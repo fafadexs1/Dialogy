@@ -93,6 +93,9 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
     rules: NexusFlowInstance[] | null,
     agents: AutopilotConfig[] | null,
     workspace: Workspace | null,
+    workspaceDefaultAiModel?: string | null,
+    workspaceDefaultTranscriptionModel?: string | null,
+    workspaceHasGeminiConfig?: boolean,
     error?: string,
     hasGlobalKey?: boolean
 }> {
@@ -174,18 +177,30 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             transcriptionModelFromIntegration = intConfig.transcriptionModel;
         }
 
-        const mergedConfig = {
-            ...selectedConfig,
-            gemini_api_key: geminiKeyFromIntegration || selectedConfig.gemini_api_key,
-            ai_model: aiModelFromIntegration || selectedConfig.ai_model,
-            transcription_model: transcriptionModelFromIntegration || selectedConfig.transcription_model
+        return {
+            config: selectedConfig,
+            rules,
+            agents,
+            workspace,
+            workspaceDefaultAiModel: aiModelFromIntegration,
+            workspaceDefaultTranscriptionModel: transcriptionModelFromIntegration,
+            workspaceHasGeminiConfig: Boolean(geminiKeyFromIntegration || aiModelFromIntegration || transcriptionModelFromIntegration),
+            hasGlobalKey: !!(process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY)
         };
-
-        return { config: mergedConfig, rules, agents, workspace, hasGlobalKey: !!process.env.GOOGLE_GENAI_API_KEY };
 
     } catch (error) {
         console.error(`[GET_AUTOPILOT_CONFIG] Erro ao buscar configs para o usuário ${userId} no workspace ${workspaceId}:`, error);
-        return { config: null, rules: null, agents: null, workspace: null, error: 'Falha ao buscar configurações do banco de dados.', hasGlobalKey: false };
+        return {
+            config: null,
+            rules: null,
+            agents: null,
+            workspace: null,
+            workspaceDefaultAiModel: null,
+            workspaceDefaultTranscriptionModel: null,
+            workspaceHasGeminiConfig: false,
+            error: 'Falha ao buscar configurações do banco de dados.',
+            hasGlobalKey: false
+        };
     }
 }
 
@@ -293,6 +308,7 @@ export async function saveAutopilotConfig(
         }
 
         revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${configId}`);
         return { success: true };
 
     } catch (error) {

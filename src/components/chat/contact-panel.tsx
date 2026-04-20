@@ -23,7 +23,9 @@ import {
     BarChart3,
     Hash,
     ArrowRight,
+    ArrowLeft,
     ArrowRightLeft,
+    ArrowUpRight,
     Copy,
     ExternalLink,
     Zap,
@@ -61,7 +63,7 @@ import { transferChatAction, getContactProtocolsAction, searchChatsAndContacts }
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { getTelegramInstances } from '@/actions/telegram';
 import { getIntegrationConfig } from '@/actions/integrations';
-import { startNewConversation } from '@/actions/messages';
+import { getResumeConversationRequirementAction, startNewConversation } from '@/actions/messages';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 import { AddContactForm } from '../crm/add-contact-form';
@@ -72,7 +74,7 @@ import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import ContactTimeline from '../crm/contact-timeline';
 import DealForm from '../crm/deal-form';
@@ -81,11 +83,17 @@ import { CopyProtocolButton } from './copy-protocol-button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { getChatContactDisplayValue, getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
 import {
+    createSGPPaymentPromise,
     createSGPServiceOrder,
     fetchSGPContactPanelData,
     generateSGPInvoicePix,
 } from '@/plugins/sgp/actions';
-import type { SGPContactPanelContract, SGPContactPanelData, SGPContactPanelInvoice } from '@/plugins/sgp/types';
+import type {
+    SGPContactPanelContract,
+    SGPContactPanelData,
+    SGPContactPanelInvoice,
+    SGPPaymentPromiseResponse,
+} from '@/plugins/sgp/types';
 
 interface ContactPanelProps {
     chat: Chat | null;
@@ -243,10 +251,19 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
     const [selectedTemplateName, setSelectedTemplateName] = useState('');
     const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
     const [loadingTemplates, setLoadingTemplates] = useState(false);
+    const [canResumeWithoutTemplate, setCanResumeWithoutTemplate] = useState(false);
+    const [lastCustomerMessageAt, setLastCustomerMessageAt] = useState<string | null>(null);
+    const [isCheckingResumeWindow, setIsCheckingResumeWindow] = useState(false);
 
     const isCloud = useMemo(() => instances.find(i => i.instance_name === selectedInstance)?.type === 'wa_cloud', [instances, selectedInstance]);
     const isTelegram = useMemo(() => instances.find(i => i.instance_name === selectedInstance)?.type === 'telegram', [instances, selectedInstance]);
     const selectedTemplate = useMemo(() => templates.find(t => t.name === selectedTemplateName), [templates, selectedTemplateName]);
+    const lastCustomerReplyLabel = useMemo(() => {
+        if (!lastCustomerMessageAt) return null;
+        const parsedDate = new Date(lastCustomerMessageAt);
+        if (Number.isNaN(parsedDate.getTime())) return null;
+        return parsedDate.toLocaleString('pt-BR');
+    }, [lastCustomerMessageAt]);
 
     const variableKeys = useMemo(() => {
         if (!selectedTemplate) return [];
@@ -331,6 +348,55 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         }
     }, [isCloud, selectedInstance]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        if (!isOpen || !isCloud || !selectedInstance || !currentUser?.activeWorkspaceId) {
+            setCanResumeWithoutTemplate(false);
+            setLastCustomerMessageAt(null);
+            setIsCheckingResumeWindow(false);
+            return;
+        }
+
+        setIsCheckingResumeWindow(true);
+        getResumeConversationRequirementAction({
+            workspaceId: currentUser.activeWorkspaceId,
+            chatId: chat.id,
+            instanceName: selectedInstance,
+        })
+            .then((result) => {
+                if (cancelled) return;
+
+                setCanResumeWithoutTemplate(Boolean(result.success && result.canResumeWithoutTemplate));
+                setLastCustomerMessageAt(result.success ? result.lastCustomerMessageAt : null);
+            })
+            .catch((error) => {
+                if (cancelled) return;
+                console.error('[CONTACT_PANEL] Falha ao verificar janela de reabertura', error);
+                setCanResumeWithoutTemplate(false);
+                setLastCustomerMessageAt(null);
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setIsCheckingResumeWindow(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [chat.id, currentUser?.activeWorkspaceId, isCloud, isOpen, selectedInstance]);
+
+    useEffect(() => {
+        if (!canResumeWithoutTemplate) {
+            return;
+        }
+
+        setSelectedTemplateName('');
+        setTemplateVariables({});
+        setMessage('');
+    }, [canResumeWithoutTemplate]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!currentUser?.activeWorkspaceId) {
@@ -347,7 +413,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         }
 
         let templatePayload = undefined;
-        if (isCloud && selectedTemplate) {
+        if (isCloud && !canResumeWithoutTemplate && selectedTemplate) {
             const parameters = variableKeys.map(key => ({
                 type: 'text',
                 text: templateVariables[key] || ''
@@ -374,6 +440,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
         setIsSubmitting(true);
         const result = await startNewConversation({
             workspaceId: currentUser.activeWorkspaceId,
+            chatId: chat.id,
             instanceName: selectedInstance,
             phoneNumber: phone,
             message: templatePayload ? `[Template: ${selectedTemplate.name}]` : message,
@@ -438,6 +505,33 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                     </div>
 
                     {isCloud ? (
+                        isCheckingResumeWindow ? (
+                            <div className="flex items-center gap-2 rounded-md border border-blue-500/20 bg-blue-500/5 p-3 text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+                                Verificando se o cliente respondeu nas ultimas 24 horas...
+                            </div>
+                        ) : canResumeWithoutTemplate ? (
+                            <div className="space-y-3 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3">
+                                <p className="text-sm text-foreground">
+                                    O cliente respondeu dentro da janela de 24h. Voce pode reabrir sem enviar template.
+                                </p>
+                                {lastCustomerReplyLabel && (
+                                    <p className="text-xs text-muted-foreground">
+                                        Ultima resposta do cliente: {lastCustomerReplyLabel}
+                                    </p>
+                                )}
+                                <div className="space-y-2">
+                                    <Label>Mensagem inicial opcional</Label>
+                                    <Textarea
+                                        value={message}
+                                        onChange={(e) => setMessage(e.target.value)}
+                                        className="bg-muted/50 border-input text-foreground"
+                                        rows={3}
+                                        placeholder="Deixe em branco para apenas reabrir o atendimento."
+                                    />
+                                </div>
+                            </div>
+                        ) : (
                         <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-muted/30 p-2 rounded-r-md">
                             <div className="space-y-2 [&_h4]:!text-muted-foreground">
                                 <Label className="text-muted-foreground">Selecionar Template (Cloud API)</Label>
@@ -483,6 +577,7 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                                 </div>
                             )}
                         </div>
+                        )
                     ) : (
                         <div className="space-y-2">
                             <Label>Mensagem inicial</Label>
@@ -494,9 +589,17 @@ export function ResumeConversationDialog({ chat, currentUser, onSuccess, trigger
                         <DialogClose asChild>
                             <Button variant="ghost">Cancelar</Button>
                         </DialogClose>
-                        <Button type="submit" disabled={isSubmitting || !phone || (isCloud && !selectedTemplate)} className="bg-blue-600 hover:bg-blue-500 text-white">
+                        <Button
+                            type="submit"
+                            disabled={isSubmitting || isCheckingResumeWindow || !phone || (isCloud && !canResumeWithoutTemplate && !selectedTemplate)}
+                            className="bg-blue-600 hover:bg-blue-500 text-white"
+                        >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {isCloud ? 'Enviar Template' : 'Enviar'}
+                            {isCloud
+                                ? canResumeWithoutTemplate
+                                    ? (message.trim() ? 'Reabrir e Enviar' : 'Reabrir')
+                                    : 'Enviar Template'
+                                : 'Enviar'}
                         </Button>
                     </div>
                 </form>
@@ -562,6 +665,178 @@ function formatSgpConnectionDetails(contract: SGPContactPanelContract) {
     }
 
     return contract.reason || 'Sem historico recente';
+}
+
+function getSgpGeoLocationHref(value?: string | null) {
+    const coordinates = String(value ?? '').trim();
+    if (!coordinates) {
+        return null;
+    }
+
+    const parts = coordinates.split(',').map((part) => part.trim()).filter(Boolean);
+    if (parts.length !== 2) {
+        return null;
+    }
+
+    return `https://www.google.com/maps?q=${encodeURIComponent(parts.join(','))}`;
+}
+
+function getTodayDateInputValue() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+}
+
+function isSgpPaymentPromiseGranted(response: SGPPaymentPromiseResponse | null) {
+    if (!response) {
+        return false;
+    }
+
+    if (typeof response.liberado === 'boolean') {
+        return response.liberado;
+    }
+
+    return response.status === 1;
+}
+
+function getSgpContractStatusBadgeClasses(statusTone: SGPContactPanelContract['statusTone']) {
+    switch (statusTone) {
+        case 'active':
+            return {
+                badge: "border-emerald-300/60 bg-emerald-100 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/70 dark:text-emerald-200",
+                dot: "bg-emerald-500",
+            };
+        case 'cancelled':
+            return {
+                badge: "border-red-300/60 bg-red-100 text-red-700 dark:border-red-900/70 dark:bg-red-950/70 dark:text-red-200",
+                dot: "bg-red-500",
+            };
+        case 'suspended':
+            return {
+                badge: "border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/70 dark:text-amber-200",
+                dot: "bg-amber-500",
+            };
+        default:
+            return {
+                badge: "border-slate-300/60 bg-slate-100 text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
+                dot: "bg-slate-400 dark:bg-zinc-400",
+            };
+    }
+}
+
+function formatSgpInvoiceStatusLabel(status: string) {
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+    if (!normalizedStatus) {
+        return 'Sem status';
+    }
+
+    const labels: Record<string, string> = {
+        aberto: 'Aberto',
+        abertos: 'Aberto',
+        pago: 'Pago',
+        pagos: 'Pago',
+        recebido: 'Pago',
+        cancelado: 'Cancelado',
+        cancelada: 'Cancelada',
+        cancelados: 'Cancelado',
+        desconhecido: 'Desconhecido',
+    };
+
+    if (labels[normalizedStatus]) {
+        return labels[normalizedStatus];
+    }
+
+    return normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
+}
+
+function getSgpInvoiceDisplayAmount(invoice: SGPContactPanelInvoice) {
+    return invoice.correctedAmount || invoice.amount;
+}
+
+function SGPDashboardTile({ 
+    title, 
+    icon: Icon, 
+    children, 
+    className, 
+    onClick,
+    status,
+    statusColor = "blue"
+}: { 
+    title: string; 
+    icon: React.ElementType; 
+    children: React.ReactNode; 
+    className?: string;
+    onClick?: () => void;
+    status?: string;
+    statusColor?: "blue" | "green" | "red" | "amber" | "emerald";
+}) {
+    const colorClasses = {
+        blue: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+        green: "text-green-500 bg-green-500/10 border-green-500/20",
+        red: "text-red-500 bg-red-500/10 border-red-500/20",
+        amber: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+        emerald: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
+    };
+
+    return (
+        <motion.div
+            whileHover={{ y: -2, transition: { duration: 0.2 } }}
+            whileTap={{ scale: 0.98 }}
+            onClick={onClick}
+            className={cn(
+                "relative flex flex-col gap-2 rounded-2xl border border-slate-200/80 bg-white/50 p-2.5 shadow-sm transition-all hover:bg-white hover:shadow-md dark:border-white/5 dark:bg-zinc-900/50 dark:hover:bg-zinc-900",
+                onClick && "cursor-pointer",
+                className
+            )}
+        >
+            <div className="flex items-start justify-between gap-1.5 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                    <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg border shrink-0", colorClasses[statusColor])}>
+                        <Icon className="h-3.5 w-3.5" />
+                    </div>
+                    <span className="truncate text-[10px] font-black uppercase tracking-[0.1em] text-slate-500 dark:text-zinc-500">{title}</span>
+                </div>
+                {status && (
+                    <span className={cn(
+                        "rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+                        colorClasses[statusColor]
+                    )}>
+                        {status}
+                    </span>
+                )}
+            </div>
+            <div className="mt-0.5 flex-1 overflow-hidden">
+                {children}
+            </div>
+        </motion.div>
+    );
+}
+
+function formatSgpInvoiceTimelineLabel(invoice: SGPContactPanelInvoice) {
+    if (invoice.isOverdue) {
+        return `${invoice.daysLate} dia(s) de atraso`;
+    }
+
+    if (invoice.isOpen) {
+        return `Vencimento ${formatSgpDate(invoice.dueDate) || 'nao informado'}`;
+    }
+
+    if (invoice.isPaid && invoice.paymentDate) {
+        return `Pago em ${formatSgpDate(invoice.paymentDate)}`;
+    }
+
+    if (invoice.isCancelled && invoice.cancellationDate) {
+        return `Cancelada em ${formatSgpDate(invoice.cancellationDate)}`;
+    }
+
+    if (invoice.issueDate) {
+        return `Emitida em ${formatSgpDate(invoice.issueDate)}`;
+    }
+
+    return 'Sem historico adicional';
 }
 
 function findNestedStringValue(source: unknown, acceptedKeys: string[]): string | null {
@@ -665,39 +940,26 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const [sgpOrderNotes, setSgpOrderNotes] = useState('');
     const [isSgpOrderDialogOpen, setIsSgpOrderDialogOpen] = useState(false);
     const [isSubmittingSgpOrder, setIsSubmittingSgpOrder] = useState(false);
-
-    const handleContactSave = useCallback((updatedContact?: Contact | null) => {
-        // If we received an updated contact, update it directly in the store
-        if (updatedContact) {
-            useInboxStore.getState().updateChatContact(updatedContact);
-        }
-        // Still call the original callback for any other sync operations
-        onContactUpdate();
-    }, [onContactUpdate]);
+    const [sgpPaymentPromiseContract, setSgpPaymentPromiseContract] = useState<SGPContactPanelContract | null>(null);
+    const [sgpPaymentPromiseDate, setSgpPaymentPromiseDate] = useState('');
+    const [sgpPaymentPromiseResponse, setSgpPaymentPromiseResponse] = useState<SGPPaymentPromiseResponse | null>(null);
+    const [isSgpPaymentPromiseDialogOpen, setIsSgpPaymentPromiseDialogOpen] = useState(false);
+    const [isSubmittingSgpPaymentPromise, setIsSubmittingSgpPaymentPromise] = useState(false);
+    const [selectedSgpCategory, setSelectedSgpCategory] = useState<string | null>(null);
 
     const contactId = chat?.contact?.id;
+    const sgpReloadFingerprint = useMemo(
+        () => JSON.stringify(chat?.contact?.custom_fields || {}),
+        [chat?.contact?.custom_fields]
+    );
 
-    useEffect(() => {
-        if (currentUser?.activeWorkspaceId) {
-            getWorkspaceUsers(currentUser.activeWorkspaceId).then(res => {
-                if (!res.error) setAgents(res.users || []);
-            });
-            getCustomFieldDefinitions(currentUser.activeWorkspaceId).then(res => {
-                if (!res.error) setCustomFields(res.fields || []);
-            });
-            getIntegrationConfig(currentUser.activeWorkspaceId, 'sgp').then(res => {
-                setIsSgpActive(res.isActive);
-            });
-        }
-    }, [currentUser?.activeWorkspaceId]);
-
-    useEffect(() => {
+    const loadSgpContactPanelData = useCallback(() => {
         if (!isSgpActive || !chat?.id) {
             setSgpData(null);
             setSgpError(null);
             setSgpLoading(false);
             setExpandedContractId(null);
-            return;
+            return () => { };
         }
 
         let cancelled = false;
@@ -719,11 +981,11 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                 setSgpData(res.data);
                 setExpandedContractId((currentValue) => {
-                    if (currentValue && res.data?.contracts.some((contract) => contract.id === currentValue)) {
+                    if (currentValue && res.data?.invoiceGroups.some((group) => group.key === currentValue)) {
                         return currentValue;
                     }
 
-                    return res.data?.contracts[0]?.id || null;
+                    return null;
                 });
             })
             .finally(() => {
@@ -736,6 +998,41 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             cancelled = true;
         };
     }, [isSgpActive, chat?.id]);
+
+    const handleContactSave = useCallback((updatedContact?: Contact | null) => {
+        if (updatedContact) {
+            useInboxStore.getState().updateChatContact(updatedContact);
+        }
+
+        onContactUpdate();
+    }, [onContactUpdate]);
+
+    useEffect(() => {
+        if (currentUser?.activeWorkspaceId) {
+            getWorkspaceUsers(currentUser.activeWorkspaceId).then(res => {
+                if (!res.error) setAgents(res.users || []);
+            });
+            getCustomFieldDefinitions(currentUser.activeWorkspaceId).then(res => {
+                if (!res.error) setCustomFields(res.fields || []);
+            });
+            getIntegrationConfig(currentUser.activeWorkspaceId, 'sgp').then(res => {
+                setIsSgpActive(res.isActive);
+            });
+        }
+    }, [currentUser?.activeWorkspaceId]);
+
+    useEffect(() => {
+        setExpandedContractId(null);
+        setIsSgpOrderDialogOpen(false);
+        setSgpOrderContract(null);
+        setSgpOrderNotes('');
+        setIsSgpPaymentPromiseDialogOpen(false);
+        setSgpPaymentPromiseContract(null);
+        setSgpPaymentPromiseDate('');
+        setSgpPaymentPromiseResponse(null);
+    }, [chat?.id]);
+
+    useEffect(() => loadSgpContactPanelData(), [loadSgpContactPanelData, sgpReloadFingerprint]);
 
     // Fetch deals for the contact
     useEffect(() => {
@@ -768,9 +1065,13 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     const totalOpenValue = useMemo(() => openDeals.reduce((s, d) => s + d.value, 0), [openDeals]);
     const sgpContracts = sgpData?.contracts || [];
     const sgpInvoices = sgpData?.invoices || [];
+    const sgpInvoiceGroups = sgpData?.invoiceGroups || [];
     const sgpOverdueInvoices = sgpData?.overdueInvoices || 0;
+    const sgpOpenInvoices = sgpData?.openInvoices || 0;
     const sgpOnlineContracts = sgpData?.onlineContracts || 0;
     const hasSgpDebt = sgpOverdueInvoices > 0;
+    const sgpContractsWithDebt = sgpInvoiceGroups.filter((group) => !group.isUnassigned && group.summary.hasDebt).length;
+    const sgpUnassignedInvoices = sgpInvoiceGroups.find((group) => group.isUnassigned)?.summary.totalInvoices || 0;
 
     const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -846,10 +1147,44 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         }
     }, []);
 
+    const handleOpenSgpInvoiceLink = useCallback((invoice: SGPContactPanelInvoice) => {
+        if (!invoice.paymentLink) {
+            toast({ title: 'Link indisponivel', description: 'Esta fatura nao possui link disponivel.', variant: 'destructive' });
+            return;
+        }
+
+        window.open(invoice.paymentLink, '_blank', 'noopener,noreferrer');
+        toast({ title: 'Link da cobranca aberto' });
+    }, []);
+
+    const handleBoletoAction = useCallback(async (invoice: SGPContactPanelInvoice) => {
+        const boletoValue = invoice.digitableLine || invoice.barcode;
+        if (boletoValue) {
+            await navigator.clipboard.writeText(boletoValue);
+            toast({ title: 'Dados do boleto copiados!' });
+            return;
+        }
+
+        if (invoice.paymentLink) {
+            window.open(invoice.paymentLink, '_blank', 'noopener,noreferrer');
+            toast({ title: 'Boleto aberto' });
+            return;
+        }
+
+        toast({ title: 'Boleto indisponivel', description: 'Esta fatura nao possui boleto disponivel.', variant: 'destructive' });
+    }, []);
+
     const handleOpenSgpOrderDialog = useCallback((contract: SGPContactPanelContract) => {
         setSgpOrderContract(contract);
         setSgpOrderNotes('');
         setIsSgpOrderDialogOpen(true);
+    }, []);
+
+    const handleOpenSgpPaymentPromiseDialog = useCallback((contract: SGPContactPanelContract) => {
+        setSgpPaymentPromiseContract(contract);
+        setSgpPaymentPromiseDate('');
+        setSgpPaymentPromiseResponse(null);
+        setIsSgpPaymentPromiseDialogOpen(true);
     }, []);
 
     const handleCreateSgpOrder = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
@@ -875,6 +1210,44 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
             setIsSubmittingSgpOrder(false);
         }
     }, [chat?.id, sgpOrderContract, sgpOrderNotes]);
+
+    const handleCreateSgpPaymentPromise = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        if (!chat?.id || !sgpPaymentPromiseContract || !sgpPaymentPromiseDate) {
+            return;
+        }
+
+        setIsSubmittingSgpPaymentPromise(true);
+        try {
+            const result = await createSGPPaymentPromise(
+                chat.id,
+                sgpPaymentPromiseContract.id,
+                sgpPaymentPromiseDate,
+                true
+            );
+            if (!result.success || !result.apiResponse) {
+                toast({ title: 'Erro ao registrar promessa', description: result.error, variant: 'destructive' });
+                return;
+            }
+
+            setSgpPaymentPromiseResponse(result.apiResponse);
+            const granted = isSgpPaymentPromiseGranted(result.apiResponse);
+            const title = granted ? 'Promessa registrada no SGP' : 'Resposta da promessa recebida';
+            const description =
+                result.apiResponse.protocolo
+                    ? `Protocolo: ${result.apiResponse.protocolo}`
+                    : result.apiResponse.msg || `Contrato ${sgpPaymentPromiseContract.id}`;
+
+            toast({
+                title,
+                description,
+                variant: granted ? 'default' : 'destructive',
+            });
+        } finally {
+            setIsSubmittingSgpPaymentPromise(false);
+        }
+    }, [chat?.id, sgpPaymentPromiseContract, sgpPaymentPromiseDate]);
 
 
     if (!chat) {
@@ -1418,444 +1791,586 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     <>
                                         <div
                                             className={cn(
-                                                "flex min-w-0 flex-col gap-3 rounded-xl border p-3",
+                                                "overflow-hidden rounded-2xl border p-4 shadow-sm",
                                                 hasSgpDebt
-                                                    ? "border-red-500/30 bg-red-500/10 dark:bg-red-500/5"
-                                                    : "border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-500/5"
+                                                    ? "border-red-300/70 bg-gradient-to-br from-red-50 via-white to-red-50/40 dark:border-red-900/60 dark:bg-gradient-to-br dark:from-red-950/50 dark:via-zinc-950 dark:to-zinc-950"
+                                                    : "border-emerald-300/70 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 dark:border-emerald-900/50 dark:bg-gradient-to-br dark:from-emerald-950/40 dark:via-zinc-950 dark:to-zinc-950"
                                             )}
                                         >
-                                            <div className="flex min-w-0 items-center gap-3">
+                                            <div className="flex min-w-0 items-start gap-3">
                                                 <div
                                                     className={cn(
-                                                        "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
-                                                        hasSgpDebt ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
+                                                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
+                                                        hasSgpDebt
+                                                            ? "border-red-300/60 bg-red-100 text-red-600 dark:border-red-800 dark:bg-red-950/70 dark:text-red-200"
+                                                            : "border-emerald-300/60 bg-emerald-100 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200"
                                                     )}
                                                 >
                                                     {hasSgpDebt ? <AlertTriangle className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
                                                 </div>
-                                                <div className="min-w-0">
-                                                    <h4 className={cn("break-words text-[13px] font-bold", hasSgpDebt ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
-                                                        {hasSgpDebt ? 'Cliente com pendencia financeira' : 'Cliente sem pendencia financeira'}
+                                                <div className="min-w-0 flex-1">
+                                                    <h4 className={cn("break-words text-[13px] font-black", hasSgpDebt ? "text-red-700 dark:text-red-200" : "text-emerald-700 dark:text-emerald-200")}>
+                                                        {hasSgpDebt ? 'Cliente com pendencia financeira' : 'Financeiro regularizado'}
                                                     </h4>
-                                                    <p className={cn("break-words text-[11px] font-medium", hasSgpDebt ? "text-red-500/80" : "text-emerald-600/80 dark:text-emerald-400/80")}>
-                                                        {sgpData?.customerName || contact.name} {'\u2022'} {sgpOnlineContracts} contrato{sgpOnlineContracts === 1 ? '' : 's'} online
+                                                    <p className="mt-1 break-words text-[11px] font-medium text-slate-700 dark:text-zinc-300">
+                                                        {sgpData?.customerName || contact?.name || 'Cliente'} - {sgpContracts.length} contrato{sgpContracts.length === 1 ? '' : 's'} no cadastro
                                                     </p>
+                                                    {sgpData?.cpfCnpj && (
+                                                        <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-400" title={`CPF/CNPJ ${sgpData.cpfCnpj}`}>
+                                                            CPF/CNPJ {sgpData.cpfCnpj}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
-                                            <div className="min-w-0 text-left">
-                                                <span className={cn("block text-[12px] font-black tabular-nums", hasSgpDebt ? "text-red-500" : "text-emerald-500")}>
-                                                    {sgpOverdueInvoices} vencida{sgpOverdueInvoices === 1 ? '' : 's'}
-                                                </span>
-                                                {sgpData?.cpfCnpj && (
-                                                    <span className="block truncate text-[10px] uppercase tracking-widest text-muted-foreground" title={`CPF/CNPJ ${sgpData.cpfCnpj}`}>
-                                                        CPF/CNPJ {sgpData.cpfCnpj}
+
+                                            <div className="mt-4 grid grid-cols-2 gap-2">
+                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
+                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Vencidas</span>
+                                                    <span className={cn("mt-1 block text-[16px] font-black tabular-nums", hasSgpDebt ? "text-red-600 dark:text-red-200" : "text-slate-900 dark:text-zinc-100")}>
+                                                        {sgpOverdueInvoices}
                                                     </span>
-                                                )}
+                                                </div>
+                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
+                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Em aberto</span>
+                                                    <span className="mt-1 block text-[16px] font-black tabular-nums text-amber-600 dark:text-amber-200">
+                                                        {sgpOpenInvoices}
+                                                    </span>
+                                                </div>
+                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
+                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Contratos online</span>
+                                                    <span className="mt-1 block text-[16px] font-black tabular-nums text-emerald-600 dark:text-emerald-200">
+                                                        {sgpOnlineContracts}
+                                                    </span>
+                                                </div>
+                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
+                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Contratos criticos</span>
+                                                    <span className={cn("mt-1 block text-[16px] font-black tabular-nums", sgpContractsWithDebt > 0 ? "text-red-600 dark:text-red-200" : "text-slate-900 dark:text-zinc-100")}>
+                                                        {sgpContractsWithDebt}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
 
                                         <div className="space-y-2">
-                                            <div className="flex items-center justify-between px-1">
-                                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">
-                                                    Contratos ({sgpContracts.length})
+                                            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-600 dark:text-zinc-400">
+                                                    Carteira por contrato ({sgpContracts.length})
                                                 </h4>
+                                                {sgpUnassignedInvoices > 0 && (
+                                                    <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                                                        {sgpUnassignedInvoices} sem vinculo
+                                                    </span>
+                                                )}
                                             </div>
 
-                                            {sgpContracts.length > 0 ? (
-                                                sgpContracts.map((contract) => {
-                                                    const isExpanded = expandedContractId === contract.id;
-                                                    const isOnline = contract.connectionStatus === 'online';
-                                                    const isOffline = contract.connectionStatus === 'offline';
+                                            {sgpInvoiceGroups.length > 0 ? (
+                                                sgpInvoiceGroups.map((group) => {
+                                                    const contract = group.contract;
+                                                    const isExpanded = expandedContractId === group.key;
+                                                    const isOnline = contract?.connectionStatus === 'online';
+                                                    const isOffline = contract?.connectionStatus === 'offline';
+                                                    const statusBadgeClasses = getSgpContractStatusBadgeClasses(contract?.statusTone || 'unknown');
+                                                    const contractGeoLocationHref = getSgpGeoLocationHref(contract?.geoLocation || null);
+                                                    const hasInvoices = group.summary.totalInvoices > 0;
+                                                    const hasOpenInvoices = group.summary.openInvoices > 0;
+                                                    const visibleSections = group.invoiceSections.filter((section) => section.count > 0);
 
                                                     return (
                                                         <div
-                                                            key={contract.id}
+                                                            key={group.key}
                                                             className={cn(
-                                                                "relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-sm transition-all dark:border-white/5 dark:bg-[#07080b]",
+                                                                "relative overflow-hidden rounded-2xl border bg-white/95 shadow-sm transition-all dark:bg-zinc-950/90",
+                                                                group.summary.hasDebt
+                                                                    ? "border-red-200/80 dark:border-red-900/50"
+                                                                    : hasOpenInvoices
+                                                                        ? "border-amber-200/80 dark:border-amber-900/50"
+                                                                        : group.isUnassigned
+                                                                            ? "border-slate-300/80 dark:border-zinc-700"
+                                                                            : isOnline
+                                                                                ? "border-emerald-200/80 dark:border-emerald-900/40"
+                                                                                : "border-slate-200/80 dark:border-zinc-800",
                                                                 isExpanded
-                                                                    ? isOnline
-                                                                        ? "border-emerald-500/30 bg-emerald-500/5 ring-1 ring-emerald-500/20"
-                                                                        : "border-slate-300 bg-slate-50 ring-1 ring-slate-200 dark:border-white/10 dark:bg-white/5/50"
-                                                                    : isOnline
-                                                                        ? "cursor-pointer hover:border-emerald-500/30 hover:bg-emerald-500/5"
-                                                                        : "cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5"
+                                                                    ? group.summary.hasDebt
+                                                                        ? "ring-1 ring-red-300/70 dark:ring-red-900/50"
+                                                                        : hasOpenInvoices
+                                                                            ? "ring-1 ring-amber-300/70 dark:ring-amber-900/50"
+                                                                            : "ring-1 ring-slate-200 dark:ring-zinc-800"
+                                                                    : "cursor-pointer hover:border-slate-300 hover:bg-slate-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-900/70"
                                                             )}
                                                         >
                                                             <div
                                                                 className={cn(
                                                                     "absolute left-0 top-0 h-full w-1",
-                                                                    isOnline ? "bg-emerald-500/50" : isOffline ? "bg-slate-300 dark:bg-slate-700" : "bg-amber-400/60"
+                                                                    group.summary.hasDebt
+                                                                        ? "bg-red-500"
+                                                                        : hasOpenInvoices
+                                                                            ? "bg-amber-500"
+                                                                            : group.isUnassigned
+                                                                                ? "bg-slate-400 dark:bg-zinc-600"
+                                                                                : isOnline
+                                                                                    ? "bg-emerald-500"
+                                                                                    : isOffline
+                                                                                        ? "bg-slate-300 dark:bg-zinc-700"
+                                                                                        : "bg-slate-400 dark:bg-zinc-600"
                                                                 )}
                                                             />
                                                             <div
-                                                                className="flex min-w-0 items-start justify-between p-3"
-                                                                onClick={() => setExpandedContractId(isExpanded ? null : contract.id)}
+                                                                className="flex min-w-0 items-start justify-between gap-3 p-4"
+                                                                onClick={() => {
+                                                                    setExpandedContractId(isExpanded ? null : group.key);
+                                                                    setSelectedSgpCategory(null);
+                                                                }}
                                                             >
-                                                                <div className="flex w-full min-w-0 gap-2">
+                                                                <div className="flex min-w-0 flex-1 gap-3">
                                                                     <div
                                                                         className={cn(
-                                                                            "flex h-8 w-8 items-center justify-center rounded-lg border shrink-0",
-                                                                            isOnline
-                                                                                ? "border-emerald-500/20 bg-emerald-500/10"
-                                                                                : isOffline
-                                                                                    ? "border-slate-200 bg-slate-100 dark:border-zinc-700 dark:bg-zinc-800"
-                                                                                    : "border-amber-500/20 bg-amber-500/10"
+                                                                            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
+                                                                            group.summary.hasDebt
+                                                                                ? "border-red-300/60 bg-red-100 text-red-600 dark:border-red-900/70 dark:bg-red-950/70 dark:text-red-200"
+                                                                                : hasOpenInvoices
+                                                                                    ? "border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/70 dark:text-amber-200"
+                                                                                    : group.isUnassigned
+                                                                                        ? "border-slate-300/60 bg-slate-100 text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                                                                                        : isOnline
+                                                                                            ? "border-emerald-300/60 bg-emerald-100 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/70 dark:text-emerald-200"
+                                                                                            : "border-slate-300/60 bg-slate-100 text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
                                                                         )}
                                                                     >
-                                                                        <Router className={cn("h-4 w-4", isOnline ? "text-emerald-500" : isOffline ? "text-slate-400" : "text-amber-500")} />
+                                                                        {group.isUnassigned ? <Receipt className="h-4 w-4" /> : <Router className="h-4 w-4" />}
                                                                     </div>
                                                                     <div className="min-w-0 flex-1">
                                                                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                                                            <h5 className="min-w-0 flex-1 break-words text-[13px] font-bold leading-tight text-slate-800 dark:text-slate-200">
-                                                                                {contract.planDescription}
+                                                                            <h5 className="min-w-0 flex-1 break-words text-[13px] font-black leading-tight text-slate-900 dark:text-zinc-100">
+                                                                                {group.title}
                                                                             </h5>
-                                                                            <span
-                                                                                className={cn(
-                                                                                    "flex h-4 shrink-0 items-center gap-1 rounded-full px-1.5 text-[9px] font-bold uppercase",
-                                                                                    isOnline
-                                                                                        ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-500"
-                                                                                        : isOffline
-                                                                                            ? "border border-slate-300 bg-slate-100 text-slate-500 dark:border-zinc-700 dark:bg-zinc-800"
-                                                                                            : "border border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                                                                                )}
-                                                                            >
-                                                                                <div className={cn("h-1.5 w-1.5 rounded-full", isOnline ? "bg-emerald-500 animate-pulse" : isOffline ? "bg-slate-400" : "bg-amber-500")} />
-                                                                                {contract.statusLabel}
+                                                                            {contract ? (
+                                                                                <span
+                                                                                    className={cn(
+                                                                                        "flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[9px] font-bold uppercase tracking-wide",
+                                                                                        statusBadgeClasses.badge
+                                                                                    )}
+                                                                                >
+                                                                                    <div className={cn("h-1.5 w-1.5 rounded-full", statusBadgeClasses.dot)} />
+                                                                                    {contract.statusLabel}
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="flex h-5 shrink-0 items-center rounded-full border border-slate-300/60 bg-slate-100 px-2 text-[9px] font-bold uppercase tracking-wide text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+                                                                                    Revisar
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+
+                                                                        {group.subtitle && (
+                                                                            <p className="mt-1 break-words text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-zinc-400">
+                                                                                {group.subtitle}
+                                                                            </p>
+                                                                        )}
+
+                                                                        {contract?.detailsLabel && (
+                                                                            <p className="mt-1 break-all text-[10px] font-medium leading-relaxed text-slate-600 dark:text-zinc-300" title={contract.detailsLabel}>
+                                                                                {contract.detailsLabel}
+                                                                            </p>
+                                                                        )}
+
+                                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                                            <span className={cn(
+                                                                                "rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em]",
+                                                                                group.summary.hasDebt
+                                                                                    ? "border-red-300/60 bg-red-100 text-red-700 dark:border-red-900/70 dark:bg-red-950/70 dark:text-red-200"
+                                                                                    : "border-slate-200 bg-slate-100 text-slate-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
+                                                                            )}>
+                                                                                {group.summary.overdueInvoices} vencida{group.summary.overdueInvoices === 1 ? '' : 's'}
+                                                                            </span>
+                                                                            <span className={cn(
+                                                                                "rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em]",
+                                                                                hasOpenInvoices
+                                                                                    ? "border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/70 dark:text-amber-200"
+                                                                                    : "border-slate-200 bg-slate-100 text-slate-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
+                                                                            )}>
+                                                                                {group.summary.openInvoices} em aberto
+                                                                            </span>
+                                                                            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
+                                                                                {group.summary.historyInvoices} historico
                                                                             </span>
                                                                         </div>
-                                                                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={contract.detailsLabel}>{contract.detailsLabel}</p>
-                                                                        <div className="mt-1 flex items-start gap-1 text-[9.5px] leading-tight text-muted-foreground/80">
-                                                                            <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
-                                                                            <span className="line-clamp-2 break-words">{contract.addressLabel}</span>
-                                                                        </div>
                                                                     </div>
-                                                                    <div className="shrink-0 pt-1 text-slate-400">
-                                                                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                                                    </div>
+                                                                </div>
+
+                                                                <div className="shrink-0 pt-1 text-slate-500 dark:text-zinc-400">
+                                                                    {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                                                 </div>
                                                             </div>
 
                                                             {isExpanded && (
-                                                                <div className="animate-in slide-in-from-top-1 px-3 pb-3 duration-200">
-                                                                    <div className="grid grid-cols-1 gap-2 border-t border-slate-200/50 pt-2 dark:border-white/10">
-                                                                        <div className="min-w-0 flex flex-col gap-0.5">
-                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Contrato</span>
-                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.id}</span>
-                                                                        </div>
-                                                                        <div className="min-w-0 flex flex-col gap-0.5">
-                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Servico</span>
-                                                                            <span className="break-words text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.serviceType || 'Nao informado'}</span>
-                                                                        </div>
-                                                                        <div className="min-w-0 flex flex-col gap-0.5">
-                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Login</span>
-                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.login || 'Nao informado'}</span>
-                                                                        </div>
-                                                                        <div className="min-w-0 flex flex-col gap-0.5">
-                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Serial</span>
-                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.serial || 'Nao informado'}</span>
-                                                                        </div>
-                                                                        <div className="min-w-0 flex flex-col gap-0.5">
-                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IP</span>
-                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.ip || 'Nao informado'}</span>
-                                                                        </div>
-                                                                        <div className="min-w-0 flex flex-col gap-0.5">
-                                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">MAC</span>
-                                                                            <span className="break-all text-[12px] font-bold text-slate-700 dark:text-slate-300">{contract.mac || 'Nao informado'}</span>
-                                                                        </div>
-                                                                    </div>
+                                                                <div className="animate-in slide-in-from-top-1 px-4 pb-4 duration-300">
+                                                                    <AnimatePresence mode="wait">
+                                                                        {selectedSgpCategory === 'financeiro' ? (
+                                                                            <motion.div
+                                                                                key="financeiro-details"
+                                                                                initial={{ opacity: 0, x: 20 }}
+                                                                                animate={{ opacity: 1, x: 0 }}
+                                                                                exit={{ opacity: 0, x: -20 }}
+                                                                                className="space-y-4"
+                                                                            >
+                                                                                <div className="flex items-center gap-2 border-b border-slate-100 pb-3 dark:border-zinc-800/50">
+                                                                                    <Button 
+                                                                                        variant="ghost" 
+                                                                                        size="icon" 
+                                                                                        className="h-8 w-8 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            setSelectedSgpCategory(null);
+                                                                                        }}
+                                                                                    >
+                                                                                        <ArrowLeft className="h-4 w-4" />
+                                                                                    </Button>
+                                                                                    <div>
+                                                                                        <h6 className="text-[12px] font-black uppercase tracking-wider text-slate-800 dark:text-zinc-100">Financeiro</h6>
+                                                                                        <p className="text-[10px] font-medium text-slate-500 dark:text-zinc-400">{group.summary.totalInvoices} faturas encontradas</p>
+                                                                                    </div>
+                                                                                </div>
 
-                                                                    <div className="mt-2 flex min-w-0 items-start gap-1 text-[10px] font-medium text-muted-foreground">
-                                                                        <Clock className={cn("h-3 w-3", isOnline ? "text-emerald-500/70" : "text-slate-400")} />
-                                                                        <span className="min-w-0 break-words">{formatSgpConnectionDetails(contract)}</span>
-                                                                    </div>
+                                                                                <div className="max-h-[400px] space-y-3 overflow-y-auto px-1 pb-2 custom-scrollbar">
+                                                                                    {hasInvoices ? (
+                                                                                        visibleSections.map((section) => (
+                                                                                            <div key={section.key} className="space-y-2">
+                                                                                                <div className="flex items-center justify-between px-1">
+                                                                                                    <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500 dark:text-zinc-500">{section.label}</span>
+                                                                                                    <span className="text-[10px] font-bold tabular-nums text-slate-400">{formatSgpCurrency(section.totalAmount)}</span>
+                                                                                                </div>
+                                                                                                {section.invoices.map((invoice) => {
+                                                                                                    const canGeneratePix = invoice.isOpen && Boolean(invoice.pixCode || invoice.contractId);
+                                                                                                    const canOpenInvoiceLink = Boolean(invoice.paymentLink);
+                                                                                                    const canUseBoleto = Boolean(invoice.digitableLine || invoice.barcode || invoice.paymentLink);
 
-                                                                    <div className="mt-3 flex gap-2">
-                                                                        <Button
-                                                                            variant="outline"
-                                                                            size="sm"
-                                                                            className="h-7 flex-1 border-slate-200 text-[10px] font-bold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-800 dark:text-slate-300 dark:hover:bg-emerald-900/30 dark:hover:text-emerald-400"
-                                                                            title="Abrir Chamado Tecnico"
-                                                                            onClick={(event) => {
-                                                                                event.stopPropagation();
-                                                                                handleOpenSgpOrderDialog(contract);
-                                                                            }}
-                                                                        >
-                                                                            <Wrench className="mr-1.5 h-3 w-3 text-emerald-500" /> Abrir Chamado
-                                                                        </Button>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })
-                                            ) : (
-                                                <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhum contrato retornado pelo SGP.</p>
-                                            )}
-                                        </div>
+                                                                                                    return (
+                                                                                                        <div key={invoice.id} className={cn(
+                                                                                                            "flex flex-col gap-3 rounded-xl border p-3 transition-colors",
+                                                                                                            invoice.isOverdue ? "border-red-100 bg-red-50/30 dark:border-red-900/10 dark:bg-red-950/20" : 
+                                                                                                            invoice.isOpen ? "border-amber-100 bg-amber-50/30 dark:border-amber-900/10 dark:bg-amber-950/20" :
+                                                                                                            "border-slate-100 bg-white dark:border-zinc-800/80 dark:bg-zinc-950"
+                                                                                                        )}>
+                                                                                                            <div className="flex items-start justify-between">
+                                                                                                                <div className="min-w-0 flex-1">
+                                                                                                                    <div className="flex items-center gap-2">
+                                                                                                                        <span className={cn(
+                                                                                                                            "text-[14px] font-black tabular-nums",
+                                                                                                                            invoice.isOverdue ? "text-red-600 dark:text-red-400" : 
+                                                                                                                            invoice.isOpen ? "text-amber-600 dark:text-amber-400" : "text-slate-900 dark:text-zinc-100"
+                                                                                                                        )}>{formatSgpCurrency(getSgpInvoiceDisplayAmount(invoice))}</span>
+                                                                                                                        <Badge variant="outline" className={cn(
+                                                                                                                            "h-4 border-none px-1.5 text-[8px] font-black uppercase",
+                                                                                                                            invoice.isOverdue ? "bg-red-500/10 text-red-600 dark:text-red-400" :
+                                                                                                                            invoice.isOpen ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-emerald-500/10 text-emerald-600"
+                                                                                                                        )}>
+                                                                                                                            {formatSgpInvoiceStatusLabel(invoice.status)}
+                                                                                                                        </Badge>
+                                                                                                                    </div>
+                                                                                                                    <p className="mt-1 flex flex-wrap gap-x-2 text-[10px] font-medium text-slate-500 dark:text-zinc-400">
+                                                                                                                        <span className="font-bold"># {invoice.id}</span>
+                                                                                                                        <span>Venc.: {formatSgpDate(invoice.dueDate)}</span>
+                                                                                                                    </p>
+                                                                                                                </div>
+                                                                                                                <div className="flex shrink-0 items-center gap-1.5">
+                                                                                                                    {canOpenInvoiceLink && (
+                                                                                                                        <Button variant="outline" size="icon" className="h-7 w-7 rounded-lg dark:border-zinc-800" onClick={(e) => { e.stopPropagation(); handleOpenSgpInvoiceLink(invoice); }}>
+                                                                                                                            <ExternalLink className="h-3 w-3" />
+                                                                                                                        </Button>
+                                                                                                                    )}
+                                                                                                                    {canGeneratePix && (
+                                                                                                                        <Button 
+                                                                                                                            variant="outline" 
+                                                                                                                            size="sm" 
+                                                                                                                            className="h-7 border-emerald-200 bg-emerald-50/50 px-2 text-[9px] font-black uppercase tracking-wider text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40" 
+                                                                                                                            onClick={(e) => { e.stopPropagation(); handleGenerateSgpPix(invoice); }}
+                                                                                                                            disabled={sgpPixLoadingInvoiceId === invoice.id}
+                                                                                                                        >
+                                                                                                                            {sgpPixLoadingInvoiceId === invoice.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'PIX'}
+                                                                                                                        </Button>
+                                                                                                                    )}
+                                                                                                                    {canUseBoleto && (
+                                                                                                                        <Button 
+                                                                                                                            variant="outline" 
+                                                                                                                            size="icon" 
+                                                                                                                            className="h-7 w-7 rounded-lg dark:border-zinc-800" 
+                                                                                                                            onClick={(e) => { e.stopPropagation(); handleBoletoAction(invoice); }}
+                                                                                                                        >
+                                                                                                                            <Receipt className="h-3 w-3" />
+                                                                                                                        </Button>
+                                                                                                                    )}
+                                                                                                                </div>
+                                                                                                            </div>
+                                                                                                            <div className="text-[10px] italic text-slate-400 dark:text-zinc-500">
+                                                                                                                {formatSgpInvoiceTimelineLabel(invoice)}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    );
+                                                                                                })}
+                                                                                            </div>
+                                                                                        ))
+                                                                                    ) : (
+                                                                                        <div className="py-12 text-center opacity-30">
+                                                                                            <Receipt className="mx-auto h-12 w-12 text-slate-400" />
+                                                                                            <p className="mt-2 text-[11px] font-bold uppercase tracking-widest">Sem faturas</p>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </motion.div>
+                                                                        ) : (
+                                                                            <motion.div
+                                                                                key="dashboard-grid"
+                                                                                initial={{ opacity: 0, scale: 0.95 }}
+                                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                                exit={{ opacity: 0, scale: 0.95 }}
+                                                                                className="grid grid-cols-2 gap-2 pt-2"
+                                                                            >
+                                                                                <SGPDashboardTile 
+                                                                                    title="Conexão" 
+                                                                                    icon={Router} 
+                                                                                    status={isOnline ? "Online" : "Offline"}
+                                                                                    statusColor={isOnline ? "emerald" : "red"}
+                                                                                >
+                                                                                    <div className="space-y-2">
+                                                                                        <div className="flex flex-col">
+                                                                                            <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-400/80">Endereço IP</span>
+                                                                                            <span className="truncate text-[11px] font-black tabular-nums text-slate-700 dark:text-zinc-200">{contract?.ip || 'Não atribuído'}</span>
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500 dark:text-zinc-400">
+                                                                                            <Clock className={cn("h-3 w-3 shrink-0", isOnline ? "text-emerald-500" : "text-slate-400")} />
+                                                                                            <span className="truncate">{formatSgpConnectionDetails(contract!)}</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </SGPDashboardTile>
 
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between px-1">
-                                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Faturas</h4>
-                                                <span className={cn("text-[12px] font-bold tabular-nums", hasSgpDebt ? "text-red-500" : "text-emerald-500")}>
-                                                    {sgpOverdueInvoices} vencida{sgpOverdueInvoices === 1 ? '' : 's'}
-                                                </span>
-                                            </div>
+                                                                                <SGPDashboardTile 
+                                                                                    title="Financeiro" 
+                                                                                    icon={DollarSign}
+                                                                                    onClick={() => hasInvoices && setSelectedSgpCategory('financeiro')}
+                                                                                    status={hasOpenInvoices ? "Pendente" : "Em dia"}
+                                                                                    statusColor={group.summary.hasDebt ? "red" : hasOpenInvoices ? "amber" : "emerald"}
+                                                                                >
+                                                                                    <div className="flex h-full flex-col justify-between">
+                                                                                        <div className="space-y-0.5">
+                                                                                            <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-400/80">Em aberto</span>
+                                                                                            <p className="truncate text-[14px] font-black tabular-nums text-slate-900 dark:text-zinc-100">
+                                                                                                {formatSgpCurrency(group.summary.totalOutstandingAmount)}
+                                                                                            </p>
+                                                                                        </div>
+                                                                                        {hasInvoices && (
+                                                                                            <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-tighter text-blue-600 dark:text-blue-400">
+                                                                                                Ver detalhes <ArrowRight className="ml-1 h-2.5 w-2.5" />
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </SGPDashboardTile>
 
-                                            {sgpInvoices.length > 0 ? (
-                                                sgpInvoices.map((invoice) => {
-                                                    const canGeneratePix = Boolean(invoice.pixCode || invoice.contractId);
+                                                                                <SGPDashboardTile 
+                                                                                    title="Ações" 
+                                                                                    icon={Wrench}
+                                                                                    statusColor="blue"
+                                                                                >
+                                                                                    <div className="space-y-2">
+                                                                                        <Button 
+                                                                                            variant="outline" 
+                                                                                            size="sm" 
+                                                                                            className="h-7 w-full justify-start gap-1.5 border-slate-200 bg-white/50 px-1.5 text-[8.5px] font-black uppercase text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-800/80 dark:bg-zinc-950/50 dark:text-zinc-300 dark:hover:bg-emerald-950/30"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                handleOpenSgpOrderDialog(contract!);
+                                                                                            }}
+                                                                                        >
+                                                                                            <Plus className="h-2.5 w-2.5 text-emerald-500 shrink-0" /> Chamado
+                                                                                        </Button>
+                                                                                        <Button 
+                                                                                            variant="outline" 
+                                                                                            size="sm" 
+                                                                                            className="h-7 w-full justify-start gap-1.5 border-slate-200 bg-white/50 px-1.5 text-[8.5px] font-black uppercase text-slate-700 hover:bg-amber-50 hover:text-amber-700 dark:border-zinc-800/80 dark:bg-zinc-950/50 dark:text-zinc-300 dark:hover:bg-amber-950/30"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                handleOpenSgpPaymentPromiseDialog(contract!);
+                                                                                            }}
+                                                                                        >
+                                                                                            <Calendar className="h-2.5 w-2.5 text-amber-500 shrink-0" /> Promessa
+                                                                                        </Button>
+                                                                                    </div>
+                                                                                </SGPDashboardTile>
 
-                                                    return (
-                                                        <div
-                                                            key={invoice.id}
-                                                            className={cn(
-                                                                "group flex flex-col rounded-xl border p-2 transition-all",
-                                                                invoice.isOverdue
-                                                                    ? "border-red-500/30 bg-red-500/5 hover:bg-red-500/10 dark:border-red-500/20"
-                                                                    : "border-slate-200/80 bg-white/90 hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5"
-                                                            )}
-                                                        >
-                                                            <div className="flex min-w-0 items-start justify-between gap-3">
-                                                                <div className="flex min-w-0 items-center gap-3">
-                                                                    <div
-                                                                        className={cn(
-                                                                            "flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm shrink-0",
-                                                                            invoice.isOverdue
-                                                                                ? "border-red-200 bg-white text-red-500 dark:border-red-900/50 dark:bg-black/50"
-                                                                                : "border-slate-200 bg-slate-100 text-emerald-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-emerald-400"
-                                                                        )}
-                                                                    >
-                                                                        <Receipt className="h-4 w-4" />
+                                                                                <SGPDashboardTile 
+                                                                                    title="Endereço" 
+                                                                                    icon={MapPin}
+                                                                                >
+                                                                                    <div className="flex h-full flex-col justify-between overflow-hidden">
+                                                                                        <p className="line-clamp-2 text-[9.5px] font-bold leading-tight text-slate-600 dark:text-zinc-400 break-words">
+                                                                                            {contract?.addressLabel || 'Não informado'}
+                                                                                        </p>
+                                                                                        {contractGeoLocationHref && (
+                                                                                            <a 
+                                                                                                href={contractGeoLocationHref} 
+                                                                                                target="_blank" 
+                                                                                                rel="noreferrer"
+                                                                                                className="mt-1 flex items-center gap-1 text-[8.5px] font-black uppercase text-blue-600 dark:text-blue-400"
+                                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                            >
+                                                                                                <Globe className="h-2.5 w-2.5 text-blue-500" /> Ver Mapa
+                                                                                            </a>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </SGPDashboardTile>
+                                                                            </motion.div>
+                                                                            )}
+                                                                        </AnimatePresence>
                                                                     </div>
-                                                                    <div className="min-w-0 flex-1">
-                                                                        <span className={cn("block text-[13px] font-bold", invoice.isOverdue ? "text-red-600 dark:text-red-400" : "text-slate-800 dark:text-slate-200")}>
-                                                                            {formatSgpCurrency(invoice.correctedAmount || invoice.amount)}
-                                                                        </span>
-                                                                        <span className={cn("block text-[10px] font-semibold uppercase tracking-widest", invoice.isOverdue ? "text-red-500/80" : "text-slate-500")}>
-                                                                            Venc.: {formatSgpDate(invoice.dueDate) || 'Sem data'}
-                                                                        </span>
-                                                                        <span className="mt-1 block truncate text-[10px] text-muted-foreground" title={`Status: ${invoice.status} ${invoice.daysLate > 0 ? `• ${invoice.daysLate} dia(s) atraso` : ''}`}>
-                                                                            Status: {invoice.status} {invoice.daysLate > 0 ? `• ${invoice.daysLate} dia(s) atraso` : ''}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                                <Button
-                                                                    variant={invoice.isOverdue ? "ghost" : "outline"}
-                                                                    size="sm"
-                                                                    className={cn(
-                                                                        "h-7 text-[10px] font-bold uppercase tracking-wider",
-                                                                        invoice.isOverdue
-                                                                            ? "border border-red-200 bg-white text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:bg-black dark:hover:bg-red-900/60"
-                                                                            : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-                                                                    )}
-                                                                    disabled={!canGeneratePix || sgpPixLoadingInvoiceId === invoice.id}
-                                                                    onClick={() => handleGenerateSgpPix(invoice)}
-                                                                >
-                                                                    {sgpPixLoadingInvoiceId === invoice.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'PIX'}
-                                                                </Button>
+                                                                )}
                                                             </div>
+                                );
+                            })
+                        ) : (
+                            <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhum contrato retornado pelo SGP.</p>
+                                                            )}
                                                         </div>
-                                                    );
-                                                })
-                                            ) : (
-                                                <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhuma fatura retornada pelo SGP.</p>
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-
-                                {false && (
-                                    <>
-                                {/* OVERALL STATUS */}
-                                <div className="flex items-center justify-between p-3 rounded-xl border border-red-500/30 bg-red-500/10 dark:bg-red-500/5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/20 text-red-500 shrink-0">
-                                            <AlertTriangle className="h-4 w-4" />
-                                        </div>
-                                        <div>
-                                            <h4 className="text-[13px] font-bold text-red-600 dark:text-red-400">Cliente Inadimplente</h4>
-                                            <p className="text-[11px] font-medium text-red-500/80">O cliente possui faturas em atraso.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* CONTRACTS */}
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between px-1">
-                                        <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Contratos (2)</h4>
-                                    </div>
-                                    
-                                    {/* Contract 1 (Online) */}
-                                    <div 
-                                        className={cn(
-                                            "relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-sm transition-all dark:border-white/5 dark:bg-[#07080b]",
-                                            expandedContractId === '1' ? "border-emerald-500/30 bg-emerald-500/5 ring-1 ring-emerald-500/20" : "hover:border-emerald-500/30 hover:bg-emerald-500/5 cursor-pointer"
-                                        )}
-                                    >
-                                        <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500/50" />
-                                        <div 
-                                            className={cn("flex justify-between items-start p-3")}
-                                            onClick={() => setExpandedContractId(expandedContractId === '1' ? null : '1')}
-                                        >
-                                            <div className="flex gap-2 w-full">
-                                                <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
-                                                    <Router className="h-4 w-4 text-emerald-500" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <h5 className="text-[13px] font-bold text-slate-800 dark:text-slate-200">Fibra 500MB Residencial</h5>
-                                                        <span className="flex shrink-0 h-4 items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 text-[9px] font-bold uppercase text-emerald-500">
-                                                            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                                            Online
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate border-none outline-none">IP: 177.100.22.45 • MAC: 00:1A:2B:3C:4D:5E</p>
-                                                    <div className="flex items-start gap-1 text-[9.5px] text-muted-foreground/80 mt-1 leading-tight">
-                                                        <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
-                                                        <span className="line-clamp-2">Av. Paulista, 1500, Apt 42 - Bela Vista, São Paulo - SP</span>
-                                                    </div>
-                                                </div>
-                                                <div className="shrink-0 pt-1 text-slate-400">
-                                                    {expandedContractId === '1' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        
-                                        {expandedContractId === '1' && (
-                                            <div className="px-3 pb-3 animate-in slide-in-from-top-1 duration-200">
-                                                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/50 dark:border-white/10">
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                                            <Download className="h-3 w-3" /> Download
-                                                        </span>
-                                                        <span className="text-[12px] font-bold text-slate-700 dark:text-slate-300">452 GB</span>
-                                                    </div>
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                                            <Upload className="h-3 w-3" /> Upload
-                                                        </span>
-                                                        <span className="text-[12px] font-bold text-slate-700 dark:text-slate-300">120 GB</span>
-                                                    </div>
-                                                </div>
-                                                <div className="mt-2 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                                                    <Clock className="h-3 w-3 text-emerald-500/70" /> Conectado há 14 dias
-                                                </div>
-                                                <div className="mt-3 flex gap-2">
-                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 border-slate-200 dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
-                                                        Desconectar
-                                                    </Button>
-                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-900/30 dark:hover:text-emerald-400 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Abrir Chamado Técnico" onClick={(e) => e.stopPropagation()}>
-                                                        <Wrench className="h-3 w-3 mr-1.5 text-emerald-500" /> Abrir Chamado
-                                                    </Button>
-                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Ler Chamados" onClick={(e) => e.stopPropagation()}>
-                                                        <FileText className="h-3 w-3 mr-1.5" /> Histórico
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Contract 2 (Offline) */}
-                                    <div 
-                                        className={cn(
-                                            "relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 shadow-sm transition-all dark:border-white/5 dark:bg-[#07080b]",
-                                            expandedContractId === '2' ? "border-slate-300 bg-slate-50 ring-1 ring-slate-200 dark:border-white/10 dark:bg-white/5/50 opacity-100" : "hover:bg-slate-50 dark:hover:bg-white/5 opacity-70 cursor-pointer"
-                                        )}
-                                    >
-                                        <div className="absolute top-0 left-0 w-1 h-full bg-slate-300 dark:bg-slate-700" />
-                                        <div 
-                                            className={cn("flex justify-between items-start p-3")}
-                                            onClick={() => setExpandedContractId(expandedContractId === '2' ? null : '2')}
-                                        >
-                                            <div className="flex gap-2 w-full">
-                                                <div className="h-8 w-8 rounded-lg bg-slate-100 dark:bg-zinc-800 flex items-center justify-center border border-slate-200 dark:border-zinc-700 shrink-0">
-                                                    <Router className="h-4 w-4 text-slate-400" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <h5 className="text-[13px] font-bold text-slate-800 dark:text-slate-200">Rádio 50MB Backup</h5>
-                                                        <span className="flex shrink-0 h-4 items-center gap-1 rounded-full border border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-800 px-1.5 text-[9px] font-bold uppercase text-slate-500">
-                                                            <div className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                                                            Offline
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">PPPoE: cliente_bkp</p>
-                                                    <div className="flex items-start gap-1 text-[9.5px] text-muted-foreground/80 mt-1 leading-tight">
-                                                        <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
-                                                        <span className="line-clamp-2">Av. Paulista, 1500, Apt 42 - Bela Vista, São Paulo - SP</span>
-                                                    </div>
-                                                </div>
-                                                <div className="shrink-0 pt-1 text-slate-400">
-                                                    {expandedContractId === '2' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {expandedContractId === '2' && (
-                                            <div className="px-3 pb-3 animate-in slide-in-from-top-1 duration-200">
-                                                <div className="mt-1 flex gap-2 pt-2 border-t border-slate-200/50 dark:border-white/10">
-                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-900/30 dark:hover:text-emerald-400 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Abrir Chamado Técnico" onClick={(e) => e.stopPropagation()}>
-                                                        <Wrench className="h-3 w-3 mr-1.5 text-emerald-500" /> Abrir Chamado
-                                                    </Button>
-                                                    <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px] font-bold hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-slate-300" title="Ler Chamados" onClick={(e) => e.stopPropagation()}>
-                                                        <FileText className="h-3 w-3 mr-1.5" /> Histórico
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* INVOICES */}
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between px-1">
-                                        <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-500">Faturas</h4>
-                                        <span className="text-[12px] font-bold text-red-500 tabular-nums">1 vencida</span>
-                                    </div>
-
-                                    {/* Overdue Invoice */}
-                                    <div className="group flex flex-col rounded-xl border border-red-500/30 bg-red-500/5 p-2 transition-all hover:bg-red-500/10 dark:border-red-500/20">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className="h-8 w-8 rounded-lg bg-white dark:bg-black/50 shadow-sm flex items-center justify-center border border-red-200 dark:border-red-900/50 shrink-0">
-                                                    <Receipt className="h-4 w-4 text-red-500" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <span className="block text-[13px] font-bold text-red-600 dark:text-red-400">R$ 149,90</span>
-                                                    <span className="block text-[10px] uppercase tracking-widest text-red-500/80 font-semibold">Venc.: 10/11/2023</span>
-                                                </div>
-                                            </div>
-                                            <Button variant="ghost" size="sm" className="h-7 bg-white dark:bg-black border border-red-200 dark:border-red-900/40 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/60 text-[10px] font-bold uppercase tracking-wider">
-                                                Pix
-                                            </Button>
-                                        </div>
-                                    </div>
-
-                                    {/* Open Invoice */}
-                                    <div className="group flex flex-col rounded-xl border border-slate-200/80 bg-white/90 p-2 transition-all hover:bg-slate-100 dark:border-white/5 dark:bg-[#07080b] dark:hover:bg-white/5">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className="h-8 w-8 rounded-lg bg-slate-100 dark:bg-zinc-800 shadow-sm flex items-center justify-center border border-slate-200 dark:border-zinc-700 shrink-0">
-                                                    <Receipt className="h-4 w-4 text-emerald-500 dark:text-emerald-400" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <span className="block text-[13px] font-bold text-slate-800 dark:text-slate-200">R$ 149,90</span>
-                                                    <span className="block text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Venc.: 10/12/2023</span>
-                                                </div>
-                                            </div>
-                                            <Button variant="outline" size="sm" className="h-7 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100">
-                                                Pix
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-                                    </>
-                                )}
-                            </TabsContent>
+                                                    </>
+                                                )}
+                                            </TabsContent>
                         )}
                     </Tabs>
                 </div>
             </ScrollArea>
+            <Dialog
+                open={isSgpPaymentPromiseDialogOpen}
+                onOpenChange={(open) => {
+                    if (!isSubmittingSgpPaymentPromise) {
+                        setIsSgpPaymentPromiseDialogOpen(open);
+                    }
+
+                    if (!open && !isSubmittingSgpPaymentPromise) {
+                        setSgpPaymentPromiseContract(null);
+                        setSgpPaymentPromiseDate('');
+                        setSgpPaymentPromiseResponse(null);
+                    }
+                }}
+            >
+                <DialogContent className="border-border bg-popover text-foreground">
+                    <DialogHeader>
+                        <DialogTitle>Promessa de pagamento no SGP</DialogTitle>
+                        <DialogDescription>
+                            {sgpPaymentPromiseContract
+                                ? `Contrato ${sgpPaymentPromiseContract.id} - ${sgpPaymentPromiseContract.planDescription}`
+                                : 'Selecione um contrato para registrar a promessa.'}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form onSubmit={handleCreateSgpPaymentPromise} className="space-y-4">
+                        {sgpPaymentPromiseContract && (
+                            <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                <p className="text-sm font-semibold text-foreground">{sgpPaymentPromiseContract.planDescription}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{sgpPaymentPromiseContract.addressLabel}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Status: {sgpPaymentPromiseContract.statusLabel} • Contrato {sgpPaymentPromiseContract.id}
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <Label htmlFor="sgp-payment-promise-date">Data da promessa</Label>
+                            <Input
+                                id="sgp-payment-promise-date"
+                                type="date"
+                                value={sgpPaymentPromiseDate}
+                                onChange={(event) => setSgpPaymentPromiseDate(event.target.value)}
+                                min={getTodayDateInputValue()}
+                                className="border-input bg-muted/50 text-foreground"
+                                required
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                O SGP recebera a data no formato yyyy-MM-dd e enviara SMS automaticamente.
+                            </p>
+                        </div>
+
+                        {sgpPaymentPromiseResponse && (
+                            <div
+                                className={cn(
+                                    "space-y-3 rounded-lg border p-3",
+                                    isSgpPaymentPromiseGranted(sgpPaymentPromiseResponse)
+                                        ? "border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/60 dark:bg-emerald-950/30"
+                                        : "border-amber-200 bg-amber-50/80 dark:border-amber-900/60 dark:bg-amber-950/20"
+                                )}
+                            >
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-foreground">
+                                            {isSgpPaymentPromiseGranted(sgpPaymentPromiseResponse) ? 'Promessa registrada' : 'Promessa nao liberada'}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {sgpPaymentPromiseResponse.razaoSocial || 'Cliente nao informado'}
+                                        </p>
+                                    </div>
+                                    <span
+                                        className={cn(
+                                            "rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em]",
+                                            isSgpPaymentPromiseGranted(sgpPaymentPromiseResponse)
+                                                ? "border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/70 dark:text-emerald-200"
+                                                : "border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/70 dark:text-amber-200"
+                                        )}
+                                    >
+                                        Status {sgpPaymentPromiseResponse.status ?? '--'}
+                                    </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="rounded-md border border-border/60 bg-background/70 p-2">
+                                        <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Protocolo</span>
+                                        <span className="mt-1 block break-all text-xs font-semibold text-foreground">
+                                            {sgpPaymentPromiseResponse.protocolo || 'Nao informado'}
+                                        </span>
+                                    </div>
+                                    <div className="rounded-md border border-border/60 bg-background/70 p-2">
+                                        <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Liberado</span>
+                                        <span className="mt-1 block text-xs font-semibold text-foreground">
+                                            {isSgpPaymentPromiseGranted(sgpPaymentPromiseResponse) ? 'Sim' : 'Nao'}
+                                            {typeof sgpPaymentPromiseResponse.liberado_dias === 'number'
+                                                ? ` • ${sgpPaymentPromiseResponse.liberado_dias} dia(s)`
+                                                : ''}
+                                        </span>
+                                    </div>
+                                    <div className="rounded-md border border-border/60 bg-background/70 p-2 sm:col-span-2">
+                                        <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">CPF/CNPJ</span>
+                                        <span className="mt-1 block break-all text-xs font-semibold text-foreground">
+                                            {sgpPaymentPromiseResponse.cpfCnpj || 'Nao informado'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-md border border-border/60 bg-background/70 p-3">
+                                    <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Mensagem</span>
+                                    <p className="mt-1 whitespace-pre-line text-xs text-foreground">
+                                        {sgpPaymentPromiseResponse.msg || 'Sem mensagem retornada pelo SGP.'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => {
+                                    setIsSgpPaymentPromiseDialogOpen(false);
+                                    setSgpPaymentPromiseContract(null);
+                                    setSgpPaymentPromiseDate('');
+                                    setSgpPaymentPromiseResponse(null);
+                                }}
+                                disabled={isSubmittingSgpPaymentPromise}
+                            >
+                                Cancelar
+                            </Button>
+                            <Button type="submit" disabled={isSubmittingSgpPaymentPromise || !sgpPaymentPromiseDate}>
+                                {isSubmittingSgpPaymentPromise && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Registrar Promessa
+                            </Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
             <Dialog
                 open={isSgpOrderDialogOpen}
                 onOpenChange={(open) => {

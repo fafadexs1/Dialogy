@@ -29,6 +29,7 @@ import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
 import { formatMessageDate } from '@/lib/utils';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
+import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -224,6 +225,7 @@ export default function CustomerChatLayout({
   const appendChats = useInboxStore((state) => state.appendChats);
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
   const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
+  const removeChat = useInboxStore((state) => state.removeChat);
 
   const handleBoundaryError = useCallback((error: Error) => {
     console.error('[INBOX_UI_ERROR]', error);
@@ -928,6 +930,7 @@ export default function CustomerChatLayout({
           lastSyncChats: snapshot.lastSyncChats,
           chatId: shouldSyncMessages ? selectedChatId : null,
           lastSyncMessages: shouldSyncMessages ? lastSyncMessage : null,
+          ownership: ownershipFilter,
         });
         if (result.error) {
           console.error('[SYNC_INBOX] Error:', result.error);
@@ -936,9 +939,19 @@ export default function CustomerChatLayout({
 
         // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
         React.startTransition(() => {
+          const visibleDeltaChats = result.deltaChats.filter((chat) =>
+            isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId)
+          );
+          const hiddenDeltaChatIds = result.deltaChats
+            .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId))
+            .map((chat) => chat.id)
+            .filter((chatId) => chatId !== snapshot.selectedChatId);
+
+          hiddenDeltaChatIds.forEach((chatId) => removeChat(chatId));
+
           // If the chat is currently selected and visible, it should remain read
           // even if delta sync sends a stale unread_count from the chats table.
-          const deltaChatsToUpsert = result.deltaChats.map(chat => {
+          const deltaChatsToUpsert = visibleDeltaChats.map(chat => {
             if (chat.id === snapshot.selectedChatId && document.hasFocus()) {
               return { ...chat, unreadCount: 0 };
             }
@@ -951,7 +964,7 @@ export default function CustomerChatLayout({
           // we immediately push that message to the chat panel as well.
           // This ensures that "active polling in chatlist" is shared with the chat view.
           if (snapshot.selectedChatId) {
-            const chatFromList = result.deltaChats.find(c => c.id === snapshot.selectedChatId);
+            const chatFromList = visibleDeltaChats.find(c => c.id === snapshot.selectedChatId);
             if (chatFromList && chatFromList.messages.length > 0) {
               appendMessagesToChat(snapshot.selectedChatId, chatFromList.messages, undefined);
             }
@@ -979,7 +992,7 @@ export default function CustomerChatLayout({
       deltaSyncQueuedRef.current = false;
       await runDeltaSync({ force: true });
     }
-  }, [appendMessagesToChat, initialUser?.activeWorkspaceId, updateChatContact, upsertChats]);
+  }, [appendMessagesToChat, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, updateChatContact, upsertChats]);
 
   useEffect(() => {
     runDeltaSyncRef.current = () => runDeltaSync({ force: true });
@@ -1202,9 +1215,29 @@ export default function CustomerChatLayout({
     console.log('[REALTIME] Chat update received:', payload);
     const newChatData = payload.new as any;
     if (!newChatData?.id) return;
+    if (newChatData.workspace_id && newChatData.workspace_id !== initialUser?.activeWorkspaceId) return;
 
     const snapshot = useInboxStore.getState();
     const existingChat = snapshot.chats.find((chat) => chat.id === newChatData.id);
+    const incomingStatus = newChatData.status || existingChat?.status || 'gerais';
+    const shouldKeepVisible = isChatVisibleForOwnership(
+      {
+        id: newChatData.id,
+        status: incomingStatus,
+        agent_id: newChatData.agent_id ?? existingChat?.agentId ?? existingChat?.agent?.id ?? null,
+      },
+      ownershipFilter,
+      initialUser?.id,
+      snapshot.selectedChatId
+    );
+
+    if (!shouldKeepVisible) {
+      if (existingChat && snapshot.selectedChatId !== newChatData.id) {
+        removeChat(newChatData.id);
+      }
+      return;
+    }
+
     const contactId: string | null = newChatData.contact_id ?? existingChat?.contact?.id ?? null;
 
     const previewRawDate =
@@ -1269,7 +1302,7 @@ export default function CustomerChatLayout({
         existingChat?.workspace_id ||
         initialUser?.activeWorkspaceId ||
         '',
-      status: newChatData.status || existingChat?.status || 'gerais',
+      status: incomingStatus,
       agentId: newChatData.agent_id ?? undefined,
       updatedAt: newChatData.updated_at || existingChat?.updatedAt || previewIso,
       unreadCount:
@@ -1287,6 +1320,10 @@ export default function CustomerChatLayout({
         typeof newChatData.is_autopilot_active === 'boolean'
           ? newChatData.is_autopilot_active
           : existingChat?.is_autopilot_active,
+      autopilot_config_id:
+        Object.prototype.hasOwnProperty.call(newChatData, 'autopilot_config_id')
+          ? newChatData.autopilot_config_id
+          : existingChat?.autopilot_config_id,
       copilot_mode:
         (newChatData.copilot_mode || existingChat?.copilot_mode || 'auto') as Chat['copilot_mode'],
       metaPlatform: (newChatData.meta_platform || existingChat?.metaPlatform || undefined) as Chat['metaPlatform'],
@@ -1317,7 +1354,7 @@ export default function CustomerChatLayout({
     }
 
     snapshot.upsertChats([optimisticUpdate as Chat]);
-  }, [fetchContactById, formatMessageDay, initialUser, initialUser?.activeWorkspaceId, workspaceTimezone]);
+  }, [fetchContactById, formatMessageDay, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, workspaceTimezone]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);

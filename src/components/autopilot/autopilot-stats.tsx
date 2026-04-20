@@ -1,116 +1,136 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { BrainCircuit, DollarSign, Activity } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import type { AutopilotUsageLog } from '@/lib/types';
 import { useMemo } from 'react';
+import { Activity, BrainCircuit, DollarSign, LineChart } from 'lucide-react';
+import { Bar, BarChart, XAxis, YAxis } from 'recharts';
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { Skeleton } from '@/components/ui/skeleton';
+import type { AutopilotUsageLog } from '@/lib/types';
 
 interface AutopilotStatsProps {
-    usageLogs: AutopilotUsageLog[];
-    loading: boolean;
+  usageLogs: AutopilotUsageLog[];
+  loading: boolean;
 }
 
 const chartConfig = {
-    executions: {
-        label: "Execuções",
-        color: "hsl(var(--primary))",
-    },
+  executions: {
+    label: 'Execuções',
+    color: 'hsl(var(--primary))',
+  },
 };
 
-// Mock data for chart - in real app, aggregate logs by month
-const chartData = [
-    { month: "Jan", executions: 0 },
-    { month: "Fev", executions: 0 },
-    { month: "Mar", executions: 0 },
-    { month: "Abr", executions: 0 },
-    { month: "Mai", executions: 0 },
-    { month: "Jun", executions: 0 },
-];
+const monthFormatter = new Intl.DateTimeFormat('pt-BR', { month: 'short' });
+
+function buildChartData(logs: AutopilotUsageLog[]) {
+  const now = new Date();
+  const buckets = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+    return {
+      key: `${date.getFullYear()}-${date.getMonth()}`,
+      month: monthFormatter.format(date).replace('.', ''),
+      executions: 0,
+    };
+  });
+
+  const bucketIndex = new Map(buckets.map((bucket, index) => [bucket.key, index]));
+
+  logs.forEach((log) => {
+    const date = new Date(log.created_at);
+    if (Number.isNaN(date.getTime())) return;
+
+    const index = bucketIndex.get(`${date.getFullYear()}-${date.getMonth()}`);
+    if (index === undefined) return;
+    buckets[index].executions += 1;
+  });
+
+  return buckets;
+}
 
 export function AutopilotStats({ usageLogs, loading }: AutopilotStatsProps) {
-    const stats = useMemo(() => {
-        if (!usageLogs.length) return { executions: 0, tokens: 0, cost: 0 };
-        // Simplified calculation for demo
-        const executions = usageLogs.length;
-        const tokens = usageLogs.reduce((acc, log) => acc + log.total_tokens, 0);
-        // Estimate cost (generic $0.50 per 1M tokens for mixed usage)
-        const cost = (tokens / 1000000) * 0.50;
-        return { executions, tokens, cost };
-    }, [usageLogs]);
+  const stats = useMemo(() => {
+    if (!usageLogs.length) return { executions: 0, tokens: 0, cost: 0 };
 
-    if (loading) {
-        return (
-            <div className="grid gap-4 md:grid-cols-3 mb-6">
-                <Skeleton className="h-32" />
-                <Skeleton className="h-32" />
-                <Skeleton className="h-32" />
-            </div>
-        );
-    }
+    const executions = usageLogs.length;
+    const tokens = usageLogs.reduce((acc, log) => acc + log.total_tokens, 0);
+    const cost = (tokens / 1000000) * 0.5;
+    return { executions, tokens, cost };
+  }, [usageLogs]);
 
+  const chartData = useMemo(() => buildChartData(usageLogs), [usageLogs]);
+
+  if (loading) {
     return (
-        <div className="grid gap-6 mb-6">
-            <div className="grid gap-4 md:grid-cols-3">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Execuções Totais</CardTitle>
-                        <Activity className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{stats.executions.toLocaleString()}</div>
-                        <p className="text-xs text-muted-foreground">Interações realizadas pelo agente</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Tokens Consumidos</CardTitle>
-                        <BrainCircuit className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{(stats.tokens / 1000).toFixed(1)}k</div>
-                        <p className="text-xs text-muted-foreground">Volume de processamento de texto</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Custo Estimado</CardTitle>
-                        <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-emerald-500">
-                            {stats.cost.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                        </div>
-                        <p className="text-xs text-muted-foreground">Baseado no modelo Gemini Flash</p>
-                    </CardContent>
-                </Card>
-            </div>
-
-            <Card className="col-span-3">
-                <CardHeader>
-                    <CardTitle>Histórico de Atividade</CardTitle>
-                    <CardDescription>Volume de execuções nos últimos 6 meses</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <ChartContainer config={chartConfig} className="h-[200px] w-full">
-                        <BarChart accessibilityLayer data={chartData}>
-                            <XAxis
-                                dataKey="month"
-                                tickLine={false}
-                                tickMargin={10}
-                                axisLine={false}
-                                tickFormatter={(value) => value.slice(0, 3)}
-                            />
-                            <YAxis tickLine={false} axisLine={false} />
-                            <ChartTooltip
-                                cursor={false}
-                                content={<ChartTooltipContent indicator="dot" />}
-                            />
-                            <Bar dataKey="executions" fill="var(--color-executions)" radius={4} />
-                        </BarChart>
-                    </ChartContainer>
-                </CardContent>
-            </Card>
-        </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Skeleton className="h-32 rounded-[26px]" />
+        <Skeleton className="h-32 rounded-[26px]" />
+        <Skeleton className="h-32 rounded-[26px]" />
+      </div>
     );
+  }
+
+  return (
+    <div className="grid gap-6">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="overflow-hidden rounded-[26px] border border-border bg-card shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-border/60 bg-muted/30 pb-4">
+            <CardTitle className="text-sm font-medium">Execuções totais</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.executions.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">Interações realizadas pelo agente</p>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden rounded-[26px] border border-border bg-card shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-border/60 bg-muted/30 pb-4">
+            <CardTitle className="text-sm font-medium">Tokens consumidos</CardTitle>
+            <BrainCircuit className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{(stats.tokens / 1000).toFixed(1)}k</div>
+            <p className="text-xs text-muted-foreground">Volume total de processamento do agente</p>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden rounded-[26px] border border-border bg-card shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-border/60 bg-muted/30 pb-4">
+            <CardTitle className="text-sm font-medium">Custo estimado</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              {stats.cost.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+            </div>
+            <p className="text-xs text-muted-foreground">Estimativa genérica com base no uso total registrado</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+        <CardHeader className="border-b border-border/60 bg-muted/30">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-lg">Histórico de atividade</CardTitle>
+              <CardDescription>Volume de execuções nos últimos 6 meses</CardDescription>
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-3 py-1 text-xs text-muted-foreground">
+              <LineChart className="h-3.5 w-3.5 text-primary" />
+              Atualizado com base nos logs do agente
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-6">
+          <ChartContainer config={chartConfig} className="h-[240px] w-full">
+            <BarChart accessibilityLayer data={chartData}>
+              <XAxis dataKey="month" tickLine={false} tickMargin={10} axisLine={false} />
+              <YAxis tickLine={false} axisLine={false} />
+              <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="dot" />} />
+              <Bar dataKey="executions" fill="var(--color-executions)" radius={8} />
+            </BarChart>
+          </ChartContainer>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }

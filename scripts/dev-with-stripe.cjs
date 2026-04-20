@@ -9,12 +9,15 @@ loadEnvConfig(rootDir);
 
 const defaultPort = "9002";
 const secretWaitMs = Number.parseInt(process.env.STRIPE_WEBHOOK_SECRET_WAIT_MS || "8000", 10);
-const devArgs = process.argv.slice(2);
+const rawDevArgs = process.argv.slice(2);
+const { nextArgs: devArgs, disableStripe } = normalizeDevArgs(rawDevArgs);
 const resolvedPort = resolvePortArg(devArgs) || defaultPort;
+const useTurbo = resolveTurboMode();
+applyLocalAppUrlOverrides(resolvedPort);
 const forwardTo =
   process.env.STRIPE_WEBHOOK_FORWARD_TO ||
   `http://localhost:${resolvedPort}/api/webhooks/stripe`;
-const shouldAutostartStripe = !isFalsey(process.env.STRIPE_CLI_AUTOSTART);
+const shouldAutostartStripe = !disableStripe && !isFalsey(process.env.STRIPE_CLI_AUTOSTART);
 const configuredWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || null;
 
 let nextProcess = null;
@@ -113,7 +116,7 @@ function startNext(injectedSecret) {
     return;
   }
 
-  const nextArgs = buildNextArgs(devArgs, defaultPort);
+  const nextArgs = buildNextArgs(devArgs, defaultPort, useTurbo);
   const childEnv = { ...process.env };
 
   if (injectedSecret) {
@@ -219,14 +222,82 @@ function resolveStripeCommand() {
   return { command: process.platform === "win32" ? "stripe.exe" : "stripe", label: "global stripe" };
 }
 
-function buildNextArgs(args, fallbackPort) {
-  const nextArgs = ["dev", "--turbo"];
+function buildNextArgs(args, fallbackPort, turboEnabled) {
+  const nextArgs = ["dev"];
+
+  if (turboEnabled) {
+    nextArgs.push("--turbo");
+  } else {
+    nextArgs.push("--webpack");
+  }
 
   if (!hasPortArg(args)) {
     nextArgs.push("-p", fallbackPort);
   }
 
   return [...nextArgs, ...args];
+}
+
+function normalizeDevArgs(args) {
+  let disableStripe = false;
+  const nextArgs = [];
+
+  for (const arg of args) {
+    if (arg === "--no-stripe" || arg === "--stripe=false") {
+      disableStripe = true;
+      continue;
+    }
+
+    nextArgs.push(arg);
+  }
+
+  return { nextArgs, disableStripe };
+}
+
+function resolveTurboMode() {
+  if (Object.prototype.hasOwnProperty.call(process.env, "DIALOGY_USE_TURBO")) {
+    return !isFalsey(process.env.DIALOGY_USE_TURBO);
+  }
+
+  const isWindows = process.platform === "win32";
+  const hasNonAsciiPath = /[^\x00-\x7F]/.test(rootDir);
+  const isOneDrivePath = /OneDrive/i.test(rootDir);
+
+  if (isWindows && (hasNonAsciiPath || isOneDrivePath)) {
+    logDev(
+      "Disabling Turbopack for local dev because this Windows workspace path uses OneDrive and/or non-ASCII characters."
+    );
+    return false;
+  }
+
+  return true;
+}
+
+function applyLocalAppUrlOverrides(port) {
+  const preserveConfiguredUrls = ["1", "true", "yes", "on"].includes(
+    String(process.env.DIALOGY_PRESERVE_APP_URLS || "").trim().toLowerCase()
+  );
+  const localOrigin = (process.env.DIALOGY_LOCAL_ORIGIN || `http://localhost:${port}`).trim();
+  const appUrlKeys = ["NEXTAUTH_URL", "NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_SITE_URL"];
+
+  process.env.PORT = String(port);
+
+  for (const key of appUrlKeys) {
+    const currentValue = process.env[key]?.trim();
+
+    if (!currentValue) {
+      process.env[key] = localOrigin;
+      logDev(`Defaulting ${key} to ${localOrigin} for local development.`);
+      continue;
+    }
+
+    if (preserveConfiguredUrls || isLocalOrigin(currentValue)) {
+      continue;
+    }
+
+    process.env[key] = localOrigin;
+    logDev(`Overriding ${key} from ${currentValue} to ${localOrigin} for local development.`);
+  }
 }
 
 function hasPortArg(args) {
@@ -251,6 +322,15 @@ function resolvePortArg(args) {
   }
 
   return null;
+}
+
+function isLocalOrigin(value) {
+  try {
+    const parsed = new URL(value);
+    return ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function isFalsey(value) {

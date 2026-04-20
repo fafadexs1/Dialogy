@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import type { SGPContactPanelContract, SGPContactPanelData, SGPContactPanelInvoice } from '../../types';
+import type { SGPContactPanelData } from '../../types';
 
 import {
     createSGPJsonRequestInit,
@@ -7,6 +7,12 @@ import {
     isSGPContextError,
     withSGPApplicationCredentials,
 } from '../../runtime';
+import {
+    buildSGPContactPanelData,
+    getContractId,
+    getPrimaryService,
+    normalizeText,
+} from '../../contact-panel-data';
 
 type SGPContractOption = {
     id: string;
@@ -20,178 +26,13 @@ type SGPClientLookupContext = {
     cpf: string;
 };
 
-function normalizeText(value: unknown): string | null {
-    const text = String(value ?? '').trim();
-    return text || null;
-}
+type SGPClientLookupResult =
+    | { success: true; clientes: any[] }
+    | { success: false; error: string };
 
-function toNumber(value: unknown): number {
-    const numericValue = Number(value);
-    return Number.isFinite(numericValue) ? numericValue : 0;
-}
-
-function toDateValue(value: string | null | undefined): number {
-    if (!value) {
-        return Number.POSITIVE_INFINITY;
-    }
-
-    const timestamp = new Date(value).getTime();
-    return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp;
-}
-
-function getContractId(rawContract: any): string {
-    const contractId = rawContract?.contrato ?? rawContract?.id;
-    return String(contractId ?? '').trim();
-}
-
-function getPrimaryService(rawContract: any) {
-    return Array.isArray(rawContract?.servicos) ? rawContract.servicos[0] ?? null : null;
-}
-
-function buildAddressLabel(address: any): string {
-    const line = [normalizeText(address?.logradouro), normalizeText(address?.numero)]
-        .filter(Boolean)
-        .join(', ');
-    const neighborhood = normalizeText(address?.bairro);
-    const city = [normalizeText(address?.cidade), normalizeText(address?.uf)]
-        .filter(Boolean)
-        .join(' - ');
-    const complement = normalizeText(address?.complemento);
-
-    return [line, neighborhood, city, complement]
-        .filter(Boolean)
-        .join(' • ');
-}
-
-function normalizeConnectionStatus(value: unknown): 'online' | 'offline' | 'unknown' {
-    const normalizedValue = String(value ?? '').trim().toLowerCase();
-    if (!normalizedValue) {
-        return 'unknown';
-    }
-
-    if (normalizedValue === 'online' || normalizedValue === 'on-line') {
-        return 'online';
-    }
-
-    if (normalizedValue === 'offline' || normalizedValue === 'off-line') {
-        return 'offline';
-    }
-
-    return 'unknown';
-}
-
-function buildContractDetails(rawContract: any): SGPContactPanelContract {
-    const primaryService = getPrimaryService(rawContract);
-    const connection = primaryService?.onu?.conexao ?? null;
-    const connectionStatus = normalizeConnectionStatus(connection?.status);
-    const ip = normalizeText(connection?.ip) || normalizeText(primaryService?.ip);
-    const mac = normalizeText(primaryService?.mac);
-    const login = normalizeText(primaryService?.login);
-    const serial = normalizeText(primaryService?.onu?.serial);
-    const detailParts = [
-        ip ? `IP: ${ip}` : null,
-        mac ? `MAC: ${mac}` : null,
-        !ip && !mac && login ? `PPPoE: ${login}` : null,
-        !ip && !mac && !login && serial ? `Serial: ${serial}` : null,
-    ].filter(Boolean);
-    const addressLabel =
-        buildAddressLabel(primaryService?.endereco) ||
-        buildAddressLabel(rawContract?.endereco) ||
-        buildAddressLabel(rawContract?.cliente_endereco);
-
-    return {
-        id: getContractId(rawContract),
-        planDescription:
-            normalizeText(primaryService?.plano?.descricao) ||
-            normalizeText(rawContract?.status) ||
-            `Contrato ${getContractId(rawContract)}`,
-        serviceType: normalizeText(primaryService?.tipo),
-        connectionStatus,
-        statusLabel:
-            connectionStatus === 'online'
-                ? 'Online'
-                : connectionStatus === 'offline'
-                    ? 'Offline'
-                    : normalizeText(rawContract?.status) || 'Sem status',
-        detailsLabel: detailParts.join(' • ') || 'Sem detalhes de conexao',
-        addressLabel: addressLabel || 'Endereco nao informado',
-        login,
-        ip,
-        mac,
-        serial,
-        connectedAt: normalizeText(connection?.data_conexao),
-        disconnectedAt: normalizeText(connection?.data_desconexao),
-        contractDate: normalizeText(rawContract?.dataCadastro),
-        reason: normalizeText(rawContract?.motivo_status),
-    };
-}
-
-function buildInvoiceDetails(rawInvoice: any): SGPContactPanelInvoice {
-    const dueDate = normalizeText(rawInvoice?.dataVencimento);
-    const paymentDate = normalizeText(rawInvoice?.dataPagamento);
-    const cancellationDate = normalizeText(rawInvoice?.dataCancelamento);
-    const status = String(rawInvoice?.status ?? '').trim().toLowerCase();
-    const isOpenInvoice = status === 'aberto' || status === 'abertos';
-    const dueTimestamp = dueDate ? new Date(`${dueDate}T00:00:00`).getTime() : Number.POSITIVE_INFINITY;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    return {
-        id: String(rawInvoice?.id ?? '').trim(),
-        contractId: String(rawInvoice?.clienteContrato ?? rawInvoice?.contrato ?? '').trim(),
-        status: status || 'desconhecido',
-        amount: toNumber(rawInvoice?.valor),
-        correctedAmount: toNumber(rawInvoice?.valorCorrigido || rawInvoice?.valor),
-        daysLate: toNumber(rawInvoice?.diasAtraso),
-        dueDate,
-        issueDate: normalizeText(rawInvoice?.dataEmissao),
-        paymentDate,
-        cancellationDate,
-        barcode: normalizeText(rawInvoice?.codigoBarras),
-        pixCode: normalizeText(rawInvoice?.codigoPix),
-        isOverdue: isOpenInvoice && dueTimestamp < today.getTime(),
-    };
-}
-
-export function buildSGPContactPanelData(clientes: any[]): SGPContactPanelData | null {
-    if (!Array.isArray(clientes) || clientes.length === 0) {
-        return null;
-    }
-
-    const customerName = normalizeText(clientes[0]?.nome) || 'Cliente';
-    const cpfCnpj = normalizeText(clientes[0]?.cpfcnpj) || '';
-    const contracts = clientes
-        .flatMap((cliente) => (Array.isArray(cliente?.contratos) ? cliente.contratos : []))
-        .map(buildContractDetails)
-        .filter((contract) => contract.id);
-
-    const invoiceMap = new Map<string, SGPContactPanelInvoice>();
-    clientes
-        .flatMap((cliente) => (Array.isArray(cliente?.titulos) ? cliente.titulos : []))
-        .map(buildInvoiceDetails)
-        .filter((invoice) => invoice.id)
-        .forEach((invoice) => {
-            invoiceMap.set(invoice.id, invoice);
-        });
-
-    const invoices = [...invoiceMap.values()].sort((left, right) => {
-        if (left.isOverdue !== right.isOverdue) {
-            return left.isOverdue ? -1 : 1;
-        }
-
-        return toDateValue(left.dueDate) - toDateValue(right.dueDate);
-    });
-
-    return {
-        customerName,
-        cpfCnpj,
-        contracts,
-        invoices,
-        onlineContracts: contracts.filter((contract) => contract.connectionStatus === 'online').length,
-        overdueInvoices: invoices.filter((invoice) => invoice.isOverdue).length,
-        openInvoices: invoices.filter((invoice) => invoice.status === 'aberto' || invoice.status === 'abertos').length,
-    };
-}
+type SGPSupportContractLookupResult =
+    | { success: true; contracts: any[] }
+    | { success: false; error: string };
 
 async function resolveSGPClientLookupContext(chatId: string): Promise<
     | { success: true; data: SGPClientLookupContext }
@@ -253,16 +94,25 @@ async function resolveSGPClientLookupContext(chatId: string): Promise<
 }
 
 async function fetchSGPClientsByChatId(chatId: string): Promise<
-    | { success: true; clientes: any[] }
-    | { success: false; error: string }
+    SGPClientLookupResult
 > {
     const lookup = await resolveSGPClientLookupContext(chatId);
     if (!lookup.success) {
         return lookup;
     }
 
-    const { global, sgpUser, cpf } = lookup.data;
+    return fetchSGPClientsByLookupContext(lookup.data);
+}
 
+function normalizeCpfCnpjDigits(value: string): string {
+    return String(value ?? '').replace(/\D/g, '');
+}
+
+async function fetchSGPClientsByLookupContext({
+    global,
+    sgpUser,
+    cpf,
+}: SGPClientLookupContext): Promise<SGPClientLookupResult> {
     try {
         const response = await fetch(
             `${global.baseUrl}/api/ura/clientes/`,
@@ -294,6 +144,68 @@ async function fetchSGPClientsByChatId(chatId: string): Promise<
         console.error('[SGP] Exception fetching clients:', error);
         return { success: false, error: 'Falha de conexao com SGP.' };
     }
+}
+
+async function fetchSGPSupportContractsByLookupContext({
+    global,
+    sgpUser,
+    cpf,
+}: SGPClientLookupContext): Promise<SGPSupportContractLookupResult> {
+    const payload = withSGPApplicationCredentials(global, {
+        cliente_cpfcnpj: normalizeCpfCnpjDigits(cpf),
+    });
+    const requestCandidates: RequestInit[] = [
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        },
+    ];
+
+    if (sgpUser?.token) {
+        requestCandidates.push(
+            createSGPJsonRequestInit(
+                sgpUser.token,
+                payload
+            )
+        );
+    }
+
+    let lastError = 'Falha ao consultar contratos de suporte no SGP.';
+
+    for (const requestInit of requestCandidates) {
+        try {
+            const response = await fetch(`${global.baseUrl}/api/suporte/contrato/list/`, requestInit);
+            if (!response.ok) {
+                const text = await response.text();
+                lastError = `Erro na API SGP: ${response.status} ${response.statusText}`;
+                console.error('[SGP] Error fetching support contracts:', text);
+                continue;
+            }
+
+            const data = await response.json();
+            const contracts = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.contratos)
+                    ? data.contratos
+                    : Array.isArray(data?.dados)
+                        ? data.dados
+                        : null;
+
+            if (contracts) {
+                return { success: true, contracts };
+            }
+
+            lastError = 'Resposta inesperada ao consultar contratos de suporte no SGP.';
+        } catch (error) {
+            console.error('[SGP] Exception fetching support contracts:', error);
+            lastError = 'Falha de conexao com SGP na consulta de suporte.';
+        }
+    }
+
+    return { success: false, error: lastError };
 }
 
 export async function fetchSGPContractsImpl(chatId: string): Promise<{
@@ -337,12 +249,27 @@ export async function fetchSGPContactPanelDataImpl(chatId: string): Promise<{
     error?: string;
     data?: SGPContactPanelData;
 }> {
-    const clientRes = await fetchSGPClientsByChatId(chatId);
+    const lookup = await resolveSGPClientLookupContext(chatId);
+    if (!lookup.success) {
+        return { success: false, error: lookup.error };
+    }
+
+    const [clientRes, supportRes] = await Promise.all([
+        fetchSGPClientsByLookupContext(lookup.data),
+        fetchSGPSupportContractsByLookupContext(lookup.data),
+    ]);
     if (!clientRes.success) {
         return { success: false, error: clientRes.error };
     }
 
-    const data = buildSGPContactPanelData(clientRes.clientes);
+    if (!supportRes.success) {
+        console.warn('[SGP] Support contract list unavailable for contact panel:', supportRes.error);
+    }
+
+    const data = buildSGPContactPanelData(
+        clientRes.clientes,
+        supportRes.success ? supportRes.contracts : []
+    );
     if (!data) {
         return { success: false, error: 'Nenhum dado SGP encontrado para este cliente.' };
     }

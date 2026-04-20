@@ -14,6 +14,7 @@ import {
     fetchSGPContractsImpl,
 } from './endpoints/ura/cliente-listar';
 import { generateSGPInvoicePixImpl } from './endpoints/ura/fatura-gerar-pix';
+import { createSGPPaymentPromiseImpl } from './endpoints/ura/liberacao-promessa';
 
 export { getTeams };
 
@@ -55,6 +56,15 @@ export async function fetchSGPContactPanelData(chatId: string) {
 
 export async function createSGPServiceOrder(chatId: string, contractId: string, notes: string) {
     return createSGPServiceOrderImpl(chatId, contractId, notes);
+}
+
+export async function createSGPPaymentPromise(
+    chatId: string,
+    contractId: string,
+    promiseDate: string,
+    sendSms: boolean = true
+) {
+    return createSGPPaymentPromiseImpl(chatId, contractId, promiseDate, sendSms);
 }
 
 export async function generateSGPInvoicePix(invoiceId: string, contractId: string) {

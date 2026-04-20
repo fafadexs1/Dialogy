@@ -16,7 +16,7 @@ export function LoginShowcase() {
     ];
 
     return (
-        <div className="relative hidden h-full flex-col items-center justify-between overflow-hidden rounded-r-[2.5rem] border-l border-black/10 bg-[linear-gradient(180deg,#fbfaf6_0%,#f4efe4_100%)] p-10 lg:flex">
+        <div className="relative hidden h-full flex-col items-center justify-between overflow-hidden bg-[linear-gradient(180deg,#fbfaf6_0%,#f4efe4_100%)] p-10 lg:flex">
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.025)_1px,transparent_1px)] bg-[size:28px_28px] opacity-30" />
             <div className="pointer-events-none absolute left-1/2 top-[42%] h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#20E401]/8 blur-[120px]" />
 

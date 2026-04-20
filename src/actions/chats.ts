@@ -667,6 +667,7 @@ type ChatRow = {
     last_message_sent_by_tab: string | null;
     contact_custom_fields: Record<string, any> | null;
     is_autopilot_active?: boolean | null;
+    autopilot_config_id?: string | null;
     copilot_mode?: 'off' | 'auto' | 'suggest' | null;
     meta_contact_external_id?: string | null;
     meta_contact_username?: string | null;
@@ -788,7 +789,7 @@ async function fetchChats({
     let ownershipClause = '';
     if (ownership === 'mine') {
         params.push(userId);
-        ownershipClause = `AND (c.status != 'encerrados' OR c.agent_id = $${queryIndex})`;
+        ownershipClause = `AND (c.status = 'gerais' OR c.agent_id = $${queryIndex})`;
         queryIndex++;
     }
 
@@ -884,6 +885,7 @@ async function fetchChats({
             c.color,
             c.protocol,
             c.is_autopilot_active,
+            c.autopilot_config_id,
             c.copilot_mode,
             c.contact_id,
             c.agent_id,
@@ -1144,11 +1146,13 @@ export const syncInboxData = withDebug(
         lastSyncChats,
         chatId,
         lastSyncMessages,
+        ownership = 'mine',
     }: {
         workspaceId: string;
         lastSyncChats: string | null;
         chatId: string | null;
         lastSyncMessages: string | null;
+        ownership?: 'mine' | 'everyone';
     }): Promise<{
         deltaChats: Chat[];
         lastSyncChats: string | null;
@@ -1184,6 +1188,9 @@ export const syncInboxData = withDebug(
                 const chatRows = await fetchChatsDelta({
                     workspaceId,
                     since: chatSyncAnchor,
+                    userId: user.id,
+                    ownership,
+                    includeChatId: chatId,
                 });
                 const { chats, lastSyncChats: updatedSync } = await hydrateChats(chatRows, timezone);
                 deltaChats = chats;
@@ -1803,17 +1810,45 @@ export async function loadMoreChatsAction({
 async function fetchChatsDelta({
     workspaceId,
     since,
+    userId,
+    ownership = 'mine',
+    includeChatId,
 }: {
     workspaceId: string;
     since: string;
+    userId: string;
+    ownership?: 'mine' | 'everyone';
+    includeChatId?: string | null;
 }): Promise<ChatRow[]> {
     const startTime = performance.now();
+    const params: any[] = [workspaceId, since];
+    let queryIndex = 3;
+
+    let ownershipCondition = '';
+    if (ownership === 'mine') {
+        params.push(userId);
+        ownershipCondition = `(c.status = 'gerais' OR c.agent_id = $${queryIndex})`;
+        queryIndex++;
+    }
+
+    if (includeChatId && ownership === 'mine') {
+        params.push(includeChatId);
+        const includeCondition = `c.id = $${queryIndex}`;
+        ownershipCondition = ownershipCondition
+            ? `(${ownershipCondition} OR ${includeCondition})`
+            : includeCondition;
+        queryIndex++;
+    }
+
+    const ownershipClause = ownershipCondition ? `AND ${ownershipCondition}` : '';
+
     const { rows } = await db.query(
         `
         WITH changed_chats AS (
             SELECT c.*
             FROM chats c
             WHERE c.workspace_id = $1
+              ${ownershipClause}
               AND (c.updated_at >= $2 OR c.closed_at >= $2 OR c.assigned_at >= $2
                    OR EXISTS (
                        SELECT 1 FROM messages m
@@ -1875,6 +1910,7 @@ async function fetchChatsDelta({
             c.color,
             c.contact_id,
             c.is_autopilot_active,
+            c.autopilot_config_id,
             c.copilot_mode,
             c.agent_id,
             GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
@@ -1936,7 +1972,7 @@ async function fetchChatsDelta({
         WHERE GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) >= $2
         ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
         `,
-        [workspaceId, since]
+        params
     );
     const endTime = performance.now();
     console.log(`[PERF] fetchChatsDelta took ${(endTime - startTime).toFixed(2)}ms, ${rows.length} changed chats since ${since}`);
@@ -2056,6 +2092,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             color: row.color || undefined,
             protocol: row.protocol || buildChatProtocol(row.id),
             is_autopilot_active: row.is_autopilot_active ?? false,
+            autopilot_config_id: row.autopilot_config_id ?? null,
             copilot_mode: row.copilot_mode || 'auto',
             metaContactExternalId: row.meta_contact_external_id || undefined,
             metaContactUsername: row.meta_contact_username || undefined,

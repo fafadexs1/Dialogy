@@ -42,6 +42,7 @@ import {
     normalizeWhatsappPhoneNumber as normalizeWhatsappPhoneIdentity,
     resolveCanonicalWhatsappChatId,
 } from '@/lib/whatsapp/contact-identity';
+import { hasRecentWhatsappCustomerReply } from '@/lib/whatsapp/customer-window';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -320,6 +321,139 @@ async function getTelegramInstanceCredentials(
         botToken: row.bot_token,
         instanceName: row.instance_name,
     };
+}
+
+async function getMessagingInstanceType(
+    client: any,
+    workspaceId: string,
+    instanceName: string
+): Promise<'wa_cloud' | 'baileys' | 'telegram' | null> {
+    const telegramCredentials = await getTelegramInstanceCredentials(instanceName, workspaceId);
+    if (telegramCredentials) {
+        return 'telegram';
+    }
+
+    const instanceRes = await client.query(
+        `SELECT type
+         FROM evolution_api_instances
+         WHERE workspace_id = $1
+           AND instance_name = $2
+         LIMIT 1`,
+        [workspaceId, instanceName]
+    );
+
+    const instanceType = instanceRes.rows[0]?.type;
+    if (instanceType === 'wa_cloud' || instanceType === 'baileys') {
+        return instanceType;
+    }
+
+    return null;
+}
+
+async function loadWhatsappResumeContext(
+    client: any,
+    workspaceId: string,
+    chatId: string
+): Promise<{
+    chatId: string;
+    workspaceId: string;
+    contactId: string;
+    status: Chat['status'];
+    lastCustomerMessageAt: Date | null;
+    canResumeWithoutTemplate: boolean;
+} | null> {
+    const res = await client.query(
+        `SELECT
+            c.id,
+            c.workspace_id,
+            c.contact_id,
+            c.status,
+            (
+                SELECT m.created_at
+                FROM messages m
+                WHERE m.chat_id = c.id
+                  AND m.from_me = FALSE
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            ) AS last_customer_message_at
+         FROM chats c
+         WHERE c.id = $1
+           AND c.workspace_id = $2
+         LIMIT 1`,
+        [chatId, workspaceId]
+    );
+
+    if ((res.rowCount ?? 0) === 0) {
+        return null;
+    }
+
+    const row = res.rows[0];
+    const lastCustomerMessageAt = row.last_customer_message_at
+        ? new Date(row.last_customer_message_at)
+        : null;
+
+    return {
+        chatId: row.id,
+        workspaceId: row.workspace_id,
+        contactId: row.contact_id,
+        status: row.status as Chat['status'],
+        lastCustomerMessageAt,
+        canResumeWithoutTemplate:
+            row.status === 'encerrados' &&
+            hasRecentWhatsappCustomerReply(lastCustomerMessageAt),
+    };
+}
+
+async function reopenClosedWhatsappChat(
+    client: any,
+    input: {
+        chatId: string;
+        workspaceId: string;
+        senderId: string;
+        senderName: string;
+        lastCustomerMessageAt: Date | null;
+    }
+): Promise<void> {
+    const reopenRes = await client.query(
+        `UPDATE chats
+         SET status = 'atendimentos',
+             closed_at = NULL,
+             agent_id = $1,
+             assigned_at = clock_timestamp()
+         WHERE id = $2
+           AND workspace_id = $3
+         RETURNING id`,
+        [input.senderId, input.chatId, input.workspaceId]
+    );
+
+    if ((reopenRes.rowCount ?? 0) === 0) {
+        throw new Error('Nao foi possivel reabrir o atendimento selecionado.');
+    }
+
+    await client.query(
+        `INSERT INTO messages (
+            workspace_id,
+            chat_id,
+            type,
+            content,
+            from_me,
+            sender_user_id,
+            created_at,
+            is_read,
+            metadata
+        ) VALUES ($1, $2, 'system', $3, TRUE, $4, clock_timestamp(), TRUE, $5)`,
+        [
+            input.workspaceId,
+            input.chatId,
+            `Atendimento reaberto por ${input.senderName} sem envio de template.`,
+            input.senderId,
+            {
+                event: 'resume_without_template',
+                resumed_by: input.senderId,
+                last_customer_message_at: input.lastCustomerMessageAt?.toISOString() ?? null,
+            },
+        ]
+    );
 }
 
 function buildInteractiveListPreview(list: InteractiveListPayload): string {
@@ -1616,7 +1750,7 @@ export const sendAgentTemplateAction = withDebug(
             const fullJid = whatsappContact.normalizedJid;
             const contactId = whatsappContact.contact.id;
 
-            let chatId;
+            let chatId = '';
             const activeChat = await findWhatsappChatByIdentity(client, {
                 workspaceId,
                 phoneOrJid: numberid,
@@ -1909,12 +2043,97 @@ export const sendAgentListAction = withDebug(
     }
 );
 
+export const getResumeConversationRequirementAction = withDebug(
+    'resume_conversation_requirement',
+    async function getResumeConversationRequirementAction(
+        input: {
+            workspaceId: string;
+            chatId: string;
+            instanceName: string;
+        }
+    ): Promise<{
+        success: boolean;
+        canResumeWithoutTemplate: boolean;
+        requiresTemplate: boolean;
+        lastCustomerMessageAt: string | null;
+        error?: string;
+    }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return {
+                success: false,
+                canResumeWithoutTemplate: false,
+                requiresTemplate: true,
+                lastCustomerMessageAt: null,
+                error: 'Usuario nao autenticado.',
+            };
+        }
+
+        if (!input.workspaceId || !input.chatId || !input.instanceName) {
+            return {
+                success: false,
+                canResumeWithoutTemplate: false,
+                requiresTemplate: true,
+                lastCustomerMessageAt: null,
+                error: 'Workspace, chat e instancia sao obrigatorios.',
+            };
+        }
+
+        const client = await db.connect();
+        try {
+            const instanceType = await getMessagingInstanceType(client, input.workspaceId, input.instanceName);
+            if (instanceType !== 'wa_cloud') {
+                return {
+                    success: true,
+                    canResumeWithoutTemplate: false,
+                    requiresTemplate: false,
+                    lastCustomerMessageAt: null,
+                };
+            }
+
+            const resumeContext = await loadWhatsappResumeContext(client, input.workspaceId, input.chatId);
+            const lastCustomerMessageAt = resumeContext?.lastCustomerMessageAt?.toISOString() ?? null;
+            const canResumeWithoutTemplate = Boolean(resumeContext?.canResumeWithoutTemplate);
+
+            return {
+                success: true,
+                canResumeWithoutTemplate,
+                requiresTemplate: !canResumeWithoutTemplate,
+                lastCustomerMessageAt,
+            };
+        } catch (error) {
+            console.error('[RESUME_CONVERSATION_REQUIREMENT] Erro:', error);
+            return {
+                success: false,
+                canResumeWithoutTemplate: false,
+                requiresTemplate: true,
+                lastCustomerMessageAt: null,
+                error: error instanceof Error ? error.message : 'Falha ao verificar a janela da conversa.',
+            };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (input) => ({
+            payload: {
+                workspaceId: input.workspaceId,
+                chatId: input.chatId,
+                instanceName: input.instanceName,
+            }
+        })
+    }
+);
+
 
 export const startNewConversation = withDebug(
     'start_conversation',
     async function startNewConversation(
         input: {
             workspaceId: string,
+            chatId?: string,
             instanceName: string,
             phoneNumber: string,
             message: string,
@@ -1929,9 +2148,11 @@ export const startNewConversation = withDebug(
             return { success: false, error: 'Usuário não autenticado.' };
         }
         const senderId = user.id;
+        const senderName = user.user_metadata?.full_name || user.email || 'Agente';
 
-        const { workspaceId, instanceName, phoneNumber, message, tabId, template } = input;
-        if (!workspaceId || !instanceName || !phoneNumber || !message) {
+        const { workspaceId, chatId: providedChatId, instanceName, phoneNumber, message, tabId, template } = input;
+        const trimmedMessage = message.trim();
+        if (!workspaceId || !instanceName || !phoneNumber) {
             return { success: false, error: 'Todos os campos são obrigatórios.' };
         }
 
@@ -1939,7 +2160,11 @@ export const startNewConversation = withDebug(
         try {
             await client.query('BEGIN');
 
-            const telegramCredentials = await getTelegramInstanceCredentials(instanceName, workspaceId);
+            const instanceType = await getMessagingInstanceType(client, workspaceId, instanceName);
+            const isCloudInstance = instanceType === 'wa_cloud';
+            const telegramCredentials = instanceType === 'telegram'
+                ? await getTelegramInstanceCredentials(instanceName, workspaceId)
+                : null;
             let contactId: string;
 
             if (telegramCredentials) {
@@ -1971,8 +2196,18 @@ export const startNewConversation = withDebug(
                 contactId = whatsappContact.contact.id;
             }
 
+            const cloudResumeWithoutTemplateRequested =
+                isCloudInstance &&
+                !template &&
+                Boolean(providedChatId);
+
+            if (!template && !trimmedMessage && !cloudResumeWithoutTemplateRequested) {
+                await client.query('ROLLBACK');
+                return { success: false, error: 'Todos os campos sao obrigatorios.' };
+            }
+
             // 2. Find or create the chat
-            let chatId;
+            let chatId: string | undefined;
             const activeChat = await findWhatsappChatByIdentity(client, {
                 workspaceId,
                 phoneOrJid: phoneNumber,
@@ -1983,25 +2218,64 @@ export const startNewConversation = withDebug(
             if (activeChat?.id) {
                 chatId = activeChat.id;
             } else {
-                const newChatId = randomUUID();
-                const protocol = buildChatProtocol(newChatId);
-                const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
-                const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
-                if (!chatLimitStatus.allowed) {
-                    throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                let reopenedExistingChat = false;
+
+                if (cloudResumeWithoutTemplateRequested) {
+                    const canonicalProvidedChatId = (await resolveCanonicalWhatsappChatId(client, providedChatId!)) || providedChatId!;
+                    const resumeContext = await loadWhatsappResumeContext(client, workspaceId, canonicalProvidedChatId);
+
+                    if (
+                        resumeContext &&
+                        resumeContext.contactId === contactId &&
+                        resumeContext.canResumeWithoutTemplate
+                    ) {
+                        await reopenClosedWhatsappChat(client, {
+                            chatId: resumeContext.chatId,
+                            workspaceId,
+                            senderId,
+                            senderName,
+                            lastCustomerMessageAt: resumeContext.lastCustomerMessageAt,
+                        });
+                        chatId = resumeContext.chatId;
+                        reopenedExistingChat = true;
+                    } else {
+                        await client.query('ROLLBACK');
+                        return {
+                            success: false,
+                            error: 'Selecione um template para reabrir via Cloud API quando nao houver resposta do cliente nas ultimas 24 horas.',
+                        };
+                    }
                 }
-                const newChatRes = await client.query(
-                    `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'atendimentos', $4, NOW(), $5) RETURNING id`,
-                    [newChatId, workspaceId, contactId, senderId, protocol]
-                );
-                chatId = newChatRes.rows[0].id;
+
+                if (!reopenedExistingChat) {
+                    const newChatId = randomUUID();
+                    const protocol = buildChatProtocol(newChatId);
+                    const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                    const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                    if (!chatLimitStatus.allowed) {
+                        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                    }
+                    const newChatRes = await client.query(
+                        `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'atendimentos', $4, NOW(), $5) RETURNING id`,
+                        [newChatId, workspaceId, contactId, senderId, protocol]
+                    );
+                    chatId = newChatRes.rows[0].id;
+                }
             }
 
             await client.query('COMMIT');
 
+            if (!chatId) {
+                return { success: false, error: 'Nao foi possivel determinar o chat para reabrir a conversa.' };
+            }
+
+            if (!template && !trimmedMessage) {
+                return { success: true };
+            }
+
             // 3. Send the message using the existing internal action
             // We pass the instanceName directly to ensure it's used.
-            const sendResult = await internalSendMessage(chatId, message, senderId, tabId, {}, instanceName, undefined, template);
+            const sendResult = await internalSendMessage(chatId, trimmedMessage || message, senderId, tabId, {}, instanceName, undefined, template);
 
             if (sendResult.success) {
                 return { success: true };

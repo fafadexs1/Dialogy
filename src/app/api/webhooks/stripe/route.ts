@@ -1,6 +1,4 @@
 import { randomUUID } from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { recordReferralBonusForInvoice } from '@/lib/referrals-server';
@@ -9,11 +7,10 @@ import { getStripe } from '@/lib/stripe';
 import { PlanType } from '@/lib/plans';
 import { logAction } from '@/lib/observability/logger';
 import { recordWebhookMetrics } from '@/lib/observability/metrics';
+import { logToNamedDebugFile } from '@/lib/debug-file';
 
 function logToFile(message: string) {
-    const logPath = path.join(process.cwd(), 'webhook_debug.log');
-    const timestamp = new Date().toISOString();
-    fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`);
+    logToNamedDebugFile('webhook_debug.log', message);
 }
 
 function normalizeStripeStatus(status?: string | null) {

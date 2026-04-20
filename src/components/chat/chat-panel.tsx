@@ -113,6 +113,7 @@ import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { motion } from 'framer-motion';
 import { useTheme } from 'next-themes';
+import { shouldAcceptAiSuggestion } from '@/lib/inbox-ownership';
 
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
@@ -510,7 +511,8 @@ export default function ChatPanel({
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const contentEditableRef = useRef<any>(null);
-    const processedMessageIds = useRef(new Set());
+    const processedMessageIds = useRef(new Set<string>());
+    const observedLastMessageIdByChatRef = useRef<Record<string, string>>({});
     const savedRange = useRef<Range | null>(null);
     const userScrolledUpRef = useRef(false);
     const isFetchingHistoryRef = useRef(false);
@@ -642,6 +644,9 @@ export default function ChatPanel({
             .on('broadcast', { event: 'ai_suggestion' }, (payload) => {
                 if (cancelled) return; // Guard against updates after unmount
                 console.log('[CHAT_PANEL] Received AI suggestion:', payload);
+                if (!shouldAcceptAiSuggestion(chat.id, payload.payload?.chatId)) {
+                    return;
+                }
                 if (payload.payload?.suggestion) {
                     setAiSuggestion({
                         text: payload.payload.suggestion,
@@ -833,10 +838,23 @@ export default function ChatPanel({
     const runAiAgent = useCallback(async () => {
         const storeMessages = chat?.id ? (messagesByChat[chat.id] || []) : [];
         const lastMessage = storeMessages.length ? storeMessages[storeMessages.length - 1] : null;
+        const chatId = chat?.id;
 
-        if (!lastMessage || processedMessageIds.current.has(lastMessage.id)) {
+        if (!chatId || !lastMessage) {
             return;
         }
+
+        const observedLastMessageId = observedLastMessageIdByChatRef.current[chatId];
+        if (!observedLastMessageId) {
+            observedLastMessageIdByChatRef.current[chatId] = lastMessage.id;
+            return;
+        }
+
+        if (observedLastMessageId === lastMessage.id || processedMessageIds.current.has(lastMessage.id)) {
+            return;
+        }
+
+        observedLastMessageIdByChatRef.current[chatId] = lastMessage.id;
 
         const shouldRun = isAiAgentActive &&
             !!chat &&
@@ -917,7 +935,6 @@ export default function ChatPanel({
     }, [runAiAgent]);
 
     useEffect(() => {
-        processedMessageIds.current.clear();
         setIsAiTyping(false);
     }, [chat?.id]);
 

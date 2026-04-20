@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle } from 'lucide-react';
+import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
 import { Virtuoso } from 'react-virtuoso';
@@ -60,6 +60,7 @@ import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
 import { isMarketingMessage, shouldKeepMarketingOnlyChatVisible } from './chat-list-visibility';
 
 import { SearchDetailsDialog } from './search-details-dialog';
+import { InboxSearchInput } from './inbox-search-input';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 
 const MAX_VISIBLE_ONLINE_AGENTS = 7;
@@ -1357,144 +1358,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         <div className="flex items-center justify-between">
           <h2 className="text-lg md:text-xl font-bold text-foreground tracking-tight">Conversas</h2>
           <div className="flex items-center gap-2">
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Filtros" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted">
-                  <Filter className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="start"
-                className="w-[340px] p-4 space-y-5 bg-popover border-border text-popover-foreground"
-                onInteractOutside={(event) => {
-                  const target = event.target as HTMLElement | null;
-                  if (target?.closest('[data-team-filter-popover="true"]')) {
-                    event.preventDefault();
-                  }
-                }}
-              >
-                {/* Ownership Section */}
-                {/* Ownership section removed; now handled by Quick Filter Chips */}
-
-                <div className="space-y-3 pt-2 border-t border-border/50">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filtrar por Equipe</Label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">1 equipe</span>
-                      <Switch
-                        checked={singleTeamMode}
-                        onCheckedChange={() => toggleSingleTeamMode()}
-                        className="h-5 w-9 data-[state=checked]:bg-indigo-600"
-                        aria-label="Ativar seleção de equipe única"
-                      />
-                      {teamFilter.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-[11px] text-muted-foreground hover:text-primary"
-                          onClick={() => setTeamFilter([])}
-                        >
-                          Limpar
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  <Popover
-                    open={isTeamFilterOpen}
-                    onOpenChange={(open) => {
-                      setIsTeamFilterOpen(open);
-                      if (!open) setTeamSearchTerm('');
-                    }}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={isTeamFilterOpen}
-                        className="w-full justify-between bg-muted/30 border-input hover:bg-muted/50 hover:text-foreground"
-                      >
-                        {teamFilter.length > 0
-                          ? `${teamFilter.length} equipe${teamFilter.length > 1 ? 's' : ''} selecionada${teamFilter.length > 1 ? 's' : ''}`
-                          : "Todas as equipes"}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[300px] p-0" align="start" data-team-filter-popover="true">
-                      <div className="border-b border-border p-2">
-                        <Input
-                          value={teamSearchTerm}
-                          onChange={(event) => setTeamSearchTerm(event.target.value)}
-                          placeholder="Buscar equipe..."
-                          className="h-9"
-                        />
-                      </div>
-                      <ScrollArea className="max-h-[220px]">
-                        <div className="p-1">
-                          {isLoadingTeams ? (
-                            <div className="px-2 py-3 text-sm text-muted-foreground">Carregando equipes...</div>
-                          ) : filteredTeamsBySearch.length === 0 ? (
-                            <div className="px-2 py-3 text-sm text-muted-foreground">Nenhuma equipe encontrada.</div>
-                          ) : (
-                            filteredTeamsBySearch.map((team) => (
-                              <button
-                                key={team.id}
-                                type="button"
-                                onClick={() => toggleTeamSelection(team.id)}
-                                className={cn(
-                                  "w-full flex items-center rounded-sm px-2 py-1.5 text-sm transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground",
-                                  teamFilter.includes(team.id) && "bg-accent/70 text-accent-foreground"
-                                )}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    teamFilter.includes(team.id) ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                <span className="truncate text-left">{team.name}</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </ScrollArea>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</p>
-                  <RadioGroup
-                    value={statusFilter}
-                    onValueChange={(value) => setStatusFilter(value as 'all' | 'open' | 'closed')}
-                    className="mt-2 space-y-2"
-                  >
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="all" id="status-all" className="border-border text-blue-500" />
-                      <Label htmlFor="status-all" className="cursor-pointer text-foreground">Todos</Label>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="open" id="status-open" className="border-border text-blue-500" />
-                      <Label htmlFor="status-open" className="cursor-pointer text-foreground">Abertos (Fila + Atendendo)</Label>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <RadioGroupItem value="closed" id="status-closed" className="border-border text-blue-500" />
-                      <Label htmlFor="status-closed" className="cursor-pointer text-foreground">Encerrados</Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-                <div className="space-y-3">
-                  {/* Unread & Unassigned removed; now handled by Quick Filter Chips */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
-                      <p className="text-xs text-muted-foreground">Oculta mensagens de marketing no preview</p>
-                    </div>
-                    <Switch checked={showMarketing} onCheckedChange={setShowMarketing} className="data-[state=checked]:bg-blue-600" />
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-
             {activeTab === 'atendimentos' && !isForwarding && (
               <TooltipProvider>
                 <Tooltip>
@@ -1530,57 +1393,216 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </div>
         </div>
         <div>
-          <div className="relative group">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-blue-400 transition-colors" />
-            <Input
-              placeholder="Pesquisar por nome, telefone ou mensagem..."
-              className="pl-9 rounded-xl border-transparent bg-muted/50 text-foreground transition-all placeholder:text-muted-foreground focus:border-primary/20 focus:bg-background focus:ring-1 focus:ring-primary/20"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              aria-label="Pesquisar conversas"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && searchTerm.trim()) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsSearchDialogOpen(true);
-                }
-              }}
-            />
-          </div>
+          <InboxSearchInput
+            aria-label="Pesquisar conversas"
+            placeholder="Pesquisar por nome, telefone ou mensagem..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onEnter={() => {
+              if (searchTerm.trim()) {
+                setIsSearchDialogOpen(true);
+              }
+            }}
+            renderFilterTrigger={(filterTriggerClassName) => (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button type="button" aria-label="Filtros" className={filterTriggerClassName}>
+                    <Filter className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="w-[340px] p-4 space-y-5 bg-popover border-border text-popover-foreground"
+                  onInteractOutside={(event) => {
+                    const target = event.target as HTMLElement | null;
+                    if (target?.closest('[data-team-filter-popover="true"]')) {
+                      event.preventDefault();
+                    }
+                  }}
+                >
+                  <div className="space-y-3 pt-2 border-t border-border/50">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filtrar por Equipe</Label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground">1 equipe</span>
+                        <Switch
+                          checked={singleTeamMode}
+                          onCheckedChange={() => toggleSingleTeamMode()}
+                          className="h-5 w-9 data-[state=checked]:bg-indigo-600"
+                          aria-label="Ativar selecao de equipe unica"
+                        />
+                        {teamFilter.length > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-[11px] text-muted-foreground hover:text-primary"
+                            onClick={() => setTeamFilter([])}
+                          >
+                            Limpar
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <Popover
+                      open={isTeamFilterOpen}
+                      onOpenChange={(open) => {
+                        setIsTeamFilterOpen(open);
+                        if (!open) setTeamSearchTerm('');
+                      }}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={isTeamFilterOpen}
+                          className="w-full justify-between bg-muted/30 border-input hover:bg-muted/50 hover:text-foreground"
+                        >
+                          {teamFilter.length > 0
+                            ? `${teamFilter.length} equipe${teamFilter.length > 1 ? 's' : ''} selecionada${teamFilter.length > 1 ? 's' : ''}`
+                            : "Todas as equipes"}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start" data-team-filter-popover="true">
+                        <div className="border-b border-border p-2">
+                          <Input
+                            value={teamSearchTerm}
+                            onChange={(event) => setTeamSearchTerm(event.target.value)}
+                            placeholder="Buscar equipe..."
+                            className="h-9"
+                          />
+                        </div>
+                        <ScrollArea className="max-h-[220px]">
+                          <div className="p-1">
+                            {isLoadingTeams ? (
+                              <div className="px-2 py-3 text-sm text-muted-foreground">Carregando equipes...</div>
+                            ) : filteredTeamsBySearch.length === 0 ? (
+                              <div className="px-2 py-3 text-sm text-muted-foreground">Nenhuma equipe encontrada.</div>
+                            ) : (
+                              filteredTeamsBySearch.map((team) => (
+                                <button
+                                  key={team.id}
+                                  type="button"
+                                  onClick={() => toggleTeamSelection(team.id)}
+                                  className={cn(
+                                    "w-full flex items-center rounded-sm px-2 py-1.5 text-sm transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                                    teamFilter.includes(team.id) && "bg-accent/70 text-accent-foreground"
+                                  )}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      teamFilter.includes(team.id) ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <span className="truncate text-left">{team.name}</span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </ScrollArea>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</p>
+                    <RadioGroup
+                      value={statusFilter}
+                      onValueChange={(value) => setStatusFilter(value as 'all' | 'open' | 'closed')}
+                      className="mt-2 space-y-2"
+                    >
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <RadioGroupItem value="all" id="status-all" className="border-border text-blue-500" />
+                        <Label htmlFor="status-all" className="cursor-pointer text-foreground">Todos</Label>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <RadioGroupItem value="open" id="status-open" className="border-border text-blue-500" />
+                        <Label htmlFor="status-open" className="cursor-pointer text-foreground">Abertos (Fila + Atendendo)</Label>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <RadioGroupItem value="closed" id="status-closed" className="border-border text-blue-500" />
+                        <Label htmlFor="status-closed" className="cursor-pointer text-foreground">Encerrados</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
+                        <p className="text-xs text-muted-foreground">Oculta mensagens de marketing no preview</p>
+                      </div>
+                      <Switch checked={showMarketing} onCheckedChange={setShowMarketing} className="data-[state=checked]:bg-blue-600" />
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+          />
           {/* Quick Filter Chips */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none pt-2">
+          <div className="grid min-w-0 grid-cols-[76px_72px_1px_minmax(78px,1fr)_minmax(102px,1.22fr)] items-center gap-1 pt-2">
             <Badge
               variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
-              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", ownershipFilter === 'mine' ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              className={cn(
+                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                ownershipFilter === 'mine'
+                  ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                  : "hover:bg-muted text-muted-foreground"
+              )}
               onClick={() => {
                 if (ownershipFilter !== 'mine') setOwnershipFilter('mine');
               }}
             >
-              {isFiltering && ownershipFilter === 'mine' && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-              Minhas
+              <span className="flex w-full items-center justify-center px-2">
+                <span className="inline-flex max-w-full items-center justify-center gap-1">
+                  {isFiltering && ownershipFilter === 'mine' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
+                  <span className="block truncate text-center">Minhas</span>
+                </span>
+              </span>
             </Badge>
             <Badge
               variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
-              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", ownershipFilter === 'everyone' ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              className={cn(
+                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                ownershipFilter === 'everyone'
+                  ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                  : "hover:bg-muted text-muted-foreground"
+              )}
               onClick={() => {
                 if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
               }}
             >
-              {isFiltering && ownershipFilter === 'everyone' && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-              Todos
+              <span className="flex w-full items-center justify-center px-2">
+                <span className="inline-flex max-w-full items-center justify-center gap-1">
+                  {isFiltering && ownershipFilter === 'everyone' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
+                  <span className="block truncate text-center">Todos</span>
+                </span>
+              </span>
             </Badge>
-            <div className="w-[1px] h-4 bg-border mx-1" />
+            <div className="h-3 w-px shrink-0 justify-self-center bg-border/60" />
             <Badge
               variant={onlyUnread ? 'default' : 'outline'}
-              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", onlyUnread ? "bg-amber-500 hover:bg-amber-600 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              className={cn(
+                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                onlyUnread
+                  ? "bg-amber-500 hover:bg-amber-600 text-white border-transparent"
+                  : "hover:bg-muted text-muted-foreground"
+              )}
               onClick={() => setOnlyUnread(!onlyUnread)}
+              title="Não lidas"
             >
               Não lidas
             </Badge>
             <Badge
               variant={showUnassignedOnly ? 'default' : 'outline'}
-              className={cn("cursor-pointer rounded-full px-3 py-1 whitespace-nowrap font-medium transition-colors", showUnassignedOnly ? "bg-emerald-500 hover:bg-emerald-600 text-white border-transparent" : "hover:bg-muted text-muted-foreground")}
+              className={cn(
+                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                showUnassignedOnly
+                  ? "bg-emerald-500 hover:bg-emerald-600 text-white border-transparent"
+                  : "hover:bg-muted text-muted-foreground"
+              )}
               onClick={() => setShowUnassignedOnly(!showUnassignedOnly)}
+              title="Sem responsavel"
             >
               Sem responsável
             </Badge>

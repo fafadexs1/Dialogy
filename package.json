@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev-with-stripe.cjs",
-    "dev:next": "next dev --turbo -p 9002",
+    "dev:next": "node scripts/dev-with-stripe.cjs --no-stripe",
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
     "genkit:watch": "genkit start -- tsx --watch src/ai/dev.ts",
     "build": "next build --webpack",
@@ -18,7 +18,7 @@
     "docker:release": "powershell -ExecutionPolicy Bypass -File scripts/docker-release.ps1",
     "docker:release:dry": "powershell -ExecutionPolicy Bypass -File scripts/docker-release.ps1 -SkipDocker",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -67,6 +67,7 @@
     "@supabase/supabase-js": "^2.93.2",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@types/sharp": "^0.31.1",
+    "@types/styled-components": "^5.1.36",
     "@xenova/transformers": "^2.17.2",
     "async-mutex": "^0.5.0",
     "bullmq": "^5.74.1",
@@ -105,6 +106,7 @@
     "server-only": "^0.0.1",
     "sharp": "^0.34.5",
     "stripe": "^20.0.0",
+    "styled-components": "^6.4.0",
     "tailwind-merge": "^3.0.1",
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^13.0.0",
@@ -113,6 +115,7 @@
     "zustand": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^20.19.0",
     "@types/papaparse": "^5.3.14",
     "@types/pg": "^8.11.6",

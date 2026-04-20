@@ -85,7 +85,7 @@ console.log(
 );
 
 if (!enableWebpackOverrides) {
-  console.log('Skipping custom webpack config (dev uses Turbopack).');
+  console.log('Skipping custom webpack config in development.');
 }
 
 const withPWA = require('@ducanh2912/next-pwa').default({

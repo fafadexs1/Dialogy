@@ -35,16 +35,16 @@ export default function RegisterPage() {
     }, [referralCode]);
 
     return (
-        <div className="relative min-h-screen overflow-y-auto overflow-x-hidden bg-[#f4f1e8] px-4 py-6 font-body text-slate-900 selection:bg-brand-green/20 selection:text-slate-950 md:px-6 md:py-8">
+        <div className="relative min-h-screen w-full bg-[#f4f1e8] font-body text-slate-900 selection:bg-brand-green/20 selection:text-slate-950">
             <div className="pointer-events-none fixed inset-0 z-0">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(25,245,178,0.12),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(58,169,255,0.08),transparent_30%),linear-gradient(180deg,#ffffff_0%,#f4f1e8_68%,#ece7db_100%)]" />
                 <div className="absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.035)_1px,transparent_1px)] bg-[size:36px_36px] opacity-20" />
-                <div className="absolute left-[10%] top-[18%] h-56 w-56 rounded-full bg-emerald-200/35 blur-[110px]" />
-                <div className="absolute bottom-[12%] right-[12%] h-64 w-64 rounded-full bg-sky-200/30 blur-[120px]" />
+                <div className="absolute left-[10%] top-[18%] h-[20rem] w-[20rem] rounded-full bg-emerald-200/25 blur-[80px] md:h-56 md:w-56 md:blur-[110px]" />
+                <div className="absolute bottom-[12%] right-[12%] h-[25rem] w-[25rem] rounded-full bg-sky-200/20 blur-[100px] md:h-64 md:w-64 md:blur-[120px]" />
             </div>
 
-            <div className="relative z-10 mx-auto grid w-full max-w-[1120px] grid-cols-1 overflow-hidden rounded-[2rem] border border-black/10 bg-white/80 shadow-[0_50px_140px_-70px_rgba(15,23,42,0.55)] backdrop-blur-2xl lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                <div className="relative border-b border-black/5 bg-white/55 p-6 md:p-10 lg:border-b-0 lg:border-r lg:border-black/5 lg:p-12">
+            <div className="relative z-10 grid min-h-screen w-full grid-cols-1 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                <div className="relative flex min-h-screen flex-col items-center justify-center bg-white/60 p-6 backdrop-blur-2xl md:p-12 lg:min-h-0 lg:border-r lg:border-black/5">
                     <div className="mx-auto w-full max-w-sm py-2">
                         <div className="mb-8 flex items-center justify-between">
                             <Link href="/" className="transition-transform hover:scale-[1.02]">
