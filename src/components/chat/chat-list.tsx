@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle } from 'lucide-react';
+import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
 import { Virtuoso } from 'react-virtuoso';
@@ -12,7 +12,7 @@ import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance, type TelegramBotInstance, type Team } from '@/lib/types';
+import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance, type TelegramBotInstance, type Team, type AutopilotConfig } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -46,7 +46,7 @@ import { Label } from '../ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { startNewConversation } from '@/actions/messages';
-import { closeMultipleChatsAction } from '@/actions/chats';
+import { closeMultipleChatsAction, toggleMultipleChatsAutopilotAction } from '@/actions/chats';
 import { guardedAssignChat, guardedCloseChat } from '@/actions/chat-guards';
 import { toast } from '@/hooks/use-toast';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
@@ -55,6 +55,7 @@ import { buildChatProtocol } from '@/lib/utils';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
 import { getTeams } from '@/actions/teams';
 import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
 import { isMarketingMessage, shouldKeepMarketingOnlyChatVisible } from './chat-list-visibility';
@@ -1048,17 +1049,32 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const ownershipRequestSeqRef = React.useRef(0);
 
   const [isBulkMode, setIsBulkMode] = useState(false);
+  const [bulkAction, setBulkAction] = useState<'close' | 'agent' | null>(null);
   const [selectedBulkChats, setSelectedBulkChats] = useState<Set<string>>(new Set());
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+  const [autopilotAgents, setAutopilotAgents] = useState<AutopilotConfig[]>([]);
+  const [selectedBulkAgentId, setSelectedBulkAgentId] = useState<string>('');
+  const [isAgentBulkConfigOpen, setIsAgentBulkConfigOpen] = useState(false);
+  const [bulkAgentStatus, setBulkAgentStatus] = useState(true);
+  const [bulkAgentMode, setBulkAgentMode] = useState<'suggest' | 'auto'>('suggest');
 
   // Assign Confirmation State
   const [chatToAssign, setChatToAssign] = useState<Chat | null>(null);
 
-  const toggleBulkMode = () => {
-    setIsBulkMode(!isBulkMode);
-    setSelectedBulkChats(new Set());
+  const toggleBulkMode = (action: 'close' | 'agent' = 'close') => {
+    if (isBulkMode && bulkAction === action) {
+      setIsBulkMode(false);
+      setBulkAction(null);
+      setSelectedBulkChats(new Set());
+    } else if (action === 'agent') {
+      setIsAgentBulkConfigOpen(true);
+    } else {
+      setIsBulkMode(true);
+      setBulkAction(action);
+      setSelectedBulkChats(new Set());
+    }
   };
 
   const handleSnooze = (chatId: string) => {
@@ -1157,6 +1173,43 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     setIsBulkSubmitting(false);
   };
 
+  const handleBulkAgentToggle = async () => {
+    if (selectedBulkChats.size === 0) return;
+    if (bulkAgentStatus && !selectedBulkAgentId) {
+      toast({ title: 'Selecione um Agente', description: 'Você precisa escolher um agente para ativar.', variant: 'destructive' });
+      return;
+    }
+
+    setIsBulkSubmitting(true);
+    const chatIds = Array.from(selectedBulkChats);
+
+    try {
+      const result = await toggleMultipleChatsAutopilotAction(
+        chatIds, 
+        bulkAgentStatus, 
+        selectedBulkAgentId || null,
+        bulkAgentStatus ? bulkAgentMode : 'off'
+      );
+      if (result.success) {
+        toast({ 
+          title: bulkAgentStatus ? 'Agentes Ativados' : 'Agentes Desativados', 
+          description: `${chatIds.length} conversas foram atualizadas.` 
+        });
+        setSelectedBulkChats(new Set());
+        setIsBulkMode(false);
+        setBulkAction(null);
+        onUpdate();
+      } else {
+        toast({ title: 'Erro', description: result.error || 'Falha ao atualizar agentes.', variant: 'destructive' });
+      }
+    } catch (err) {
+      console.error('Erro bulk agent:', err);
+      toast({ title: 'Erro crítico', description: 'Ocorreu um erro ao processar a ação em massa.', variant: 'destructive' });
+    } finally {
+      setIsBulkSubmitting(false);
+    }
+  };
+
   const handleAssignChat = (chat: Chat) => {
     setChatToAssign(chat);
   };
@@ -1193,6 +1246,18 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           }
         })
         .finally(() => setIsLoadingTeams(false));
+
+      // Fetch autopilot agents
+      import('@/actions/autopilot').then(({ getAutopilotConfig }) => {
+        getAutopilotConfig(currentUser.activeWorkspaceId!)
+          .then((res: any) => {
+            if (res.agents) {
+              setAutopilotAgents(res.agents);
+              const primary = res.agents.find((a: any) => a.is_primary) || res.agents[0];
+              if (primary) setSelectedBulkAgentId(primary.id);
+            }
+          });
+      });
     }
   }, [currentUser.activeWorkspaceId]);
 
@@ -1259,9 +1324,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   }, [chats]);
 
   const TABS = [
-    { id: 'gerais', label: 'Fila', data: sortedChats.gerais },
-    { id: 'atendimentos', label: 'Atendendo', data: sortedChats.atendimentos },
-    { id: 'encerrados', label: 'Encerrados', data: sortedChats.encerrados }
+    { id: 'gerais', label: 'Fila', icon: ListTodo, data: sortedChats.gerais },
+    { id: 'atendimentos', label: 'Atendendo', icon: MessageSquare, data: sortedChats.atendimentos },
+    { id: 'encerrados', label: 'Encerrados', icon: CheckCircle2, data: sortedChats.encerrados }
   ] as const;
 
   const getBaseChatsForTab = useCallback(
@@ -1349,33 +1414,102 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   return (
     <div
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-border bg-background transition-none",
-        "w-full md:w-[280px] lg:w-[320px] xl:w-[380px] 2xl:w-[420px] md:min-w-[240px] md:max-w-[420px]",
+        "flex h-full shrink-0 flex-row border-r border-border bg-background transition-none",
+        "w-full md:w-[400px] lg:w-[440px] xl:w-[500px] 2xl:w-[540px] md:min-w-[380px] md:max-w-[560px]",
         className
       )}
     >
+      {/* Side Navigation Rail */}
+      <div className="w-[80px] 2xl:w-[90px] flex-shrink-0 border-r border-border flex flex-col items-center py-6 gap-4 bg-muted/5">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
+          return (
+            <TooltipProvider key={tab.id}>
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cn(
+                      "group relative flex flex-col h-12 w-[62px] 2xl:w-[70px] items-center justify-center rounded-xl transition-all duration-300 gap-1",
+                      activeTab === tab.id
+                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <Icon className={cn("h-[18px] w-[18px] transition-transform duration-300", activeTab === tab.id ? "scale-105" : "group-hover:scale-105")} />
+                    <span className="text-[7.5px] 2xl:text-[8px] font-bold uppercase tracking-wider text-center leading-none">
+                      {tab.label}
+                    </span>
+                    {filteredCount > 0 && (
+                      <span className={cn(
+                        "absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold ring-2 ring-background",
+                        activeTab === tab.id ? "bg-white text-blue-600" : "bg-blue-600 text-white"
+                      )}>
+                        {filteredCount}
+                      </span>
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={10} className="font-medium bg-popover border-border text-popover-foreground">
+                  {tab.label}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-1 flex-col min-w-0 h-full overflow-hidden">
       <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg md:text-xl font-bold text-foreground tracking-tight">Conversas</h2>
           <div className="flex items-center gap-2">
             {activeTab === 'atendimentos' && !isForwarding && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={isBulkMode ? "secondary" : "ghost"}
-                      size="icon"
-                      className={cn("h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground", isBulkMode && "bg-blue-500/20 text-blue-600 hover:bg-blue-500/15 hover:text-blue-700")}
-                      onClick={toggleBulkMode}
-                    >
-                      <Check className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {isBulkMode ? "Sair da seleção em massa" : "Selecionar conversas para encerrar"}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <div className="flex items-center gap-1.5 bg-muted/40 p-1 rounded-lg">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={isBulkMode && bulkAction === 'close' ? "secondary" : "ghost"}
+                        size="icon"
+                        className={cn(
+                          "h-7 w-7 text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-200", 
+                          isBulkMode && bulkAction === 'close' && "bg-red-500/20 text-red-600 hover:bg-red-500/30 hover:text-red-700"
+                        )}
+                        onClick={() => toggleBulkMode('close')}
+                      >
+                        <Check className="h-[15px] w-[15px]" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isBulkMode && bulkAction === 'close' ? "Sair da seleção" : "Encerrar em massa"}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={isBulkMode && bulkAction === 'agent' ? "secondary" : "ghost"}
+                        size="icon"
+                        className={cn(
+                          "h-7 w-7 text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-200", 
+                          isBulkMode && bulkAction === 'agent' && "bg-blue-500/20 text-blue-600 hover:bg-blue-500/30 hover:text-blue-700"
+                        )}
+                        onClick={() => toggleBulkMode('agent')}
+                      >
+                        <Bot className="h-[15px] w-[15px]" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isBulkMode && bulkAction === 'agent' ? "Sair da seleção" : "Ativar Agente em massa"}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
             )}
 
             {currentUser.activeWorkspaceId && (
@@ -1540,7 +1674,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             )}
           />
           {/* Quick Filter Chips */}
-          <div className="grid min-w-0 grid-cols-[76px_72px_1px_minmax(78px,1fr)_minmax(102px,1.22fr)] items-center gap-1 pt-3.5">
+          <div className="flex flex-wrap items-center gap-2 pt-4">
             <Badge
               variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
               className={cn(
@@ -1579,11 +1713,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 </span>
               </span>
             </Badge>
-            <div className="h-3 w-px shrink-0 justify-self-center bg-border/60" />
+            <div className="h-4 w-px bg-border/40 mx-0.5" />
             <Badge
               variant={onlyUnread ? 'default' : 'outline'}
               className={cn(
-                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                "flex h-7 items-center justify-center rounded-full px-3 text-[11px] font-medium transition-colors whitespace-nowrap",
                 onlyUnread
                   ? "bg-amber-500 hover:bg-amber-600 text-white border-transparent"
                   : "hover:bg-muted text-muted-foreground"
@@ -1750,85 +1884,78 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         isOnline={true}
       />
 
-      <div className="p-3 xl:p-4 flex-shrink-0 border-b border-border">
-        <div className="flex items-center rounded-lg border border-border bg-muted/40 p-1">
-          {TABS.map((tab) => {
-            const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 text-xs font-medium py-1.5 rounded-md transition-all duration-200',
-                  activeTab === tab.id
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                <span>{tab.label}</span>
-                {filteredCount > 0 && (
-                  <Badge
-                    className={cn(
-                      'px-1.5 h-4 text-[10px] min-w-[16px] justify-center',
-                      activeTab === tab.id
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-muted text-muted-foreground'
-                    )}
-                  >
-                    {filteredCount}
-                  </Badge>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+
 
       {
         isBulkMode && (
-          <div className="p-2 border-b border-border bg-blue-500/10 flex items-center justify-between animate-in slide-in-from-top-2">
+          <div className={cn(
+            "p-2 border-b border-border flex items-center justify-between animate-in slide-in-from-top-2",
+            bulkAction === 'agent' ? "bg-blue-500/10" : "bg-red-500/10"
+          )}>
             <div className="flex items-center gap-2 px-2">
-              <p className="text-sm font-medium text-blue-800">{selectedBulkChats.size} selecionado(s)</p>
-              <Button variant="link" size="sm" className="h-auto p-0 text-blue-600 hover:text-blue-700" onClick={handleSelectAllBulk}>
+              <p className={cn(
+                "text-sm font-medium",
+                bulkAction === 'agent' ? "text-blue-800" : "text-red-800"
+              )}>
+                {selectedBulkChats.size} selecionado(s)
+              </p>
+              <Button variant="link" size="sm" className="h-auto p-0 text-muted-foreground hover:text-foreground" onClick={handleSelectAllBulk}>
                 {filteredChats.length > 0 && filteredChats.every(c => selectedBulkChats.has(c.id)) ? "Deselecionar todos" : "Selecionar todos"}
               </Button>
             </div>
-            <div className="flex items-center gap-1">
-              <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" variant="destructive" disabled={selectedBulkChats.size === 0}>
-                    Encerrar
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px]">
-                  <DialogHeader>
-                    <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
-                    <DialogDescription className="text-muted-foreground">
-                      Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="py-4">
-                    <Label htmlFor="bulk-message" className="text-foreground mb-2 block">Mensagem de Encerramento (opcional)</Label>
-                    <Textarea
-                      id="bulk-message"
-                      placeholder="Ex: Agradecemos o contato!"
-                      className="bg-muted/50 border-border text-foreground min-h-[100px]"
-                      value={bulkMessage}
-                      onChange={(e) => setBulkMessage(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Se deixar em branco, o modelo de encerramento padrão será usado (se configurado).
+            
+            <div className="flex items-center gap-2">
+              {bulkAction === 'agent' ? (
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 px-2 border-r border-border mr-2">
+                    <p className="text-xs font-semibold text-blue-800 uppercase tracking-wider">
+                      Modo: {bulkAgentStatus ? (bulkAgentMode === 'auto' ? 'Automático' : 'Sugestão') : 'Desligado'}
                     </p>
                   </div>
-                  <DialogFooter>
-                    <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
-                    <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
-                      {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Confirmar Encerramento
+                  <Button 
+                    size="sm" 
+                    className="h-8 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4"
+                    disabled={selectedBulkChats.size === 0 || isBulkSubmitting}
+                    onClick={handleBulkAgentToggle}
+                  >
+                    {isBulkSubmitting ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <CheckCircle2 className="h-3 w-3 mr-2" />}
+                    Confirmar Alteração em {selectedBulkChats.size}
+                  </Button>
+                </div>
+              ) : (
+                <Dialog open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="destructive" className="h-8" disabled={selectedBulkChats.size === 0}>
+                      Encerrar Chats
                     </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                  </DialogTrigger>
+                  <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>Encerrar {selectedBulkChats.size} Atendimentos</DialogTitle>
+                      <DialogDescription className="text-muted-foreground">
+                        Você pode enviar uma mensagem final para todos os contatos selecionados antes de encerrar.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <Label htmlFor="bulk-message" className="text-foreground mb-2 block">Mensagem de Encerramento (opcional)</Label>
+                      <Textarea
+                        id="bulk-message"
+                        placeholder="Ex: Agradecemos o contato!"
+                        className="bg-muted/50 border-border text-foreground min-h-[100px]"
+                        value={bulkMessage}
+                        onChange={(e) => setBulkMessage(e.target.value)}
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button variant="ghost" onClick={() => setIsBulkDialogOpen(false)} disabled={isBulkSubmitting}>Cancelar</Button>
+                      <Button onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
+                        {isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Confirmar Encerramento
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
             </div>
           </div>
         )
@@ -1957,6 +2084,102 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         )
       }
 
+      {/* Agent Bulk Configuration Dialog */}
+      <Dialog open={isAgentBulkConfigOpen} onOpenChange={setIsAgentBulkConfigOpen}>
+        <DialogContent className="bg-background border-border text-foreground max-w-md p-6">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Bot className="h-5 w-5 text-blue-500" />
+              Configurar Agente em Massa
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground mt-2">
+              Defina as configurações do Agente antes de selecionar as conversas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-semibold">Status do Agente</Label>
+                <p className="text-xs text-muted-foreground">Ativar ou desativar resposta automática</p>
+              </div>
+              <Switch 
+                checked={bulkAgentStatus} 
+                onCheckedChange={setBulkAgentStatus}
+              />
+            </div>
+
+            <Separator className="bg-border/50" />
+
+            <div className="space-y-3">
+              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Agente Responsável</Label>
+              <Select 
+                value={selectedBulkAgentId || undefined} 
+                onValueChange={setSelectedBulkAgentId}
+                disabled={!bulkAgentStatus}
+              >
+                <SelectTrigger className="h-10 bg-background border-border">
+                  <SelectValue placeholder="Selecione o agente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {autopilotAgents.map(agent => (
+                    <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Modo de Operação</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <Button 
+                  variant={bulkAgentMode === 'suggest' ? 'secondary' : 'outline'}
+                  className={cn(
+                    "h-10 text-sm font-medium transition-all duration-200", 
+                    bulkAgentMode === 'suggest' && "bg-blue-500/10 text-blue-600 border-blue-200 shadow-sm"
+                  )}
+                  onClick={() => setBulkAgentMode('suggest')}
+                  disabled={!bulkAgentStatus}
+                >
+                  <MessageSquareQuote className="h-4 w-4 mr-2" />
+                  Sugestão
+                </Button>
+                <Button 
+                  variant={bulkAgentMode === 'auto' ? 'secondary' : 'outline'}
+                  className={cn(
+                    "h-10 text-sm font-medium transition-all duration-200", 
+                    bulkAgentMode === 'auto' && "bg-green-500/10 text-green-600 border-green-200 shadow-sm"
+                  )}
+                  onClick={() => setBulkAgentMode('auto')}
+                  disabled={!bulkAgentStatus}
+                >
+                  <Bot className="h-4 w-4 mr-2" />
+                  Automático
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-6 flex gap-2">
+            <Button variant="ghost" onClick={() => setIsAgentBulkConfigOpen(false)} className="flex-1">
+              Cancelar
+            </Button>
+            <Button 
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-lg shadow-blue-500/20"
+              onClick={() => {
+                setIsAgentBulkConfigOpen(false);
+                setIsBulkMode(true);
+                setBulkAction('agent');
+                setSelectedBulkChats(new Set());
+              }}
+              disabled={bulkAgentStatus && !selectedBulkAgentId}
+            >
+              Prosseguir para Seleção
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={!!chatToAssign} onOpenChange={(open) => !open && setChatToAssign(null)}>
         <AlertDialogContent className="bg-background border-border text-foreground">
           <AlertDialogHeader>
@@ -1973,6 +2196,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </div>
     </div >
   );
 }

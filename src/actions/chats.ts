@@ -571,7 +571,9 @@ export const closeMultipleChatsAction = withDebug(
     {
         contextResolver: (chatIds) => ({ payload: { count: chatIds?.length } })
     }
-); export const updateChatTagAction = withDebug(
+);
+
+export const updateChatTagAction = withDebug(
     'update_chat_tag',
     async function updateChatTagAction(chatId: string, tagId: string): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
@@ -603,14 +605,45 @@ export const closeMultipleChatsAction = withDebug(
             console.error("Erro ao atualizar a tag do chat:", error);
             return { success: false, error: "Falha ao atualizar a etiqueta no servidor." };
         }
-    },
-    {
-        contextResolver: (chatId, tagId) => ({ payload: { chatId, tagId } })
     }
 );
 
+export const toggleMultipleChatsAutopilotAction = withDebug(
+    'toggle_multiple_chats_autopilot',
+    async function toggleMultipleChatsAutopilotAction(chatIds: string[], isActive: boolean, agentId: string | null = null, mode: 'suggest' | 'auto' | 'off' = 'suggest'): Promise<{ success: boolean; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: "Usuário não autenticado." };
 
+        if (!chatIds || chatIds.length === 0) {
+            return { success: false, error: "Nenhum chat selecionado." };
+        }
 
+        try {
+            const copilotMode = isActive ? mode : 'off';
+            
+            // Execute updates in parallel
+            await Promise.all(chatIds.map(async (chatId) => {
+                await db.query(`
+                    UPDATE chats 
+                    SET is_autopilot_active = $1, 
+                        autopilot_config_id = $2,
+                        copilot_mode = $4
+                    WHERE id = $3
+                `, [isActive, agentId, chatId, copilotMode]);
+            }));
+
+            revalidatePath('/', 'layout');
+            return { success: true };
+        } catch (error: any) {
+            console.error("Erro ao alternar autopilot em massa:", error);
+            return { success: false, error: "Falha ao atualizar status do autopilot em massa." };
+        }
+    },
+    {
+        contextResolver: (chatIds, isActive, agentId, mode) => ({ payload: { count: chatIds?.length, isActive, agentId, mode } })
+    }
+);
 
 export type InitialChatsPayload = {
     chats: Chat[];
