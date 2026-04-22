@@ -71,6 +71,7 @@ function DialogyLogo() {
         fill
         className="object-cover"
         sizes="(max-width: 1535px) 24px, 32px"
+        priority
       />
     </div>
   );

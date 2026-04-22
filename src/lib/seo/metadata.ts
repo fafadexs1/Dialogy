@@ -104,8 +104,7 @@ export function absoluteUrl(pathOrUrl: string, baseUrl = getBaseUrl()) {
 
 export async function buildRootMetadata(): Promise<Metadata> {
     const site = await getSeoSiteContext();
-    const fallbackIcon = `${site.baseUrl}/api/favicon?v=${site.iconVersion}`;
-    const baseIconUrl = site.faviconUrl || fallbackIcon;
+    const baseIconUrl = `/api/favicon?v=${site.iconVersion}`;
     const getIconType = (url: string) => {
         const ext = url.split('.').pop()?.toLowerCase();
         if (ext === 'png') return 'image/png';
@@ -114,9 +113,10 @@ export async function buildRootMetadata(): Promise<Metadata> {
         if (ext === 'ico') return 'image/x-icon';
         return undefined;
     };
-    const iconSeparator = baseIconUrl.includes('?') ? '&' : '?';
-    const versionedIcon = `${baseIconUrl}${iconSeparator}v=${site.iconVersion}`;
-    const icon = { url: versionedIcon, type: getIconType(baseIconUrl) };
+    const icon = {
+        url: baseIconUrl,
+        type: getIconType(site.faviconUrl || 'favicon.ico') || 'image/x-icon',
+    };
 
     return {
         metadataBase: site.metadataBase,

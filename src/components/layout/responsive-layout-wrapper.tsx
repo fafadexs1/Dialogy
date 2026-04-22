@@ -3,49 +3,38 @@
 import React, { useEffect, useState } from 'react';
 
 interface ResponsiveLayoutWrapperProps {
-    children: React.ReactNode; // This will now be just ONE layout passed from server
     desktopLayout: React.ReactNode;
     mobileLayout: React.ReactNode;
-    defaultLayout: 'mobile' | 'desktop';
+    loadingFallback?: React.ReactNode;
 }
 
 export default function ResponsiveLayoutWrapper({
     desktopLayout,
     mobileLayout,
-    defaultLayout,
+    loadingFallback,
 }: ResponsiveLayoutWrapperProps) {
-    const [layout, setLayout] = useState<'mobile' | 'desktop'>(defaultLayout);
-    const [isMounted, setIsMounted] = useState(false);
+    const [layout, setLayout] = useState<'mobile' | 'desktop' | null>(null);
 
     useEffect(() => {
-        setIsMounted(true);
-
-        // Check if the server guess matches the actual viewport
-        const checkViewport = () => {
-            const isMobileViewport = window.innerWidth < 768; // Tailwind 'md' breakpoint
-            const actualLayout = isMobileViewport ? 'mobile' : 'desktop';
-
-            if (actualLayout !== layout) {
-                console.log('[LAYOUT] Viewport mismatch detected. Switching layout to:', actualLayout);
-                setLayout(actualLayout);
-            }
+        const mediaQuery = window.matchMedia('(min-width: 768px)');
+        const syncLayout = () => {
+            setLayout(mediaQuery.matches ? 'desktop' : 'mobile');
         };
 
-        checkViewport();
+        syncLayout();
 
-        const resizeHandler = () => {
-            checkViewport();
-        };
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', syncLayout);
+            return () => mediaQuery.removeEventListener('change', syncLayout);
+        }
 
-        window.addEventListener('resize', resizeHandler);
-        return () => window.removeEventListener('resize', resizeHandler);
-    }, [layout]);
+        mediaQuery.addListener(syncLayout);
+        return () => mediaQuery.removeListener(syncLayout);
+    }, []);
 
-    // Before hydration (SSR), render the default layout chosen by server
-    if (!isMounted) {
-        return defaultLayout === 'mobile' ? <>{mobileLayout}</> : <>{desktopLayout}</>;
+    if (layout === null) {
+        return <>{loadingFallback ?? null}</>;
     }
 
-    // After hydration, match viewport
     return layout === 'mobile' ? <>{mobileLayout}</> : <>{desktopLayout}</>;
 }

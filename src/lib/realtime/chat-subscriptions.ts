@@ -37,17 +37,73 @@ export type WorkspaceContactSubscriptionParams = {
   onStatusChange?: (status: string) => void;
 };
 
-export const buildChatMessageChannelName = (workspaceId: string, chatId: string) =>
-  `realtime-messages-${workspaceId}-${chatId}`;
+type RealtimeRow = { [key: string]: any };
+type RealtimeBroadcastChangesPayload = {
+  id: string;
+  schema: string;
+  table: string;
+  operation: 'INSERT' | 'UPDATE' | 'DELETE';
+  record: RealtimeRow | null;
+  old_record: RealtimeRow | null;
+};
+type RealtimeBroadcastEnvelope = {
+  type: 'broadcast';
+  event: string;
+  meta?: {
+    replayed?: boolean;
+    id: string;
+  };
+  payload: RealtimeBroadcastChangesPayload;
+};
+
+export const buildChatMessageChannelName = (_workspaceId: string, chatId: string) =>
+  `room:${chatId}:messages`;
 
 export const buildWorkspaceChatChannelName = (workspaceId: string) =>
-  `realtime-chats-workspace-${workspaceId}`;
+  `workspace:${workspaceId}:chats`;
 
 export const buildWorkspaceMessageChannelName = (workspaceId: string) =>
-  `realtime-messages-workspace-${workspaceId}`;
+  `workspace:${workspaceId}:messages`;
 
 export const buildWorkspaceContactChannelName = (workspaceId: string) =>
-  `realtime-contacts-workspace-${workspaceId}`;
+  `workspace:${workspaceId}:contacts`;
+
+function toPostgresChangesPayload(
+  payload: RealtimeBroadcastChangesPayload,
+): RealtimePostgresChangesPayload<RealtimeRow> {
+  const record = payload.record ?? {};
+  const oldRecord = payload.old_record ?? {};
+  const recordWithDates = record as { updated_at?: string; created_at?: string };
+  const oldRecordWithDates = oldRecord as { updated_at?: string; created_at?: string };
+  const commitTimestamp =
+    recordWithDates.updated_at ||
+    recordWithDates.created_at ||
+    oldRecordWithDates.updated_at ||
+    oldRecordWithDates.created_at ||
+    new Date().toISOString();
+
+  return {
+    schema: payload.schema,
+    table: payload.table,
+    commit_timestamp: commitTimestamp,
+    errors: [],
+    eventType: payload.operation,
+    new: record as RealtimeRow,
+    old: oldRecord as Partial<RealtimeRow>,
+  };
+}
+
+function getPayloadChatId(payload: RealtimePostgresChangesPayload<RealtimeRow>): string | null {
+  const nextChatId = (payload.new as { chat_id?: string } | null)?.chat_id;
+  if (nextChatId) return nextChatId;
+  return (payload.old as { chat_id?: string } | null)?.chat_id ?? null;
+}
+
+function getPayloadRecordId(payload: RealtimePostgresChangesPayload<RealtimeRow>): string | null {
+  const nextId = (payload.new as { id?: string } | null)?.id;
+  if (nextId) return nextId;
+  return (payload.old as { id?: string } | null)?.id ?? null;
+}
 
 export function subscribeToChatMessages({
   client,
@@ -56,23 +112,22 @@ export function subscribeToChatMessages({
   onMessage,
   onStatusChange,
 }: ChatMessageSubscriptionParams): RealtimeChannel {
-  const baseConfig = {
-    event: '*', // Listen for INSERT and UPDATE
-    schema: 'public',
-    table: 'messages',
-  } as const;
-  const config = chatId === 'all'
-    ? baseConfig
-    : { ...baseConfig, filter: `chat_id=eq.${chatId}` };
+  const topic =
+    chatId === 'all'
+      ? buildWorkspaceMessageChannelName(workspaceId)
+      : buildChatMessageChannelName(workspaceId, chatId);
 
   return client
-    .channel(buildChatMessageChannelName(workspaceId, chatId))
+    .channel(topic, {
+      config: {
+        private: true,
+      },
+    })
     .on(
-      'postgres_changes',
-      config,
-      (payload) => {
-        // console.log('[REALTIME-DEBUG] Message payload:', payload);
-        onMessage(payload);
+      'broadcast',
+      { event: '*' },
+      (payload: RealtimeBroadcastEnvelope) => {
+        onMessage(toPostgresChangesPayload(payload.payload));
       },
     )
     .subscribe((status, err) => {
@@ -92,22 +147,26 @@ export function subscribeToWorkspaceChatUpdates({
   onStatusChange,
 }: WorkspaceChatSubscriptionParams): RealtimeChannel {
   console.log('[REALTIME-DEBUG-CHATS] Subscribing to chats for workspace:', workspaceId);
-  const filter = chatIdsCsv && chatIdsCsv.length > 0
-    ? `id=in.(${chatIdsCsv})`
-    : `workspace_id=eq.${workspaceId}`;
+  const visibleChatIds = chatIdsCsv && chatIdsCsv.length > 0
+    ? new Set(chatIdsCsv.split(',').map((value) => value.trim()).filter(Boolean))
+    : null;
+
   return client
-    .channel(buildWorkspaceChatChannelName(workspaceId))
-    .on(
-      'postgres_changes',
-      {
-        event: '*', // Listen for INSERT, UPDATE, and DELETE
-        schema: 'public',
-        table: 'chats',
-        filter,
+    .channel(buildWorkspaceChatChannelName(workspaceId), {
+      config: {
+        private: true,
       },
-      (payload) => {
-        // console.log('[REALTIME-DEBUG-CHATS] Chat update payload (Filter Enabled):', payload);
-        onChatUpdate(payload);
+    })
+    .on(
+      'broadcast',
+      { event: '*' },
+      (payload: RealtimeBroadcastEnvelope) => {
+        const normalizedPayload = toPostgresChangesPayload(payload.payload);
+        const payloadId = getPayloadRecordId(normalizedPayload);
+        if (visibleChatIds && payloadId && !visibleChatIds.has(payloadId)) {
+          return;
+        }
+        onChatUpdate(normalizedPayload);
       },
     )
     .subscribe((status, err) => {
@@ -126,21 +185,26 @@ export function subscribeToWorkspaceMessages({
   onMessage,
   onStatusChange,
 }: WorkspaceMessageSubscriptionParams): RealtimeChannel {
-  const filter = chatIdsCsv && chatIdsCsv.length > 0
-    ? `chat_id=in.(${chatIdsCsv})`
-    : `workspace_id=eq.${workspaceId}`;
+  const visibleChatIds = chatIdsCsv && chatIdsCsv.length > 0
+    ? new Set(chatIdsCsv.split(',').map((value) => value.trim()).filter(Boolean))
+    : null;
+
   return client
-    .channel(buildWorkspaceMessageChannelName(workspaceId))
-    .on(
-      'postgres_changes',
-      {
-        event: '*', // Listen for INSERT and UPDATE
-        schema: 'public',
-        table: 'messages',
-        filter,
+    .channel(buildWorkspaceMessageChannelName(workspaceId), {
+      config: {
+        private: true,
       },
-      (payload) => {
-        onMessage(payload);
+    })
+    .on(
+      'broadcast',
+      { event: '*' },
+      (payload: RealtimeBroadcastEnvelope) => {
+        const normalizedPayload = toPostgresChangesPayload(payload.payload);
+        const payloadChatId = getPayloadChatId(normalizedPayload);
+        if (visibleChatIds && payloadChatId && !visibleChatIds.has(payloadChatId)) {
+          return;
+        }
+        onMessage(normalizedPayload);
       },
     )
     .subscribe((status, err) => {
@@ -159,17 +223,16 @@ export function subscribeToWorkspaceContacts({
   onStatusChange,
 }: WorkspaceContactSubscriptionParams): RealtimeChannel {
   return client
-    .channel(buildWorkspaceContactChannelName(workspaceId))
-    .on(
-      'postgres_changes',
-      {
-        event: '*', // Listen for INSERT, UPDATE, and DELETE
-        schema: 'public',
-        table: 'contacts',
-        filter: `workspace_id=eq.${workspaceId}`,
+    .channel(buildWorkspaceContactChannelName(workspaceId), {
+      config: {
+        private: true,
       },
-      (payload) => {
-        onContactUpdate(payload);
+    })
+    .on(
+      'broadcast',
+      { event: '*' },
+      (payload: RealtimeBroadcastEnvelope) => {
+        onContactUpdate(toPostgresChangesPayload(payload.payload));
       },
     )
     .subscribe((status, err) => {
