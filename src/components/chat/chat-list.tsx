@@ -1008,6 +1008,8 @@ interface ChatListProps {
   bottomPadding?: number;
 }
 
+type ChatListTabId = 'robo' | 'gerais' | 'atendimentos' | 'encerrados';
+
 
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
@@ -1023,7 +1025,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'gerais' | 'atendimentos' | 'encerrados'>('gerais');
+  const [activeTab, setActiveTab] = useState<ChatListTabId>('gerais');
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [onlyUnread, setOnlyUnread] = useState(false);
@@ -1316,24 +1318,29 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       return timeB - timeA;
     });
 
-    const gerais = sorted.filter((c) => c.status === 'gerais');
+    const queueChats = sorted.filter((c) => c.status === 'gerais');
+    const robo = queueChats.filter((c) => !c.tag?.trim());
+    const fila = queueChats.filter((c) => Boolean(c.tag?.trim()));
     const atendimentos = sorted.filter((c) => c.status === 'atendimentos');
     const encerrados = sorted.filter((c) => c.status === 'encerrados');
 
-    return { gerais, atendimentos, encerrados };
+    return { robo, fila, atendimentos, encerrados };
   }, [chats]);
 
   const TABS = [
-    { id: 'gerais', label: 'Fila', icon: ListTodo, data: sortedChats.gerais },
+    { id: 'robo', label: 'Robô', icon: Bot, data: sortedChats.robo },
+    { id: 'gerais', label: 'Fila', icon: ListTodo, data: sortedChats.fila },
     { id: 'atendimentos', label: 'Atendendo', icon: MessageSquare, data: sortedChats.atendimentos },
     { id: 'encerrados', label: 'Encerrados', icon: CheckCircle2, data: sortedChats.encerrados }
   ] as const;
 
   const getBaseChatsForTab = useCallback(
-    (tabId: typeof TABS[number]['id']) => {
+    (tabId: ChatListTabId) => {
       switch (tabId) {
+        case 'robo':
+          return sortedChats.robo;
         case 'gerais':
-          return sortedChats.gerais;
+          return sortedChats.fila;
         case 'atendimentos':
           return sortedChats.atendimentos;
         case 'encerrados':
@@ -1652,7 +1659,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       </div>
                       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                         <RadioGroupItem value="open" id="status-open" className="border-border text-blue-500" />
-                        <Label htmlFor="status-open" className="cursor-pointer text-foreground">Abertos (Fila + Atendendo)</Label>
+                        <Label htmlFor="status-open" className="cursor-pointer text-foreground">Abertos (Robô + Fila + Atendendo)</Label>
                       </div>
                       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                         <RadioGroupItem value="closed" id="status-closed" className="border-border text-blue-500" />
