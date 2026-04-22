@@ -26,6 +26,11 @@ import {
     resolveEvolutionInstance,
 } from '@/lib/whatsapp/evolution-config';
 import {
+    extractEvolutionInteractiveResponseText,
+    mapEvolutionInboundMessageTypeToDbType,
+    resolveEvolutionInboundMessageType,
+} from '@/lib/whatsapp/evolution-inbound-message';
+import {
     findOrCreateWhatsappContact,
     findWhatsappChatByIdentity,
     lockWhatsappIdentityTransaction,
@@ -231,6 +236,7 @@ function extractMessagePreviewFromEnvelope(rawMessage: any): string | undefined 
     if (!rawMessage || typeof rawMessage !== 'object') return undefined;
 
     const locationDetails = rawMessage.locationMessage;
+    const interactiveText = extractEvolutionInteractiveResponseText(rawMessage);
     const mediaDetails =
         rawMessage.imageMessage ||
         rawMessage.videoMessage ||
@@ -263,6 +269,7 @@ function extractMessagePreviewFromEnvelope(rawMessage: any): string | undefined 
         rawMessage.conversation,
         mediaDetails?.text,
         mediaDetails?.caption,
+        interactiveText,
         mediaDetails?.fileName,
         mediaDetails?.filename,
         locationLabel,
@@ -285,12 +292,14 @@ function extractReplyContextFromPayload(data: any, message: any): ReplyContextDa
         message?.videoMessage,
         message?.documentMessage,
         message?.audioMessage,
+        message?.buttonMessage,
         message?.locationMessage,
         message?.contactMessage,
         message?.contactsArrayMessage,
         message?.buttonsResponseMessage,
         message?.listResponseMessage,
         message?.templateButtonReplyMessage,
+        message?.interactiveResponseMessage,
         message?.reactionMessage,
         message?.stickerMessage,
     ];
@@ -1135,13 +1144,16 @@ async function handleMessagesUpsert(payload: any) {
             ? `Contato: ${primarySharedContact.phones[0]}`
             : 'Contato compartilhado')
         : '';
+    const interactiveText = extractEvolutionInteractiveResponseText(message);
 
-    content =
-        message.conversation ||
-        mediaDetails?.text ||
-        mediaDetails?.caption ||
-        locationLabel ||
-        sharedContactLabel;
+    content = pickFirstNonEmptyString(
+        message.conversation,
+        mediaDetails?.text,
+        mediaDetails?.caption,
+        interactiveText,
+        locationLabel,
+        sharedContactLabel
+    ) || '';
 
     const replyContext = extractReplyContextFromPayload(data, message);
 
@@ -1157,34 +1169,20 @@ async function handleMessagesUpsert(payload: any) {
         console.log('[WEBHOOK_MSG_UPSERT] Raw Mime_type:', messageDetails.mime_type);
     }
 
-    const effectiveMessageType = messageType || (locationDetails ? 'locationMessage' : hasSharedContacts ? 'contactMessage' : undefined);
+    const effectiveMessageType = resolveEvolutionInboundMessageType({
+        messageType,
+        rawMessage: message,
+        hasLocation: Boolean(locationDetails),
+        hasSharedContacts,
+    });
 
     if (effectiveMessageType) {
-        switch (effectiveMessageType) {
-            case 'audioMessage':
-                dbMessageType = 'audio';
-                break;
-            case 'imageMessage':
-                dbMessageType = 'image';
-                break;
-            case 'videoMessage':
-                dbMessageType = 'video';
-                break;
-            case 'documentMessage':
-                dbMessageType = 'document';
-                break;
-            case 'locationMessage':
-                dbMessageType = 'location';
-                break;
-            case 'contactMessage':
-            case 'contactsArrayMessage':
-                dbMessageType = 'text';
-                break;
-            case 'conversation': case 'extendedTextMessage': break;
-            default:
-                console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem nao suportado: ${effectiveMessageType}. Ignorando.`);
-                return;
+        const mappedDbMessageType = mapEvolutionInboundMessageTypeToDbType(effectiveMessageType);
+        if (mappedDbMessageType === 'unsupported') {
+            console.log(`[WEBHOOK_MSG_UPSERT] Tipo de mensagem nao suportado: ${effectiveMessageType}. Ignorando.`);
+            return;
         }
+        dbMessageType = mappedDbMessageType;
     }
 
     if (!content.trim() && !mediaUrl && !locationDetails && !hasSharedContacts) {

@@ -959,21 +959,26 @@ export default function ChatPanel({
         onForwardMessage(message);
     }, [onForwardMessage]);
 
-    const handleExportChat = () => {
+    const handleExportChat = async () => {
         if (!chat) return;
-        const html = generateChatHtml(chat, currentUser);
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const dateStr = new Date().toISOString().split('T')[0];
-        const safeName = chat.contact.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        a.download = `chat-${safeName}-${dateStr}.html`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        toast({ title: "Exportado", description: "Download do HTML iniciado." });
+        try {
+            const html = await generateChatHtml(chat, currentUser);
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const dateStr = new Date().toISOString().split('T')[0];
+            const safeName = chat.contact.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            a.download = `chat-${safeName}-${dateStr}.html`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            toast({ title: "Exportado", description: "Download do HTML iniciado." });
+        } catch (error) {
+            console.error('Failed to export chat HTML', error);
+            toast({ title: "Erro", description: "Nao foi possivel exportar a conversa em HTML.", variant: 'destructive' });
+        }
     };
 
     const handleTrainAgent = async () => {
@@ -1831,7 +1836,7 @@ export default function ChatPanel({
         <div className="flex-1 flex flex-col min-w-0 relative h-full bg-transparent">
             {/* Header */}
             {/* Header */}
-            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.18)] backdrop-blur-md md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]/95 dark:shadow-[0_12px_30px_-24px_rgba(0,0,0,0.8)]">
+            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.18)] backdrop-blur-xl md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]/95 dark:shadow-[0_12px_30px_-24px_rgba(0,0,0,0.8)]">
                 <div className="flex items-center gap-3">
                     {onBack && (
                         <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 mr-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
@@ -2129,7 +2134,7 @@ export default function ChatPanel({
 
             {/* Messages Area */}
 
-            <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-[#F3F4F6] dark:bg-[#050507]">
+            <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-[#F3F4F6]/68 dark:bg-black/25">
                 <Virtuoso
                     key={chat?.id}
                     ref={virtuosoRef}
@@ -2632,7 +2637,7 @@ export default function ChatPanel({
                         </div>
                     </footer>
                 ) : (
-                    <footer className="p-4 flex-shrink-0 text-center bg-background/50 backdrop-blur-md border-t border-border">
+                    <footer className="p-4 flex-shrink-0 text-center bg-background/60 backdrop-blur-xl border-t border-border/70">
                         <p className='text-sm font-medium text-muted-foreground'>
                             Este atendimento foi encerrado.
                         </p>

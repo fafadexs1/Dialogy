@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { v4 as uuidv4 } from 'uuid';
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
@@ -1545,16 +1545,11 @@ export default function CustomerChatLayout({
 
 
   return (
-    <div className="flex h-screen w-full bg-background relative overflow-hidden">
-      {/* Background Effects */}
-      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-[0.045] [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
-        <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-blue-100/50 to-transparent" />
-      </div>
+    <div className="flex h-screen w-full bg-transparent relative overflow-hidden">
 
       <LayoutGroup>
         <div
-          className={`relative z-10 flex h-full w-full overflow-hidden bg-background/85 backdrop-blur-[1px] selection:bg-primary/20 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
+          className={`relative z-10 flex h-full w-full overflow-hidden bg-background/45 backdrop-blur-[1.5px] selection:bg-primary/20 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
           dir={isRTL ? 'rtl' : 'ltr'}
         >
           {needsAudioUnlock && (

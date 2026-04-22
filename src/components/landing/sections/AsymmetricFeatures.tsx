@@ -8,9 +8,9 @@ const features = [
     {
         title: 'API Oficial do WhatsApp',
         description: 'Vincule seu número oficial e escale com disparos em massa sem risco de banimentos. Compliance total com a Meta.',
-        icon: <MessageSquare className="h-6 w-6 text-emerald-600" />,
-        bg: 'bg-emerald-500/10',
-        border: 'border-emerald-500/20',
+        icon: <MessageSquare className="h-6 w-6 text-brand-green" />,
+        bg: 'bg-brand-green/10',
+        border: 'border-brand-green/20',
         span: 'md:col-span-2', // Large feature
     },
     {
@@ -88,20 +88,20 @@ export const AsymmetricFeatures = () => {
     const itemMotionProps = { variants: itemVariants };
 
     return (
-        <section id="features" className="relative overflow-hidden border-b border-zinc-200/50 bg-[#FAFAFA] py-32">
-            <div className="pointer-events-none absolute left-1/2 top-0 hidden h-[600px] w-[1000px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-50/60 blur-[120px] md:block" />
+        <section id="features" className="relative overflow-hidden border-b border-white/5 bg-transparent py-32">
+            <div className="pointer-events-none absolute left-1/2 top-0 hidden h-[600px] w-[1000px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-green/5 blur-[120px] md:block" />
 
             <div className="relative z-10 mx-auto max-w-7xl px-6">
                 <motion.div 
                     {...headerMotionProps}
                     className="mx-auto mb-20 max-w-3xl text-center"
                 >
-                    <h2 className="mb-6 text-4xl font-extrabold leading-tight tracking-tight text-zinc-900 md:text-5xl lg:text-6xl">
+                    <h2 className="mb-6 text-4xl font-extrabold leading-tight tracking-tight text-white md:text-5xl lg:text-6xl">
                         Poder absoluto para orquestrar <br className="hidden md:block" />
-                        operações <span className="text-zinc-500">inteiras.</span>
+                        operações <span className="text-white/40">inteiras.</span>
                     </h2>
 
-                    <p className="text-lg font-medium leading-relaxed text-zinc-600 md:text-xl">
+                    <p className="text-lg font-medium leading-relaxed text-white/50 md:text-xl">
                         Tudo o que sua empresa precisa para escalar vendas e suporte, do roteamento ao pagamento, dentro das principais redes sociais do mundo.
                     </p>
                 </motion.div>
@@ -114,7 +114,7 @@ export const AsymmetricFeatures = () => {
                         <motion.div
                             {...itemMotionProps}
                             key={feature.title}
-                            className={`group relative flex cursor-default flex-col items-start overflow-hidden rounded-[2rem] border border-zinc-200/60 bg-white p-8 transition-colors duration-500 ease-out md:transition-all md:hover:-translate-y-1 md:hover:border-zinc-300 md:hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] ${feature.span}`}
+                            className={`group relative flex cursor-default flex-col items-start overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/50 p-8 transition-all duration-500 ease-out md:hover:-translate-y-1 md:hover:border-white/20 md:hover:shadow-2xl ${feature.span}`}
                         >
                             <div className="absolute -right-12 -top-12 hidden h-32 w-32 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100 dark:opacity-20 bg-current mix-blend-multiply md:block" />
                             
@@ -122,11 +122,11 @@ export const AsymmetricFeatures = () => {
                                 {feature.icon}
                             </div>
 
-                            <h3 className="mb-3 text-2xl font-bold tracking-tight text-zinc-900">
+                            <h3 className="mb-3 text-2xl font-bold tracking-tight text-white">
                                 {feature.title}
                             </h3>
 
-                            <p className="font-medium leading-relaxed text-zinc-600 line-clamp-3">
+                            <p className="font-medium leading-relaxed text-white/50 line-clamp-3">
                                 {feature.description}
                             </p>
                         </motion.div>

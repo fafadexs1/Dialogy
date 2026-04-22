@@ -1414,13 +1414,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   return (
     <div
       className={cn(
-        "flex h-full shrink-0 flex-row border-r border-border bg-background transition-none",
+        "flex h-full shrink-0 flex-row border-r border-border/80 bg-background/92 backdrop-blur-xl transition-none",
         "w-full md:w-[400px] lg:w-[440px] xl:w-[500px] 2xl:w-[540px] md:min-w-[380px] md:max-w-[560px]",
         className
       )}
     >
       {/* Side Navigation Rail */}
-      <div className="w-[80px] 2xl:w-[90px] flex-shrink-0 border-r border-border flex flex-col items-center py-6 gap-4 bg-muted/5">
+      <div className="w-[80px] 2xl:w-[90px] flex-shrink-0 border-r border-border/80 flex flex-col items-center py-6 gap-4 bg-background/82 backdrop-blur-md">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;

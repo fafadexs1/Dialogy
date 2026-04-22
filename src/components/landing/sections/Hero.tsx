@@ -38,7 +38,7 @@ const inboxItems = [
     {
         name: 'Studio Marea',
         channel: 'Instagram',
-        message: 'Voces integram direct com CRM?',
+        message: 'Voces integram direct com chatbot?',
         status: 'Novo contato',
     },
     {
@@ -70,7 +70,7 @@ export function Hero() {
 
                         <FadeIn delay={0.2} className="mt-6 max-w-2xl">
                             <p className="text-lg leading-8 text-slate-600 md:text-xl">
-                                A Dialogy conecta WhatsApp, Instagram, Facebook e Mercado Livre com CRM,
+                                A Dialogy conecta WhatsApp, Instagram, Facebook e Mercado Livre com chatbot,
                                 fila de atendimento e automacao para seu time responder melhor e vender sem perder contexto.
                             </p>
                         </FadeIn>
@@ -187,7 +187,7 @@ export function Hero() {
                                                 <div>
                                                     <p className="text-sm font-semibold">Proxima acao sugerida</p>
                                                     <p className="mt-2 text-sm leading-6 text-slate-300">
-                                                        Enviar os planos, marcar demo e registrar a conversa no CRM sem sair do chat.
+                                                        Enviar os planos, marcar demo e manter o contexto sem sair do chat.
                                                     </p>
                                                 </div>
                                                 <Sparkles className="mt-1 h-5 w-5 text-brand-green" />

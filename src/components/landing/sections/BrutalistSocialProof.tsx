@@ -24,11 +24,11 @@ export const BrutalistSocialProof = () => {
     };
 
     return (
-        <section className="relative overflow-hidden border-b border-zinc-100 bg-white py-16 md:py-24">
+        <section className="relative overflow-hidden border-b border-white/5 bg-transparent py-16 md:py-24">
             <div className="mx-auto max-w-7xl px-6 text-center">
                 <motion.p 
                     {...textMotionProps}
-                    className="mb-8 text-sm font-bold uppercase tracking-[0.2em] text-zinc-400 md:mb-12 md:text-xs"
+                    className="mb-8 text-sm font-bold uppercase tracking-[0.2em] text-white/40 md:mb-12 md:text-xs"
                 >
                     Mais de 10 workspaces globais criados na plataforma
                 </motion.p>
@@ -44,7 +44,7 @@ export const BrutalistSocialProof = () => {
                         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-xl font-black text-white shadow-lg">
                             V
                         </div>
-                        <div className="text-3xl font-extrabold tracking-tighter text-zinc-900">Velpro Telecom</div>
+                        <div className="text-3xl font-extrabold tracking-tighter text-white">Velpro Telecom</div>
                     </motion.div>
 
                     <motion.div 
@@ -54,7 +54,7 @@ export const BrutalistSocialProof = () => {
                         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-xl font-black text-white shadow-lg">
                             K
                         </div>
-                        <div className="text-3xl font-extrabold tracking-tighter text-zinc-900">KlyraAi</div>
+                        <div className="text-3xl font-extrabold tracking-tighter text-white">KlyraAi</div>
                     </motion.div>
                 </motion.div>
             </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowRight, Check, Sparkles } from 'lucide-react';
+import { ArrowRight, Check, Sparkles, Building2, MessageCircle } from 'lucide-react';
 
 import {
     CHAT_VOLUME_MIN,
@@ -11,6 +11,7 @@ import {
     PLANS,
     VOLUME_TIERS,
 } from '@/lib/plans-types';
+import { Slider } from '@/components/ui/slider';
 
 type SectionVariant = 'landing' | 'page';
 
@@ -23,15 +24,6 @@ function formatCurrency(value: number) {
 
 function formatChatVolume(value: number) {
     return value.toLocaleString('pt-BR');
-}
-
-function FeatureItem({ label, featured = false }: { label: string; featured?: boolean }) {
-    return (
-        <div className={`flex items-start gap-3 text-sm leading-6 ${featured ? 'text-slate-800' : 'text-slate-600'}`}>
-            <Check className={`mt-1 h-4 w-4 shrink-0 ${featured ? 'text-brand-green' : 'text-emerald-500'}`} />
-            <span>{label}</span>
-        </div>
-    );
 }
 
 function CheckoutButton({
@@ -71,11 +63,11 @@ function CheckoutButton({
         }
     };
 
-    const baseStyles = "inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3.5 text-sm font-semibold transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60";
+    const baseStyles = "inline-flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-base font-bold transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-60";
     const variants = {
-        solid: "bg-brand-green text-slate-950 hover:bg-emerald-400 hover:scale-[1.02] shadow-sm",
-        dark: "bg-slate-950 text-white hover:bg-slate-800 hover:scale-[1.02] shadow-sm",
-        outline: "bg-white border text-slate-950 border-slate-200 hover:border-slate-300 hover:bg-slate-50 hover:scale-[1.02]"
+        solid: "bg-brand-green text-black hover:bg-emerald-400 hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(34,197,94,0.4)] shadow-[0_0_15px_rgba(34,197,94,0.2)]",
+        dark: "bg-white text-black hover:bg-white/90 hover:scale-[1.02] shadow-sm",
+        outline: "bg-white/5 border text-white border-white/10 hover:border-white/20 hover:bg-white/10 hover:scale-[1.02]"
     };
 
     return (
@@ -86,7 +78,7 @@ function CheckoutButton({
             className={`${baseStyles} ${variants[variant]}`}
         >
             {loading ? 'Processando...' : label}
-            {!loading && <ArrowRight className="h-4 w-4" />}
+            {!loading && <ArrowRight className="h-5 w-5" />}
         </button>
     );
 }
@@ -103,83 +95,75 @@ function MainPlanCard({
     const plan = PLANS.starter;
 
     const features = [
-        `Até ${formatChatVolume(selectedTier.chats)} chats por mês`,
-        `${plan.limits.whatsapp} canais conectados`,
-        `${DEFAULT_TRIAL_DAYS} dias grátis`,
         'Usuários ilimitados',
+        `${plan.limits.whatsapp} canais conectados`,
         'Inbox unificado',
-        'Departamentos',
-        'Etiquetas e notas internas',
+        'Departamentos e Repasses',
+        'SLA e Distribuição',
+        'Etiquetas e Notas',
+        'Transcrição via IA',
         `Histórico de ${plan.limits.history_months} meses`,
-        'Transcrição de áudio',
-        'SLA e distribuição',
     ];
 
     return (
-        <div className="relative flex w-full flex-col overflow-hidden rounded-[24px] border-2 border-brand-green bg-white shadow-xl ring-1 ring-black/5">
-            <div className="absolute top-0 right-0 p-4">
-                <div className="inline-flex w-fit items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-inset ring-brand-green/30">
+        <div className="relative mx-auto w-full max-w-xl flex flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/80 backdrop-blur-xl shadow-2xl p-8 md:p-10">
+            <div className="absolute top-0 right-0 p-6 hidden sm:block">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-brand-green/10 px-3 py-1.5 text-xs font-bold text-brand-green border border-brand-green/20">
                     <Sparkles className="h-3.5 w-3.5" />
-                    Plano único
+                    Tudo Incluso
                 </div>
             </div>
 
-            <div className="p-6 md:p-8 lg:p-10 flex flex-col bg-gradient-to-b from-brand-green/5 to-transparent">
-                <div className="mb-4 max-w-[80%]">
-                    <h3 className="text-2xl md:text-3xl font-bold text-slate-950">Dialogy</h3>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-600">
-                        Um plano com tudo incluso. Escolha apenas a faixa de chats que sua operação precisa por mês.
-                    </p>
+            <div className="flex flex-col text-center">
+                {/* Price Display */}
+                <div className="mb-8">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-white/40 mb-3">Plano Único</h3>
+                    <div className="flex items-center justify-center gap-1">
+                        <span className="text-5xl md:text-6xl font-extrabold tracking-tight text-white">{formatCurrency(price)}</span>
+                        <span className="text-lg text-white/50 font-medium self-end mb-1.5">/mês</span>
+                    </div>
                 </div>
 
-                {/* Tier Selector + Price */}
-                <div className="my-6 rounded-2xl border border-emerald-100/50 bg-white p-6 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-                        <div>
-                            <p className="text-sm font-medium text-slate-500">Volume selecionado</p>
-                            <h4 className="mt-1 flex items-baseline gap-1 text-4xl font-bold tracking-tight text-slate-950">
-                                {formatChatVolume(selectedTier.chats)}
-                                <span className="text-sm font-medium text-slate-500">chats/mês</span>
-                            </h4>
-                        </div>
-                        <div className="text-left sm:text-right">
-                            <p className="text-sm font-medium text-slate-500">Valor mensal</p>
-                            <div className="mt-1 text-3xl font-bold tracking-tight text-brand-green">{formatCurrency(price)}</div>
-                        </div>
+                {/* Slider Selector */}
+                <div className="mb-10 text-left bg-black/40 p-6 rounded-3xl border border-white/5">
+                    <div className="flex items-center justify-between mb-6">
+                        <span className="text-sm font-medium text-white/60">Volume mensal</span>
+                        <span className="text-xl font-bold text-brand-green">Até {formatChatVolume(selectedTier.chats)} chats</span>
                     </div>
-
-                    <div className="mt-6">
-                        <div className="flex flex-wrap gap-2">
-                            {VOLUME_TIERS.map((tier, index) => (
-                                <button
-                                    key={tier.chats}
-                                    type="button"
-                                    onClick={() => onTierChange(index)}
-                                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all border ${
-                                        index === selectedTierIndex
-                                            ? 'bg-brand-green text-slate-950 border-brand-green shadow-sm'
-                                            : 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200 hover:text-slate-900'
-                                    }`}
-                                >
-                                    {tier.label}
-                                </button>
-                            ))}
-                        </div>
+                    
+                    <div className="px-2">
+                        <Slider
+                            value={[selectedTierIndex]}
+                            max={VOLUME_TIERS.length - 1}
+                            step={1}
+                            onValueChange={(val) => onTierChange(val[0])}
+                            className="py-2 cursor-pointer [&_[role=slider]]:bg-brand-green [&_[role=slider]]:border-brand-green [&_[role=slider]]:shadow-[0_0_15px_rgba(34,197,94,0.5)] [&_.bg-primary]:bg-brand-green"
+                        />
+                    </div>
+                    
+                    <div className="flex justify-between mt-4 text-xs text-white/30 font-bold px-2">
+                        <span>{formatChatVolume(CHAT_VOLUME_MIN)}</span>
+                        <span>{formatChatVolume(CHAT_VOLUME_MAX)}</span>
                     </div>
                 </div>
 
                 {/* Features Grid */}
-                <div className="grid sm:grid-cols-2 gap-x-6 gap-y-3 mb-8">
-                    {features.map((feature, idx) => (
-                        <FeatureItem key={idx} featured label={feature} />
-                    ))}
+                <div className="pt-2 mb-10 text-left">
+                    <div className="grid grid-cols-2 gap-y-4 gap-x-4">
+                        {features.map((feature, idx) => (
+                            <div key={idx} className="flex items-center gap-3 text-white/80">
+                                <Check className="h-4 w-4 text-brand-green shrink-0" strokeWidth={3} />
+                                <span className="text-sm font-medium">{feature}</span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
 
                 {/* CTA */}
                 <div className="mt-auto">
-                    <CheckoutButton monthlyChats={selectedTier.chats} label="Começar agora" variant="solid" />
-                    <p className="mt-3 text-center text-xs font-medium text-slate-500">
-                        Preços fixos por faixa de volume. Sem surpresas.
+                    <CheckoutButton monthlyChats={selectedTier.chats} label={`Começar meus ${DEFAULT_TRIAL_DAYS} dias grátis`} variant="solid" />
+                    <p className="mt-4 text-center text-xs font-medium text-white/40">
+                        Cancele a qualquer momento. Sem fidelidade ou taxas.
                     </p>
                 </div>
             </div>
@@ -187,39 +171,29 @@ function MainPlanCard({
     );
 }
 
-function EnterpriseHorizontalCard() {
+function EnterpriseCard() {
     return (
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between overflow-hidden rounded-[24px] border border-slate-200 bg-white p-8 md:p-10 shadow-sm transition-all hover:shadow-md">
-            <div className="flex-1 xl:pr-12">
-                <div className="mb-4 inline-flex w-fit rounded-[8px] bg-slate-900 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
-                    Sob medida
+        <div className="mx-auto mt-6 w-full max-w-xl flex flex-col items-center gap-6 rounded-[2rem] border border-white/10 bg-gradient-to-br from-zinc-900/90 to-black/90 backdrop-blur-xl p-8 shadow-xl text-center">
+            <div>
+                <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white border border-white/5">
+                    <Building2 className="h-3.5 w-3.5" />
+                    Grandes Operações
                 </div>
-                <h3 className="text-2xl md:text-3xl font-bold text-slate-950 mb-3">{PLANS.enterprise.label}</h3>
-                <p className="text-base leading-relaxed text-slate-600 max-w-2xl">
-                    Acima de {formatChatVolume(CHAT_VOLUME_MAX)} chats por mês, a Dialogy entra com desenho comercial, rollout dedicado e suporte próximo. Ideal para operações massivas.
+                <h3 className="text-2xl font-bold text-white mb-3">Sob Medida</h3>
+                <p className="text-white/50 text-sm leading-relaxed max-w-[280px] mx-auto font-medium">
+                    Acima de {formatChatVolume(CHAT_VOLUME_MAX)} chats. Arquitetura dedicada e executivo de contas.
                 </p>
             </div>
-
-            <div className="mt-8 xl:mt-0 flex-1 grid sm:grid-cols-2 gap-6 xl:gap-8 items-center">
-                 <div className="space-y-4">
-                    <FeatureItem label="Usuários e canais ilimitados" featured />
-                    <FeatureItem label="Arquitetura de operação dedicada" featured />
-                    <FeatureItem label="Implantação e governança sob medida" featured />
-                 </div>
-                 <div className="flex flex-col justify-center space-y-3">
-                     <a
-                        href="https://wa.me/551151994714"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-4 text-sm font-semibold text-white transition-all hover:bg-slate-800 hover:scale-[1.02] shadow-sm"
-                    >
-                        Falar com vendas
-                        <ArrowRight className="h-4 w-4" />
-                    </a>
-                    <p className="text-center text-xs font-medium text-slate-500">
-                        Fluxo fora do checkout automático.
-                    </p>
-                 </div>
+            <div className="w-full">
+                 <a
+                    href="https://wa.me/551151994714"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white text-black px-8 py-4 text-sm font-bold transition-all hover:bg-zinc-200 hover:scale-105 shadow-lg"
+                >
+                    <MessageCircle className="h-5 w-5" />
+                    Falar com Vendas
+                </a>
             </div>
         </div>
     );
@@ -238,43 +212,35 @@ export function ChatVolumePricingSection({
             id="pricing"
             className={
                 isLanding
-                    ? 'relative z-20 -mt-6 bg-[#f8f9fa] px-4 pb-20 sm:px-6 md:-mt-12 md:pb-24'
-                    : 'mx-auto mb-24 max-w-[1400px] px-4 xl:px-8'
+                    ? 'relative z-20 -mt-6 bg-transparent px-4 pb-20 sm:px-6 md:-mt-12 md:pb-24'
+                    : 'mx-auto mb-24 max-w-[1400px] px-4 xl:px-8 pt-12'
             }
         >
-            <div className={isLanding ? 'mx-auto max-w-[1400px]' : ''}>
-                <div className={isLanding ? 'rounded-[32px] border border-black/5 bg-white px-6 py-12 shadow-sm md:px-12 md:py-20' : ''}>
-                    <div className="mx-auto mb-16 max-w-4xl text-center">
-                        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-4 py-1.5 text-xs font-semibold text-emerald-800">
-                            <Sparkles className="h-3.5 w-3.5 text-brand-green" />
-                            {DEFAULT_TRIAL_DAYS} dias grátis, usuários ilimitados e limite por chats
+            <div className={isLanding ? 'mx-auto max-w-[1200px]' : ''}>
+                <div className={isLanding ? 'rounded-[32px] border border-white/5 bg-transparent px-2 py-12 md:px-12 md:py-20' : ''}>
+                    
+                    {/* Header */}
+                    <div className="mx-auto mb-16 max-w-2xl text-center">
+                        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-green/20 bg-brand-green/10 px-4 py-1.5 text-xs font-bold text-brand-green shadow-[0_0_15px_rgba(34,197,94,0.15)]">
+                            <Sparkles className="h-4 w-4" />
+                            Um plano único
                         </div>
-                        <h2 className={`font-bold tracking-tight text-slate-950 ${isLanding ? 'text-4xl md:text-5xl lg:text-6xl' : 'text-5xl md:text-6xl'}`}>
-                            Escolha o volume certo para sua operação.
+                        <h2 className={`font-extrabold tracking-tight text-white ${isLanding ? 'text-4xl md:text-5xl lg:text-6xl' : 'text-4xl md:text-5xl'}`}>
+                            Preço simples para <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-green to-emerald-300">crescer junto</span>.
                         </h2>
-                        <p className={`mx-auto mt-6 max-w-2xl leading-relaxed text-slate-600 ${isLanding ? 'text-lg md:text-xl' : 'text-lg'}`}>
-                            Um plano, tudo incluso. Selecione a faixa de chats mensais e veja o valor atualizar em tempo real.
-                        </p>
                     </div>
 
-                    <div className="max-w-3xl mx-auto">
+                    <div className="max-w-4xl mx-auto flex flex-col items-center">
                         <MainPlanCard
                             selectedTierIndex={tierIndex}
                             onTierChange={setTierIndex}
                         />
+                        <EnterpriseCard />
                     </div>
 
-                    <div className="mt-6 max-w-3xl mx-auto">
-                        <EnterpriseHorizontalCard />
-                    </div>
-
-                    {!isLanding && (
-                        <div className="mx-auto mt-8 max-w-4xl rounded-2xl border border-slate-200 bg-slate-50 px-6 py-4 text-center text-sm font-medium text-slate-600">
-                            Faixas de {formatChatVolume(CHAT_VOLUME_MIN)} a {formatChatVolume(CHAT_VOLUME_MAX)} chats por mês. Trial gratuito de {DEFAULT_TRIAL_DAYS} dias.
-                        </div>
-                    )}
                 </div>
             </div>
         </section>
     );
 }
+

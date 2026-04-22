@@ -52,10 +52,10 @@ export const OmnichannelOrbit = () => {
     return (
         <section
             id="omnichannel"
-            className="relative overflow-hidden border-b border-zinc-100 bg-[#F9FAFB] py-24 md:py-32"
+            className="relative overflow-hidden border-b border-white/5 bg-transparent py-24 md:py-32"
         >
             <div className="pointer-events-none absolute inset-0">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(25,245,178,0.08),transparent_34%),linear-gradient(180deg,#f9fafb_0%,#f5f7fb_100%)]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(25,245,178,0.08),transparent_34%)]" />
                 <div className="absolute left-[5%] top-10 hidden h-80 w-80 rounded-full bg-blue-100/40 blur-[120px] md:block" />
                 <div className="absolute bottom-0 right-[5%] hidden h-96 w-96 rounded-full bg-sky-200/25 blur-[140px] md:block" />
             </div>
@@ -65,25 +65,25 @@ export const OmnichannelOrbit = () => {
                     {...introMotionProps}
                     className="mx-auto max-w-4xl px-4 text-center sm:px-6"
                 >
-                    <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-zinc-200/60 bg-white/95 px-4 py-2 text-xs font-bold uppercase tracking-[0.15em] text-zinc-600 shadow-sm md:bg-white/80 md:backdrop-blur-md">
+                    <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold uppercase tracking-[0.15em] text-white/50 shadow-sm md:backdrop-blur-md">
                         Plataforma Omnichannel
                     </div>
 
-                    <h2 className="mb-6 text-4xl font-extrabold leading-[1.1] tracking-tighter text-zinc-900 md:text-6xl lg:text-7xl">
+                    <h2 className="mb-6 text-4xl font-extrabold leading-[1.1] tracking-tighter text-white md:text-6xl lg:text-7xl">
                         Atenda clientes em <br className="hidden md:block" />
-                        todos os <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">canais.</span>
+                        todos os <span className="bg-gradient-to-r from-brand-green to-emerald-400 bg-clip-text text-transparent">canais.</span>
                     </h2>
 
-                    <p className="mx-auto max-w-2xl text-lg font-medium leading-relaxed text-zinc-500 md:text-xl">
+                    <p className="mx-auto max-w-2xl text-lg font-medium leading-relaxed text-white/50 md:text-xl">
                         Conecte WhatsApp, Instagram, Facebook e ferramentas proprietárias em um único inbox ultra-rápido.
                     </p>
                 </motion.div>
 
                 <motion.div 
                     {...panelMotionProps}
-                    className="relative mx-auto mt-16 max-w-6xl rounded-[32px] border border-black/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.99)_0%,rgba(250,250,252,0.99)_100%)] p-6 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.14)] ring-1 ring-zinc-900/5 md:mt-24 md:rounded-[48px] md:p-12 md:shadow-[0_40px_100px_-20px_rgba(15,23,42,0.15)] md:backdrop-blur-3xl lg:p-16"
+                    className="relative mx-auto mt-16 max-w-6xl rounded-[32px] border border-white/10 bg-zinc-900/50 p-6 shadow-2xl ring-1 ring-white/5 md:mt-24 md:rounded-[48px] md:p-12 md:backdrop-blur-3xl lg:p-16"
                 >
-                    <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.02)_1px,transparent_1px)] bg-[size:40px_40px] opacity-30" />
+                    <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] opacity-30" />
                     
                     <div className="relative z-10 grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
                         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -91,12 +91,12 @@ export const OmnichannelOrbit = () => {
                                 <motion.div
                                     key={item.label}
                                     {...channelMotionProps(index)}
-                                    className="group flex cursor-default items-center gap-3 rounded-2xl border border-zinc-200/50 bg-white px-4 py-3 text-left shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-colors md:transition-all md:hover:bg-zinc-50 md:hover:shadow-[0_16px_30px_-10px_rgba(15,23,42,0.15)]"
+                                    className="group flex cursor-default items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left shadow-sm transition-all md:hover:bg-white/10"
                                 >
-                                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-black/5 md:transition-transform md:group-hover:scale-110 ${item.className}`}>
+                                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/5 md:transition-transform md:group-hover:scale-110 ${item.className}`}>
                                         {item.icon}
                                     </div>
-                                    <span className="text-sm font-bold text-zinc-700">{item.label}</span>
+                                    <span className="text-sm font-bold text-white/80">{item.label}</span>
                                 </motion.div>
                             ))}
                         </div>

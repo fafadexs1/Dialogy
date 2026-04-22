@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { globalSeoStore } from '@/services/global-seo-store';
@@ -12,13 +12,14 @@ const withVersion = (url: string, version: number) => {
   return `${url}${separator}v=${version}`;
 };
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const { settings, updatedAt } = await globalSeoStore.getWithMeta();
 
   if (settings.faviconUrl) {
     const version = updatedAt ? new Date(updatedAt).getTime() : Date.now();
     const target = withVersion(settings.faviconUrl, version);
-    const response = NextResponse.redirect(target, 307);
+    const absoluteTarget = new URL(target, request.url);
+    const response = NextResponse.redirect(absoluteTarget, 307);
     response.headers.set('Cache-Control', 'no-store, must-revalidate');
     response.headers.set('Pragma', 'no-cache');
     return response;

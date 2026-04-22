@@ -1,12 +1,12 @@
-export const HOME_SEO_TITLE = 'Chatbot para WhatsApp, CRM e Atendimento Omnichannel com IA';
+export const HOME_SEO_TITLE = 'Chatbot para WhatsApp e Atendimento Omnichannel com IA';
 
 export const HOME_SEO_DESCRIPTION =
-    'Chatbot inteligente para WhatsApp com CRM, inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte.';
+    'Chatbot inteligente para WhatsApp com inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte.';
 
 export const HOME_SEO_KEYWORDS = [
     'chatbot para WhatsApp',
     'chatbot inteligente',
-    'CRM para WhatsApp',
+    'plataforma de chatbot para WhatsApp',
     'atendimento omnichannel',
     'inbox omnichannel',
     'automacao de atendimento',
@@ -21,9 +21,9 @@ export const HOME_SEO_KEYWORDS = [
 
 export const HOME_SEO_PILLARS = [
     {
-        title: 'CRM para WhatsApp com historico, contexto e distribuicao',
+        title: 'Chatbot para WhatsApp com contexto, triagem e distribuicao',
         description:
-            'Organize contatos, etiquetas, notas internas, responsaveis e etapas comerciais para acompanhar cada conversa do primeiro contato ao fechamento.',
+            'Automatize a primeira resposta, registre o historico e entregue cada conversa para a equipe certa com contexto completo.',
     },
     {
         title: 'Atendimento omnichannel em uma unica operacao',
@@ -57,9 +57,9 @@ export const HOME_SEO_USE_CASES = [
 
 export const HOME_FAQ_ITEMS = [
     {
-        question: 'A Dialogy funciona como CRM para WhatsApp?',
+        question: 'A Dialogy funciona como chatbot para WhatsApp?',
         answer:
-            'Sim. A plataforma organiza contatos, historico, etiquetas, filas, distribuicao entre atendentes e automacoes em um unico inbox para vendas e suporte.',
+            'Sim. A plataforma combina chatbot, inbox omnichannel, distribuicao entre atendentes e automacoes em um unico fluxo para vendas e suporte.',
     },
     {
         question: 'Posso centralizar Instagram, Messenger e outros canais?',

@@ -1252,7 +1252,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
     if (!chat) {
         return (
-            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 border-l border-border/70 bg-background/80 backdrop-blur-xl">
+            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 border-l border-border/80 bg-background/90 backdrop-blur-xl">
                 <div className="flex h-16 items-center border-b border-border px-4 xl:px-6">
                     <h3 className="font-semibold text-foreground">Informações de Contato</h3>
                 </div>
@@ -1299,14 +1299,14 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         <motion.div
             initial={{ x: 30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            className="relative z-10 hidden h-full overflow-x-hidden overflow-y-hidden border-l border-slate-200/80 bg-white/95 shadow-[-20px_0_60px_rgba(15,23,42,0.12)] backdrop-blur-[40px] dark:border-white/5 dark:bg-black dark:shadow-[-20px_0_60px_rgba(0,0,0,0.8)] lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]"
+            className="relative z-10 hidden h-full overflow-x-hidden overflow-y-hidden border-l border-slate-200/80 bg-white shadow-[-20px_0_60px_rgba(15,23,42,0.12)] backdrop-blur-[40px] dark:border-white/5 dark:bg-[#050507] dark:shadow-[-20px_0_60px_rgba(0,0,0,0.8)] lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]"
         >
             {/* Background Glows */}
             <div className="pointer-events-none absolute right-0 top-0 h-[300px] w-[300px] -mr-20 -mt-20 rounded-full bg-blue-200/70 blur-[120px] dark:bg-transparent dark:opacity-0" />
             <div className="pointer-events-none absolute bottom-0 left-0 h-[200px] w-[200px] -mb-20 -ml-20 rounded-full bg-emerald-100/70 blur-[100px] dark:bg-transparent dark:opacity-0" />
 
             {/* Header */}
-            <div className="sticky top-0 z-20 flex flex-col border-b border-slate-200/80 bg-white/90 px-3 pb-2 pt-3 backdrop-blur-md dark:border-white/5 dark:bg-black">
+            <div className="sticky top-0 z-20 flex flex-col border-b border-slate-200/80 bg-white px-3 pb-2 pt-3 backdrop-blur-xl dark:border-white/5 dark:bg-[#050507]">
                 {/* Quick Actions Bar - Icon only */}
                 <div className="flex flex-wrap items-center gap-1 justify-end min-w-0">
                     <TooltipProvider>

@@ -23,16 +23,16 @@ export function RegisterShowcase() {
     ];
 
     return (
-        <div className="relative hidden h-full flex-col items-center justify-between overflow-hidden bg-[linear-gradient(180deg,#fbfaf6_0%,#f4efe4_100%)] p-10 lg:flex">
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.025)_1px,transparent_1px)] bg-[size:28px_28px] opacity-30" />
-            <div className="pointer-events-none absolute left-1/2 top-[42%] h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#20E401]/8 blur-[120px]" />
+        <div className="relative hidden h-full flex-col items-center justify-between overflow-hidden bg-transparent p-10 lg:flex">
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:28px_28px] opacity-30" />
+            <div className="pointer-events-none absolute left-1/2 top-[42%] h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#20E401]/5 blur-[120px]" />
 
             <div className="z-10 w-full text-left">
                 <motion.div
                     initial={{ opacity: 0, y: 18 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.15 }}
-                    className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/80 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600 shadow-[0_16px_36px_-28px_rgba(15,23,42,0.35)]"
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 shadow-[0_16px_36px_-28px_rgba(0,0,0,0.35)] backdrop-blur-md"
                 >
                     Crescimento organizado
                 </motion.div>
@@ -40,7 +40,7 @@ export function RegisterShowcase() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="mb-3 mt-6 max-w-md text-3xl font-semibold tracking-tight text-slate-950"
+                    className="mb-3 mt-6 max-w-md text-3xl font-semibold tracking-tight text-white"
                 >
                     Comece com uma base limpa para escalar atendimento e vendas.
                 </motion.h2>
@@ -48,7 +48,7 @@ export function RegisterShowcase() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
-                    className="max-w-md text-sm leading-7 text-slate-500"
+                    className="max-w-md text-sm leading-7 text-white/50"
                 >
                     Configure sua operação, organize o time e entre já com o ambiente pronto para atender com contexto.
                 </motion.p>
@@ -58,7 +58,7 @@ export function RegisterShowcase() {
                 <motion.div
                     initial={{ scale: 0.8, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    className="relative z-20 flex h-24 w-24 items-center justify-center rounded-full border border-black/10 bg-white shadow-[0_28px_70px_-38px_rgba(15,23,42,0.38)]"
+                    className="relative z-20 flex h-24 w-24 items-center justify-center rounded-full border border-white/10 bg-white/5 backdrop-blur-xl shadow-[0_28px_70px_-38px_rgba(0,0,0,0.5)]"
                 >
                     <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#08110d]">
                         <TrendingUp className="h-7 w-7 text-[#20E401]" />
@@ -66,8 +66,8 @@ export function RegisterShowcase() {
                     <div className="absolute inset-0 rounded-full border border-[#20E401]/15" />
                 </motion.div>
 
-                <div className="absolute h-[150px] w-[150px] rounded-full border border-black/10" />
-                <div className="absolute h-[220px] w-[220px] rounded-full border border-black/10" />
+                <div className="absolute h-[150px] w-[150px] rounded-full border border-white/5" />
+                <div className="absolute h-[220px] w-[220px] rounded-full border border-white/5" />
 
                 {orbits.map((orbit, index) => (
                     <motion.div
@@ -86,7 +86,7 @@ export function RegisterShowcase() {
                         }}
                     >
                         <motion.div
-                            className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-black/10 bg-white p-3 shadow-[0_18px_34px_-28px_rgba(15,23,42,0.28)]"
+                            className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-3 shadow-[0_18px_34px_-28px_rgba(0,0,0,0.4)]"
                             animate={{ rotate: -360 }}
                             transition={{
                                 duration: orbit.duration,
@@ -101,20 +101,20 @@ export function RegisterShowcase() {
                 ))}
             </div>
 
-            <div className="z-10 w-full rounded-[28px] border border-black/10 bg-white/80 p-5 shadow-[0_18px_50px_-36px_rgba(15,23,42,0.3)]">
+            <div className="z-10 w-full rounded-[28px] border border-white/10 bg-white/5 backdrop-blur-xl p-5 shadow-[0_18px_50px_-36px_rgba(0,0,0,0.4)]">
                 <motion.div
                     initial={{ opacity: 0, y: 18 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.45 }}
                 >
-                    <p className="text-sm font-semibold text-slate-950">O que voce configura ao entrar</p>
+                    <p className="text-sm font-semibold text-white">O que voce configura ao entrar</p>
                     <div className="mt-4 space-y-3">
                         {[
                             'Estrutura inicial do workspace e equipe.',
                             'Base pronta para atendimento, comercial e automacoes.',
                             'Mais clareza para crescer sem virar operacao improvisada.',
                         ].map((item) => (
-                            <div key={item} className="flex items-start gap-3 text-sm leading-6 text-slate-600">
+                            <div key={item} className="flex items-start gap-3 text-sm leading-6 text-white/60">
                                 <CheckCircle2 className="mt-0.5 h-4.5 w-4.5 shrink-0 text-[#20E401]" />
                                 {item}
                             </div>

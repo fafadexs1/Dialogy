@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '../components/ui/button';
 import { AlertCircle } from 'lucide-react';
+// Force recompile
 
 export default function Error({
     error,

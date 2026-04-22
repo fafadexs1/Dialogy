@@ -20,7 +20,7 @@ const steps = [
         id: 'automate',
         icon: Bot,
         title: 'Impulsione vendas com automações',
-        description: 'Dispare mensagens segmentadas com base no histórico do CRM. Envie lembretes, reativação e promoções customizadas.',
+        description: 'Dispare mensagens segmentadas com base no histórico das conversas. Envie lembretes, reativação e promoções customizadas.',
     },
     {
         id: 'repeat',
@@ -34,18 +34,18 @@ export const AutomagicShowcase = () => {
     const isMobile = useIsMobile();
 
     return (
-        <section id="journey" className="relative overflow-hidden bg-[#f8f9fa] py-24 md:py-32">
+        <section id="journey" className="relative overflow-hidden bg-transparent py-24 md:py-32">
             <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8">
                 <div className="mb-16 text-center max-w-3xl mx-auto">
-                    <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1.5 text-xs font-semibold text-emerald-800">
+                    <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-green/20 bg-brand-green/5 px-4 py-1.5 text-xs font-semibold text-brand-green">
                         <Sparkles className="h-3.5 w-3.5 text-brand-green" />
                         Jornada de Vendas Conversacional
                     </div>
-                    <h2 className="mb-6 text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl lg:text-6xl">
+                    <h2 className="mb-6 text-4xl font-extrabold tracking-tight text-white md:text-5xl lg:text-6xl">
                         Do primeiro &quot;Oi&quot; <br />
                         ao cliente fiel.
                     </h2>
-                    <p className="text-lg text-slate-600 leading-relaxed md:text-xl">
+                    <p className="text-lg text-white/50 leading-relaxed md:text-xl">
                         Tudo em uma só plataforma. Conecte canais, aplique IA na triagem e dê superpoderes ao seu time comercial.
                     </p>
                 </div>
@@ -54,22 +54,22 @@ export const AutomagicShowcase = () => {
                     {/* Left path */}
                     <div className="relative pl-2 md:pl-0">
                         {/* Connecting vertical line */}
-                        <div className="absolute left-[27px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-brand-green/50 via-slate-200 to-transparent"></div>
+                        <div className="absolute left-[27px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-brand-green/50 via-white/10 to-transparent"></div>
 
                         <div className="flex flex-col gap-10 relative z-10">
                             {steps.map((step, index) => {
                                 const Icon = step.icon;
                                 return (
                                     <div key={step.id} className="group relative flex items-start gap-6">
-                                        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white border border-slate-200 shadow-sm transition-all duration-300 md:group-hover:scale-110 md:group-hover:border-brand-green md:group-hover:shadow-md">
-                                            <Icon className="h-6 w-6 text-slate-600 transition-colors duration-300 md:group-hover:text-brand-green" />
+                                        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-zinc-900 border border-white/10 shadow-sm transition-all duration-300 md:group-hover:scale-110 md:group-hover:border-brand-green md:group-hover:shadow-brand-green/10">
+                                            <Icon className="h-6 w-6 text-white/50 transition-colors duration-300 md:group-hover:text-brand-green" />
                                         </div>
                                         <div className="pt-1.5">
                                             <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-brand-green">
                                                 Etapa {index + 1}
                                             </div>
-                                            <h3 className="mb-2 text-xl font-bold text-slate-950">{step.title}</h3>
-                                            <p className="text-base leading-relaxed text-slate-600">{step.description}</p>
+                                            <h3 className="mb-2 text-xl font-bold text-white">{step.title}</h3>
+                                            <p className="text-base leading-relaxed text-white/50">{step.description}</p>
                                         </div>
                                     </div>
                                 );
@@ -122,7 +122,7 @@ export const AutomagicShowcase = () => {
                                         {/* IA Agent message */}
                                         <div className="flex items-start justify-end">
                                             <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-brand-green px-4 py-3 text-sm leading-relaxed text-slate-950 font-medium">
-                                                A IA já qualificou a necessidade e o tamanho da operação. Negócio criado no CRM.
+                                                A IA já qualificou a necessidade e o tamanho da operação. Lead pronto para vendas.
                                             </div>
                                         </div>
 

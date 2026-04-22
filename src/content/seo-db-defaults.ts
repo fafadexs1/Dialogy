@@ -15,9 +15,9 @@ const UPDATED_AT = '2026-03-26';
 
 export const GLOBAL_SEO_DB_DEFAULTS = {
     siteName: 'Dialogy',
-    slogan: 'CRM para WhatsApp, omnichannel e IA para vendas e suporte.',
+    slogan: 'Chatbot para WhatsApp, omnichannel e IA para vendas e suporte.',
     titleTemplate: '%s | Dialogy',
-    description: 'CRM para WhatsApp com inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte em escala.',
+    description: 'Chatbot para WhatsApp com inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte em escala.',
     faviconUrl: '/favicon.ico',
     logoUrl: '/logo.png',
     defaultOgImage: '/logo-new.jpg',
@@ -106,8 +106,8 @@ export function getPublicSeoDbDefaults(baseUrl: string): SeedRoute[] {
     const routes: Array<Omit<SeedRoute, 'canonical' | 'ogImage' | 'jsonLd'>> = [
         {
             pathname: '/',
-            title: 'CRM para WhatsApp e atendimento omnichannel com IA',
-            description: 'CRM para WhatsApp com inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte em escala.',
+            title: 'Chatbot para WhatsApp e atendimento omnichannel com IA',
+            description: 'Chatbot para WhatsApp com inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte em escala.',
             robots: 'index, follow',
             ogType: 'website',
         },

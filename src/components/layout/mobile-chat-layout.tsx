@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { v4 as uuidv4 } from 'uuid';
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
@@ -1586,7 +1586,7 @@ export default function MobileChatLayout({
         <div className="flex-1 overflow-hidden relative w-full">
           {activeTab === 'chats' && (
             <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
-              <div className="w-full h-full border-r-0 bg-background/70 backdrop-blur-xl">
+              <div className="w-full h-full border-r-0 bg-background/58 backdrop-blur-xl">
                 <ChatList
                   chats={chats}
                   selectedChat={enrichedSelectedChat}
@@ -1608,7 +1608,7 @@ export default function MobileChatLayout({
           )}
           {activeTab === 'crm' && (
             <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
-              <div className="rounded-3xl border border-border/60 bg-background/70 p-5 shadow-sm backdrop-blur-md">
+              <div className="rounded-3xl border border-border/60 bg-background/58 p-5 shadow-sm backdrop-blur-md">
                 <div className="flex items-center gap-4">
                   <div className="h-12 w-12 rounded-2xl bg-blue-500/15 text-blue-500 flex items-center justify-center">
                     <Users className="h-6 w-6" />
@@ -1620,7 +1620,7 @@ export default function MobileChatLayout({
                 </div>
               </div>
               <div className="mt-4 grid gap-3">
-                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm">
+                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-foreground">Segmentos inteligentes</p>
@@ -1629,7 +1629,7 @@ export default function MobileChatLayout({
                     <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm">
+                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-foreground">Pipeline visual</p>
@@ -1638,7 +1638,7 @@ export default function MobileChatLayout({
                     <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm">
+                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-foreground">Insights rapidos</p>
@@ -1652,7 +1652,7 @@ export default function MobileChatLayout({
           )}
           {activeTab === 'settings' && (
             <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
-              <div className="rounded-3xl border border-border/60 bg-background/70 p-5 shadow-sm backdrop-blur-md">
+              <div className="rounded-3xl border border-border/60 bg-background/58 p-5 shadow-sm backdrop-blur-md">
                 <div className="flex items-center gap-4">
                   <div className="h-12 w-12 rounded-2xl bg-muted/60 text-foreground flex items-center justify-center">
                     <Settings className="h-6 w-6" />
@@ -1664,21 +1664,21 @@ export default function MobileChatLayout({
                 </div>
               </div>
               <div className="mt-4 grid gap-3">
-                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm flex items-center justify-between gap-3">
+                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-foreground">Alto contraste</p>
                     <p className="text-xs text-muted-foreground">Melhor legibilidade em ambientes claros.</p>
                   </div>
                   <Switch checked={highContrast} onCheckedChange={(checked) => setHighContrast(checked)} />
                 </div>
-                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm flex items-center justify-between gap-3">
+                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-foreground">Direcao RTL</p>
                     <p className="text-xs text-muted-foreground">Inverta o layout para idiomas RTL.</p>
                   </div>
                   <Switch checked={isRTL} onCheckedChange={(checked) => setIsRTL(checked)} />
                 </div>
-                <div className="rounded-2xl border border-border/60 bg-background/60 p-4 shadow-sm flex items-center justify-between gap-3">
+                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-foreground">Som de notificacao</p>
                     <p className="text-xs text-muted-foreground">Ative o audio para alertas no mobile.</p>
@@ -1704,7 +1704,7 @@ export default function MobileChatLayout({
 
         {/* Bottom Navigation Bar */}
         <div className="px-6 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1 fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-          <div className="mx-auto grid max-w-[280px] grid-cols-3 gap-1 rounded-2xl border border-border/70 bg-background/92 p-1 shadow-xl shadow-slate-300/30 backdrop-blur-xl pointer-events-auto">
+          <div className="mx-auto grid max-w-[280px] grid-cols-3 gap-1 rounded-2xl border border-border/70 bg-background/80 p-1 shadow-xl shadow-slate-300/30 backdrop-blur-xl pointer-events-auto">
             {mobileTabs.map((tab) => {
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
