@@ -288,7 +288,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                                                     <ArrowUpRight className="h-4 w-4 text-white/40 group-hover:text-white/70 transition-colors" />
                                                 </div>
                                                 {lastMessage && (
-                                                    <p className="text-xs text-white/70 line-clamp-2 pl-3 border-l border-white/10">
+                                                    <p className="text-xs text-white/70 line-clamp-2 pl-3 border-l border-white/10" data-no-auto-translate>
                                                         {lastMessage.content || 'Mensagem'}
                                                     </p>
                                                 )}
@@ -347,7 +347,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                                                         {format(new Date(message.createdAt), "dd/MM/yy HH:mm", { locale: ptBR })}
                                                     </span>
                                                 </div>
-                                                <p className="text-sm text-white/90 line-clamp-2 pl-8 border-l-2 border-white/10 group-hover:border-blue-500/50 transition-colors">
+                                                <p className="text-sm text-white/90 line-clamp-2 pl-8 border-l-2 border-white/10 group-hover:border-blue-500/50 transition-colors" data-no-auto-translate>
                                                     {message.content}
                                                 </p>
                                             </button>

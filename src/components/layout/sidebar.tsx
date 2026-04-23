@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/providers/theme-provider";
 import type { User } from "@/lib/types";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { cn } from "@/lib/utils";

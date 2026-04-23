@@ -24,14 +24,14 @@ function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
 
   if (loading || !user) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full min-h-0 items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden overscroll-none">
       <header className="flex flex-shrink-0 items-center justify-between border-b bg-background p-4 sm:p-6">
         <div>
           <h1 className="text-2xl font-bold">{t('Configuracoes')}</h1>
@@ -44,8 +44,8 @@ function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
           </Link>
         </Button>
       </header>
-      <div className="flex min-h-0 flex-1 bg-muted/40">
-        <aside className="flex w-full max-w-xs flex-col border-r bg-background p-4">
+      <div className="flex min-h-0 flex-1 overflow-hidden overscroll-none bg-muted/40">
+        <aside className="flex w-full max-w-xs flex-col overflow-y-auto border-r bg-background p-4">
           <nav className="flex flex-col gap-2">
             {settingsNavItems.map((item) => (
               <Link
@@ -64,7 +64,7 @@ function SettingsLayoutContent({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
         </aside>
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-6">{children}</main>
       </div>
     </div>
   );

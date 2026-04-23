@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { AutoTranslateDom } from "./auto-translate-dom";
 import { defaultLocale, localeOptions, resolveLocale, type Locale } from "./locales";
 import { createTranslator } from "./translator";
 
@@ -82,7 +83,12 @@ export function I18nProvider({
     [locale, setLocale, t]
   );
 
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+  return (
+    <I18nContext.Provider value={value}>
+      <AutoTranslateDom locale={locale} translate={t} />
+      {children}
+    </I18nContext.Provider>
+  );
 }
 
 export function useI18n() {

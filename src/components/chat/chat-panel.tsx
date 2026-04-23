@@ -86,6 +86,9 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSub,
+    DropdownMenuSubContent,
+    DropdownMenuSubTrigger,
     DropdownMenuTrigger,
     DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
@@ -103,7 +106,7 @@ import {
 import MediaPreview, { type MediaFileType } from './media-preview';
 import { cn, formatWhatsappText, formatMessageDate } from '@/lib/utils';
 import MessageItem from './message-item';
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
@@ -113,7 +116,7 @@ import { reportClientMetric } from '@/lib/observability/client';
 import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { motion } from 'framer-motion';
-import { useTheme } from 'next-themes';
+import { useTheme } from '@/providers/theme-provider';
 import { shouldAcceptAiSuggestion } from '@/lib/inbox-ownership';
 
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
@@ -506,7 +509,6 @@ export default function ChatPanel({
     const isProtocolScoped = !!(chat as any)?.protocolScoped;
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
-    const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
     const [isSpellChecking, setIsSpellChecking] = useState(false);
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -1634,6 +1636,51 @@ export default function ChatPanel({
         }
     };
 
+    const escapeHtml = useCallback((value: string) => {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }, []);
+
+    const moveComposerCaretToEnd = useCallback((element: HTMLElement) => {
+        const selection = window.getSelection();
+        if (!selection) return;
+
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        savedRange.current = range.cloneRange();
+    }, []);
+
+    const syncComposerHtml = useCallback((html: string, focusToEnd: boolean = false) => {
+        const element = contentEditableRef.current as HTMLElement | null;
+        if (element && element.innerHTML !== html) {
+            element.innerHTML = html;
+        }
+
+        setNewMessage(html);
+
+        if (chat?.id) {
+            setDraft(chat.id, html);
+        }
+
+        if (focusToEnd && element) {
+            element.focus();
+            moveComposerCaretToEnd(element);
+        }
+    }, [chat?.id, moveComposerCaretToEnd, setDraft]);
+
+    const syncComposerPlainText = useCallback((text: string, focusToEnd: boolean = false) => {
+        const normalized = text.replace(/\r\n/g, '\n');
+        const html = escapeHtml(normalized).replace(/\n/g, '<br>');
+        syncComposerHtml(html, focusToEnd);
+    }, [escapeHtml, syncComposerHtml]);
+
     const filteredShortcuts = useMemo(() => {
         if (!showShortcutSuggestions) return [];
         const command = debouncedMessageInput.substring(debouncedMessageInput.lastIndexOf('/') + 1).toLowerCase();
@@ -1650,12 +1697,8 @@ export default function ChatPanel({
     }, [debouncedMessageInput]);
 
     const handleShortcutSelect = (shortcut: Shortcut) => {
-        if (contentEditableRef.current) {
-            // Use innerText to ensure newlines are handled correctly as plain text
-            contentEditableRef.current.innerText = shortcut.message;
-            setNewMessage(contentEditableRef.current.innerHTML);
-            setShowShortcutSuggestions(false);
-        }
+        syncComposerPlainText(shortcut.message, true);
+        setShowShortcutSuggestions(false);
     };
 
     const handleSpellCheck = async () => {
@@ -1677,7 +1720,7 @@ export default function ChatPanel({
                 body: JSON.stringify({ text: plainText }),
             });
 
-            const data = await res.json();
+            const data = await res.json().catch(() => ({} as { correctedText?: string; error?: string }));
 
             if (!res.ok) {
                 if (inputContainer) inputContainer.classList.remove('spellcheck-processing');
@@ -1689,16 +1732,27 @@ export default function ChatPanel({
                 return;
             }
 
-            if (data.correctedText && contentEditableRef.current) {
+            if (data.correctedText) {
                 const corrected = data.correctedText;
-                const el = contentEditableRef.current;
+                const el = contentEditableRef.current as HTMLElement | null;
 
                 // Remove glow, prepare for typewriter
                 if (inputContainer) inputContainer.classList.remove('spellcheck-processing');
 
+                if (!el) {
+                    syncComposerPlainText(corrected, true);
+                    toast({
+                        title: corrected === plainText ? 'Texto já está correto' : 'Texto corrigido ✨',
+                        description: corrected === plainText
+                            ? 'Nenhum ajuste ortográfico foi necessário.'
+                            : 'A ortografia foi revisada com sucesso.',
+                    });
+                    return;
+                }
+
                 // Clear the text first with a brief pause
                 el.innerText = '';
-                setNewMessage('');
+                syncComposerHtml('');
 
                 // Typewriter effect — character by character
                 const typeSpeed = Math.max(12, Math.min(35, 1200 / corrected.length)); // adaptive speed
@@ -1718,7 +1772,7 @@ export default function ChatPanel({
                 });
 
                 // Set final state
-                setNewMessage(el.innerHTML);
+                syncComposerPlainText(corrected, true);
 
                 // Sparkle explosion effect
                 if (inputContainer) {
@@ -1765,8 +1819,10 @@ export default function ChatPanel({
                 }
 
                 toast({
-                    title: 'Texto corrigido ✨',
-                    description: 'A ortografia foi revisada com sucesso.',
+                    title: corrected === plainText ? 'Texto já está correto' : 'Texto corrigido ✨',
+                    description: corrected === plainText
+                        ? 'Nenhum ajuste ortográfico foi necessário.'
+                        : 'A ortografia foi revisada com sucesso.',
                 });
             }
         } catch (error) {
@@ -1790,6 +1846,8 @@ export default function ChatPanel({
         return msgs.slice().reverse().find(m => !m.from_me && m.type !== 'system');
     }, [chat?.id, messagesByChat]);
 
+    const aiTypingDisplayName = autopilotConfig?.name || 'IA Dialogy';
+
     if (!chat) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-transparent min-w-0 p-6">
@@ -1810,6 +1868,7 @@ export default function ChatPanel({
     const isChatAssignedToMe = (chat.agent?.id || chat.agentId) === currentUser.id;
 
     const showTextInput = !mediaFiles.length;
+    const showAiTypingOverlay = showTextInput && isAiTyping && isComposerTextEmpty;
     const availableAutopilotAgents = autopilotAgents.length > 0 ? autopilotAgents : autopilotConfig ? [autopilotConfig] : [];
     const selectedAutopilotAgentId =
         chat.autopilot_config_id ||
@@ -2185,7 +2244,7 @@ export default function ChatPanel({
                             (replyToId ? visibleMessagesLookup.byId.get(replyToId) : undefined) ||
                             (replyToApiId ? visibleMessagesLookup.byApiMessageId.get(replyToApiId) : undefined);
                         return (
-                            <div className="px-2 md:px-6 py-0.5" id={`message-${message.id}`}>
+                            <div className="px-2 md:px-6 py-0.5" id={`message-${message.id}`} data-no-auto-translate>
                                 <MessageItem
                                     key={message.id}
                                     message={message}
@@ -2270,11 +2329,7 @@ export default function ChatPanel({
                                             size="sm"
                                             variant="outline"
                                             onClick={() => {
-                                                setNewMessage(aiSuggestion.text);
-                                                if (contentEditableRef.current) {
-                                                    contentEditableRef.current.innerHTML = aiSuggestion.text;
-                                                    contentEditableRef.current.focus();
-                                                }
+                                                syncComposerPlainText(aiSuggestion.text, true);
                                                 setAiSuggestion(null);
                                             }}
                                         >
@@ -2301,18 +2356,27 @@ export default function ChatPanel({
                                 <input type="hidden" name="chatId" value={chat.id} />
 
                                 <div data-input-container className={cn(
-                                    "border rounded-2xl relative flex-1 transition-all duration-200 overflow-hidden",
+                                    "relative flex flex-col w-full shadow-sm rounded-[24px] border transition-all duration-200 overflow-hidden",
                                     isInternalNote
                                         ? "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-300 dark:border-yellow-700/40"
-                                        : "bg-white border-slate-200 shadow-[0_20px_45px_-28px_rgba(15,23,42,0.18)] dark:bg-[#0B0B10] dark:border-white/10 dark:shadow-[0_20px_45px_-28px_rgba(0,0,0,0.95)]",
+                                        : "bg-muted/50 border-border dark:border-white/10 dark:bg-black",
                                     canSendFromComposer && !isInternalNote && "shadow-[0_12px_32px_-20px_rgba(34,211,238,0.45)]",
-                                    isSendBurstActive && !isInternalNote && "ring-1 ring-cyan-300/40"
+                                    isSendBurstActive && !isInternalNote && "ring-1 ring-cyan-300/40",
+                                    isAiTyping && !isInternalNote && "ring-1 ring-cyan-400/25 shadow-[0_0_0_1px_rgba(34,211,238,0.12),0_16px_44px_-24px_rgba(6,182,212,0.55)]"
                                 )}>
                                     {!isInternalNote && canSendFromComposer && (
                                         <motion.span
                                             className="pointer-events-none absolute left-6 right-6 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent"
                                             animate={{ opacity: [0.2, 0.75, 0.2], scaleX: [0.88, 1, 0.88] }}
                                             transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                                        />
+                                    )}
+
+                                    {isAiTyping && !isInternalNote && (
+                                        <motion.span
+                                            className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
+                                            animate={{ opacity: [0.15, 0.9, 0.15], scaleX: [0.72, 1.04, 0.72] }}
+                                            transition={{ duration: 1.05, repeat: Infinity, ease: 'easeInOut' }}
                                         />
                                     )}
 
@@ -2326,14 +2390,89 @@ export default function ChatPanel({
                                         />
                                     )}
 
+                                    {/* AI Selector */}
+                                    <div className="flex items-center justify-between px-3 pt-3">
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="h-8 rounded-full px-3 text-sm font-medium gap-2 hover:bg-muted dark:hover:bg-white/10">
+                                                    <Sparkles className="w-4 h-4 text-cyan-500" />
+                                                    {isAiAgentActive ? (autopilotConfig?.name || 'IA Dialogy') : 'IA Desativada'}
+                                                    <ChevronDown className="w-3 h-3 text-muted-foreground" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="start" className="w-[240px]">
+                                                <div className="flex items-center justify-between p-2">
+                                                    <span className="text-sm font-medium">Copiloto IA</span>
+                                                    <Switch checked={isAiAgentActive} onCheckedChange={handleAiSwitchChange} />
+                                                </div>
+                                                <DropdownMenuSeparator />
+                                                {autopilotAgents.map(agent => (
+                                                    <DropdownMenuItem key={agent.id} onClick={() => handleAgentChange(agent.id)} className="flex items-center gap-2">
+                                                        <Bot className="w-4 h-4" />
+                                                        <span className="flex-1 truncate">{agent.name}</span>
+                                                        {autopilotConfig?.id === agent.id && isAiAgentActive && <Check className="w-4 h-4 text-cyan-500" />}
+                                                    </DropdownMenuItem>
+                                                ))}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </div>
+
+                                    {isSpellChecking && (
+                                        <div className="px-4 pt-1">
+                                            <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-300">
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                Revisando ortografia...
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* Text Input Area */}
-                                    <div className="relative min-w-0 px-4 pt-3 pb-1">
-                                        {showTextInput && isComposerTextEmpty && (
+                                    <div className="relative min-w-0 px-4 pt-2 pb-1">
+                                        {showTextInput && isComposerTextEmpty && !showAiTypingOverlay && (
                                             <div className="absolute inset-0 px-4 pt-3 pb-1 pointer-events-none select-none">
                                                 <span className={cn(
                                                     "text-[15px] leading-relaxed",
                                                     isInternalNote ? "text-muted-foreground/50" : "text-slate-400 dark:text-zinc-500"
                                                 )}>Digite aqui o seu texto...</span>
+                                            </div>
+                                        )}
+                                        {showAiTypingOverlay && (
+                                            <div className="absolute inset-0 z-10 px-4 pt-3 pb-2 pointer-events-none select-none">
+                                                <div className="flex items-center gap-2 text-sm font-medium text-cyan-600 dark:text-cyan-300">
+                                                    <Sparkles className="h-4 w-4 animate-pulse" />
+                                                    <span>{aiTypingDisplayName} está escrevendo uma resposta</span>
+                                                    <div className="flex items-center gap-1">
+                                                        {[0, 1, 2].map((dot) => (
+                                                            <motion.span
+                                                                key={`ai-typing-dot-${dot}`}
+                                                                className="h-1.5 w-1.5 rounded-full bg-current"
+                                                                animate={{ opacity: [0.25, 1, 0.25], y: [0, -2, 0] }}
+                                                                transition={{
+                                                                    duration: 0.9,
+                                                                    repeat: Infinity,
+                                                                    ease: 'easeInOut',
+                                                                    delay: dot * 0.14,
+                                                                }}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div className="mt-3 space-y-2">
+                                                    {[72, 94, 61].map((width, index) => (
+                                                        <motion.div
+                                                            key={`ai-typing-line-${index}`}
+                                                            className="h-3 rounded-full bg-gradient-to-r from-cyan-400/10 via-cyan-300/35 to-transparent"
+                                                            style={{ width: `${width}%` }}
+                                                            animate={{ opacity: [0.35, 0.95, 0.35], scaleX: [0.96, 1, 0.96] }}
+                                                            transition={{
+                                                                duration: 1.15,
+                                                                repeat: Infinity,
+                                                                ease: 'easeInOut',
+                                                                delay: index * 0.12,
+                                                            }}
+                                                        />
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
                                         {showTextInput ? (
@@ -2345,7 +2484,8 @@ export default function ChatPanel({
                                                 onPaste={handlePaste}
                                                 className={cn(
                                                     "w-full bg-transparent border-0 focus:ring-0 p-0 resize-none max-h-[120px] min-h-[28px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto text-[15px] leading-relaxed",
-                                                    isInternalNote ? "text-foreground" : "text-slate-900 caret-slate-900 dark:text-white dark:caret-white"
+                                                    isInternalNote ? "text-foreground" : "text-slate-900 caret-slate-900 dark:text-white dark:caret-white",
+                                                    showAiTypingOverlay && "opacity-0"
                                                 )}
                                                 tagName="div"
                                                 onKeyUp={saveCursorPosition}
@@ -2355,233 +2495,18 @@ export default function ChatPanel({
                                     </div>
 
                                     {/* Bottom Toolbar */}
-                                    <div className="flex items-center justify-between px-1.5 pb-1.5 pt-0.5">
+                                    <div className="flex items-center justify-between px-3 pb-3 pt-1">
                                         {/* Left Action Buttons */}
-                                        <div className="flex items-center gap-0.5">
-                                            {/* Mobile: Plus menu */}
-                                            <div className="md:hidden">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            className={cn(
-                                                                "h-8 w-8 flex items-center justify-center rounded-lg border transition-colors duration-150",
-                                                                isInternalNote
-                                                                    ? "text-muted-foreground hover:text-foreground border-border/60 dark:border-zinc-600/50"
-                                                                    : "text-slate-500 hover:text-slate-900 border-slate-200 hover:border-slate-300 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/5"
-                                                            )}
-                                                            disabled={isAiTyping}
-                                                        >
-                                                            <Plus className="h-4 w-4" />
-                                                        </button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="start" side="top" className="w-48 bg-popover/90 backdrop-blur-md border-border">
-                                                        <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="cursor-pointer">
-                                                            <Paperclip className="mr-2 h-4 w-4" />
-                                                            <span>Anexar</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)} className={cn("cursor-pointer", isInternalNote ? "text-yellow-600 focus:text-yellow-700" : "")}>
-                                                            <StickyNote className="mr-2 h-4 w-4" />
-                                                            <span>{isInternalNote ? 'Remover Nota' : 'Nota Interna'}</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => setIsShortcutsOpen(true)} className="cursor-pointer">
-                                                            <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                                            <span>Respostas Rápidas</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                            onClick={handleSpellCheck}
-                                                            disabled={isSpellChecking || isComposerTextEmpty}
-                                                            className="cursor-pointer"
-                                                        >
-                                                            {isSpellChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SpellCheck2 className="mr-2 h-4 w-4" />}
-                                                            <span>Ortográfico</span>
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </div>
-
-                                            {/* Desktop: Individual buttons with separators */}
-                                            <Popover open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen}>
-                                                <div className="hidden md:flex items-center gap-0.5">
-                                                    {/* Plus button with border (like reference) */}
-                                                    <button
-                                                        type="button"
-                                                        className={cn(
-                                                            "h-8 w-8 flex items-center justify-center rounded-lg border transition-colors duration-150 mr-0.5",
-                                                            isInternalNote
-                                                                ? "text-muted-foreground hover:text-foreground border-border/60 dark:border-zinc-600/50"
-                                                                : "text-slate-500 hover:text-slate-900 border-slate-200 hover:border-slate-300 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/5"
-                                                        )}
-                                                        onClick={() => fileInputRef.current?.click()}
-                                                        disabled={isAiTyping}
-                                                        aria-label="Anexar arquivo"
-                                                    >
-                                                        <Plus className="h-4 w-4" />
-                                                    </button>
-
-                                                    {/* Separator */}
-                                                    <div className={cn("w-px h-4 mx-0.5", isInternalNote ? "bg-border/40 dark:bg-zinc-600/40" : "bg-slate-200 dark:bg-white/10")} />
-
-                                                    {/* Emoji */}
-                                                    <Popover>
-                                                        <PopoverTrigger asChild>
-                                                            <button
-                                                                type="button"
-                                                                className={cn(
-                                                                    "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
-                                                                    isInternalNote
-                                                                        ? "text-muted-foreground hover:text-foreground"
-                                                                        : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                                                )}
-                                                                disabled={isAiTyping}
-                                                                aria-label="Abrir emojis"
-                                                            >
-                                                                <Smile className="h-[18px] w-[18px]" />
-                                                            </button>
-                                                        </PopoverTrigger>
-                                                        <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                                            <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme as any} />
-                                                        </PopoverContent>
-                                                    </Popover>
-
-                                                    {/* Attach file */}
-                                                    <button
-                                                        type="button"
-                                                        className={cn(
-                                                            "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
-                                                            isInternalNote
-                                                                ? "text-muted-foreground hover:text-foreground"
-                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                                        )}
-                                                        onClick={() => fileInputRef.current?.click()}
-                                                        disabled={isAiTyping}
-                                                        aria-label="Anexar arquivo"
-                                                    >
-                                                        <Paperclip className="h-[18px] w-[18px]" />
-                                                    </button>
-
-                                                    {/* Separator */}
-                                                    <div className={cn("w-px h-4 mx-0.5", isInternalNote ? "bg-border/40 dark:bg-zinc-600/40" : "bg-slate-200 dark:bg-white/10")} />
-
-                                                    {/* Shortcuts */}
-                                                    <PopoverTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            className={cn(
-                                                                "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
-                                                                isInternalNote
-                                                                    ? "text-muted-foreground hover:text-foreground"
-                                                                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                                            )}
-                                                            disabled={isAiTyping}
-                                                            aria-label="Respostas rápidas"
-                                                        >
-                                                            <MessageSquareQuote className="h-[18px] w-[18px]" />
-                                                        </button>
-                                                    </PopoverTrigger>
-
-                                                    {/* Internal note */}
-                                                    <button
-                                                        type="button"
-                                                        className={cn(
-                                                            "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
-                                                            isInternalNote
-                                                                ? "text-yellow-500"
-                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                                        )}
-                                                        onClick={() => setIsInternalNote(!isInternalNote)}
-                                                        disabled={isAiTyping}
-                                                        aria-label="Nota interna"
-                                                    >
-                                                        <StickyNote className="h-[18px] w-[18px]" />
-                                                    </button>
-
-                                                    {/* Separator */}
-                                                    <div className={cn("w-px h-4 mx-0.5", isInternalNote ? "bg-border/40 dark:bg-zinc-600/40" : "bg-slate-200 dark:bg-white/10")} />
-
-                                                    {/* Spell check */}
-                                                    <TooltipProvider>
-                                                        <Tooltip>
-                                                            <TooltipTrigger asChild>
-                                                                <button
-                                                                    type="button"
-                                                                    className={cn(
-                                                                        "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
-                                                                        isSpellChecking
-                                                                            ? "text-blue-500"
-                                                                            : isInternalNote
-                                                                                ? "text-muted-foreground hover:text-foreground"
-                                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                                                    )}
-                                                                    onClick={handleSpellCheck}
-                                                                    disabled={isSpellChecking || isAiTyping || isComposerTextEmpty}
-                                                                    aria-label="Corretor ortográfico"
-                                                                >
-                                                                    {isSpellChecking ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : <SpellCheck2 className="h-[18px] w-[18px]" />}
-                                                                </button>
-                                                            </TooltipTrigger>
-                                                            <TooltipContent side="top" className="text-xs">
-                                                                Corretor Ortográfico
-                                                            </TooltipContent>
-                                                        </Tooltip>
-                                                    </TooltipProvider>
-                                                </div>
-
-                                                <PopoverContent className="w-80 p-0 bg-popover border-border backdrop-blur-md text-foreground max-h-96 overflow-y-auto" align="start" side="top" sideOffset={12}>
-                                                    <div className="p-2 space-y-1">
-                                                        <h4 className="text-xs font-medium text-muted-foreground px-2 py-1">Atalhos Disponíveis</h4>
-                                                        {shortcuts.length === 0 ? (
-                                                            <p className="text-sm text-muted-foreground px-2 py-2">Nenhum atalho encontrado.</p>
-                                                        ) : (
-                                                            shortcuts.map(shortcut => (
-                                                                <button
-                                                                    key={shortcut.id}
-                                                                    className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors flex flex-col gap-1 group"
-                                                                    onClick={() => {
-                                                                        handleShortcutSelect(shortcut);
-                                                                        setIsShortcutsOpen(false);
-                                                                    }}
-                                                                >
-                                                                    <div className="flex items-center justify-between w-full">
-                                                                        <span className="font-bold text-primary flex items-center gap-2">
-                                                                            /{shortcut.name}
-                                                                            {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
-                                                                        </span>
-                                                                    </div>
-                                                                    <span className="text-muted-foreground truncate w-full text-xs">{shortcut.message}</span>
-                                                                </button>
-                                                            ))
-                                                        )}
-                                                    </div>
-                                                </PopoverContent>
-                                            </Popover>
-
-                                            {/* Mobile: Emoji button (outside dropdown for quick access) */}
-                                            <div className="md:hidden">
-                                                <Popover>
-                                                    <PopoverTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            className={cn(
-                                                                "h-8 w-8 flex items-center justify-center rounded-lg transition-colors duration-150",
-                                                                isInternalNote
-                                                                    ? "text-muted-foreground hover:text-foreground"
-                                                                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                                            )}
-                                                            disabled={isAiTyping}
-                                                            aria-label="Abrir emojis"
-                                                        >
-                                                            <Smile className="h-[18px] w-[18px]" />
-                                                        </button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                                        <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme as any} />
-                                                    </PopoverContent>
-                                                </Popover>
-                                            </div>
-
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                type="button"
+                                                className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/10 transition-colors"
+                                                onClick={() => fileInputRef.current?.click()}
+                                                disabled={isAiTyping}
+                                                aria-label="Anexar arquivo"
+                                            >
+                                                <Plus className="h-4 w-4" />
+                                            </button>
                                             <input
                                                 type="file"
                                                 ref={fileInputRef}
@@ -2590,6 +2515,80 @@ export default function ChatPanel({
                                                 multiple
                                                 accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
                                             />
+
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/10 transition-colors"
+                                                    >
+                                                        <Globe className="h-4 w-4" />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="start">
+                                                    <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)}>
+                                                        <StickyNote className="mr-2 h-4 w-4 text-yellow-500" />
+                                                        {isInternalNote ? 'Remover Nota' : 'Nota Interna'}
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuSub>
+                                                        <DropdownMenuSubTrigger>
+                                                            <MessageSquareQuote className="mr-2 h-4 w-4" />
+                                                            Respostas Rápidas
+                                                        </DropdownMenuSubTrigger>
+                                                        <DropdownMenuSubContent className="w-80 max-h-96 overflow-y-auto" sideOffset={10}>
+                                                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                                                                Atalhos Disponíveis
+                                                            </div>
+                                                            <DropdownMenuSeparator />
+                                                            {shortcuts.length === 0 ? (
+                                                                <DropdownMenuItem disabled>
+                                                                    Nenhum atalho encontrado.
+                                                                </DropdownMenuItem>
+                                                            ) : (
+                                                                shortcuts.map(shortcut => (
+                                                                    <DropdownMenuItem
+                                                                        key={shortcut.id}
+                                                                        className="items-start gap-0 px-0 py-0 focus:bg-transparent"
+                                                                        onSelect={() => handleShortcutSelect(shortcut)}
+                                                                    >
+                                                                        <div className="flex w-full flex-col gap-1 rounded-sm px-2 py-2 hover:bg-accent">
+                                                                            <div className="flex items-center justify-between w-full gap-2">
+                                                                                <span className="font-bold text-primary flex items-center gap-2">
+                                                                                    /{shortcut.name}
+                                                                                    {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
+                                                                                    {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
+                                                                                    {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
+                                                                                </span>
+                                                                            </div>
+                                                                            <span className="w-full truncate text-xs text-muted-foreground">{shortcut.message}</span>
+                                                                        </div>
+                                                                    </DropdownMenuItem>
+                                                                ))
+                                                            )}
+                                                        </DropdownMenuSubContent>
+                                                    </DropdownMenuSub>
+                                                    <DropdownMenuItem onSelect={handleSpellCheck} disabled={isSpellChecking || isComposerTextEmpty}>
+                                                        {isSpellChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SpellCheck2 className="mr-2 h-4 w-4" />}
+                                                        Corretor Ortográfico
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/10 transition-colors"
+                                                        disabled={isAiTyping}
+                                                        aria-label="Abrir emojis"
+                                                    >
+                                                        <Smile className="h-4 w-4" />
+                                                    </button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
+                                                    <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme as any} />
+                                                </PopoverContent>
+                                            </Popover>
                                         </div>
 
                                         {/* Right: Audio / Send */}

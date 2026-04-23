@@ -9,7 +9,7 @@ import type { User } from '@/lib/types';
 import React from 'react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { useAuth } from '@/providers/auth-provider';
-import { useTheme } from 'next-themes';
+import { useTheme } from '@/providers/theme-provider';
 
 export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -17,6 +17,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { resolvedTheme } = useTheme();
   const isInboxRoute = pathname === '/inbox' || pathname.startsWith('/inbox/');
+  const isSettingsRoute = pathname === '/settings' || pathname.startsWith('/settings/');
   const [mounted, setMounted] = React.useState(false);
 
   const noSidebarPrefixes = [
@@ -69,10 +70,35 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [shellThemeClass]);
 
+  React.useEffect(() => {
+    if (!isSettingsRoute) {
+      return;
+    }
+
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtmlOverflow = html.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+    const previousHtmlOverscroll = html.style.overscrollBehavior;
+    const previousBodyOverscroll = body.style.overscrollBehavior;
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    html.style.overscrollBehavior = 'none';
+    body.style.overscrollBehavior = 'none';
+
+    return () => {
+      html.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
+      html.style.overscrollBehavior = previousHtmlOverscroll;
+      body.style.overscrollBehavior = previousBodyOverscroll;
+    };
+  }, [isSettingsRoute]);
+
   return (
     <div
       className={cn(
-        'h-dvh w-full',
+        'h-dvh w-full overflow-hidden overscroll-none',
         shellThemeClass,
         shouldShowSidebar ? 'bg-background' : 'bg-muted/30',
         shouldShowSidebar ? 'grid grid-cols-[auto,1fr]' : 'flex'
@@ -101,8 +127,18 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
         </aside>
       )}
 
-      <main className="min-h-0 min-w-0 flex flex-col flex-1 overflow-y-auto">
-        <div className="flex-1 min-h-0">
+      <main
+        className={cn(
+          'min-h-0 min-w-0 flex flex-1 flex-col',
+          isSettingsRoute ? 'overflow-hidden overscroll-none' : 'overflow-y-auto'
+        )}
+      >
+        <div
+          className={cn(
+            'flex min-h-0 flex-1 flex-col',
+            isSettingsRoute && 'overflow-hidden overscroll-none'
+          )}
+        >
           {children}
         </div>
       </main>

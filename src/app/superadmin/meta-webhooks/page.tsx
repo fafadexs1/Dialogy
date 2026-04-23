@@ -80,7 +80,7 @@ export default async function MetaWebhooksPage({
       OR wl.event ILIKE $${index}
       OR wl.direction ILIKE $${index}
       OR mc.name ILIKE $${index}
-      OR mc.type ILIKE $${index}
+      OR mc.type::text ILIKE $${index}
       OR wl.payload::text ILIKE $${index}
       OR wl.response_body::text ILIKE $${index}
     )`);

@@ -2,6 +2,7 @@ import './globals.css';
 
 import type { Metadata, Viewport } from 'next';
 
+import { getServerLocale } from '@/i18n/server';
 import { buildRootMetadata } from '@/lib/seo/metadata';
 import { JsonLd, getOrganizationSchema, getWebSiteSchema } from '@/lib/seo/schema';
 
@@ -20,13 +21,14 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getServerLocale();
   const [organizationSchema, websiteSchema] = await Promise.all([
     getOrganizationSchema(),
     getWebSiteSchema(),
   ]);
 
   return (
-    <html lang="pt-BR" className="h-full" suppressHydrationWarning>
+    <html lang={locale} className="h-full" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

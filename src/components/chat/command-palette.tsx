@@ -28,14 +28,12 @@ import {
 } from "@/components/ui/command";
 import { useInboxStore } from "@/hooks/use-inbox-store";
 import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export function CommandPalette() {
     const [open, setOpen] = React.useState(false);
     const router = useRouter();
-    const { theme, setTheme } = useTheme();
 
     const chats = useInboxStore((state) => state.chats);
     const selectedChatId = useInboxStore((state) => state.selectedChatId);

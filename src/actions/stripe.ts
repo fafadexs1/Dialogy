@@ -5,9 +5,8 @@ import { headers } from 'next/headers';
 import { db } from '@/lib/db';
 import { applyReferralToUser, getReferralContextForUser } from '@/lib/referrals-server';
 import {
-    calculatePlanPrice,
-    clampMonthlyChats,
     DEFAULT_TRIAL_DAYS,
+    getPlanPrice,
     isSelfServePlanType,
     PLANS,
 } from '@/lib/plans-types';
@@ -140,10 +139,11 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
         const referralContext = await getReferralContextForUser(user.id);
         const stripe = await getStripe();
         const origin = await getRequestOrigin();
-        const monthlyChats = clampMonthlyChats(requestedMonthlyChats, planId);
-        const calculatedMonthlyAmount = calculatePlanPrice(planId, monthlyChats);
-        const unitAmountInCents = Math.round(calculatedMonthlyAmount * 100);
-        const planLabel = PLANS[planId].label;
+        const plan = PLANS[planId];
+        const monthlyChats = plan.limits.monthly_chats;
+        const planPrice = getPlanPrice(planId);
+        const unitAmountInCents = Math.round(planPrice * 100);
+        const planLabel = plan.label;
 
         const userResult = await db.query('SELECT last_active_workspace_id FROM users WHERE id = $1', [user.id]);
         const activeWorkspaceId = userResult.rows[0]?.last_active_workspace_id;
@@ -207,7 +207,7 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
                         metadata: {
                             planId,
                             monthlyChats: String(monthlyChats),
-                            calculatedMonthlyAmount: calculatedMonthlyAmount.toFixed(2),
+                            calculatedMonthlyAmount: planPrice.toFixed(2),
                         },
                     });
 
@@ -256,7 +256,7 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
                         currency: 'brl',
                         product_data: {
                             name: `Dialogy ${planLabel}`,
-                            description: `${monthlyChats.toLocaleString('pt-BR')} chats por mes, usuarios ilimitados e ${DEFAULT_TRIAL_DAYS} dias gratis.`,
+                            description: `Plano ${planLabel} — ${monthlyChats.toLocaleString('pt-BR')} chats/mes, usuarios ilimitados.`,
                         },
                         recurring: {
                             interval: 'month',
@@ -274,7 +274,7 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
                 planId,
                 userId: user.id,
                 monthlyChats: String(monthlyChats),
-                calculatedMonthlyAmount: calculatedMonthlyAmount.toFixed(2),
+                calculatedMonthlyAmount: planPrice.toFixed(2),
                 ...(referralContext.referredByUserId
                     ? {
                         referredByUserId: referralContext.referredByUserId,
@@ -288,7 +288,7 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
                     workspaceId: workspace.id,
                     planId,
                     monthlyChats: String(monthlyChats),
-                    calculatedMonthlyAmount: calculatedMonthlyAmount.toFixed(2),
+                    calculatedMonthlyAmount: planPrice.toFixed(2),
                     ...(referralContext.referredByUserId
                         ? {
                             referredByUserId: referralContext.referredByUserId,

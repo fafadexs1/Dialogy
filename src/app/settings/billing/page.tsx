@@ -29,7 +29,7 @@ import {
     type BillingOverview,
 } from '@/actions/stripe';
 import { useToast } from '@/hooks/use-toast';
-import { calculatePlanPrice, CHAT_VOLUME_MAX, CHAT_VOLUME_MIN, PLANS, type PlanType, type SelfServePlanType } from '@/lib/plans-types';
+import { CHAT_VOLUME_MAX, CHAT_VOLUME_MIN, PLANS, type PlanType, type SelfServePlanType } from '@/lib/plans-types';
 import { cn } from '@/lib/utils';
 
 function formatCurrency(value: number, currency = 'BRL') {
@@ -154,8 +154,8 @@ export default function BillingPage() {
     const { plan: currentPlanId, usage, limits } = planData;
     const currentDetails = PLANS[currentPlanId as PlanType] || PLANS.starter;
     const currentPlanPrice = currentPlanId !== 'enterprise'
-        ? calculatePlanPrice(currentPlanId as SelfServePlanType, limits.monthly_chats)
-        : currentDetails.price;
+        ? currentDetails.price
+        : 0;
     const chatsPct = (usage.chats / (limits.monthly_chats || 1)) * 100;
     const whatsappPct = (usage.whatsapp / (limits.whatsapp || 1)) * 100;
     const billingStatus = getBillingStatusMeta(billingOverview?.status);

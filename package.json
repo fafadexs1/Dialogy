@@ -18,6 +18,7 @@
     "docker:release": "powershell -ExecutionPolicy Bypass -File scripts/docker-release.ps1",
     "docker:release:dry": "powershell -ExecutionPolicy Bypass -File scripts/docker-release.ps1 -SkipDocker",
     "lint": "next lint",
+    "i18n:sync-en": "node scripts/sync-en-us-i18n.mjs",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run"
   },

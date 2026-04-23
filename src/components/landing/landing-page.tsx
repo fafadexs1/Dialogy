@@ -6,6 +6,7 @@ import { BrutalistSocialProof } from './sections/BrutalistSocialProof';
 import { HomeSeoContent } from './sections/HomeSeoContent';
 import { MinimalFooter } from './sections/MinimalFooter';
 import { CanvasRevealEffect } from '@/components/ui/sign-in-flow-1';
+import { FloatingButtons } from './ui/FloatingButtons';
 
 export default function LandingPage() {
     return (
@@ -37,6 +38,7 @@ export default function LandingPage() {
                 </main>
 
                 <MinimalFooter />
+                <FloatingButtons />
             </div>
         </div>
     );
