@@ -1,0 +1,141 @@
+ROTEIRO COMERCIAL DIALOGY
+Titulo: O Mundo Antes da Resposta
+
+OBJETIVO DESTA VERSAO
+Esta versao foi estruturada para geracao em IA de forma pratica.
+Cada cena tem apenas um foco visual principal.
+Cada imagem deve congelar um unico momento.
+Cada video deve continuar esse mesmo momento com movimento simples e controlado.
+As cenas devem parecer continuacao direta umas das outras.
+
+USO RECOMENDADO
+1. Gere primeiro as imagens no GPT, uma por cena.
+2. Use a imagem da cena anterior como referencia visual para a proxima, mantendo personagem, ambiente, celular, luz e paleta.
+3. No Veo 3.1, gere cada cena como um clipe curto, com uma unica acao principal.
+4. Depois una os clipes na ordem abaixo.
+
+CONTINUIDADE OBRIGATORIA ENTRE TODAS AS CENAS
+Mesmo protagonista em todas as cenas: empreendedor de 30 a 40 anos, aparencia profissional, roupa social casual premium, camisa neutra, sem gravata, expressao inteligente e humana.
+Mesmo ambiente em todas as cenas: escritorio ou loja premium de atendimento, mesa de madeira escura, notebook aberto, xicara de cafe discreta, luz natural da manha entrando pela lateral esquerda, fundo elegante desfocado.
+Mesmo celular em todas as cenas: smartphone premium preto fosco, tela brilhante, interface limpa inspirada em plataforma de atendimento multicanal, sem textos legiveis detalhados.
+Mesma linguagem visual: realismo magico tecnologico, fotografia publicitaria premium, look cinematografico, lente anamorfica, profundidade de campo rasa, iluminacao volumetrica suave, reflexos refinados em vidro, tons azul profundo, verde esmeralda, branco quente e pequenos acentos coral.
+Sem musica.
+Narracao em PT-BR.
+Sem logos oficiais de WhatsApp, Instagram ou outras plataformas.
+Sem robo generico.
+Sem mascote infantil.
+Sem referencia a refrigerante, moeda, maquina de venda, lata, garrafa ou liquido gaseificado.
+
+NARRACAO PRINCIPAL
+Por tras de cada mensagem, existe uma intencao.
+Uma duvida. Uma compra. Uma urgencia.
+E quando tudo chega ao mesmo tempo, nao basta responder rapido.
+E preciso entender.
+
+A Dialogy entra antes do caos virar atraso.
+Organiza conversas, reconhece prioridades, aciona a inteligencia certa e ajuda sua equipe a responder como se cada cliente fosse o unico.
+
+Porque no fim, atendimento bom nao parece tecnologia.
+Parece cuidado.
+
+Dialogy. Cada conversa no lugar certo.
+
+
+CENA 1 - A PRESSAO CHEGA
+Foco visual unico: o celular recebe a notificacao enquanto o protagonista sente a pressao.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem cinematografica hiper-realista, 16:9, 8K, de um empreendedor sentado em sua mesa de trabalho em um ambiente premium de atendimento. O foco principal da cena deve ser um smartphone preto fosco sobre a mesa, ao lado da mao do protagonista, no instante exato em que uma nova notificacao chega e a tela acende. O protagonista aparece parcialmente no quadro, em segundo plano, ligeiramente desfocado, olhando para o celular com tensao controlada. O ambiente deve ser sofisticado e realista: notebook aberto desfocado, xicara de cafe discreta, luz natural suave da manha entrando pela esquerda, reflexos elegantes no tampo da mesa, fundo bonito e profissional. Mostrar apenas UMA notificacao nova como elemento central da cena. Nada de varias coisas acontecendo ao mesmo tempo. Interface inspirada na Dialogy, moderna e organizada, sem textos legiveis detalhados. Estilo de fotografia publicitaria premium, lente anamorfica, profundidade de campo rasa, iluminacao volumetrica suave, reflexos refinados, tons azul profundo e branco quente, composicao limpa, dramatic tension, premium tech commercial frame.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 6 segundos, 16:9, 4K, continuando exatamente a cena descrita. Sem musica. Narracao em PT-BR. A unica acao principal e o celular sobre a mesa recebendo uma nova notificacao, enquanto o protagonista, sentado ao fundo, respira fundo e fixa o olhar na tela. Camera quase estatica, com leve push-in cinematografico em direcao ao celular. Nao adicionar novas acoes paralelas. Nao fazer objetos extras se moverem. O notebook permanece parado, a xicara parada, o ambiente elegante e silencioso. O som deve destacar ambiente realista de escritorio premium: teclado distante muito suave, cadeira quase imperceptivel, ar ambiente leve, e uma notificacao curta, seca e memoravel. O som da notificacao deve ser o elemento dominante da cena. Narracao em PT-BR: "Por tras de cada mensagem, existe uma intencao."
+
+
+CENA 2 - A MENSAGEM PULSA
+Foco visual unico: close na tela do celular com a bolha da mensagem pulsando.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem macro cinematografica hiper-realista, 16:9, 8K, mostrando um close extremo do smartphone preto fosco da cena anterior. O foco principal deve ser a tela do celular com uma unica bolha de mensagem luminosa pulsando discretamente no centro da interface. A tela precisa parecer premium, com reflexo fino de vidro, brilho controlado e design limpo. O restante do ambiente deve aparecer apenas como reflexos desfocados e bokeh elegante. O protagonista nao precisa aparecer por inteiro; no maximo, uma sombra suave ou reflexo sutil no vidro. Mostrar apenas UM evento visual: a mensagem recem-chegada pulsando, como se guardasse algo maior dentro dela. Nada de cidade interna ainda. Nada de multiplas mensagens. Nada de caos visual. Estetica ultra premium, realismo magico contido, macro lens, shallow depth of field, glass texture, polished cinematic commercial, elegant light falloff.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 5 segundos, 16:9, 4K, continuando exatamente essa cena. Sem musica. Narracao em PT-BR. A unica acao principal e a bolha da mensagem pulsando na tela do celular, enquanto a camera faz um movimento lento de aproximacao ate quase tocar o vidro. Nada mais deve competir com essa acao. O pulso da mensagem deve ser sutil, sofisticado e hipnotico. O som deve ter um pequeno "plim" cristalino e memoravel, seguido por uma vibracao curta de vidro fino, como se a interface estivesse viva. Sem sons exagerados. Narracao em PT-BR: "Uma duvida. Uma compra. Uma urgencia."
+
+
+CENA 3 - O VIDRO SE ABRE
+Foco visual unico: a tela se abrindo como portal de luz.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem cinematografica hiper-realista, 16:9, 8K, mostrando o instante exato em que a superficie da tela do smartphone parece se abrir como um portal elegante de vidro liquido. O celular continua na mesma mesa e no mesmo angulo geral da cena anterior, mas agora o centro da tela revela uma abertura luminosa azul-esmeralda, muito refinada, como se existisse um universo escondido dentro da interface. O foco principal deve ser apenas essa abertura. Nao mostrar ainda uma cidade complexa inteira. Apenas sugerir profundidade e luz interna. O resto da mesa e do ambiente permanece realista e desfocado. O protagonista pode aparecer muito sutilmente ao fundo, fora de foco. A imagem deve transmitir descoberta, tecnologia premium e misterio controlado. Nao adicionar varios elementos internos, criaturas ou multiplos objetos. Um unico portal elegante e o centro absoluto da composicao. Estilo publicitario de cinema, hyper realistic, luxury tech ad, volumetric glow, glass liquid texture, soft bokeh, ultra refined contrast.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 5 segundos, 16:9, 4K, com a continuidade direta da cena anterior. Sem musica. Narracao em PT-BR. A unica acao principal e a tela do smartphone se abrindo lentamente como um portal de vidro liquido e luz. A camera continua aproximando-se da tela ate atravessar levemente a abertura no final do clipe. Nada mais deve se mover. O som precisa ser muito marcante e limpo: um som de vidro liquido abrindo, um sopro leve de ar digital, e um grave macio de transicao. Sem trilha musical. Narracao em PT-BR: "E quando tudo chega ao mesmo tempo, nao basta responder rapido."
+
+
+CENA 4 - O MUNDO INTERNO
+Foco visual unico: revelacao do interior da Dialogy como uma unica avenida de luz organizada.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem cinematografica hiper-realista, 16:9, 8K, mostrando o primeiro quadro dentro do universo interno da Dialogy. Em vez de mostrar uma cidade inteira complexa, mostre apenas UMA grande avenida luminosa central feita de vidro, luz e trilhos de dados organizados, com profundidade ao fundo. A composicao deve ser simples e clara: um caminho principal atravessando o quadro, com pequenas estruturas laterais discretas, como paineis translcidos e arcos de luz, mas sem excesso de informacao. O espectador deve entender que entrou em um mundo secreto e organizado dentro da mensagem. Nao mostrar varias acoes ao mesmo tempo. Nao mostrar varias mensagens entrando ainda. Apenas a revelacao do espaco principal. Visual premium, sofisticado, realismo magico tecnologico, detalhes minuciosos de vidro, metal escovado, energia luminosa controlada, sem mascotes, sem robo, sem caos visual.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 8 segundos, 16:9, 4K, continuando exatamente a entrada pelo portal. Sem musica. Narracao em PT-BR. A unica acao principal e a camera avancando lentamente por uma avenida luminosa central dentro do universo interno da Dialogy. Nenhum personagem precisa fazer nada importante aqui. O objetivo e apenas revelar o espaco de forma elegante e memoravel. O som deve destacar trilhos de luz suaves, pequenos ecos de vidro refinado, ar circulando de forma limpa e uma sensacao sonora de precisao. Sem excesso. Narracao em PT-BR: "E preciso entender."
+
+
+CENA 5 - A MENSAGEM E CLASSIFICADA
+Foco visual unico: uma unica bolha de mensagem sendo encaixada no trilho correto.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem cinematografica hiper-realista, 16:9, 8K, dentro do universo interno da Dialogy mostrado na cena anterior. O foco principal deve ser uma unica bolha de mensagem luminosa pairando sobre um trilho de dados elegante, no instante exato em que ela esta sendo encaixada no lugar correto. A bolha deve ter brilho sofisticado e forma limpa, sem texto legivel. Ao redor dela, apenas o minimo necessario para contextualizar: um trilho de vidro, uma base luminosa e pequenas marcas visuais de prioridade. Nao mostrar varias mensagens. Nao mostrar muitos operadores. Se houver uma figura abstrata de luz, ela deve ser discreta e secundaria. O centro absoluto da imagem e o encaixe correto de UMA unica conversa. A sensacao deve ser de ordem, inteligencia e satisfacao visual. Estilo premium, sharp focus on the message orb, elegant sci-tech realism, precise lighting, cinematic depth.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 7 segundos, 16:9, 4K, continuando a cena anterior dentro do universo da Dialogy. Sem musica. Narracao em PT-BR. A unica acao principal e uma bolha de mensagem luminosa descendo lentamente e se encaixando com precisao em um trilho de prioridade. Assim que encaixa, um pequeno pulso de luz percorre o trilho. Nao adicionar varias bolhas, nem multiplos movimentos concorrentes. O som deve ser delicioso e memoravel: um leve deslocamento de ar, um "tic" de vidro e um "clac" premium de encaixe perfeito. Narracao em PT-BR: "A Dialogy entra antes do caos virar atraso."
+
+
+CENA 6 - O CONTEXTO APARECE
+Foco visual unico: um unico painel de contexto se abrindo.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem cinematografica hiper-realista, 16:9, 8K, no mesmo universo interno da Dialogy. O foco principal deve ser um painel translcido de contexto se abrindo no ar, logo a frente da bolha ja classificada. O painel deve mostrar apenas sugestoes visuais de historico e memoria, como cartoes, linhas organizadas, sinais de prioridade e estrutura de dados, mas sem textos legiveis especificos. O resto do ambiente deve permanecer limpo e secundario. Nao mostrar varias interfaces ao mesmo tempo. Nao mostrar a cidade toda. Nao mostrar varias mensagens. Apenas um painel elegante se abrindo, como se a plataforma estivesse entendendo a conversa antes da resposta. Visual refinado, clean futuristic realism, glass UI, subtle volumetric light, premium commercial frame.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 7 segundos, 16:9, 4K, com continuidade direta da cena anterior. Sem musica. Narracao em PT-BR. A unica acao principal e um painel translcido de contexto se abrindo de maneira elegante no ar, revelando memoria, prioridade e estrutura da conversa sem textos legiveis. O movimento deve ser calmo, sofisticado e claro. Nao adicionar outras janelas ou elementos em excesso. O som deve trazer camadas finas de vidro desdobrando, pequenos estalos de foco e uma respiracao eletronica leve, como se a inteligencia estivesse compreendendo a mensagem. Narracao em PT-BR: "Organiza conversas, reconhece prioridades, aciona a inteligencia certa..."
+
+
+CENA 7 - A RESPOSTA NASCE
+Foco visual unico: uma unica resposta luminosa sendo formada.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem cinematografica hiper-realista, 16:9, 8K, dentro do universo interno da Dialogy, mostrando o instante em que uma unica resposta luminosa comeca a se formar acima do painel de contexto. A resposta nao deve ser texto legivel; deve ser representada como uma forma de luz elegante, limpa e precisa, como uma sintese perfeita da conversa. O foco principal e apenas esse nascimento da resposta. O painel de contexto fica abaixo, desfocado o suficiente para nao roubar atencao. O ambiente ao redor permanece sofisticado, limpo e escuro o bastante para destacar a luz da resposta. Nada de varias respostas, nada de varias pessoas, nada de caos. Apenas uma resposta perfeita surgindo. Visual premium, restrained magical realism, elegant white light, cinematic composition, luxury technology advertising look.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 6 segundos, 16:9, 4K, continuando diretamente a cena anterior. Sem musica. Narracao em PT-BR. A unica acao principal e a resposta luminosa tomando forma acima do painel de contexto, condensando-se ate ficar estavel, clara e pronta para ser enviada. O movimento deve ser delicado e hipnotico. Nada mais deve disputar a atencao. O som precisa ser limpo e inesquecivel: micro particulas de luz se unindo, um sopro curto de ar e um brilho sonoro cristalino muito discreto. Narracao em PT-BR: "...e ajuda sua equipe a responder como se cada cliente fosse o unico."
+
+
+CENA 8 - A RESPOSTA VOLTA AO MUNDO REAL
+Foco visual unico: a resposta aparece enviada na tela do celular no mundo real.
+
+PROMPT DE IMAGEM - GPT
+Crie uma imagem cinematografica hiper-realista, 16:9, 8K, voltando ao mundo real da primeira cena. O mesmo smartphone preto fosco esta sobre a mesa premium, e agora o foco principal e a tela mostrando visualmente que a resposta foi enviada com sucesso, de maneira limpa e elegante, sem textos detalhados. O protagonista aparece ao fundo, agora com expressao de controle e alivio genuino, sem exagero. O ambiente e o mesmo das cenas iniciais: notebook desfocado, xicara, luz da manha, atmosfera sofisticada. O foco da imagem deve ser apenas o resultado final na tela: a conversa organizada e respondida. Nada de varias acoes. Nada de multiplos clientes aparecendo ao mesmo tempo. Apenas a sensacao de que tudo entrou no lugar certo. Frame final de campanha premium para marca de tecnologia.
+
+PROMPT DE VIDEO - VEO 3.1
+Crie um clipe cinematografico de 8 segundos, 16:9, 4K, encerrando o comercial. Sem musica. Narracao em PT-BR. A unica acao principal e o envio final da resposta na tela do celular, seguido por uma pequena reacao humana do protagonista ao fundo: um alivio sutil, um olhar de confianca, nada exagerado. Camera quase estatica, com leve respiracao cinematografica. O som deve trazer silencio controlado, um som final de envio muito marcante e elegante, e um eco curto da assinatura sonora da Dialogy. Narracao em PT-BR: "Porque no fim, atendimento bom nao parece tecnologia. Parece cuidado. Dialogy. Cada conversa no lugar certo."
+
+
+ASSINATURA SONORA DA DIALOGY
+Usar tres vezes ao longo do filme.
+Som curto, refinado e memoravel.
+Descricao: um "plim" cristalino pequeno, redondo, premium, com leve cauda de vidro fino.
+Usos recomendados:
+1. Quando a mensagem pulsa.
+2. Quando o portal se abre.
+3. No envio final da resposta.
+
+
+REGRAS FINAIS PARA GPT E VEO 3.1
+Cada prompt deve mostrar um unico acontecimento principal.
+Nao empilhar varias acoes na mesma cena.
+Se for necessario mostrar um elemento secundario, ele deve apenas apoiar o foco principal.
+Cada cena deve herdar o visual da anterior.
+Tratar o filme como uma sequencia de quadros conectados, nao como um unico prompt gigante.
+Sem musica.
+Narracao em PT-BR.
