@@ -76,6 +76,7 @@ describe('delivery hub helpers', () => {
                   name: 'Combo Smash',
                   description: 'Batata e refri',
                   price: '34,90',
+                  imageUrl: '',
                 },
               ],
             },

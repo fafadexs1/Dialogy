@@ -8,10 +8,8 @@ import { MessageSquare, User as UserIcon, Phone, Calendar, Loader2, Sparkles, Ar
 import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
 import { useInboxStore } from '@/hooks/use-inbox-store';
-import { searchChatsAndContacts, getOrCreateChatAction } from '@/actions/chats';
+import { searchChatsAndContacts, getMergedContactThreadAction } from '@/actions/chats';
 import type { Chat, Contact, Message } from '@/lib/types';
-import { buildChatProtocol } from '@/lib/utils';
-import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 
 interface SearchDetailsDialogProps {
@@ -32,7 +30,7 @@ const FILTER_LABELS: Record<SearchResultFilter, string> = {
     messages: 'Mensagens',
 };
 
-export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, workspaceId, onSelectChat }: SearchDetailsDialogProps) {
+export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspaceId, onSelectChat }: SearchDetailsDialogProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [remoteChats, setRemoteChats] = useState<Chat[]>([]);
     const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
@@ -40,7 +38,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
     const [error, setError] = useState<string | null>(null);
     const [resultFilter, setResultFilter] = useState<SearchResultFilter>('all');
     const upsertChats = useInboxStore((state) => state.upsertChats);
-    const router = useRouter();
+    const setMessagesForChat = useInboxStore((state) => state.setMessagesForChat);
     const { toast } = useToast();
 
     const isProtocolSearch = searchQuery.trim().toUpperCase().startsWith('PRT-');
@@ -91,6 +89,19 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
 
     const handleSelectChat = (chat: Chat) => {
         upsertChats([chat]);
+        if (chat.messages?.length) {
+            const firstMessage = chat.messages[0];
+            const lastMessage = chat.messages[chat.messages.length - 1];
+            setMessagesForChat(
+                chat.id,
+                chat.messages,
+                lastMessage?.createdAt ?? null,
+                firstMessage?.createdAt ?? null,
+                firstMessage?.id ?? null,
+                false,
+                true
+            );
+        }
         onSelectChat(chat);
         onOpenChange(false);
     };
@@ -98,33 +109,15 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
     const handleContactClick = async (contact: Contact) => {
         if (!workspaceId) return;
 
-        // Check if we already have a chat for this contact in the list
-        const existingChat = chats.find(c => c.contact.id === contact.id) || remoteChats.find(c => c.contact.id === contact.id);
-        if (existingChat) {
-            handleSelectChat(existingChat);
-            return;
-        }
-
-        // If not, fetch or create
         try {
-            const result = await getOrCreateChatAction(workspaceId, contact.id);
-            if (result.chatId) {
-                const newChat: Chat = {
-                    id: result.chatId,
-                    status: 'gerais', // Default for new
-                    workspace_id: workspaceId,
-                    contact: contact,
-                    messages: [],
-                    unreadCount: 0,
-                    updatedAt: new Date().toISOString(),
-                    protocol: buildChatProtocol(result.chatId),
-                };
-                handleSelectChat(newChat);
+            const result = await getMergedContactThreadAction(workspaceId, contact.id);
+            if (result.chat) {
+                handleSelectChat(result.chat);
             } else if (result.error) {
                 toast({ title: "Erro", description: result.error, variant: "destructive" });
             }
         } catch (e) {
-            toast({ title: "Erro", description: "Falha ao abrir conversa.", variant: "destructive" });
+            toast({ title: "Erro", description: "Falha ao abrir historico agregado.", variant: "destructive" });
         }
     };
 
@@ -210,26 +203,35 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, chats, 
                                     Contatos no CRM ({crmContacts.length})
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {crmContacts.map(contact => (
-                                        <button
-                                            key={contact.id}
-                                            onClick={() => handleContactClick(contact)}
-                                            className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-colors text-left group"
-                                        >
-                                            <Avatar className="h-10 w-10 border border-white/10">
-                                                <AvatarImage src={contact.avatar_url} />
-                                                <AvatarFallback className="bg-zinc-800">{contact.name?.charAt(0) || '?'}</AvatarFallback>
-                                            </Avatar>
-                                            <div className="min-w-0 flex-1">
-                                                <p className="font-medium text-white truncate group-hover:text-blue-300 transition-colors">{contact.name}</p>
-                                                <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
-                                                    <Phone className="h-3 w-3" />
-                                                    {contact.phone_number_jid || contact.email || 'Dados indisponíveis'}
-                                                </p>
-                                            </div>
-                                            <ArrowUpRight className="h-4 w-4 text-white/40 group-hover:text-white/70 transition-colors opacity-0 group-hover:opacity-100" />
-                                        </button>
-                                    ))}
+                                    {crmContacts.map(contact => {
+                                        const mergedCount = contact.relatedContactCount || 1;
+
+                                        return (
+                                            <button
+                                                key={contact.id}
+                                                onClick={() => handleContactClick(contact)}
+                                                className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-colors text-left group"
+                                            >
+                                                <Avatar className="h-10 w-10 border border-white/10">
+                                                    <AvatarImage src={contact.avatar_url} />
+                                                    <AvatarFallback className="bg-zinc-800">{contact.name?.charAt(0) || '?'}</AvatarFallback>
+                                                </Avatar>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="font-medium text-white truncate group-hover:text-blue-300 transition-colors">{contact.name}</p>
+                                                    <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                                                        <Phone className="h-3 w-3" />
+                                                        {contact.phone_number_jid || contact.email || 'Dados indisponíveis'}
+                                                    </p>
+                                                    {mergedCount > 1 && (
+                                                        <p className="text-[11px] text-blue-200/80 truncate">
+                                                            {mergedCount} cadastros equivalentes
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <ArrowUpRight className="h-4 w-4 text-white/40 group-hover:text-white/70 transition-colors opacity-0 group-hover:opacity-100" />
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}

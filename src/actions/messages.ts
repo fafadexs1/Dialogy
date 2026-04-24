@@ -23,6 +23,7 @@ import {
     type MetaChannelRecord,
 } from '@/services/meta/meta-channel.service';
 import { withDebug } from '@/lib/observability/logger';
+import { recordInboxEvent } from '@/lib/observability/inbox-events';
 import type { Chat, Contact } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
@@ -578,6 +579,12 @@ async function internalSendMessage(
 
     try {
         await client.query('BEGIN');
+        if (messageId) {
+            await client.query(
+                `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+                ['agent_message_send', messageId]
+            );
+        }
         chatId = (await resolveCanonicalWhatsappChatId(client, chatId)) || chatId;
 
         // Carrega info básica do chat para atribuição de agente (independente do canal)
@@ -623,6 +630,30 @@ async function internalSendMessage(
 
         // Emulate source property for downstream logic
         chatInfo.source = outboundSourceFromApi || source;
+
+        if (messageId) {
+            const existingMessageRes = await client.query(
+                `SELECT *
+                 FROM messages
+                 WHERE id = $1
+                   AND chat_id = $2
+                   AND workspace_id = $3
+                 LIMIT 1`,
+                [messageId, chatId, workspaceId]
+            );
+
+            if ((existingMessageRes.rowCount ?? 0) > 0) {
+                persistedMessage = mapDbMessageToFrontend(existingMessageRes.rows[0]);
+                await client.query('COMMIT');
+                recordInboxEvent('message_send_idempotent_replay', {
+                    chatId,
+                    workspaceId,
+                    messageId,
+                    tabId,
+                });
+                return { success: true, message: persistedMessage };
+            }
+        }
 
         // Se for humano e não tiver agente (independente do status), atribui o agente
         const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
@@ -679,6 +710,13 @@ async function internalSendMessage(
         );
 
         persistedMessage = mapDbMessageToFrontend(insertRes.rows[0]);
+        recordInboxEvent('message_persisted_pending', {
+            chatId,
+            workspaceId,
+            messageId: persistedMessage.id,
+            tabId,
+            source: outboundSourceFromApi || source || 'whatsapp',
+        });
         backgroundTaskData = {
             chatInfo,
             instanceName,
@@ -828,6 +866,12 @@ async function internalSendMessage(
                         senderType: metadata?.sentBy === 'system_agent' ? 'system_agent' : 'user',
                         tabId
                     });
+                    recordInboxEvent('message_send_enqueued', {
+                        chatId,
+                        workspaceId: persistedMessage.workspace_id,
+                        messageId,
+                        instanceName,
+                    });
                     // Retornamos aqui pois o worker vai atualizar o status depois
                     return;
                 }
@@ -856,11 +900,23 @@ async function internalSendMessage(
                     message_id_from_api = $1
                 WHERE id = $2
             `, [externalId, messageId]);
+            recordInboxEvent('message_send_sent', {
+                chatId,
+                workspaceId: persistedMessage.workspace_id,
+                messageId,
+                externalId,
+            });
 
         } catch (bgError) {
-            console.error('[INTERNAL_SEND_BG] Falha no envio em background:', bgError);
             // Atualiza para FAILED
             const errorMessage = formatMetaSendError(bgError);
+            recordInboxEvent('message_send_failed', {
+                chatId,
+                workspaceId: persistedMessage.workspace_id,
+                messageId: backgroundTaskData?.messageId,
+                reason: errorMessage,
+            }, 'warn');
+            console.error('[INTERNAL_SEND_BG] Falha no envio em background:', bgError);
             const errorDetails = {
                 source: 'dialogy_send_background',
                 status: 'FAILED',

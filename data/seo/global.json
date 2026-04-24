@@ -3,7 +3,7 @@
   "slogan": "Chatbot para WhatsApp, omnichannel e IA para vendas e suporte.",
   "titleTemplate": "%s | Dialogy",
   "description": "Chatbot para WhatsApp com inbox omnichannel, automacao de atendimento, IA para qualificar leads e analytics para vendas e suporte em escala.",
-  "faviconUrl": "https://ouvjsqkouuilrupuksxm.supabase.co/storage/v1/object/public/temp-media/Dialogy.png",
+  "faviconUrl": "/favicon.ico",
   "logoUrl": "/logo.png",
   "themeColor": "#ffffff"
 }

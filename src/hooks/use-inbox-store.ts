@@ -1,157 +1,13 @@
 import { create } from 'zustand';
 import type { Chat, Contact, Message } from '@/lib/types';
 import { cacheService } from '@/lib/cache';
-import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
-
-type MessagesRecord = Record<string, Message[]>;
-type TimestampRecord = Record<string, string | null>;
-type IdRecord = Record<string, string | null>;
-type BooleanRecord = Record<string, boolean>;
-
-type InboxState = {
-  chats: Chat[];
-  messagesByChat: MessagesRecord;
-  messageThreadOrder: string[];
-  selectedChatId: string | null;
-  lastSyncChats: string | null;
-  lastSyncMessages: TimestampRecord;
-  oldestMessageDateByChat: TimestampRecord;
-  oldestMessageIdByChat: IdRecord;
-  hasMoreHistoryByChat: BooleanRecord;
-  hasMoreChats: boolean;
-  setInitialData: (payload: {
-    chats: Chat[];
-    selectedChatId: string | null;
-    messages: Message[];
-    lastSyncChats: string | null;
-    lastSyncMessageForSelected: string | null;
-    oldestMessageDate: string | null;
-    oldestMessageId: string | null;
-    hasMoreHistory: boolean;
-    hasMoreChats: boolean;
-  }) => void;
-  setSelectedChatId: (chatId: string | null) => void;
-  upsertChats: (chats: Chat[], lastSyncChats?: string | null) => void;
-  appendChats: (chats: Chat[]) => void;
-  setHasMoreChats: (hasMore: boolean) => void;
-  updateChatContact: (contact: Contact) => void;
-  setMessagesForChat: (chatId: string, messages: Message[], lastSync?: string | null, oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean, replace?: boolean) => void;
-  appendMessagesToChat: (chatId: string, messages: Message[], lastSync?: string | null) => void;
-  prependMessagesToChat: (chatId: string, messages: Message[], oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean) => void;
-  markChatAsRead: (chatId: string) => void;
-  incrementUnread: (chatId: string) => void;
-  removeMessagesForChat: (chatId: string, predicate: (message: Message) => boolean) => void;
-  markMessagesAsReadByRecipient: (chatId: string, upToDate: string) => void;
-  updateMessage: (chatId: string, messageId: string, updates: Partial<Message>) => void;
-  replaceOptimisticMessage: (chatId: string, optimisticId: string, realMessage: Message) => void;
-  updateChat: (chatId: string, updates: Partial<Chat>) => void;
-  removeChat: (chatId: string) => void;
-  drafts: Record<string, string>;
-  setDraft: (chatId: string, text: string) => void;
-  reset: () => void;
-};
-
-const baseState = {
-  chats: [] as Chat[],
-  messagesByChat: {} as MessagesRecord,
-  messageThreadOrder: [] as string[],
-  selectedChatId: null as string | null,
-  lastSyncChats: null as string | null,
-  lastSyncMessages: {} as TimestampRecord,
-  oldestMessageDateByChat: {} as TimestampRecord,
-  oldestMessageIdByChat: {} as IdRecord,
-  hasMoreHistoryByChat: {} as BooleanRecord,
-  hasMoreChats: false,
-  drafts: {} as Record<string, string>,
-};
-
-const getChatSortValue = (chat: Chat): number => {
-  if (chat.updatedAt) {
-    return new Date(chat.updatedAt).getTime();
-  }
-  const lastMessage = chat.messages?.[chat.messages.length - 1];
-  if (lastMessage) {
-    return new Date(lastMessage.createdAt).getTime();
-  }
-  return 0;
-};
-
-const dedupeChats = (chats: Chat[], preserveChatId?: string | null) =>
-  dedupeActiveWhatsappChatsByIdentity({
-    chats,
-    getId: (chat) => chat.id,
-    getStatus: (chat) => chat.status,
-    getPhoneOrJid: (chat) => chat.contact?.phone_number_jid,
-    preserveChatId,
-  });
-
-const MAX_IN_MEMORY_MESSAGE_THREADS = 12;
-
-type MessageThreadState = Pick<
-  InboxState,
-  'messagesByChat' | 'messageThreadOrder' | 'lastSyncMessages' | 'oldestMessageDateByChat' | 'oldestMessageIdByChat' | 'hasMoreHistoryByChat' | 'selectedChatId'
->;
-
-function touchMessageThread(order: string[], chatId: string | null | undefined): string[] {
-  if (!chatId) return order;
-  const next = order.filter((id) => id !== chatId);
-  next.push(chatId);
-  return next;
-}
-
-function pruneMessageThreads(state: MessageThreadState): Pick<
-  InboxState,
-  'messagesByChat' | 'messageThreadOrder' | 'lastSyncMessages' | 'oldestMessageDateByChat' | 'oldestMessageIdByChat' | 'hasMoreHistoryByChat'
-> {
-  const retainedIds = new Set<string>();
-
-  if (state.selectedChatId) {
-    retainedIds.add(state.selectedChatId);
-  }
-
-  for (let index = state.messageThreadOrder.length - 1; index >= 0; index -= 1) {
-    const chatId = state.messageThreadOrder[index];
-    if (!state.messagesByChat[chatId]) continue;
-    retainedIds.add(chatId);
-    if (retainedIds.size >= MAX_IN_MEMORY_MESSAGE_THREADS) break;
-  }
-
-  const nextMessagesByChat: MessagesRecord = {};
-  const nextLastSyncMessages: TimestampRecord = {};
-  const nextOldestMessageDateByChat: TimestampRecord = {};
-  const nextOldestMessageIdByChat: IdRecord = {};
-  const nextHasMoreHistoryByChat: BooleanRecord = {};
-
-  retainedIds.forEach((chatId) => {
-    if (state.messagesByChat[chatId]) {
-      nextMessagesByChat[chatId] = state.messagesByChat[chatId];
-    }
-    if (chatId in state.lastSyncMessages) {
-      nextLastSyncMessages[chatId] = state.lastSyncMessages[chatId];
-    }
-    if (chatId in state.oldestMessageDateByChat) {
-      nextOldestMessageDateByChat[chatId] = state.oldestMessageDateByChat[chatId];
-    }
-    if (chatId in state.oldestMessageIdByChat) {
-      nextOldestMessageIdByChat[chatId] = state.oldestMessageIdByChat[chatId];
-    }
-    if (chatId in state.hasMoreHistoryByChat) {
-      nextHasMoreHistoryByChat[chatId] = state.hasMoreHistoryByChat[chatId];
-    }
-  });
-
-  return {
-    messagesByChat: nextMessagesByChat,
-    messageThreadOrder: state.messageThreadOrder.filter((chatId) => retainedIds.has(chatId)),
-    lastSyncMessages: nextLastSyncMessages,
-    oldestMessageDateByChat: nextOldestMessageDateByChat,
-    oldestMessageIdByChat: nextOldestMessageIdByChat,
-    hasMoreHistoryByChat: nextHasMoreHistoryByChat,
-  };
-}
+import { appendNewChatsById, dedupeChats, mergeChatsById, sortChatsByActivity } from '@/hooks/inbox-store/chat-list-slice';
+import { dedupeMessages, pruneMessageThreads, removeReplacedOptimisticMessages, touchMessageThread } from '@/hooks/inbox-store/message-thread-slice';
+import { normalizeDraftForStorage } from '@/hooks/inbox-store/draft-slice';
+import { baseInboxState, type InboxState } from '@/hooks/inbox-store/types';
 
 export const useInboxStore = create<InboxState>((set, get) => ({
-  ...baseState,
+  ...baseInboxState,
   setInitialData: ({
     chats,
     selectedChatId,
@@ -212,7 +68,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
 
       return {
         chats: dedupeChats(
-          chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
+          sortChatsByActivity(chats),
           selectedChatId
         ),
         selectedChatId,
@@ -255,25 +111,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       return;
     }
     set((state) => {
-      const chatMap = new Map<string, Chat>();
-      state.chats.forEach((chat) => chatMap.set(chat.id, chat));
-      incomingChats.forEach((chat) => {
-        const existing = chatMap.get(chat.id);
-        if (existing) {
-          chatMap.set(chat.id, {
-            ...existing,
-            ...chat,
-            messages: chat.messages?.length ? chat.messages : existing.messages,
-            contact: chat.contact || existing.contact,
-            agent: chat.agent || existing.agent,
-          });
-        } else {
-          chatMap.set(chat.id, chat);
-        }
-      });
-      const nextChats = Array.from(chatMap.values()).sort(
-        (a, b) => getChatSortValue(b) - getChatSortValue(a)
-      );
+      const nextChats = mergeChatsById(state.chats, incomingChats);
       return {
         chats: dedupeChats(nextChats, state.selectedChatId),
         lastSyncChats: lastSyncChats ?? state.lastSyncChats,
@@ -290,16 +128,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
   appendChats: (incomingChats) => {
     if (!incomingChats.length) return;
     set((state) => {
-      const chatMap = new Map<string, Chat>();
-      state.chats.forEach((chat) => chatMap.set(chat.id, chat));
-      incomingChats.forEach((chat) => {
-        if (!chatMap.has(chat.id)) {
-          chatMap.set(chat.id, chat);
-        }
-      });
-      const nextChats = Array.from(chatMap.values()).sort(
-        (a, b) => getChatSortValue(b) - getChatSortValue(a)
-      );
+      const nextChats = appendNewChatsById(state.chats, incomingChats);
       return { chats: dedupeChats(nextChats, state.selectedChatId) };
     });
   },
@@ -350,40 +179,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     if (!messages.length) return;
     set((state) => {
       const current = state.messagesByChat[chatId] || [];
-      const cleanedCurrent = messages.reduce((acc, incoming) => {
-        if (incoming.sentByTab) {
-          const incomingOptimisticId = incoming.metadata?.optimisticId;
-          const contentCandidates = acc.filter(
-            (message) =>
-              message.optimistic &&
-              message.sentByTab === incoming.sentByTab &&
-              message.content === incoming.content
-          );
-          const contentMatchIdToRemove =
-            contentCandidates.length === 1 ? contentCandidates[0].id : null;
-          return acc.filter(
-            (message) => {
-              // Remove only the matching optimistic message for this tab.
-              // Prefer ID/optimisticId match; use content match only when it's unambiguous.
-              if (message.optimistic && message.sentByTab === incoming.sentByTab) {
-                // Strict ID match: Always replace.
-                if (message.id === incoming.id) return false;
-
-                // Optimistic ID match (via metadata): Logic for when server ID differs but it's the same message.
-                if (incomingOptimisticId && message.id === incomingOptimisticId) return false;
-
-                // Content match: If IDs differ (server ignored client ID), assume same message if content matches.
-                // This prevents "stuck as sending" duplicates while preserving other distinct pending messages.
-                if (contentMatchIdToRemove && message.id === contentMatchIdToRemove) return false;
-
-                return true;
-              }
-              return true;
-            }
-          );
-        }
-        return acc;
-      }, current);
+      const cleanedCurrent = removeReplacedOptimisticMessages(current, messages);
       const merged = dedupeMessages([...cleanedCurrent, ...messages]);
       const latest = merged[merged.length - 1];
       const chats = state.chats.map((chat) =>
@@ -410,7 +206,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       });
       return {
         ...prunedState,
-        chats: chats.sort((a, b) => getChatSortValue(b) - getChatSortValue(a)),
+        chats: sortChatsByActivity(chats),
       };
     });
 
@@ -593,30 +389,6 @@ export const useInboxStore = create<InboxState>((set, get) => ({
   },
   reset: () =>
     set({
-      ...baseState,
+      ...baseInboxState,
     }),
 }));
-
-function dedupeMessages(messages: Message[]): Message[] {
-  const seen = new Map<string, Message>();
-  messages.forEach((message) => {
-    seen.set(message.id, message);
-  });
-  return Array.from(seen.values()).sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
-}
-
-function normalizeDraftForStorage(text: string): string {
-  if (!text) return '';
-
-  const plainText = text
-    .replace(/<\/(div|p)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/<[^>]*>/g, '')
-    .replace(/\u200B/g, '')
-    .trim();
-
-  return plainText.length > 0 ? text : '';
-}

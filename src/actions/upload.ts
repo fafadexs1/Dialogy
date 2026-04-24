@@ -25,8 +25,8 @@ export async function uploadFavicon(formData: FormData) {
     const bytes = await file.arrayBuffer();
     let buffer = Buffer.from(bytes);
 
-    // Convert to ICO if not already .ico
-    if (!file.name.endsWith('.ico')) {
+    // Convert to ICO if not already .ico.
+    if (!file.name.toLowerCase().endsWith('.ico')) {
         try {
             // Lazy load dependencies to avoid cold start impact if not used
             const pngToIco = require('png-to-ico');
@@ -41,10 +41,8 @@ export async function uploadFavicon(formData: FormData) {
 
             buffer = await generateIco(pngBuffer);
         } catch (e) {
-            console.error("ICO Conversion failed, saving original buffer as ico (might fail in browser):", e);
-            // If conversion fails, we might still try to save it, but really we should probably error or warn.
-            // For now, we proceed with the original buffer, but this is risky if it's not a valid ICO structure.
-            // Ideally, we just let it fail or the user sees the error.
+            console.error('ICO conversion failed:', e);
+            throw new Error('Failed to convert uploaded image to a browser-compatible favicon.');
         }
     }
 

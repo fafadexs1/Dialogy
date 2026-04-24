@@ -19,8 +19,12 @@ import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-con
 import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 import { touchUserPresenceActivity } from '@/lib/presence-server';
 import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
+import { buildWhatsappLookupDigits } from '@/lib/whatsapp/contact-identity';
+import { mergeEquivalentContacts } from '@/lib/whatsapp/contact-thread';
 import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
+import { requireWorkspaceAccess } from '@/server/inbox/access';
+import { loadContactThreadContext } from '@/server/inbox/contact-thread-service';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -1288,6 +1292,11 @@ export const searchChatsAndContacts = withDebug(
             return { chats: [], contacts: [], messages: [], error: "Usuário não autenticado." };
         }
 
+        const access = await requireWorkspaceAccess(user.id, workspaceId);
+        if (!access.ok) {
+            return { chats: [], contacts: [], messages: [], error: access.error };
+        }
+
         if (!query || query.trim().length < 2) {
             return { chats: [], contacts: [], messages: [] };
         }
@@ -1297,6 +1306,7 @@ export const searchChatsAndContacts = withDebug(
             const isProtocolQuery = protocolTerm.startsWith('PRT-');
             const timezone = await getWorkspaceTimezone(workspaceId);
             const searchTerm = `%${query.trim()}%`;
+            const searchLookupDigits = buildWhatsappLookupDigits(query.trim());
 
             // Protocol search: return only the chat and its messages (no cross-content search)
             if (isProtocolQuery) {
@@ -1317,6 +1327,7 @@ export const searchChatsAndContacts = withDebug(
                         cont.name AS contact_name,
                         cont.avatar_url AS contact_avatar_url,
                         cont.email AS contact_email,
+                        cont.phone AS contact_phone,
                         cont.phone_number_jid AS contact_phone_number_jid,
                         cont.address AS contact_address,
                         t.name AS team_name,
@@ -1467,6 +1478,8 @@ export const searchChatsAndContacts = withDebug(
                   AND (
                       cont.name ILIKE $2
                       OR cont.phone_number_jid ILIKE $2
+                      OR cont.phone ILIKE $2
+                      OR regexp_replace(COALESCE(cont.phone_number_jid, cont.phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
                       OR cont.email ILIKE $2
                       OR c.protocol ILIKE $2
                       OR c.id::text ILIKE $2
@@ -1474,7 +1487,7 @@ export const searchChatsAndContacts = withDebug(
                 ORDER BY c.id, c.created_at DESC
                 LIMIT 20
             `,
-                [workspaceId, searchTerm]
+                [workspaceId, searchTerm, searchLookupDigits]
             );
 
             const chats: Chat[] = chatRows.rows.map((row: any) => {
@@ -1489,6 +1502,7 @@ export const searchChatsAndContacts = withDebug(
                         name: row.contact_name || 'Contato',
                         avatar_url: row.contact_avatar_url,
                         email: row.contact_email,
+                        phone: row.contact_phone,
                         phone_number_jid: row.contact_phone_number_jid,
                         address: row.contact_address,
                     },
@@ -1534,23 +1548,27 @@ export const searchChatsAndContacts = withDebug(
                   AND (
                       name ILIKE $2
                       OR phone_number_jid ILIKE $2
+                      OR phone ILIKE $2
+                      OR regexp_replace(COALESCE(phone_number_jid, phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
                       OR email ILIKE $2
                   )
-                LIMIT 20
+                ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+                LIMIT 50
             `,
-                [workspaceId, searchTerm]
+                [workspaceId, searchTerm, searchLookupDigits]
             );
 
-            const contacts: Contact[] = contactRows.rows.map((row: any) => ({
+            const contacts: Contact[] = mergeEquivalentContacts(contactRows.rows.map((row: any) => ({
                 id: row.id,
                 workspace_id: row.workspace_id,
                 name: row.name,
                 avatar_url: row.avatar_url,
                 email: row.email,
+                phone: row.phone,
                 phone_number_jid: row.phone_number_jid,
                 address: row.address,
                 custom_fields: row.custom_fields
-            }));
+            })));
 
             // 3. Search in Messages (Content Match)
             const messageRows = await db.query(
@@ -1638,19 +1656,9 @@ export const getContactProtocolsAction = withDebug(
         }
 
         try {
-            const accessRes = await db.query(
-                `
-                SELECT 1
-                FROM user_workspace_roles
-                WHERE user_id = $1
-                  AND workspace_id = $2
-                LIMIT 1
-                `,
-                [user.id, workspaceId]
-            );
-
-            if ((accessRes.rowCount ?? 0) === 0) {
-                return { protocols: [], error: "Sem permissao para este workspace." };
+            const access = await requireWorkspaceAccess(user.id, workspaceId);
+            if (!access.ok) {
+                return { protocols: [], error: access.error };
             }
 
             const { rows } = await db.query(
@@ -1764,10 +1772,42 @@ export const getOrCreateChatAction = withDebug(
         }
 
         try {
-            // Check for existing active chat
+            const access = await requireWorkspaceAccess(user.id, workspaceId);
+            if (!access.ok) {
+                return { error: access.error };
+            }
+
+            const contactRes = await db.query(
+                `SELECT id, phone, phone_number_jid
+                 FROM contacts
+                 WHERE id = $1
+                   AND workspace_id = $2
+                 LIMIT 1`,
+                [contactId, workspaceId]
+            );
+            const contactRow = contactRes.rows[0];
+            const lookupDigits = contactRow
+                ? buildWhatsappLookupDigits(contactRow.phone_number_jid || contactRow.phone)
+                : [];
+
+            // Check for an existing active chat on this contact or equivalent WhatsApp aliases.
             const existingChat = await db.query(
-                `SELECT id FROM chats WHERE workspace_id = $1 AND contact_id = $2 AND status IN ('gerais', 'atendimentos') ORDER BY created_at DESC LIMIT 1`,
-                [workspaceId, contactId]
+                `SELECT ch.id
+                 FROM chats ch
+                 LEFT JOIN contacts cont
+                   ON cont.id = ch.contact_id
+                  AND cont.workspace_id = ch.workspace_id
+                 WHERE ch.workspace_id = $1
+                   AND ch.status IN ('gerais', 'atendimentos')
+                   AND (
+                     ch.contact_id = $2
+                     OR regexp_replace(COALESCE(cont.phone_number_jid, cont.phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
+                   )
+                 ORDER BY
+                   CASE WHEN ch.contact_id = $2 THEN 0 ELSE 1 END,
+                   ch.created_at DESC
+                 LIMIT 1`,
+                [workspaceId, contactId, lookupDigits]
             );
 
             if (existingChat.rowCount && existingChat.rowCount > 0) {
@@ -1797,6 +1837,237 @@ export const getOrCreateChatAction = withDebug(
     {
         contextResolver: (workspaceId, contactId) => ({ payload: { workspaceId, contactId } }),
         timeoutMs: 15000 // Increase timeout to 15s
+    }
+);
+
+export const getMergedContactThreadAction = withDebug(
+    'get_merged_contact_thread',
+    async function getMergedContactThreadAction(
+        workspaceId: string,
+        contactId: string
+    ): Promise<{ chat?: Chat; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { error: "UsuÃ¡rio nÃ£o autenticado." };
+        }
+
+        try {
+            const access = await requireWorkspaceAccess(user.id, workspaceId);
+            if (!access.ok) {
+                return { error: access.error };
+            }
+
+            const threadContext = await loadContactThreadContext(workspaceId, contactId);
+            if ('error' in threadContext) {
+                return { error: threadContext.error };
+            }
+            const { mergedContact, relatedContactIds } = threadContext;
+
+            const timezone = await getWorkspaceTimezone(workspaceId);
+            const chatRowsRes = await db.query(
+                `
+                SELECT
+                    c.id,
+                    c.status,
+                    c.workspace_id,
+                    c.assigned_at,
+                    c.tag,
+                    c.color,
+                    c.protocol,
+                    c.is_autopilot_active,
+                    c.autopilot_config_id,
+                    c.copilot_mode,
+                    c.contact_id,
+                    c.agent_id,
+                    GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
+                    lmd.instance_name AS instance_name,
+                    COALESCE(lmd.source_from_api, lmd.platform::text, mc.platform::text) AS source,
+                    0 AS unread_count,
+                    t.id AS team_id,
+                    t.name AS team_name,
+                    t.color AS team_color,
+                    channel_instance.type AS instance_type,
+                    cont.name AS contact_name,
+                    cont.avatar_url AS contact_avatar_url,
+                    cont.email AS contact_email,
+                    cont.phone_number_jid AS contact_phone_number_jid,
+                    cont.address AS contact_address,
+                    lmd.id AS last_message_id,
+                    lmd.content AS last_message_content,
+                    lmd.type AS last_message_type,
+                    lmd.metadata AS last_message_metadata,
+                    lmd.transcription AS last_message_transcription,
+                    lmd.created_at AS last_message_created_at,
+                    lmd.from_me AS last_message_from_me,
+                    lmd.sender_user_id AS last_message_sender_user_id,
+                    lmd.sender_system_agent_id AS last_message_sender_system_agent_id,
+                    lmd.instance_name AS last_message_instance_name,
+                    lmd.platform AS last_message_platform,
+                    lmd.source_from_api AS last_message_source_from_api,
+                    lmd.message_id_from_api AS last_message_message_id_from_api,
+                    lmd.api_message_status AS last_message_api_message_status,
+                    lmd.is_read AS last_message_is_read,
+                    lmd.sent_by_tab AS last_message_sent_by_tab,
+                    NULL::json AS contact_custom_fields,
+                    COALESCE(mct.external_id, mct_stable.external_id) AS meta_contact_external_id,
+                    COALESCE(mct.username, mct_stable.username) AS meta_contact_username,
+                    COALESCE(mc.platform, mct_stable.platform_type) AS meta_platform
+                FROM chats c
+                LEFT JOIN LATERAL (
+                    SELECT
+                        m.id,
+                        m.chat_id,
+                        m.content,
+                        m.type,
+                        m.metadata,
+                        m.transcription,
+                        m.created_at,
+                        m.from_me,
+                        m.sender_user_id,
+                        m.sender_system_agent_id,
+                        m.instance_name,
+                        m.source_from_api,
+                        m.platform,
+                        m.message_id_from_api,
+                        m.api_message_status,
+                        m.is_read,
+                        m.sent_by_tab
+                    FROM messages m
+                    WHERE m.chat_id = c.id
+                    ORDER BY m.created_at DESC, m.id DESC
+                    LIMIT 1
+                ) lmd ON TRUE
+                LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
+                LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
+                LEFT JOIN contacts cont ON cont.id = c.contact_id
+                LEFT JOIN LATERAL (
+                    SELECT mct2.username, mct2.external_id, mch.type as platform_type
+                    FROM meta_contacts mct2
+                    JOIN meta_channels mch ON mch.id = mct2.channel_id
+                    WHERE mct2.contact_id = c.contact_id
+                    ORDER BY mct2.created_at DESC
+                    LIMIT 1
+                ) mct_stable ON true
+                LEFT JOIN team_members tm ON c.agent_id = tm.user_id
+                LEFT JOIN teams t ON tm.team_id = t.id
+                LEFT JOIN LATERAL (
+                    SELECT type
+                    FROM (
+                        SELECT eai.type
+                        FROM evolution_api_instances eai
+                        WHERE eai.instance_name = lmd.instance_name
+                          AND eai.workspace_id = c.workspace_id
+                        UNION ALL
+                        SELECT 'telegram'::text AS type
+                        FROM telegram_bot_instances tbi
+                        WHERE tbi.instance_name = lmd.instance_name
+                          AND tbi.workspace_id = c.workspace_id
+                    ) instances
+                    LIMIT 1
+                ) channel_instance ON true
+                WHERE c.workspace_id = $1
+                  AND c.contact_id = ANY($2::uuid[])
+                ORDER BY
+                    CASE
+                        WHEN c.status = 'atendimentos' THEN 0
+                        WHEN c.status = 'gerais' THEN 1
+                        ELSE 2
+                    END,
+                    GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC,
+                    c.created_at DESC
+                LIMIT 100
+                `,
+                [workspaceId, relatedContactIds]
+            );
+
+            const hydrated = await hydrateChats(chatRowsRes.rows as ChatRow[], timezone);
+            const threadChat = hydrated.chats[0];
+            const relatedChatIds = [...new Set(chatRowsRes.rows.map((row: any) => row.id).filter(Boolean))];
+
+            if (!threadChat) {
+                const created = await getOrCreateChatAction(workspaceId, mergedContact.id);
+                if (created.error || !created.chatId) {
+                    return { error: created.error || 'Nenhuma conversa encontrada para este contato.' };
+                }
+
+                return {
+                    chat: {
+                        id: created.chatId,
+                        status: 'gerais',
+                        workspace_id: workspaceId,
+                        contact: {
+                            ...mergedContact,
+                            relatedContactIds,
+                            relatedContactCount: relatedContactIds.length,
+                        },
+                        messages: [],
+                        unreadCount: 0,
+                        updatedAt: new Date().toISOString(),
+                        protocol: buildChatProtocol(created.chatId),
+                        relatedContactThread: true,
+                        relatedContactIds,
+                        relatedChatIds: [created.chatId],
+                    },
+                };
+            }
+
+            const messagesRes = await db.query(
+                `
+                SELECT
+                    m.*,
+                    c.workspace_id AS workspace_id,
+                    cont.id AS contact_id,
+                    cont.name AS contact_name,
+                    cont.avatar_url AS contact_avatar_url,
+                    cont.email AS contact_email,
+                    cont.phone_number_jid AS contact_phone_number_jid,
+                    cont.address AS contact_address
+                FROM messages m
+                JOIN chats c ON c.id = m.chat_id
+                LEFT JOIN contacts cont ON cont.id = c.contact_id
+                WHERE c.workspace_id = $1
+                  AND c.contact_id = ANY($2::uuid[])
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT 1000
+                `,
+                [workspaceId, relatedContactIds]
+            );
+
+            const senderIds = [...new Set(messagesRes.rows.map((row: any) => row.sender_user_id).filter(Boolean))];
+            const systemAgentIds = [...new Set(messagesRes.rows.map((row: any) => row.sender_system_agent_id).filter(Boolean))];
+            const [agentsMap, systemAgentsMap] = await Promise.all([
+                fetchAgentsMap(senderIds as string[]),
+                fetchSystemAgentsMap(systemAgentIds as string[]),
+            ]);
+            const messages = messagesRes.rows
+                .map((row: MessageRow) => mapMessageFromRow(row, timezone, mergedContact, agentsMap, systemAgentsMap))
+                .reverse();
+
+            return {
+                chat: {
+                    ...threadChat,
+                    contact: {
+                        ...mergedContact,
+                        relatedContactIds,
+                        relatedContactCount: relatedContactIds.length,
+                    },
+                    messages,
+                    relatedContactThread: true,
+                    relatedContactIds,
+                    relatedChatIds,
+                    updatedAt: messages[messages.length - 1]?.createdAt || threadChat.updatedAt,
+                },
+            };
+        } catch (error: any) {
+            console.error('[GET_MERGED_CONTACT_THREAD] Error:', error);
+            return { error: `Erro ao abrir historico agregado: ${error.message}` };
+        }
+    },
+    {
+        contextResolver: (workspaceId, contactId) => ({ payload: { workspaceId, contactId } }),
+        timeoutMs: 20000,
     }
 );
 
@@ -2189,8 +2460,19 @@ export async function getChatMessagesWindow({
 
     const accessCheck = await db.query(
         `
-        SELECT c.workspace_id
+        SELECT
+            c.workspace_id,
+            c.contact_id,
+            cont.name AS contact_name,
+            cont.avatar_url AS contact_avatar_url,
+            cont.email AS contact_email,
+            cont.phone AS contact_phone,
+            cont.phone_number_jid AS contact_phone_number_jid,
+            cont.address AS contact_address
         FROM chats c
+        LEFT JOIN contacts cont
+          ON cont.id = c.contact_id
+         AND cont.workspace_id = c.workspace_id
         JOIN user_workspace_roles uwr
           ON uwr.workspace_id = c.workspace_id
          AND uwr.user_id = $2
@@ -2210,22 +2492,50 @@ export async function getChatMessagesWindow({
         };
     }
 
-    const params: (string | number)[] = [chatId, limit];
+    const targetRow = accessCheck.rows[0];
+    const identityLookupDigits = chatOnly
+        ? []
+        : buildWhatsappLookupDigits(targetRow.contact_phone_number_jid || targetRow.contact_phone);
+    const targetContact: Contact | undefined = targetRow.contact_id
+        ? {
+            id: targetRow.contact_id,
+            workspace_id: targetRow.workspace_id,
+            name: targetRow.contact_name || 'Contato',
+            avatar_url: targetRow.contact_avatar_url || undefined,
+            email: targetRow.contact_email || undefined,
+            phone: targetRow.contact_phone || undefined,
+            phone_number_jid: targetRow.contact_phone_number_jid || undefined,
+            address: targetRow.contact_address || undefined,
+        }
+        : undefined;
+
+    const params: (string | number | string[])[] = [chatId, limit, identityLookupDigits];
     let beforeClause = '';
     if (before && beforeId) {
         params.push(before, beforeId);
         // Use timestamptz for proper comparison with timestamp with time zone column
-        beforeClause = 'AND (m.created_at, m.id) < ($3::timestamptz, $4::uuid)';
+        beforeClause = 'AND (m.created_at, m.id) < ($4::timestamptz, $5::uuid)';
     } else if (before) {
         params.push(before);
-        beforeClause = 'AND m.created_at < $3::timestamptz';
+        beforeClause = 'AND m.created_at < $4::timestamptz';
     }
 
     // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
 
     const chatScopeJoinCondition = chatOnly
-        ? 'c.id = tc.id'
-        : 'c.workspace_id = tc.workspace_id AND (c.contact_id = tc.contact_id OR c.id = tc.id)';
+        ? 'c.id = tc.id AND cardinality($3::text[]) >= 0'
+        : `c.workspace_id = tc.workspace_id
+           AND (
+             c.contact_id = tc.contact_id
+             OR c.id = tc.id
+             OR EXISTS (
+               SELECT 1
+               FROM contacts alias_cont
+               WHERE alias_cont.id = c.contact_id
+                 AND alias_cont.workspace_id = c.workspace_id
+                 AND regexp_replace(COALESCE(alias_cont.phone_number_jid, alias_cont.phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
+             )
+           )`;
 
     // Default behavior keeps contact-thread history across sessions.
     // For protocol-scoped searches, we can force chat-only history.
@@ -2248,8 +2558,8 @@ export async function getChatMessagesWindow({
         FROM target_chat tc
         JOIN chats c
           ON ${chatScopeJoinCondition}
-        JOIN messages m ON m.chat_id = c.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
+        JOIN messages m ON m.chat_id = c.id
         WHERE 1=1
         ${beforeClause}
         ORDER BY m.created_at DESC, m.id DESC
@@ -2268,20 +2578,8 @@ export async function getChatMessagesWindow({
         fetchSystemAgentsMap(systemAgentIds as string[]),
     ]);
 
-    const contact = rows[0]?.contact_id
-        ? {
-            id: rows[0].contact_id,
-            workspace_id: rows[0].workspace_id,
-            name: rows[0].contact_name || 'Contato',
-            avatar_url: rows[0].contact_avatar_url || undefined,
-            email: rows[0].contact_email || undefined,
-            phone_number_jid: rows[0].contact_phone_number_jid || undefined,
-            address: rows[0].contact_address || undefined,
-        }
-        : undefined;
-
     const messages = rows
-        .map((row: MessageRow) => mapMessageFromRow(row, timezone, contact, agentsMap, systemAgentsMap))
+        .map((row: MessageRow) => mapMessageFromRow(row, timezone, targetContact, agentsMap, systemAgentsMap))
         .reverse();
 
     const lastSyncMessage = rows.reduce<string | null>((acc, row) => maxIsoDate(acc, row.created_at), null);
@@ -2302,7 +2600,7 @@ export async function getChatMessagesWindow({
         oldestMessageId
     });
 
-    return { messages, lastSyncMessage, oldestMessageDate, oldestMessageId, hasMoreHistory, contact };
+    return { messages, lastSyncMessage, oldestMessageDate, oldestMessageId, hasMoreHistory, contact: targetContact };
 }
 
 async function fetchMessageDeltas({
@@ -2533,7 +2831,36 @@ export async function getContactMessages({
     }
 
     try {
+        const access = await requireWorkspaceAccess(user.id, workspaceId);
+        if (!access.ok) {
+            return { messages: [], error: access.error };
+        }
+
         const timezone = await getWorkspaceTimezone(workspaceId);
+        const contactRes = await db.query(
+            `SELECT id, workspace_id, name, avatar_url, email, phone, phone_number_jid, address
+             FROM contacts
+             WHERE id = $1
+               AND workspace_id = $2
+             LIMIT 1`,
+            [contactId, workspaceId]
+        );
+        const contactRow = contactRes.rows[0];
+        const identityLookupDigits = contactRow
+            ? buildWhatsappLookupDigits(contactRow.phone_number_jid || contactRow.phone)
+            : [];
+        const targetContact: Contact | undefined = contactRow
+            ? {
+                id: contactRow.id,
+                workspace_id: contactRow.workspace_id,
+                name: contactRow.name || 'Contato',
+                avatar_url: contactRow.avatar_url || undefined,
+                email: contactRow.email || undefined,
+                phone: contactRow.phone || undefined,
+                phone_number_jid: contactRow.phone_number_jid || undefined,
+                address: contactRow.address || undefined,
+            }
+            : undefined;
 
         const { rows } = await db.query(
             `
@@ -2549,11 +2876,15 @@ export async function getContactMessages({
             FROM messages m
             JOIN chats c ON c.id = m.chat_id
             LEFT JOIN contacts cont ON cont.id = c.contact_id
-            WHERE c.contact_id = $1 AND c.workspace_id = $2
+            WHERE c.workspace_id = $2
+              AND (
+                c.contact_id = $1
+                OR regexp_replace(COALESCE(cont.phone_number_jid, cont.phone, ''), '[^0-9]', '', 'g') = ANY($4::text[])
+              )
             ORDER BY m.created_at DESC
             LIMIT $3
             `,
-            [contactId, workspaceId, limit]
+            [contactId, workspaceId, limit, identityLookupDigits]
         );
 
         const senderIds = [...new Set(rows.map((row) => row.sender_user_id).filter(Boolean))];
@@ -2564,20 +2895,8 @@ export async function getContactMessages({
             fetchSystemAgentsMap(systemAgentIds as string[]),
         ]);
 
-        const contact = rows[0]?.contact_id
-            ? {
-                id: rows[0].contact_id,
-                workspace_id: rows[0].workspace_id,
-                name: rows[0].contact_name || 'Contato',
-                avatar_url: rows[0].contact_avatar_url || undefined,
-                email: rows[0].contact_email || undefined,
-                phone_number_jid: rows[0].contact_phone_number_jid || undefined,
-                address: rows[0].contact_address || undefined,
-            }
-            : undefined;
-
         const messages = rows
-            .map((row: MessageRow) => mapMessageFromRow(row, timezone, contact, agentsMap, systemAgentsMap))
+            .map((row: MessageRow) => mapMessageFromRow(row, timezone, targetContact, agentsMap, systemAgentsMap))
             .reverse();
 
         return { messages };

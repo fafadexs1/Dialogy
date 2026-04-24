@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getBillingData, getInstanceCosts, updateInstanceCosts } from "@/actions/billing";
 import { type BillingData, type InstanceCost } from "@/lib/types";
-import { DollarSign, Server, Smartphone, Badge, Save, Loader2 } from "lucide-react";
+import { DollarSign, Server, Smartphone, Badge, Save, Loader2, type LucideIcon } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 
-function StatCard({ title, value, icon: Icon, description }: { title: string, value: string, icon: React.ElementType, description: string }) {
+function StatCard({ title, value, icon: Icon, description }: { title: string, value: string, icon: LucideIcon, description: string }) {
     return (
         <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

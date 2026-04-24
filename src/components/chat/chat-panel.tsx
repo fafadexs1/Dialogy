@@ -1916,6 +1916,11 @@ export default function ChatPanel({
                                     Atendendo
                                 </Badge>
                             )}
+                            {chat.relatedContactThread && (
+                                <Badge variant="secondary" className="bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-500/20 text-[10px] px-1.5 h-5 shrink-0 hidden xl:inline-flex">
+                                    {chat.relatedChatIds?.length || 1} conversas
+                                </Badge>
+                            )}
                         </h2>
                         <p className="flex items-center gap-1 overflow-hidden min-w-0 text-xs text-slate-500 dark:text-zinc-500">
                             {chat.instance_name && (

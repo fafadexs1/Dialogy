@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  buildWhatsappLookupDigits,
   buildWhatsappLookupJids,
   findWhatsappChatByIdentity,
+  getWhatsappThreadIdentityKey,
   normalizeWhatsappPhoneNumber,
   resolveCanonicalWhatsappChatId,
   resolveCanonicalWhatsappChatIdByIdentity,
@@ -19,6 +21,19 @@ describe('whatsapp contact identity', () => {
       '5561998765432@s.whatsapp.net',
       '556198765432@s.whatsapp.net',
     ]);
+  });
+
+  it('builds lookup digits with and without the ninth digit', () => {
+    expect(buildWhatsappLookupDigits('556194295752@s.whatsapp.net')).toEqual([
+      '5561994295752',
+      '556194295752',
+    ]);
+  });
+
+  it('builds the same thread identity key for equivalent whatsapp aliases', () => {
+    expect(getWhatsappThreadIdentityKey('556194295752@s.whatsapp.net')).toBe(
+      getWhatsappThreadIdentityKey('5561994295752@c.us')
+    );
   });
 
   it('queries chats by whatsapp identity across equivalent JIDs', async () => {

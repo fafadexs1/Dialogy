@@ -70,10 +70,14 @@ describe('Realtime subscriptions', () => {
       onMessage: handler,
     });
 
-    expect(client.channel).toHaveBeenCalledWith(buildChatMessageChannelName(WORKSPACE_ID, 'chat-123'));
+    expect(client.channel).toHaveBeenCalledWith(
+      buildChatMessageChannelName(WORKSPACE_ID, 'chat-123'),
+      { config: { private: true } },
+    );
     expect(channel.subscribe).toHaveBeenCalled();
     expect(onCalls).toHaveLength(1);
-    expect(onCalls.every((call) => call.config.filter === 'chat_id=eq.chat-123')).toBe(true);
+    expect(onCalls[0].event).toBe('broadcast');
+    expect(onCalls[0].config).toEqual({ event: '*' });
 
     teardownChannel(client as any, subscription as any);
     expect(client.removeChannel).toHaveBeenCalledWith(subscription);
@@ -92,7 +96,12 @@ describe('Realtime subscriptions', () => {
     expect(client.channel).toHaveBeenCalled();
     expect(channel.subscribe).toHaveBeenCalled();
     expect(onCalls).toHaveLength(1);
-    expect(onCalls[0].config.filter).toBe(`workspace_id=eq.${WORKSPACE_ID}`);
+    expect(client.channel).toHaveBeenCalledWith(
+      `workspace:${WORKSPACE_ID}:chats`,
+      { config: { private: true } },
+    );
+    expect(onCalls[0].event).toBe('broadcast');
+    expect(onCalls[0].config).toEqual({ event: '*' });
 
     teardownChannel(client as any, subscription as any);
     expect(client.removeChannel).toHaveBeenCalledWith(subscription);

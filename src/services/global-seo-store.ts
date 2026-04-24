@@ -14,7 +14,7 @@ const DEFAULT_SETTINGS: GlobalSeoSettings = {
     titleTemplate: '%s | Dialogy',
     slogan: 'CRM conversacional e atendimento omnichannel com IA',
     description: 'Centralize WhatsApp, Instagram e outros canais em uma operacao omnichannel com automacao, IA e visibilidade comercial.',
-    faviconUrl: '',
+    faviconUrl: '/favicon.ico',
     themeColor: '#09090b',
 };
 

@@ -2,6 +2,42 @@ import { describe, it, expect } from 'vitest';
 import { randomUUID } from 'crypto';
 import { generateDocumentPassageEmbedding, generateDocumentQueryEmbedding } from '@/lib/embeddings';
 import { VectorStore } from '@/lib/vector-store';
+import { db } from '@/lib/db';
+
+async function createCaseMemoryFixture(workspaceId: string, chatId: string) {
+    const userId = randomUUID();
+    const contactId = randomUUID();
+
+    await db.query(
+        `INSERT INTO users (id, full_name, email)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO NOTHING`,
+        [userId, 'RAG Test User', `rag-${userId}@example.test`]
+    );
+
+    await db.query(
+        `INSERT INTO workspaces (id, name, owner_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO NOTHING`,
+        [workspaceId, 'RAG Test Workspace', userId]
+    );
+
+    await db.query(
+        `INSERT INTO contacts (id, workspace_id, name)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO NOTHING`,
+        [contactId, workspaceId, 'RAG Test Contact']
+    );
+
+    await db.query(
+        `INSERT INTO chats (id, workspace_id, contact_id, status)
+         VALUES ($1, $2, $3, 'encerrados')
+         ON CONFLICT (id) DO NOTHING`,
+        [chatId, workspaceId, contactId]
+    );
+
+    return { contactId };
+}
 
 describe('RAG Integration Tests', () => {
     it('should generate and store a knowledge base document embedding scoped by workspace', async () => {
@@ -39,6 +75,7 @@ describe('RAG Integration Tests', () => {
     it('should upsert and retrieve a resolved case memory scoped by workspace', async () => {
         const workspaceId = randomUUID();
         const chatId = randomUUID();
+        const { contactId } = await createCaseMemoryFixture(workspaceId, chatId);
         const searchableContent = [
             'Resumo: cliente pediu segunda via de boleto.',
             'Problema: cliente nao encontrou o boleto.',
@@ -53,6 +90,7 @@ describe('RAG Integration Tests', () => {
         await expect(VectorStore.upsertCaseMemory({
             chatId,
             workspaceId,
+            contactId,
             summary: 'Segunda via de boleto enviada',
             problem: 'Cliente nao encontrou o boleto',
             resolution: 'Reenviar boleto e confirmar vencimento',

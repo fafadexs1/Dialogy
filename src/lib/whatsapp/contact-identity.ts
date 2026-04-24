@@ -1,5 +1,5 @@
-const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
-const WHATSAPP_ALT_JID_SUFFIX = '@c.us';
+export const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
+export const WHATSAPP_ALT_JID_SUFFIX = '@c.us';
 const BRAZIL_COUNTRY_CODE = '55';
 const BRAZIL_AREA_CODE_LENGTH = 2;
 
@@ -13,14 +13,14 @@ type QueryableClient = {
     }>;
 };
 
-function extractDigits(value?: string | null): string {
+export function extractWhatsappDigits(value?: string | null): string {
     return String(value ?? '')
         .trim()
         .replace(/@.*$/, '')
         .replace(/\D/g, '');
 }
 
-function isResolvableWhatsappIdentity(value?: string | null): boolean {
+export function isResolvableWhatsappIdentity(value?: string | null): boolean {
     const rawValue = String(value ?? '').trim().toLowerCase();
     if (!rawValue) return false;
     if (rawValue.includes(':')) return false;
@@ -33,7 +33,7 @@ function isResolvableWhatsappIdentity(value?: string | null): boolean {
         return false;
     }
 
-    return extractDigits(rawValue).length >= 8;
+    return extractWhatsappDigits(rawValue).length >= 8;
 }
 
 function getBrazilianSubscriberDigits(digits: string): string | null {
@@ -80,7 +80,7 @@ export function normalizeWhatsappPhoneNumber(value?: string | null): string | nu
         return null;
     }
 
-    const digits = extractDigits(value);
+    const digits = extractWhatsappDigits(value);
     if (!digits) return null;
 
     if (isBrazilianMobileWithoutNinthDigit(digits)) {
@@ -105,7 +105,7 @@ export function buildWhatsappLookupJids(value?: string | null): string[] {
         `${normalizedPhone}${WHATSAPP_STANDARD_JID_SUFFIX}`,
     ]);
 
-    const rawDigits = extractDigits(value);
+    const rawDigits = extractWhatsappDigits(value);
     if (rawDigits) {
         lookupJids.add(`${rawDigits}${WHATSAPP_STANDARD_JID_SUFFIX}`);
 
@@ -123,11 +123,26 @@ export function buildWhatsappLookupJids(value?: string | null): string[] {
     return [...lookupJids];
 }
 
+export function buildWhatsappLookupDigits(value?: string | null): string[] {
+    return [
+        ...new Set(
+            buildWhatsappLookupJids(value)
+                .map((jid) => extractWhatsappDigits(jid))
+                .filter(Boolean)
+        ),
+    ];
+}
+
+export function getWhatsappThreadIdentityKey(value?: string | null): string | null {
+    const normalizedPhone = normalizeWhatsappPhoneNumber(value);
+    return normalizedPhone ? `whatsapp:${normalizedPhone}` : null;
+}
+
 function resolveCanonicalContactPhone(
     contact: { phone?: string | null } | null | undefined,
     normalizedPhone: string
 ): string | null {
-    const existingPhoneDigits = extractDigits(contact?.phone);
+    const existingPhoneDigits = extractWhatsappDigits(contact?.phone);
 
     if (!existingPhoneDigits) {
         return normalizedPhone;

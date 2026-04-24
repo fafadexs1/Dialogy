@@ -11,6 +11,14 @@ describe('whatsapp chat dedupe', () => {
     );
   });
 
+  it('builds the same active identity key for standard and legacy whatsapp suffixes', () => {
+    expect(
+      getActiveWhatsappChatIdentityKey('gerais', '556194295752@s.whatsapp.net')
+    ).toBe(
+      getActiveWhatsappChatIdentityKey('atendimentos', '5561994295752@c.us')
+    );
+  });
+
   it('keeps only the first active chat for the same whatsapp identity', () => {
     const chats = [
       { id: 'chat-new', status: 'gerais', phone: '5561984734944@s.whatsapp.net' },

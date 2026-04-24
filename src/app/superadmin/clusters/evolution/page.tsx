@@ -3,7 +3,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, Cpu, MemoryStick, HardDrive, Network, Server, Loader2, ArrowDown, ArrowUp } from "lucide-react";
+import { PlusCircle, Cpu, MemoryStick, HardDrive, Network, Server, Loader2, ArrowDown, ArrowUp, type LucideIcon } from "lucide-react";
 import {
     Dialog,
     DialogContent,
@@ -24,7 +24,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 
-function MetricBar({ value, label, icon: Icon, unit = '%' }: { value: number, label: string, icon: React.ElementType, unit?: string }) {
+function MetricBar({ value, label, icon: Icon, unit = '%' }: { value: number, label: string, icon: LucideIcon, unit?: string }) {
     const getColor = (val: number) => {
         if (val > 85) return 'bg-destructive';
         if (val > 65) return 'bg-yellow-500';

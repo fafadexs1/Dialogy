@@ -103,6 +103,9 @@ export type Contact = {
   converted_at?: string | null;
   custom_fields?: Record<string, any>;
   lead_score?: number;
+  relatedContactIds?: string[];
+  relatedPhoneNumberJids?: string[];
+  relatedContactCount?: number;
 }
 
 export type OnlineAgent = {
@@ -324,6 +327,9 @@ export type Chat = {
   metaContactExternalId?: string | null;
   metaContactUsername?: string | null;
   metaPlatform?: 'instagram' | 'messenger' | null;
+  relatedContactThread?: boolean;
+  relatedContactIds?: string[];
+  relatedChatIds?: string[];
 };
 
 export type InternalChannel = {

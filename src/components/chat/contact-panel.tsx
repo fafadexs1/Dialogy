@@ -46,6 +46,7 @@ import {
     Wrench,
     FileText,
     Plus,
+    type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
@@ -766,7 +767,7 @@ function SGPDashboardTile({
     statusColor = "blue"
 }: { 
     title: string; 
-    icon: React.ElementType; 
+    icon: LucideIcon;
     children: React.ReactNode; 
     className?: string;
     onClick?: () => void;

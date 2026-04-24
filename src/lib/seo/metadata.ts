@@ -106,7 +106,8 @@ export async function buildRootMetadata(): Promise<Metadata> {
     const site = await getSeoSiteContext();
     const baseIconUrl = `/api/favicon?v=${site.iconVersion}`;
     const getIconType = (url: string) => {
-        const ext = url.split('.').pop()?.toLowerCase();
+        const pathname = url.split(/[?#]/)[0] || '';
+        const ext = pathname.split('.').pop()?.toLowerCase();
         if (ext === 'png') return 'image/png';
         if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
         if (ext === 'svg') return 'image/svg+xml';

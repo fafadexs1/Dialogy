@@ -5,7 +5,24 @@ import { globalSeoStore } from '@/services/global-seo-store';
 
 export const dynamic = 'force-dynamic';
 
+const ICON_PATH = path.join(process.cwd(), 'public', 'favicon.ico');
 const FALLBACK_ICON_PATH = path.join(process.cwd(), 'public', 'favicon-default.ico');
+
+const getContentType = (buffer: Buffer) => {
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return 'image/png';
+  }
+
+  if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01 && buffer[3] === 0x00) {
+    return 'image/x-icon';
+  }
+
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+
+  return 'image/x-icon';
+};
 
 const withVersion = (url: string, version: number) => {
   const separator = url.includes('?') ? '&' : '?';
@@ -26,11 +43,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const icon = await readFile(FALLBACK_ICON_PATH);
+    const icon = await readFile(ICON_PATH).catch(() => readFile(FALLBACK_ICON_PATH));
     return new NextResponse(icon, {
       status: 200,
       headers: {
-        'Content-Type': 'image/x-icon',
+        'Content-Type': getContentType(icon),
         'Cache-Control': 'no-store, must-revalidate',
         'Pragma': 'no-cache',
       },
