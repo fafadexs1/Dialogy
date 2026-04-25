@@ -1,4 +1,3 @@
-
 'use server';
 
 import { db } from '@/lib/db';
@@ -19,9 +18,8 @@ import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-con
 import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 import { touchUserPresenceActivity } from '@/lib/presence-server';
 import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
-import { buildWhatsappLookupDigits } from '@/lib/whatsapp/contact-identity';
 import { mergeEquivalentContacts } from '@/lib/whatsapp/contact-thread';
-import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
+import { enqueueAiAutopilotProcess, enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import { requireWorkspaceAccess } from '@/server/inbox/access';
 import { loadContactThreadContext } from '@/server/inbox/contact-thread-service';
@@ -77,7 +75,15 @@ export const assignChatToSelfAction = withDebug(
             // Corrected query: Allow taking ownership as long as the chat is in the 'gerais' (general) queue,
             // regardless of whether agent_id was previously filled.
             const result = await db.query(
-                "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = clock_timestamp() WHERE id = $2 AND status = 'gerais' RETURNING workspace_id",
+                `UPDATE chats
+                 SET agent_id = $1,
+                     assigned_system_agent_id = NULL,
+                     is_autopilot_active = FALSE,
+                     copilot_mode = 'off',
+                     status = 'atendimentos',
+                     assigned_at = clock_timestamp()
+                 WHERE id = $2 AND status = 'gerais'
+                 RETURNING workspace_id`,
                 [currentAgentId, chatId]
             );
 
@@ -171,6 +177,7 @@ export const transferChatAction = withDebug(
             SELECT 
                 workspace_id, 
                 agent_id as current_chat_agent_id, 
+                assigned_system_agent_id AS current_system_agent_id,
                 status,
                 (
                     SELECT m.instance_name 
@@ -186,7 +193,7 @@ export const transferChatAction = withDebug(
                 await client.query('ROLLBACK');
                 return { success: false, error: "Conversa não encontrada." };
             }
-            const { workspace_id: workspaceId, current_chat_agent_id, status, last_instance_name: lastInstanceName } = chatRes.rows[0];
+            const { workspace_id: workspaceId, current_chat_agent_id, current_system_agent_id, status, last_instance_name: lastInstanceName } = chatRes.rows[0];
 
             if (status === 'encerrados') {
                 await client.query('ROLLBACK');
@@ -256,21 +263,25 @@ export const transferChatAction = withDebug(
                 return { success: false, error: "Não foi possível determinar um agente para a transferência." };
             }
 
-            const isFirstAssignment = !current_chat_agent_id;
+            const isFirstAssignment = !current_chat_agent_id && !current_system_agent_id;
             const isActualTransfer = !!current_chat_agent_id && current_chat_agent_id !== finalAgentId;
+            const isHumanTakingFromAi = !!current_system_agent_id && !current_chat_agent_id;
 
             // Update chat with the new agent and status
             await client.query(`
             UPDATE chats
             SET 
                 agent_id = $1,
+                assigned_system_agent_id = NULL,
+                is_autopilot_active = FALSE,
+                copilot_mode = 'off',
                 status = 'atendimentos',
                 assigned_at = clock_timestamp()
             WHERE id = $2
         `, [finalAgentId, chatId]);
 
             // Log system message
-            const systemMessageContent = !isFirstAssignment
+            const systemMessageContent = isHumanTakingFromAi ? `Atendimento reassumido por ${transferTargetName}.` : !isFirstAssignment
                 ? `Atendimento transferido por ${currentAgentName} para ${transferTargetName}.`
                 : `Atendimento atribuído a ${transferTargetName} por ${currentAgentName}.`;
 
@@ -283,6 +294,8 @@ export const transferChatAction = withDebug(
                 systemMessageContent,
                 {
                     event: 'transfer',
+                    previous_system_agent_id: current_system_agent_id || null,
+                    autopilot_disabled: true,
                     from_agent_id: currentAgentId,
                     to_agent_id: finalAgentId,
                     to_team_id: teamId,
@@ -324,6 +337,204 @@ export const transferChatAction = withDebug(
             await client.query('ROLLBACK');
             console.error("Erro ao transferir chat:", error);
             return { success: false, error: "Falha no servidor ao tentar transferir o atendimento." };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (input) => ({ payload: input })
+    }
+);
+
+export const transferChatToIntelligentAgentAction = withDebug(
+    'transfer_chat_to_intelligent_agent',
+    async function transferChatToIntelligentAgentAction(
+        input: { chatId: string; systemAgentId: string },
+        prefetchedSession?: { user: { id: string, name: string, email?: string | null }, isSystemAgent?: boolean }
+    ): Promise<{ success: boolean; error?: string; chat?: Chat }> {
+        const supabase = await createClient();
+        let sessionToUse = prefetchedSession;
+
+        if (!sessionToUse) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                sessionToUse = { user: { id: user.id, name: user.user_metadata.full_name || user.email || 'Agente', email: user.email } };
+            }
+        }
+
+        if (!sessionToUse?.user?.id || !sessionToUse?.user?.name) {
+            return { success: false, error: "Usuário não autenticado." };
+        }
+
+        const { chatId, systemAgentId } = input;
+        if (!chatId || !systemAgentId) {
+            return { success: false, error: "Chat e Atendente Inteligente são obrigatórios." };
+        }
+
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+
+            const chatRes = await client.query(
+                `SELECT workspace_id, status, contact_id
+                 FROM chats
+                 WHERE id = $1
+                 FOR UPDATE`,
+                [chatId]
+            );
+            if ((chatRes.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "Conversa não encontrada." };
+            }
+
+            const chat = chatRes.rows[0];
+            if (chat.status === 'encerrados') {
+                await client.query('ROLLBACK');
+                return { success: false, error: "Não é possível transferir um atendimento encerrado para IA." };
+            }
+
+            const workspaceId = chat.workspace_id;
+            if (prefetchedSession?.isSystemAgent) {
+                const actorRes = await client.query(
+                    `SELECT 1 FROM system_agents
+                     WHERE id = $1 AND workspace_id = $2 AND is_active = TRUE
+                     LIMIT 1`,
+                    [sessionToUse.user.id, workspaceId]
+                );
+                if ((actorRes.rowCount ?? 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: "Agente do sistema não autorizado para este workspace." };
+                }
+            }
+            if (!prefetchedSession && !await hasPermission(sessionToUse.user.id, workspaceId, 'teams:view')) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "Você não tem permissão para transferir atendimentos." };
+            }
+
+            const agentRes = await client.query(
+                `SELECT sa.id, sa.name, sa.autopilot_config_id, sa.is_active, ac.is_active AS autopilot_is_active
+                 FROM system_agents sa
+                 LEFT JOIN autopilot_configs ac ON ac.id = sa.autopilot_config_id
+                 WHERE sa.id = $1
+                   AND sa.workspace_id = $2
+                   AND sa.type = 'intelligent_attendant'
+                 LIMIT 1`,
+                [systemAgentId, workspaceId]
+            );
+            if ((agentRes.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "Atendente Inteligente não encontrado neste workspace." };
+            }
+
+            const intelligentAgent = agentRes.rows[0];
+            if (!intelligentAgent.is_active) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "Este Atendente Inteligente está inativo." };
+            }
+            if (!intelligentAgent.autopilot_config_id) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "Este Atendente Inteligente não possui uma configuração de IA vinculada." };
+            }
+            if (!intelligentAgent.autopilot_is_active) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "A configuração de IA vinculada está pausada." };
+            }
+
+            await client.query(
+                `UPDATE chats
+                 SET assigned_system_agent_id = $1,
+                     agent_id = NULL,
+                     is_autopilot_active = TRUE,
+                     autopilot_config_id = $2,
+                     copilot_mode = 'auto',
+                     status = 'atendimentos',
+                     assigned_at = clock_timestamp()
+                 WHERE id = $3`,
+                [systemAgentId, intelligentAgent.autopilot_config_id, chatId]
+            );
+
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me, is_read, sender_system_agent_id, metadata, created_at
+                 ) VALUES ($1, $2, 'system', $3, true, true, $4, $5, clock_timestamp())`,
+                [
+                    workspaceId,
+                    chatId,
+                    `Atendimento transferido para ${intelligentAgent.name}.`,
+                    systemAgentId,
+                    {
+                        event: 'transfer_to_intelligent_attendant',
+                        from_actor_id: sessionToUse.user.id,
+                        from_actor_type: prefetchedSession?.isSystemAgent ? 'system_agent' : 'user',
+                        to_system_agent_id: systemAgentId,
+                        autopilot_config_id: intelligentAgent.autopilot_config_id,
+                    },
+                ]
+            );
+
+            await client.query('COMMIT');
+
+            try {
+                const lastInboundRes = await db.query(
+                    `SELECT id, content, instance_name
+                     FROM messages
+                     WHERE chat_id = $1
+                       AND from_me = FALSE
+                       AND COALESCE(content, '') <> ''
+                     ORDER BY created_at DESC
+                     LIMIT 1`,
+                    [chatId]
+                );
+                const lastInbound = lastInboundRes.rows[0];
+                if (lastInbound?.content) {
+                    if (shouldEnqueueJob('ai_autopilot_process')) {
+                        await enqueueAiAutopilotProcess({
+                            workspaceId,
+                            chatId,
+                            messageId: lastInbound.id,
+                            lastMessageContent: lastInbound.content,
+                            instanceName: lastInbound.instance_name || 'N/A',
+                        });
+                    } else {
+                        const { processAutopilotForChat } = await import('@/services/autopilot-service');
+                        await processAutopilotForChat(
+                            workspaceId,
+                            {
+                                id: chatId,
+                                workspace_id: workspaceId,
+                                status: 'atendimentos',
+                                assigned_system_agent_id: systemAgentId,
+                                is_autopilot_active: true,
+                                autopilot_config_id: intelligentAgent.autopilot_config_id,
+                                copilot_mode: 'auto',
+                                messages: [],
+                                contact: {} as Contact,
+                            } as Chat,
+                            lastInbound.content,
+                            lastInbound.instance_name || 'N/A'
+                        );
+                    }
+                }
+            } catch (error) {
+                console.error('[TRANSFER_TO_AI] Falha ao enfileirar resposta inicial:', error);
+            }
+
+            const rows = await fetchChats({
+                workspaceId,
+                userId: sessionToUse.user.id,
+                limit: 1,
+                includeChatId: chatId,
+                ownership: 'everyone',
+                statuses: [],
+            });
+            const timezone = await getWorkspaceTimezone(workspaceId);
+            const { chats } = await hydrateChats(rows, timezone);
+
+            return { success: true, chat: chats[0] };
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[TRANSFER_TO_AI] Erro ao transferir para Atendente Inteligente:', error);
+            return { success: false, error: "Falha no servidor ao transferir para IA." };
         } finally {
             client.release();
         }
@@ -673,6 +884,10 @@ type ChatRow = {
     protocol: string | null;
     contact_id: string | null;
     agent_id: string | null;
+    assigned_system_agent_id: string | null;
+    assigned_system_agent_name?: string | null;
+    assigned_system_agent_avatar_url?: string | null;
+    assigned_system_agent_type?: string | null;
     team_id: string | null;
     team_name: string | null;
     team_color: string | null;
@@ -819,7 +1034,7 @@ async function fetchChats({
     let beforeClause = '';
     if (before) {
         params.push(before);
-        beforeClause = `AND cca.chat_activity_at < $${queryIndex}`;
+        beforeClause = `AND c.last_activity_at < $${queryIndex}`;
         queryIndex++;
     }
 
@@ -853,32 +1068,17 @@ async function fetchChats({
     const { rows } = await db.query(
         `
         WITH filtered_chats AS (
-            SELECT c.*
+            SELECT c.id, c.last_activity_at
             FROM chats c
             WHERE c.workspace_id = $1
               ${statusClause}
               ${ownershipClause}
-        ),
-        candidate_chat_activity AS (
-            SELECT
-                fc.id,
-                GREATEST(lm.created_at, fc.closed_at, fc.assigned_at, fc.created_at) AS chat_activity_at
-            FROM filtered_chats fc
-            LEFT JOIN LATERAL (
-                SELECT m.created_at
-                FROM messages m
-                WHERE m.chat_id = fc.id
-                ORDER BY m.created_at DESC, m.id DESC
-                LIMIT 1
-            ) lm ON TRUE
+              ${beforeClause}
+            ORDER BY c.last_activity_at DESC
+            LIMIT $2
         ),
         sorted_chat_ids AS (
-            SELECT cca.id
-            FROM candidate_chat_activity cca
-            WHERE 1=1
-              ${beforeClause}
-            ORDER BY cca.chat_activity_at DESC
-            LIMIT $2
+            SELECT id FROM filtered_chats
         )
         ${includeChatClause}
         , merged_chat_ids AS (
@@ -926,7 +1126,8 @@ async function fetchChats({
             c.copilot_mode,
             c.contact_id,
             c.agent_id,
-            GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
+            c.assigned_system_agent_id,
+            c.last_activity_at AS chat_activity_at,
             lmd.instance_name AS instance_name,
             COALESCE(
                 lmd.source_from_api,
@@ -1018,7 +1219,7 @@ async function fetchChats({
             ) instances
             LIMIT 1
         ) channel_instance ON true
-        ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
+        ORDER BY c.last_activity_at DESC
         `,
         params
     );
@@ -1082,7 +1283,8 @@ export const getInitialChatsData = withDebug(
                      assigned_at = NULL
                  WHERE workspace_id = $1
                    AND status = 'atendimentos'
-                   AND agent_id IS NULL`,
+                   AND agent_id IS NULL
+                   AND assigned_system_agent_id IS NULL`,
                 [workspaceId]
             ).catch(err => console.error('[REPAIR_CHATS] Failed:', err));
 
@@ -1270,7 +1472,7 @@ export const syncInboxData = withDebug(
                 updatedContacts: [],
                 deltaMessages: [],
                 lastSyncMessage: null,
-                error: `Falha na sincronização: ${error.message}`
+                error: `Erro ao sincronizar: ${error.message}`
             };
         }
     },
@@ -1300,15 +1502,12 @@ export const searchChatsAndContacts = withDebug(
         if (!query || query.trim().length < 2) {
             return { chats: [], contacts: [], messages: [] };
         }
-
         try {
             const protocolTerm = query.trim().toUpperCase();
             const isProtocolQuery = protocolTerm.startsWith('PRT-');
             const timezone = await getWorkspaceTimezone(workspaceId);
             const searchTerm = `%${query.trim()}%`;
-            const searchLookupDigits = buildWhatsappLookupDigits(query.trim());
 
-            // Protocol search: return only the chat and its messages (no cross-content search)
             if (isProtocolQuery) {
                 const chatRes = await db.query(
                     `
@@ -1358,6 +1557,7 @@ export const searchChatsAndContacts = withDebug(
                         name: row.contact_name || 'Contato',
                         avatar_url: row.contact_avatar_url,
                         email: row.contact_email,
+                        phone: row.contact_phone,
                         phone_number_jid: row.contact_phone_number_jid,
                         address: row.contact_address,
                     },
@@ -1429,14 +1629,10 @@ export const searchChatsAndContacts = withDebug(
                     status: 'default',
                 }));
 
-                // Anexar as mensagens no chat para facilitar o render imediato
                 chat.messages = messages;
-
                 return { chats: [chat], contacts: [], messages: [] };
             }
 
-            // 1. Search in Chats (MATCHING CONTACT INFO ONLY)
-            // We removed 'OR m.content ILIKE $2' to avoid random chats appearing without context
             const chatRows = await db.query(
                 `
                 SELECT DISTINCT ON (c.id)
@@ -1454,6 +1650,7 @@ export const searchChatsAndContacts = withDebug(
                     cont.name AS contact_name,
                     cont.avatar_url AS contact_avatar_url,
                     cont.email AS contact_email,
+                    cont.phone AS contact_phone,
                     cont.phone_number_jid AS contact_phone_number_jid,
                     cont.address AS contact_address,
                     t.name AS team_name,
@@ -1479,7 +1676,7 @@ export const searchChatsAndContacts = withDebug(
                       cont.name ILIKE $2
                       OR cont.phone_number_jid ILIKE $2
                       OR cont.phone ILIKE $2
-                      OR regexp_replace(COALESCE(cont.phone_number_jid, cont.phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
+                      OR cont.phone_canonical ILIKE $2
                       OR cont.email ILIKE $2
                       OR c.protocol ILIKE $2
                       OR c.id::text ILIKE $2
@@ -1487,7 +1684,7 @@ export const searchChatsAndContacts = withDebug(
                 ORDER BY c.id, c.created_at DESC
                 LIMIT 20
             `,
-                [workspaceId, searchTerm, searchLookupDigits]
+                [workspaceId, searchTerm]
             );
 
             const chats: Chat[] = chatRows.rows.map((row: any) => {
@@ -1532,14 +1729,11 @@ export const searchChatsAndContacts = withDebug(
                     tag: row.tag,
                     color: row.color,
                     teamName: row.team_name,
-                    teamColor: row.team_color || undefined
-                    ,
+                    teamColor: row.team_color || undefined,
                     protocol: row.protocol || buildChatProtocol(row.id),
                 };
             });
 
-
-            // 2. Search in Contacts (standalone)
             const contactRows = await db.query(
                 `
                 SELECT *
@@ -1549,13 +1743,13 @@ export const searchChatsAndContacts = withDebug(
                       name ILIKE $2
                       OR phone_number_jid ILIKE $2
                       OR phone ILIKE $2
-                      OR regexp_replace(COALESCE(phone_number_jid, phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
+                      OR phone_canonical ILIKE $2
                       OR email ILIKE $2
                   )
                 ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
                 LIMIT 50
             `,
-                [workspaceId, searchTerm, searchLookupDigits]
+                [workspaceId, searchTerm]
             );
 
             const contacts: Contact[] = mergeEquivalentContacts(contactRows.rows.map((row: any) => ({
@@ -1570,7 +1764,6 @@ export const searchChatsAndContacts = withDebug(
                 custom_fields: row.custom_fields
             })));
 
-            // 3. Search in Messages (Content Match)
             const messageRows = await db.query(
                 `
                 SELECT 
@@ -1623,8 +1816,7 @@ export const searchChatsAndContacts = withDebug(
         }
     },
     {
-        contextResolver: (workspaceId, query) => ({ payload: { workspaceId, query } }),
-        timeoutMs: 20000 // Increase timeout to 20s for complex search
+        contextResolver: (workspaceId, query) => ({ payload: { workspaceId, query } })
     }
 );
 
@@ -1668,7 +1860,7 @@ export const getContactProtocolsAction = withDebug(
                     COALESCE(c.protocol, 'PRT-' || upper(replace(c.id::text, '-', ''))) AS protocol,
                     c.status,
                     c.created_at,
-                    COALESCE(last_msg.created_at, c.created_at) AS last_activity_at,
+                    COALESCE(c.last_activity_at, c.created_at) AS last_activity_at,
                     last_msg.content AS last_message_content
                 FROM chats c
                 LEFT JOIN LATERAL (
@@ -1786,28 +1978,22 @@ export const getOrCreateChatAction = withDebug(
                 [contactId, workspaceId]
             );
             const contactRow = contactRes.rows[0];
-            const lookupDigits = contactRow
-                ? buildWhatsappLookupDigits(contactRow.phone_number_jid || contactRow.phone)
-                : [];
 
-            // Check for an existing active chat on this contact or equivalent WhatsApp aliases.
+            // Check for an existing active chat on this contact or equivalent contacts by canonical phone
             const existingChat = await db.query(
                 `SELECT ch.id
                  FROM chats ch
-                 LEFT JOIN contacts cont
-                   ON cont.id = ch.contact_id
-                  AND cont.workspace_id = ch.workspace_id
+                 JOIN contacts c1 ON c1.id = ch.contact_id
+                 JOIN contacts c2 ON c2.id = $2
                  WHERE ch.workspace_id = $1
                    AND ch.status IN ('gerais', 'atendimentos')
                    AND (
                      ch.contact_id = $2
-                     OR regexp_replace(COALESCE(cont.phone_number_jid, cont.phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
+                     OR (c1.phone_canonical IS NOT NULL AND c1.phone_canonical = c2.phone_canonical)
                    )
-                 ORDER BY
-                   CASE WHEN ch.contact_id = $2 THEN 0 ELSE 1 END,
-                   ch.created_at DESC
+                 ORDER BY ch.created_at DESC
                  LIMIT 1`,
-                [workspaceId, contactId, lookupDigits]
+                [workspaceId, contactId]
             );
 
             if (existingChat.rowCount && existingChat.rowCount > 0) {
@@ -1823,7 +2009,7 @@ export const getOrCreateChatAction = withDebug(
                 throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
             }
             const newChat = await db.query(
-                `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol) VALUES ($1, $2, $3, 'gerais', $4, NOW(), $5) RETURNING id`,
+                `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol, last_activity_at) VALUES ($1, $2, $3, 'gerais', $4, NOW(), $5, NOW()) RETURNING id`,
                 [newChatId, workspaceId, contactId, user.id, protocol]
             );
 
@@ -1850,7 +2036,7 @@ export const getMergedContactThreadAction = withDebug(
         const { data: { user } } = await supabase.auth.getUser();
 
         if (!user) {
-            return { error: "UsuÃ¡rio nÃ£o autenticado." };
+            return { error: "Usuário não autenticado." };
         }
 
         try {
@@ -1881,7 +2067,8 @@ export const getMergedContactThreadAction = withDebug(
                     c.copilot_mode,
                     c.contact_id,
                     c.agent_id,
-                    GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
+                    c.assigned_system_agent_id,
+                    c.last_activity_at AS chat_activity_at,
                     lmd.instance_name AS instance_name,
                     COALESCE(lmd.source_from_api, lmd.platform::text, mc.platform::text) AS source,
                     0 AS unread_count,
@@ -1975,7 +2162,7 @@ export const getMergedContactThreadAction = withDebug(
                         WHEN c.status = 'gerais' THEN 1
                         ELSE 2
                     END,
-                    GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC,
+                    c.last_activity_at DESC,
                     c.created_at DESC
                 LIMIT 100
                 `,
@@ -2153,11 +2340,7 @@ async function fetchChatsDelta({
             FROM chats c
             WHERE c.workspace_id = $1
               ${ownershipClause}
-              AND (c.updated_at >= $2 OR c.closed_at >= $2 OR c.assigned_at >= $2
-                   OR EXISTS (
-                       SELECT 1 FROM messages m
-                       WHERE m.chat_id = c.id AND m.created_at >= $2
-                   ))
+              AND (c.updated_at >= $2 OR c.last_activity_at >= $2)
         ),
         last_message_details AS (
             SELECT DISTINCT ON (m.chat_id)
@@ -2217,7 +2400,8 @@ async function fetchChatsDelta({
             c.autopilot_config_id,
             c.copilot_mode,
             c.agent_id,
-            GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) AS chat_activity_at,
+            c.assigned_system_agent_id,
+            c.last_activity_at AS chat_activity_at,
             lmd.instance_name,
             COALESCE(
                 lmd.source_from_api,
@@ -2273,8 +2457,8 @@ async function fetchChatsDelta({
             ) instances
             LIMIT 1
         ) channel_instance ON true
-        WHERE GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) >= $2
-        ORDER BY GREATEST(lmd.created_at, c.closed_at, c.assigned_at, c.created_at) DESC
+        WHERE c.last_activity_at >= $2
+        ORDER BY c.last_activity_at DESC
         `,
         params
     );
@@ -2299,13 +2483,13 @@ async function fetchAgentsMap(ids: string[]): Promise<Map<string, AgentRow>> {
     return new Map(rows.map((row: AgentRow) => [row.id, row]));
 }
 
-async function fetchSystemAgentsMap(ids: string[]): Promise<Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>>> {
+async function fetchSystemAgentsMap(ids: string[]): Promise<Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url' | 'type'>>> {
     if (!ids.length) return new Map();
     const { rows } = await db.query(
-        'SELECT id, name, avatar_url FROM system_agents WHERE id::text = ANY($1::text[])',
+        'SELECT id, name, avatar_url, type FROM system_agents WHERE id::text = ANY($1::text[])',
         [ids]
     );
-    return new Map(rows.map((row: Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>) => [row.id, row]));
+    return new Map(rows.map((row: Pick<SystemAgent, 'id' | 'name' | 'avatar_url' | 'type'>) => [row.id, row]));
 }
 
 async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats: Chat[]; chatMap: Map<string, Chat>; lastSyncChats: string | null }> {
@@ -2317,6 +2501,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
     const systemAgentIds = new Set<string>();
     rows.forEach((row) => {
         if (row.agent_id) agentIds.add(row.agent_id);
+        if (row.assigned_system_agent_id) systemAgentIds.add(row.assigned_system_agent_id);
         if (row.last_message_sender_user_id) agentIds.add(row.last_message_sender_user_id);
         if (row.last_message_sender_system_agent_id) systemAgentIds.add(row.last_message_sender_system_agent_id);
     });
@@ -2366,6 +2551,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             : undefined;
 
         const agentRow = row.agent_id ? agentsMap.get(row.agent_id) : undefined;
+        const assignedSystemAgentRow = row.assigned_system_agent_id ? systemAgentsMap.get(row.assigned_system_agent_id) : undefined;
         const agent = agentRow
             ? {
                 id: agentRow.id,
@@ -2382,6 +2568,15 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             contact: contact as Contact,
             agent,
             agentId: row.agent_id || undefined,
+            assigned_system_agent_id: row.assigned_system_agent_id || null,
+            assignedSystemAgent: assignedSystemAgentRow
+                ? {
+                    id: assignedSystemAgentRow.id,
+                    name: assignedSystemAgentRow.name,
+                    avatar_url: assignedSystemAgentRow.avatar_url,
+                    type: assignedSystemAgentRow.type,
+                }
+                : undefined,
             messages: lastMessage ? [lastMessage] : [],
             updatedAt: row.chat_activity_at || undefined,
             source: row.source || undefined,
@@ -2405,6 +2600,22 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
     });
 
     const chatMap = new Map(chats.map((chat) => [chat.id, chat]));
+
+function maxIsoDate(a: string | null, b: string | null): string | null {
+    if (!a) return b;
+    if (!b) return a;
+    return a > b ? a : b;
+}
+
+function parseMetadata(metadata: any, shape: 'full' | 'preview' = 'full'): MessageMetadata | null {
+    if (!metadata) return null;
+    try {
+        return typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+    } catch (e) {
+        return null;
+    }
+}
+
     const lastSync = rows.reduce<string | null>((acc, row) => maxIsoDate(acc, row.chat_activity_at), null);
     return { chats, chatMap, lastSyncChats: lastSync };
 }
@@ -2421,6 +2632,72 @@ function buildContactFromRow(row: ChatRow): Contact | undefined {
         address: row.contact_address || undefined,
         custom_fields: row.contact_custom_fields || undefined,
     };
+}
+
+export async function getContactMessages({
+    contactId,
+    workspaceId,
+    limit = 50,
+    before,
+    timezone = DEFAULT_TIMEZONE,
+}: {
+    contactId: string;
+    workspaceId: string;
+    limit?: number;
+    before?: string;
+    timezone?: string;
+}): Promise<{ messages: Message[] }> {
+    const params: any[] = [contactId, workspaceId, limit];
+    let beforeClause = '';
+    if (before) {
+        params.push(before);
+        beforeClause = 'AND m.created_at < $4::timestamptz';
+    }
+
+    const { rows } = await db.query(
+        `
+        SELECT 
+            m.*,
+            c.workspace_id AS workspace_id,
+            cont.id AS contact_id,
+            cont.name AS contact_name,
+            cont.avatar_url AS contact_avatar_url,
+            cont.email AS contact_email,
+            cont.phone_number_jid AS contact_phone_number_jid,
+            cont.address AS contact_address
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+        JOIN contacts cont ON cont.id = c.contact_id
+        WHERE cont.id = $1
+          AND c.workspace_id = $2
+          ${beforeClause}
+        ORDER BY m.created_at DESC
+        LIMIT $3
+        `,
+        params
+    );
+
+    const senderIds = [...new Set(rows.map((row) => row.sender_user_id).filter(Boolean))];
+    const systemAgentIds = [...new Set(rows.map((row) => row.sender_system_agent_id).filter(Boolean))];
+
+    const [agentsMap, systemAgentsMap] = await Promise.all([
+        fetchAgentsMap(senderIds as string[]),
+        fetchSystemAgentsMap(systemAgentIds as string[]),
+    ]);
+
+    const contact = rows.length > 0 ? {
+        id: rows[0].contact_id,
+        workspace_id: rows[0].workspace_id,
+        name: rows[0].contact_name,
+        avatar_url: rows[0].contact_avatar_url,
+        email: rows[0].contact_email,
+        phone_number_jid: rows[0].contact_phone_number_jid,
+        address: rows[0].contact_address
+    } : undefined;
+
+    const messages = rows.map(row => mapMessageFromRow(row, timezone, contact as Contact, agentsMap, systemAgentsMap)).reverse();
+
+    return { messages };
 }
 
 export async function getChatMessagesWindow({
@@ -2493,9 +2770,6 @@ export async function getChatMessagesWindow({
     }
 
     const targetRow = accessCheck.rows[0];
-    const identityLookupDigits = chatOnly
-        ? []
-        : buildWhatsappLookupDigits(targetRow.contact_phone_number_jid || targetRow.contact_phone);
     const targetContact: Contact | undefined = targetRow.contact_id
         ? {
             id: targetRow.contact_id,
@@ -2509,42 +2783,42 @@ export async function getChatMessagesWindow({
         }
         : undefined;
 
-    const params: (string | number | string[])[] = [chatId, limit, identityLookupDigits];
+    const params: (string | number | string[])[] = [chatId, limit];
     let beforeClause = '';
     if (before && beforeId) {
         params.push(before, beforeId);
         // Use timestamptz for proper comparison with timestamp with time zone column
-        beforeClause = 'AND (m.created_at, m.id) < ($4::timestamptz, $5::uuid)';
+        beforeClause = 'AND (m.created_at, m.id) < ($3::timestamptz, $4::uuid)';
     } else if (before) {
         params.push(before);
-        beforeClause = 'AND m.created_at < $4::timestamptz';
+        beforeClause = 'AND m.created_at < $3::timestamptz';
     }
 
     // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
 
-    const chatScopeJoinCondition = chatOnly
-        ? 'c.id = tc.id AND cardinality($3::text[]) >= 0'
-        : `c.workspace_id = tc.workspace_id
-           AND (
-             c.contact_id = tc.contact_id
-             OR c.id = tc.id
-             OR EXISTS (
-               SELECT 1
-               FROM contacts alias_cont
-               WHERE alias_cont.id = c.contact_id
-                 AND alias_cont.workspace_id = c.workspace_id
-                 AND regexp_replace(COALESCE(alias_cont.phone_number_jid, alias_cont.phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
-             )
-           )`;
+    const contactIdsCTE = chatOnly
+        ? `SELECT tc.contact_id FROM target_chat tc`
+        : `SELECT id FROM contacts 
+           WHERE id = (SELECT contact_id FROM target_chat)
+              OR (phone_canonical IS NOT NULL AND phone_canonical = (SELECT phone_canonical FROM contacts WHERE id = (SELECT contact_id FROM target_chat)))`;
 
-    // Default behavior keeps contact-thread history across sessions.
-    // For protocol-scoped searches, we can force chat-only history.
+    const chatIdsCTE = chatOnly
+        ? `SELECT tc.id FROM target_chat tc`
+        : `SELECT id FROM chats 
+           WHERE contact_id IN (SELECT id FROM matching_contact_ids)`;
+
     const { rows } = await db.query(
         `
         WITH target_chat AS (
             SELECT id, workspace_id, contact_id
             FROM chats
             WHERE id = $1
+        ),
+        matching_contact_ids AS (
+            ${contactIdsCTE}
+        ),
+        matching_chat_ids AS (
+            ${chatIdsCTE}
         )
         SELECT 
             m.*,
@@ -2555,9 +2829,8 @@ export async function getChatMessagesWindow({
             cont.email AS contact_email,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address
-        FROM target_chat tc
-        JOIN chats c
-          ON ${chatScopeJoinCondition}
+        FROM matching_chat_ids mci
+        JOIN chats c ON c.id = mci.id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
         JOIN messages m ON m.chat_id = c.id
         WHERE 1=1
@@ -2667,7 +2940,7 @@ function mapMessageFromRow(
     timezone: string,
     contact: Contact | undefined,
     agentsMap: Map<string, AgentRow>,
-    systemAgentsMap: Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>>,
+    systemAgentsMap: Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url' | 'type'>>,
     metadataShape: 'full' | 'preview' = 'full'
 ): Message {
     const createdAt = new Date(row.created_at);
@@ -2710,201 +2983,36 @@ function resolveSender(
     row: MessageRow,
     contact: Contact | undefined,
     agentsMap: Map<string, AgentRow>,
-    systemAgentsMap: Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url'>>
+    systemAgentsMap: Map<string, Pick<SystemAgent, 'id' | 'name' | 'avatar_url' | 'type'>>
 ): MessageSender {
     if (row.from_me) {
         if (row.sender_user_id && agentsMap.has(row.sender_user_id)) {
             const agent = agentsMap.get(row.sender_user_id)!;
-            return { id: agent.id, name: agent.full_name, avatar: agent.avatar_url || undefined, type: 'user' };
+            return {
+                type: 'user',
+                id: agent.id,
+                name: agent.full_name,
+                avatar_url: agent.avatar_url || undefined,
+            };
         }
         if (row.sender_system_agent_id && systemAgentsMap.has(row.sender_system_agent_id)) {
             const systemAgent = systemAgentsMap.get(row.sender_system_agent_id)!;
-            return { id: systemAgent.id, name: systemAgent.name, avatar: systemAgent.avatar_url || undefined, type: 'system_agent' };
+            return {
+                type: 'system_agent',
+                id: systemAgent.id,
+                name: systemAgent.name,
+                avatar_url: systemAgent.avatar_url || undefined,
+            };
         }
-    } else if (contact) {
-        return { id: contact.id, name: contact.name, avatar: contact.avatar_url, type: 'contact' };
+        return { type: 'user', id: 'unknown', name: 'Sistema' };
     }
-    return undefined;
-}
 
-function stripBulkyErrorPayloads(details: MessageMetadata['send_error_details']): MessageMetadata['send_error_details'] {
-    if (!details) return details;
-
-    const {
-        raw_data: _rawData,
-        raw_payload: _rawPayload,
-        provider_payload: _providerPayload,
-        message_updates: _messageUpdates,
-        ...rest
-    } = details;
-
-    return Object.keys(rest).length > 0 ? rest : undefined;
-}
-
-function compactSharedContactsForPreview(sharedContacts: MessageMetadata['sharedContacts']): MessageMetadata['sharedContacts'] {
-    if (!Array.isArray(sharedContacts) || sharedContacts.length === 0) return undefined;
-
-    return sharedContacts.slice(0, 1).map((contact) => ({
-        displayName: contact.displayName,
-        fullName: contact.fullName,
-        organization: contact.organization,
-        phones: Array.isArray(contact.phones) ? contact.phones.slice(0, 3) : undefined,
-        vcard: undefined,
-    }));
-}
-
-function compactMessageMetadata(
-    metadata: MessageMetadata,
-    shape: 'full' | 'preview'
-): MessageMetadata | undefined {
-    const sanitized: MessageMetadata = {
-        ...metadata,
-        send_error_details: stripBulkyErrorPayloads(metadata.send_error_details),
+    return {
+        type: 'contact',
+        id: contact?.id || row.contact_id || 'unknown',
+        name: contact?.name || row.contact_name || 'Contato',
+        avatar_url: contact?.avatar_url || row.contact_avatar_url || undefined,
     };
-
-    if (shape === 'full') {
-        return Object.keys(sanitized).length > 0 ? sanitized : undefined;
-    }
-
-    const preview: MessageMetadata = {};
-
-    if (sanitized.mediaUrl) preview.mediaUrl = sanitized.mediaUrl;
-    if (sanitized.mimetype) preview.mimetype = sanitized.mimetype;
-    if (sanitized.fileName) preview.fileName = sanitized.fileName;
-    if (typeof sanitized.latitude === 'number') preview.latitude = sanitized.latitude;
-    if (typeof sanitized.longitude === 'number') preview.longitude = sanitized.longitude;
-    if (sanitized.address) preview.address = sanitized.address;
-    if (sanitized.locationName) preview.locationName = sanitized.locationName;
-    if (sanitized.locationDescription) preview.locationDescription = sanitized.locationDescription;
-    if (sanitized.mapUrl) preview.mapUrl = sanitized.mapUrl;
-    if (sanitized.isInternalNote) preview.isInternalNote = sanitized.isInternalNote;
-    if (sanitized.isMarketing) preview.isMarketing = sanitized.isMarketing;
-    if (sanitized.event) preview.event = sanitized.event;
-    if (sanitized.sharedContactName) preview.sharedContactName = sanitized.sharedContactName;
-    if (Array.isArray(sanitized.sharedContactPhones) && sanitized.sharedContactPhones.length > 0) {
-        preview.sharedContactPhones = sanitized.sharedContactPhones.slice(0, 3);
-    }
-    const compactSharedContacts = compactSharedContactsForPreview(sanitized.sharedContacts);
-    if (compactSharedContacts) preview.sharedContacts = compactSharedContacts;
-
-    return Object.keys(preview).length > 0 ? preview : undefined;
-}
-
-function parseMetadata(metadata: any, shape: 'full' | 'preview' = 'full'): MessageMetadata | undefined {
-    if (!metadata) return undefined;
-    if (typeof metadata === 'object') return compactMessageMetadata(metadata as MessageMetadata, shape);
-    try {
-        return compactMessageMetadata(JSON.parse(metadata) as MessageMetadata, shape);
-    } catch {
-        return undefined;
-    }
-}
-
-function maxIsoDate(current: string | Date | null, candidate: string | Date | null): string | null {
-    if (!candidate) return toIsoString(current);
-    if (!current) return toIsoString(candidate);
-    const currentTime = new Date(current).getTime();
-    const candidateTime = new Date(candidate).getTime();
-    return candidateTime > currentTime ? toIsoString(candidate) : toIsoString(current);
-}
-
-function toIsoString(value: string | Date | null): string | null {
-    if (!value) return null;
-    if (value instanceof Date) return value.toISOString();
-    return String(value);
-}
-
-export async function getContactMessages({
-    contactId,
-    workspaceId,
-    limit = 100,
-}: {
-    contactId: string;
-    workspaceId: string;
-    limit?: number;
-}): Promise<{ messages: Message[]; error?: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return { messages: [], error: "Usuário não autenticado." };
-    }
-
-    try {
-        const access = await requireWorkspaceAccess(user.id, workspaceId);
-        if (!access.ok) {
-            return { messages: [], error: access.error };
-        }
-
-        const timezone = await getWorkspaceTimezone(workspaceId);
-        const contactRes = await db.query(
-            `SELECT id, workspace_id, name, avatar_url, email, phone, phone_number_jid, address
-             FROM contacts
-             WHERE id = $1
-               AND workspace_id = $2
-             LIMIT 1`,
-            [contactId, workspaceId]
-        );
-        const contactRow = contactRes.rows[0];
-        const identityLookupDigits = contactRow
-            ? buildWhatsappLookupDigits(contactRow.phone_number_jid || contactRow.phone)
-            : [];
-        const targetContact: Contact | undefined = contactRow
-            ? {
-                id: contactRow.id,
-                workspace_id: contactRow.workspace_id,
-                name: contactRow.name || 'Contato',
-                avatar_url: contactRow.avatar_url || undefined,
-                email: contactRow.email || undefined,
-                phone: contactRow.phone || undefined,
-                phone_number_jid: contactRow.phone_number_jid || undefined,
-                address: contactRow.address || undefined,
-            }
-            : undefined;
-
-        const { rows } = await db.query(
-            `
-            SELECT 
-                m.*,
-                c.workspace_id AS workspace_id,
-                cont.id AS contact_id,
-                cont.name AS contact_name,
-                cont.avatar_url AS contact_avatar_url,
-                cont.email AS contact_email,
-                cont.phone_number_jid AS contact_phone_number_jid,
-                cont.address AS contact_address
-            FROM messages m
-            JOIN chats c ON c.id = m.chat_id
-            LEFT JOIN contacts cont ON cont.id = c.contact_id
-            WHERE c.workspace_id = $2
-              AND (
-                c.contact_id = $1
-                OR regexp_replace(COALESCE(cont.phone_number_jid, cont.phone, ''), '[^0-9]', '', 'g') = ANY($4::text[])
-              )
-            ORDER BY m.created_at DESC
-            LIMIT $3
-            `,
-            [contactId, workspaceId, limit, identityLookupDigits]
-        );
-
-        const senderIds = [...new Set(rows.map((row) => row.sender_user_id).filter(Boolean))];
-        const systemAgentIds = [...new Set(rows.map((row) => row.sender_system_agent_id).filter(Boolean))];
-
-        const [agentsMap, systemAgentsMap] = await Promise.all([
-            fetchAgentsMap(senderIds as string[]),
-            fetchSystemAgentsMap(systemAgentIds as string[]),
-        ]);
-
-        const messages = rows
-            .map((row: MessageRow) => mapMessageFromRow(row, timezone, targetContact, agentsMap, systemAgentsMap))
-            .reverse();
-
-        return { messages };
-
-    } catch (error: any) {
-        console.error("[GET_CONTACT_MESSAGES] Error:", error);
-        return { messages: [], error: `Falha ao buscar histórico do contato: ${error.message}` };
-    }
 }
 
 export const toggleChatAutopilot = withDebug(
@@ -2969,4 +3077,22 @@ export const updateChatCopilotModeAction = withDebug(
     }
 );
 
+function maxIsoDate(d1: string | null, d2: string | Date | null): string | null {
+    if (!d1) return d2 ? (d2 instanceof Date ? d2.toISOString() : String(d2)) : null;
+    if (!d2) return d1;
+    const date1 = new Date(d1);
+    const date2 = new Date(d2);
+    return date1 > date2 ? d1 : (d2 instanceof Date ? d2.toISOString() : String(d2));
+}
 
+function parseMetadata(metadata: any, shape: 'full' | 'preview'): MessageMetadata {
+    if (!metadata) return {};
+    if (typeof metadata === 'string') {
+        try {
+            return JSON.parse(metadata);
+        } catch (e) {
+            return {};
+        }
+    }
+    return metadata;
+}

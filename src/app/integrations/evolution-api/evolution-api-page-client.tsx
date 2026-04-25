@@ -145,7 +145,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
     const handleMetaLogin = () => {
         if (!hasValidMetaAppId) {
             toast({
-                title: 'ConfiguraÃ§Ã£o Meta ausente',
+                title: 'Configuração Meta ausente',
                 description: 'Defina NEXT_PUBLIC_FACEBOOK_APP_ID ou NEXT_PUBLIC_META_APP_ID com o App ID correto antes de conectar o WhatsApp.',
                 variant: 'destructive'
             });

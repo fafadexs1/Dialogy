@@ -6,6 +6,9 @@ import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog, KnowledgeBaseDocument, Workspace } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
+import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
+import { VectorStore } from '@/lib/vector-store';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -235,6 +238,8 @@ export async function saveAutopilotConfig(
         const fieldsToUpdate: { [key: string]: any } = {};
         const setClauses: string[] = [];
         const values: any[] = [];
+        let parsedDocsForIndex: KnowledgeBaseDocument[] | null = null;
+        let previousDocsForIndex: KnowledgeBaseDocument[] = [];
         let valueIndex = 4; // Start index for parameterized query, after workspaceId, configId (removed userId from WHERE) + placeholder for userId logging if needed? No, purely config update.
         // Actually, let's reset index logic.
         // Params: [workspaceId, configId] -> indices $1, $2
@@ -265,8 +270,9 @@ export async function saveAutopilotConfig(
         if (formData.has('knowledgeBaseDocuments')) {
             try {
                 const parsedDocs = formData.get('knowledgeBaseDocuments') ? JSON.parse(formData.get('knowledgeBaseDocuments')!.toString()) : [];
+                parsedDocsForIndex = Array.isArray(parsedDocs) ? parsedDocs : [];
                 setClauses.push(`knowledge_base_documents = $${valueIndex++}`);
-                values.push(JSON.stringify(parsedDocs));
+                values.push(JSON.stringify(parsedDocsForIndex));
             } catch (error) {
                 console.error('[SAVE_AUTOPILOT_CONFIG] Erro ao parsear documentos da base:', error);
                 return { success: false, error: 'Base de conhecimento inválida.' };
@@ -283,6 +289,14 @@ export async function saveAutopilotConfig(
             setClauses.push(`default_fallback_reply = $${valueIndex++}`);
             values.push(formData.get('defaultFallbackReply') || null);
         }
+        if (formData.has('escalationPolicy')) {
+            setClauses.push(`escalation_policy = $${valueIndex++}`);
+            values.push(formData.get('escalationPolicy') || null);
+        }
+        if (formData.has('closingPolicy')) {
+            setClauses.push(`closing_policy = $${valueIndex++}`);
+            values.push(formData.get('closingPolicy') || null);
+        }
 
         const isPrivate = formData.get('isPrivate');
         const value = typeof isPrivate === 'string' ? isPrivate : '';
@@ -295,6 +309,19 @@ export async function saveAutopilotConfig(
             return { success: true }; // Nothing to update
         }
 
+        if (parsedDocsForIndex) {
+            const currentDocsRes = await db.query(
+                `SELECT knowledge_base_documents FROM autopilot_configs WHERE workspace_id = $1 AND id = $2 LIMIT 1`,
+                [workspaceId, configId]
+            );
+            const rawDocs = currentDocsRes.rows[0]?.knowledge_base_documents;
+            previousDocsForIndex = typeof rawDocs === 'string'
+                ? JSON.parse(rawDocs || '[]')
+                : Array.isArray(rawDocs)
+                    ? rawDocs
+                    : [];
+        }
+
         const updateQuery = `
             UPDATE autopilot_configs
             SET ${setClauses.join(', ')}, updated_at = NOW()
@@ -305,6 +332,58 @@ export async function saveAutopilotConfig(
 
         if (result.rowCount === 0) {
             return { success: false, error: 'Agente não encontrado ou nenhuma alteração foi feita.' };
+        }
+
+        if (parsedDocsForIndex) {
+            const previousById = new Map(previousDocsForIndex.map((doc) => [doc.id, doc]));
+            const nextById = new Map(parsedDocsForIndex.map((doc) => [doc.id, doc]));
+
+            const removedDocs = previousDocsForIndex.filter((doc) => !nextById.has(doc.id));
+            const changedDocs = parsedDocsForIndex.filter((doc) => {
+                const previous = previousById.get(doc.id);
+                return !previous || previous.name !== doc.name || previous.content !== doc.content;
+            });
+
+            await Promise.all(
+                removedDocs.map((doc) =>
+                    VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+                        console.error('[RAG] Failed to remove document embeddings:', ragError);
+                    })
+                )
+            );
+
+            for (const doc of changedDocs) {
+                const content = (doc.content || '').trim();
+                if (!content) {
+                    await VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+                        console.error('[RAG] Failed to clear empty document embeddings:', ragError);
+                    });
+                    continue;
+                }
+
+                try {
+                    await VectorStore.deleteDocumentEmbeddings(doc.id);
+                    if (shouldEnqueueJob('ai_document_ingest')) {
+                        await enqueueAiDocumentIngest({
+                            workspaceId,
+                            autopilotConfigId: configId,
+                            documentId: doc.id,
+                            documentName: doc.name || 'Documento',
+                            content,
+                        });
+                    } else {
+                        await ingestKnowledgeBaseDocument({
+                            workspaceId,
+                            autopilotConfigId: configId,
+                            documentId: doc.id,
+                            documentName: doc.name || 'Documento',
+                            content,
+                        });
+                    }
+                } catch (ragError) {
+                    console.error('[RAG] Failed to reindex knowledge document:', ragError);
+                }
+            }
         }
 
         revalidatePath('/autopilot');
@@ -486,15 +565,36 @@ interface UsageLogData {
     outputTokens: number;
     totalTokens: number;
     ruleName?: string;
+    chatId?: string | null;
+    systemAgentId?: string | null;
+    inputMessage?: string | null;
+    outputMessage?: string | null;
+    status?: string | null;
+    metadata?: Record<string, unknown> | null;
 }
 
 export async function logAutopilotUsage(data: UsageLogData): Promise<void> {
     try {
         await db.query(
             `INSERT INTO autopilot_usage_logs 
-             (config_id, flow_name, model_name, input_tokens, output_tokens, total_tokens, rule_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [data.configId, data.flowName, data.modelName, data.inputTokens, data.outputTokens, data.totalTokens, data.ruleName]
+             (config_id, flow_name, model_name, input_tokens, output_tokens, total_tokens, rule_name,
+              chat_id, system_agent_id, input_message, output_message, status, metadata)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+                data.configId,
+                data.flowName,
+                data.modelName,
+                data.inputTokens,
+                data.outputTokens,
+                data.totalTokens,
+                data.ruleName,
+                data.chatId || null,
+                data.systemAgentId || null,
+                data.inputMessage || null,
+                data.outputMessage || null,
+                data.status || null,
+                data.metadata ? JSON.stringify(data.metadata) : null,
+            ]
         );
         console.log(`[LOG_USAGE] Usage logged for flow ${data.flowName} with model ${data.modelName}. Total Tokens: ${data.totalTokens}`);
     } catch (error) {
@@ -514,7 +614,8 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
 
     try {
         const res = await db.query(
-            `SELECT flow_name, rule_name, model_name, total_tokens, created_at
+            `SELECT flow_name, rule_name, model_name, total_tokens, input_tokens, output_tokens,
+                    chat_id, system_agent_id, input_message, output_message, status, metadata, created_at
              FROM autopilot_usage_logs
              WHERE config_id = $1
              ORDER BY created_at DESC
@@ -527,9 +628,6 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
         return { logs: null, error: "Falha ao buscar o histórico de uso." };
     }
 }
-
-import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
-import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 
 export async function addDocumentToKnowledgeBase(
     workspaceId: string,

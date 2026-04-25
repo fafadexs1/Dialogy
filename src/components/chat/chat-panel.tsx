@@ -135,6 +135,7 @@ interface ChatPanelProps {
     tabId: string;
     onLoadOlderMessages: () => Promise<void> | void;
     canLoadOlder: boolean;
+    isLoadingInitialMessages?: boolean;
     workspaceTimezone: string;
     onToggleContactPanel: () => void;
     onForwardMessage: (message: Message) => void;
@@ -427,6 +428,7 @@ export default function ChatPanel({
     tabId,
     onLoadOlderMessages,
     canLoadOlder,
+    isLoadingInitialMessages = false,
     workspaceTimezone,
     onToggleContactPanel,
     onForwardMessage,
@@ -861,8 +863,11 @@ export default function ChatPanel({
 
         observedLastMessageIdByChatRef.current[chatId] = lastMessage.id;
 
+        const copilotMode = chat?.copilot_mode || 'off';
         const shouldRun = isAiAgentActive &&
             !!chat &&
+            !chat.assigned_system_agent_id &&
+            copilotMode === 'suggest' &&
             lastMessage?.sender?.id !== currentUser.id &&
             !lastMessage?.metadata?.sentBy &&
             !isAiTyping;
@@ -901,8 +906,6 @@ export default function ChatPanel({
             });
 
             if (result?.response) {
-                const copilotMode = chat?.copilot_mode || 'auto';
-
                 if (copilotMode === 'suggest') {
                     setAiSuggestion({
                         text: result.response,
@@ -915,13 +918,7 @@ export default function ChatPanel({
                     return;
                 }
 
-                const agentIdForMessage = chat.agent?.id || currentUser.id;
-                const sendResult = await sendAutomatedMessageAction(chat.id, result.response, agentIdForMessage);
-                if (sendResult.success) {
-                    onActionSuccess();
-                } else {
-                    toast({ title: 'Erro ao Enviar Mensagem', description: sendResult.error, variant: 'destructive' });
-                }
+                return;
             }
         } catch (error: any) {
             console.error('[AUTOPILOT] Erro ao gerar resposta:', error);
@@ -1887,6 +1884,8 @@ export default function ChatPanel({
     const activeAutopilotRuleCount = autopilotRules.filter(rule => rule.enabled).length;
     const currentCopilotMode = chat.copilot_mode === 'auto' ? 'auto' : 'suggest';
     const hasAutopilotAvailable = availableAutopilotAgents.length > 0;
+    const assignedOwnerLabel = chat.assignedSystemAgent?.name || chat.agent?.name || null;
+    const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
 
 
 
@@ -1921,6 +1920,12 @@ export default function ChatPanel({
                                     {chat.relatedChatIds?.length || 1} conversas
                                 </Badge>
                             )}
+                            {isAssignedToIntelligentAgent && (
+                                <Badge variant="secondary" className="bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 border-cyan-500/20 text-[10px] px-1.5 h-5 shrink-0 hidden xl:inline-flex">
+                                    <Bot className="mr-1 h-3 w-3" />
+                                    IA
+                                </Badge>
+                            )}
                         </h2>
                         <p className="flex items-center gap-1 overflow-hidden min-w-0 text-xs text-slate-500 dark:text-zinc-500">
                             {chat.instance_name && (
@@ -1931,6 +1936,15 @@ export default function ChatPanel({
                             )}
                             <span className="hidden lg:inline mx-1">•</span>
                             <span className="truncate text-slate-600 dark:text-zinc-400">{contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid}</span>
+                            {assignedOwnerLabel && (
+                                <span className="hidden md:inline-flex min-w-0 items-center gap-1">
+                                    <span className="mx-1">•</span>
+                                    {isAssignedToIntelligentAgent && <Bot className="h-3 w-3 shrink-0 text-cyan-500" />}
+                                    <span className="truncate text-slate-500 dark:text-zinc-500">
+                                        {isAssignedToIntelligentAgent ? 'IA: ' : 'Responsável: '}{assignedOwnerLabel}
+                                    </span>
+                                </span>
+                            )}
                             <span className="hidden sm:inline-flex items-center shrink-0">
                                 <span className="mx-1">•</span>
                                 <span className="text-xs whitespace-nowrap text-slate-400 dark:text-zinc-600">ID: {chat.id}</span>
@@ -2199,6 +2213,14 @@ export default function ChatPanel({
             {/* Messages Area */}
 
             <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-[#F3F4F6]/68 dark:bg-black/25">
+                {isLoadingInitialMessages ? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                        <div className="flex items-center gap-2 rounded-full border border-border bg-background/70 px-4 py-2 shadow-sm backdrop-blur-sm">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Carregando conversa...</span>
+                        </div>
+                    </div>
+                ) : (
                 <Virtuoso
                     key={chat?.id}
                     ref={virtuosoRef}
@@ -2266,6 +2288,7 @@ export default function ChatPanel({
                         );
                     }}
                 />
+                )}
             </div>
 
 

@@ -44,6 +44,9 @@ const HEALTHY_REALTIME_POLL_HIDDEN_MS = 180000;
 const FALLBACK_POLL_VISIBLE_MS = 15000;
 const FALLBACK_POLL_HIDDEN_MS = 45000;
 
+const hasRecordKey = (record: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(record, key);
+
 function DraggableSoundTester({
   debugCounter,
   onPlay,
@@ -209,6 +212,7 @@ export default function CustomerChatLayout({
   const chats = useInboxStore((state) => state.chats);
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
   const messagesByChat = useInboxStore((state) => state.messagesByChat);
+  const lastSyncMessages = useInboxStore((state) => state.lastSyncMessages);
   const oldestMessageDateByChat = useInboxStore((state) => state.oldestMessageDateByChat);
   const oldestMessageIdByChat = useInboxStore((state) => state.oldestMessageIdByChat);
   const hasMoreHistoryByChat = useInboxStore((state) => state.hasMoreHistoryByChat);
@@ -245,6 +249,7 @@ export default function CustomerChatLayout({
   const initialBuildIdRef = useRef<string>('');
   const buildMismatchTriggeredRef = useRef(false);
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
+  const messageWindowLoadsInFlightRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
   const deltaSyncInFlightRef = useRef<Promise<void> | null>(null);
   const deltaSyncQueuedRef = useRef(false);
@@ -312,14 +317,26 @@ export default function CustomerChatLayout({
   const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
   const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
   const oldestLoadedMessageId = selectedChatId ? oldestMessageIdByChat[selectedChatId] : null;
+  const hasLoadedSelectedMessageWindow = selectedChatId
+    ? hasRecordKey(lastSyncMessages, selectedChatId) || hasRecordKey(oldestMessageDateByChat, selectedChatId)
+    : false;
 
-  const enrichedSelectedChat = useMemo(() => selectedChat ? {
-    ...selectedChat,
-    messages: (selectedChat as any)?.protocolScoped
-      ? (selectedChat.messages || [])
-      : currentChatMessages,
-    unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
-  } : null, [selectedChat, currentChatMessages]);
+  const enrichedSelectedChat = useMemo(() => {
+    if (!selectedChat) return null;
+
+    const fallbackMessages = selectedChat.messages || [];
+    const threadMessages = (selectedChat as any)?.protocolScoped
+      ? fallbackMessages
+      : hasLoadedSelectedMessageWindow
+        ? currentChatMessages
+        : [];
+
+    return {
+      ...selectedChat,
+      messages: threadMessages,
+      unreadCount: threadMessages.filter(m => !m.from_me && !m.is_read).length,
+    };
+  }, [selectedChat, currentChatMessages, hasLoadedSelectedMessageWindow]);
 
   const messagesListChatIdsCsv = useMemo(() => {
     if (!initialUser?.id || ownershipFilter !== 'mine') return '';
@@ -620,10 +637,6 @@ export default function CustomerChatLayout({
     }
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
-  const prefetchChat = useCallback((chatId: string) => {
-    void chatId;
-  }, []);
-
   const loadOlderMessages = useCallback(async () => {
     console.log('[LOAD_OLDER] Called. selectedChatId:', selectedChatId, 'beforeDate:', oldestLoadedMessageDate, 'beforeId:', oldestLoadedMessageId);
     if (!selectedChatId) {
@@ -654,10 +667,22 @@ export default function CustomerChatLayout({
     const force = options?.force ?? false;
     const state = useInboxStore.getState();
     const currentMessages = state.messagesByChat[chatId] || [];
-    console.log('[ENSURE_MESSAGES] Called for chat:', chatId, 'force:', force, 'currentMessages:', currentMessages.length, 'hasMoreHistory:', state.hasMoreHistoryByChat[chatId]);
-    if (force || !currentMessages.length) {
+    const hasLoadedMessageWindow =
+      hasRecordKey(state.lastSyncMessages, chatId) ||
+      hasRecordKey(state.oldestMessageDateByChat, chatId);
+    console.log('[ENSURE_MESSAGES] Called for chat:', chatId, 'force:', force, 'currentMessages:', currentMessages.length, 'hasLoadedMessageWindow:', hasLoadedMessageWindow, 'hasMoreHistory:', state.hasMoreHistoryByChat[chatId]);
+    if (force || !hasLoadedMessageWindow || !currentMessages.length) {
+      if (messageWindowLoadsInFlightRef.current.has(chatId)) {
+        console.log('[ENSURE_MESSAGES] Skipped - load already in flight:', chatId);
+        return;
+      }
       console.log('[ENSURE_MESSAGES] Loading messages (force or empty)');
-      await loadChatMessages(chatId);
+      messageWindowLoadsInFlightRef.current.add(chatId);
+      try {
+        await loadChatMessages(chatId);
+      } finally {
+        messageWindowLoadsInFlightRef.current.delete(chatId);
+      }
       return;
     }
 
@@ -675,16 +700,20 @@ export default function CustomerChatLayout({
     }
   }, [loadChatMessages]);
 
+  const prefetchChat = useCallback((chatId: string) => {
+    void ensureMessagesForChat(chatId);
+  }, [ensureMessagesForChat]);
+
   useEffect(() => {
     if (!selectedChatId) return;
-    if (activatedChatIdsRef.current.has(selectedChatId)) {
+    if (activatedChatIdsRef.current.has(selectedChatId) && hasLoadedSelectedMessageWindow) {
       console.log('[ENSURE_MESSAGES_EFFECT] Skipped - already activated:', selectedChatId);
       return;
     }
     console.log('[ENSURE_MESSAGES_EFFECT] First activation for chat:', selectedChatId);
     activatedChatIdsRef.current.add(selectedChatId);
-    void ensureMessagesForChat(selectedChatId, { force: true });
-  }, [selectedChatId, ensureMessagesForChat]);
+    void ensureMessagesForChat(selectedChatId, { force: !hasLoadedSelectedMessageWindow });
+  }, [selectedChatId, ensureMessagesForChat, hasLoadedSelectedMessageWindow]);
 
   const handleLoadMoreChats = useCallback(async (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => {
     if (isLoadingMoreChats || !hasMoreChats || !initialUser?.activeWorkspaceId) return;
@@ -777,10 +806,8 @@ export default function CustomerChatLayout({
     // Update Ref immediately to prevent rapid-fire duplicates
     selectedChatIdRef.current = chat.id;
 
-    React.startTransition(() => {
-      setSelectedChatId(chat.id);
-      setShowFullHistory(false);
-    });
+    setSelectedChatId(chat.id);
+    setShowFullHistory(false);
 
     updateSelectedChatPath(chat.id);
     activatedChatIdsRef.current.add(chat.id);
@@ -1595,7 +1622,8 @@ export default function CustomerChatLayout({
               setShowFullHistory={setShowFullHistory}
               tabId={tabIdRef.current}
               onLoadOlderMessages={loadOlderMessages}
-              canLoadOlder={hasMoreHistory}
+              canLoadOlder={hasLoadedSelectedMessageWindow && hasMoreHistory}
+              isLoadingInitialMessages={Boolean(enrichedSelectedChat && !hasLoadedSelectedMessageWindow && !(enrichedSelectedChat as any)?.protocolScoped)}
               workspaceTimezone={workspaceTimezone}
               onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
               onForwardMessage={handleForwardMessage}

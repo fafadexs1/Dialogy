@@ -46,6 +46,9 @@ const HEALTHY_REALTIME_POLL_HIDDEN_MS = 300000;
 const FALLBACK_POLL_VISIBLE_MS = 30000;
 const FALLBACK_POLL_HIDDEN_MS = 300000;
 
+const hasRecordKey = (record: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(record, key);
+
 function DraggableSoundTester({
   debugCounter,
   onPlay,
@@ -245,6 +248,7 @@ export default function MobileChatLayout({
   const chats = useInboxStore((state) => state.chats);
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
   const messagesByChat = useInboxStore((state) => state.messagesByChat);
+  const lastSyncMessages = useInboxStore((state) => state.lastSyncMessages);
   const oldestMessageDateByChat = useInboxStore((state) => state.oldestMessageDateByChat);
   const oldestMessageIdByChat = useInboxStore((state) => state.oldestMessageIdByChat);
   const hasMoreHistoryByChat = useInboxStore((state) => state.hasMoreHistoryByChat);
@@ -327,6 +331,7 @@ export default function MobileChatLayout({
   const initialBuildIdRef = useRef<string>('');
   const buildMismatchTriggeredRef = useRef(false);
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
+  const messageWindowLoadsInFlightRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
   const deltaSyncInFlightRef = useRef<Promise<void> | null>(null);
   const deltaSyncQueuedRef = useRef(false);
@@ -418,6 +423,9 @@ export default function MobileChatLayout({
   const hasMoreHistory = selectedChatId ? hasMoreHistoryByChat[selectedChatId] ?? true : false;
   const oldestLoadedMessageDate = selectedChatId ? oldestMessageDateByChat[selectedChatId] : null;
   const oldestLoadedMessageId = selectedChatId ? oldestMessageIdByChat[selectedChatId] : null;
+  const hasLoadedSelectedMessageWindow = selectedChatId
+    ? hasRecordKey(lastSyncMessages, selectedChatId) || hasRecordKey(oldestMessageDateByChat, selectedChatId)
+    : false;
 
   const formatMessageDay = useCallback((date: Date) => {
     return formatMessageDate(date, workspaceTimezone);
@@ -708,10 +716,6 @@ export default function MobileChatLayout({
     }
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
-  const prefetchChat = useCallback((chatId: string) => {
-    void chatId;
-  }, []);
-
   const loadOlderMessages = useCallback(async () => {
     if (!selectedChatId) return;
     const state = useInboxStore.getState();
@@ -727,8 +731,19 @@ export default function MobileChatLayout({
     const force = options?.force ?? false;
     const state = useInboxStore.getState();
     const currentMessages = state.messagesByChat[chatId] || [];
-    if (force || !currentMessages.length) {
-      await loadChatMessages(chatId);
+    const hasLoadedMessageWindow =
+      hasRecordKey(state.lastSyncMessages, chatId) ||
+      hasRecordKey(state.oldestMessageDateByChat, chatId);
+    if (force || !hasLoadedMessageWindow || !currentMessages.length) {
+      if (messageWindowLoadsInFlightRef.current.has(chatId)) {
+        return;
+      }
+      messageWindowLoadsInFlightRef.current.add(chatId);
+      try {
+        await loadChatMessages(chatId);
+      } finally {
+        messageWindowLoadsInFlightRef.current.delete(chatId);
+      }
       return;
     }
 
@@ -743,12 +758,16 @@ export default function MobileChatLayout({
     }
   }, [loadChatMessages]);
 
+  const prefetchChat = useCallback((chatId: string) => {
+    void ensureMessagesForChat(chatId);
+  }, [ensureMessagesForChat]);
+
   useEffect(() => {
     if (!selectedChatId) return;
-    if (activatedChatIdsRef.current.has(selectedChatId)) return;
+    if (activatedChatIdsRef.current.has(selectedChatId) && hasLoadedSelectedMessageWindow) return;
     activatedChatIdsRef.current.add(selectedChatId);
-    void ensureMessagesForChat(selectedChatId, { force: true });
-  }, [selectedChatId, ensureMessagesForChat]);
+    void ensureMessagesForChat(selectedChatId, { force: !hasLoadedSelectedMessageWindow });
+  }, [selectedChatId, ensureMessagesForChat, hasLoadedSelectedMessageWindow]);
 
   const handleSetSelectedChat = useCallback((chat: Chat | null) => {
     if (!chat) {
@@ -768,10 +787,8 @@ export default function MobileChatLayout({
       return;
     }
     selectedChatIdRef.current = chat.id;
-    React.startTransition(() => {
-      setSelectedChatId(chat.id);
-      setShowFullHistory(false);
-    });
+    setSelectedChatId(chat.id);
+    setShowFullHistory(false);
     updateSelectedChatPath(chat.id);
     activatedChatIdsRef.current.add(chat.id);
     void ensureMessagesForChat(chat.id, { force: isFirstActivation });
@@ -1506,13 +1523,20 @@ export default function MobileChatLayout({
     )
   }
 
-  const enrichedSelectedChat = selectedChat ? {
-    ...selectedChat,
-    messages: (selectedChat as any)?.protocolScoped
-      ? (selectedChat.messages || [])
-      : currentChatMessages,
-    unreadCount: currentChatMessages.filter(m => !m.from_me && !m.is_read).length,
-  } : null;
+  const enrichedSelectedChat = selectedChat ? (() => {
+    const fallbackMessages = selectedChat.messages || [];
+    const threadMessages = (selectedChat as any)?.protocolScoped
+      ? fallbackMessages
+      : hasLoadedSelectedMessageWindow
+        ? currentChatMessages
+        : [];
+
+    return {
+      ...selectedChat,
+      messages: threadMessages,
+      unreadCount: threadMessages.filter(m => !m.from_me && !m.is_read).length,
+    };
+  })() : null;
 
   const mobileTabs = [
     { id: 'chats' as const, label: 'Conversas', icon: MessageSquare, badge: mobileStats.unread },
@@ -1545,7 +1569,8 @@ export default function MobileChatLayout({
               setShowFullHistory={setShowFullHistory}
               tabId={tabIdRef.current}
               onLoadOlderMessages={loadOlderMessages}
-              canLoadOlder={hasMoreHistory}
+              canLoadOlder={hasLoadedSelectedMessageWindow && hasMoreHistory}
+              isLoadingInitialMessages={Boolean(enrichedSelectedChat && !hasLoadedSelectedMessageWindow && !(enrichedSelectedChat as any)?.protocolScoped)}
               workspaceTimezone={workspaceTimezone}
               onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
               onForwardMessage={handleForwardMessage}

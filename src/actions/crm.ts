@@ -537,11 +537,11 @@ export async function getTags(workspaceId: string): Promise<{ tags: Tag[] | null
 export async function getPipelineStages(workspaceId: string): Promise<{ stages: PipelineStage[] | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { stages: null, error: "UsuÃ¡rio nÃ£o autenticado." };
+    if (!user) return { stages: null, error: "Usuário não autenticado." };
 
     try {
         if (!await hasPermission(user.id, workspaceId, 'crm:view')) {
-            return { stages: null, error: "Acesso nÃ£o autorizado." };
+            return { stages: null, error: "Acesso não autorizado." };
         }
 
         const stages = await getPipelineStagesForWorkspace(workspaceId);
@@ -561,20 +561,20 @@ export const createPipelineStage = withDebug(
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+        if (!user) return { success: false, error: "Usuário não autenticado." };
 
         if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
-            return { success: false, error: "VocÃª nÃ£o tem permissÃ£o para editar o funil." };
+            return { success: false, error: "Você não tem permissão para editar o funil." };
         }
 
         const normalizedLabel = label.trim();
         if (!normalizedLabel) {
-            return { success: false, error: "Nome da etapa Ã© obrigatÃ³rio." };
+            return { success: false, error: "Nome da etapa é obrigatório." };
         }
 
         const value = normalizePipelineStageValue(normalizedLabel);
         if (!value) {
-            return { success: false, error: "Nome da etapa invÃ¡lido." };
+            return { success: false, error: "Nome da etapa inválido." };
         }
 
         try {
@@ -606,7 +606,7 @@ export const createPipelineStage = withDebug(
         } catch (error: any) {
             console.error("[CREATE_PIPELINE_STAGE] Error:", error);
             if (error?.code === '23505') {
-                return { success: false, error: "JÃ¡ existe uma etapa com esse nome neste workspace." };
+                return { success: false, error: "Já existe uma etapa com esse nome neste workspace." };
             }
             return { success: false, error: "Falha ao criar etapa do funil." };
         }
@@ -959,15 +959,15 @@ export const updateCustomFieldDefinition = withDebug(
     ): Promise<{ success: boolean; error?: string }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return { success: false, error: "UsuÃ¡rio nÃ£o autenticado." };
+        if (!user) return { success: false, error: "Usuário não autenticado." };
 
         try {
             const fieldRes = await db.query('SELECT workspace_id FROM custom_field_definitions WHERE id = $1', [fieldId]);
-            if (fieldRes.rowCount === 0) return { success: false, error: "Campo nÃ£o encontrado." };
+            if (fieldRes.rowCount === 0) return { success: false, error: "Campo não encontrado." };
             const workspaceId = fieldRes.rows[0].workspace_id;
 
             if (!await hasPermission(user.id, workspaceId, 'crm:edit')) {
-                return { success: false, error: "VocÃª nÃ£o tem permissÃ£o para editar campos." };
+                return { success: false, error: "Você não tem permissão para editar campos." };
             }
 
             const setClauses: string[] = [];
@@ -992,7 +992,7 @@ export const updateCustomFieldDefinition = withDebug(
             }
 
             if (setClauses.length === 0) {
-                return { success: false, error: "Nenhuma alteraÃ§Ã£o enviada." };
+                return { success: false, error: "Nenhuma alteração enviada." };
             }
 
             values.push(fieldId);

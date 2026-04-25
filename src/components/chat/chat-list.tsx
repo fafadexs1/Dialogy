@@ -581,6 +581,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const canAssign = chat.status === 'gerais';
   const canSnooze = chat.status === 'atendimentos';
   const canTag = false;
+  const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
   const isSnoozed = !!snoozedUntil && snoozedUntil > Date.now();
   const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
   const statusTone = chat.status === 'encerrados'
@@ -813,6 +814,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               {isSnoozed && (
                 <Badge className="text-[10px] px-1.5 py-0 bg-amber-500/30 text-amber-100 border-amber-500/40 flex-shrink-0" title="Conversa adiada temporariamente">
                   Snooze
+                </Badge>
+              )}
+              {isAssignedToIntelligentAgent && (
+                <Badge className="text-[10px] px-1.5 py-0 bg-cyan-500/20 text-cyan-100 border-cyan-500/30 flex-shrink-0" title={`Atendido por IA: ${chat.assignedSystemAgent?.name || 'Atendente Inteligente'}`}>
+                  <Bot className="mr-1 h-3 w-3" />
+                  IA
                 </Badge>
               )}
             </div>
@@ -1370,6 +1377,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         (statusFilter === 'open' ? chat.status !== 'encerrados' : chat.status === 'encerrados');
 
       const chatAgentId = chat.agent?.id || chat.agentId;
+      const chatSystemAgentId = chat.assigned_system_agent_id || chat.assignedSystemAgent?.id;
       const matchesTeam =
         ownershipFilter === 'mine'
           ? true
@@ -1381,7 +1389,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         chat.status === 'gerais';
 
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
-      const matchesUnassigned = !showUnassignedOnly || !chat.agent;
+      const matchesUnassigned = !showUnassignedOnly || (!chat.agent && !chatSystemAgentId);
       const snoozedUntil = snoozedUntilMap[chat.id];
       const matchesSnooze = !snoozedUntil || snoozedUntil <= now;
 

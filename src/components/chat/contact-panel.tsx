@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { type Chat, type User, type Team, type Contact, type Deal, EvolutionInstance, type TelegramBotInstance, CustomFieldDefinition } from '@/lib/types';
+import { type Chat, type User, type Team, type Contact, type Deal, EvolutionInstance, type TelegramBotInstance, CustomFieldDefinition, type SystemAgent } from '@/lib/types';
 import {
     Mail,
     Phone,
@@ -60,7 +60,8 @@ import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
 import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
 import { getDealsByContact } from '@/actions/deals';
-import { transferChatAction, getContactProtocolsAction, searchChatsAndContacts } from '@/actions/chats';
+import { transferChatAction, transferChatToIntelligentAgentAction, getContactProtocolsAction, searchChatsAndContacts } from '@/actions/chats';
+import { getSystemAgents } from '@/actions/system-agents';
 import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { getTelegramInstances } from '@/actions/telegram';
 import { getIntegrationConfig } from '@/actions/integrations';
@@ -106,6 +107,7 @@ interface ContactPanelProps {
 export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled, trigger }: { chat: Chat, currentUser: User | null, onTransferSuccess: () => void, disabled?: boolean, trigger?: React.ReactNode }) {
     const { onlineAgents: allOnlineAgents } = usePresence();
     const [teams, setTeams] = useState<Awaited<ReturnType<typeof getTeamsWithOnlineMembers>>['teams']>([]);
+    const [intelligentAgents, setIntelligentAgents] = useState<SystemAgent[]>([]);
     const [loading, setLoading] = useState(true);
     const [isTransferring, setIsTransferring] = useState(false);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -114,9 +116,17 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
         if (!isDialogOpen || !currentUser?.activeWorkspaceId) return;
 
         setLoading(true);
-        getTeamsWithOnlineMembers(currentUser.activeWorkspaceId)
-            .then(data => {
-                if (data.teams) setTeams(data.teams);
+        Promise.all([
+            getTeamsWithOnlineMembers(currentUser.activeWorkspaceId),
+            getSystemAgents(currentUser.activeWorkspaceId),
+        ])
+            .then(([teamsData, agentsData]) => {
+                if (teamsData.teams) setTeams(teamsData.teams);
+                setIntelligentAgents((agentsData.agents || []).filter((agent) =>
+                    agent.type === 'intelligent_attendant' &&
+                    agent.is_active &&
+                    !!agent.autopilot_config_id
+                ));
             })
             .finally(() => setLoading(false));
 
@@ -143,7 +153,28 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
         setIsTransferring(false);
     }
 
+    const handleTransferToAi = async (systemAgentId: string) => {
+        setIsTransferring(true);
+        const result = await transferChatToIntelligentAgentAction({
+            chatId: chat.id,
+            systemAgentId,
+        });
+
+        if (result.error) {
+            toast({ title: "Erro ao transferir", description: result.error, variant: 'destructive' });
+        } else {
+            if (result.chat) {
+                useInboxStore.getState().upsertChats([result.chat]);
+            }
+            toast({ title: "Atendimento transferido para IA!" });
+            onTransferSuccess();
+            setIsDialogOpen(false);
+        }
+        setIsTransferring(false);
+    }
+
     const availableAgents = allOnlineAgents.filter(agent => agent.user.id !== currentUser?.id);
+    const hasIntelligentAgents = intelligentAgents.length > 0;
 
     return (
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -183,9 +214,12 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
                     </div>
                 )}
                 <Tabs defaultValue="team" className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 bg-muted/50">
+                    <TabsList className={cn("grid w-full bg-muted/50", hasIntelligentAgents ? "grid-cols-3" : "grid-cols-2")}>
                         <TabsTrigger value="team" className="data-[state=active]:bg-background data-[state=active]:text-foreground">Para Equipe</TabsTrigger>
                         <TabsTrigger value="agent" className="data-[state=active]:bg-background data-[state=active]:text-foreground">Para Agente</TabsTrigger>
+                        {hasIntelligentAgents && (
+                            <TabsTrigger value="ai" className="data-[state=active]:bg-background data-[state=active]:text-foreground">Para IA</TabsTrigger>
+                        )}
                     </TabsList>
                     <TabsContent value="team">
                         <ScrollArea className="h-64">
@@ -230,6 +264,33 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
                             </div>
                         </ScrollArea>
                     </TabsContent>
+                    {hasIntelligentAgents && (
+                        <TabsContent value="ai">
+                            <ScrollArea className="h-64">
+                                <div className="p-1 space-y-2">
+                                    {loading ? <Loader2 className="mx-auto my-10 h-6 w-6 animate-spin text-primary" /> :
+                                        intelligentAgents.map(agent => (
+                                            <div key={agent.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors">
+                                                <div className="flex min-w-0 items-center gap-3">
+                                                    <Avatar className="h-8 w-8 border border-border">
+                                                        <AvatarImage src={agent.avatar_url || undefined} />
+                                                        <AvatarFallback className="bg-muted text-foreground">{agent.name.charAt(0)}</AvatarFallback>
+                                                    </Avatar>
+                                                    <div className="min-w-0">
+                                                        <p className="truncate font-medium text-foreground">{agent.name}</p>
+                                                        <p className="truncate text-xs text-muted-foreground">{agent.autopilot_config_name || 'IA configurada'}</p>
+                                                    </div>
+                                                </div>
+                                                <Button size="sm" onClick={() => handleTransferToAi(agent.id)} disabled={isTransferring} className="bg-cyan-600 hover:bg-cyan-500 text-white">
+                                                    {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                    Transferir
+                                                </Button>
+                                            </div>
+                                        ))}
+                                </div>
+                            </ScrollArea>
+                        </TabsContent>
+                    )}
                 </Tabs>
             </DialogContent>
         </Dialog >

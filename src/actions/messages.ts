@@ -590,7 +590,7 @@ async function internalSendMessage(
         // Carrega info básica do chat para atribuição de agente (independente do canal)
         const chatInfoRes = await client.query(`
             SELECT 
-                c.workspace_id, c.status, c.agent_id,
+                c.workspace_id, c.status, c.agent_id, c.assigned_system_agent_id,
                 ct.phone_number_jid,
                 mc.platform as meta_platform,
                 (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name,
@@ -610,7 +610,7 @@ async function internalSendMessage(
         }
 
         const chatInfo = chatInfoRes.rows[0];
-        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source, meta_platform } = chatInfo;
+        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, assigned_system_agent_id: currentSystemAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source, meta_platform } = chatInfo;
         const normalizedSource = (source || '').toString().toLowerCase();
         const normalizedMetaPlatform = (meta_platform || '').toString().toLowerCase();
         const isTelegramSource =
@@ -656,12 +656,19 @@ async function internalSendMessage(
         }
 
         // Se for humano e não tiver agente (independente do status), atribui o agente
-        const isFromHumanAgent = metadata?.sentBy !== 'system_agent';
+        const isFromHumanAgent = !metadata?.sentBy;
         const isCloseNotice = metadata?.event === 'close_notice';
 
         if (!currentAgentId && chatStatus !== 'encerrados' && isFromHumanAgent && !isCloseNotice) {
             await client.query(
-                "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
+                `UPDATE chats
+                 SET agent_id = $1,
+                     assigned_system_agent_id = NULL,
+                     is_autopilot_active = FALSE,
+                     copilot_mode = 'off',
+                     status = 'atendimentos',
+                     assigned_at = NOW()
+                 WHERE id = $2`,
                 [senderId, chatId]
             );
 
@@ -673,7 +680,7 @@ async function internalSendMessage(
                     workspace_id, chat_id, type, content, from_me, 
                     sender_user_id, created_at, is_read
                 ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
-                [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, senderId]
+                [workspaceId, chatId, currentSystemAgentId ? `Atendimento reassumido por ${agentName}.` : `Atendimento iniciado por ${agentName}.`, senderId]
             );
         }
 
@@ -1619,14 +1626,21 @@ export const sendMediaAction = withDebug(
                 try {
                     try {
                         const chatInfoRes = await client.query(
-                            `SELECT workspace_id, status, agent_id FROM chats WHERE id = $1`,
+                            `SELECT workspace_id, status, agent_id, assigned_system_agent_id FROM chats WHERE id = $1`,
                             [chatId]
                         );
                         if ((chatInfoRes.rowCount ?? 0) > 0) {
-                            const { workspace_id: workspaceId, status, agent_id: currentAgentId } = chatInfoRes.rows[0];
+                            const { workspace_id: workspaceId, status, agent_id: currentAgentId, assigned_system_agent_id: currentSystemAgentId } = chatInfoRes.rows[0];
                             if (!currentAgentId && status !== 'encerrados') {
                                 await client.query(
-                                    "UPDATE chats SET agent_id = $1, status = 'atendimentos', assigned_at = NOW() WHERE id = $2",
+                                    `UPDATE chats
+                                     SET agent_id = $1,
+                                         assigned_system_agent_id = NULL,
+                                         is_autopilot_active = FALSE,
+                                         copilot_mode = 'off',
+                                         status = 'atendimentos',
+                                         assigned_at = NOW()
+                                     WHERE id = $2`,
                                     [user.id, chatId]
                                 );
 
@@ -1641,7 +1655,7 @@ export const sendMediaAction = withDebug(
                                         workspace_id, chat_id, type, content, from_me,
                                         sender_user_id, created_at, is_read
                                     ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
-                                    [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, user.id]
+                                    [workspaceId, chatId, currentSystemAgentId ? `Atendimento reassumido por ${agentName}.` : `Atendimento iniciado por ${agentName}.`, user.id]
                                 );
                             }
                         }

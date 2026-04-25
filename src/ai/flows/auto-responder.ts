@@ -84,6 +84,14 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('Mensagem de contingência para quando nenhuma resposta segura puder ser gerada.'),
+  escalationPolicy: z
+    .string()
+    .optional()
+    .describe('Politica operacional para quando escalar ou transferir para um humano.'),
+  closingPolicy: z
+    .string()
+    .optional()
+    .describe('Politica operacional para quando o atendimento pode ser considerado resolvido ou encerrado.'),
   model: z.string().optional().describe('The AI model to use for the response.'),
   contact: z.object({ id: z.string(), name: z.string(), email: z.string().optional() })
     .describe('The contact details of the customer.'),
@@ -102,6 +110,15 @@ const AgentResponseOutputSchema = z.object({
     .optional()
     .nullable()
     .describe('The name of the rule that was triggered.'),
+  actions: z
+    .array(z.object({
+      type: z.enum(['transfer_chat', 'add_internal_note']),
+      reason: z.string().optional().nullable(),
+      payload: z.record(z.any()).optional().nullable(),
+    }))
+    .optional()
+    .nullable()
+    .describe('Structured system actions requested by the AI. The server validates and executes them.'),
 });
 export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
 
@@ -315,8 +332,52 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 **RESPOSTA DE CONTINGÊNCIA**:
 {{{fallbackReply}}}
 ---
+**POLITICA DE ESCALONAMENTO PARA HUMANO**:
+{{#if escalationPolicy}}
+{{{escalationPolicy}}}
+{{else}}
+(Nenhuma politica especifica definida. Se nao tiver seguranca, informe que vai envolver um atendente humano.)
+{{/if}}
+---
+**POLITICA DE ENCERRAMENTO**:
+{{#if closingPolicy}}
+{{{closingPolicy}}}
+{{else}}
+(Nenhuma politica especifica definida. Nao encerre nem diga que vai encerrar sem confirmacao clara do cliente.)
+{{/if}}
+---
 **ÚLTIMA MENSAGEM DO CLIENTE**:
-{{{customerMessage}}}
+**FERRAMENTAS DISPONIVEIS (Dialogy Agent Tools)**:
+Voce pode solicitar acoes estruturadas no campo "actions". O servidor validara e executara.
+Use no maximo 2 acoes por resposta.
+
+Ferramentas permitidas:
+1. transfer_chat
+   - Use quando precisar envolver humano ou setor.
+   - Payload aceito: {"teamName":"Financeiro"} ou {"teamId":"..."} ou {"agentId":"..."}.
+   - Sempre explique ao cliente em "response" que vai transferir.
+2. add_internal_note
+   - Use para deixar uma nota interna para a equipe.
+   - Payload aceito: {"content":"Resumo objetivo para o humano"}.
+   - A nota nao sera enviada ao cliente.
+
+Exemplo de saida:
+{
+  "response": "Vou encaminhar seu atendimento para o setor responsavel.",
+  "actions": [
+    {
+      "type": "add_internal_note",
+      "reason": "Cliente pediu assunto financeiro",
+      "payload": {"content": "Cliente pediu segunda via de boleto. Verificar dados antes de enviar."}
+    },
+    {
+      "type": "transfer_chat",
+      "reason": "Assunto financeiro sensivel",
+      "payload": {"teamName": "Financeiro"}
+    }
+  ]
+}
+---{{{customerMessage}}}
 
 Com base na sua persona, nos documentos e na emoção identificada, responda ao cliente.`,
 };
@@ -336,6 +397,8 @@ const autoResponderFlow = ai.defineFlow(
       ...input,
       knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
       fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
+      escalationPolicy: input.escalationPolicy ?? input.config?.escalation_policy ?? '',
+      closingPolicy: input.closingPolicy ?? input.config?.closing_policy ?? '',
     });
 
     // 1. Resolve Gemini API key (agent -> workspace integration -> env)

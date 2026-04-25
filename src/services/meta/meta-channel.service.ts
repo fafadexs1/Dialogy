@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { resilientFetch } from '@/lib/http/resilient-fetch';
 import type { Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
-import { enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
+import { enqueueAiAutopilotProcess, enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
 import { buildChatProtocol } from '@/lib/utils';
 
 export type MetaChannelType = 'instagram' | 'messenger';
@@ -55,6 +55,10 @@ type ContactRow = Pick<
 type ChatRow = Pick<Chat, 'id' | 'workspace_id' | 'status' | 'agent' | 'protocol'> & {
   contact_id: string;
   agent_id?: string | null;
+  assigned_system_agent_id?: string | null;
+  is_autopilot_active?: boolean | null;
+  autopilot_config_id?: string | null;
+  copilot_mode?: 'auto' | 'suggest' | 'off' | null;
 };
 
 export async function findChannelByVerifyToken(
@@ -384,6 +388,10 @@ async function ensureConversation(
         ch.status AS chat_status,
         ch.contact_id,
         ch.agent_id,
+        ch.assigned_system_agent_id,
+        ch.is_autopilot_active,
+        ch.autopilot_config_id,
+        ch.copilot_mode,
         ch.protocol AS chat_protocol
       FROM meta_conversations mc
       JOIN chats ch ON ch.id = mc.chat_id
@@ -441,6 +449,10 @@ async function ensureConversation(
         status: newChatRow.status,
         contact_id: newChatRow.contact_id,
         agent_id: newChatRow.agent_id,
+        assigned_system_agent_id: newChatRow.assigned_system_agent_id,
+        is_autopilot_active: newChatRow.is_autopilot_active,
+        autopilot_config_id: newChatRow.autopilot_config_id,
+        copilot_mode: newChatRow.copilot_mode,
         agent: undefined,
         protocol: newChatRow.protocol,
       };
@@ -454,6 +466,10 @@ async function ensureConversation(
       status: row.chat_status,
       contact_id: row.contact_id,
       agent_id: row.agent_id,
+      assigned_system_agent_id: row.assigned_system_agent_id,
+      is_autopilot_active: row.is_autopilot_active,
+      autopilot_config_id: row.autopilot_config_id,
+      copilot_mode: row.copilot_mode,
       agent: undefined,
       protocol: row.chat_protocol || buildChatProtocol(row.chat_id),
     };
@@ -657,20 +673,48 @@ export async function persistNormalizedMessage(params: {
     status: chat.status as Chat['status'],
     contact: contact as any,
     messages: [],
+    assigned_system_agent_id: chat.assigned_system_agent_id,
+    is_autopilot_active: Boolean(chat.is_autopilot_active),
+    autopilot_config_id: chat.autopilot_config_id,
+    copilot_mode: chat.copilot_mode || undefined,
   };
 
   if (direction === 'incoming') {
+    const instanceName = channel.name || platform;
     const webhookDispatch = shouldEnqueueJob('webhook_outbound')
       ? enqueueWebhookOutbound({
         chatId: chatForDispatch.id,
         messageId: persistedMessage.id,
-        instanceName: channel.name || platform,
+        instanceName,
       })
-      : dispatchMessageToWebhooks(chatForDispatch, persistedMessage, channel.name || platform);
+      : dispatchMessageToWebhooks(chatForDispatch, persistedMessage, instanceName);
 
     webhookDispatch.catch((error) => {
       console.error('[META_WEBHOOK_DISPATCH] Failed to dispatch incoming message', error);
     });
+
+    const shouldProcessAi =
+      Boolean(chat.assigned_system_agent_id) &&
+      Boolean(chat.is_autopilot_active) &&
+      Boolean(message.content?.trim());
+
+    if (shouldProcessAi) {
+      const autopilotProcess = shouldEnqueueJob('ai_autopilot_process')
+        ? enqueueAiAutopilotProcess({
+          workspaceId: channel.workspace_id,
+          chatId: chat.id,
+          messageId: persistedMessage.id,
+          lastMessageContent: message.content!.trim(),
+          instanceName,
+        })
+        : import('@/services/autopilot-service').then(({ processAutopilotForChat }) =>
+          processAutopilotForChat(channel.workspace_id, chatForDispatch, message.content!.trim(), instanceName)
+        );
+
+      autopilotProcess.catch((error) => {
+        console.error('[META_AUTOPILOT] Failed to process incoming message', error);
+      });
+    }
   }
 
   return persistedMessage;

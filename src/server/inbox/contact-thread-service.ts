@@ -2,7 +2,6 @@ import 'server-only';
 
 import { db } from '@/lib/db';
 import type { Contact } from '@/lib/types';
-import { buildWhatsappLookupDigits } from '@/lib/whatsapp/contact-identity';
 import { buildContactThreadIdentity } from '@/lib/whatsapp/contact-thread';
 
 type ContactRow = {
@@ -13,6 +12,7 @@ type ContactRow = {
   email?: string | null;
   phone?: string | null;
   phone_number_jid?: string | null;
+  phone_canonical?: string | null;
   address?: string | null;
   custom_fields?: Record<string, any> | null;
 };
@@ -26,6 +26,7 @@ function mapContactRow(row: ContactRow): Contact {
     email: row.email || undefined,
     phone: row.phone || undefined,
     phone_number_jid: row.phone_number_jid || undefined,
+    phone_canonical: row.phone_canonical || undefined,
     address: row.address || undefined,
     custom_fields: row.custom_fields || undefined,
   };
@@ -45,7 +46,7 @@ export async function loadContactThreadContext(
 ): Promise<ContactThreadContext | { error: string }> {
   const contactRes = await db.query(
     `
-    SELECT id, workspace_id, name, avatar_url, email, phone, phone_number_jid, address
+    SELECT id, workspace_id, name, avatar_url, email, phone, phone_number_jid, phone_canonical, address
     FROM contacts
     WHERE id = $1
       AND workspace_id = $2
@@ -59,25 +60,21 @@ export async function loadContactThreadContext(
     return { error: 'Contato nao encontrado.' };
   }
 
-  const lookupDigits = buildWhatsappLookupDigits(sourceContactRow.phone_number_jid || sourceContactRow.phone);
   const relatedContactsRes = await db.query(
     `
-    SELECT id, workspace_id, name, avatar_url, email, phone, phone_number_jid, address
+    SELECT id, workspace_id, name, avatar_url, email, phone, phone_number_jid, address, phone_canonical
     FROM contacts
     WHERE workspace_id = $1
-      AND (
-        id = $2
-        OR regexp_replace(COALESCE(phone_number_jid, phone, ''), '[^0-9]', '', 'g') = ANY($3::text[])
-      )
-    ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+      AND id = $2
+    LIMIT 1
     `,
-    [workspaceId, contactId, lookupDigits]
+    [workspaceId, contactId]
   );
 
   const relatedContacts = relatedContactsRes.rows.map(mapContactRow);
   const contactThread = buildContactThreadIdentity(relatedContacts);
   const mergedContact = contactThread?.primaryContact || relatedContacts[0];
-  const relatedContactIds = contactThread?.contactIds || [...new Set(relatedContacts.map((contact) => contact.id).filter(Boolean))];
+  const relatedContactIds = [contactId];
 
   if (!mergedContact || relatedContactIds.length === 0) {
     return { error: 'Contato sem identidade valida para abrir historico.' };
@@ -88,6 +85,6 @@ export async function loadContactThreadContext(
     relatedContacts,
     mergedContact,
     relatedContactIds,
-    lookupDigits,
+    lookupDigits: [],
   };
 }

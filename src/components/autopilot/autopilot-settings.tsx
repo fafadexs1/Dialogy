@@ -19,6 +19,12 @@ interface AutopilotSettingsProps {
   setAiModel: (model: string) => void;
   knowledgeBase: string;
   setKnowledgeBase: (kb: string) => void;
+  defaultFallbackReply: string;
+  setDefaultFallbackReply: (reply: string) => void;
+  escalationPolicy: string;
+  setEscalationPolicy: (policy: string) => void;
+  closingPolicy: string;
+  setClosingPolicy: (policy: string) => void;
   isActive: boolean;
   setIsActive: (active: boolean) => void;
   isPrivate: boolean;
@@ -44,6 +50,12 @@ export function AutopilotSettings({
   setAiModel,
   knowledgeBase,
   setKnowledgeBase,
+  defaultFallbackReply,
+  setDefaultFallbackReply,
+  escalationPolicy,
+  setEscalationPolicy,
+  closingPolicy,
+  setClosingPolicy,
   isActive,
   setIsActive,
   isPrivate,
@@ -141,6 +153,50 @@ export function AutopilotSettings({
               <p className="text-xs text-muted-foreground">
                 Esse texto funciona como prompt base da operação. Seja específico no tom, política de resposta e critérios de escalonamento.
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="fallback-reply">Resposta de fallback</Label>
+              <Textarea
+                id="fallback-reply"
+                value={defaultFallbackReply}
+                onChange={(e) => setDefaultFallbackReply(e.target.value)}
+                placeholder="Ex: Para te responder com segurança, preciso encaminhar este atendimento para um especialista."
+                className="min-h-[110px] resize-y"
+              />
+              <p className="text-xs text-muted-foreground">
+                Use quando a IA não tiver informação suficiente ou quando a pergunta sair do escopo definido.
+              </p>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="escalation-policy">Política de escalonamento</Label>
+                <Textarea
+                  id="escalation-policy"
+                  value={escalationPolicy}
+                  onChange={(e) => setEscalationPolicy(e.target.value)}
+                  placeholder="Ex: transfira para humano quando houver reclamação grave, pedido de cancelamento, assunto financeiro sensível ou quando não tiver certeza."
+                  className="min-h-[130px] resize-y"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Defina quando a IA deve parar de resolver sozinha e envolver um atendente humano.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="closing-policy">Política de encerramento</Label>
+                <Textarea
+                  id="closing-policy"
+                  value={closingPolicy}
+                  onChange={(e) => setClosingPolicy(e.target.value)}
+                  placeholder="Ex: pode encerrar somente após confirmação clara do cliente ou quando a dúvida estiver resolvida e o cliente se despedir."
+                  className="min-h-[130px] resize-y"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Oriente em quais condições o atendimento pode ser considerado resolvido.
+                </p>
+              </div>
             </div>
 
             <div className="space-y-2">

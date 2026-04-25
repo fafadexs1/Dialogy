@@ -81,6 +81,9 @@ export default function AutopilotDetailPage() {
   const [isPrimary, setIsPrimary] = useState(false);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [knowledgeBase, setKnowledgeBase] = useState('');
+  const [defaultFallbackReply, setDefaultFallbackReply] = useState('');
+  const [escalationPolicy, setEscalationPolicy] = useState('');
+  const [closingPolicy, setClosingPolicy] = useState('');
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -139,6 +142,9 @@ export default function AutopilotDetailPage() {
       setIsPrimary(Boolean(autopilotData.config.is_primary));
       setGeminiApiKey(autopilotData.config.gemini_api_key || '');
       setKnowledgeBase(autopilotData.config.knowledge_base || '');
+      setDefaultFallbackReply(autopilotData.config.default_fallback_reply || '');
+      setEscalationPolicy(autopilotData.config.escalation_policy || '');
+      setClosingPolicy(autopilotData.config.closing_policy || '');
       setKnowledgeDocuments(autopilotData.config.knowledge_base_documents || []);
 
       const logsData = await getAutopilotUsageLogs(autopilotData.config.id);
@@ -172,14 +178,20 @@ export default function AutopilotDetailPage() {
       isPrivate !== Boolean(config.is_private) ||
       geminiApiKey !== (config.gemini_api_key || '') ||
       knowledgeBase !== (config.knowledge_base || '') ||
+      defaultFallbackReply !== (config.default_fallback_reply || '') ||
+      escalationPolicy !== (config.escalation_policy || '') ||
+      closingPolicy !== (config.closing_policy || '') ||
       documentSignature !== configDocumentSignature
     );
   }, [
     agentName,
     aiModel,
     config,
+    closingPolicy,
     configDocumentSignature,
+    defaultFallbackReply,
     documentSignature,
+    escalationPolicy,
     geminiApiKey,
     isActive,
     isPrivate,
@@ -201,6 +213,9 @@ export default function AutopilotDetailPage() {
       formData.append('isActive', isActive ? 'on' : 'off');
       formData.append('isPrivate', isPrivate ? 'on' : 'off');
       formData.append('knowledgeBase', knowledgeBase);
+      formData.append('defaultFallbackReply', defaultFallbackReply);
+      formData.append('escalationPolicy', escalationPolicy);
+      formData.append('closingPolicy', closingPolicy);
       formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
 
       const result = await saveAutopilotConfig({ success: false }, formData);
@@ -540,6 +555,12 @@ export default function AutopilotDetailPage() {
                 setAiModel={setAiModel}
                 knowledgeBase={knowledgeBase}
                 setKnowledgeBase={setKnowledgeBase}
+                defaultFallbackReply={defaultFallbackReply}
+                setDefaultFallbackReply={setDefaultFallbackReply}
+                escalationPolicy={escalationPolicy}
+                setEscalationPolicy={setEscalationPolicy}
+                closingPolicy={closingPolicy}
+                setClosingPolicy={setClosingPolicy}
                 isActive={isActive}
                 setIsActive={setIsActive}
                 isPrivate={isPrivate}

@@ -1,4 +1,4 @@
-﻿import { db } from '@/lib/db';
+import { db } from '@/lib/db';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

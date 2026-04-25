@@ -450,7 +450,18 @@ export async function findOrCreateWhatsappContact(
     }
 
     const lookupJids = buildWhatsappLookupJids(phoneOrJid);
-    let contact = await selectPreferredWhatsappContact(client, workspaceId, lookupJids, normalizedJid);
+    
+    // Search by phone_canonical first (highly optimized)
+    let contactRes = await client.query(
+        `SELECT c.* FROM contacts c WHERE c.workspace_id = $1 AND c.phone_canonical = $2 LIMIT 1`,
+        [workspaceId, normalizedPhone]
+    );
+    let contact = contactRes.rows[0] ?? null;
+
+    if (!contact) {
+        // Fallback to existing GIN lookup
+        contact = await selectPreferredWhatsappContact(client, workspaceId, lookupJids, normalizedJid);
+    }
 
     if (contact) {
         contact = await alignContactToNormalizedJid(

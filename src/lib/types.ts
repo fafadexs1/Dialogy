@@ -88,6 +88,7 @@ export type Contact = {
   email?: string;
   phone?: string;
   phone_number_jid?: string;
+  phone_canonical?: string;
   lastSeen?: string;
   // Campos que podem não vir do DB diretamente mas são úteis no front
   firstName?: string;
@@ -305,6 +306,8 @@ export type Chat = {
   contact: Contact;
   agent?: User;
   agentId?: string;
+  assignedSystemAgent?: Pick<SystemAgent, 'id' | 'name' | 'avatar_url' | 'type'>;
+  assigned_system_agent_id?: string | null;
   messages: Message[];
   protocol?: string;
   protocolScoped?: boolean;
@@ -505,6 +508,8 @@ export interface AutopilotConfig {
   is_active: boolean;
   is_private: boolean;
   default_fallback_reply: string | null;
+  escalation_policy: string | null;
+  closing_policy: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -518,6 +523,12 @@ export interface AutopilotUsageLog {
   created_at: string;
   input_tokens: number;
   output_tokens: number;
+  chat_id?: string | null;
+  system_agent_id?: string | null;
+  input_message?: string | null;
+  output_message?: string | null;
+  status?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface WhatsappCluster {
@@ -688,6 +699,10 @@ export interface SystemAgent {
   type?: string | null;
   handoff_system_agent_id?: string | null;
   hide_from_chatlist?: boolean;
+  autopilot_config_id?: string | null;
+  team_id?: string | null;
+  autopilot_config_name?: string | null;
+  team_name?: string | null;
 }
 
 // Analytics Types

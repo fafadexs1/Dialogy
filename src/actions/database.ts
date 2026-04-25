@@ -374,9 +374,12 @@ create table if not exists public.system_agents (
 create index if not exists idx_system_agents_workspace on public.system_agents(workspace_id);
 -- Ensure webhook_url can be null (marketing agents)
 alter table if exists public.system_agents alter column webhook_url drop not null;
+alter table if exists public.system_agents alter column avatar_url drop not null;
 alter table if exists public.system_agents add column if not exists type text default 'default';
 alter table if exists public.system_agents add column if not exists handoff_system_agent_id uuid;
 alter table if exists public.system_agents add column if not exists hide_from_chatlist boolean not null default false;
+alter table if exists public.system_agents add column if not exists autopilot_config_id uuid;
+alter table if exists public.system_agents add column if not exists team_id uuid;
 do $$
 begin
   if not exists (
@@ -385,6 +388,20 @@ begin
     alter table public.system_agents
       add constraint system_agents_handoff_system_agent_id_fkey
       foreign key (handoff_system_agent_id) references public.system_agents(id) on delete set null;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'system_agents_autopilot_config_id_fkey'
+  ) then
+    alter table public.system_agents
+      add constraint system_agents_autopilot_config_id_fkey
+      foreign key (autopilot_config_id) references public.autopilot_configs(id) on delete set null;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'system_agents_team_id_fkey'
+  ) then
+    alter table public.system_agents
+      add constraint system_agents_team_id_fkey
+      foreign key (team_id) references public.teams(id) on delete set null;
   end if;
 end$$;
 
@@ -555,7 +572,20 @@ create index if not exists idx_chats_workspace_contact_id on public.chats(worksp
 create index if not exists idx_chats_workspace_status_agent on public.chats(workspace_id, status, agent_id);
 -- Garantir coluna de protocolo em chats (para bases já criadas)
 alter table if exists public.chats add column if not exists protocol text;
+alter table if exists public.chats add column if not exists assigned_system_agent_id uuid;
 create unique index if not exists idx_chats_protocol on public.chats(protocol);
+create index if not exists idx_chats_assigned_system_agent on public.chats(assigned_system_agent_id)
+  where assigned_system_agent_id is not null;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'chats_assigned_system_agent_id_fkey'
+  ) then
+    alter table public.chats
+      add constraint chats_assigned_system_agent_id_fkey
+      foreign key (assigned_system_agent_id) references public.system_agents(id) on delete set null;
+  end if;
+end$$;
 update public.chats
    set protocol = COALESCE(protocol, 'PRT-' || upper(replace(id::text, '-', '')))
  where protocol is null;
@@ -752,6 +782,8 @@ create table if not exists public.autopilot_configs (
   is_primary boolean not null default false,
   is_active boolean not null default false,
   default_fallback_reply text,
+  escalation_policy text,
+  closing_policy text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint autopilot_configs_workspace_id_fkey
@@ -761,6 +793,8 @@ create table if not exists public.autopilot_configs (
 );
 create index if not exists idx_autopilot_configs_workspace_user on public.autopilot_configs(workspace_id, user_id);
 create index if not exists idx_autopilot_configs_workspace on public.autopilot_configs(workspace_id);
+alter table if exists public.autopilot_configs add column if not exists escalation_policy text;
+alter table if exists public.autopilot_configs add column if not exists closing_policy text;
 
 
 -- Autopilot: regras
@@ -786,11 +820,48 @@ create table if not exists public.autopilot_usage_logs (
   input_tokens int,
   output_tokens int,
   total_tokens int,
+  chat_id uuid,
+  system_agent_id uuid,
+  input_message text,
+  output_message text,
+  status text,
+  metadata jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   constraint autopilot_usage_logs_config_id_fkey
     foreign key (config_id) references public.autopilot_configs(id) on delete cascade
 );
 create index if not exists idx_autopilot_usage_config on public.autopilot_usage_logs(config_id);
+create index if not exists idx_autopilot_usage_chat on public.autopilot_usage_logs(chat_id) where chat_id is not null;
+create index if not exists idx_autopilot_usage_system_agent on public.autopilot_usage_logs(system_agent_id) where system_agent_id is not null;
+
+create table if not exists public.agent_tool_executions (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  chat_id uuid,
+  system_agent_id uuid,
+  autopilot_config_id uuid,
+  tool_name text not null,
+  status text not null,
+  input jsonb,
+  output jsonb,
+  error text,
+  requires_human_approval boolean not null default false,
+  approved_by_user_id uuid,
+  created_at timestamptz not null default timezone('utc', now()),
+  constraint agent_tool_executions_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade,
+  constraint agent_tool_executions_chat_id_fkey
+    foreign key (chat_id) references public.chats(id) on delete set null,
+  constraint agent_tool_executions_system_agent_id_fkey
+    foreign key (system_agent_id) references public.system_agents(id) on delete set null,
+  constraint agent_tool_executions_autopilot_config_id_fkey
+    foreign key (autopilot_config_id) references public.autopilot_configs(id) on delete set null,
+  constraint agent_tool_executions_approved_by_user_id_fkey
+    foreign key (approved_by_user_id) references public.users(id) on delete set null
+);
+create index if not exists idx_agent_tool_executions_workspace_created on public.agent_tool_executions(workspace_id, created_at desc);
+create index if not exists idx_agent_tool_executions_chat on public.agent_tool_executions(chat_id) where chat_id is not null;
+create index if not exists idx_agent_tool_executions_system_agent on public.agent_tool_executions(system_agent_id) where system_agent_id is not null;
 
 -- Billing (1:1 workspace)
 create table if not exists public.billing_info (

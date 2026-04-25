@@ -26,20 +26,26 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { getSystemAgents, createSystemAgent, deleteSystemAgent, updateSystemAgent } from '@/actions/system-agents';
-import { type SystemAgent, type User } from '@/lib/types';
-import { Loader2, PlusCircle, MoreVertical, Edit, Trash2, Copy, Rocket, KeyRound, Webhook, Save } from 'lucide-react';
+import { getAutopilotConfig } from '@/actions/autopilot';
+import { getTeamsWithOnlineMembers } from '@/actions/teams';
+import { type AutopilotConfig, type SystemAgent, type Team, type User } from '@/lib/types';
+import { Loader2, PlusCircle, MoreVertical, Edit, Trash2, Copy, Rocket, KeyRound, Webhook, Save, Bot, Users } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCurrentUser } from '@/hooks/use-online-status';
 
 function AgentForm({
   workspaceId,
   agents,
+  autopilotAgents,
+  teams,
   onSuccess,
   onClose,
   agent
 }: {
   workspaceId: string;
   agents: SystemAgent[];
+  autopilotAgents: AutopilotConfig[];
+  teams: Array<Omit<Team, 'businessHours' | 'scheduleExceptions' | 'members'> & { onlineMembersCount?: number }>;
   onSuccess: () => void;
   onClose: () => void;
   agent?: SystemAgent | null;
@@ -48,6 +54,8 @@ function AgentForm({
   const [avatarUrl, setAvatarUrl] = useState(agent?.avatar_url || '');
   const [webhookUrl, setWebhookUrl] = useState(agent?.webhook_url || '');
   const [type, setType] = useState<string>(agent?.type || 'default');
+  const [autopilotConfigId, setAutopilotConfigId] = useState<string>(agent?.autopilot_config_id || '');
+  const [teamId, setTeamId] = useState<string>(agent?.team_id || '');
   const [hideMarketing, setHideMarketing] = useState<boolean>(agent?.hide_from_chatlist ?? false);
   const [handoffSystemAgentId, setHandoffSystemAgentId] = useState<string>(agent?.handoff_system_agent_id || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,6 +67,10 @@ function AgentForm({
       toast({ title: "Nome é obrigatório", variant: "destructive" });
       return;
     }
+    if (type === 'intelligent_attendant' && !autopilotConfigId) {
+      toast({ title: "Selecione o agente de IA", description: "O Atendente Inteligente precisa estar ligado a uma configuração de IA.", variant: "destructive" });
+      return;
+    }
     setIsSubmitting(true);
 
     const data = {
@@ -66,6 +78,8 @@ function AgentForm({
       avatar_url: avatarUrl,
       webhook_url: webhookUrl,
       type,
+      autopilot_config_id: type === 'intelligent_attendant' ? autopilotConfigId : null,
+      team_id: type === 'intelligent_attendant' ? (teamId || null) : null,
       hide_from_chatlist: hideMarketing,
       handoff_system_agent_id: handoffSystemAgentId || null,
     };
@@ -106,9 +120,49 @@ function AgentForm({
           >
             <option value="default">Padrão</option>
             <option value="marketing">Marketing</option>
+            <option value="intelligent_attendant">Atendente Inteligente</option>
           </select>
           <p className="text-xs text-muted-foreground">Escolha "Marketing" para disparos iniciais e roteamento posterior.</p>
         </div>
+        {type === 'intelligent_attendant' && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="ai-config">Agente de IA responsável</Label>
+              <select
+                id="ai-config"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={autopilotConfigId}
+                onChange={(e) => setAutopilotConfigId(e.target.value)}
+                required
+              >
+                <option value="">Selecione uma configuração de IA</option>
+                {autopilotAgents.map((config) => (
+                  <option key={config.id} value={config.id}>
+                    {config.name}{config.is_active ? '' : ' (inativo)'}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">Esta é a inteligência que irá responder quando o atendimento for transferido para este operador.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ai-team">Setor vinculado</Label>
+              <select
+                id="ai-team"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={teamId}
+                onChange={(e) => setTeamId(e.target.value)}
+              >
+                <option value="">Nenhum setor específico</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">Opcional. Serve para organizar, mas não entra em transferência aleatória por setor.</p>
+            </div>
+          </>
+        )}
         <div className="space-y-2">
           <Label htmlFor="agent-avatar">URL do Avatar</Label>
           <Input id="agent-avatar" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} type="url" placeholder="https://exemplo.com/avatar.png" />
@@ -173,6 +227,8 @@ export default function RobotsPage() {
   const user = useCurrentUser();
   const { toast } = useToast();
   const [agents, setAgents] = useState<SystemAgent[]>([]);
+  const [autopilotAgents, setAutopilotAgents] = useState<AutopilotConfig[]>([]);
+  const [teams, setTeams] = useState<Array<Omit<Team, 'businessHours' | 'scheduleExceptions' | 'members'> & { onlineMembersCount?: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<SystemAgent | null>(null);
@@ -180,13 +236,19 @@ export default function RobotsPage() {
   const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
     setLoading(true);
-    const result = await getSystemAgents(user.activeWorkspaceId);
+    const [result, autopilotData, teamsData] = await Promise.all([
+      getSystemAgents(user.activeWorkspaceId),
+      getAutopilotConfig(user.activeWorkspaceId),
+      getTeamsWithOnlineMembers(user.activeWorkspaceId),
+    ]);
     if (result.error) {
       toast({ title: "Erro ao carregar agentes", description: result.error, variant: 'destructive' });
       setAgents([]);
     } else {
       setAgents(result.agents || []);
     }
+    setAutopilotAgents(autopilotData.agents || []);
+    setTeams(teamsData.teams || []);
     setLoading(false);
   }, [user?.activeWorkspaceId, toast]);
 
@@ -239,6 +301,8 @@ export default function RobotsPage() {
             <AgentForm
               workspaceId={user.activeWorkspaceId!}
               agents={agents}
+              autopilotAgents={autopilotAgents}
+              teams={teams}
               onSuccess={handleSuccess}
               onClose={() => setIsModalOpen(false)}
               agent={editingAgent}
@@ -300,6 +364,23 @@ export default function RobotsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="flex-grow space-y-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><Bot className="h-3 w-3" /> Tipo</Label>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="rounded-md bg-muted px-2 py-1 text-xs">
+                        {agent.type === 'intelligent_attendant' ? 'Atendente Inteligente' : agent.type === 'marketing' ? 'Marketing' : 'Padrão'}
+                      </span>
+                      {agent.team_name && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs">
+                          <Users className="h-3 w-3" />
+                          {agent.team_name}
+                        </span>
+                      )}
+                    </div>
+                    {agent.autopilot_config_name && (
+                      <p className="text-xs text-muted-foreground">IA: {agent.autopilot_config_name}</p>
+                    )}
+                  </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><KeyRound className="h-3 w-3" /> Token de Acesso</Label>
                     <div className="flex items-center">

@@ -8,6 +8,8 @@ import { randomBytes } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
+const DEFAULT_SYSTEM_AGENT_AVATAR_URL = '/integration-fallback.svg';
+
 async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
     // For now, let's assume any logged in user can manage agents.
     // Replace with actual permission check later.
@@ -25,7 +27,18 @@ export async function getSystemAgents(workspaceId: string): Promise<{ agents: Sy
     }
 
     try {
-        const res = await db.query('SELECT * FROM system_agents WHERE workspace_id = $1 ORDER BY created_at DESC', [workspaceId]);
+        const res = await db.query(
+            `SELECT
+                sa.*,
+                ac.name AS autopilot_config_name,
+                t.name AS team_name
+             FROM system_agents sa
+             LEFT JOIN autopilot_configs ac ON ac.id = sa.autopilot_config_id
+             LEFT JOIN teams t ON t.id = sa.team_id
+             WHERE sa.workspace_id = $1
+             ORDER BY sa.created_at DESC`,
+            [workspaceId]
+        );
         return { agents: res.rows };
     } catch (error) {
         console.error("[GET_SYSTEM_AGENTS] Error:", error);
@@ -36,7 +49,7 @@ export async function getSystemAgents(workspaceId: string): Promise<{ agents: Sy
 
 export async function createSystemAgent(
     workspaceId: string,
-    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'> & Partial<Pick<SystemAgent, 'type' | 'handoff_system_agent_id' | 'hide_from_chatlist'>>
+    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'> & Partial<Pick<SystemAgent, 'type' | 'handoff_system_agent_id' | 'hide_from_chatlist' | 'autopilot_config_id' | 'team_id'>>
 ): Promise<{ success: boolean; error?: string, agent?: SystemAgent }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -48,6 +61,7 @@ export async function createSystemAgent(
 
     // Validate webhook URL if provided
     const webhookUrl = data.webhook_url?.trim();
+    const agentType = data.type || 'default';
 
     if (webhookUrl) {
         try {
@@ -60,15 +74,56 @@ export async function createSystemAgent(
         }
     }
 
+    if (agentType === 'intelligent_attendant' && !data.autopilot_config_id) {
+        return { success: false, error: 'Selecione uma configuração de IA para o Atendente Inteligente.' };
+    }
+
+    if (data.autopilot_config_id) {
+        const configRes = await db.query(
+            'SELECT 1 FROM autopilot_configs WHERE id = $1 AND workspace_id = $2 LIMIT 1',
+            [data.autopilot_config_id, workspaceId]
+        );
+        if ((configRes.rowCount ?? 0) === 0) {
+            return { success: false, error: 'Configuração de IA não encontrada neste workspace.' };
+        }
+    }
+
+    if (data.team_id) {
+        const teamRes = await db.query(
+            'SELECT 1 FROM teams WHERE id = $1 AND workspace_id = $2 LIMIT 1',
+            [data.team_id, workspaceId]
+        );
+        if ((teamRes.rowCount ?? 0) === 0) {
+            return { success: false, error: 'Setor/equipe não encontrado neste workspace.' };
+        }
+    }
+
     // Generate a secure, unique token
     const token = `dgy_${randomBytes(24).toString('hex')}`;
 
     try {
         const webhookValue = webhookUrl || null;
+        const avatarUrl = data.avatar_url?.trim() || DEFAULT_SYSTEM_AGENT_AVATAR_URL;
         const res = await db.query(
-            `INSERT INTO system_agents (workspace_id, name, avatar_url, webhook_url, token, created_by_id, type, handoff_system_agent_id, hide_from_chatlist)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false)) RETURNING *`,
-            [workspaceId, data.name, data.avatar_url || null, webhookValue, token, user.id, data.type || 'default', data.handoff_system_agent_id || null, data.hide_from_chatlist]
+            `INSERT INTO system_agents (
+                workspace_id, name, avatar_url, webhook_url, token, created_by_id,
+                type, handoff_system_agent_id, hide_from_chatlist, autopilot_config_id, team_id
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11)
+             RETURNING *`,
+            [
+                workspaceId,
+                data.name,
+                avatarUrl,
+                webhookValue,
+                token,
+                user.id,
+                agentType,
+                data.handoff_system_agent_id || null,
+                data.hide_from_chatlist,
+                data.autopilot_config_id || null,
+                data.team_id || null,
+            ]
         );
         revalidatePath('/automations/robots');
         return { success: true, agent: res.rows[0] };
@@ -83,14 +138,14 @@ export async function createSystemAgent(
 
 export async function updateSystemAgent(
     agentId: string,
-    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'> & Partial<Pick<SystemAgent, 'type' | 'handoff_system_agent_id' | 'hide_from_chatlist'>>
+    data: Pick<SystemAgent, 'name' | 'avatar_url' | 'webhook_url'> & Partial<Pick<SystemAgent, 'type' | 'handoff_system_agent_id' | 'hide_from_chatlist' | 'autopilot_config_id' | 'team_id'>>
 ): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
     try {
-        const agentRes = await db.query('SELECT workspace_id FROM system_agents WHERE id = $1', [agentId]);
+        const agentRes = await db.query('SELECT workspace_id, type FROM system_agents WHERE id = $1', [agentId]);
         if ((agentRes.rowCount || 0) === 0) return { success: false, error: 'Agente não encontrado.' };
         const workspaceId = agentRes.rows[0].workspace_id;
 
@@ -99,6 +154,7 @@ export async function updateSystemAgent(
         }
 
         const webhookUrl = data.webhook_url?.trim();
+        const agentType = data.type || agentRes.rows[0].type || 'default';
 
         if (webhookUrl) {
             try {
@@ -109,18 +165,55 @@ export async function updateSystemAgent(
             }
         }
 
+        if (agentType === 'intelligent_attendant' && !data.autopilot_config_id) {
+            return { success: false, error: 'Selecione uma configuração de IA para o Atendente Inteligente.' };
+        }
+
+        if (data.autopilot_config_id) {
+            const configRes = await db.query(
+                'SELECT 1 FROM autopilot_configs WHERE id = $1 AND workspace_id = $2 LIMIT 1',
+                [data.autopilot_config_id, workspaceId]
+            );
+            if ((configRes.rowCount ?? 0) === 0) {
+                return { success: false, error: 'Configuração de IA não encontrada neste workspace.' };
+            }
+        }
+
+        if (data.team_id) {
+            const teamRes = await db.query(
+                'SELECT 1 FROM teams WHERE id = $1 AND workspace_id = $2 LIMIT 1',
+                [data.team_id, workspaceId]
+            );
+            if ((teamRes.rowCount ?? 0) === 0) {
+                return { success: false, error: 'Setor/equipe não encontrado neste workspace.' };
+            }
+        }
+
         const webhookValue = webhookUrl || null;
+        const avatarUrl = data.avatar_url?.trim() || DEFAULT_SYSTEM_AGENT_AVATAR_URL;
 
         await db.query(
             `UPDATE system_agents SET 
                 name = $1, 
                 avatar_url = $2, 
                 webhook_url = $3,
-                type = COALESCE($4, type),
-                handoff_system_agent_id = COALESCE($5, handoff_system_agent_id),
-                hide_from_chatlist = COALESCE($6, hide_from_chatlist)
-             WHERE id = $7`,
-            [data.name, data.avatar_url || null, webhookValue, data.type || null, data.handoff_system_agent_id || null, data.hide_from_chatlist, agentId]
+                type = $4,
+                handoff_system_agent_id = $5,
+                hide_from_chatlist = COALESCE($6, hide_from_chatlist),
+                autopilot_config_id = $7,
+                team_id = $8
+             WHERE id = $9`,
+            [
+                data.name,
+                avatarUrl,
+                webhookValue,
+                agentType,
+                data.handoff_system_agent_id || null,
+                data.hide_from_chatlist,
+                data.autopilot_config_id || null,
+                data.team_id || null,
+                agentId,
+            ]
         );
 
         revalidatePath('/automations/robots');
