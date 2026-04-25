@@ -708,7 +708,7 @@ export async function persistNormalizedMessage(params: {
           instanceName,
         })
         : import('@/services/autopilot-service').then(({ processAutopilotForChat }) =>
-          processAutopilotForChat(channel.workspace_id, chatForDispatch, message.content!.trim(), instanceName)
+          processAutopilotForChat(channel.workspace_id, chatForDispatch, message.content!.trim(), instanceName, persistedMessage.id)
         );
 
       autopilotProcess.catch((error) => {

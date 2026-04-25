@@ -4,7 +4,18 @@ import { auditAgentToolExecution } from './audit';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
 
 const MAX_ACTIONS_PER_MESSAGE = 2;
+const MAX_INTERNAL_NOTE_CHARS = 500;
 const ALLOWED_TOOLS = new Set(['transfer_chat', 'add_internal_note']);
+
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function reject(action: AgentToolAction, message: string): AgentToolExecutionResult {
   return {
@@ -13,6 +24,39 @@ function reject(action: AgentToolAction, message: string): AgentToolExecutionRes
     input: action,
     error: message,
   };
+}
+
+export function sanitizeInternalNoteContent(value: string): string {
+  const normalized = value
+    .replace(/\s+/g, ' ')
+    .replace(/\b(Fim|Finalizado|Finaliza(?:do)?|Registro concluido|Registro terminado)[^.?!]*(?:[.?!]|$)/gi, '')
+    .replace(/\b[\w\s]*\bfinaliza a nota agora[.?!]?/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (normalized.length <= MAX_INTERNAL_NOTE_CHARS) {
+    return normalized;
+  }
+
+  const sentences = normalized.match(/[^.!?]+[.!?]?/g) || [normalized];
+  const selected: string[] = [];
+  let total = 0;
+
+  for (const sentence of sentences) {
+    const cleanSentence = sentence.trim();
+    if (!cleanSentence) continue;
+    const nextTotal = total + cleanSentence.length + (selected.length > 0 ? 1 : 0);
+    if (nextTotal > MAX_INTERNAL_NOTE_CHARS) break;
+    selected.push(cleanSentence);
+    total = nextTotal;
+  }
+
+  const compact = selected.join(' ').trim();
+  if (compact) {
+    return compact;
+  }
+
+  return `${normalized.slice(0, MAX_INTERNAL_NOTE_CHARS - 1).trim()}…`;
 }
 
 async function ensureChatStillAssignedToAgent(context: AgentToolRuntimeContext) {
@@ -62,18 +106,42 @@ async function resolveTransferTarget(context: AgentToolRuntimeContext, action: E
   }
 
   if (payload.teamName) {
-    const { rows } = await db.query(
+    const requestedTeamName = payload.teamName.trim();
+    const { rows: exactRows } = await db.query(
       `SELECT id
        FROM teams
        WHERE workspace_id = $1 AND lower(name) = lower($2)
        ORDER BY name
        LIMIT 1`,
-      [context.workspaceId, payload.teamName.trim()]
+      [context.workspaceId, requestedTeamName]
     );
-    if (!rows[0]) {
-      throw new Error(`Equipe "${payload.teamName}" nao encontrada neste workspace.`);
+    if (exactRows[0]) {
+      return { teamId: exactRows[0].id as string };
     }
-    return { teamId: rows[0].id as string };
+
+    const requestedNormalized = normalizeSearchText(requestedTeamName);
+    const { rows: allTeamRows } = await db.query(
+      `SELECT id, name
+       FROM teams
+       WHERE workspace_id = $1
+       ORDER BY name`,
+      [context.workspaceId]
+    );
+    const fuzzyRows = allTeamRows.filter((row) => {
+      const teamNormalized = normalizeSearchText(String(row.name || ''));
+      if (!teamNormalized || teamNormalized.length < 4) return false;
+      return requestedNormalized.includes(teamNormalized) || teamNormalized.includes(requestedNormalized);
+    });
+
+    if (fuzzyRows.length === 1) {
+      return { teamId: fuzzyRows[0].id as string };
+    }
+
+    if (fuzzyRows.length > 1) {
+      throw new Error(`Equipe "${payload.teamName}" esta ambigua neste workspace.`);
+    }
+
+    throw new Error(`Equipe "${payload.teamName}" nao encontrada neste workspace.`);
   }
 
   throw new Error('Informe teamId, teamName ou agentId para transferir o atendimento.');
@@ -132,7 +200,7 @@ async function runAddInternalNoteTool(
   context: AgentToolRuntimeContext,
   action: Extract<AgentToolAction, { type: 'add_internal_note' }>
 ): Promise<AgentToolExecutionResult> {
-  const content = action.payload?.content?.trim() || action.reason?.trim();
+  const content = sanitizeInternalNoteContent(action.payload?.content?.trim() || action.reason?.trim() || '');
   if (!content) {
     return reject(action, 'Nota interna sem conteudo.');
   }
@@ -163,6 +231,8 @@ async function runAddInternalNoteTool(
         note,
         JSON.stringify({
           isInternalNote: true,
+          isAiAnalysis: true,
+          analysisKind: 'routing_context',
           sentBy: 'system_agent',
           tool: 'add_internal_note',
           customerMessage: context.customerMessage,

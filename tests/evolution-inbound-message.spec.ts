@@ -4,6 +4,7 @@ import {
   extractEvolutionInteractiveResponseText,
   mapEvolutionInboundMessageTypeToDbType,
   resolveEvolutionInboundMessageType,
+  shouldAppendInboundToClosedWhatsappChat,
 } from '@/lib/whatsapp/evolution-inbound-message';
 
 describe('evolution inbound message helpers', () => {
@@ -68,5 +69,23 @@ describe('evolution inbound message helpers', () => {
         },
       })
     ).toBe('Atendimento presencial');
+  });
+
+  it('appends only delayed messages to a closed WhatsApp chat', () => {
+    const closedAt = new Date('2026-04-25T11:00:00.000Z');
+
+    expect(
+      shouldAppendInboundToClosedWhatsappChat({
+        closedAt,
+        messageCreatedAt: new Date('2026-04-25T10:59:59.000Z'),
+      })
+    ).toBe(true);
+
+    expect(
+      shouldAppendInboundToClosedWhatsappChat({
+        closedAt,
+        messageCreatedAt: new Date('2026-04-25T11:00:01.000Z'),
+      })
+    ).toBe(false);
   });
 });

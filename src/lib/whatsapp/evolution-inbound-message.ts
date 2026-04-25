@@ -135,3 +135,17 @@ export function mapEvolutionInboundMessageTypeToDbType(
       return 'unsupported';
   }
 }
+
+export function shouldAppendInboundToClosedWhatsappChat(params: {
+  closedAt?: Date | number | string | null;
+  messageCreatedAt: Date | number | string;
+}): boolean {
+  const closedAtMs = new Date(params.closedAt ?? 0).getTime();
+  const messageCreatedAtMs = new Date(params.messageCreatedAt).getTime();
+
+  if (!Number.isFinite(closedAtMs) || !Number.isFinite(messageCreatedAtMs)) {
+    return false;
+  }
+
+  return messageCreatedAtMs <= closedAtMs;
+}

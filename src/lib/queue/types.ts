@@ -73,7 +73,7 @@ export type AiAutopilotProcessPayload = {
   workspaceId: string;
   chatId: string;
   messageId: string;
-  lastMessageContent: string;
+  lastMessageContent?: string;
   instanceName: string;
 };
 

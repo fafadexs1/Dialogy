@@ -1332,6 +1332,24 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
     }
 
     const { contact, agent } = chat;
+    const assignedSystemAgent = chat.assignedSystemAgent;
+    const responsible = assignedSystemAgent
+        ? {
+            id: assignedSystemAgent.id,
+            name: assignedSystemAgent.name,
+            avatar: assignedSystemAgent.avatar_url,
+            badge: 'IA',
+            isAi: true,
+        }
+        : agent && agent.id !== 'unknown'
+            ? {
+                id: agent.id,
+                name: agent.name,
+                avatar: agent.avatar || agent.avatar_url,
+                badge: 'AGENTE',
+                isAi: false,
+            }
+            : null;
     const currentProtocol = chat.protocol || buildChatProtocol(chat.id);
 
     const resolvedPlatform = resolveChatPlatform(chat);
@@ -1668,19 +1686,30 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             <div className="space-y-2">
                                 <h4 className="px-1 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Responsável</h4>
                                 <div className="rounded-xl border border-slate-200/80 bg-white/90 p-2.5 dark:border-white/5 dark:bg-[#07080b] sm:p-3">
-                                    {agent && agent.id !== 'unknown' ? (
+                                    {responsible ? (
                                         <div className="flex items-center gap-2.5 min-w-0">
                                             <div className="relative shrink-0">
                                                 <Avatar className="h-7 w-7 rounded-lg border border-border shadow-lg sm:h-8 sm:w-8">
-                                                    <AvatarImage src={agent.avatar || undefined} alt={agent.name} />
-                                                    <AvatarFallback className="bg-zinc-900 text-zinc-300 font-black text-xs">{agent.name.charAt(0)}</AvatarFallback>
+                                                    <AvatarImage src={responsible.avatar || undefined} alt={responsible.name} />
+                                                    <AvatarFallback className="bg-zinc-900 text-zinc-300 font-black text-xs">
+                                                        {responsible.isAi ? <Cpu className="h-3.5 w-3.5" /> : responsible.name.charAt(0)}
+                                                    </AvatarFallback>
                                                 </Avatar>
                                                 <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-black" />
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex min-w-0 items-center justify-between gap-2 overflow-hidden">
-                                                    <p className="truncate text-[13px] font-semibold leading-tight text-foreground sm:text-sm" title={agent.name}>{agent.name}</p>
-                                                    <Badge className="bg-blue-500/10 text-blue-400 text-[9px] font-black px-1.5 h-4 border-blue-500/20 shrink-0">AGENTE</Badge>
+                                                    <p className="truncate text-[13px] font-semibold leading-tight text-foreground sm:text-sm" title={responsible.name}>{responsible.name}</p>
+                                                    <Badge
+                                                        className={cn(
+                                                            "text-[9px] font-black px-1.5 h-4 shrink-0",
+                                                            responsible.isAi
+                                                                ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                                                                : "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                                        )}
+                                                    >
+                                                        {responsible.badge}
+                                                    </Badge>
                                                 </div>
                                                 {chat.assigned_at && (
                                                     <p className="mt-0.5 truncate text-[9px] text-muted-foreground sm:text-[10px]" title={new Date(chat.assigned_at).toLocaleDateString()}>

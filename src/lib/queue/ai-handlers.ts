@@ -84,7 +84,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   },
   ai_autopilot_process: async (job) => {
     const payload = job.payload as AiAutopilotProcessPayload;
-    if (!payload.workspaceId || !payload.chatId || !payload.lastMessageContent || !payload.instanceName) {
+    if (!payload.workspaceId || !payload.chatId || !payload.messageId || !payload.instanceName) {
       throw new Error('Invalid ai_autopilot_process payload.');
     }
 
@@ -99,7 +99,13 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       return;
     }
 
-    await processAutopilotForChat(payload.workspaceId, chat, payload.lastMessageContent, payload.instanceName);
+    await processAutopilotForChat(
+      payload.workspaceId,
+      chat,
+      payload.lastMessageContent || '',
+      payload.instanceName,
+      payload.messageId
+    );
   },
   ai_case_memory_refresh: async (job) => {
     const payload = job.payload as AiCaseMemoryRefreshPayload;

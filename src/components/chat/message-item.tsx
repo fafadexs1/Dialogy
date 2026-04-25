@@ -509,6 +509,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
     const status = (message.api_message_status || '').toUpperCase();
     const isFailed = status === 'FAILED' || status === 'ERROR';
     const isInternalNote = message.metadata?.isInternalNote;
+    const isAiAnalysis = message.metadata?.isAiAnalysis;
     const failureDetails = normalizeFailureDetails(message);
     const replyPreview = resolveReplyPreview(message, quotedMessage);
     const statusTitle = isFailed
@@ -620,16 +621,21 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                         "break-words rounded-[22px] md:rounded-2xl p-3 md:p-3 max-w-[85%] md:max-w-lg shadow-sm md:shadow-lg relative",
                                         isDeleted
                                             ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'
-                                            : isInternalNote
-                                                ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-700'
+                                            : isAiAnalysis
+                                                ? 'border border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
+                                                : isInternalNote
+                                                    ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-700'
                                                 : (isFromMe
                                                     ? 'rounded-tr-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_16px_30px_-18px_rgba(59,130,246,0.85)]'
                                                     : 'rounded-tl-sm border border-slate-200/80 bg-white text-slate-800 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100 dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.85)]')
                                     )}
                                 >
-                                    {isInternalNote && (
-                                        <div className="flex items-center gap-1 text-xs text-yellow-500/70 mb-1 font-medium uppercase tracking-wider">
-                                            <StickyNote className="h-3 w-3" /> Nota Interna
+                                    {(isInternalNote || isAiAnalysis) && (
+                                        <div className={cn(
+                                            "flex items-center gap-1 text-xs mb-1 font-medium uppercase tracking-wider",
+                                            isAiAnalysis ? "text-emerald-500/80" : "text-yellow-500/70"
+                                        )}>
+                                            <StickyNote className="h-3 w-3" /> {isAiAnalysis ? 'Análise Inteligente' : 'Nota Interna'}
                                         </div>
                                     )}
                                     {!isDeleted && replyPreview && (
@@ -763,7 +769,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </TooltipProvider>
-                                                {onRetry && !isInternalNote && (
+                                                {onRetry && !isInternalNote && !isAiAnalysis && (
                                                     <Button
                                                         type="button"
                                                         variant="link"

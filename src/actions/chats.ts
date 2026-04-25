@@ -145,11 +145,10 @@ export const transferChatAction = withDebug(
         // Optional parameter to accept a session-like object from an API call
         prefetchedSession?: { user: { id: string, name: string, email?: string | null }, isSystemAgent?: boolean }
     ): Promise<{ success: boolean; error?: string; chat?: Chat }> {
-        const supabase = await createClient();
-
         let sessionToUse = prefetchedSession;
 
         if (!sessionToUse) {
+            const supabase = await createClient();
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
                 sessionToUse = { user: { id: user.id, name: user.user_metadata.full_name, email: user.email } };
@@ -211,6 +210,18 @@ export const transferChatAction = withDebug(
 
             let finalAgentId = agentId;
             let transferTargetName = '';
+            let transferActorName = currentAgentName;
+            let transferActorAvatarUrl: string | null = null;
+
+            if (isSystemAgent) {
+                const actorRes = await client.query('SELECT name, avatar_url FROM system_agents WHERE id = $1', [currentAgentId]);
+                transferActorName = actorRes.rows[0]?.name || currentAgentName;
+                transferActorAvatarUrl = actorRes.rows[0]?.avatar_url || null;
+            } else {
+                const actorRes = await client.query('SELECT full_name, avatar_url FROM users WHERE id = $1', [currentAgentId]);
+                transferActorName = actorRes.rows[0]?.full_name || currentAgentName;
+                transferActorAvatarUrl = actorRes.rows[0]?.avatar_url || null;
+            }
 
             // Load balancing logic for team transfer
             if (teamId) {
@@ -282,8 +293,8 @@ export const transferChatAction = withDebug(
 
             // Log system message
             const systemMessageContent = isHumanTakingFromAi ? `Atendimento reassumido por ${transferTargetName}.` : !isFirstAssignment
-                ? `Atendimento transferido por ${currentAgentName} para ${transferTargetName}.`
-                : `Atendimento atribuído a ${transferTargetName} por ${currentAgentName}.`;
+                ? `Atendimento transferido por ${transferActorName} para ${transferTargetName}.`
+                : `Atendimento atribuído a ${transferTargetName} por ${transferActorName}.`;
 
             await client.query(`
             INSERT INTO messages (workspace_id, chat_id, type, content, metadata, created_at)
@@ -297,6 +308,8 @@ export const transferChatAction = withDebug(
                     previous_system_agent_id: current_system_agent_id || null,
                     autopilot_disabled: true,
                     from_agent_id: currentAgentId,
+                    from_agent_name: transferActorName,
+                    from_agent_avatar_url: transferActorAvatarUrl,
                     to_agent_id: finalAgentId,
                     to_team_id: teamId,
                     to_name: transferTargetName
@@ -323,6 +336,8 @@ export const transferChatAction = withDebug(
                             to_team_id: teamId,
                             to_name: transferTargetName,
                             authored_by: currentAgentId,
+                            authored_by_name: transferActorName,
+                            authored_by_avatar_url: transferActorAvatarUrl || undefined,
                             template_applied: true,
                         });
                     } catch (templateErr) {
@@ -511,7 +526,8 @@ export const transferChatToIntelligentAgentAction = withDebug(
                                 contact: {} as Contact,
                             } as Chat,
                             lastInbound.content,
-                            lastInbound.instance_name || 'N/A'
+                            lastInbound.instance_name || 'N/A',
+                            lastInbound.id
                         );
                     }
                 }
@@ -1128,10 +1144,12 @@ async function fetchChats({
             c.agent_id,
             c.assigned_system_agent_id,
             c.last_activity_at AS chat_activity_at,
-            lmd.instance_name AS instance_name,
+            COALESCE(lmd.instance_name, lci.instance_name) AS instance_name,
             COALESCE(
                 lmd.source_from_api,
                 lmd.platform::text,
+                lci.source_from_api,
+                lci.platform::text,
                 mc.platform::text
             ) AS source,
             COALESCE(uc.unread_count, 0) AS unread_count,
@@ -1189,6 +1207,14 @@ async function fetchChats({
             ORDER BY m.created_at DESC, m.id DESC
             LIMIT 1
         ) lmd ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT m.instance_name, m.source_from_api, m.platform
+            FROM messages m
+            WHERE m.chat_id = c.id
+              AND m.instance_name IS NOT NULL
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT 1
+        ) lci ON TRUE
         LEFT JOIN unread_counts uc ON uc.chat_id = c.id
         LEFT JOIN contact_custom_fields ccf ON ccf.contact_id = c.contact_id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
@@ -1209,12 +1235,12 @@ async function fetchChats({
             FROM (
                 SELECT eai.type
                 FROM evolution_api_instances eai
-                WHERE eai.instance_name = lmd.instance_name
+                WHERE eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND eai.workspace_id = c.workspace_id
                 UNION ALL
                 SELECT 'telegram'::text AS type
                 FROM telegram_bot_instances tbi
-                WHERE tbi.instance_name = lmd.instance_name
+                WHERE tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND tbi.workspace_id = c.workspace_id
             ) instances
             LIMIT 1
@@ -1769,6 +1795,8 @@ export const searchChatsAndContacts = withDebug(
                 SELECT 
                     m.*,
                     c.workspace_id AS workspace_id,
+                    c.status AS chat_status,
+                    c.protocol AS chat_protocol,
                     cont.id AS contact_id,
                     cont.name AS contact_name,
                     cont.avatar_url AS contact_avatar_url,
@@ -1805,7 +1833,12 @@ export const searchChatsAndContacts = withDebug(
                     address: row.contact_address,
                 } : undefined;
 
-                return mapMessageFromRow(row, timezone, contact, agentsMap, systemAgentsMap);
+                const message = mapMessageFromRow(row, timezone, contact, agentsMap, systemAgentsMap);
+                return {
+                    ...message,
+                    chat_status: row.chat_status,
+                    chat_protocol: row.chat_protocol,
+                } as Message;
             });
 
             return { chats, contacts, messages };
@@ -2069,8 +2102,8 @@ export const getMergedContactThreadAction = withDebug(
                     c.agent_id,
                     c.assigned_system_agent_id,
                     c.last_activity_at AS chat_activity_at,
-                    lmd.instance_name AS instance_name,
-                    COALESCE(lmd.source_from_api, lmd.platform::text, mc.platform::text) AS source,
+                    COALESCE(lmd.instance_name, lci.instance_name) AS instance_name,
+                    COALESCE(lmd.source_from_api, lmd.platform::text, lci.source_from_api, lci.platform::text, mc.platform::text) AS source,
                     0 AS unread_count,
                     t.id AS team_id,
                     t.name AS team_name,
@@ -2126,6 +2159,14 @@ export const getMergedContactThreadAction = withDebug(
                     ORDER BY m.created_at DESC, m.id DESC
                     LIMIT 1
                 ) lmd ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT m.instance_name, m.source_from_api, m.platform
+                    FROM messages m
+                    WHERE m.chat_id = c.id
+                      AND m.instance_name IS NOT NULL
+                    ORDER BY m.created_at DESC, m.id DESC
+                    LIMIT 1
+                ) lci ON TRUE
                 LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
                 LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
                 LEFT JOIN contacts cont ON cont.id = c.contact_id
@@ -2144,12 +2185,12 @@ export const getMergedContactThreadAction = withDebug(
                     FROM (
                         SELECT eai.type
                         FROM evolution_api_instances eai
-                        WHERE eai.instance_name = lmd.instance_name
+                        WHERE eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                           AND eai.workspace_id = c.workspace_id
                         UNION ALL
                         SELECT 'telegram'::text AS type
                         FROM telegram_bot_instances tbi
-                        WHERE tbi.instance_name = lmd.instance_name
+                        WHERE tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                           AND tbi.workspace_id = c.workspace_id
                     ) instances
                     LIMIT 1
@@ -2365,6 +2406,17 @@ async function fetchChatsDelta({
             WHERE m.chat_id IN (SELECT id FROM changed_chats)
             ORDER BY m.chat_id, m.created_at DESC
         ),
+        latest_channel_message AS (
+            SELECT DISTINCT ON (m.chat_id)
+                m.chat_id,
+                m.instance_name,
+                m.source_from_api,
+                m.platform
+            FROM messages m
+            WHERE m.chat_id IN (SELECT id FROM changed_chats)
+              AND m.instance_name IS NOT NULL
+            ORDER BY m.chat_id, m.created_at DESC
+        ),
         unread_counts AS (
             SELECT
                 m.chat_id,
@@ -2402,10 +2454,12 @@ async function fetchChatsDelta({
             c.agent_id,
             c.assigned_system_agent_id,
             c.last_activity_at AS chat_activity_at,
-            lmd.instance_name,
+            COALESCE(lmd.instance_name, lci.instance_name) AS instance_name,
             COALESCE(
                 lmd.source_from_api,
                 lmd.platform::text,
+                lci.source_from_api,
+                lci.platform::text,
                 mc.platform::text
             ) AS source,
             COALESCE(uc.unread_count, 0) AS unread_count,
@@ -2436,6 +2490,7 @@ async function fetchChatsDelta({
             ccf.contact_custom_fields AS contact_custom_fields
         FROM changed_chats c
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
+        LEFT JOIN latest_channel_message lci ON lci.chat_id = c.id
         LEFT JOIN unread_counts uc ON uc.chat_id = c.id
         LEFT JOIN contact_custom_fields ccf ON ccf.contact_id = c.contact_id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
@@ -2447,12 +2502,12 @@ async function fetchChatsDelta({
             FROM (
                 SELECT eai.type
                 FROM evolution_api_instances eai
-                WHERE eai.instance_name = lmd.instance_name
+                WHERE eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND eai.workspace_id = c.workspace_id
                 UNION ALL
                 SELECT 'telegram'::text AS type
                 FROM telegram_bot_instances tbi
-                WHERE tbi.instance_name = lmd.instance_name
+                WHERE tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND tbi.workspace_id = c.workspace_id
             ) instances
             LIMIT 1

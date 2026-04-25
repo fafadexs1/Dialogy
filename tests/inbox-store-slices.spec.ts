@@ -56,6 +56,31 @@ describe('inbox store slices', () => {
     expect(merged[0].messages).toEqual([existingMessage]);
   });
 
+  it('clears stale human agent when incoming chat is assigned to an AI agent', () => {
+    const existing = {
+      ...chat('chat-1', '2024-01-01T10:00:00Z'),
+      agentId: 'agent-1',
+      agent: { id: 'agent-1', name: 'Humano' } as any,
+    };
+    const incoming = {
+      ...chat('chat-1', '2024-01-01T11:00:00Z'),
+      agentId: undefined,
+      agent: undefined,
+      assigned_system_agent_id: 'system-agent-1',
+      assignedSystemAgent: {
+        id: 'system-agent-1',
+        name: 'IA Suporte',
+        type: 'intelligent_attendant',
+      },
+    } as Chat;
+
+    const merged = mergeChatsById([existing], [incoming]);
+
+    expect(merged[0].agent).toBeUndefined();
+    expect(merged[0].agentId).toBeUndefined();
+    expect(merged[0].assignedSystemAgent?.name).toBe('IA Suporte');
+  });
+
   it('appends only new chats by id', () => {
     const appended = appendNewChatsById(
       [chat('chat-1', '2024-01-01T10:00:00Z')],

@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Workspace, Chat, Contact } from '@/lib/types';
+import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Workspace, Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { sendAutomatedMessageAction } from '@/actions/messages';
 import { logToDebugFile } from '@/lib/debug-file';
@@ -7,6 +7,7 @@ import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact
 import { retrieveSupportContext } from '@/services/rag/retrieval';
 import { runAgentTools } from '@/services/agent-tools/runtime';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
+import { analyzeMediaForAutopilot } from '@/ai/flows/analyze-media';
 
 function interpolateTemplate(value: string, context: Record<string, any>): string {
     return value.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
@@ -125,6 +126,144 @@ function normalizeAgentActions(actions: unknown): AgentToolAction[] {
         })) as AgentToolAction[];
 }
 
+const MAX_AI_ANALYSIS_CHARS = 1000;
+
+function compactAiAnalysis(value: string): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= MAX_AI_ANALYSIS_CHARS) return normalized;
+    return `${normalized.slice(0, MAX_AI_ANALYSIS_CHARS - 1).trim()}…`;
+}
+
+function resolveAnalysisKind(type: Message['type']): MessageMetadata['analysisKind'] {
+    if (type === 'audio') return 'transcription';
+    if (type === 'image') return 'visual_summary';
+    if (type === 'video') return 'video_summary';
+    return 'media_summary';
+}
+
+async function broadcastAiProcessing(chatId: string, event: 'ai_processing_start' | 'ai_processing_stop', payload: Record<string, unknown> = {}) {
+    try {
+        const { getSupabaseAdmin } = await import('@/lib/supabase');
+        const supabase = getSupabaseAdmin();
+        await supabase.channel(`chat:${chatId}`).send({
+            type: 'broadcast',
+            event,
+            payload: {
+                chatId,
+                ...payload,
+            },
+        });
+    } catch (error) {
+        console.error(`[AUTOPILOT_SERVICE] Failed to broadcast ${event}:`, error);
+    }
+}
+
+async function insertAiAnalysisMessage(input: {
+    workspaceId: string;
+    chatId: string;
+    systemAgentId: string;
+    content: string;
+    sourceMessageId: string;
+    sourceType: Message['type'];
+    analysisKind: NonNullable<MessageMetadata['analysisKind']>;
+}) {
+    await db.query(
+        `INSERT INTO messages (
+            workspace_id,
+            chat_id,
+            type,
+            content,
+            from_me,
+            api_message_status,
+            metadata,
+            is_read,
+            sender_system_agent_id,
+            created_at
+         ) VALUES ($1, $2, 'text', $3, true, 'internal', $4, true, $5, clock_timestamp())`,
+        [
+            input.workspaceId,
+            input.chatId,
+            input.content,
+            JSON.stringify({
+                isAiAnalysis: true,
+                analysisKind: input.analysisKind,
+                sourceMessageId: input.sourceMessageId,
+                sourceType: input.sourceType,
+                sentBy: 'system_agent',
+                tool: 'ai_media_analysis',
+            } satisfies MessageMetadata),
+            input.systemAgentId,
+        ]
+    );
+}
+
+async function buildMediaAnalysisContext(input: {
+    workspaceId: string;
+    chatId: string;
+    messageId?: string | null;
+    systemAgentId: string;
+}): Promise<string> {
+    if (!input.messageId) return '';
+
+    const { rows } = await db.query(
+        `SELECT id, type, content, metadata, media_url
+         FROM messages
+         WHERE id = $1
+           AND chat_id = $2
+         LIMIT 1`,
+        [input.messageId, input.chatId]
+    );
+    const message = rows[0];
+    if (!message) return '';
+
+    const type = message.type as Message['type'];
+    if (!['audio', 'image', 'video'].includes(type)) return '';
+
+    let metadata: MessageMetadata = {};
+    try {
+        metadata = typeof message.metadata === 'string'
+            ? JSON.parse(message.metadata)
+            : message.metadata || {};
+    } catch {
+        metadata = {};
+    }
+
+    const mediaUrl = metadata.mediaUrl || message.media_url;
+    if (!mediaUrl) {
+        return `[Midia recebida: ${type}. Nao foi possivel localizar URL publica para analise automatica.]`;
+    }
+
+    try {
+        const result = await analyzeMediaForAutopilot({
+            workspaceId: input.workspaceId,
+            mediaUrl,
+            mediaType: type as 'audio' | 'image' | 'video',
+            mimetype: metadata.mimetype,
+            caption: message.content,
+        });
+        const compact = compactAiAnalysis(result.analysis);
+        const label = type === 'audio'
+            ? 'Audio do cliente'
+            : type === 'image'
+                ? 'Imagem do cliente'
+                : 'Video do cliente';
+        const content = `${label}: ${compact}`;
+        await insertAiAnalysisMessage({
+            workspaceId: input.workspaceId,
+            chatId: input.chatId,
+            systemAgentId: input.systemAgentId,
+            content,
+            sourceMessageId: message.id,
+            sourceType: type,
+            analysisKind: resolveAnalysisKind(type) as NonNullable<MessageMetadata['analysisKind']>,
+        });
+        return `[Analise automatica de ${type}] ${compact}`;
+    } catch (error) {
+        console.error('[AUTOPILOT_MEDIA_ANALYSIS] Failed:', error);
+        return `[Midia recebida: ${type}. A analise automatica falhou; se necessario, peca ao cliente para descrever o conteudo.]`;
+    }
+}
+
 async function runRequestedAgentTools(input: {
     workspaceId: string;
     chat: Chat;
@@ -213,7 +352,8 @@ export async function processAutopilotForChat(
     workspaceId: string,
     chat: Chat,
     lastMessageContent: string,
-    instanceName: string
+    instanceName: string,
+    sourceMessageId?: string | null
 ) {
     const resolvedChatId =
         (await resolveCanonicalWhatsappChatIdByIdentity(db, {
@@ -230,7 +370,9 @@ export async function processAutopilotForChat(
     }
 
     console.log(`[AUTOPILOT_SERVICE] Verificando autopilot para chat ${chat.id}`);
+    await broadcastAiProcessing(chat.id, 'ai_processing_start');
 
+    try {
     const chatConfigRes = await db.query(
         `SELECT
             c.copilot_mode,
@@ -307,6 +449,17 @@ export async function processAutopilotForChat(
         return `${sender}: ${m.content}`;
     }).join('\n');
 
+    const mediaAnalysisContext = await buildMediaAnalysisContext({
+        workspaceId,
+        chatId: chat.id,
+        messageId: sourceMessageId,
+        systemAgentId: assignedSystemAgentId,
+    });
+    const enrichedLastMessageContent = [
+        lastMessageContent || '',
+        mediaAnalysisContext,
+    ].filter((part) => part.trim().length > 0).join('\n\n');
+
     const activeRules = (autopilotRules || []).filter(rule => rule.enabled);
     const sanitizedContact: Contact = {
         ...(chat.contact as Contact),
@@ -350,12 +503,12 @@ export async function processAutopilotForChat(
     }> = [];
 
     try {
-        if (lastMessageContent && lastMessageContent.trim().length > 3) {
-            console.log(`[AUTOPILOT_RAG] Searching support context for: "${lastMessageContent.substring(0, 50)}..."`);
+        if (enrichedLastMessageContent && enrichedLastMessageContent.trim().length > 3) {
+            console.log(`[AUTOPILOT_RAG] Searching support context for: "${enrichedLastMessageContent.substring(0, 50)}..."`);
             const retrieval = await retrieveSupportContext({
                 workspaceId,
                 autopilotConfigId: autopilotConfig.id,
-                query: lastMessageContent,
+                query: enrichedLastMessageContent,
                 excludeChatId: chat.id,
             });
 
@@ -385,7 +538,7 @@ export async function processAutopilotForChat(
         const result = await generateAgentResponse({
             config: autopilotConfig,
             chatId: chat.id,
-            customerMessage: lastMessageContent || '',
+            customerMessage: enrichedLastMessageContent || '',
             chatHistory: chatHistoryForAI,
             relevantHistory,
             rules: activeRules,
@@ -413,7 +566,7 @@ export async function processAutopilotForChat(
                         rule: triggeredRule,
                         chat,
                         contact: sanitizedContact,
-                        message: lastMessageContent || '',
+                        message: enrichedLastMessageContent || '',
                     });
                     if (webhookExecution?.reply) {
                         finalResponse = webhookExecution.reply;
@@ -448,7 +601,7 @@ export async function processAutopilotForChat(
                     chatId: chat.id,
                     systemAgentId: assignedSystemAgentId,
                     modelName: autopilotConfig.ai_model || 'googleai/gemini-2.0-flash',
-                    customerMessage: lastMessageContent || '',
+                    customerMessage: enrichedLastMessageContent || '',
                     response: finalResponse,
                     status: 'suggested',
                     triggeredRule: result.triggeredRule || null,
@@ -470,7 +623,7 @@ export async function processAutopilotForChat(
                     systemAgentId: assignedSystemAgentId,
                     systemAgentName: assignedSystemAgentName,
                     autopilotConfig,
-                    customerMessage: lastMessageContent || '',
+                    customerMessage: enrichedLastMessageContent || '',
                     actions: result.actions,
                 });
                 await logIntelligentAttendantResponse({
@@ -478,7 +631,7 @@ export async function processAutopilotForChat(
                     chatId: chat.id,
                     systemAgentId: assignedSystemAgentId,
                     modelName: autopilotConfig.ai_model || 'googleai/gemini-2.0-flash',
-                    customerMessage: lastMessageContent || '',
+                    customerMessage: enrichedLastMessageContent || '',
                     response: finalResponse,
                     status: 'sent',
                     triggeredRule: result.triggeredRule || null,
@@ -498,7 +651,7 @@ export async function processAutopilotForChat(
                     systemAgentId: assignedSystemAgentId,
                     systemAgentName: assignedSystemAgentName,
                     autopilotConfig,
-                    customerMessage: lastMessageContent || '',
+                    customerMessage: enrichedLastMessageContent || '',
                     actions: result?.actions,
                 })
                 : [];
@@ -507,7 +660,7 @@ export async function processAutopilotForChat(
                 chatId: chat.id,
                 systemAgentId: assignedSystemAgentId,
                 modelName: autopilotConfig.ai_model || 'googleai/gemini-2.0-flash',
-                customerMessage: lastMessageContent || '',
+                customerMessage: enrichedLastMessageContent || '',
                 response: null,
                 status: 'empty',
                 triggeredRule: result?.triggeredRule || null,
@@ -526,5 +679,8 @@ export async function processAutopilotForChat(
             status: 'error',
             errorMessage: error instanceof Error ? error.message : String(error),
         });
+    }
+    } finally {
+        await broadcastAiProcessing(chat.id, 'ai_processing_stop');
     }
 }

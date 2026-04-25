@@ -478,7 +478,7 @@ export async function POST(
             instanceName: instance.instance_name,
           });
         } else {
-          await processAutopilotForChat(instance.workspace_id, savedChat, savedMessage.content, instance.instance_name);
+          await processAutopilotForChat(instance.workspace_id, savedChat, savedMessage.content, instance.instance_name, savedMessage.id);
         }
       } catch (error) {
         console.error('[TELEGRAM_WEBHOOK] Falha ao disparar autopilot:', error);

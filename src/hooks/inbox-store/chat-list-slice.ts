@@ -30,12 +30,13 @@ export function mergeChatsById(existingChats: Chat[], incomingChats: Chat[]): Ch
   incomingChats.forEach((chat) => {
     const existing = chatMap.get(chat.id);
     if (existing) {
+      const hasIncomingAgent = Object.prototype.hasOwnProperty.call(chat, 'agent');
       chatMap.set(chat.id, {
         ...existing,
         ...chat,
         messages: chat.messages?.length ? chat.messages : existing.messages,
         contact: chat.contact || existing.contact,
-        agent: chat.agent || existing.agent,
+        agent: hasIncomingAgent ? chat.agent : existing.agent,
       });
     } else {
       chatMap.set(chat.id, chat);

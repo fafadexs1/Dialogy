@@ -29,6 +29,7 @@ import {
     extractEvolutionInteractiveResponseText,
     mapEvolutionInboundMessageTypeToDbType,
     resolveEvolutionInboundMessageType,
+    shouldAppendInboundToClosedWhatsappChat,
 } from '@/lib/whatsapp/evolution-inbound-message';
 import {
     findOrCreateWhatsappContact,
@@ -1342,11 +1343,11 @@ async function handleMessagesUpsert(payload: any) {
                 const closedAt = recentChat.closed_at ? new Date(recentChat.closed_at).getTime() : 0;
                 const msgTime = messageCreatedAt.getTime();
 
-                // If message was sent before chat was closed, or within 15s (race condition / quick "thank you"), 
-                // append to the closed chat rather than spamming a new chat in the queue.
-                if (msgTime <= closedAt + 15000) {
+                // Messages timestamped before the close are delayed/replayed events and belong to
+                // the closed chat. New inbound messages after closing must open a fresh queue chat.
+                if (shouldAppendInboundToClosedWhatsappChat({ closedAt, messageCreatedAt: msgTime })) {
                     chat = recentChat;
-                    console.log(`[WEBHOOK_MSG_UPSERT] Mensagem dentro da tolerancia de encerramento (${msgTime <= closedAt ? 'atrasada' : 'grace period'}). Reutilizando chat encerrado ${chat.id}.`);
+                    console.log(`[WEBHOOK_MSG_UPSERT] Mensagem atrasada apos encerramento. Reutilizando chat encerrado ${chat.id}.`);
                 } else if (!isLiveInbound) {
                     // Historical/replayed events must not reopen queue chats.
                     chat = recentChat;
@@ -1598,7 +1599,7 @@ async function handleMessagesUpsert(payload: any) {
                         lastMessageContent: content,
                         instanceName,
                     })
-                    : processAutopilotForChat(savedChat.workspace_id, savedChat, content, instanceName);
+                    : processAutopilotForChat(savedChat.workspace_id, savedChat, content, instanceName, savedMessage.id);
                 postTransactionTasks.push(autopilotTask);
             } else {
                 console.log(`[WEBHOOK_MSG_UPSERT] Autopilot SKIPPED (Inactive) for chat ${savedChat.id}`);

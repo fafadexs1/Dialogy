@@ -640,20 +640,32 @@ export default function ChatPanel({
         setAiSuggestion(null); // Clear suggestion when chat changes
     }, [chat?.id, chat?.is_autopilot_active]);
 
-    // Subscribe to AI suggestions via Realtime
+    // Subscribe to AI processing events and suggestions via Realtime
     useEffect(() => {
         console.log('[CHAT_PANEL] Checking copilot subscription. Mode:', chat?.copilot_mode, 'ID:', chat?.id);
-        if (!chat?.id || chat.copilot_mode !== 'suggest') return;
+        if (!chat?.id) return;
 
         let cancelled = false;
         const supabase = createClient();
         const channel = supabase.channel(`chat:${chat.id}`)
+            .on('broadcast', { event: 'ai_processing_start' }, (payload) => {
+                if (cancelled) return;
+                if (payload.payload?.chatId && payload.payload.chatId !== chat.id) return;
+                setIsAiTyping(true);
+            })
+            .on('broadcast', { event: 'ai_processing_stop' }, (payload) => {
+                if (cancelled) return;
+                if (payload.payload?.chatId && payload.payload.chatId !== chat.id) return;
+                setIsAiTyping(false);
+            })
             .on('broadcast', { event: 'ai_suggestion' }, (payload) => {
                 if (cancelled) return; // Guard against updates after unmount
                 console.log('[CHAT_PANEL] Received AI suggestion:', payload);
+                setIsAiTyping(false);
                 if (!shouldAcceptAiSuggestion(chat.id, payload.payload?.chatId)) {
                     return;
                 }
+                if (chat.copilot_mode !== 'suggest') return;
                 if (payload.payload?.suggestion) {
                     setAiSuggestion({
                         text: payload.payload.suggestion,
@@ -1884,7 +1896,6 @@ export default function ChatPanel({
     const activeAutopilotRuleCount = autopilotRules.filter(rule => rule.enabled).length;
     const currentCopilotMode = chat.copilot_mode === 'auto' ? 'auto' : 'suggest';
     const hasAutopilotAvailable = availableAutopilotAgents.length > 0;
-    const assignedOwnerLabel = chat.assignedSystemAgent?.name || chat.agent?.name || null;
     const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
 
 
@@ -1895,7 +1906,7 @@ export default function ChatPanel({
             {/* Header */}
             {/* Header */}
             <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.18)] backdrop-blur-xl md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]/95 dark:shadow-[0_12px_30px_-24px_rgba(0,0,0,0.8)]">
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                     {onBack && (
                         <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 mr-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
                             <ArrowLeft className="h-5 w-5" />
@@ -1926,33 +1937,83 @@ export default function ChatPanel({
                                     IA
                                 </Badge>
                             )}
+                            <Dialog>
+                                <TooltipProvider delayDuration={150}>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <DialogTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 shrink-0 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-500 dark:hover:bg-white/5 dark:hover:text-white"
+                                                    aria-label="Ver detalhes da conversa"
+                                                >
+                                                    <Info className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </DialogTrigger>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">Detalhes da conversa</TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                                <DialogContent className="sm:max-w-md">
+                                    <DialogHeader>
+                                        <DialogTitle>Detalhes da conversa</DialogTitle>
+                                        <DialogDescription>
+                                            Dados tecnicos do atendimento selecionado.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-3 text-sm">
+                                        <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Canal</div>
+                                            <div className="mt-1 flex items-center gap-2 font-medium text-foreground">
+                                                {headerPlatformIcon}
+                                                <span className="break-all">{chat.instance_name || resolvedPlatform}</span>
+                                            </div>
+                                        </div>
+                                        <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Contato</div>
+                                            <div className="mt-1 break-all font-medium text-foreground">
+                                                {contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid || 'Nao informado'}
+                                            </div>
+                                        </div>
+                                        <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">ID do chat</div>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-7 w-7"
+                                                    aria-label="Copiar ID do chat"
+                                                    onClick={() => {
+                                                        navigator.clipboard?.writeText(chat.id);
+                                                        toast({ title: "ID copiado", description: "O ID da conversa foi copiado." });
+                                                    }}
+                                                >
+                                                    <Copy className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                            <div className="mt-1 break-all font-mono text-xs text-foreground">{chat.id}</div>
+                                        </div>
+                                    </div>
+                                </DialogContent>
+                            </Dialog>
                         </h2>
-                        <p className="flex items-center gap-1 overflow-hidden min-w-0 text-xs text-slate-500 dark:text-zinc-500">
+                        <p className="flex min-w-0 items-center gap-1 overflow-hidden text-xs text-slate-500 dark:text-zinc-500">
                             {chat.instance_name && (
-                                <span className="flex items-center gap-1 shrink-0 text-slate-500 dark:text-zinc-500">
+                                <span className="flex shrink-0 items-center gap-1 text-slate-500 dark:text-zinc-500">
                                     {headerPlatformIcon}
-                                    <span className="hidden lg:inline truncate max-w-[80px]">{chat.instance_name}</span>
+                                    <span className="hidden max-w-[72px] truncate lg:inline xl:max-w-[96px]">{chat.instance_name}</span>
                                 </span>
                             )}
-                            <span className="hidden lg:inline mx-1">•</span>
-                            <span className="truncate text-slate-600 dark:text-zinc-400">{contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid}</span>
-                            {assignedOwnerLabel && (
-                                <span className="hidden md:inline-flex min-w-0 items-center gap-1">
-                                    <span className="mx-1">•</span>
-                                    {isAssignedToIntelligentAgent && <Bot className="h-3 w-3 shrink-0 text-cyan-500" />}
-                                    <span className="truncate text-slate-500 dark:text-zinc-500">
-                                        {isAssignedToIntelligentAgent ? 'IA: ' : 'Responsável: '}{assignedOwnerLabel}
-                                    </span>
-                                </span>
+                            {chat.instance_name && (contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid) && (
+                                <span className="mx-1 hidden shrink-0 lg:inline">•</span>
                             )}
-                            <span className="hidden sm:inline-flex items-center shrink-0">
-                                <span className="mx-1">•</span>
-                                <span className="text-xs whitespace-nowrap text-slate-400 dark:text-zinc-600">ID: {chat.id}</span>
-                            </span>
+                            <span className="min-w-0 truncate text-slate-600 dark:text-zinc-400">{contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid}</span>
                         </p>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                     {/* Dialogs logic - rendered once */}
                     {isChatOpen && isChatAssignedToMe && (
                         <CloseChatDialog
@@ -2256,7 +2317,25 @@ export default function ChatPanel({
                                 )}
                             </div>
                         ),
-                        Footer: () => <div className="h-4" />
+                        Footer: () => (
+                            <div className="min-h-4 px-2 pb-2 md:px-6">
+                                {isAiTyping && (
+                                    <div className="flex items-start gap-3 py-1">
+                                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500">
+                                            <Sparkles className="h-4 w-4 animate-pulse" />
+                                        </div>
+                                        <div className="rounded-2xl rounded-tl-sm border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm dark:text-emerald-200">
+                                            <span>{aiTypingDisplayName} está analisando</span>
+                                            <span className="ml-1 inline-flex gap-0.5 align-middle">
+                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
+                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
+                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current" />
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )
                     }}
                     itemContent={(index, message) => {
                         const arrayIndex = index - firstItemIndex;

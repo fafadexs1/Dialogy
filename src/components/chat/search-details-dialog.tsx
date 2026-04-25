@@ -310,9 +310,10 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspa
                                 </div>
                                 <div className="space-y-2">
                                     {remoteMessages.map((message) => {
+                                        const messageChatStatus = (message as any).chat_status as Chat['status'] | undefined;
                                         const chatForMessage: Chat = {
                                             id: message.chat_id,
-                                            status: 'atendimentos',
+                                            status: messageChatStatus || 'gerais',
                                             workspace_id: message.workspace_id,
                                             contact: {
                                                 id: (message as any).contact_id,
@@ -325,7 +326,8 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspa
                                             },
                                             messages: [message],
                                             unreadCount: 0,
-                                            updatedAt: message.createdAt
+                                            updatedAt: message.createdAt,
+                                            protocol: (message as any).chat_protocol,
                                         };
 
                                         return (

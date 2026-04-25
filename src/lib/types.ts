@@ -193,6 +193,12 @@ export type MessageMetadata = {
   duration?: number; // Duration in seconds for audio/video
   waveform?: number[]; // For audio visualization
   isInternalNote?: boolean;
+  isAiAnalysis?: boolean;
+  tool?: string;
+  customerMessage?: string;
+  analysisKind?: 'transcription' | 'visual_summary' | 'video_summary' | 'media_summary' | 'routing_context';
+  sourceMessageId?: string;
+  sourceType?: 'text' | 'audio' | 'image' | 'video' | 'document' | 'location' | 'system';
   event?: string;
   from_agent_id?: string;
   to_agent_id?: string;
@@ -202,6 +208,9 @@ export type MessageMetadata = {
   reason_tag_id?: string | null;
   notes?: string | null;
   authored_by?: string;
+  authored_by_name?: string;
+  authored_by_avatar?: string;
+  authored_by_avatar_url?: string;
   template_applied?: boolean;
   closed_by_system_agent_id?: string;
   authored_by_system_agent_id?: string;

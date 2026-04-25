@@ -109,6 +109,25 @@ export function resolveRealtimeSender({
     metadataRecord?.from_system_agent_avatar_url
   );
   const knownSystemAgent = getKnownSystemAgentSender(knownMessages, systemAgentId, systemAgentName);
+  const userSenderName = pickString(
+    metadataRecord?.authored_by_name,
+    metadataRecord?.senderName,
+    metadataRecord?.sender_name,
+    metadataRecord?.agent_name,
+    metadataRecord?.from_agent_name
+  );
+  const userSenderAvatar = pickString(
+    metadataRecord?.authored_by_avatar,
+    metadataRecord?.authored_by_avatar_url,
+    metadataRecord?.senderAvatar,
+    metadataRecord?.sender_avatar,
+    metadataRecord?.senderAvatarUrl,
+    metadataRecord?.sender_avatar_url,
+    metadataRecord?.agent_avatar,
+    metadataRecord?.agent_avatar_url,
+    metadataRecord?.from_agent_avatar,
+    metadataRecord?.from_agent_avatar_url
+  );
   const isSystemAgent = Boolean(
     systemAgentId ||
     data.sender_system_agent_id ||
@@ -140,6 +159,15 @@ export function resolveRealtimeSender({
         id: chat.agent.id,
         name: chat.agent.name,
         avatar: chat.agent.avatar || chat.agent.avatar_url || undefined,
+        type: 'user',
+      };
+    }
+
+    if (data.sender_user_id && (userSenderName || userSenderAvatar)) {
+      return {
+        id: data.sender_user_id,
+        name: userSenderName || 'Agente',
+        avatar: userSenderAvatar,
         type: 'user',
       };
     }
