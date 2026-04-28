@@ -395,6 +395,12 @@ export interface Team {
   color: string;
   roleId: string;
   tagId: string | null;
+  agentRoutingConfig?: {
+    enabled?: boolean;
+    autoTransfer?: boolean;
+    keywords?: string[];
+    responseHint?: string | null;
+  } | null;
   businessHours: BusinessHour[];
   scheduleExceptions: ScheduleException[];
   members: User[];
@@ -482,7 +488,20 @@ export type Action =
   | {
     type: 'webhook';
     url: string;
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    description?: string;
+    auth?: {
+      type: 'none' | 'bearer' | 'basic' | 'api_key';
+      token?: string;
+      username?: string;
+      password?: string;
+      key?: string;
+      value?: string;
+      placement?: 'header' | 'query';
+    };
+    headers?: Record<string, string>;
+    query?: Record<string, string>;
+    bodyType?: 'json' | 'form-data';
     body?: Record<string, any>;
   };
 

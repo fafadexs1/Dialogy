@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import type { AutopilotConfig, KnowledgeBaseDocument } from '@/lib/types';
+import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 
 function normalizeKnowledgeBaseDocuments(raw: unknown): KnowledgeBaseDocument[] {
     if (typeof raw === 'string') {
@@ -99,13 +100,22 @@ export async function resolveWorkspaceAiExecutionContext(
         console.error('[AI_RUNTIME] Failed to resolve workspace Gemini integration:', error);
     }
 
+    const configuredModel =
+        autopilotConfig?.ai_model ||
+        workspaceModel ||
+        process.env.AI_DEFAULT_MODEL?.trim() ||
+        null;
+    const resolvedModel = await resolveAutopilotModelFromCatalog(configuredModel);
+
+    if (resolvedModel.fallbackUsed) {
+        console.warn(
+            `[AI_RUNTIME] Model "${resolvedModel.requestedModel}" is not enabled in the global catalog. Falling back to "${resolvedModel.model}".`
+        );
+    }
+
     return {
         autopilotConfig,
         workspaceGeminiApiKey,
-        model:
-            autopilotConfig?.ai_model ||
-            workspaceModel ||
-            process.env.AI_DEFAULT_MODEL?.trim() ||
-            'googleai/gemini-2.0-flash',
+        model: resolvedModel.model,
     };
 }

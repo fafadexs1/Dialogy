@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/server';
 import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 import { VectorStore } from '@/lib/vector-store';
+import { isAllowedAutopilotModel } from '@/services/ai/model-selection';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -252,8 +253,12 @@ export async function saveAutopilotConfig(
             values.push(formData.get('geminiApiKey') || null);
         }
         if (formData.has('aiModel')) {
+            const requestedModel = formData.get('aiModel')?.toString() || '';
+            if (!(await isAllowedAutopilotModel(requestedModel))) {
+                return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global.' };
+            }
             setClauses.push(`ai_model = $${valueIndex++}`);
-            values.push(formData.get('aiModel'));
+            values.push(requestedModel);
         }
         if (formData.has('transcriptionModel')) {
             setClauses.push(`transcription_model = $${valueIndex++}`);

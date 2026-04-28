@@ -34,7 +34,7 @@ export const DEFAULT_AI_MODEL_CATALOG: AiModelCatalogEntry[] = [
     enabled: true,
   },
   {
-    id: 'googleai/gemini-3-flash-preview',
+    id: 'googleai/gemini-3.1-flash-lite-preview',
     label: 'Gemini 3 Flash',
     provider: 'googleai',
     description: 'Preview experimental.',

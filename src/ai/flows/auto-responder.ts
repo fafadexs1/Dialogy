@@ -25,7 +25,12 @@ const ActionSchema = z.union([
   z.object({
     type: z.literal('webhook'),
     url: z.string().url().describe('The URL to send the HTTP request to.'),
-    method: z.enum(['GET', 'POST']).default('POST'),
+    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('POST'),
+    description: z.string().optional(),
+    auth: z.record(z.any()).optional(),
+    headers: z.record(z.string()).optional(),
+    query: z.record(z.string()).optional(),
+    bodyType: z.enum(['json', 'form-data']).optional(),
     body: z.record(z.any()).optional().describe('The JSON body for the request. You can use Handlebars variables like {{contact.id}}.'),
   }),
 ]);
@@ -112,7 +117,16 @@ const AgentResponseOutputSchema = z.object({
     .describe('The name of the rule that was triggered.'),
   actions: z
     .array(z.object({
-      type: z.enum(['transfer_chat', 'add_internal_note']),
+      type: z.enum([
+        'transfer_chat',
+        'add_internal_note',
+        'crm_update_contact_custom_fields',
+        'sgp_fetch_contracts',
+        'sgp_fetch_contact_panel_data',
+        'sgp_generate_invoice_pix',
+        'sgp_create_payment_promise',
+        'sgp_open_support_ticket',
+      ]),
       reason: z.string().optional().nullable(),
       payload: z.record(z.any()).optional().nullable(),
     }))
@@ -349,7 +363,7 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 **ÚLTIMA MENSAGEM DO CLIENTE**:
 **FERRAMENTAS DISPONIVEIS (Dialogy Agent Tools)**:
 Voce pode solicitar acoes estruturadas no campo "actions". O servidor validara e executara.
-Use no maximo 2 acoes por resposta.
+Use no maximo 4 acoes por resposta.
 
 Ferramentas permitidas:
 1. transfer_chat
@@ -363,6 +377,28 @@ Ferramentas permitidas:
    - A nota deve ter no maximo 3 frases curtas e 280 caracteres.
    - Nunca escreva texto de auditoria, assinatura, repeticao da persona, "fim da nota", "registro concluido" ou explicacoes sobre o proprio sistema.
    - A nota nao sera enviada ao cliente.
+3. crm_update_contact_custom_fields
+   - Use para preencher/atualizar campos do CRM do contato atual quando o cliente informar um dado claro.
+   - Exemplo para CPF: {"fields":{"CPF":"01298570174"}}. Pode usar o nome do campo ou o ID do campo.
+   - Nunca atualize contato de outra pessoa. Nunca invente valores.
+4. sgp_fetch_contact_panel_data
+   - Use para consultar dados do SGP do contato atual depois que o CPF/CNPJ estiver salvo no CRM.
+   - Retorna cliente, contratos, status de conexao e faturas.
+   - Nao diga que acessou/verificou o SGP antes da ferramenta ser executada com sucesso.
+5. sgp_fetch_contracts
+   - Use para listar contratos do cliente no SGP.
+6. sgp_generate_invoice_pix
+   - Use apenas quando houver fatura e contrato claros. Payload: {"invoiceId":"...","contractId":"..."}.
+7. sgp_create_payment_promise
+   - Use apenas quando o cliente pedir promessa de pagamento e informar data. Payload: {"contractId":"...","promiseDate":"yyyy-MM-dd","sendSms":true}.
+
+Ferramenta bloqueada para IA:
+- sgp_open_support_ticket. Nunca solicite esta ferramenta. Abertura de chamado/OS no SGP deve ficar com humano.
+
+Regra critica:
+- Se precisar consultar SGP mas ainda nao recebeu CPF/CNPJ, peca o CPF/CNPJ.
+- Se receber CPF/CNPJ, pode primeiro solicitar crm_update_contact_custom_fields e sgp_fetch_contact_panel_data.
+- Se a consulta ainda nao foi feita ou falhou, nao afirme "estou vendo seu sinal", "acessei o sistema" ou "verifiquei seu contrato".
 
 Exemplo de saida:
 {
@@ -388,6 +424,11 @@ Com base na sua persona, nos documentos e na emoção identificada, responda ao 
 // Default prompt with global AI
 const globalPrompt = ai.definePrompt(promptConfig);
 
+function isInvalidGeminiApiKeyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /API_KEY_INVALID|API key expired|API key not valid|API_KEY/i.test(message);
+}
+
 const autoResponderFlow = ai.defineFlow(
   {
     name: 'autoResponderFlow',
@@ -408,51 +449,76 @@ const autoResponderFlow = ai.defineFlow(
     const configKey = input.config?.gemini_api_key?.trim();
     const workspaceKey = input.workspaceGeminiApiKey?.trim();
     const envKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim();
-    const apiKey = configKey || workspaceKey || (envKey && envKey !== 'no-key-configured' ? envKey : '');
+    const apiKeyCandidates = [
+      { source: 'agent', key: configKey },
+      { source: 'workspace', key: workspaceKey },
+      { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
+    ].filter((candidate): candidate is { source: string; key: string } => Boolean(candidate.key));
+    const uniqueApiKeyCandidates = apiKeyCandidates.filter((candidate, index, all) => (
+      all.findIndex((item) => item.key === candidate.key) === index
+    ));
 
-    if (!apiKey) {
+    if (uniqueApiKeyCandidates.length === 0) {
       console.error('[AUTORESPONDER_FLOW_ERROR] Nenhuma chave de API encontrada (Config, Integrações ou ENV).');
       throw new Error('Chave Gemini não configurada. Configure em Integrações > Google Gemini.');
     }
 
-    let effectivePrompt = globalPrompt;
-
-    // Use a dynamic Genkit instance when we are overriding the default env key
-    const defaultEnvKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
-    if (!defaultEnvKey || defaultEnvKey !== apiKey) {
-      const { genkit } = require('genkit');
-      const { googleAI } = require('@genkit-ai/googleai');
-
-      const dynamicAi = genkit({
-        plugins: [googleAI({ apiKey })],
-        model: model,
-        // tools: [makeHttpRequestTool],
-      });
-      effectivePrompt = dynamicAi.definePrompt(promptConfig);
-    }
     let output: AgentResponseOutput | null = null;
-    try {
-      const result = await effectivePrompt(promptInput, { model });
-      output = result.output;
+    let lastPromptError: unknown = null;
 
-      // Log usage in the background without awaiting it.
-      // This allows the flow to return faster.
-      if (result.usage && input.config?.id) {
-        logAutopilotUsage({
-          configId: input.config.id,
-          flowName: 'autoResponderFlow',
-          modelName: model,
-          inputTokens: result.usage.inputTokens ?? 0,
-          outputTokens: result.usage.outputTokens ?? 0,
-          totalTokens: result.usage.totalTokens ?? 0,
-          ruleName: output?.triggeredRule ?? undefined,
-        }).catch(err => {
-          // Log the error but don't block the main flow.
-          console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
+    for (const candidate of uniqueApiKeyCandidates) {
+      let effectivePrompt = globalPrompt;
+
+      // Use a dynamic Genkit instance when we are overriding the default env key.
+      const defaultEnvKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+      if (!defaultEnvKey || defaultEnvKey !== candidate.key) {
+        const { genkit } = require('genkit');
+        const { googleAI } = require('@genkit-ai/googleai');
+
+        const dynamicAi = genkit({
+          plugins: [googleAI({ apiKey: candidate.key })],
+          model: model,
+          // tools: [makeHttpRequestTool],
         });
+        effectivePrompt = dynamicAi.definePrompt(promptConfig);
       }
-    } catch (error) {
-      console.error('[AUTORESPONDER_FLOW_ERROR] Error calling prompt:', error);
+
+      try {
+        const result = await effectivePrompt(promptInput, { model });
+        output = result.output;
+
+        if (candidate.source !== 'agent' && configKey) {
+          console.warn(`[AUTORESPONDER_FLOW] Gemini key fallback succeeded with ${candidate.source} key.`);
+        }
+
+        // Log usage in the background without awaiting it.
+        // This allows the flow to return faster.
+        if (result.usage && input.config?.id) {
+          logAutopilotUsage({
+            configId: input.config.id,
+            flowName: 'autoResponderFlow',
+            modelName: model,
+            inputTokens: result.usage.inputTokens ?? 0,
+            outputTokens: result.usage.outputTokens ?? 0,
+            totalTokens: result.usage.totalTokens ?? 0,
+            ruleName: output?.triggeredRule ?? undefined,
+          }).catch(err => {
+            // Log the error but don't block the main flow.
+            console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
+          });
+        }
+        break;
+      } catch (error) {
+        lastPromptError = error;
+        console.error(`[AUTORESPONDER_FLOW_ERROR] Error calling prompt with ${candidate.source} key:`, error);
+
+        if (!isInvalidGeminiApiKeyError(error)) {
+          break;
+        }
+      }
+    }
+
+    if (!output && lastPromptError) {
       // Do not re-throw; allow the flow to proceed to fallback logic.
       output = null;
     }

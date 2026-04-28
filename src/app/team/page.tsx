@@ -164,6 +164,8 @@ function TeamSettingsContent({
   const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [teamName, setTeamName] = useState(team.name);
+  const [routingKeywords, setRoutingKeywords] = useState((team.agentRoutingConfig?.keywords || []).join(', '));
+  const [routingResponseHint, setRoutingResponseHint] = useState(team.agentRoutingConfig?.responseHint || '');
   const [isAddingMember, setIsAddingMember] = useState(false);
   const sortedBusinessHours = sortBusinessHours(team.businessHours || []);
 
@@ -180,6 +182,38 @@ function TeamSettingsContent({
       toast({ title: "Campo atualizado!", duration: 2000 });
     }
   }
+
+  const handleRoutingConfigUpdate = async (patch: NonNullable<Team['agentRoutingConfig']>) => {
+    const nextConfig = {
+      enabled: team.agentRoutingConfig?.enabled ?? false,
+      autoTransfer: team.agentRoutingConfig?.autoTransfer ?? true,
+      keywords: team.agentRoutingConfig?.keywords || [],
+      responseHint: team.agentRoutingConfig?.responseHint || '',
+      ...patch,
+    };
+
+    const result = await updateTeam(team.id, { agentRoutingConfig: nextConfig });
+    if (result.error) {
+      toast({ title: 'Erro ao atualizar roteamento', description: result.error, variant: 'destructive' });
+      return;
+    }
+
+    onTeamUpdate(team.id, { ...team, agentRoutingConfig: nextConfig });
+    toast({ title: 'Roteamento atualizado!', duration: 2000 });
+  };
+
+  const handleRoutingKeywordsBlur = () => {
+    const keywords = routingKeywords
+      .split(',')
+      .map((keyword) => keyword.trim())
+      .filter(Boolean)
+      .slice(0, 30);
+    void handleRoutingConfigUpdate({ keywords });
+  };
+
+  const handleRoutingResponseBlur = () => {
+    void handleRoutingConfigUpdate({ responseHint: routingResponseHint.trim() || null });
+  };
 
   const handleRemoveTeam = async () => {
     const result = await deleteTeam(team.id);
@@ -372,6 +406,42 @@ function TeamSettingsContent({
                 {isAddingMember ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
                 Adicionar
               </Button>
+            </div>
+          </div>
+          <div className="rounded-md border bg-background p-4 space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor={`team-routing-${team.id}`}>Roteamento automático por IA</Label>
+                <p className="text-xs text-muted-foreground">
+                  Use palavras-chave para encaminhar atendimentos óbvios para esta equipe sem depender do modelo.
+                </p>
+              </div>
+              <Switch
+                id={`team-routing-${team.id}`}
+                checked={Boolean(team.agentRoutingConfig?.enabled)}
+                onCheckedChange={(checked) => handleRoutingConfigUpdate({ enabled: checked })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`team-routing-keywords-${team.id}`}>Palavras-chave</Label>
+              <Input
+                id={`team-routing-keywords-${team.id}`}
+                value={routingKeywords}
+                onChange={(event) => setRoutingKeywords(event.target.value)}
+                onBlur={handleRoutingKeywordsBlur}
+                placeholder="Ex: contratar, orçamento, planos, vendas"
+              />
+              <p className="text-xs text-muted-foreground">Separe por vírgula. Use termos específicos do seu nicho e desta equipe.</p>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`team-routing-response-${team.id}`}>Resposta antes da transferência</Label>
+              <Input
+                id={`team-routing-response-${team.id}`}
+                value={routingResponseHint}
+                onChange={(event) => setRoutingResponseHint(event.target.value)}
+                onBlur={handleRoutingResponseBlur}
+                placeholder={`Vou encaminhar seu atendimento para a equipe ${team.name}.`}
+              />
             </div>
           </div>
         </CardContent>

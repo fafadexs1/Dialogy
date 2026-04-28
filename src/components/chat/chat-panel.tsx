@@ -35,7 +35,6 @@ import {
     Eye,
     EyeOff,
     Clock,
-    ChevronDown,
     Phone,
     Video,
     ArrowLeft,
@@ -86,9 +85,6 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
-    DropdownMenuSub,
-    DropdownMenuSubContent,
-    DropdownMenuSubTrigger,
     DropdownMenuTrigger,
     DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
@@ -2497,33 +2493,6 @@ export default function ChatPanel({
                                         />
                                     )}
 
-                                    {/* AI Selector */}
-                                    <div className="flex items-center justify-between px-3 pt-3">
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="sm" className="h-8 rounded-full px-3 text-sm font-medium gap-2 hover:bg-muted dark:hover:bg-white/10">
-                                                    <Sparkles className="w-4 h-4 text-cyan-500" />
-                                                    {isAiAgentActive ? (autopilotConfig?.name || 'IA Dialogy') : 'IA Desativada'}
-                                                    <ChevronDown className="w-3 h-3 text-muted-foreground" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="start" className="w-[240px]">
-                                                <div className="flex items-center justify-between p-2">
-                                                    <span className="text-sm font-medium">Copiloto IA</span>
-                                                    <Switch checked={isAiAgentActive} onCheckedChange={handleAiSwitchChange} />
-                                                </div>
-                                                <DropdownMenuSeparator />
-                                                {autopilotAgents.map(agent => (
-                                                    <DropdownMenuItem key={agent.id} onClick={() => handleAgentChange(agent.id)} className="flex items-center gap-2">
-                                                        <Bot className="w-4 h-4" />
-                                                        <span className="flex-1 truncate">{agent.name}</span>
-                                                        {autopilotConfig?.id === agent.id && isAiAgentActive && <Check className="w-4 h-4 text-cyan-500" />}
-                                                    </DropdownMenuItem>
-                                                ))}
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </div>
-
                                     {isSpellChecking && (
                                         <div className="px-4 pt-1">
                                             <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-300">
@@ -2623,57 +2592,123 @@ export default function ChatPanel({
                                                 accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
                                             />
 
+                                            <button
+                                                type="button"
+                                                className={cn(
+                                                    "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+                                                    isInternalNote
+                                                        ? "bg-yellow-500/15 text-yellow-700 hover:bg-yellow-500/20 dark:text-yellow-300"
+                                                        : "text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
+                                                )}
+                                                onClick={() => setIsInternalNote(!isInternalNote)}
+                                                disabled={isAiTyping}
+                                                aria-pressed={isInternalNote}
+                                            >
+                                                <StickyNote className="h-4 w-4" />
+                                                <span className="hidden sm:inline">{isInternalNote ? 'Remover nota' : 'Nota interna'}</span>
+                                            </button>
+
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
                                                         type="button"
-                                                        className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/10 transition-colors"
+                                                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
+                                                        disabled={isAiTyping}
                                                     >
-                                                        <Globe className="h-4 w-4" />
+                                                        <MessageSquareQuote className="h-4 w-4" />
+                                                        <span className="hidden sm:inline">Respostas rápidas</span>
                                                     </button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start">
-                                                    <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)}>
-                                                        <StickyNote className="mr-2 h-4 w-4 text-yellow-500" />
-                                                        {isInternalNote ? 'Remover Nota' : 'Nota Interna'}
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuSub>
-                                                        <DropdownMenuSubTrigger>
-                                                            <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                                            Respostas Rápidas
-                                                        </DropdownMenuSubTrigger>
-                                                        <DropdownMenuSubContent className="w-80 max-h-96 overflow-y-auto" sideOffset={10}>
-                                                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                                Atalhos Disponíveis
+                                                <DropdownMenuContent align="start" className="w-80 max-h-96 overflow-y-auto">
+                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                                                        Atalhos disponíveis
+                                                    </div>
+                                                    <DropdownMenuSeparator />
+                                                    {shortcuts.length === 0 ? (
+                                                        <DropdownMenuItem disabled>
+                                                            Nenhum atalho encontrado.
+                                                        </DropdownMenuItem>
+                                                    ) : (
+                                                        shortcuts.map(shortcut => (
+                                                            <DropdownMenuItem
+                                                                key={shortcut.id}
+                                                                className="items-start gap-0 px-0 py-0 focus:bg-transparent"
+                                                                onSelect={() => handleShortcutSelect(shortcut)}
+                                                            >
+                                                                <div className="flex w-full flex-col gap-1 rounded-sm px-2 py-2 hover:bg-accent">
+                                                                    <div className="flex items-center justify-between w-full gap-2">
+                                                                        <span className="font-bold text-primary flex items-center gap-2">
+                                                                            /{shortcut.name}
+                                                                            {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
+                                                                            {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
+                                                                            {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span className="w-full truncate text-xs text-muted-foreground">{shortcut.message}</span>
+                                                                </div>
+                                                            </DropdownMenuItem>
+                                                        ))
+                                                    )}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className={cn(
+                                                            "h-8 w-8 flex items-center justify-center rounded-full transition-colors hover:bg-muted dark:hover:bg-white/10",
+                                                            isAiAgentActive
+                                                                ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300"
+                                                                : "text-muted-foreground hover:text-foreground"
+                                                        )}
+                                                        aria-label="Configurar IA"
+                                                    >
+                                                        <Globe className={cn("h-4 w-4", isAiAgentActive && "animate-pulse")} />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="start" className="w-72">
+                                                    <div className="px-2 py-2">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <div className="flex min-w-0 items-center gap-2">
+                                                                <Sparkles className="h-4 w-4 text-cyan-500" />
+                                                                <div className="min-w-0">
+                                                                    <p className="truncate text-sm font-medium">Copiloto IA</p>
+                                                                    <p className="truncate text-xs text-muted-foreground">
+                                                                        {selectedAutopilotAgent?.name || 'Nenhum agente selecionado'}
+                                                                    </p>
+                                                                </div>
                                                             </div>
-                                                            <DropdownMenuSeparator />
-                                                            {shortcuts.length === 0 ? (
-                                                                <DropdownMenuItem disabled>
-                                                                    Nenhum atalho encontrado.
-                                                                </DropdownMenuItem>
-                                                            ) : (
-                                                                shortcuts.map(shortcut => (
-                                                                    <DropdownMenuItem
-                                                                        key={shortcut.id}
-                                                                        className="items-start gap-0 px-0 py-0 focus:bg-transparent"
-                                                                        onSelect={() => handleShortcutSelect(shortcut)}
-                                                                    >
-                                                                        <div className="flex w-full flex-col gap-1 rounded-sm px-2 py-2 hover:bg-accent">
-                                                                            <div className="flex items-center justify-between w-full gap-2">
-                                                                                <span className="font-bold text-primary flex items-center gap-2">
-                                                                                    /{shortcut.name}
-                                                                                    {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
-                                                                                    {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
-                                                                                    {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
-                                                                                </span>
-                                                                            </div>
-                                                                            <span className="w-full truncate text-xs text-muted-foreground">{shortcut.message}</span>
-                                                                        </div>
-                                                                    </DropdownMenuItem>
-                                                                ))
-                                                            )}
-                                                        </DropdownMenuSubContent>
-                                                    </DropdownMenuSub>
+                                                            <Switch
+                                                                checked={isAiAgentActive}
+                                                                onCheckedChange={handleAiSwitchChange}
+                                                                disabled={isAiTyping || !hasAutopilotAvailable}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <DropdownMenuSeparator />
+                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                                                        Agente responsavel
+                                                    </div>
+                                                    {!hasAutopilotAvailable ? (
+                                                        <DropdownMenuItem disabled>
+                                                            Nenhum agente IA configurado.
+                                                        </DropdownMenuItem>
+                                                    ) : (
+                                                        availableAutopilotAgents.map(agent => (
+                                                            <DropdownMenuItem
+                                                                key={agent.id}
+                                                                onSelect={() => handleAgentChange(agent.id)}
+                                                                disabled={isAiTyping}
+                                                                className="gap-2"
+                                                            >
+                                                                <Bot className="h-4 w-4 text-muted-foreground" />
+                                                                <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+                                                                {agent.id === selectedAutopilotAgent?.id && <Check className="h-4 w-4 text-cyan-500" />}
+                                                            </DropdownMenuItem>
+                                                        ))
+                                                    )}
+                                                    <DropdownMenuSeparator />
                                                     <DropdownMenuItem onSelect={handleSpellCheck} disabled={isSpellChecking || isComposerTextEmpty}>
                                                         {isSpellChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SpellCheck2 className="mr-2 h-4 w-4" />}
                                                         Corretor Ortográfico

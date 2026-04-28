@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Bot, Info, Loader2, MessageCircle, Sparkles, Webhook } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Bot, Info, Loader2, MessageCircle, Plus, Sparkles, Trash2, Webhook } from 'lucide-react';
 
 import type { Action, ActionType, NexusFlowInstance } from '@/lib/types';
 import { saveAutopilotRule } from '@/actions/autopilot';
@@ -11,7 +11,41 @@ import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/co
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+type BodyType = 'json' | 'form-data';
+type AuthType = 'none' | 'bearer' | 'basic' | 'api_key';
+type KeyValueRow = { id: string; key: string; value: string };
+
+function rowsFromRecord(record?: Record<string, unknown> | null): KeyValueRow[] {
+  return Object.entries(record || {}).map(([key, value], index) => ({ id: `${key}-${index}`, key, value: String(value ?? '') }));
+}
+
+function recordFromRows(rows: KeyValueRow[]): Record<string, string> {
+  return Object.fromEntries(rows.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.value]));
+}
+
+function KeyValueEditor({ rows, onChange }: { rows: KeyValueRow[]; onChange: (rows: KeyValueRow[]) => void }) {
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => (
+        <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px] gap-2">
+          <Input value={row.key} onChange={(event) => onChange(rows.map((item) => item.id === row.id ? { ...item, key: event.target.value } : item))} placeholder="chave" className="h-9 rounded-xl bg-muted/30 font-mono text-xs" />
+          <Input value={row.value} onChange={(event) => onChange(rows.map((item) => item.id === row.id ? { ...item, value: event.target.value } : item))} placeholder="valor ou {{variavel}}" className="h-9 rounded-xl bg-muted/30 font-mono text-xs" />
+          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={() => onChange(rows.filter((item) => item.id !== row.id))}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" className="h-9 w-full rounded-xl border-dashed" onClick={() => onChange([...rows, { id: crypto.randomUUID(), key: '', value: '' }])}>
+        <Plus className="mr-2 h-4 w-4" />
+        Adicionar item
+      </Button>
+    </div>
+  );
+}
 
 interface AutomationFormProps {
   configId: string;
@@ -31,10 +65,23 @@ export function AutomationForm({
   const [actionType, setActionType] = useState<ActionType>(instance?.action.type || 'reply');
   const [actionValue, setActionValue] = useState(instance?.action.type === 'reply' ? instance.action.value : '');
   const [webhookUrl, setWebhookUrl] = useState(instance?.action.type === 'webhook' ? instance.action.url || '' : '');
-  const [webhookMethod, setWebhookMethod] = useState(instance?.action.type === 'webhook' ? instance.action.method || 'POST' : 'POST');
-  const [webhookBody, setWebhookBody] = useState(instance?.action.type === 'webhook' ? JSON.stringify(instance.action.body, null, 2) || '' : '');
+  const [webhookMethod, setWebhookMethod] = useState<HttpMethod>(instance?.action.type === 'webhook' ? instance.action.method || 'POST' : 'POST');
+  const [webhookDescription, setWebhookDescription] = useState(instance?.action.type === 'webhook' ? instance.action.description || '' : '');
+  const [webhookBodyType, setWebhookBodyType] = useState<BodyType>(instance?.action.type === 'webhook' ? instance.action.bodyType || 'json' : 'json');
+  const [webhookBody, setWebhookBody] = useState(instance?.action.type === 'webhook' && (!instance.action.bodyType || instance.action.bodyType === 'json') ? JSON.stringify(instance.action.body, null, 2) || '' : '');
+  const [headerRows, setHeaderRows] = useState<KeyValueRow[]>(instance?.action.type === 'webhook' ? rowsFromRecord(instance.action.headers) : []);
+  const [queryRows, setQueryRows] = useState<KeyValueRow[]>(instance?.action.type === 'webhook' ? rowsFromRecord(instance.action.query) : []);
+  const [bodyRows, setBodyRows] = useState<KeyValueRow[]>(instance?.action.type === 'webhook' && instance.action.bodyType === 'form-data' ? rowsFromRecord(instance.action.body) : []);
+  const [authType, setAuthType] = useState<AuthType>(instance?.action.type === 'webhook' ? instance.action.auth?.type || 'none' : 'none');
+  const [authToken, setAuthToken] = useState(instance?.action.type === 'webhook' ? instance.action.auth?.token || '' : '');
+  const [authUsername, setAuthUsername] = useState(instance?.action.type === 'webhook' ? instance.action.auth?.username || '' : '');
+  const [authPassword, setAuthPassword] = useState(instance?.action.type === 'webhook' ? instance.action.auth?.password || '' : '');
+  const [authKey, setAuthKey] = useState(instance?.action.type === 'webhook' ? instance.action.auth?.key || '' : '');
+  const [authValue, setAuthValue] = useState(instance?.action.type === 'webhook' ? instance.action.auth?.value || '' : '');
+  const [authPlacement, setAuthPlacement] = useState<'header' | 'query'>(instance?.action.type === 'webhook' ? instance.action.auth?.placement || 'header' : 'header');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
+  const bodyPreview = useMemo(() => webhookBodyType === 'form-data' ? JSON.stringify(recordFromRows(bodyRows), null, 2) : webhookBody, [bodyRows, webhookBody, webhookBodyType]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +107,20 @@ export function AutomationForm({
           type: 'webhook',
           url: webhookUrl,
           method: webhookMethod,
-          body: webhookBody ? JSON.parse(webhookBody) : undefined,
+          description: webhookDescription || undefined,
+          auth: authType === 'none' ? undefined : {
+            type: authType,
+            token: authToken || undefined,
+            username: authUsername || undefined,
+            password: authPassword || undefined,
+            key: authKey || undefined,
+            value: authValue || undefined,
+            placement: authPlacement,
+          },
+          headers: recordFromRows(headerRows),
+          query: recordFromRows(queryRows),
+          bodyType: webhookBodyType,
+          body: webhookBodyType === 'form-data' ? recordFromRows(bodyRows) : (webhookBody ? JSON.parse(webhookBody) : undefined),
         };
       } else {
         if (!actionValue.trim()) {
@@ -226,27 +286,107 @@ export function AutomationForm({
 
                     <div className="space-y-3">
                       <Label htmlFor="webhook-method" className="text-base font-semibold">Método HTTP</Label>
-                      <Select value={webhookMethod} onValueChange={(val) => setWebhookMethod(val as 'GET' | 'POST')}>
+                      <Select value={webhookMethod} onValueChange={(val) => setWebhookMethod(val as HttpMethod)}>
                         <SelectTrigger id="webhook-method" className="h-11 rounded-2xl bg-muted/30">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="POST">POST</SelectItem>
                           <SelectItem value="GET">GET</SelectItem>
+                          <SelectItem value="PUT">PUT</SelectItem>
+                          <SelectItem value="PATCH">PATCH</SelectItem>
+                          <SelectItem value="DELETE">DELETE</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
 
                   <div className="space-y-3">
-                    <Label htmlFor="webhook-body" className="text-base font-semibold">5. JSON body opcional</Label>
+                    <Label htmlFor="webhook-description" className="text-base font-semibold">5. Instrução da ferramenta</Label>
                     <Textarea
-                      id="webhook-body"
-                      className="min-h-[220px] rounded-[24px] bg-muted/30 font-mono text-xs"
-                      value={webhookBody}
-                      onChange={(e) => setWebhookBody(e.target.value)}
-                      placeholder={'{\n  "customerId": "{{contact.id}}"\n}'}
+                      id="webhook-description"
+                      className="min-h-[110px] rounded-[20px] bg-muted/30 text-sm"
+                      value={webhookDescription}
+                      onChange={(e) => setWebhookDescription(e.target.value)}
+                      placeholder="Explique quando usar esta API, quais dados enviar e como interpretar a resposta."
                     />
+                  </div>
+
+                  <Tabs defaultValue="body" className="space-y-4">
+                    <TabsList className="grid w-full grid-cols-4 rounded-2xl">
+                      <TabsTrigger value="auth" className="rounded-xl">Auth</TabsTrigger>
+                      <TabsTrigger value="headers" className="rounded-xl">Headers</TabsTrigger>
+                      <TabsTrigger value="query" className="rounded-xl">Query</TabsTrigger>
+                      <TabsTrigger value="body" className="rounded-xl">Corpo</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="auth" className="space-y-3">
+                      <Select value={authType} onValueChange={(value) => setAuthType(value as AuthType)}>
+                        <SelectTrigger className="h-11 rounded-2xl bg-muted/30"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Sem autenticação</SelectItem>
+                          <SelectItem value="bearer">Bearer token</SelectItem>
+                          <SelectItem value="basic">Basic auth</SelectItem>
+                          <SelectItem value="api_key">API key</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {authType === 'bearer' && (
+                        <Input value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="Token" className="h-10 rounded-xl bg-muted/30 font-mono text-xs" />
+                      )}
+                      {authType === 'basic' && (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Input value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} placeholder="Usuário" className="h-10 rounded-xl bg-muted/30" />
+                          <Input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Senha" type="password" className="h-10 rounded-xl bg-muted/30" />
+                        </div>
+                      )}
+                      {authType === 'api_key' && (
+                        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_150px]">
+                          <Input value={authKey} onChange={(e) => setAuthKey(e.target.value)} placeholder="Nome" className="h-10 rounded-xl bg-muted/30 font-mono text-xs" />
+                          <Input value={authValue} onChange={(e) => setAuthValue(e.target.value)} placeholder="Valor" className="h-10 rounded-xl bg-muted/30 font-mono text-xs" />
+                          <Select value={authPlacement} onValueChange={(value) => setAuthPlacement(value as 'header' | 'query')}>
+                            <SelectTrigger className="h-10 rounded-xl bg-muted/30"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="header">Header</SelectItem>
+                              <SelectItem value="query">Query</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="headers">
+                      <KeyValueEditor rows={headerRows} onChange={setHeaderRows} />
+                    </TabsContent>
+
+                    <TabsContent value="query">
+                      <KeyValueEditor rows={queryRows} onChange={setQueryRows} />
+                    </TabsContent>
+
+                    <TabsContent value="body" className="space-y-3">
+                      <Select value={webhookBodyType} onValueChange={(value) => setWebhookBodyType(value as BodyType)}>
+                        <SelectTrigger className="h-11 rounded-2xl bg-muted/30"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="json">JSON (application/json)</SelectItem>
+                          <SelectItem value="form-data">Multipart (multipart/form-data)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {webhookBodyType === 'form-data' ? (
+                        <KeyValueEditor rows={bodyRows} onChange={setBodyRows} />
+                      ) : (
+                        <Textarea
+                          id="webhook-body"
+                          className="min-h-[220px] rounded-[24px] bg-muted/30 font-mono text-xs"
+                          value={webhookBody}
+                          onChange={(e) => setWebhookBody(e.target.value)}
+                          placeholder={'{\n  "customerId": "{{contact.id}}",\n  "message": "{{message}}"\n}'}
+                        />
+                      )}
+                      <p className="break-words rounded-xl bg-muted/30 p-3 font-mono text-[11px] text-muted-foreground">Preview: {bodyPreview || '{}'}</p>
+                    </TabsContent>
+                  </Tabs>
+
+                  <div className="rounded-2xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                    Variáveis disponíveis: <span className="font-mono">{'{{message}} {{resposta_agente}} {{agent.response}} {{contact.id}} {{contact.name}} {{contact.email}} {{chat.id}} {{chat.status}}'}</span>
                   </div>
                 </>
               )}

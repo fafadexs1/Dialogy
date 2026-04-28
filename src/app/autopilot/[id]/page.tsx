@@ -126,6 +126,10 @@ export default function AutopilotDetailPage() {
       const nextCatalog = catalogData.models || [];
       const nextSelectableModels = getAutopilotSelectableModels(nextCatalog);
       const fallbackModel = nextSelectableModels[0]?.id || DEFAULT_AUTOPILOT_MODEL;
+      const savedModel = autopilotData.config.ai_model || null;
+      const selectedModel = savedModel && nextSelectableModels.some((model) => model.id === savedModel)
+        ? savedModel
+        : fallbackModel;
 
       setConfig(autopilotData.config);
       setInstances(autopilotData.rules || []);
@@ -136,7 +140,7 @@ export default function AutopilotDetailPage() {
       setModelCatalog(nextCatalog);
 
       setAgentName(autopilotData.config.name || '');
-      setAiModel(autopilotData.config.ai_model || fallbackModel);
+      setAiModel(selectedModel);
       setIsActive(Boolean(autopilotData.config.is_active));
       setIsPrivate(Boolean(autopilotData.config.is_private));
       setIsPrimary(Boolean(autopilotData.config.is_primary));
@@ -166,7 +170,9 @@ export default function AutopilotDetailPage() {
     [config?.knowledge_base_documents]
   );
 
-  const savedModelValue = config?.ai_model || selectableModels[0]?.id || DEFAULT_AUTOPILOT_MODEL;
+  const savedModelValue = config?.ai_model && selectableModels.some((model) => model.id === config.ai_model)
+    ? config.ai_model
+    : selectableModels[0]?.id || DEFAULT_AUTOPILOT_MODEL;
 
   const isDirty = useMemo(() => {
     if (!config) return false;

@@ -32,6 +32,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                 t.color,
                 t.role_id as "roleId",
                 t.tag_id as "tagId",
+                COALESCE(t.agent_routing_config, '{}'::jsonb) as "agentRoutingConfig",
                 COALESCE(
                     (SELECT json_agg(
                         json_build_object(
@@ -102,7 +103,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
         await client.query('BEGIN');
 
         const teamRes = await client.query(
-            'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id as "roleId", tag_id as "tagId"',
+            'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id as "roleId", tag_id as "tagId", COALESCE(agent_routing_config, \'{}\'::jsonb) as "agentRoutingConfig"',
             [data.workspaceId, data.name, data.roleId, user.id]
         );
         const newTeam = teamRes.rows[0];
@@ -134,6 +135,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
             color: newTeam.color,
             roleId: newTeam.roleId,
             tagId: newTeam.tagId,
+            agentRoutingConfig: newTeam.agentRoutingConfig || {},
             members: [],
             businessHours: businessHoursRes.rows,
             scheduleExceptions: [],
@@ -151,7 +153,7 @@ export async function createTeam(data: { workspaceId: string, name: string, role
 }
 
 
-export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId'>>): Promise<{ success: boolean; error?: string }> {
+export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name' | 'color' | 'roleId' | 'tagId' | 'agentRoutingConfig'>>): Promise<{ success: boolean; error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
@@ -174,6 +176,7 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
         const fieldMapping: Record<string, string> = {
             roleId: 'role_id',
             tagId: 'tag_id',
+            agentRoutingConfig: 'agent_routing_config',
             name: 'name',
             color: 'color'
         };
@@ -185,6 +188,23 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
 
         const values = fields.map(field => {
             const value = data[field];
+            if (field === 'agentRoutingConfig') {
+                const config = value && typeof value === 'object' ? value : {};
+                const keywords = Array.isArray((config as any).keywords)
+                    ? (config as any).keywords
+                        .map((keyword: unknown) => String(keyword || '').trim())
+                        .filter(Boolean)
+                        .slice(0, 30)
+                    : [];
+                return JSON.stringify({
+                    enabled: Boolean((config as any).enabled),
+                    autoTransfer: (config as any).autoTransfer !== false,
+                    keywords,
+                    responseHint: typeof (config as any).responseHint === 'string'
+                        ? (config as any).responseHint.trim().slice(0, 240)
+                        : null,
+                });
+            }
             return value === 'no-tag' ? null : value;
         });
 

@@ -1,11 +1,29 @@
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import { auditAgentToolExecution } from './audit';
+import { getAgentToolDefinition } from './catalog';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
+import { recordAgentToolMetrics } from '@/lib/observability/metrics';
+import { runCrmUpdateContactCustomFieldsTool } from './crm-tools';
+import { runSgpTool } from './sgp-tools';
+import {
+  DEFAULT_ORCHESTRATOR_BUDGET,
+  recordOrchestratorToolCall,
+  withTimeout,
+  type OrchestratorRunHandle,
+} from '@/services/orchestrator/runtime';
 
-const MAX_ACTIONS_PER_MESSAGE = 2;
+const MAX_ACTIONS_PER_MESSAGE = 4;
 const MAX_INTERNAL_NOTE_CHARS = 500;
-const ALLOWED_TOOLS = new Set(['transfer_chat', 'add_internal_note']);
+const ALLOWED_TOOLS = new Set([
+  'transfer_chat',
+  'add_internal_note',
+  'crm_update_contact_custom_fields',
+  'sgp_fetch_contracts',
+  'sgp_fetch_contact_panel_data',
+  'sgp_generate_invoice_pix',
+  'sgp_create_payment_promise',
+]);
 
 function normalizeSearchText(value: string): string {
   return value
@@ -24,6 +42,51 @@ function reject(action: AgentToolAction, message: string): AgentToolExecutionRes
     input: action,
     error: message,
   };
+}
+
+function contextRun(context: AgentToolRuntimeContext): OrchestratorRunHandle | null {
+  if (!context.orchestratorRunId) return null;
+  return {
+    id: context.orchestratorRunId,
+    workspaceId: context.workspaceId,
+    chatId: context.chat.id,
+    startedAt: Date.now(),
+    budget: DEFAULT_ORCHESTRATOR_BUDGET,
+  };
+}
+
+async function auditToolResult(
+  context: AgentToolRuntimeContext,
+  result: AgentToolExecutionResult,
+  durationMs: number,
+  inputOverride?: AgentToolAction
+) {
+  const definition = getAgentToolDefinition(result.toolName);
+  await auditAgentToolExecution(context, result, inputOverride);
+  recordAgentToolMetrics({
+    toolName: result.toolName,
+    status: result.status,
+    durationMs,
+    riskLevel: definition?.riskLevel ?? null,
+    workspaceId: context.workspaceId,
+  });
+  await recordOrchestratorToolCall({
+    run: contextRun(context),
+    workspaceId: context.workspaceId,
+    chatId: context.chat.id,
+    systemAgentId: context.systemAgentId,
+    autopilotConfigId: context.autopilotConfig.id,
+    toolName: result.toolName,
+    toolVersion: definition?.version ?? null,
+    class: definition?.class ?? null,
+    riskLevel: definition?.riskLevel ?? null,
+    status: result.status,
+    input: (inputOverride || result.input) as unknown as Record<string, unknown>,
+    output: result.output ?? null,
+    error: result.error ?? null,
+    durationMs,
+    requiresHumanApproval: definition?.requiresHumanApproval ?? false,
+  });
 }
 
 export function sanitizeInternalNoteContent(value: string): string {
@@ -273,8 +336,9 @@ export async function runAgentTools(
   const allowedToRun = await ensureChatStillAssignedToAgent(context);
   if (!allowedToRun) {
     for (const action of normalizedActions) {
+      const startedAt = Date.now();
       const result = reject(action, 'Chat nao esta atribuido a este Atendente Inteligente ou autopilot esta desligado.');
-      await auditAgentToolExecution(context, result);
+      await auditToolResult(context, result, Date.now() - startedAt);
       results.push(result);
     }
     return results;
@@ -282,30 +346,53 @@ export async function runAgentTools(
 
   let transferExecuted = false;
   for (const action of normalizedActions) {
+    const startedAt = Date.now();
     if (!ALLOWED_TOOLS.has(action.type)) {
       const result = reject(action, 'Ferramenta nao permitida para Atendente Inteligente.');
-      await auditAgentToolExecution(context, result);
+      await auditToolResult(context, result, Date.now() - startedAt);
+      results.push(result);
+      continue;
+    }
+
+    const definition = getAgentToolDefinition(action.type);
+    if (!definition) {
+      const result = reject(action, 'Ferramenta sem contrato registrado no catalogo.');
+      await auditToolResult(context, result, Date.now() - startedAt);
       results.push(result);
       continue;
     }
 
     if (action.type === 'transfer_chat' && transferExecuted) {
       const result = reject(action, 'Apenas uma transferencia pode ser executada por mensagem.');
-      await auditAgentToolExecution(context, result);
+      await auditToolResult(context, result, Date.now() - startedAt);
       results.push(result);
       continue;
     }
 
-    const result =
-      action.type === 'transfer_chat'
-        ? await runTransferChatTool(context, action)
-        : await runAddInternalNoteTool(context, action);
+    let result: AgentToolExecutionResult;
+    try {
+      result = await withTimeout((async () => {
+        if (action.type === 'transfer_chat') return runTransferChatTool(context, action);
+        if (action.type === 'add_internal_note') return runAddInternalNoteTool(context, action);
+        if (action.type === 'crm_update_contact_custom_fields') {
+          return runCrmUpdateContactCustomFieldsTool(context, action);
+        }
+        return runSgpTool(context, action as any);
+      })(), definition.timeoutMs, `agent tool ${definition.name}`);
+    } catch (error) {
+      result = {
+        toolName: action.type,
+        status: 'error',
+        input: action,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
 
     if (action.type === 'transfer_chat' && result.status === 'success') {
       transferExecuted = true;
     }
 
-    await auditAgentToolExecution(context, result);
+    await auditToolResult(context, result, Date.now() - startedAt);
     results.push(result);
   }
 

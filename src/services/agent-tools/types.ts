@@ -1,6 +1,14 @@
 import type { AutopilotConfig, Chat, Contact } from '@/lib/types';
 
-export type AgentToolName = 'transfer_chat' | 'add_internal_note';
+export type AgentToolName =
+  | 'transfer_chat'
+  | 'add_internal_note'
+  | 'crm_update_contact_custom_fields'
+  | 'sgp_fetch_contracts'
+  | 'sgp_fetch_contact_panel_data'
+  | 'sgp_generate_invoice_pix'
+  | 'sgp_create_payment_promise'
+  | 'sgp_open_support_ticket';
 
 export type AgentToolAction =
   | {
@@ -18,6 +26,40 @@ export type AgentToolAction =
       payload?: {
         content?: string | null;
       } | null;
+    }
+  | {
+      type: 'crm_update_contact_custom_fields';
+      reason?: string | null;
+      payload?: {
+        fields?: Record<string, string | number | boolean | null | undefined> | null;
+      } | null;
+    }
+  | {
+      type: 'sgp_fetch_contracts' | 'sgp_fetch_contact_panel_data';
+      reason?: string | null;
+      payload?: Record<string, never> | null;
+    }
+  | {
+      type: 'sgp_generate_invoice_pix';
+      reason?: string | null;
+      payload?: {
+        invoiceId?: string | null;
+        contractId?: string | null;
+      } | null;
+    }
+  | {
+      type: 'sgp_create_payment_promise';
+      reason?: string | null;
+      payload?: {
+        contractId?: string | null;
+        promiseDate?: string | null;
+        sendSms?: boolean | null;
+      } | null;
+    }
+  | {
+      type: 'sgp_open_support_ticket';
+      reason?: string | null;
+      payload?: Record<string, unknown> | null;
     };
 
 export type AgentToolRuntimeContext = {
@@ -28,6 +70,7 @@ export type AgentToolRuntimeContext = {
   systemAgentName: string;
   autopilotConfig: AutopilotConfig;
   customerMessage: string;
+  orchestratorRunId?: string | null;
 };
 
 export type AgentToolExecutionResult = {
