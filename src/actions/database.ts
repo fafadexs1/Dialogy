@@ -784,6 +784,7 @@ create table if not exists public.autopilot_configs (
   default_fallback_reply text,
   escalation_policy text,
   closing_policy text,
+  enabled_tool_names jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint autopilot_configs_workspace_id_fkey
@@ -795,6 +796,7 @@ create index if not exists idx_autopilot_configs_workspace_user on public.autopi
 create index if not exists idx_autopilot_configs_workspace on public.autopilot_configs(workspace_id);
 alter table if exists public.autopilot_configs add column if not exists escalation_policy text;
 alter table if exists public.autopilot_configs add column if not exists closing_policy text;
+alter table if exists public.autopilot_configs add column if not exists enabled_tool_names jsonb;
 
 
 -- Autopilot: regras

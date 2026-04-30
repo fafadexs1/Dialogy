@@ -15,6 +15,7 @@ import { z } from 'genkit';
 import type { NexusFlowInstance, Action, AutopilotConfig } from '@/lib/types';
 import { makeHttpRequestTool } from '../tools/webhook-tool';
 import { logAutopilotUsage } from '@/actions/autopilot';
+import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
 
 // Define a schema for a single automation rule
 const ActionSchema = z.union([
@@ -97,6 +98,14 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('Politica operacional para quando o atendimento pode ser considerado resolvido ou encerrado.'),
+  enabledAgentToolsDescription: z
+    .string()
+    .optional()
+    .describe('Lista textual das ferramentas habilitadas para este agente.'),
+  knowledgeToolProcedures: z
+    .string()
+    .optional()
+    .describe('Procedimentos da base de conhecimento que mencionam tools com @nome_da_tool.'),
   model: z.string().optional().describe('The AI model to use for the response.'),
   contact: z.object({ id: z.string(), name: z.string(), email: z.string().optional() })
     .describe('The contact details of the customer.'),
@@ -126,6 +135,7 @@ const AgentResponseOutputSchema = z.object({
         'sgp_generate_invoice_pix',
         'sgp_create_payment_promise',
         'sgp_open_support_ticket',
+        'mcp_call_tool',
       ]),
       reason: z.string().optional().nullable(),
       payload: z.record(z.any()).optional().nullable(),
@@ -309,6 +319,12 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
     - Use os **DOCUMENTOS CARREGADOS** para fatos e procedimentos.
 3. **Resposta Natural**:
     - Se não houver regra, construa uma resposta baseada na sua persona + documentos + análise emocional.
+4. **Formato e tamanho para WhatsApp**:
+    - Responda de forma curta por padrao: 1 a 3 paragrafos, com no maximo 2 frases curtas por paragrafo.
+    - Separe paragrafos com uma linha em branco quando houver mais de uma ideia.
+    - Nao envie blocos longos de texto. Se houver muitos detalhes, resuma o essencial e pergunte se o cliente quer mais informacoes.
+    - So escreva uma resposta longa quando o cliente pedir explicitamente explicacao detalhada, lista completa ou passo a passo.
+    - Evite repetir informacoes que ja foram ditas no historico recente.
 
 ---
 
@@ -317,6 +333,14 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 ### {{name}}
 {{{content}}}
 {{/each}}
+
+---
+**PROCEDIMENTOS COM TOOLS MENCIONADAS NA BASE (@tool)**:
+{{#if knowledgeToolProcedures}}
+{{{knowledgeToolProcedures}}}
+{{else}}
+(Nenhum procedimento com @tool foi identificado nos documentos relevantes.)
+{{/if}}
 
 ---
 **REGRAS DE AUTOMAÇÃO**:
@@ -365,6 +389,20 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 Voce pode solicitar acoes estruturadas no campo "actions". O servidor validara e executara.
 Use no maximo 4 acoes por resposta.
 
+Ferramentas habilitadas para este agente:
+{{#if enabledAgentToolsDescription}}
+{{{enabledAgentToolsDescription}}}
+{{else}}
+(Use apenas as ferramentas permitidas abaixo.)
+{{/if}}
+
+Solicite somente ferramentas habilitadas para este agente. Se uma ferramenta necessaria nao estiver habilitada, responda sem inventar consulta/acao e escale conforme a politica.
+
+Regra para procedimentos da base:
+- Quando um documento orientar uso de @tool para um procedimento, trate a tool resolvida como obrigatoria para aquele procedimento.
+- Antes de chamar a tool, colete e valide os dados exigidos pelo procedimento.
+- Se a tool estiver desabilitada, nao finja execucao; informe que vai encaminhar ou pedir apoio humano.
+
 Ferramentas permitidas:
 1. transfer_chat
    - Use quando precisar envolver humano ou setor.
@@ -391,6 +429,10 @@ Ferramentas permitidas:
    - Use apenas quando houver fatura e contrato claros. Payload: {"invoiceId":"...","contractId":"..."}.
 7. sgp_create_payment_promise
    - Use apenas quando o cliente pedir promessa de pagamento e informar data. Payload: {"contractId":"...","promiseDate":"yyyy-MM-dd","sendSms":true}.
+8. mcp_call_tool
+   - Use para chamar uma ferramenta MCP externa habilitada para este agente.
+   - Payload aceito: {"toolName":"mcp:<serverId>:<toolName>","arguments":{"campo":"valor"}}.
+   - Use exatamente o nome qualificado mostrado na lista de ferramentas habilitadas.
 
 Ferramenta bloqueada para IA:
 - sgp_open_support_ticket. Nunca solicite esta ferramenta. Abertura de chamado/OS no SGP deve ficar com humano.
@@ -534,7 +576,7 @@ const autoResponderFlow = ai.defineFlow(
         ),
         emojiBudget
       );
-      const outputResponse = sanitized.trim() ? sanitized : output.response;
+      const outputResponse = formatCustomerFacingAiResponse(sanitized.trim() ? sanitized : output.response);
       return { ...output, response: outputResponse };
     }
     const fallback = input.config?.default_fallback_reply?.trim();
@@ -547,7 +589,7 @@ const autoResponderFlow = ai.defineFlow(
         ),
         emojiBudget
       );
-      const outputResponse = sanitized.trim() ? sanitized : fallback;
+      const outputResponse = formatCustomerFacingAiResponse(sanitized.trim() ? sanitized : fallback);
       return {
         response: outputResponse,
         triggeredRule: output?.triggeredRule ?? null,

@@ -1,11 +1,13 @@
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import { auditAgentToolExecution } from './audit';
-import { getAgentToolDefinition } from './catalog';
+import { getAgentToolDefinition, listDefaultEnabledAgentToolNames } from './catalog';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
 import { recordAgentToolMetrics } from '@/lib/observability/metrics';
 import { runCrmUpdateContactCustomFieldsTool } from './crm-tools';
 import { runSgpTool } from './sgp-tools';
+import { callMcpServerTool, parseQualifiedMcpToolName } from '@/services/mcp/client';
+import { getMcpWorkspaceConfig } from '@/services/mcp/store';
 import {
   DEFAULT_ORCHESTRATOR_BUDGET,
   recordOrchestratorToolCall,
@@ -23,7 +25,10 @@ const ALLOWED_TOOLS = new Set([
   'sgp_fetch_contact_panel_data',
   'sgp_generate_invoice_pix',
   'sgp_create_payment_promise',
+  'mcp_call_tool',
 ]);
+
+const DEFAULT_ENABLED_TOOLS = new Set(listDefaultEnabledAgentToolNames());
 
 function normalizeSearchText(value: string): string {
   return value
@@ -55,6 +60,21 @@ function contextRun(context: AgentToolRuntimeContext): OrchestratorRunHandle | n
   };
 }
 
+function isToolEnabledForAgent(context: AgentToolRuntimeContext, toolName: string): boolean {
+  const configuredToolNames = context.autopilotConfig.enabled_tool_names;
+  if (!Array.isArray(configuredToolNames)) {
+    return DEFAULT_ENABLED_TOOLS.has(toolName as any);
+  }
+  return configuredToolNames.includes(toolName);
+}
+
+function resolveRequestedToolName(action: AgentToolAction): string {
+  if (action.type === 'mcp_call_tool') {
+    return action.payload?.toolName || '';
+  }
+  return action.type;
+}
+
 async function auditToolResult(
   context: AgentToolRuntimeContext,
   result: AgentToolExecutionResult,
@@ -62,6 +82,7 @@ async function auditToolResult(
   inputOverride?: AgentToolAction
 ) {
   const definition = getAgentToolDefinition(result.toolName);
+  const actionDefinition = getAgentToolDefinition(inputOverride?.type || result.input.type);
   await auditAgentToolExecution(context, result, inputOverride);
   recordAgentToolMetrics({
     toolName: result.toolName,
@@ -77,15 +98,15 @@ async function auditToolResult(
     systemAgentId: context.systemAgentId,
     autopilotConfigId: context.autopilotConfig.id,
     toolName: result.toolName,
-    toolVersion: definition?.version ?? null,
-    class: definition?.class ?? null,
-    riskLevel: definition?.riskLevel ?? null,
+    toolVersion: definition?.version ?? actionDefinition?.version ?? null,
+    class: definition?.class ?? actionDefinition?.class ?? null,
+    riskLevel: definition?.riskLevel ?? actionDefinition?.riskLevel ?? null,
     status: result.status,
     input: (inputOverride || result.input) as unknown as Record<string, unknown>,
     output: result.output ?? null,
     error: result.error ?? null,
     durationMs,
-    requiresHumanApproval: definition?.requiresHumanApproval ?? false,
+    requiresHumanApproval: definition?.requiresHumanApproval ?? actionDefinition?.requiresHumanApproval ?? false,
   });
 }
 
@@ -322,6 +343,54 @@ async function runAddInternalNoteTool(
   }
 }
 
+async function runMcpCallTool(
+  context: AgentToolRuntimeContext,
+  action: Extract<AgentToolAction, { type: 'mcp_call_tool' }>
+): Promise<AgentToolExecutionResult> {
+  const qualifiedName = action.payload?.toolName?.trim() || '';
+  const parsed = parseQualifiedMcpToolName(qualifiedName);
+  if (!parsed) {
+    return reject(action, 'Ferramenta MCP invalida ou ausente.');
+  }
+
+  try {
+    const config = await getMcpWorkspaceConfig(context.workspaceId);
+    const server = config.servers.find((item) => item.id === parsed.serverId && item.isActive);
+    if (!server) {
+      return reject(action, 'Servidor MCP nao encontrado ou inativo.');
+    }
+
+    const tool = (server.tools || []).find((item) => item.qualifiedName === qualifiedName);
+    if (!tool) {
+      return reject(action, 'Ferramenta MCP nao foi sincronizada neste workspace.');
+    }
+
+    const result = await callMcpServerTool({
+      server,
+      toolName: parsed.toolName,
+      arguments: action.payload?.arguments || {},
+    });
+
+    return {
+      toolName: qualifiedName as any,
+      status: 'success',
+      input: action,
+      output: JSON.parse(JSON.stringify({
+        content: (result as any).content || null,
+        structuredContent: (result as any).structuredContent || null,
+        isError: (result as any).isError || false,
+      })),
+    };
+  } catch (error) {
+    return {
+      toolName: qualifiedName as any,
+      status: 'error',
+      input: action,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function runAgentTools(
   context: AgentToolRuntimeContext,
   actions: AgentToolAction[] | null | undefined
@@ -354,6 +423,14 @@ export async function runAgentTools(
       continue;
     }
 
+    const requestedToolName = resolveRequestedToolName(action);
+    if (!isToolEnabledForAgent(context, requestedToolName)) {
+      const result = reject(action, 'Ferramenta desabilitada nas configuracoes deste agente.');
+      await auditToolResult(context, result, Date.now() - startedAt);
+      results.push(result);
+      continue;
+    }
+
     const definition = getAgentToolDefinition(action.type);
     if (!definition) {
       const result = reject(action, 'Ferramenta sem contrato registrado no catalogo.');
@@ -374,6 +451,7 @@ export async function runAgentTools(
       result = await withTimeout((async () => {
         if (action.type === 'transfer_chat') return runTransferChatTool(context, action);
         if (action.type === 'add_internal_note') return runAddInternalNoteTool(context, action);
+        if (action.type === 'mcp_call_tool') return runMcpCallTool(context, action);
         if (action.type === 'crm_update_contact_custom_fields') {
           return runCrmUpdateContactCustomFieldsTool(context, action);
         }

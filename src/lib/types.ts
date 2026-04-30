@@ -538,6 +538,7 @@ export interface AutopilotConfig {
   default_fallback_reply: string | null;
   escalation_policy: string | null;
   closing_policy: string | null;
+  enabled_tool_names?: string[] | null;
   created_at: string;
   updated_at: string;
 }

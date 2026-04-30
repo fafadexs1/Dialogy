@@ -21,6 +21,14 @@ export type AgentToolDefinition = {
   requiresHumanApproval: boolean;
 };
 
+export type AgentToolCatalogItem = AgentToolDefinition & {
+  source: 'dialogy' | 'mcp';
+  enabledByDefault: boolean;
+  serverId?: string;
+  serverName?: string;
+  inputSchema?: Record<string, unknown> | null;
+};
+
 const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   transfer_chat: {
     name: 'transfer_chat',
@@ -110,6 +118,17 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
     maxAttempts: 1,
     requiresHumanApproval: true,
   },
+  mcp_call_tool: {
+    name: 'mcp_call_tool',
+    version: '2026-04-30',
+    description: 'Executa uma ferramenta externa descoberta via MCP quando ela estiver habilitada no agente.',
+    class: 'retrieval',
+    riskLevel: 'medium',
+    idempotent: false,
+    timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
+    maxAttempts: 1,
+    requiresHumanApproval: false,
+  },
 };
 
 export function getAgentToolDefinition(name: AgentToolName): AgentToolDefinition | null {
@@ -118,4 +137,20 @@ export function getAgentToolDefinition(name: AgentToolName): AgentToolDefinition
 
 export function listAgentToolDefinitions() {
   return Object.values(TOOL_CATALOG);
+}
+
+export function listAgentToolCatalogItems(): AgentToolCatalogItem[] {
+  return listAgentToolDefinitions()
+    .filter((definition) => definition.name !== 'mcp_call_tool')
+    .map((definition) => ({
+    ...definition,
+    source: 'dialogy',
+    enabledByDefault: definition.name !== 'sgp_open_support_ticket',
+  }));
+}
+
+export function listDefaultEnabledAgentToolNames(): AgentToolName[] {
+  return listAgentToolCatalogItems()
+    .filter((definition) => definition.enabledByDefault)
+    .map((definition) => definition.name);
 }

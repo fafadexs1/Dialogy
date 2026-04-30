@@ -1,4 +1,5 @@
-import { Edit, MessageCircle, Plus, Trash2, Webhook, Zap } from 'lucide-react';
+import Link from 'next/link';
+import { Edit, Loader2, MessageCircle, Plus, Save, Server, Trash2, Webhook, Wrench, Zap } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,8 +8,26 @@ import { Switch } from '@/components/ui/switch';
 import type { NexusFlowInstance } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
+type AgentToolCatalogItem = {
+  name: string;
+  version: string;
+  description: string;
+  class: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  requiresHumanApproval: boolean;
+  enabledByDefault: boolean;
+  source: 'dialogy' | 'mcp';
+  serverId?: string;
+  serverName?: string;
+};
+
 interface AutopilotRulesProps {
   rules: NexusFlowInstance[];
+  toolCatalog: AgentToolCatalogItem[];
+  enabledToolNames: string[];
+  setEnabledToolNames: (toolNames: string[]) => void;
+  onSaveTools: () => void;
+  isSavingTools: boolean;
   onAdd: () => void;
   onEdit: (rule: NexusFlowInstance) => void;
   onDelete: (id: string) => void;
@@ -25,9 +44,130 @@ function getRuleActionSummary(rule: NexusFlowInstance) {
   return `${method} ${url}`;
 }
 
-export function AutopilotRules({ rules, onAdd, onEdit, onDelete, onToggle }: AutopilotRulesProps) {
+function groupMcpToolsByServer(tools: AgentToolCatalogItem[]) {
+  return tools.reduce<Array<{ serverId: string; serverName: string; tools: AgentToolCatalogItem[] }>>((groups, tool) => {
+    const serverId = tool.serverId || 'unknown';
+    const serverName = tool.serverName || 'Servidor MCP';
+    const existing = groups.find((group) => group.serverId === serverId);
+    if (existing) {
+      existing.tools.push(tool);
+      return groups;
+    }
+    groups.push({ serverId, serverName, tools: [tool] });
+    return groups;
+  }, []);
+}
+
+export function AutopilotRules({
+  rules,
+  toolCatalog,
+  enabledToolNames,
+  setEnabledToolNames,
+  onSaveTools,
+  isSavingTools,
+  onAdd,
+  onEdit,
+  onDelete,
+  onToggle,
+}: AutopilotRulesProps) {
+  const enabledToolSet = new Set(enabledToolNames);
+  const mcpTools = toolCatalog.filter((tool) => tool.source === 'mcp');
+  const mcpToolGroups = groupMcpToolsByServer(mcpTools);
+
   return (
     <div className="space-y-6">
+      <Card className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+        <CardContent className="grid gap-5 p-5 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                <Wrench className="h-3.5 w-3.5" />
+                Ferramentas MCP
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-foreground">Servidores e tools do agente</h2>
+                <p className="text-sm text-muted-foreground">
+                  Habilite aqui quais tools MCP este agente pode chamar durante o atendimento.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Badge variant="outline" className="rounded-full">
+                {mcpTools.filter((tool) => enabledToolSet.has(tool.name)).length} MCP ativas
+              </Badge>
+              <Button onClick={onSaveTools} disabled={isSavingTools} className="rounded-full">
+                {isSavingTools ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Salvar tools
+              </Button>
+            </div>
+          </div>
+
+          {mcpToolGroups.length > 0 ? (
+            <div className="grid gap-4">
+              {mcpToolGroups.map((group) => (
+                <div key={group.serverId} className="rounded-[24px] border border-border bg-muted/20 p-4">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-background text-primary shadow-sm">
+                        <Server className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-foreground">{group.serverName}</div>
+                        <div className="text-xs text-muted-foreground">{group.tools.length} tool(s) sincronizada(s)</div>
+                      </div>
+                    </div>
+                    <Button asChild variant="outline" size="sm" className="rounded-full">
+                      <Link href="/integrations/mcp">Gerenciar servidor</Link>
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {group.tools.map((tool) => {
+                      const checked = enabledToolSet.has(tool.name);
+                      return (
+                        <div key={tool.name} className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-background/80 px-4 py-4">
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate font-mono text-xs font-semibold text-foreground">{tool.name}</span>
+                              <Badge variant={tool.riskLevel === 'high' ? 'destructive' : 'outline'} className="rounded-full text-[10px]">
+                                {tool.riskLevel}
+                              </Badge>
+                            </div>
+                            <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">{tool.description}</p>
+                          </div>
+                          <Switch
+                            checked={checked}
+                            onCheckedChange={(nextChecked) => {
+                              setEnabledToolNames(
+                                nextChecked
+                                  ? Array.from(new Set([...enabledToolNames, tool.name]))
+                                  : enabledToolNames.filter((name) => name !== tool.name)
+                              );
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-[24px] border border-dashed border-border bg-muted/20 p-6 text-center">
+              <Server className="mx-auto h-10 w-10 text-muted-foreground/50" />
+              <h3 className="mt-3 text-base font-semibold text-foreground">Nenhuma tool MCP sincronizada</h3>
+              <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                Cadastre um servidor em Integrações &gt; MCP, sincronize as tools e volte aqui para habilitar no agente.
+              </p>
+              <Button asChild className="mt-4 rounded-full">
+                <Link href="/integrations/mcp">Abrir integração MCP</Link>
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
         <CardContent className="flex flex-col gap-4 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-2">

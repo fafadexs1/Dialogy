@@ -7,6 +7,10 @@ import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact
 import { retrieveSupportContext } from '@/services/rag/retrieval';
 import { runAgentTools } from '@/services/agent-tools/runtime';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
+import { listAgentToolCatalogItems, listDefaultEnabledAgentToolNames } from '@/services/agent-tools/catalog';
+import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
+import { extractKnowledgeToolProcedures, formatKnowledgeToolProcedures } from '@/services/agent-tools/knowledge-procedures';
+import { listMcpToolsForWorkspace } from '@/services/mcp/store';
 import {
     hasExplicitTeamHandoff,
     routeDeterministicAgentTools,
@@ -14,6 +18,7 @@ import {
     type ToolRouterTeam,
 } from '@/services/agent-tools/router';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
+import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
 import { classifyToolIntent } from '@/ai/flows/tool-intent-gate';
 import {
     finishOrchestratorRun,
@@ -188,6 +193,7 @@ function normalizeAgentActions(actions: unknown): AgentToolAction[] {
         'sgp_generate_invoice_pix',
         'sgp_create_payment_promise',
         'sgp_open_support_ticket',
+        'mcp_call_tool',
     ]);
 
     return actions
@@ -258,7 +264,7 @@ function filterImplicitTransferActions(input: {
 }
 
 function isPreResponseDataAction(action: AgentToolAction) {
-    return action.type === 'crm_update_contact_custom_fields' || action.type.startsWith('sgp_');
+    return action.type === 'crm_update_contact_custom_fields' || action.type.startsWith('sgp_') || action.type === 'mcp_call_tool';
 }
 
 function buildSgpResponseFromToolResults(results: AgentToolExecutionResult[]): string | null {
@@ -288,6 +294,78 @@ function buildSgpResponseFromToolResults(results: AgentToolExecutionResult[]): s
                 ? `Ha ${openInvoices} fatura(s) em aberto.`
                 : '',
     ].filter(Boolean).join(' ');
+}
+
+function buildMcpResponseFromToolResults(results: AgentToolExecutionResult[]): string | null {
+    const mcpResult = results.find((result) => result.toolName.startsWith('mcp:') && result.status === 'success');
+    const output = mcpResult?.output as any;
+    if (!output) return null;
+
+    if (output.structuredContent && typeof output.structuredContent === 'object') {
+        return JSON.stringify(output.structuredContent, null, 2).slice(0, 1800);
+    }
+
+    const textParts = Array.isArray(output.content)
+        ? output.content
+            .map((item: any) => {
+                if (item?.type === 'text' && typeof item.text === 'string') return item.text;
+                if (typeof item === 'string') return item;
+                return null;
+            })
+            .filter(Boolean)
+        : [];
+
+    return textParts.join('\n\n').trim().slice(0, 1800) || null;
+}
+
+async function listRuntimeAgentToolCatalog(workspaceId: string): Promise<AgentToolCatalogItem[]> {
+    const mcpTools = await listMcpToolsForWorkspace(workspaceId).catch((error) => {
+        console.error('[AUTOPILOT_MCP] Failed to list MCP tools:', error);
+        return [];
+    });
+
+    const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools.map((tool) => ({
+        name: tool.qualifiedName as any,
+        version: 'mcp',
+        description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
+        class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
+        riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
+        idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
+        timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
+        maxAttempts: 1,
+        requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
+        source: 'mcp',
+        enabledByDefault: false,
+        serverId: tool.serverId,
+        serverName: tool.serverName,
+        inputSchema: tool.inputSchema || null,
+    }));
+
+    return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
+}
+
+function resolveEnabledToolNames(config: AutopilotConfig) {
+    return Array.isArray(config.enabled_tool_names)
+        ? config.enabled_tool_names
+        : listDefaultEnabledAgentToolNames();
+}
+
+function buildEnabledAgentToolsDescription(config: AutopilotConfig, toolCatalog: AgentToolCatalogItem[]): string {
+    const configured = Array.isArray(config.enabled_tool_names)
+        ? new Set(config.enabled_tool_names)
+        : new Set(listDefaultEnabledAgentToolNames());
+
+    const enabledTools = toolCatalog.filter((tool) => configured.has(tool.name));
+    if (enabledTools.length === 0) {
+        return 'Nenhuma ferramenta operacional esta habilitada. Nao solicite actions.';
+    }
+
+    return enabledTools
+        .map((tool) => {
+            const schema = tool.inputSchema ? ` Entrada JSON: ${JSON.stringify(tool.inputSchema).slice(0, 600)}` : '';
+            return `- ${tool.name}: ${tool.description}${schema}`;
+        })
+        .join('\n');
 }
 
 const MAX_AI_ANALYSIS_CHARS = 1000;
@@ -783,7 +861,7 @@ export async function processAutopilotForChat(
     }
 
     if (deterministicRouting.actions.length > 0 && deterministicRouting.responseHint) {
-        const finalResponse = deterministicRouting.responseHint;
+        const finalResponse = formatCustomerFacingAiResponse(deterministicRouting.responseHint);
 
         if (currentCopilotMode === 'suggest') {
             const { getSupabaseAdmin } = await import('@/lib/supabase');
@@ -948,6 +1026,15 @@ export async function processAutopilotForChat(
         });
     }
 
+    const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId);
+    const knowledgeToolProcedures = formatKnowledgeToolProcedures(
+        extractKnowledgeToolProcedures({
+            documents: ragDocuments,
+            tools: runtimeToolCatalog,
+            enabledToolNames: resolveEnabledToolNames(autopilotConfig),
+        })
+    );
+
     try {
         const llmStage = await timeOrchestratorStage(
             orchestratorRun,
@@ -973,6 +1060,8 @@ export async function processAutopilotForChat(
             model: resolvedAiModel.model,
             contact: sanitizedContact,
             workspaceGeminiApiKey,
+            enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
+            knowledgeToolProcedures,
             }), orchestratorRun.budget.maxLlmMs, 'llm response'),
             {
                 model: resolvedAiModel.model,
@@ -1014,6 +1103,8 @@ export async function processAutopilotForChat(
                     };
                 }
             }
+
+            finalResponse = formatCustomerFacingAiResponse(finalResponse);
 
             if (currentCopilotMode === 'suggest') {
                 console.log(`[AUTOPILOT_SERVICE] Modo sugestao - enviando para agente: ${finalResponse.substring(0, 50)}...`);
@@ -1086,9 +1177,15 @@ export async function processAutopilotForChat(
                     toolResults = preToolsStage.value;
                     const sgpResponse = buildSgpResponseFromToolResults(toolResults);
                     if (sgpResponse) {
-                        finalResponse = sgpResponse;
+                        finalResponse = formatCustomerFacingAiResponse(sgpResponse);
+                    }
+                    const mcpResponse = buildMcpResponseFromToolResults(toolResults);
+                    if (mcpResponse) {
+                        finalResponse = formatCustomerFacingAiResponse(mcpResponse);
                     }
                 }
+
+                finalResponse = formatCustomerFacingAiResponse(finalResponse);
 
                 console.log(`[AUTOPILOT_SERVICE] Enviando resposta: ${finalResponse}`);
                 const agentId = assignedSystemAgentId;
@@ -1209,9 +1306,10 @@ export async function processAutopilotForChat(
         console.error('[AUTOPILOT_SERVICE] Erro ao processar:', error);
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (currentCopilotMode === 'auto' && errorMessage.includes('llm response timed out')) {
-            const timeoutFallback =
+            const timeoutFallback = formatCustomerFacingAiResponse(
                 autopilotConfig.default_fallback_reply?.trim() ||
-                'Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.';
+                'Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.'
+            );
             try {
                 const sendStage = await timeOrchestratorStage(
                     orchestratorRun,

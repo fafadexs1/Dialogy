@@ -8,7 +8,9 @@ export type AgentToolName =
   | 'sgp_fetch_contact_panel_data'
   | 'sgp_generate_invoice_pix'
   | 'sgp_create_payment_promise'
-  | 'sgp_open_support_ticket';
+  | 'sgp_open_support_ticket'
+  | 'mcp_call_tool'
+  | `mcp:${string}:${string}`;
 
 export type AgentToolAction =
   | {
@@ -60,6 +62,14 @@ export type AgentToolAction =
       type: 'sgp_open_support_ticket';
       reason?: string | null;
       payload?: Record<string, unknown> | null;
+    }
+  | {
+      type: 'mcp_call_tool';
+      reason?: string | null;
+      payload?: {
+        toolName?: string | null;
+        arguments?: Record<string, unknown> | null;
+      } | null;
     };
 
 export type AgentToolRuntimeContext = {

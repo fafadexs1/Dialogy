@@ -242,6 +242,18 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
         is_active: activeProviders.has('sgp'),
       },
       {
+        id: 'mcp',
+        name: 'MCP',
+        description: 'Conecte servidores Model Context Protocol e exponha tools para agentes de IA.',
+        icon_url: '/icons/gemini.svg',
+        tag: 'IA Tools',
+        tag_type: 'beta',
+        href: '/integrations/mcp',
+        status: 'active',
+        provider: 'mcp',
+        is_active: activeProviders.has('mcp'),
+      },
+      {
         id: 'delivery-hub',
         name: 'Delivery Hub',
         description: 'Monte uma vitrine com varios negocios, cardapios e link publico compartilhavel.',

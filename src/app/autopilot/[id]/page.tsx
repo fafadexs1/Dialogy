@@ -26,6 +26,7 @@ import {
   getAutopilotUsageLogs,
   deleteAutopilotAgent,
   setPrimaryAutopilotAgent,
+  getAgentToolCatalogAction,
 } from '@/actions/autopilot';
 import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
@@ -45,6 +46,19 @@ import { AutopilotRules } from '@/components/autopilot/autopilot-rules';
 import { AutopilotSettings } from '@/components/autopilot/autopilot-settings';
 import { AutomationForm } from '@/components/autopilot/automation-form';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+
+type AgentToolCatalogItem = {
+  name: string;
+  version: string;
+  description: string;
+  class: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  requiresHumanApproval: boolean;
+  enabledByDefault: boolean;
+  source: 'dialogy' | 'mcp';
+  serverId?: string;
+  serverName?: string;
+};
 
 function buildDocumentSignature(documents: KnowledgeBaseDocument[] | null | undefined) {
   return JSON.stringify(
@@ -70,6 +84,7 @@ export default function AutopilotDetailPage() {
   const [usageLogs, setUsageLogs] = useState<AutopilotUsageLog[]>([]);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [modelCatalog, setModelCatalog] = useState<AiModelCatalogEntry[]>([]);
+  const [toolCatalog, setToolCatalog] = useState<AgentToolCatalogItem[]>([]);
   const [hasGlobalKey, setHasGlobalKey] = useState(false);
   const [workspaceDefaultAiModel, setWorkspaceDefaultAiModel] = useState<string | null>(null);
   const [workspaceHasGeminiConfig, setWorkspaceHasGeminiConfig] = useState(false);
@@ -84,6 +99,7 @@ export default function AutopilotDetailPage() {
   const [defaultFallbackReply, setDefaultFallbackReply] = useState('');
   const [escalationPolicy, setEscalationPolicy] = useState('');
   const [closingPolicy, setClosingPolicy] = useState('');
+  const [enabledToolNames, setEnabledToolNames] = useState<string[]>([]);
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -107,9 +123,10 @@ export default function AutopilotDetailPage() {
 
     setLoading(true);
     try {
-      const [autopilotData, catalogData] = await Promise.all([
+      const [autopilotData, catalogData, toolCatalogData] = await Promise.all([
         getAutopilotConfig(user.activeWorkspaceId, agentId),
         getAiModelCatalogAction(),
+        getAgentToolCatalogAction(user.activeWorkspaceId),
       ]);
 
       if (autopilotData.error) {
@@ -138,6 +155,7 @@ export default function AutopilotDetailPage() {
       setWorkspaceDefaultAiModel(autopilotData.workspaceDefaultAiModel || null);
       setWorkspaceHasGeminiConfig(Boolean(autopilotData.workspaceHasGeminiConfig));
       setModelCatalog(nextCatalog);
+      setToolCatalog(toolCatalogData.tools || []);
 
       setAgentName(autopilotData.config.name || '');
       setAiModel(selectedModel);
@@ -149,6 +167,11 @@ export default function AutopilotDetailPage() {
       setDefaultFallbackReply(autopilotData.config.default_fallback_reply || '');
       setEscalationPolicy(autopilotData.config.escalation_policy || '');
       setClosingPolicy(autopilotData.config.closing_policy || '');
+      setEnabledToolNames(
+        Array.isArray(autopilotData.config.enabled_tool_names)
+          ? autopilotData.config.enabled_tool_names
+          : (toolCatalogData.tools || []).filter((tool) => tool.enabledByDefault).map((tool) => tool.name)
+      );
       setKnowledgeDocuments(autopilotData.config.knowledge_base_documents || []);
 
       const logsData = await getAutopilotUsageLogs(autopilotData.config.id);
@@ -176,6 +199,9 @@ export default function AutopilotDetailPage() {
 
   const isDirty = useMemo(() => {
     if (!config) return false;
+    const savedEnabledToolNames = Array.isArray(config.enabled_tool_names)
+      ? config.enabled_tool_names
+      : toolCatalog.filter((tool) => tool.enabledByDefault).map((tool) => tool.name);
 
     return (
       agentName !== (config.name || '') ||
@@ -187,6 +213,7 @@ export default function AutopilotDetailPage() {
       defaultFallbackReply !== (config.default_fallback_reply || '') ||
       escalationPolicy !== (config.escalation_policy || '') ||
       closingPolicy !== (config.closing_policy || '') ||
+      JSON.stringify([...enabledToolNames].sort()) !== JSON.stringify([...savedEnabledToolNames].sort()) ||
       documentSignature !== configDocumentSignature
     );
   }, [
@@ -197,12 +224,14 @@ export default function AutopilotDetailPage() {
     configDocumentSignature,
     defaultFallbackReply,
     documentSignature,
+    enabledToolNames,
     escalationPolicy,
     geminiApiKey,
     isActive,
     isPrivate,
     knowledgeBase,
     savedModelValue,
+    toolCatalog,
   ]);
 
   const handleSaveConfig = async () => {
@@ -222,6 +251,7 @@ export default function AutopilotDetailPage() {
       formData.append('defaultFallbackReply', defaultFallbackReply);
       formData.append('escalationPolicy', escalationPolicy);
       formData.append('closingPolicy', closingPolicy);
+      formData.append('enabledToolNames', JSON.stringify(enabledToolNames));
       formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
 
       const result = await saveAutopilotConfig({ success: false }, formData);
@@ -528,6 +558,7 @@ export default function AutopilotDetailPage() {
             <TabsContent value="knowledge" className="mt-0 min-w-0 pb-10">
               <AutopilotKnowledge
                 documents={knowledgeDocuments}
+                toolCatalog={toolCatalog}
                 onUpload={handleKnowledgeUpload}
                 onRemove={handleRemoveDoc}
                 onUpdateContent={handleUpdateDoc}
@@ -540,6 +571,11 @@ export default function AutopilotDetailPage() {
             <TabsContent value="rules" className="mt-0 min-w-0 pb-10">
               <AutopilotRules
                 rules={instances}
+                toolCatalog={toolCatalog}
+                enabledToolNames={enabledToolNames}
+                setEnabledToolNames={setEnabledToolNames}
+                onSaveTools={handleSaveConfig}
+                isSavingTools={isSaving}
                 onAdd={() => {
                   setEditingRule(null);
                   setIsRuleModalOpen(true);

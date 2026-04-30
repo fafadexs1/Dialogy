@@ -214,6 +214,7 @@ export function AutopilotSettings({
                   : 'Nenhuma chave global foi encontrada. Preencha uma chave aqui ou configure Integrações > Gemini.'}
               </p>
             </div>
+
           </div>
 
           <div className="grid gap-4 self-start">

@@ -10,11 +10,20 @@ import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 import { VectorStore } from '@/lib/vector-store';
 import { isAllowedAutopilotModel } from '@/services/ai/model-selection';
+import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
+import { listMcpToolsForWorkspace } from '@/services/mcp/store';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
     const res = await db.query('SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]);
     return (res.rowCount ?? 0) > 0;
+}
+
+async function ensureAutopilotToolColumns(): Promise<void> {
+    await db.query(`
+        ALTER TABLE IF EXISTS autopilot_configs
+        ADD COLUMN IF NOT EXISTS enabled_tool_names jsonb
+    `);
 }
 
 export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<{
@@ -89,6 +98,38 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
             error: 'Falha ao buscar configuração de IA do workspace.',
         };
     }
+}
+
+export async function getAgentToolCatalogAction(workspaceId: string) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { tools: [], error: 'UsuÃ¡rio nÃ£o autenticado.' };
+    }
+    if (!await isWorkspaceMember(user.id, workspaceId)) {
+        return { tools: [], error: 'Acesso nÃ£o autorizado.' };
+    }
+
+    const mcpTools = await listMcpToolsForWorkspace(workspaceId);
+    const mcpCatalogItems = mcpTools.map((tool) => ({
+        name: tool.qualifiedName as any,
+        version: 'mcp',
+        description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
+        class: tool.annotations?.readOnlyHint ? 'read_only' as const : 'retrieval' as const,
+        riskLevel: tool.annotations?.destructiveHint ? 'high' as const : 'medium' as const,
+        idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
+        timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
+        maxAttempts: 1,
+        requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
+        source: 'mcp' as const,
+        enabledByDefault: false,
+        serverId: tool.serverId,
+        serverName: tool.serverName,
+        inputSchema: tool.inputSchema || null,
+    }));
+
+    return { tools: [...listAgentToolCatalogItems(), ...mcpCatalogItems] };
 }
 
 
@@ -301,6 +342,20 @@ export async function saveAutopilotConfig(
         if (formData.has('closingPolicy')) {
             setClauses.push(`closing_policy = $${valueIndex++}`);
             values.push(formData.get('closingPolicy') || null);
+        }
+        if (formData.has('enabledToolNames')) {
+            try {
+                await ensureAutopilotToolColumns();
+                const parsed = JSON.parse(formData.get('enabledToolNames')?.toString() || '[]');
+                const enabledToolNames = Array.isArray(parsed)
+                    ? parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                    : [];
+                setClauses.push(`enabled_tool_names = $${valueIndex++}`);
+                values.push(JSON.stringify(enabledToolNames));
+            } catch (error) {
+                console.error('[SAVE_AUTOPILOT_CONFIG] Erro ao parsear ferramentas habilitadas:', error);
+                return { success: false, error: 'Lista de ferramentas habilitadas invÃ¡lida.' };
+            }
         }
 
         const isPrivate = formData.get('isPrivate');

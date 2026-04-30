@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Settings, Copy, Check, Link as LinkIcon, PlusCircle, UserPlus, Trash2, Clock, LogIn, AlertCircle, UploadCloud, Save, Building2, Globe, MessageSquare, Timer, Users, Mail } from 'lucide-react';
+import { Loader2, Settings, Copy, Check, PlusCircle, Trash2, Clock, LogIn, AlertCircle, UploadCloud, Save, Building2, Globe, MessageSquare, Timer, Users, Mail } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -514,6 +514,7 @@ export default function WorkspaceSettingsPage() {
                         </CardContent>
                     </Card>
                 </TabsContent>
+
             </Tabs>
         </div>
     )
