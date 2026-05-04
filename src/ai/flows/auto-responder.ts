@@ -119,6 +119,11 @@ const AgentResponseOutputSchema = z.object({
     .optional()
     .nullable()
     .describe('The generated response to be sent to the customer. This could be a direct text reply or the result from a webhook.'),
+  messageBlocks: z
+    .array(z.string())
+    .optional()
+    .nullable()
+    .describe('When the response has distinct thematic sections that should be sent as separate WhatsApp messages, split them here. Each element is one message bubble. Use only when there are 2+ clearly distinct topics. For simple/short replies, omit this and use only "response".'),
   triggeredRule: z
     .string()
     .optional()
@@ -320,9 +325,15 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 3. **Resposta Natural**:
     - Se não houver regra, construa uma resposta baseada na sua persona + documentos + análise emocional.
 4. **Formato e tamanho para WhatsApp**:
-    - Responda de forma curta por padrao: 1 a 3 paragrafos, com no maximo 2 frases curtas por paragrafo.
-    - Separe paragrafos com uma linha em branco quando houver mais de uma ideia.
-    - Nao envie blocos longos de texto. Se houver muitos detalhes, resuma o essencial e pergunte se o cliente quer mais informacoes.
+    - Responda de forma curta por padrao: 1 a 3 paragrafos, com no maximo 3 frases curtas por paragrafo.
+    - Separe paragrafos com uma linha em branco quando houver mais de uma ideia ou topico.
+    - Quando listar opcoes, planos, precos ou itens, coloque CADA item em uma linha separada. Exemplo:
+      💡 PLANOS SOMENTE INTERNET
+      100 MEGA: R$79,99/mes*
+      300 MEGA (Mais vendido): R$89,90/mes*
+      500 MEGA: R$99,90/mes*
+    - Quando a resposta tiver blocos tematicos distintos (ex: lista de planos + promocao + pergunta), separe-os com uma linha em branco para que possam ser enviados como mensagens separadas no WhatsApp.
+    - Nao envie blocos longos de texto corrido. Se houver muitos detalhes, resuma o essencial e pergunte se o cliente quer mais informacoes.
     - So escreva uma resposta longa quando o cliente pedir explicitamente explicacao detalhada, lista completa ou passo a passo.
     - Evite repetir informacoes que ja foram ditas no historico recente.
 
@@ -401,6 +412,7 @@ Solicite somente ferramentas habilitadas para este agente. Se uma ferramenta nec
 Regra para procedimentos da base:
 - Quando um documento orientar uso de @tool para um procedimento, trate a tool resolvida como obrigatoria para aquele procedimento.
 - Antes de chamar a tool, colete e valide os dados exigidos pelo procedimento.
+- Se uma consulta anterior retornou dados necessarios para a proxima @tool do procedimento, solicite a proxima action agora; nao responda que "vai fazer".
 - Se a tool estiver desabilitada, nao finja execucao; informe que vai encaminhar ou pedir apoio humano.
 
 Ferramentas permitidas:
@@ -432,6 +444,7 @@ Ferramentas permitidas:
 8. mcp_call_tool
    - Use para chamar uma ferramenta MCP externa habilitada para este agente.
    - Payload aceito: {"toolName":"mcp:<serverId>:<toolName>","arguments":{"campo":"valor"}}.
+   - "arguments" deve ser sempre um objeto JSON, nunca uma string. Exemplo correto para reboot_router: {"toolName":"mcp:<serverId>:reboot_router","arguments":{"device_id":"...","client_ip":"...","reason":"Cliente solicitou reinicializacao"}}.
    - Use exatamente o nome qualificado mostrado na lista de ferramentas habilitadas.
 
 Ferramenta bloqueada para IA:
@@ -441,8 +454,9 @@ Regra critica:
 - Se precisar consultar SGP mas ainda nao recebeu CPF/CNPJ, peca o CPF/CNPJ.
 - Se receber CPF/CNPJ, pode primeiro solicitar crm_update_contact_custom_fields e sgp_fetch_contact_panel_data.
 - Se a consulta ainda nao foi feita ou falhou, nao afirme "estou vendo seu sinal", "acessei o sistema" ou "verifiquei seu contrato".
+- Nunca responda apenas "vou verificar", "vou consultar" ou equivalente. Se disser que vai verificar/consultar qualquer sistema, inclua a action da ferramenta necessaria na mesma saida. Se nao houver ferramenta habilitada ou dados suficientes, diga isso claramente e encaminhe/peca o dado faltante.
 
-Exemplo de saida:
+Exemplo de saida simples (resposta unica):
 {
   "response": "Vou encaminhar seu atendimento para o setor responsavel.",
   "actions": [
@@ -458,6 +472,22 @@ Exemplo de saida:
     }
   ]
 }
+
+Exemplo de saida com multiplas mensagens (messageBlocks):
+{
+  "response": "Com certeza! Aqui estao as opcoes...\n\nAlem disso temos uma promocao...",
+  "messageBlocks": [
+    "Com certeza! Aqui estao as nossas opcoes:\n\n💡 PLANOS SOMENTE INTERNET\n100 MEGA: R$79,99/mes*\n300 MEGA (Mais vendido): R$89,90/mes*\n500 MEGA: R$99,90/mes*\n\n*Valores com desconto de pontualidade.",
+    "Alem disso, temos uma promocao especial de maio: 1000 Megas + 60 Canais por R$99,90/mes! Algum desses planos parece ideal para o seu uso?"
+  ]
+}
+
+Regras para messageBlocks:
+- Use messageBlocks APENAS quando a resposta tiver 2 ou mais blocos tematicos claramente distintos.
+- Se a resposta for curta ou tratar de um unico assunto, use apenas "response" e nao inclua "messageBlocks".
+- Cada bloco deve fazer sentido sozinho como mensagem.
+- Maximo de 3 blocos.
+- "response" sempre deve conter o texto completo (todos os blocos juntos).
 ---{{{customerMessage}}}
 
 Com base na sua persona, nos documentos e na emoção identificada, responda ao cliente.`,
@@ -569,15 +599,31 @@ const autoResponderFlow = ai.defineFlow(
     // This also prevents returning `null` values which would violate the Zod schema.
     if (output?.response && output.response.trim() !== '') {
       const emojiBudget = getEmojiBudget(input.chatHistory, input.customerMessage);
-      const sanitized = limitEmojis(
-        stripRepeatedGreeting(
-          stripRepeatedName(output.response, input.contact?.name ?? '', input.chatHistory),
-          input.chatHistory
-        ),
-        emojiBudget
-      );
+      const sanitizeBlock = (text: string, isFirstBlock: boolean) => {
+        let result = stripRepeatedName(text, input.contact?.name ?? '', input.chatHistory);
+        if (isFirstBlock) result = stripRepeatedGreeting(result, input.chatHistory);
+        return limitEmojis(result, emojiBudget);
+      };
+
+      const sanitized = sanitizeBlock(output.response, true);
       const outputResponse = formatCustomerFacingAiResponse(sanitized.trim() ? sanitized : output.response);
-      return { ...output, response: outputResponse };
+
+      // Sanitize each messageBlock if the AI decided to split
+      let sanitizedBlocks: string[] | undefined;
+      if (output.messageBlocks && output.messageBlocks.length > 1) {
+        sanitizedBlocks = output.messageBlocks
+          .map((block, i) => {
+            const s = sanitizeBlock(block, i === 0);
+            return formatCustomerFacingAiResponse(s.trim() ? s : block);
+          })
+          .filter((block) => block.trim() !== '');
+      }
+
+      return {
+        ...output,
+        response: outputResponse,
+        ...(sanitizedBlocks && sanitizedBlocks.length > 1 ? { messageBlocks: sanitizedBlocks } : { messageBlocks: undefined }),
+      };
     }
     const fallback = input.config?.default_fallback_reply?.trim();
     if (fallback) {

@@ -194,6 +194,7 @@ export type MessageMetadata = {
   waveform?: number[]; // For audio visualization
   isInternalNote?: boolean;
   isAiAnalysis?: boolean;
+  isToolExecution?: boolean;
   tool?: string;
   customerMessage?: string;
   analysisKind?: 'transcription' | 'visual_summary' | 'video_summary' | 'media_summary' | 'routing_context';

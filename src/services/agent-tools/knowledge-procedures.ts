@@ -9,11 +9,11 @@ export type KnowledgeToolProcedure = {
   excerpt: string;
 };
 
-const TOOL_MENTION_PATTERN = /@([a-zA-Z0-9_.:-]+)/g;
+const TOOL_MENTION_PATTERN = /@([a-zA-Z0-9_.:\-]+)/g;
 const MAX_EXCERPT_CHARS = 700;
 
 function normalizeToolToken(value: string) {
-  return value.trim().toLowerCase();
+  return value.trim().replace(/[.,;!?]+$/g, '').toLowerCase();
 }
 
 function getMentionExcerpt(content: string, index: number): string {
@@ -56,7 +56,7 @@ export function extractKnowledgeToolProcedures(input: {
     TOOL_MENTION_PATTERN.lastIndex = 0;
 
     for (const match of content.matchAll(TOOL_MENTION_PATTERN)) {
-      const mention = match[1] || '';
+      const mention = (match[1] || '').replace(/[.,;!?]+$/g, '');
       const tool = lookup.get(normalizeToolToken(mention));
       if (!tool) continue;
 

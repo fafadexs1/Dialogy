@@ -6,6 +6,7 @@ import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext
 import { recordAgentToolMetrics } from '@/lib/observability/metrics';
 import { runCrmUpdateContactCustomFieldsTool } from './crm-tools';
 import { runSgpTool } from './sgp-tools';
+import { normalizeMcpToolArguments } from './mcp-arguments';
 import { callMcpServerTool, parseQualifiedMcpToolName } from '@/services/mcp/client';
 import { getMcpWorkspaceConfig } from '@/services/mcp/store';
 import {
@@ -365,18 +366,46 @@ async function runMcpCallTool(
       return reject(action, 'Ferramenta MCP nao foi sincronizada neste workspace.');
     }
 
+    const normalizedArguments = normalizeMcpToolArguments(action.payload?.arguments);
+    if (!normalizedArguments.success) {
+      return reject(action, normalizedArguments.error);
+    }
+
     const result = await callMcpServerTool({
       server,
       toolName: parsed.toolName,
-      arguments: action.payload?.arguments || {},
+      arguments: normalizedArguments.arguments,
     });
+
+    const content = (result as any).content || null;
+    const textError = Array.isArray(content)
+      ? content
+          .map((item: any) => item?.type === 'text' ? item.text : null)
+          .filter(Boolean)
+          .join('\n')
+          .trim()
+      : '';
+
+    if ((result as any).isError) {
+      return {
+        toolName: qualifiedName as any,
+        status: 'error',
+        input: action,
+        error: textError || 'Ferramenta MCP retornou erro.',
+        output: JSON.parse(JSON.stringify({
+          content,
+          structuredContent: (result as any).structuredContent || null,
+          isError: true,
+        })),
+      };
+    }
 
     return {
       toolName: qualifiedName as any,
       status: 'success',
       input: action,
       output: JSON.parse(JSON.stringify({
-        content: (result as any).content || null,
+        content,
         structuredContent: (result as any).structuredContent || null,
         isError: (result as any).isError || false,
       })),

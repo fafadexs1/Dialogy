@@ -18,7 +18,7 @@ import {
     type ToolRouterTeam,
 } from '@/services/agent-tools/router';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
-import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
+import { formatCustomerFacingAiResponse, splitIntoMessageBlocks } from '@/lib/ai-response-format';
 import { classifyToolIntent } from '@/ai/flows/tool-intent-gate';
 import {
     finishOrchestratorRun,
@@ -29,6 +29,49 @@ import {
     type OrchestratorRunHandle,
 } from '@/services/orchestrator/runtime';
 import { analyzeMediaForAutopilot } from '@/ai/flows/analyze-media';
+import {
+    buildMcpCustomerResponseFromToolResults,
+    buildRouterRebootActionFromSgpResults,
+    buildSgpResponseFromToolResults,
+    buildToolFailureResponse,
+    ensurePromisedSgpLookupAction,
+    ensureProcedureSgpLookupAction,
+} from '@/services/autopilot-sgp-response';
+
+/**
+ * Sends an AI response as one or more separate WhatsApp message bubbles.
+ *
+ * When `aiMessageBlocks` is provided (the AI explicitly decided to split),
+ * each block is sent as its own message. Otherwise, the heuristic
+ * `splitIntoMessageBlocks` is used as a fallback for deterministic responses.
+ */
+async function sendMultiBlockResponse(
+    chatId: string,
+    formattedResponse: string,
+    agentId: string,
+    isSystemAgent: boolean,
+    instanceName?: string,
+    aiMessageBlocks?: string[] | null,
+): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
+    // Prefer AI-decided blocks; fall back to heuristic splitting
+    const blocks = (aiMessageBlocks && aiMessageBlocks.length > 1)
+        ? aiMessageBlocks
+        : splitIntoMessageBlocks(formattedResponse);
+
+    if (blocks.length <= 1) {
+        return sendAutomatedMessageAction(chatId, formattedResponse, agentId, isSystemAgent, instanceName);
+    }
+
+    let lastResult: { success: boolean; error?: string; apiResponse?: any } = { success: true };
+    for (let i = 0; i < blocks.length; i++) {
+        if (i > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+        lastResult = await sendAutomatedMessageAction(chatId, blocks[i], agentId, isSystemAgent, instanceName);
+        if (!lastResult.success) break;
+    }
+    return lastResult;
+}
 
 function interpolateTemplate(value: string, context: Record<string, any>): string {
     return value.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
@@ -267,35 +310,6 @@ function isPreResponseDataAction(action: AgentToolAction) {
     return action.type === 'crm_update_contact_custom_fields' || action.type.startsWith('sgp_') || action.type === 'mcp_call_tool';
 }
 
-function buildSgpResponseFromToolResults(results: AgentToolExecutionResult[]): string | null {
-    const panelResult = results.find(
-        (result) => result.toolName === 'sgp_fetch_contact_panel_data' && result.status === 'success'
-    );
-    const output = panelResult?.output as any;
-    if (!output) return null;
-
-    const contracts = Array.isArray(output.contracts) ? output.contracts : [];
-    const onlineContracts = Number(output.onlineContracts || 0);
-    const overdueInvoices = Number(output.overdueInvoices || 0);
-    const openInvoices = Number(output.openInvoices || 0);
-    const firstContract = contracts[0];
-    const statusLabel = firstContract?.connectionStatus === 'online'
-        ? 'online'
-        : firstContract?.connectionStatus === 'offline'
-            ? 'offline'
-            : 'sem status claro de conexao';
-
-    return [
-        `Consultei o cadastro no SGP. Encontrei ${contracts.length} contrato(s); ${onlineContracts} online.`,
-        firstContract ? `Contrato principal: ${firstContract.planDescription || firstContract.id}, status ${statusLabel}.` : '',
-        overdueInvoices > 0
-            ? `Tambem ha ${overdueInvoices} fatura(s) vencida(s).`
-            : openInvoices > 0
-                ? `Ha ${openInvoices} fatura(s) em aberto.`
-                : '',
-    ].filter(Boolean).join(' ');
-}
-
 function buildMcpResponseFromToolResults(results: AgentToolExecutionResult[]): string | null {
     const mcpResult = results.find((result) => result.toolName.startsWith('mcp:') && result.status === 'success');
     const output = mcpResult?.output as any;
@@ -316,6 +330,79 @@ function buildMcpResponseFromToolResults(results: AgentToolExecutionResult[]): s
         : [];
 
     return textParts.join('\n\n').trim().slice(0, 1800) || null;
+}
+
+function compactToolOutputForContinuation(result: AgentToolExecutionResult): Record<string, unknown> {
+    const output = (result.output || {}) as any;
+
+    if (result.toolName === 'sgp_fetch_contact_panel_data') {
+        const contracts = Array.isArray(output.contracts) ? output.contracts : [];
+        return {
+            customerName: output.customerName || null,
+            cpfCnpj: output.cpfCnpj || null,
+            contracts: contracts.slice(0, 8).map((contract: any) => ({
+                id: contract.id,
+                planDescription: contract.planDescription,
+                connectionStatus: contract.connectionStatus,
+                statusLabel: contract.statusLabel,
+                addressLabel: contract.addressLabel,
+                ip: contract.ip,
+                ipv6: contract.ipv6,
+                login: contract.login,
+            })),
+            invoiceGroups: Array.isArray(output.invoiceGroups)
+                ? output.invoiceGroups.slice(0, 8).map((group: any) => ({
+                    contractId: group.contractId,
+                    title: group.title,
+                    summary: group.summary,
+                }))
+                : [],
+        };
+    }
+
+    if (result.toolName.startsWith('mcp:')) {
+        return {
+            content: output.content || null,
+            structuredContent: output.structuredContent || null,
+            isError: output.isError || false,
+        };
+    }
+
+    return output;
+}
+
+function buildToolContinuationContext(results: AgentToolExecutionResult[]): string {
+    const successfulResults = results.filter((result) => result.status === 'success');
+    if (successfulResults.length === 0) return '';
+
+    const payload = successfulResults.map((result) => ({
+        toolName: result.toolName,
+        output: compactToolOutputForContinuation(result),
+    }));
+
+    return [
+        '[RESULTADOS DE FERRAMENTAS JA EXECUTADAS]',
+        JSON.stringify(payload).slice(0, 5000),
+        'Use estes dados para decidir se ainda falta executar a proxima @tool obrigatoria do procedimento. Se faltar, retorne a proxima action agora. Se o procedimento ja terminou, responda com o resultado concreto ao cliente.',
+    ].join('\n');
+}
+
+function actionKey(action: AgentToolAction): string {
+    if (action.type === 'mcp_call_tool') {
+        return `${action.type}:${action.payload?.toolName || ''}`;
+    }
+    return action.type;
+}
+
+function filterAlreadyExecutedActions(actions: AgentToolAction[], results: AgentToolExecutionResult[]): AgentToolAction[] {
+    const executed = new Set(results.map((result) => {
+        if (result.input.type === 'mcp_call_tool') {
+            return `${result.input.type}:${result.input.payload?.toolName || result.toolName}`;
+        }
+        return result.input.type;
+    }));
+
+    return actions.filter((action) => !executed.has(actionKey(action)));
 }
 
 async function listRuntimeAgentToolCatalog(workspaceId: string): Promise<AgentToolCatalogItem[]> {
@@ -369,11 +456,39 @@ function buildEnabledAgentToolsDescription(config: AutopilotConfig, toolCatalog:
 }
 
 const MAX_AI_ANALYSIS_CHARS = 1000;
+const MAX_PROMPT_DOCUMENT_CHARS = 1200;
+const MAX_PROMPT_DOCUMENT_TOTAL_CHARS = 4500;
 
 function compactAiAnalysis(value: string): string {
     const normalized = value.replace(/\s+/g, ' ').trim();
     if (normalized.length <= MAX_AI_ANALYSIS_CHARS) return normalized;
     return `${normalized.slice(0, MAX_AI_ANALYSIS_CHARS - 1).trim()}…`;
+}
+
+function compactKnowledgeDocumentsForPrompt(documents: KnowledgeBaseDocument[]): KnowledgeBaseDocument[] {
+    let totalChars = 0;
+    const compacted: KnowledgeBaseDocument[] = [];
+
+    for (const document of documents || []) {
+        const rawContent = String(document.content || '').replace(/\s+/g, ' ').trim();
+        if (!rawContent) continue;
+
+        const remaining = MAX_PROMPT_DOCUMENT_TOTAL_CHARS - totalChars;
+        if (remaining <= 0) break;
+
+        const maxForDocument = Math.min(MAX_PROMPT_DOCUMENT_CHARS, remaining);
+        const content = rawContent.length > maxForDocument
+            ? `${rawContent.slice(0, Math.max(0, maxForDocument - 1)).trim()}…`
+            : rawContent;
+
+        compacted.push({
+            ...document,
+            content,
+        });
+        totalChars += content.length;
+    }
+
+    return compacted;
 }
 
 function resolveAnalysisKind(type: Message['type']): MessageMetadata['analysisKind'] {
@@ -437,6 +552,124 @@ async function insertAiAnalysisMessage(input: {
             input.systemAgentId,
         ]
     );
+}
+
+function describeAgentToolAction(action: AgentToolAction): string {
+    if (action.type === 'sgp_fetch_contact_panel_data') return 'Consultar dados do cliente no SGP';
+    if (action.type === 'sgp_fetch_contracts') return 'Listar contratos no SGP';
+    if (action.type === 'mcp_call_tool') {
+        const toolName = String(action.payload?.toolName || '').split(':').at(-1) || 'MCP';
+        if (toolName === 'reboot_router') return 'Reinicializar roteador via TR-069';
+        return `Executar ferramenta MCP ${toolName}`;
+    }
+    if (action.type === 'transfer_chat') return 'Transferir atendimento';
+    if (action.type === 'add_internal_note') return 'Registrar nota interna';
+    if (action.type === 'crm_update_contact_custom_fields') return 'Atualizar dados do CRM';
+    if (action.type === 'sgp_generate_invoice_pix') return 'Gerar PIX de fatura no SGP';
+    if (action.type === 'sgp_create_payment_promise') return 'Registrar promessa de pagamento no SGP';
+    return action.type;
+}
+
+function summarizeAgentToolResult(result: AgentToolExecutionResult): string {
+    const label = describeAgentToolAction(result.input);
+    if (result.status === 'success') {
+        if (result.toolName.endsWith(':reboot_router')) {
+            const output = result.output as any;
+            const text = Array.isArray(output?.content)
+                ? output.content.map((item: any) => item?.text).filter(Boolean).join(' ')
+                : '';
+            return `${label}: comando enviado com sucesso.${text ? ` Retorno: ${text.slice(0, 240)}` : ''}`;
+        }
+        return `${label}: concluido com sucesso.`;
+    }
+
+    if (result.status === 'rejected') {
+        return `${label}: nao executado. ${result.error || 'A ferramenta rejeitou a solicitacao.'}`;
+    }
+
+    return `${label}: falhou. ${result.error || 'Erro desconhecido na ferramenta.'}`;
+}
+
+async function insertAgentToolStatusMessage(input: {
+    workspaceId: string;
+    chatId: string;
+    systemAgentId: string;
+    content: string;
+    toolName: string;
+    status: 'running' | 'success' | 'error' | 'rejected';
+}) {
+    try {
+        await db.query(
+            `INSERT INTO messages (
+                workspace_id,
+                chat_id,
+                type,
+                content,
+                from_me,
+                api_message_status,
+                metadata,
+                is_read,
+                sender_system_agent_id,
+                created_at
+             ) VALUES ($1, $2, 'text', $3, true, 'internal', $4, true, $5, clock_timestamp())`,
+            [
+                input.workspaceId,
+                input.chatId,
+                input.content,
+                JSON.stringify({
+                    isInternalNote: true,
+                    isToolExecution: true,
+                    analysisKind: 'routing_context',
+                    sentBy: 'system_agent',
+                    tool: 'agent_tool_status',
+                    agentToolName: input.toolName,
+                    agentToolStatus: input.status,
+                }),
+                input.systemAgentId,
+            ]
+        );
+    } catch (error) {
+        console.error('[AUTOPILOT_TOOL_STATUS] Failed to insert tool status message:', error);
+    }
+}
+
+async function isAutopilotSourceMessageStillCurrent(input: {
+    chatId: string;
+    sourceMessageId?: string | null;
+}): Promise<boolean> {
+    if (!input.sourceMessageId) return true;
+
+    try {
+        const { rows } = await db.query(
+            `WITH source_message AS (
+                SELECT id, created_at
+                FROM messages
+                WHERE id = $1
+                  AND chat_id = $2
+                  AND from_me = false
+                LIMIT 1
+             ),
+             newer_customer_message AS (
+                SELECT 1
+                FROM messages m
+                JOIN source_message sm ON true
+                WHERE m.chat_id = $2
+                  AND m.from_me = false
+                  AND m.created_at > sm.created_at
+                  AND m.id <> sm.id
+                LIMIT 1
+             )
+             SELECT
+                EXISTS(SELECT 1 FROM source_message) AS source_exists,
+                EXISTS(SELECT 1 FROM newer_customer_message) AS has_newer_customer_message`,
+            [input.sourceMessageId, input.chatId]
+        );
+        const row = rows[0];
+        return Boolean(row?.source_exists) && !Boolean(row?.has_newer_customer_message);
+    } catch (error) {
+        console.error('[AUTOPILOT_STALE_GUARD] Failed to verify source message:', error);
+        return false;
+    }
 }
 
 async function buildMediaAnalysisContext(input: {
@@ -533,6 +766,50 @@ async function runRequestedAgentTools(input: {
         },
         normalizedActions
     );
+}
+
+async function runRequestedAgentToolsWithStatus(input: {
+    workspaceId: string;
+    chat: Chat;
+    contact: Contact;
+    systemAgentId: string;
+    systemAgentName: string;
+    autopilotConfig: AutopilotConfig;
+    customerMessage: string;
+    actions: unknown;
+    orchestratorRunId?: string | null;
+}): Promise<AgentToolExecutionResult[]> {
+    const normalizedActions = normalizeAgentActions(input.actions);
+    if (normalizedActions.length === 0) return [];
+
+    for (const action of normalizedActions) {
+        await insertAgentToolStatusMessage({
+            workspaceId: input.workspaceId,
+            chatId: input.chat.id,
+            systemAgentId: input.systemAgentId,
+            content: `Executando ferramenta: ${describeAgentToolAction(action)}.`,
+            toolName: action.type === 'mcp_call_tool' ? String(action.payload?.toolName || action.type) : action.type,
+            status: 'running',
+        });
+    }
+
+    const results = await runRequestedAgentTools({
+        ...input,
+        actions: normalizedActions,
+    });
+
+    for (const result of results) {
+        await insertAgentToolStatusMessage({
+            workspaceId: input.workspaceId,
+            chatId: input.chat.id,
+            systemAgentId: input.systemAgentId,
+            content: summarizeAgentToolResult(result),
+            toolName: result.toolName,
+            status: result.status,
+        });
+    }
+
+    return results;
 }
 
 async function loadToolRouterTeams(workspaceId: string): Promise<ToolRouterTeam[]> {
@@ -861,6 +1138,37 @@ export async function processAutopilotForChat(
     }
 
     if (deterministicRouting.actions.length > 0 && deterministicRouting.responseHint) {
+        const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+            chatId: chat.id,
+            sourceMessageId: sourceMessageId ?? null,
+        });
+        if (!sourceMessageStillCurrent) {
+            console.warn(`[AUTOPILOT_STALE_GUARD] Skipping stale deterministic response/tool execution for chat ${chat.id}, sourceMessageId=${sourceMessageId || 'none'}.`);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'stale_source_message_guard',
+                status: 'skipped',
+                payload: {
+                    sourceMessageId: sourceMessageId ?? null,
+                    reason: 'newer_customer_message_exists',
+                    deterministicRouting: deterministicRouting.matchedReason,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'skipped',
+                timings: orchestratorTimings,
+                metadata: {
+                    responseSent: false,
+                    toolCount: 0,
+                    staleSourceMessage: true,
+                    sourceMessageId: sourceMessageId ?? null,
+                    deterministicRouting: deterministicRouting.matchedReason,
+                },
+            });
+            return;
+        }
+
         const finalResponse = formatCustomerFacingAiResponse(deterministicRouting.responseHint);
 
         if (currentCopilotMode === 'suggest') {
@@ -904,7 +1212,7 @@ export async function processAutopilotForChat(
         const sendStage = await timeOrchestratorStage(
             orchestratorRun,
             'message_send',
-            () => sendAutomatedMessageAction(
+            () => sendMultiBlockResponse(
                 chat.id,
                 finalResponse,
                 assignedSystemAgentId,
@@ -918,7 +1226,7 @@ export async function processAutopilotForChat(
         const toolsStage = await timeOrchestratorStage(
             orchestratorRun,
             'tool_execution',
-            () => runRequestedAgentTools({
+            () => runRequestedAgentToolsWithStatus({
                 workspaceId,
                 chat,
                 contact: sanitizedContact,
@@ -1034,6 +1342,7 @@ export async function processAutopilotForChat(
             enabledToolNames: resolveEnabledToolNames(autopilotConfig),
         })
     );
+    const promptKnowledgeDocuments = compactKnowledgeDocumentsForPrompt(ragDocuments);
 
     try {
         const llmStage = await timeOrchestratorStage(
@@ -1047,7 +1356,7 @@ export async function processAutopilotForChat(
             relevantHistory,
             rules: activeRules,
             knowledgeBase: autopilotConfig.knowledge_base || '',
-            knowledgeBaseDocuments: ragDocuments,
+            knowledgeBaseDocuments: promptKnowledgeDocuments,
             resolvedCases,
             fallbackReply: autopilotConfig.default_fallback_reply || '',
             escalationPolicy: [
@@ -1075,6 +1384,9 @@ export async function processAutopilotForChat(
 
         if (result?.response) {
             let finalResponse = result.response;
+            let aiMessageBlocks: string[] | null = (result as any).messageBlocks?.length > 1
+                ? (result as any).messageBlocks as string[]
+                : null;
             let webhookExecution: Awaited<ReturnType<typeof executeTriggeredWebhookRule>> | null = null;
             const triggeredRule = result.triggeredRule
                 ? activeRules.find((rule) => rule.name === result.triggeredRule)
@@ -1091,10 +1403,12 @@ export async function processAutopilotForChat(
                     });
                     if (webhookExecution?.reply) {
                         finalResponse = webhookExecution.reply;
+                        aiMessageBlocks = null; // Webhook overrode the AI response
                     }
                 } catch (webhookError) {
                     console.error('[AUTOPILOT_WEBHOOK_ACTION] Failed to execute webhook rule:', webhookError);
                     finalResponse = autopilotConfig.default_fallback_reply || result.response;
+                    aiMessageBlocks = null; // Webhook error, blocks no longer valid
                     webhookExecution = {
                         reply: finalResponse,
                         response: {
@@ -1141,8 +1455,51 @@ export async function processAutopilotForChat(
                     },
                 });
             } else {
+                const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+                    chatId: chat.id,
+                    sourceMessageId: sourceMessageId ?? null,
+                });
+                if (!sourceMessageStillCurrent) {
+                    console.warn(`[AUTOPILOT_STALE_GUARD] Skipping stale autopilot response/tool execution for chat ${chat.id}, sourceMessageId=${sourceMessageId || 'none'}.`);
+                    await recordOrchestratorEvent({
+                        run: orchestratorRun,
+                        kind: 'stale_source_message_guard',
+                        status: 'skipped',
+                        payload: {
+                            sourceMessageId: sourceMessageId ?? null,
+                            reason: 'newer_customer_message_exists',
+                        },
+                    });
+                    await finishOrchestratorRun({
+                        run: orchestratorRun,
+                        status: 'skipped',
+                        timings: orchestratorTimings,
+                        metadata: {
+                            responseSent: false,
+                            toolCount: 0,
+                            staleSourceMessage: true,
+                            sourceMessageId: sourceMessageId ?? null,
+                        },
+                    });
+                    return;
+                }
+
+                const enabledToolNames = resolveEnabledToolNames(autopilotConfig);
+                const promisedLookupActions = ensurePromisedSgpLookupAction({
+                    response: finalResponse,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: normalizeAgentActions(result.actions),
+                    enabledToolNames,
+                });
+                const llmActions = ensureProcedureSgpLookupAction({
+                    response: finalResponse,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: promisedLookupActions,
+                    enabledToolNames,
+                    knowledgeToolProcedures,
+                });
                 const requestedActions = filterImplicitTransferActions({
-                    actions: mergeAgentActions(deterministicRouting.actions, normalizeAgentActions(result.actions)),
+                    actions: mergeAgentActions(deterministicRouting.actions, llmActions),
                     customerMessage: enrichedLastMessageContent || '',
                     availableTeams,
                 });
@@ -1160,7 +1517,7 @@ export async function processAutopilotForChat(
                     const preToolsStage = await timeOrchestratorStage(
                         orchestratorRun,
                         'tool_execution',
-                        () => runRequestedAgentTools({
+                        () => runRequestedAgentToolsWithStatus({
                             workspaceId,
                             chat,
                             contact: sanitizedContact,
@@ -1175,13 +1532,206 @@ export async function processAutopilotForChat(
                     );
                     orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + preToolsStage.durationMs;
                     toolResults = preToolsStage.value;
-                    const sgpResponse = buildSgpResponseFromToolResults(toolResults);
+
+                    const deterministicProcedureAction = buildRouterRebootActionFromSgpResults({
+                        toolResults,
+                        customerMessage: enrichedLastMessageContent || '',
+                        response: finalResponse,
+                        knowledgeToolProcedures,
+                    });
+
+                    if (deterministicProcedureAction) {
+                        const procedureToolsStage = await timeOrchestratorStage(
+                            orchestratorRun,
+                            'tool_execution',
+                            () => runRequestedAgentToolsWithStatus({
+                                workspaceId,
+                                chat,
+                                contact: sanitizedContact,
+                                systemAgentId: assignedSystemAgentId,
+                                systemAgentName: assignedSystemAgentName,
+                                autopilotConfig,
+                                customerMessage: enrichedLastMessageContent || '',
+                                actions: [deterministicProcedureAction],
+                                orchestratorRunId: orchestratorRun.id,
+                            }),
+                            {
+                                requestedActions: [deterministicProcedureAction.type],
+                                deterministicProcedure: 'router_reboot',
+                            }
+                        );
+                        orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + procedureToolsStage.durationMs;
+                        toolResults = [...toolResults, ...procedureToolsStage.value];
+                    }
+
+                    const continuationContext = buildToolContinuationContext(toolResults);
+                    const hasProcedureToolPending =
+                        Boolean(knowledgeToolProcedures) &&
+                        Boolean(continuationContext) &&
+                        !toolResults.some((toolResult) => toolResult.toolName.startsWith('mcp:'));
+
+                    if (hasProcedureToolPending) {
+                        try {
+                            const continuationStage = await timeOrchestratorStage(
+                                orchestratorRun,
+                                'llm_tool_continuation',
+                                () => withTimeout(generateAgentResponse({
+                                    config: autopilotConfig,
+                                    chatId: chat.id,
+                                    customerMessage: enrichedLastMessageContent || '',
+                                    chatHistory: chatHistoryForAI,
+                                    relevantHistory: [
+                                        relevantHistory,
+                                        continuationContext,
+                                    ].filter(Boolean).join('\n\n'),
+                                    rules: activeRules,
+                                    knowledgeBase: autopilotConfig.knowledge_base || '',
+                                    knowledgeBaseDocuments: promptKnowledgeDocuments,
+                                    resolvedCases,
+                                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                                    escalationPolicy: autopilotConfig.escalation_policy || '',
+                                    closingPolicy: autopilotConfig.closing_policy || '',
+                                    model: resolvedAiModel.model,
+                                    contact: sanitizedContact,
+                                    workspaceGeminiApiKey,
+                                    enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
+                                    knowledgeToolProcedures,
+                                }), orchestratorRun.budget.maxLlmMs, 'llm tool continuation'),
+                                {
+                                    model: resolvedAiModel.model,
+                                    reason: 'procedure_tool_continuation',
+                                    priorToolResults: toolResults.map((toolResult) => toolResult.toolName),
+                                }
+                            );
+                            orchestratorTimings.llm_tool_continuation_ms = continuationStage.durationMs;
+
+                            const continuation = continuationStage.value;
+                            const continuationActions = filterAlreadyExecutedActions(
+                                normalizeAgentActions(continuation?.actions),
+                                toolResults
+                            ).filter(isPreResponseDataAction);
+
+                            if (continuation?.response) {
+                                finalResponse = continuation.response;
+                            }
+
+                            if (continuationActions.length > 0) {
+                                const continuationToolsStage = await timeOrchestratorStage(
+                                    orchestratorRun,
+                                    'tool_execution',
+                                    () => runRequestedAgentToolsWithStatus({
+                                        workspaceId,
+                                        chat,
+                                        contact: sanitizedContact,
+                                        systemAgentId: assignedSystemAgentId,
+                                        systemAgentName: assignedSystemAgentName,
+                                        autopilotConfig,
+                                        customerMessage: enrichedLastMessageContent || '',
+                                        actions: continuationActions,
+                                        orchestratorRunId: orchestratorRun.id,
+                                    }),
+                                    {
+                                        requestedActions: continuationActions.map((action) => action.type),
+                                        procedureContinuation: true,
+                                    }
+                                );
+                                orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + continuationToolsStage.durationMs;
+                                toolResults = [...toolResults, ...continuationToolsStage.value];
+                            }
+                        } catch (continuationError) {
+                            console.warn('[AUTOPILOT_TOOL_CONTINUATION] Failed, falling back to first tool response:', continuationError);
+                            await recordOrchestratorEvent({
+                                run: orchestratorRun,
+                                kind: 'llm_tool_continuation',
+                                status: 'fallback',
+                                payload: {
+                                    error: continuationError instanceof Error ? continuationError.message : String(continuationError),
+                                },
+                            });
+                        }
+                    }
+
+                    let postToolAiResponse: string | null = null;
+                    const shouldGeneratePostToolResponse = toolResults.some((toolResult) => toolResult.toolName.startsWith('mcp:'));
+                    if (shouldGeneratePostToolResponse) {
+                        try {
+                            const finalToolContext = [
+                                buildToolContinuationContext(toolResults),
+                                'Escreva a resposta final ao cliente com base no resultado real das ferramentas. Nao exponha JSON, command_id, stack trace ou mensagem tecnica bruta. Se a acao falhou, explique de forma simples e diga que sera verificado manualmente.',
+                            ].filter(Boolean).join('\n\n');
+                            const finalResponseStage = await timeOrchestratorStage(
+                                orchestratorRun,
+                                'llm_tool_final_response',
+                                () => withTimeout(generateAgentResponse({
+                                    config: autopilotConfig,
+                                    chatId: chat.id,
+                                    customerMessage: enrichedLastMessageContent || '',
+                                    chatHistory: chatHistoryForAI,
+                                    relevantHistory: [
+                                        relevantHistory,
+                                        finalToolContext,
+                                    ].filter(Boolean).join('\n\n'),
+                                    rules: activeRules,
+                                    knowledgeBase: autopilotConfig.knowledge_base || '',
+                                    knowledgeBaseDocuments: promptKnowledgeDocuments,
+                                    resolvedCases,
+                                    fallbackReply: '',
+                                    escalationPolicy: autopilotConfig.escalation_policy || '',
+                                    closingPolicy: autopilotConfig.closing_policy || '',
+                                    model: resolvedAiModel.model,
+                                    contact: sanitizedContact,
+                                    workspaceGeminiApiKey,
+                                    enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
+                                    knowledgeToolProcedures,
+                                }), orchestratorRun.budget.maxLlmMs, 'llm tool final response'),
+                                {
+                                    model: resolvedAiModel.model,
+                                    reason: 'post_tool_customer_response',
+                                    toolResults: toolResults.map((toolResult) => ({
+                                        toolName: toolResult.toolName,
+                                        status: toolResult.status,
+                                    })),
+                                }
+                            );
+                            orchestratorTimings.llm_tool_final_response_ms = finalResponseStage.durationMs;
+                            if (finalResponseStage.value?.response) {
+                                postToolAiResponse = finalResponseStage.value.response;
+                            }
+                        } catch (finalResponseError) {
+                            console.warn('[AUTOPILOT_TOOL_FINAL_RESPONSE] Failed, using deterministic tool response:', finalResponseError);
+                            await recordOrchestratorEvent({
+                                run: orchestratorRun,
+                                kind: 'llm_tool_final_response',
+                                status: 'fallback',
+                                payload: {
+                                    error: finalResponseError instanceof Error ? finalResponseError.message : String(finalResponseError),
+                                },
+                            });
+                        }
+                    }
+
+                    const sgpResponse = buildSgpResponseFromToolResults(
+                        toolResults,
+                        `${enrichedLastMessageContent || ''}\n${finalResponse || ''}`
+                    );
                     if (sgpResponse) {
                         finalResponse = formatCustomerFacingAiResponse(sgpResponse);
+                        aiMessageBlocks = null; // Tool response overrode AI blocks
                     }
-                    const mcpResponse = buildMcpResponseFromToolResults(toolResults);
+                    const mcpResponse = buildMcpCustomerResponseFromToolResults(toolResults) ||
+                        buildMcpResponseFromToolResults(toolResults);
                     if (mcpResponse) {
                         finalResponse = formatCustomerFacingAiResponse(mcpResponse);
+                        aiMessageBlocks = null;
+                    }
+                    const toolFailureResponse = buildToolFailureResponse(toolResults, finalResponse);
+                    if (toolFailureResponse) {
+                        finalResponse = formatCustomerFacingAiResponse(toolFailureResponse);
+                        aiMessageBlocks = null;
+                    }
+                    if (postToolAiResponse) {
+                        finalResponse = formatCustomerFacingAiResponse(postToolAiResponse);
+                        aiMessageBlocks = null;
                     }
                 }
 
@@ -1192,12 +1742,13 @@ export async function processAutopilotForChat(
                 const sendStage = await timeOrchestratorStage(
                     orchestratorRun,
                     'message_send',
-                    () => sendAutomatedMessageAction(
+                    () => sendMultiBlockResponse(
                         chat.id,
                         finalResponse,
                         agentId,
                         true,
-                        instanceName
+                        instanceName,
+                        aiMessageBlocks
                     ),
                     { responseLength: finalResponse.length }
                 );
@@ -1205,7 +1756,7 @@ export async function processAutopilotForChat(
                 const toolsStage = await timeOrchestratorStage(
                     orchestratorRun,
                     'tool_execution',
-                    () => runRequestedAgentTools({
+                    () => runRequestedAgentToolsWithStatus({
                         workspaceId,
                         chat,
                         contact: sanitizedContact,
@@ -1259,7 +1810,7 @@ export async function processAutopilotForChat(
                 ? (await timeOrchestratorStage(
                     orchestratorRun,
                     'tool_execution',
-                    () => runRequestedAgentTools({
+                    () => runRequestedAgentToolsWithStatus({
                         workspaceId,
                         chat,
                         contact: sanitizedContact,
