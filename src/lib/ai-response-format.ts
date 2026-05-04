@@ -1,4 +1,5 @@
 const DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS = 900;
+const STRUCTURED_CATALOG_MAX_CHARS = 2600;
 const MAX_PARAGRAPHS = 5;
 const MAX_SENTENCES_PER_PARAGRAPH = 3;
 const SOFT_PARAGRAPH_CHAR_LIMIT = 280;
@@ -19,6 +20,8 @@ const MAX_MESSAGE_BLOCKS = 3;
  * Matches lines starting with: emoji, bullet (•·–—-), number+dot/), asterisk, or 💡🔹▸▪️ style markers.
  */
 const LIST_LINE_PATTERN = /^(\s*)([\p{Extended_Pictographic}\u2022\u00b7\u2013\u2014\-\*\u25b8\u25aa\u25cf\u25cb]|\d+[.)]\s)/u;
+const MONEY_PATTERN = /\bR\$\s*\d+/i;
+const PLAN_SECTION_PATTERN = /\bPLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET|COM\s+TV|INTERNET\s*\+\s*TV)\b/i;
 
 function normalizeWhitespace(value: string): string {
   return value
@@ -57,6 +60,27 @@ function trimToMaxLength(value: string, maxChars: number): string {
   return `${compact}...`;
 }
 
+function isStructuredCatalogResponse(value: string): boolean {
+  const upper = value.toUpperCase();
+  const planMatches = upper.match(/\b\d{2,4}\s*(?:MEGA|MB|GB)\b/g) || [];
+  return (
+    planMatches.length >= 3 &&
+    MONEY_PATTERN.test(value) &&
+    (PLAN_SECTION_PATTERN.test(value) || upper.includes('CANAIS') || upper.includes('FIBRA'))
+  );
+}
+
+function expandCompactPlanCatalog(value: string): string {
+  if (!isStructuredCatalogResponse(value)) return value;
+
+  return value
+    .replace(/\s+(?=PLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET|COM\s+TV|INTERNET\s*\+\s*TV)\b)/gi, '\n\n')
+    .replace(/\s+\*(?=(?:PROMO|VALORES)\b)/gi, '\n\n*')
+    .replace(/\s+(?=\d{2,4}\s*(?:MEGA|MB|GB)\b)/gi, '\n')
+    .replace(/(PLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET|COM\s+TV|INTERNET\s*\+\s*TV))\s+(?=\d{2,4}\s*(?:MEGA|MB|GB)\b)/gi, '$1\n')
+    .replace(/(\S)\s+(?=(?:Algum desses planos|Qual desses planos|Quer que eu|Posso te ajudar)\b)/gi, '$1\n\n');
+}
+
 /**
  * Returns true when a paragraph block contains list-style lines that should
  * be kept separated by `\n` instead of collapsed into a single line.
@@ -69,7 +93,7 @@ function containsListLines(block: string): boolean {
   return listLineCount >= 2;
 }
 
-function paragraphize(value: string): string {
+function paragraphize(value: string, maxParagraphs = MAX_PARAGRAPHS): string {
   const existingParagraphs = value
     .split(/\n{2,}/)
     .filter(Boolean);
@@ -113,17 +137,23 @@ function paragraphize(value: string): string {
     }
   }
 
-  return paragraphs.slice(0, MAX_PARAGRAPHS).join('\n\n').trim();
+  return paragraphs.slice(0, maxParagraphs).join('\n\n').trim();
 }
 
 export function formatCustomerFacingAiResponse(
   response: string,
   maxChars = DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
 ): string {
-  const normalized = normalizeWhitespace(response);
+  const normalized = normalizeWhitespace(expandCompactPlanCatalog(response));
   if (!normalized) return '';
 
-  const limited = trimToMaxLength(normalized, maxChars);
+  const isCatalog = isStructuredCatalogResponse(normalized);
+  const effectiveMaxChars =
+    isCatalog && maxChars === DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
+      ? STRUCTURED_CATALOG_MAX_CHARS
+      : maxChars;
+  const limited = trimToMaxLength(normalized, effectiveMaxChars);
+  if (isCatalog) return limited;
   return paragraphize(limited);
 }
 

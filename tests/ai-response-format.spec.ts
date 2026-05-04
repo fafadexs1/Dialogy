@@ -32,4 +32,64 @@ describe('AI customer response formatting', () => {
     expect(formatted).toContain('oferta especial');
     expect(formatted).not.toContain('comparar com cada plano antigo');
   });
+
+  it('preserves WhatsApp spacing for full internet plan catalogs', () => {
+    const response = [
+      '🚀 *CONHECA NOSSOS PLANOS DE INTERNET FIBRA*',
+      'Velocidade, estabilidade e tecnologia pra voce!',
+      '',
+      '━━━━━━━━━━━━━━━',
+      '',
+      '💡 *PLANOS SOMENTE INTERNET*',
+      '',
+      '🔹 *100 MEGA*',
+      '📶 Wi-Fi 5',
+      '💰 R$79,99/mes pagando em dia',
+      '💰 R$89,99/mes',
+      '',
+      '🔹 *300 MEGA*',
+      '📶 Wi-Fi 5',
+      '💰 R$89,90/mes pagando em dia',
+      '💰 R$95,90/mes',
+      '',
+      '🔹 *500 MEGA*',
+      '📶 Wi-Fi 5',
+      '💰 R$99,90/mes pagando em dia',
+      '💰 R$109,90/mes',
+      '',
+      '━━━━━━━━━━━━━━━',
+      '',
+      '📺 *PLANOS COM INTERNET + TV*',
+      '',
+      '🔹 *600 MEGA + 60 CANAIS*',
+      '📶 Wi-Fi 5',
+      '💰 R$109,90/mes pagando em dia',
+      '💰 R$119,90/mes',
+      '',
+      '🔹 *800 MEGA + 75 CANAIS*',
+      '📶 Wi-Fi 5',
+      '💰 R$125,90/mes pagando em dia',
+      '💰 R$135,90/mes',
+      '',
+      '🔹 *1000 MEGA + 100 CANAIS*',
+      '📶 Wi-Fi 6',
+      '💰 R$149,90/mes pagando em dia',
+      '💰 R$159,90/mes',
+      '',
+      '━━━━━━━━━━━━━━━',
+      '',
+      '📡 *Quer ver todos os canais?*',
+      '👉 https://velpro.net.br/tv',
+    ].join('\n');
+
+    const formatted = formatCustomerFacingAiResponse(response);
+
+    expect(formatted).toContain('💡 *PLANOS SOMENTE INTERNET*');
+    expect(formatted).toContain('📺 *PLANOS COM INTERNET + TV*');
+    expect(formatted).toContain('🔹 *1000 MEGA + 100 CANAIS*');
+    expect(formatted).toContain('📡 *Quer ver todos os canais?*');
+    expect(formatted).toContain('💡 *PLANOS SOMENTE INTERNET*\n\n🔹 *100 MEGA*');
+    expect(formatted).toContain('💰 R$149,90/mes pagando em dia\n💰 R$159,90/mes');
+    expect(formatted).not.toContain('...');
+  });
 });

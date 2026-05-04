@@ -37,6 +37,7 @@ import {
     ensurePromisedSgpLookupAction,
     ensureProcedureSgpLookupAction,
 } from '@/services/autopilot-sgp-response';
+import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 
 /**
  * Sends an AI response as one or more separate WhatsApp message bubbles.
@@ -470,7 +471,13 @@ function compactKnowledgeDocumentsForPrompt(documents: KnowledgeBaseDocument[]):
     const compacted: KnowledgeBaseDocument[] = [];
 
     for (const document of documents || []) {
-        const rawContent = String(document.content || '').replace(/\s+/g, ' ').trim();
+        const rawContent = String(document.content || '')
+            .replace(/\r\n?/g, '\n')
+            .split('\n')
+            .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
         if (!rawContent) continue;
 
         const remaining = MAX_PROMPT_DOCUMENT_TOTAL_CHARS - totalChars;
@@ -489,6 +496,23 @@ function compactKnowledgeDocumentsForPrompt(documents: KnowledgeBaseDocument[]):
     }
 
     return compacted;
+}
+
+function cleanKnowledgeCatalogContent(content: string): string {
+    let normalized = content
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map((line) => line.replace(/[ \t]+$/g, '').trimStart())
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    const firstCatalogLine = normalized.search(/(?:[\p{Extended_Pictographic}]|\*)\s*\*?.{0,80}(?:PLANOS?|PROMO|CONHE[ÇC]A|INTERNET|FIBRA)/iu);
+    if (firstCatalogLine > 0) {
+        normalized = normalized.slice(firstCatalogLine).trim();
+    }
+
+    return normalized;
 }
 
 function resolveAnalysisKind(type: Message['type']): MessageMetadata['analysisKind'] {
@@ -1343,6 +1367,150 @@ export async function processAutopilotForChat(
         })
     );
     const promptKnowledgeDocuments = compactKnowledgeDocumentsForPrompt(ragDocuments);
+    const intentResolution = resolveAutopilotIntent({
+        customerMessage: enrichedLastMessageContent || '',
+        chatHistory: chatHistoryForAI,
+        knowledgeDocuments: autopilotConfig.knowledge_base_documents || ragDocuments,
+    });
+    const deterministicPlanCatalog = intentResolution.intent === 'catalogo_planos'
+        ? intentResolution.officialResponse || null
+        : null;
+
+    if (deterministicPlanCatalog) {
+        const finalResponse = formatCustomerFacingAiResponse(deterministicPlanCatalog);
+
+        if (currentCopilotMode === 'suggest') {
+            console.log(`[AUTOPILOT_SERVICE] Modo sugestao - catalogo de planos deterministico: ${finalResponse.substring(0, 50)}...`);
+            const { getSupabaseAdmin } = await import('@/lib/supabase');
+            const supabase = getSupabaseAdmin();
+            await supabase.channel(`chat:${chat.id}`).send({
+                type: 'broadcast',
+                event: 'ai_suggestion',
+                payload: {
+                    suggestion: finalResponse,
+                    chatId: chat.id,
+                    configName: autopilotConfig.name,
+                },
+            });
+            await logIntelligentAttendantResponse({
+                configId: autopilotConfig.id,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                modelName: 'deterministic_plan_catalog',
+                customerMessage: enrichedLastMessageContent || '',
+                response: finalResponse,
+                status: 'suggested',
+                triggeredRule: null,
+                metadata: {
+                    deterministicPlanCatalog: true,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    reason: intentResolution.reason,
+                    sourceDocumentId: intentResolution.sourceDocumentId,
+                    sourceDocumentName: intentResolution.sourceDocumentName,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'success',
+                timings: orchestratorTimings,
+                intent: 'deterministic_plan_catalog',
+                confidenceLevel: 'deterministic',
+                metadata: {
+                    suggestionOnly: true,
+                    deterministicPlanCatalog: true,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    reason: intentResolution.reason,
+                    sourceDocumentId: intentResolution.sourceDocumentId,
+                    sourceDocumentName: intentResolution.sourceDocumentName,
+                    responseLength: finalResponse.length,
+                },
+            });
+            return;
+        }
+
+        const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+            chatId: chat.id,
+            sourceMessageId: sourceMessageId ?? null,
+        });
+        if (!sourceMessageStillCurrent) {
+            console.warn(`[AUTOPILOT_STALE_GUARD] Skipping stale deterministic plan catalog for chat ${chat.id}, sourceMessageId=${sourceMessageId || 'none'}.`);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'stale_source_message_guard',
+                status: 'skipped',
+                payload: {
+                    sourceMessageId: sourceMessageId ?? null,
+                    reason: 'newer_customer_message_exists',
+                    deterministicPlanCatalog: true,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'skipped',
+                timings: orchestratorTimings,
+                metadata: {
+                    responseSent: false,
+                    toolCount: 0,
+                    staleSourceMessage: true,
+                    deterministicPlanCatalog: true,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    sourceMessageId: sourceMessageId ?? null,
+                },
+            });
+            return;
+        }
+
+        console.log(`[AUTOPILOT_SERVICE] Enviando catalogo de planos deterministico: ${finalResponse}`);
+        const sendStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'message_send',
+            () => sendAutomatedMessageAction(chat.id, finalResponse, assignedSystemAgentId, true, instanceName),
+            { responseLength: finalResponse.length, deterministicPlanCatalog: true }
+        );
+        orchestratorTimings.send_ms = sendStage.durationMs;
+        await logIntelligentAttendantResponse({
+            configId: autopilotConfig.id,
+            chatId: chat.id,
+            systemAgentId: assignedSystemAgentId,
+            modelName: 'deterministic_plan_catalog',
+            customerMessage: enrichedLastMessageContent || '',
+            response: finalResponse,
+            status: 'sent',
+            triggeredRule: null,
+            metadata: {
+                deterministicPlanCatalog: true,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                reason: intentResolution.reason,
+                sourceDocumentId: intentResolution.sourceDocumentId,
+                sourceDocumentName: intentResolution.sourceDocumentName,
+            },
+        });
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: 'success',
+            timings: orchestratorTimings,
+            intent: 'deterministic_plan_catalog',
+            confidenceLevel: 'deterministic',
+            metadata: {
+                responseSent: true,
+                toolCount: 0,
+                deterministicPlanCatalog: true,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                reason: intentResolution.reason,
+                sourceDocumentId: intentResolution.sourceDocumentId,
+                sourceDocumentName: intentResolution.sourceDocumentName,
+                responseLength: finalResponse.length,
+            },
+        });
+        return;
+    }
 
     try {
         const llmStage = await timeOrchestratorStage(
