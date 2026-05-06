@@ -1,0 +1,180 @@
+import { describe, expect, it } from 'vitest';
+
+import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services/agent-tools/catalog';
+import type { AgentToolAction } from '@/services/agent-tools/types';
+import type { ToolRouterTeam } from '@/services/agent-tools/router';
+import { resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { extractAutopilotSlots } from '@/services/autopilot/slots';
+import { hasExternalLookupPromise, planAutopilotTools } from '@/services/autopilot/tool-planner';
+import type { Contact } from '@/lib/types';
+
+const team: ToolRouterTeam = {
+  id: 'team-support',
+  name: 'Suporte',
+  routingConfig: { enabled: true, autoTransfer: true },
+};
+
+const contact: Contact = {
+  id: 'contact-1',
+  workspace_id: 'workspace-1',
+  name: 'Cliente Teste',
+};
+
+function runPlanner(input: {
+  message: string;
+  response?: string | null;
+  actions: AgentToolAction[];
+  enabledToolNames?: string[];
+  toolCatalog?: AgentToolCatalogItem[];
+  contactOverride?: Contact;
+}) {
+  const intentResolution = resolveAutopilotIntent({ customerMessage: input.message });
+  const resolvedContact = input.contactOverride || contact;
+  return planAutopilotTools({
+    response: input.response ?? null,
+    customerMessage: input.message,
+    intentResolution,
+    slotExtraction: extractAutopilotSlots({
+      customerMessage: input.message,
+      contact: resolvedContact,
+    }),
+    actions: input.actions,
+    enabledToolNames: input.enabledToolNames || ['transfer_chat', 'add_internal_note'],
+    toolCatalog: input.toolCatalog || listAgentToolCatalogItems(),
+    availableTeams: [team],
+    contact: resolvedContact,
+  });
+}
+
+describe('autopilot tool planner', () => {
+  it('detects external lookup promises', () => {
+    expect(hasExternalLookupPromise('Vou verificar seu cadastro no sistema.')).toBe(true);
+    expect(hasExternalLookupPromise('Para consultar, me envie seu CPF.')).toBe(false);
+  });
+
+  it('blocks promised SGP lookup when customer identifier is missing and repairs the response', () => {
+    const result = runPlanner({
+      message: 'Preciso da segunda via do boleto',
+      response: 'Vou consultar sua fatura no sistema.',
+      enabledToolNames: ['sgp_fetch_contact_panel_data'],
+      actions: [
+        {
+          type: 'sgp_fetch_contact_panel_data',
+          reason: 'Consultar faturas',
+          payload: {},
+        },
+      ],
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.rejectedActions[0]).toMatchObject({ code: 'missing_slots' });
+    expect(result.responseOverride).toContain('CPF/CNPJ');
+    expect(result.promiseValidation.repairReason).toBe('promise_missing_slots');
+  });
+
+  it('blocks tools outside the allowed intent', () => {
+    const contactWithCpf: Contact = {
+      ...contact,
+      custom_fields: { cpf: '529.982.247-25' },
+    };
+    const result = runPlanner({
+      message: 'Quero conhecer os planos',
+      contactOverride: contactWithCpf,
+      enabledToolNames: ['sgp_fetch_contact_panel_data'],
+      actions: [
+        {
+          type: 'sgp_fetch_contact_panel_data',
+          reason: 'Consulta indevida',
+          payload: {},
+        },
+      ],
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.rejectedActions[0]).toMatchObject({ code: 'intent_not_allowed' });
+  });
+
+  it('allows billing lookup when slots and enabled tools are valid', () => {
+    const result = runPlanner({
+      message: 'Preciso da segunda via do boleto. CPF 529.982.247-25',
+      response: 'Vou consultar sua fatura no sistema.',
+      enabledToolNames: ['crm_update_contact_custom_fields', 'sgp_fetch_contact_panel_data'],
+      actions: [
+        {
+          type: 'crm_update_contact_custom_fields',
+          reason: 'Salvar CPF',
+          payload: { fields: { CPF: '52998224725' } },
+        },
+        {
+          type: 'sgp_fetch_contact_panel_data',
+          reason: 'Consultar faturas',
+          payload: {},
+        },
+      ],
+    });
+
+    expect(result.rejectedActions).toHaveLength(0);
+    expect(result.actions.map((action) => action.type)).toEqual([
+      'crm_update_contact_custom_fields',
+      'sgp_fetch_contact_panel_data',
+    ]);
+    expect(result.promiseValidation.hasExecutableLookupTool).toBe(true);
+  });
+
+  it('repairs lookup promises with handoff when no executable tool exists', () => {
+    const result = runPlanner({
+      message: 'Voce consegue verificar o status do meu pedido?',
+      response: 'Vou verificar o status do pedido no sistema.',
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+      actions: [],
+    });
+
+    expect(result.responseOverride).toContain('encaminhar');
+    expect(result.actions.map((action) => action.type)).toEqual(['add_internal_note', 'transfer_chat']);
+    expect(result.promiseValidation.repairReason).toBe('promise_handoff');
+  });
+
+  it('rejects MCP tools that require human approval', () => {
+    const destructiveMcpTool: AgentToolCatalogItem = {
+      name: 'mcp:server:delete_account' as any,
+      version: 'mcp',
+      description: 'Remove conta externa',
+      class: 'write_non_idempotent',
+      riskLevel: 'high',
+      sideEffect: 'high',
+      idempotent: false,
+      timeoutMs: 8000,
+      maxAttempts: 1,
+      requiresHumanApproval: true,
+      customerVisible: true,
+      allowedIntents: ['support_request'],
+      requiredSlots: [],
+      fallbackAction: 'handoff',
+      source: 'mcp',
+      enabledByDefault: false,
+      serverId: 'server',
+      serverName: 'Server',
+      inputSchema: null,
+      outputSchema: null,
+    };
+
+    const result = runPlanner({
+      message: 'Preciso de suporte',
+      enabledToolNames: ['mcp:server:delete_account'],
+      toolCatalog: [...listAgentToolCatalogItems(), destructiveMcpTool],
+      actions: [
+        {
+          type: 'mcp_call_tool',
+          reason: 'Acao destrutiva',
+          payload: {
+            toolName: 'mcp:server:delete_account',
+            arguments: {},
+          },
+        },
+      ],
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.rejectedActions[0]).toMatchObject({ code: 'requires_human_approval' });
+  });
+});

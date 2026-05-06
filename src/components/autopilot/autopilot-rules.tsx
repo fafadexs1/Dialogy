@@ -176,7 +176,7 @@ export function AutopilotRules({
               Automação operacional
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-foreground">Habilidades e regras</h2>
+              <h2 className="text-xl font-semibold text-foreground">O que ele pode fazer</h2>
               <p className="text-sm text-muted-foreground">
                 Configure gatilhos específicos para respostas dirigidas ou integrações por webhook.
               </p>
@@ -283,7 +283,7 @@ export function AutopilotRules({
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-background shadow-sm">
             <Plus className="h-6 w-6" />
           </div>
-          <p className="mt-5 text-base font-semibold">Criar nova habilidade</p>
+          <p className="mt-5 text-base font-semibold">Criar nova acao</p>
           <p className="mt-2 max-w-xs text-sm leading-6">
             Adicione gatilhos para atendimento guiado, respostas imediatas ou integração com sistemas externos.
           </p>

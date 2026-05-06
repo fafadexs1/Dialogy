@@ -1,0 +1,30 @@
+
+> nextn@0.1.0 dev:next
+> node scripts/dev-with-stripe.cjs --no-stripe
+
+[dev] Disabling Turbopack for local dev because this Windows workspace path uses OneDrive and/or non-ASCII characters.
+[dev] Overriding NEXTAUTH_URL from https://dialogy.klyraai.com.br to http://localhost:9002 for local development.
+[dev] Overriding NEXT_PUBLIC_APP_URL from https://dialogy.klyraai.com.br to http://localhost:9002 for local development.
+[dev] Overriding NEXT_PUBLIC_SITE_URL from https://dialogy.klyraai.com.br to http://localhost:9002 for local development.
+[dev] Stripe CLI autostart disabled by STRIPE_CLI_AUTOSTART.
+[dev] Starting Next dev server on port 9002.
+▲ Next.js 16.2.3 (webpack)
+- Local:         http://localhost:9002
+- Network:       http://192.168.0.164:9002
+- Environments: .env
+✓ Ready in 878ms
+Next.js config loaded with experimental.serverActions.bodySizeLimit: 100mb
+Skipping custom webpack config in development.
+ ○ (pwa) PWA support is disabled.
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: "100mb"
+  · serverActions
+
+○ Compiling /autopilot ...
+ GET /autopilot 200 in 11.9s (next.js: 10.9s, proxy.ts: 263ms, application-code: 761ms)
+○ Compiling /autopilot/[id] ...
+ GET /autopilot/preview-agent 200 in 7.4s (next.js: 6.7s, proxy.ts: 108ms, application-code: 590ms)
+ GET /autopilot/preview-agent 200 in 86ms (next.js: 16ms, proxy.ts: 12ms, application-code: 58ms)
+ GET /autopilot/preview-agent 200 in 3.0s (next.js: 2.3s, proxy.ts: 136ms, application-code: 662ms)
+ GET /autopilot/preview-agent 200 in 689ms (next.js: 101ms, proxy.ts: 97ms, application-code: 491ms)
+[?25h

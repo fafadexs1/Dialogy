@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
-import { recordAutopilotRunMetrics, recordAutopilotStageMetrics } from '@/lib/observability/metrics';
+import {
+  recordAutopilotDecisionMetrics,
+  recordAutopilotRunMetrics,
+  recordAutopilotStageMetrics,
+} from '@/lib/observability/metrics';
 
 export type OrchestratorBudget = {
   maxTotalMs: number;
@@ -21,7 +25,7 @@ export type OrchestratorRunHandle = {
 export const DEFAULT_ORCHESTRATOR_BUDGET: OrchestratorBudget = {
   maxTotalMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOTAL_TIMEOUT_MS || '', 10) || 30000,
   maxLlmMs: Number.parseInt(process.env.AI_ORCHESTRATOR_LLM_TIMEOUT_MS || '', 10) || 20000,
-  maxRagMs: Number.parseInt(process.env.AI_ORCHESTRATOR_RAG_TIMEOUT_MS || '', 10) || 3000,
+  maxRagMs: Number.parseInt(process.env.AI_ORCHESTRATOR_RAG_TIMEOUT_MS || '', 10) || 7000,
   maxToolMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
   maxToolCalls: Number.parseInt(process.env.AI_ORCHESTRATOR_MAX_TOOL_CALLS || '', 10) || 2,
 };
@@ -58,6 +62,132 @@ type FinishRunInput = {
 function sanitizeJson(value: Record<string, unknown> | null | undefined) {
   if (!value) return {};
   return JSON.parse(JSON.stringify(value));
+}
+
+function asMetricString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function firstMetricString(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const first = value.find((item) => typeof item === 'string' && item.trim().length > 0);
+    return typeof first === 'string' ? first : null;
+  }
+  return asMetricString(value);
+}
+
+function asMetricCount(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.length;
+  return null;
+}
+
+function extractNestedRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function extractRunMetricDimensions(metadata: Record<string, unknown>) {
+  const responseValidator = extractNestedRecord(metadata.responseValidator);
+  const toolPlanner = extractNestedRecord(metadata.toolPlanner);
+  const promiseValidation = extractNestedRecord(toolPlanner?.promiseValidation);
+  const rejectedActions = toolPlanner?.rejectedActions;
+
+  return {
+    workflowId: asMetricString(metadata.workflowId),
+    ragStrategy: asMetricString(metadata.ragStrategy),
+    knowledgeCoverage: asMetricString(metadata.knowledgeCoverage),
+    fallbackReason: asMetricString(metadata.fallbackReason) ||
+      firstMetricString(responseValidator?.reasons) ||
+      asMetricString(promiseValidation?.repairReason),
+    validatorAction: asMetricString(metadata.validatorAction) ||
+      asMetricString(responseValidator?.decision),
+    toolPlannerRejectedCount: asMetricCount(rejectedActions),
+  };
+}
+
+function recordDecisionMetric(input: RecordEventInput) {
+  const payload = sanitizeJson(input.payload);
+  const status = input.status === 'error'
+    ? 'error'
+    : input.status === 'fallback'
+      ? 'fallback'
+      : input.status === 'skipped'
+        ? 'skipped'
+        : 'success';
+
+  if (input.kind === 'intent_resolution') {
+    recordAutopilotDecisionMetrics({
+      kind: 'intent',
+      status,
+      durationMs: input.durationMs,
+      workspaceId: input.run?.workspaceId,
+      intent: asMetricString(payload.intent),
+      workflowId: asMetricString(payload.workflowId),
+      decision: asMetricString(payload.confidenceLevel),
+      reason: asMetricString(payload.reason),
+    });
+    return;
+  }
+
+  if (input.kind === 'rag_selection' || input.kind === 'rag_fallback_static_documents' || input.kind === 'rag_retrieval') {
+    recordAutopilotDecisionMetrics({
+      kind: 'rag',
+      status,
+      durationMs: input.durationMs,
+      workspaceId: input.run?.workspaceId,
+      intent: asMetricString(payload.intent),
+      workflowId: asMetricString(payload.workflowId),
+      ragStrategy: asMetricString(payload.strategy),
+      knowledgeCoverage: asMetricString(payload.knowledgeCoverage),
+      reason: asMetricString(payload.fallbackReason),
+      count: asMetricCount(payload.selectedDocuments),
+    });
+    return;
+  }
+
+  if (input.kind === 'workflow_plan') {
+    recordAutopilotDecisionMetrics({
+      kind: 'workflow',
+      status,
+      durationMs: input.durationMs,
+      workspaceId: input.run?.workspaceId,
+      intent: asMetricString(payload.intent),
+      workflowId: asMetricString(payload.workflowId),
+      decision: asMetricString(payload.executionMode),
+      reason: asMetricString(payload.reason),
+      count: asMetricCount(payload.missingSlots),
+    });
+    return;
+  }
+
+  if (input.kind === 'tool_planner') {
+    recordAutopilotDecisionMetrics({
+      kind: 'tool_planner',
+      status,
+      durationMs: input.durationMs,
+      workspaceId: input.run?.workspaceId,
+      intent: asMetricString(payload.intent),
+      workflowId: asMetricString(payload.workflowId),
+      decision: asMetricString(extractNestedRecord(payload.promiseValidation)?.repairReason) ||
+        (asMetricCount(payload.rejectedActions) ? 'rejected_actions' : 'accepted'),
+      count: asMetricCount(payload.rejectedActions),
+    });
+    return;
+  }
+
+  if (input.kind === 'response_validator') {
+    recordAutopilotDecisionMetrics({
+      kind: 'response_validator',
+      status,
+      durationMs: input.durationMs,
+      workspaceId: input.run?.workspaceId,
+      intent: asMetricString(payload.intent),
+      workflowId: asMetricString(payload.workflowId),
+      decision: asMetricString(payload.decision),
+      reason: Array.isArray(payload.reasons) ? payload.reasons.join(',') : asMetricString(payload.reasons),
+    });
+  }
 }
 
 function shouldSuppressDbError(error: unknown) {
@@ -141,16 +271,24 @@ export async function recordOrchestratorEvent(input: RecordEventInput) {
       JSON.stringify(sanitizeJson(input.payload)),
     ]
   );
+
+  try {
+    recordDecisionMetric(input);
+  } catch (error) {
+    console.error('[ORCHESTRATOR_RUNTIME] Failed to record decision metric:', error);
+  }
 }
 
 export async function finishOrchestratorRun(input: FinishRunInput) {
   if (!input.run) return;
 
   const totalMs = Date.now() - input.run.startedAt;
+  const metadata = sanitizeJson(input.metadata);
   const timings = {
     ...(input.timings || {}),
     total_ms: totalMs,
   };
+  const metricDimensions = extractRunMetricDimensions(metadata);
 
   await safeQuery(
     `UPDATE orchestrator_runs
@@ -171,7 +309,7 @@ export async function finishOrchestratorRun(input: FinishRunInput) {
       input.confidenceLevel ?? null,
       input.confidenceScore ?? null,
       JSON.stringify(timings),
-      JSON.stringify(sanitizeJson(input.metadata)),
+      JSON.stringify(metadata),
       input.error ?? null,
     ]
   );
@@ -180,7 +318,9 @@ export async function finishOrchestratorRun(input: FinishRunInput) {
     status: input.status,
     durationMs: totalMs,
     workspaceId: input.run.workspaceId,
-    hasDeterministicRouting: Boolean(input.metadata?.deterministicRouting),
+    hasDeterministicRouting: Boolean(metadata.deterministicRouting),
+    intent: input.intent ?? null,
+    ...metricDimensions,
   });
 }
 

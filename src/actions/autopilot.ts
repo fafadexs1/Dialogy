@@ -4,7 +4,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { AutopilotConfig, NexusFlowInstance, Action, AutopilotUsageLog, KnowledgeBaseDocument, Workspace } from '@/lib/types';
+import type {
+    AutopilotConfig,
+    AutopilotConfigDraft,
+    AutopilotConfigDraftSnapshot,
+    AutopilotConfigVersionSummary,
+    NexusFlowInstance,
+    Action,
+    AutopilotUsageLog,
+    KnowledgeBaseDocument,
+    Workspace,
+} from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
@@ -22,8 +32,255 @@ async function isWorkspaceMember(userId: string, workspaceId: string): Promise<b
 async function ensureAutopilotToolColumns(): Promise<void> {
     await db.query(`
         ALTER TABLE IF EXISTS autopilot_configs
-        ADD COLUMN IF NOT EXISTS enabled_tool_names jsonb
+        ADD COLUMN IF NOT EXISTS enabled_tool_names jsonb,
+        ADD COLUMN IF NOT EXISTS transcription_model text
     `);
+}
+
+async function ensureAutopilotVersioningTables(): Promise<void> {
+    await ensureAutopilotToolColumns();
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS autopilot_config_drafts (
+            config_id uuid PRIMARY KEY,
+            workspace_id uuid NOT NULL,
+            user_id uuid NOT NULL,
+            snapshot jsonb NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+            updated_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+            CONSTRAINT autopilot_config_drafts_config_id_fkey
+                FOREIGN KEY (config_id) REFERENCES autopilot_configs(id) ON DELETE CASCADE,
+            CONSTRAINT autopilot_config_drafts_workspace_id_fkey
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+            CONSTRAINT autopilot_config_drafts_user_id_fkey
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_autopilot_config_drafts_workspace
+            ON autopilot_config_drafts(workspace_id);
+
+        CREATE TABLE IF NOT EXISTS autopilot_config_versions (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            config_id uuid NOT NULL,
+            workspace_id uuid NOT NULL,
+            user_id uuid,
+            version_number int NOT NULL,
+            label text,
+            snapshot jsonb NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
+            CONSTRAINT autopilot_config_versions_config_id_fkey
+                FOREIGN KEY (config_id) REFERENCES autopilot_configs(id) ON DELETE CASCADE,
+            CONSTRAINT autopilot_config_versions_workspace_id_fkey
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+            CONSTRAINT autopilot_config_versions_user_id_fkey
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+            CONSTRAINT autopilot_config_versions_config_number_key
+                UNIQUE (config_id, version_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_autopilot_config_versions_config_created
+            ON autopilot_config_versions(config_id, version_number DESC);
+    `);
+}
+
+function parseKnowledgeBaseDocuments(raw: unknown): KnowledgeBaseDocument[] {
+    if (!raw) return [];
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function normalizeEnabledToolNames(raw: unknown): string[] {
+    const parsed = typeof raw === 'string'
+        ? (() => {
+            try {
+                return JSON.parse(raw);
+            } catch {
+                return [];
+            }
+        })()
+        : raw;
+
+    return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+}
+
+function readFormBoolean(formData: FormData, field: string, fallback = false): boolean {
+    if (!formData.has(field)) return fallback;
+    const value = formData.get(field);
+    const normalized = typeof value === 'string' ? value : '';
+    return normalized === 'true' || normalized === 'on' || normalized === '1';
+}
+
+function buildSnapshotFromConfigRow(row: any): AutopilotConfigDraftSnapshot {
+    return {
+        name: row.name || 'Meu agente de IA',
+        gemini_api_key: row.gemini_api_key || null,
+        ai_model: row.ai_model || null,
+        transcription_model: row.transcription_model || null,
+        knowledge_base: row.knowledge_base || null,
+        knowledge_base_documents: parseKnowledgeBaseDocuments(row.knowledge_base_documents),
+        is_active: Boolean(row.is_active),
+        is_private: Boolean(row.is_private),
+        default_fallback_reply: row.default_fallback_reply || null,
+        escalation_policy: row.escalation_policy || null,
+        closing_policy: row.closing_policy || null,
+        enabled_tool_names: normalizeEnabledToolNames(row.enabled_tool_names),
+    };
+}
+
+function normalizeDraftSnapshot(
+    raw: unknown,
+    fallback: AutopilotConfigDraftSnapshot,
+): AutopilotConfigDraftSnapshot {
+    const snapshot = raw && typeof raw === 'object' ? raw as Partial<AutopilotConfigDraftSnapshot> : {};
+    const hasOwn = (key: keyof AutopilotConfigDraftSnapshot) =>
+        Object.prototype.hasOwnProperty.call(snapshot, key);
+
+    return {
+        name: typeof snapshot.name === 'string' && snapshot.name.trim().length > 0
+            ? snapshot.name
+            : fallback.name,
+        gemini_api_key: hasOwn('gemini_api_key')
+            ? (typeof snapshot.gemini_api_key === 'string' && snapshot.gemini_api_key.length > 0 ? snapshot.gemini_api_key : null)
+            : fallback.gemini_api_key,
+        ai_model: hasOwn('ai_model')
+            ? (typeof snapshot.ai_model === 'string' && snapshot.ai_model.length > 0 ? snapshot.ai_model : null)
+            : fallback.ai_model,
+        transcription_model: hasOwn('transcription_model')
+            ? (typeof snapshot.transcription_model === 'string' && snapshot.transcription_model.length > 0 ? snapshot.transcription_model : null)
+            : fallback.transcription_model || null,
+        knowledge_base: hasOwn('knowledge_base')
+            ? (typeof snapshot.knowledge_base === 'string' && snapshot.knowledge_base.length > 0 ? snapshot.knowledge_base : null)
+            : fallback.knowledge_base,
+        knowledge_base_documents: Array.isArray(snapshot.knowledge_base_documents)
+            ? snapshot.knowledge_base_documents
+            : fallback.knowledge_base_documents,
+        is_active: hasOwn('is_active') ? Boolean(snapshot.is_active) : fallback.is_active,
+        is_private: hasOwn('is_private') ? Boolean(snapshot.is_private) : fallback.is_private,
+        default_fallback_reply: hasOwn('default_fallback_reply')
+            ? (typeof snapshot.default_fallback_reply === 'string' && snapshot.default_fallback_reply.length > 0 ? snapshot.default_fallback_reply : null)
+            : fallback.default_fallback_reply,
+        escalation_policy: hasOwn('escalation_policy')
+            ? (typeof snapshot.escalation_policy === 'string' && snapshot.escalation_policy.length > 0 ? snapshot.escalation_policy : null)
+            : fallback.escalation_policy,
+        closing_policy: hasOwn('closing_policy')
+            ? (typeof snapshot.closing_policy === 'string' && snapshot.closing_policy.length > 0 ? snapshot.closing_policy : null)
+            : fallback.closing_policy,
+        enabled_tool_names: Array.isArray(snapshot.enabled_tool_names)
+            ? normalizeEnabledToolNames(snapshot.enabled_tool_names)
+            : fallback.enabled_tool_names,
+    };
+}
+
+async function buildSnapshotFromFormData(
+    formData: FormData,
+    fallback: AutopilotConfigDraftSnapshot,
+): Promise<AutopilotConfigDraftSnapshot> {
+    const requestedModel = formData.get('aiModel')?.toString() || fallback.ai_model || '';
+    if (requestedModel && !(await isAllowedAutopilotModel(requestedModel))) {
+        throw new Error('Modelo de IA nao esta habilitado no catalogo global.');
+    }
+
+    let documents = fallback.knowledge_base_documents;
+    if (formData.has('knowledgeBaseDocuments')) {
+        const parsedDocs = parseKnowledgeBaseDocuments(formData.get('knowledgeBaseDocuments')?.toString() || '[]');
+        documents = parsedDocs;
+    }
+
+    return {
+        name: formData.get('agentName')?.toString() || fallback.name || 'Meu agente de IA',
+        gemini_api_key: formData.has('geminiApiKey')
+            ? (formData.get('geminiApiKey')?.toString() || null)
+            : fallback.gemini_api_key,
+        ai_model: requestedModel || null,
+        transcription_model: formData.has('transcriptionModel')
+            ? (formData.get('transcriptionModel')?.toString() || null)
+            : fallback.transcription_model || null,
+        knowledge_base: formData.has('knowledgeBase')
+            ? (formData.get('knowledgeBase')?.toString() || null)
+            : fallback.knowledge_base,
+        knowledge_base_documents: documents,
+        is_active: readFormBoolean(formData, 'isActive', fallback.is_active),
+        is_private: readFormBoolean(formData, 'isPrivate', fallback.is_private),
+        default_fallback_reply: formData.has('defaultFallbackReply')
+            ? (formData.get('defaultFallbackReply')?.toString() || null)
+            : fallback.default_fallback_reply,
+        escalation_policy: formData.has('escalationPolicy')
+            ? (formData.get('escalationPolicy')?.toString() || null)
+            : fallback.escalation_policy,
+        closing_policy: formData.has('closingPolicy')
+            ? (formData.get('closingPolicy')?.toString() || null)
+            : fallback.closing_policy,
+        enabled_tool_names: formData.has('enabledToolNames')
+            ? normalizeEnabledToolNames(formData.get('enabledToolNames')?.toString() || '[]')
+            : fallback.enabled_tool_names,
+    };
+}
+
+async function reindexChangedKnowledgeDocuments({
+    workspaceId,
+    configId,
+    previousDocs,
+    nextDocs,
+}: {
+    workspaceId: string;
+    configId: string;
+    previousDocs: KnowledgeBaseDocument[];
+    nextDocs: KnowledgeBaseDocument[];
+}): Promise<void> {
+    const previousById = new Map(previousDocs.map((doc) => [doc.id, doc]));
+    const nextById = new Map(nextDocs.map((doc) => [doc.id, doc]));
+
+    const removedDocs = previousDocs.filter((doc) => !nextById.has(doc.id));
+    const changedDocs = nextDocs.filter((doc) => {
+        const previous = previousById.get(doc.id);
+        return !previous || previous.name !== doc.name || previous.content !== doc.content;
+    });
+
+    await Promise.all(
+        removedDocs.map((doc) =>
+            VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+                console.error('[RAG] Failed to remove document embeddings:', ragError);
+            })
+        )
+    );
+
+    for (const doc of changedDocs) {
+        const content = (doc.content || '').trim();
+        if (!content) {
+            await VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+                console.error('[RAG] Failed to clear empty document embeddings:', ragError);
+            });
+            continue;
+        }
+
+        try {
+            await VectorStore.deleteDocumentEmbeddings(doc.id);
+            if (shouldEnqueueJob('ai_document_ingest')) {
+                await enqueueAiDocumentIngest({
+                    workspaceId,
+                    autopilotConfigId: configId,
+                    documentId: doc.id,
+                    documentName: doc.name || 'Documento',
+                    content,
+                });
+            } else {
+                await ingestKnowledgeBaseDocument({
+                    workspaceId,
+                    autopilotConfigId: configId,
+                    documentId: doc.id,
+                    documentName: doc.name || 'Documento',
+                    content,
+                });
+            }
+        } catch (ragError) {
+            console.error('[RAG] Failed to reindex knowledge document:', ragError);
+        }
+    }
 }
 
 export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<{
@@ -118,15 +375,21 @@ export async function getAgentToolCatalogAction(workspaceId: string) {
         description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
         class: tool.annotations?.readOnlyHint ? 'read_only' as const : 'retrieval' as const,
         riskLevel: tool.annotations?.destructiveHint ? 'high' as const : 'medium' as const,
+        sideEffect: tool.annotations?.destructiveHint ? 'high' as const : tool.annotations?.readOnlyHint ? 'none' as const : 'medium' as const,
         idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
         timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
         maxAttempts: 1,
         requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
+        customerVisible: true,
+        allowedIntents: [],
+        requiredSlots: [],
+        fallbackAction: 'handoff' as const,
         source: 'mcp' as const,
         enabledByDefault: false,
         serverId: tool.serverId,
         serverName: tool.serverName,
         inputSchema: tool.inputSchema || null,
+        outputSchema: null,
     }));
 
     return { tools: [...listAgentToolCatalogItems(), ...mcpCatalogItems] };
@@ -137,6 +400,8 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
     config: AutopilotConfig | null,
     rules: NexusFlowInstance[] | null,
     agents: AutopilotConfig[] | null,
+    draft?: AutopilotConfigDraft | null,
+    versions?: AutopilotConfigVersionSummary[],
     workspace: Workspace | null,
     workspaceDefaultAiModel?: string | null,
     workspaceDefaultTranscriptionModel?: string | null,
@@ -157,6 +422,8 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
     }
 
     try {
+        await ensureAutopilotVersioningTables();
+
         // Fetch configs for the workspace
         const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1 ORDER BY created_at', [workspaceId]);
 
@@ -169,16 +436,10 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         }
 
         const agents = configRes.rows.map((row: any) => {
-            const documentsRaw = row.knowledge_base_documents;
-            const normalizedDocs: KnowledgeBaseDocument[] =
-                typeof documentsRaw === 'string'
-                    ? JSON.parse(documentsRaw)
-                    : Array.isArray(documentsRaw)
-                        ? documentsRaw
-                        : [];
             return {
                 ...row,
-                knowledge_base_documents: normalizedDocs,
+                knowledge_base_documents: parseKnowledgeBaseDocuments(row.knowledge_base_documents),
+                enabled_tool_names: normalizeEnabledToolNames(row.enabled_tool_names),
                 is_active: Boolean(row.is_active),
                 is_primary: Boolean(row.is_primary),
                 is_private: Boolean(row.is_private),
@@ -204,6 +465,34 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             action: typeof r.action === 'string' ? JSON.parse(r.action) : r.action
         }));
 
+        const draftRes = await db.query(
+            `SELECT config_id, workspace_id, user_id, snapshot, created_at, updated_at
+             FROM autopilot_config_drafts
+             WHERE config_id = $1
+             LIMIT 1`,
+            [selectedConfig.id]
+        );
+        const selectedSnapshot = buildSnapshotFromConfigRow(selectedConfig);
+        const draft = draftRes.rows[0]
+            ? {
+                ...draftRes.rows[0],
+                snapshot: normalizeDraftSnapshot(draftRes.rows[0].snapshot, selectedSnapshot),
+            } as AutopilotConfigDraft
+            : null;
+
+        const versionsRes = await db.query(
+            `SELECT id, config_id, workspace_id, user_id, version_number, label, created_at
+             FROM autopilot_config_versions
+             WHERE config_id = $1
+             ORDER BY version_number DESC
+             LIMIT 12`,
+            [selectedConfig.id]
+        );
+        const versions = versionsRes.rows.map((row) => ({
+            ...row,
+            version_number: Number(row.version_number),
+        })) as AutopilotConfigVersionSummary[];
+
         // Fetch Gemini Integration Config
         const integrationRes = await db.query(`
             SELECT config, is_active 
@@ -226,6 +515,8 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             config: selectedConfig,
             rules,
             agents,
+            draft,
+            versions,
             workspace,
             workspaceDefaultAiModel: aiModelFromIntegration,
             workspaceDefaultTranscriptionModel: transcriptionModelFromIntegration,
@@ -453,6 +744,231 @@ export async function saveAutopilotConfig(
     } catch (error) {
         console.error('[SAVE_AUTOPILOT_CONFIG] Erro ao salvar configurações:', error);
         return { success: false, error: "Falha ao salvar as configurações no banco de dados." };
+    }
+}
+
+export async function saveAutopilotDraft(
+    prevState: any,
+    formData: FormData
+): Promise<{ success: boolean; error?: string; updatedAt?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { success: false, error: 'Usuario nao autenticado.' };
+    }
+
+    const workspaceId = formData.get('workspaceId') as string;
+    const configId = formData.get('configId') as string;
+    if (!workspaceId || !configId) {
+        return { success: false, error: 'Workspace e agente sao obrigatorios.' };
+    }
+
+    if (!await isWorkspaceMember(user.id, workspaceId)) {
+        return { success: false, error: 'Acesso nao autorizado.' };
+    }
+
+    try {
+        await ensureAutopilotVersioningTables();
+
+        const configRes = await db.query(
+            'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND id = $2 LIMIT 1',
+            [workspaceId, configId]
+        );
+        if (configRes.rowCount === 0) {
+            return { success: false, error: 'Agente nao encontrado.' };
+        }
+
+        const fallback = buildSnapshotFromConfigRow(configRes.rows[0]);
+        const snapshot = await buildSnapshotFromFormData(formData, fallback);
+        const saveRes = await db.query(
+            `INSERT INTO autopilot_config_drafts (config_id, workspace_id, user_id, snapshot, updated_at)
+             VALUES ($1, $2, $3, $4, timezone('utc', now()))
+             ON CONFLICT (config_id)
+             DO UPDATE SET
+                workspace_id = EXCLUDED.workspace_id,
+                user_id = EXCLUDED.user_id,
+                snapshot = EXCLUDED.snapshot,
+                updated_at = timezone('utc', now())
+             RETURNING updated_at`,
+            [configId, workspaceId, user.id, JSON.stringify(snapshot)]
+        );
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${configId}`);
+        return { success: true, updatedAt: saveRes.rows[0]?.updated_at };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Falha ao salvar rascunho.';
+        console.error('[SAVE_AUTOPILOT_DRAFT] Erro ao salvar rascunho:', error);
+        return { success: false, error: message };
+    }
+}
+
+export async function discardAutopilotDraft(configId: string): Promise<{ success: boolean; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { success: false, error: 'Usuario nao autenticado.' };
+    }
+
+    try {
+        await ensureAutopilotVersioningTables();
+
+        const configRes = await db.query(
+            'SELECT workspace_id FROM autopilot_configs WHERE id = $1 LIMIT 1',
+            [configId]
+        );
+        if (configRes.rowCount === 0) {
+            return { success: false, error: 'Agente nao encontrado.' };
+        }
+
+        const workspaceId = configRes.rows[0].workspace_id;
+        if (!await isWorkspaceMember(user.id, workspaceId)) {
+            return { success: false, error: 'Acesso nao autorizado.' };
+        }
+
+        await db.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${configId}`);
+        return { success: true };
+    } catch (error) {
+        console.error('[DISCARD_AUTOPILOT_DRAFT] Erro ao descartar rascunho:', error);
+        return { success: false, error: 'Falha ao descartar rascunho.' };
+    }
+}
+
+export async function publishAutopilotDraft(configId: string): Promise<{
+    success: boolean;
+    error?: string;
+    versionNumber?: number;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { success: false, error: 'Usuario nao autenticado.' };
+    }
+
+    const client = await db.connect();
+    let previousDocs: KnowledgeBaseDocument[] = [];
+    let nextDocs: KnowledgeBaseDocument[] = [];
+    let versionNumber = 0;
+
+    try {
+        await ensureAutopilotVersioningTables();
+        await client.query('BEGIN');
+
+        const configRes = await client.query(
+            'SELECT * FROM autopilot_configs WHERE id = $1 FOR UPDATE',
+            [configId]
+        );
+        if (configRes.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Agente nao encontrado.' };
+        }
+
+        const configRow = configRes.rows[0];
+        const currentWorkspaceId = String(configRow.workspace_id);
+        if (!await isWorkspaceMember(user.id, currentWorkspaceId)) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Acesso nao autorizado.' };
+        }
+
+        const draftRes = await client.query(
+            'SELECT snapshot FROM autopilot_config_drafts WHERE config_id = $1 LIMIT 1',
+            [configId]
+        );
+        if (draftRes.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Nenhum rascunho para publicar.' };
+        }
+
+        const fallback = buildSnapshotFromConfigRow(configRow);
+        const snapshot = normalizeDraftSnapshot(draftRes.rows[0].snapshot, fallback);
+        if (snapshot.ai_model && !(await isAllowedAutopilotModel(snapshot.ai_model))) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global.' };
+        }
+
+        previousDocs = fallback.knowledge_base_documents;
+        nextDocs = snapshot.knowledge_base_documents;
+
+        const nextVersionRes = await client.query(
+            'SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version FROM autopilot_config_versions WHERE config_id = $1',
+            [configId]
+        );
+        versionNumber = Number(nextVersionRes.rows[0]?.next_version || 1);
+
+        await client.query(
+            `UPDATE autopilot_configs
+             SET
+                name = $3,
+                gemini_api_key = $4,
+                ai_model = $5,
+                transcription_model = $6,
+                knowledge_base = $7,
+                knowledge_base_documents = $8,
+                is_active = $9,
+                is_private = $10,
+                default_fallback_reply = $11,
+                escalation_policy = $12,
+                closing_policy = $13,
+                enabled_tool_names = $14,
+                updated_at = NOW()
+             WHERE workspace_id = $1 AND id = $2`,
+            [
+                currentWorkspaceId,
+                configId,
+                snapshot.name,
+                snapshot.gemini_api_key,
+                snapshot.ai_model,
+                snapshot.transcription_model || null,
+                snapshot.knowledge_base,
+                JSON.stringify(snapshot.knowledge_base_documents),
+                snapshot.is_active,
+                snapshot.is_private,
+                snapshot.default_fallback_reply,
+                snapshot.escalation_policy,
+                snapshot.closing_policy,
+                JSON.stringify(snapshot.enabled_tool_names),
+            ]
+        );
+
+        await client.query(
+            `INSERT INTO autopilot_config_versions
+                (config_id, workspace_id, user_id, version_number, label, snapshot)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+                configId,
+                currentWorkspaceId,
+                user.id,
+                versionNumber,
+                `Publicacao v${versionNumber}`,
+                JSON.stringify(snapshot),
+            ]
+        );
+
+        await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
+        await client.query('COMMIT');
+
+        await reindexChangedKnowledgeDocuments({
+            workspaceId: currentWorkspaceId,
+            configId,
+            previousDocs,
+            nextDocs,
+        });
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${configId}`);
+        return { success: true, versionNumber };
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        console.error('[PUBLISH_AUTOPILOT_DRAFT] Erro ao publicar rascunho:', error);
+        return { success: false, error: 'Falha ao publicar rascunho.' };
+    } finally {
+        client.release();
     }
 }
 

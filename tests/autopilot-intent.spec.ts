@@ -1,68 +1,105 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  findOfficialKnowledgeAnswer,
   findOfficialPlanCatalog,
   isInternetPlanInquiry,
   resolveAutopilotIntent,
 } from '@/services/autopilot-intent';
 import type { KnowledgeBaseDocument } from '@/lib/types';
 
-const planDocument: KnowledgeBaseDocument = {
-  id: 'plans-1',
-  name: 'Preço dos Planos de Internet',
+const catalogDocument: KnowledgeBaseDocument = {
+  id: 'catalog-1',
+  name: 'Catalogo de servicos',
+  category: 'product_or_service_catalog',
+  priority: 10,
   content: [
     'Nao mude nada na lista. Mande dessa forma para o cliente:',
     '',
-    '🚀 *CONHEÇA NOSSOS PLANOS DE INTERNET FIBRA*',
+    '*Catalogo oficial*',
     '',
-    '💡 *PLANOS SOMENTE INTERNET*',
-    '',
-    '🔹 *100 MEGA*',
-    '💰 R$79,99/mês',
-    '',
-    '🔹 *300 MEGA*',
-    '💰 R$89,90/mês',
-    '',
-    '🔹 *500 MEGA*',
-    '💰 R$99,90/mês',
+    'Servico Essencial: R$79,90/mensal',
+    'Servico Pro: R$129,90/mensal',
   ].join('\n'),
 };
 
-describe('autopilot intent resolver', () => {
-  it('detects informal customer requests for plan prices', () => {
-    expect(isInternetPlanInquiry('Quero conhecer sim. Me mostra os valor')).toBe(true);
-    expect(isInternetPlanInquiry('me manda todos')).toBe(true);
-  });
-
-  it('uses recent plan offer context for affirmative follow-ups', () => {
-    const history = 'Atendente: Deseja conhecer nossos planos de internet?';
-
-    expect(isInternetPlanInquiry('quero sim', history)).toBe(true);
-  });
-
-  it('selects price/plan documents as the official plan catalog', () => {
-    const promoDocument: KnowledgeBaseDocument = {
-      id: 'promo-1',
-      name: 'Plano Promocional',
-      content: 'PROMOÇÃO ESPECIAL 1000 MEGA R$99,90/mês',
-    };
-
-    const catalog = findOfficialPlanCatalog([promoDocument, planDocument]);
-
-    expect(catalog?.document.id).toBe('plans-1');
-    expect(catalog?.content).toContain('🚀 *CONHEÇA NOSSOS PLANOS');
-    expect(catalog?.content).not.toContain('Nao mude nada');
-  });
-
-  it('returns a structured catalog intent with source document metadata', () => {
+describe('autopilot universal intent resolver', () => {
+  it('detects legacy ISP plan inquiries without making telecom the core intent', () => {
     const resolution = resolveAutopilotIntent({
-      customerMessage: 'Me mostra os valor',
-      knowledgeDocuments: [planDocument],
+      customerMessage: 'Me mostra os planos e valores',
+      knowledgeDocuments: [catalogDocument],
     });
 
-    expect(resolution.intent).toBe('catalogo_planos');
-    expect(resolution.confidence).toBeGreaterThan(0.9);
-    expect(resolution.sourceDocumentName).toBe('Preço dos Planos de Internet');
-    expect(resolution.officialResponse).toContain('*500 MEGA*');
+    expect(isInternetPlanInquiry('Me mostra os planos de internet')).toBe(true);
+    expect(resolution.intent).toBe('catalog_request');
+    expect(resolution.workflowId).toBe('universal.catalog_request');
+    expect(resolution.officialResponse).toContain('Servico Pro');
+  });
+
+  it('detects catalog requests for non-telecom niches', () => {
+    const menuDocument: KnowledgeBaseDocument = {
+      id: 'menu-1',
+      name: 'Cardapio oficial',
+      category: 'menu',
+      canonicalAnswer: '*Cardapio*\nPizza media: R$49,90\nCombo familia: R$89,90',
+      content: 'Cardapio atualizado do restaurante.',
+    };
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Me manda o cardapio por favor',
+      knowledgeDocuments: [menuDocument],
+    });
+
+    expect(resolution.intent).toBe('catalog_request');
+    expect(resolution.officialResponse).toContain('Pizza media');
+    expect(resolution.shouldUseLlm).toBe(false);
+  });
+
+  it('routes billing, scheduling and human requests deterministically', () => {
+    expect(resolveAutopilotIntent({ customerMessage: 'Preciso da segunda via do boleto' }).intent).toBe('billing_or_payment');
+    expect(resolveAutopilotIntent({ customerMessage: 'Quero agendar uma consulta amanha' }).intent).toBe('scheduling_request');
+
+    const handoff = resolveAutopilotIntent({ customerMessage: 'Quero falar com um atendente humano' });
+    expect(handoff.intent).toBe('human_handoff');
+    expect(handoff.shouldTransfer).toBe(true);
+  });
+
+  it('uses recent catalog offer context for affirmative follow-ups', () => {
+    const history = 'Atendente: Deseja conhecer nossas opcoes de servicos?';
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'quero sim',
+      chatHistory: history,
+      knowledgeDocuments: [catalogDocument],
+    });
+
+    expect(resolution.intent).toBe('catalog_request');
+    expect(resolution.confidence).toBeGreaterThan(0.8);
+  });
+
+  it('does not use expired official documents', () => {
+    const expiredDocument: KnowledgeBaseDocument = {
+      id: 'expired-1',
+      name: 'Promocao antiga',
+      category: 'offers',
+      validUntil: '2020-01-01',
+      canonicalAnswer: 'Oferta antiga por R$1,00',
+      content: 'Oferta expirada.',
+    };
+
+    const official = findOfficialKnowledgeAnswer({
+      documents: [expiredDocument],
+      intent: 'promotion_request',
+    });
+
+    expect(official).toBeNull();
+  });
+
+  it('keeps compatibility helper for official plan catalogs', () => {
+    const catalog = findOfficialPlanCatalog([catalogDocument]);
+
+    expect(catalog?.document.id).toBe('catalog-1');
+    expect(catalog?.content).toContain('*Catalogo oficial*');
+    expect(catalog?.content).not.toContain('Nao mude nada');
   });
 });

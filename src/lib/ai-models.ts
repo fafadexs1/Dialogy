@@ -20,8 +20,8 @@ export const DEFAULT_AI_MODEL_CATALOG: AiModelCatalogEntry[] = [
     enabled: true,
   },
   {
-    id: 'googleai/gemini-2.5-flash-lite',
-    label: 'Gemini 2.5 Flash Lite',
+    id: 'googleai/gemini-2.0-flash-lite',
+    label: 'Gemini 2.0 Flash Lite',
     provider: 'googleai',
     description: 'Mais barato e rapido para alto volume.',
     enabled: true,
@@ -38,7 +38,7 @@ export const DEFAULT_AI_MODEL_CATALOG: AiModelCatalogEntry[] = [
     label: 'Gemini 3 Flash',
     provider: 'googleai',
     description: 'Preview experimental.',
-    enabled: true,
+    enabled: false,
   },
 ];
 
@@ -111,8 +111,12 @@ export function serializeAiModelCatalog(catalog: AiModelCatalogEntry[]): string 
   return JSON.stringify(normalized, null, 2);
 }
 
+export function isPreviewAiModel(id: string): boolean {
+  return /\bpreview\b|\bexperimental\b|\balpha\b|\bbeta\b/i.test(id);
+}
+
 export function isAutopilotRuntimeSupportedModel(entry: AiModelCatalogEntry): boolean {
-  return entry.provider === 'googleai' && entry.id.startsWith('googleai/');
+  return entry.provider === 'googleai' && entry.id.startsWith('googleai/') && !isPreviewAiModel(entry.id);
 }
 
 export function getEnabledAiModels(catalog: AiModelCatalogEntry[]): AiModelCatalogEntry[] {
@@ -121,7 +125,9 @@ export function getEnabledAiModels(catalog: AiModelCatalogEntry[]): AiModelCatal
 
 export function getAutopilotSelectableModels(catalog: AiModelCatalogEntry[]): AiModelCatalogEntry[] {
   const supported = getEnabledAiModels(catalog).filter(isAutopilotRuntimeSupportedModel);
-  return supported.length > 0 ? supported : DEFAULT_AI_MODEL_CATALOG;
+  return supported.length > 0
+    ? supported
+    : DEFAULT_AI_MODEL_CATALOG.filter((entry) => entry.enabled && isAutopilotRuntimeSupportedModel(entry));
 }
 
 export function getAiModelById(

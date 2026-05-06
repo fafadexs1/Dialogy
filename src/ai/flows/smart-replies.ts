@@ -13,6 +13,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
 
@@ -58,14 +59,14 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
   // Use a default config if none is found to avoid breaking smart replies
   const config = configRes.rows.length > 0
     ? configRes.rows[0]
-    : { id: 'default', ai_model: 'googleai/gemini-2.0-flash' };
+    : { id: 'default', ai_model: DEFAULT_AUTOPILOT_MODEL };
 
   // Check if we have a custom Gemini API Key
   if (config.gemini_api_key) {
     try {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(config.gemini_api_key);
-      const model = genAI.getGenerativeModel({ model: config.ai_model || 'gemini-2.0-flash' });
+      const model = genAI.getGenerativeModel({ model: config.ai_model || DEFAULT_AUTOPILOT_MODEL.replace(/^googleai\//, '') });
 
       const prompt = `You are an AI assistant helping support agents by suggesting quick replies to customer messages.
       
@@ -101,7 +102,7 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
           await logAutopilotUsage({
             configId: config.id,
             flowName: 'generateSmartRepliesFlow (Custom Key)',
-            modelName: config.ai_model || 'gemini-2.0-flash',
+            modelName: config.ai_model || DEFAULT_AUTOPILOT_MODEL,
             inputTokens: usageMetadata.promptTokenCount,
             outputTokens: usageMetadata.candidatesTokenCount,
             totalTokens: usageMetadata.totalTokenCount,
@@ -148,7 +149,7 @@ const generateSmartRepliesFlow = ai.defineFlow(
     outputSchema: SmartRepliesOutputSchema,
   },
   async (input) => {
-    const model = input.config?.ai_model || 'googleai/gemini-2.0-flash';
+    const model = input.config?.ai_model || DEFAULT_AUTOPILOT_MODEL;
     // The prompt only receives the fields defined in its own input schema.
     const promptInput = SmartRepliesInputSchema.parse(input);
     const result = await prompt(promptInput, { model });

@@ -65,6 +65,7 @@ import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, Auto
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
@@ -909,7 +910,7 @@ export default function ChatPanel({
                 knowledgeBase: autopilotConfig?.knowledge_base || '',
                 knowledgeBaseDocuments: autopilotConfig?.knowledge_base_documents || [],
                 fallbackReply: autopilotConfig?.default_fallback_reply || '',
-                model: autopilotConfig?.ai_model || 'googleai/gemini-2.0-flash',
+                model: autopilotConfig?.ai_model || DEFAULT_AUTOPILOT_MODEL,
                 contact: sanitizedContact
             });
 
@@ -1851,7 +1852,7 @@ export default function ChatPanel({
         return msgs.slice().reverse().find(m => !m.from_me && m.type !== 'system');
     }, [chat?.id, messagesByChat]);
 
-    const aiTypingDisplayName = autopilotConfig?.name || 'IA Dialogy';
+    const aiTypingDisplayName = chat?.assignedSystemAgent?.name || autopilotAgents.find(a => a.id === chat?.autopilot_config_id)?.name || autopilotConfig?.name || 'IA Dialogy';
 
     if (!chat) {
         return (

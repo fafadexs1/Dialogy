@@ -13,14 +13,25 @@ import {
   ArrowLeft,
   ShieldCheck,
   Bot,
+  History,
 } from 'lucide-react';
 
-import type { AutopilotConfig, AutopilotUsageLog, KnowledgeBaseDocument, NexusFlowInstance, Workspace } from '@/lib/types';
+import type {
+  AutopilotConfig,
+  AutopilotConfigDraftSnapshot,
+  AutopilotConfigVersionSummary,
+  AutopilotUsageLog,
+  KnowledgeBaseDocument,
+  NexusFlowInstance,
+  Workspace,
+} from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import {
   getAutopilotConfig,
-  saveAutopilotConfig,
+  saveAutopilotDraft,
+  publishAutopilotDraft,
+  discardAutopilotDraft,
   deleteAutopilotRule,
   toggleAutopilotRule,
   getAutopilotUsageLogs,
@@ -44,8 +55,11 @@ import { AutopilotStats } from '@/components/autopilot/autopilot-stats';
 import { AutopilotKnowledge } from '@/components/autopilot/autopilot-knowledge';
 import { AutopilotRules } from '@/components/autopilot/autopilot-rules';
 import { AutopilotSettings } from '@/components/autopilot/autopilot-settings';
+import { AutopilotPlayground } from '@/components/autopilot/autopilot-playground';
+import { AutopilotReadiness } from '@/components/autopilot/autopilot-readiness';
 import { AutomationForm } from '@/components/autopilot/automation-form';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import type { AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
 
 type AgentToolCatalogItem = {
   name: string;
@@ -60,15 +74,75 @@ type AgentToolCatalogItem = {
   serverName?: string;
 };
 
-function buildDocumentSignature(documents: KnowledgeBaseDocument[] | null | undefined) {
-  return JSON.stringify(
-    (documents || []).map((doc) => ({
+function normalizeSnapshotForSignature(snapshot: AutopilotConfigDraftSnapshot) {
+  return {
+    ...snapshot,
+    name: snapshot.name || '',
+    gemini_api_key: snapshot.gemini_api_key || null,
+    ai_model: snapshot.ai_model || null,
+    transcription_model: snapshot.transcription_model || null,
+    knowledge_base: snapshot.knowledge_base || null,
+    knowledge_base_documents: (snapshot.knowledge_base_documents || []).map((doc) => ({
       id: doc.id,
       name: doc.name,
       content: doc.content,
       tokens: doc.tokens || 0,
-    }))
-  );
+    })),
+    default_fallback_reply: snapshot.default_fallback_reply || null,
+    escalation_policy: snapshot.escalation_policy || null,
+    closing_policy: snapshot.closing_policy || null,
+    enabled_tool_names: [...(snapshot.enabled_tool_names || [])].sort(),
+  };
+}
+
+function buildSnapshotSignature(snapshot: AutopilotConfigDraftSnapshot | null) {
+  return snapshot ? JSON.stringify(normalizeSnapshotForSignature(snapshot)) : '';
+}
+
+function buildSnapshotFromConfig(
+  config: AutopilotConfig,
+  defaultEnabledToolNames: string[],
+): AutopilotConfigDraftSnapshot {
+  return {
+    name: config.name || '',
+    gemini_api_key: config.gemini_api_key || null,
+    ai_model: config.ai_model || null,
+    transcription_model: config.transcription_model || null,
+    knowledge_base: config.knowledge_base || null,
+    knowledge_base_documents: config.knowledge_base_documents || [],
+    is_active: Boolean(config.is_active),
+    is_private: Boolean(config.is_private),
+    default_fallback_reply: config.default_fallback_reply || null,
+    escalation_policy: config.escalation_policy || null,
+    closing_policy: config.closing_policy || null,
+    enabled_tool_names: Array.isArray(config.enabled_tool_names)
+      ? config.enabled_tool_names
+      : defaultEnabledToolNames,
+  };
+}
+
+function normalizeLoadedSnapshot(
+  snapshot: AutopilotConfigDraftSnapshot,
+  fallback: AutopilotConfigDraftSnapshot,
+): AutopilotConfigDraftSnapshot {
+  return {
+    name: snapshot.name || fallback.name,
+    gemini_api_key: snapshot.gemini_api_key || null,
+    ai_model: snapshot.ai_model || fallback.ai_model,
+    transcription_model: snapshot.transcription_model || fallback.transcription_model || null,
+    knowledge_base: snapshot.knowledge_base || null,
+    knowledge_base_documents: Array.isArray(snapshot.knowledge_base_documents)
+      ? snapshot.knowledge_base_documents
+      : fallback.knowledge_base_documents,
+    is_active: Boolean(snapshot.is_active),
+    is_private: Boolean(snapshot.is_private),
+    default_fallback_reply: snapshot.default_fallback_reply || null,
+    escalation_policy: snapshot.escalation_policy || null,
+    closing_policy: snapshot.closing_policy || null,
+    enabled_tool_names: Array.isArray(snapshot.enabled_tool_names)
+      ? snapshot.enabled_tool_names
+      : fallback.enabled_tool_names,
+  };
 }
 
 export default function AutopilotDetailPage() {
@@ -101,11 +175,17 @@ export default function AutopilotDetailPage() {
   const [closingPolicy, setClosingPolicy] = useState('');
   const [enabledToolNames, setEnabledToolNames] = useState<string[]>([]);
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
+  const [loadedEditorSnapshot, setLoadedEditorSnapshot] = useState<AutopilotConfigDraftSnapshot | null>(null);
+  const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
+  const [versions, setVersions] = useState<AutopilotConfigVersionSummary[]>([]);
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isDiscardingDraft, setIsDiscardingDraft] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<NexusFlowInstance | null>(null);
+  const [lastPlaygroundTrace, setLastPlaygroundTrace] = useState<AutopilotPlaygroundTrace | null>(null);
 
   const estimateTokens = useCallback((content: string) => {
     const normalized = content?.trim() || '';
@@ -141,12 +221,24 @@ export default function AutopilotDetailPage() {
       }
 
       const nextCatalog = catalogData.models || [];
+      const nextToolCatalog = toolCatalogData.tools || [];
       const nextSelectableModels = getAutopilotSelectableModels(nextCatalog);
       const fallbackModel = nextSelectableModels[0]?.id || DEFAULT_AUTOPILOT_MODEL;
-      const savedModel = autopilotData.config.ai_model || null;
+      const defaultEnabledToolNames = nextToolCatalog
+        .filter((tool) => tool.enabledByDefault)
+        .map((tool) => tool.name);
+      const publishedSnapshot = buildSnapshotFromConfig(autopilotData.config, defaultEnabledToolNames);
+      const loadedSnapshot = autopilotData.draft?.snapshot
+        ? normalizeLoadedSnapshot(autopilotData.draft.snapshot, publishedSnapshot)
+        : publishedSnapshot;
+      const savedModel = loadedSnapshot.ai_model || null;
       const selectedModel = savedModel && nextSelectableModels.some((model) => model.id === savedModel)
         ? savedModel
         : fallbackModel;
+      const editorSnapshot = {
+        ...loadedSnapshot,
+        ai_model: selectedModel,
+      };
 
       setConfig(autopilotData.config);
       setInstances(autopilotData.rules || []);
@@ -155,24 +247,23 @@ export default function AutopilotDetailPage() {
       setWorkspaceDefaultAiModel(autopilotData.workspaceDefaultAiModel || null);
       setWorkspaceHasGeminiConfig(Boolean(autopilotData.workspaceHasGeminiConfig));
       setModelCatalog(nextCatalog);
-      setToolCatalog(toolCatalogData.tools || []);
+      setToolCatalog(nextToolCatalog);
+      setDraftUpdatedAt(autopilotData.draft?.updated_at || null);
+      setVersions(autopilotData.versions || []);
+      setLoadedEditorSnapshot(editorSnapshot);
 
-      setAgentName(autopilotData.config.name || '');
+      setAgentName(editorSnapshot.name || '');
       setAiModel(selectedModel);
-      setIsActive(Boolean(autopilotData.config.is_active));
-      setIsPrivate(Boolean(autopilotData.config.is_private));
+      setIsActive(Boolean(editorSnapshot.is_active));
+      setIsPrivate(Boolean(editorSnapshot.is_private));
       setIsPrimary(Boolean(autopilotData.config.is_primary));
-      setGeminiApiKey(autopilotData.config.gemini_api_key || '');
-      setKnowledgeBase(autopilotData.config.knowledge_base || '');
-      setDefaultFallbackReply(autopilotData.config.default_fallback_reply || '');
-      setEscalationPolicy(autopilotData.config.escalation_policy || '');
-      setClosingPolicy(autopilotData.config.closing_policy || '');
-      setEnabledToolNames(
-        Array.isArray(autopilotData.config.enabled_tool_names)
-          ? autopilotData.config.enabled_tool_names
-          : (toolCatalogData.tools || []).filter((tool) => tool.enabledByDefault).map((tool) => tool.name)
-      );
-      setKnowledgeDocuments(autopilotData.config.knowledge_base_documents || []);
+      setGeminiApiKey(editorSnapshot.gemini_api_key || '');
+      setKnowledgeBase(editorSnapshot.knowledge_base || '');
+      setDefaultFallbackReply(editorSnapshot.default_fallback_reply || '');
+      setEscalationPolicy(editorSnapshot.escalation_policy || '');
+      setClosingPolicy(editorSnapshot.closing_policy || '');
+      setEnabledToolNames(editorSnapshot.enabled_tool_names || []);
+      setKnowledgeDocuments(editorSnapshot.knowledge_base_documents || []);
 
       const logsData = await getAutopilotUsageLogs(autopilotData.config.id);
       setUsageLogs(logsData.logs || []);
@@ -187,85 +278,162 @@ export default function AutopilotDetailPage() {
     }
   }, [fetchData, user?.activeWorkspaceId, agentId]);
 
-  const documentSignature = useMemo(() => buildDocumentSignature(knowledgeDocuments), [knowledgeDocuments]);
-  const configDocumentSignature = useMemo(
-    () => buildDocumentSignature(config?.knowledge_base_documents),
-    [config?.knowledge_base_documents]
-  );
-
-  const savedModelValue = config?.ai_model && selectableModels.some((model) => model.id === config.ai_model)
-    ? config.ai_model
-    : selectableModels[0]?.id || DEFAULT_AUTOPILOT_MODEL;
-
-  const isDirty = useMemo(() => {
-    if (!config) return false;
-    const savedEnabledToolNames = Array.isArray(config.enabled_tool_names)
-      ? config.enabled_tool_names
-      : toolCatalog.filter((tool) => tool.enabledByDefault).map((tool) => tool.name);
-
-    return (
-      agentName !== (config.name || '') ||
-      aiModel !== savedModelValue ||
-      isActive !== Boolean(config.is_active) ||
-      isPrivate !== Boolean(config.is_private) ||
-      geminiApiKey !== (config.gemini_api_key || '') ||
-      knowledgeBase !== (config.knowledge_base || '') ||
-      defaultFallbackReply !== (config.default_fallback_reply || '') ||
-      escalationPolicy !== (config.escalation_policy || '') ||
-      closingPolicy !== (config.closing_policy || '') ||
-      JSON.stringify([...enabledToolNames].sort()) !== JSON.stringify([...savedEnabledToolNames].sort()) ||
-      documentSignature !== configDocumentSignature
-    );
-  }, [
+  const currentEditorSnapshot = useMemo<AutopilotConfigDraftSnapshot>(() => ({
+    name: agentName,
+    gemini_api_key: geminiApiKey || null,
+    ai_model: aiModel || null,
+    transcription_model: config?.transcription_model || null,
+    knowledge_base: knowledgeBase || null,
+    knowledge_base_documents: knowledgeDocuments,
+    is_active: isActive,
+    is_private: isPrivate,
+    default_fallback_reply: defaultFallbackReply || null,
+    escalation_policy: escalationPolicy || null,
+    closing_policy: closingPolicy || null,
+    enabled_tool_names: enabledToolNames,
+  }), [
     agentName,
     aiModel,
-    config,
     closingPolicy,
-    configDocumentSignature,
+    config?.transcription_model,
     defaultFallbackReply,
-    documentSignature,
     enabledToolNames,
     escalationPolicy,
     geminiApiKey,
     isActive,
     isPrivate,
     knowledgeBase,
-    savedModelValue,
-    toolCatalog,
+    knowledgeDocuments,
+  ]);
+
+  const currentSnapshotSignature = useMemo(
+    () => buildSnapshotSignature(currentEditorSnapshot),
+    [currentEditorSnapshot]
+  );
+  const loadedSnapshotSignature = useMemo(
+    () => buildSnapshotSignature(loadedEditorSnapshot),
+    [loadedEditorSnapshot]
+  );
+
+  const isDirty = useMemo(() => {
+    if (!config || !loadedSnapshotSignature) return false;
+    return currentSnapshotSignature !== loadedSnapshotSignature;
+  }, [config, currentSnapshotSignature, loadedSnapshotSignature]);
+
+  const hasDraft = Boolean(draftUpdatedAt);
+  const hasUnpublishedChanges = hasDraft || isDirty;
+  const previewDraftSnapshot = hasUnpublishedChanges ? currentEditorSnapshot : null;
+
+  const buildConfigFormData = useCallback(() => {
+    if (!config || !user?.activeWorkspaceId) return null;
+
+    const formData = new FormData();
+    formData.append('workspaceId', user.activeWorkspaceId);
+    formData.append('configId', config.id);
+    formData.append('agentName', agentName);
+    formData.append('aiModel', aiModel);
+    formData.append('geminiApiKey', geminiApiKey);
+    formData.append('isActive', isActive ? 'on' : 'off');
+    formData.append('isPrivate', isPrivate ? 'on' : 'off');
+    formData.append('knowledgeBase', knowledgeBase);
+    formData.append('defaultFallbackReply', defaultFallbackReply);
+    formData.append('escalationPolicy', escalationPolicy);
+    formData.append('closingPolicy', closingPolicy);
+    formData.append('enabledToolNames', JSON.stringify(enabledToolNames));
+    formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
+    return formData;
+  }, [
+    agentName,
+    aiModel,
+    closingPolicy,
+    config,
+    defaultFallbackReply,
+    enabledToolNames,
+    escalationPolicy,
+    geminiApiKey,
+    isActive,
+    isPrivate,
+    knowledgeBase,
+    knowledgeDocuments,
+    user?.activeWorkspaceId,
   ]);
 
   const handleSaveConfig = async () => {
-    if (!config || !user?.activeWorkspaceId) return;
+    const formData = buildConfigFormData();
+    if (!formData) return;
 
     setIsSaving(true);
     try {
-      const formData = new FormData();
-      formData.append('workspaceId', user.activeWorkspaceId);
-      formData.append('configId', config.id);
-      formData.append('agentName', agentName);
-      formData.append('aiModel', aiModel);
-      formData.append('geminiApiKey', geminiApiKey);
-      formData.append('isActive', isActive ? 'on' : 'off');
-      formData.append('isPrivate', isPrivate ? 'on' : 'off');
-      formData.append('knowledgeBase', knowledgeBase);
-      formData.append('defaultFallbackReply', defaultFallbackReply);
-      formData.append('escalationPolicy', escalationPolicy);
-      formData.append('closingPolicy', closingPolicy);
-      formData.append('enabledToolNames', JSON.stringify(enabledToolNames));
-      formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
-
-      const result = await saveAutopilotConfig({ success: false }, formData);
+      const result = await saveAutopilotDraft({ success: false }, formData);
 
       if (result.success) {
-        toast({ title: 'Agente salvo', description: 'As mudanças já estão refletidas no workspace.' });
+        toast({ title: 'Rascunho salvo', description: 'Teste e compare antes de publicar para os clientes.' });
+        setLastPlaygroundTrace(null);
         await fetchData();
       } else {
-        toast({ title: 'Erro ao salvar', description: result.error, variant: 'destructive' });
+        toast({ title: 'Erro ao salvar rascunho', description: result.error, variant: 'destructive' });
       }
     } catch (error: any) {
       toast({ title: 'Erro inesperado', description: error.message, variant: 'destructive' });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handlePublishConfig = async () => {
+    if (!config) return;
+
+    setIsPublishing(true);
+    try {
+      if (isDirty) {
+        const formData = buildConfigFormData();
+        if (!formData) return;
+
+        const draftResult = await saveAutopilotDraft({ success: false }, formData);
+        if (!draftResult.success) {
+          toast({ title: 'Erro ao salvar rascunho', description: draftResult.error, variant: 'destructive' });
+          return;
+        }
+      }
+
+      const result = await publishAutopilotDraft(config.id);
+      if (result.success) {
+        toast({
+          title: 'Agente publicado',
+          description: result.versionNumber ? `Versao v${result.versionNumber} publicada.` : 'Rascunho promovido para producao.',
+        });
+        setLastPlaygroundTrace(null);
+        await fetchData();
+      } else {
+        toast({ title: 'Erro ao publicar', description: result.error, variant: 'destructive' });
+      }
+    } catch (error: any) {
+      toast({ title: 'Erro inesperado', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const handleDiscardDraft = async () => {
+    if (!config) return;
+    if (hasDraft && !confirm('Descartar o rascunho atual e voltar ao publicado?')) return;
+
+    setIsDiscardingDraft(true);
+    try {
+      if (hasDraft) {
+        const result = await discardAutopilotDraft(config.id);
+        if (!result.success) {
+          toast({ title: 'Erro ao descartar', description: result.error, variant: 'destructive' });
+          return;
+        }
+      }
+      setLastPlaygroundTrace(null);
+      await fetchData();
+      toast({ title: 'Rascunho descartado', description: 'A tela voltou para a versao publicada.' });
+    } catch (error: any) {
+      toast({ title: 'Erro inesperado', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsDiscardingDraft(false);
     }
   };
 
@@ -418,29 +586,71 @@ export default function AutopilotDetailPage() {
           <div className="flex flex-wrap items-center gap-3">
             {isDirty ? (
               <Badge className="rounded-full border-0 bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                Alterações pendentes
+                Alteracoes nao salvas
+              </Badge>
+            ) : hasDraft ? (
+              <Badge className="rounded-full border-0 bg-blue-500/15 text-blue-700 dark:text-blue-300">
+                Rascunho salvo
               </Badge>
             ) : (
               <Badge className="rounded-full border-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
                 <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                Sincronizado
+                Publicado
               </Badge>
+            )}
+
+            {(hasDraft || isDirty) && (
+              <Button
+                onClick={handleDiscardDraft}
+                disabled={isSaving || isPublishing || isDiscardingDraft}
+                variant="outline"
+                className="rounded-full px-4"
+              >
+                {isDiscardingDraft ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Descartar
+              </Button>
             )}
 
             <Button
               onClick={handleSaveConfig}
               disabled={isSaving || !isDirty}
+              variant="secondary"
               className="rounded-full px-5"
             >
               {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-              Salvar alterações
+              Salvar rascunho
+            </Button>
+
+            <Button
+              onClick={handlePublishConfig}
+              disabled={isSaving || isPublishing || (!hasDraft && !isDirty)}
+              className="rounded-full px-5"
+            >
+              {isPublishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+              Publicar
             </Button>
           </div>
         </div>
+        {(hasDraft || versions.length > 0) && (
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-muted/25 px-4 py-3 text-xs text-muted-foreground">
+            <History className="h-4 w-4" />
+            {hasDraft && (
+              <span>
+                Rascunho salvo{draftUpdatedAt ? ` em ${new Date(draftUpdatedAt).toLocaleString('pt-BR')}` : ''}.
+              </span>
+            )}
+            {versions[0] && (
+              <span>
+                Ultima publicacao: v{versions[0].version_number}
+                {versions[0].created_at ? ` em ${new Date(versions[0].created_at).toLocaleString('pt-BR')}` : ''}.
+              </span>
+            )}
+          </div>
+        )}
       </header>
 
-      <main className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-1 flex-col">
-        <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col gap-4">
+      <main className="mx-auto grid w-full max-w-[1600px] min-w-0 flex-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <Tabs defaultValue="overview" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm">
             <TabsTrigger value="overview" className="gap-2 rounded-xl px-4 py-2">
               <LayoutDashboard className="h-4 w-4" /> Visão geral
@@ -449,7 +659,7 @@ export default function AutopilotDetailPage() {
               <Database className="h-4 w-4" /> Conhecimento
             </TabsTrigger>
             <TabsTrigger value="rules" className="gap-2 rounded-xl px-4 py-2">
-              <Zap className="h-4 w-4" /> Habilidades
+              <Zap className="h-4 w-4" /> O que ele pode fazer
             </TabsTrigger>
             <TabsTrigger value="settings" className="gap-2 rounded-xl px-4 py-2">
               <Settings2 className="h-4 w-4" /> Ajustes
@@ -623,6 +833,30 @@ export default function AutopilotDetailPage() {
             </TabsContent>
           </div>
         </Tabs>
+
+        <aside className="grid min-w-0 gap-4 self-start xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pr-1">
+          <AutopilotReadiness
+            aiModel={aiModel}
+            modelOptions={selectableModels}
+            hasRuntimeKey={Boolean(geminiApiKey || hasGlobalKey || workspaceHasGeminiConfig)}
+            knowledgeBase={knowledgeBase}
+            documents={knowledgeDocuments}
+            fallbackReply={defaultFallbackReply}
+            escalationPolicy={escalationPolicy}
+            enabledToolNames={enabledToolNames}
+            isActive={isActive}
+            isDirty={hasUnpublishedChanges}
+            lastTrace={lastPlaygroundTrace}
+          />
+          <AutopilotPlayground
+            workspaceId={user?.activeWorkspaceId}
+            agentId={agentId}
+            disabled={isSaving || isPublishing}
+            stale={hasUnpublishedChanges}
+            draftSnapshot={previewDraftSnapshot}
+            onTrace={setLastPlaygroundTrace}
+          />
+        </aside>
       </main>
 
       <Dialog open={isRuleModalOpen} onOpenChange={setIsRuleModalOpen}>

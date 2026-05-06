@@ -13,6 +13,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import type { AutopilotConfig } from '@/lib/types';
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
@@ -52,7 +53,7 @@ export async function summarizeChat(input: SummarizeChatInput): Promise<Summariz
   // Use a default config if none is found to avoid breaking summarization
   const config = configRes.rows.length > 0
     ? configRes.rows[0]
-    : { id: 'default', ai_model: 'googleai/gemini-2.0-flash' };
+    : { id: 'default', ai_model: DEFAULT_AUTOPILOT_MODEL };
 
   // Pass the full input including config to the flow
   const flowInput = { ...input, config };
@@ -74,7 +75,7 @@ const summarizeChatFlow = ai.defineFlow(
     outputSchema: SummarizeChatOutputSchema,
   },
   async (input) => {
-    const model = input.config?.ai_model || 'googleai/gemini-2.0-flash';
+    const model = input.config?.ai_model || DEFAULT_AUTOPILOT_MODEL;
     // The prompt only receives the fields defined in its own input schema.
     const promptInput = SummarizeChatInputSchema.parse(input);
     const result = await summarizeChatPrompt(promptInput, { model });

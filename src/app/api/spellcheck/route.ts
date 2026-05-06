@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/actions/user';
 import { getIntegrationConfig } from '@/actions/integrations';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 
 const MIN_OUTPUT_TOKENS = 1024;
 const MAX_OUTPUT_TOKENS = 8192;
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
 
         // Resolve Gemini API key: workspace integrations -> env var
         let apiKey: string | undefined;
-        let model = 'gemini-2.0-flash';
+        let model = DEFAULT_AUTOPILOT_MODEL.replace(/^googleai\//, '');
 
         const { config, isActive } = await getIntegrationConfig(user.activeWorkspaceId, 'gemini');
 

@@ -34,6 +34,12 @@ describe('ai model catalog', () => {
         provider: 'googleai',
         enabled: false,
       },
+      {
+        id: 'googleai/gemini-3.1-flash-lite-preview',
+        label: 'Gemini Preview',
+        provider: 'googleai',
+        enabled: true,
+      },
     ]));
 
     const selectable = getAutopilotSelectableModels(catalog);

@@ -1,6 +1,7 @@
 'use server';
 
 import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export type AnalyzeMediaInput = {
@@ -54,7 +55,7 @@ export async function analyzeMediaForAutopilot(input: AnalyzeMediaInput): Promis
   const arrayBuffer = await response.arrayBuffer();
   const base64Media = Buffer.from(arrayBuffer).toString('base64');
   const mimeType = input.mimetype || response.headers.get('content-type') || 'application/octet-stream';
-  const modelName = runtimeConfig.transcriptionModel || runtimeConfig.aiModel || 'gemini-2.0-flash';
+  const modelName = runtimeConfig.transcriptionModel || runtimeConfig.aiModel || DEFAULT_AUTOPILOT_MODEL.replace(/^googleai\//, '');
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: modelName });
 

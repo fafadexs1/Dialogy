@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -18,14 +18,32 @@ export default function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const codeExchanged = useRef(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    const initSession = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+
+      if (code && !codeExchanged.current) {
+        codeExchanged.current = true;
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        if (exchangeError) {
+          setError(t("Erro ao validar o link de recuperacao: ") + exchangeError.message);
+          return;
+        }
+        // Remove code from URL to prevent reuse
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setError(t("Link invalido ou expirado. Solicite um novo e-mail de redefinicao."));
       }
-    });
-  }, [supabase]);
+    };
+    
+    initSession();
+  }, [supabase, t]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

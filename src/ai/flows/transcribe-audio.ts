@@ -10,6 +10,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
 
@@ -50,7 +51,7 @@ const transcribeAudioFlow = ai.defineFlow(
       throw new Error('Integracao Gemini do workspace nao configurada ou inativa. Acesse Integracoes > Gemini.');
     }
 
-    const modelName = runtimeConfig.transcriptionModel || runtimeConfig.aiModel || 'gemini-2.0-flash-exp';
+    const modelName = runtimeConfig.transcriptionModel || runtimeConfig.aiModel || DEFAULT_AUTOPILOT_MODEL.replace(/^googleai\//, '');
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: modelName });

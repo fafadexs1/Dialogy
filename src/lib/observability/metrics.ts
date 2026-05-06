@@ -34,6 +34,13 @@ export function recordAutopilotRunMetrics(input: {
   durationMs: number;
   workspaceId?: string | null;
   hasDeterministicRouting?: boolean;
+  intent?: string | null;
+  workflowId?: string | null;
+  ragStrategy?: string | null;
+  knowledgeCoverage?: string | null;
+  fallbackReason?: string | null;
+  validatorAction?: string | null;
+  toolPlannerRejectedCount?: number | null;
 }) {
   void input;
 }
@@ -43,6 +50,22 @@ export function recordAutopilotStageMetrics(input: {
   status: 'success' | 'fallback' | 'error';
   durationMs: number;
   workspaceId?: string | null;
+}) {
+  void input;
+}
+
+export function recordAutopilotDecisionMetrics(input: {
+  kind: 'intent' | 'rag' | 'workflow' | 'tool_planner' | 'response_validator' | 'fallback';
+  status: 'success' | 'fallback' | 'error' | 'skipped';
+  durationMs?: number | null;
+  workspaceId?: string | null;
+  intent?: string | null;
+  workflowId?: string | null;
+  ragStrategy?: string | null;
+  knowledgeCoverage?: string | null;
+  decision?: string | null;
+  reason?: string | null;
+  count?: number | null;
 }) {
   void input;
 }

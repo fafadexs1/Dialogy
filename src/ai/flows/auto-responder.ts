@@ -12,10 +12,16 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import type { NexusFlowInstance, Action, AutopilotConfig } from '@/lib/types';
 import { makeHttpRequestTool } from '../tools/webhook-tool';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
+import {
+  assertAiModelOutput,
+  runAiModelWithFallback,
+  type AiModelKeyCandidate,
+} from '@/services/ai/model-client';
 
 // Define a schema for a single automation rule
 const ActionSchema = z.union([
@@ -47,7 +53,7 @@ const KnowledgeDocumentSchema = z.object({
   id: z.string(),
   name: z.string(),
   content: z.string(),
-  summary: z.string().optional(),
+  summary: z.string().nullable().optional(),
 });
 
 const ResolvedCaseSchema = z.object({
@@ -106,6 +112,10 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('Procedimentos da base de conhecimento que mencionam tools com @nome_da_tool.'),
+  intentContext: z
+    .string()
+    .optional()
+    .describe('Contexto deterministico de intencao, workflow e cobertura de conhecimento resolvido pelo servidor.'),
   model: z.string().optional().describe('The AI model to use for the response.'),
   contact: z.object({ id: z.string(), name: z.string(), email: z.string().optional() })
     .describe('The contact details of the customer.'),
@@ -383,6 +393,13 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 **DADOS DO CONTATO**:
 {{json contact}}
 ---
+**ROTEAMENTO DETERMINISTICO DO SERVIDOR**:
+{{#if intentContext}}
+{{{intentContext}}}
+{{else}}
+(Nenhum roteamento deterministico informado.)
+{{/if}}
+---
 **CONTEXTO HISTÓRICO RELEVANTE (Memória)**:
 {{#if relevantHistory}}
 {{{relevantHistory}}}
@@ -514,10 +531,41 @@ Com base na sua persona, nos documentos e na emoção identificada, responda ao 
 
 // Default prompt with global AI
 const globalPrompt = ai.definePrompt(promptConfig);
+const STABLE_AUTOPILOT_MODEL_FALLBACKS = [
+  DEFAULT_AUTOPILOT_MODEL,
+  'googleai/gemini-2.0-flash-lite',
+  'googleai/gemini-1.5-pro',
+];
 
-function isInvalidGeminiApiKeyError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /API_KEY_INVALID|API key expired|API key not valid|API_KEY/i.test(message);
+function getDefaultGeminiEnvKey(): string {
+  return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
+}
+
+function getModelCandidates(model: string): string[] {
+  return [model, ...STABLE_AUTOPILOT_MODEL_FALLBACKS].filter((candidate, index, all) => (
+    Boolean(candidate) && all.indexOf(candidate) === index
+  ));
+}
+
+function definePromptForCandidate(input: {
+  apiKey: string;
+  model: string;
+}) {
+  const defaultEnvKey = getDefaultGeminiEnvKey();
+  if (defaultEnvKey && defaultEnvKey === input.apiKey) {
+    return globalPrompt;
+  }
+
+  const { genkit } = require('genkit');
+  const { googleAI } = require('@genkit-ai/googleai');
+
+  const dynamicAi = genkit({
+    plugins: [googleAI({ apiKey: input.apiKey })],
+    model: input.model,
+    // tools: [makeHttpRequestTool],
+  });
+
+  return dynamicAi.definePrompt(promptConfig);
 }
 
 const autoResponderFlow = ai.defineFlow(
@@ -527,7 +575,7 @@ const autoResponderFlow = ai.defineFlow(
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
-    const model = input.model || 'googleai/gemini-2.0-flash';
+    const model = input.model || DEFAULT_AUTOPILOT_MODEL;
     const promptInput = AgentResponseInputSchema.parse({
       ...input,
       knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
@@ -539,48 +587,65 @@ const autoResponderFlow = ai.defineFlow(
     // 1. Resolve Gemini API key (agent -> workspace integration -> env)
     const configKey = input.config?.gemini_api_key?.trim();
     const workspaceKey = input.workspaceGeminiApiKey?.trim();
-    const envKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim();
-    const apiKeyCandidates = [
+    const envKey = getDefaultGeminiEnvKey();
+    const apiKeyCandidates: AiModelKeyCandidate[] = [
       { source: 'agent', key: configKey },
       { source: 'workspace', key: workspaceKey },
       { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
-    ].filter((candidate): candidate is { source: string; key: string } => Boolean(candidate.key));
+    ].filter((candidate): candidate is AiModelKeyCandidate => Boolean(candidate.key));
     const uniqueApiKeyCandidates = apiKeyCandidates.filter((candidate, index, all) => (
       all.findIndex((item) => item.key === candidate.key) === index
     ));
 
     if (uniqueApiKeyCandidates.length === 0) {
       console.error('[AUTORESPONDER_FLOW_ERROR] Nenhuma chave de API encontrada (Config, Integrações ou ENV).');
-      throw new Error('Chave Gemini não configurada. Configure em Integrações > Google Gemini.');
+      // Continue to configured fallback reply instead of throwing and leaving auto mode silent.
     }
 
     let output: AgentResponseOutput | null = null;
-    let lastPromptError: unknown = null;
 
-    for (const candidate of uniqueApiKeyCandidates) {
-      let effectivePrompt = globalPrompt;
-
-      // Use a dynamic Genkit instance when we are overriding the default env key.
-      const defaultEnvKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
-      if (!defaultEnvKey || defaultEnvKey !== candidate.key) {
-        const { genkit } = require('genkit');
-        const { googleAI } = require('@genkit-ai/googleai');
-
-        const dynamicAi = genkit({
-          plugins: [googleAI({ apiKey: candidate.key })],
-          model: model,
-          // tools: [makeHttpRequestTool],
-        });
-        effectivePrompt = dynamicAi.definePrompt(promptConfig);
-      }
-
+    if (uniqueApiKeyCandidates.length > 0) {
       try {
-        const result = await effectivePrompt(promptInput, { model });
-        output = result.output;
+        const promptRun = await runAiModelWithFallback({
+          label: 'autoResponderFlow',
+          modelCandidates: getModelCandidates(model),
+          apiKeyCandidates: uniqueApiKeyCandidates,
+          maxAttemptsPerCandidate: Number.parseInt(process.env.AI_MODEL_MAX_ATTEMPTS || '', 10) || 2,
+          retryBaseDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_BASE_DELAY_MS || '', 10) || 250,
+          retryMaxDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_MAX_DELAY_MS || '', 10) || 1500,
+          execute: async (context) => {
+            const effectivePrompt = definePromptForCandidate({
+              apiKey: context.apiKey,
+              model: context.model,
+            });
+            const result = await effectivePrompt(promptInput, { model: context.model });
+            assertAiModelOutput(result?.output, 'Auto responder returned no structured output.');
+            return result;
+          },
+          onAttempt: (event) => {
+            if (event.status === 'success') {
+              if (event.keySource !== 'agent' && configKey) {
+                console.warn(`[AUTORESPONDER_FLOW] Gemini key fallback succeeded with ${event.keySource} key.`);
+              }
+              if (event.model !== model) {
+                console.warn(`[AUTORESPONDER_FLOW] Model fallback succeeded with "${event.model}" instead of "${model}".`);
+              }
+              return;
+            }
 
-        if (candidate.source !== 'agent' && configKey) {
-          console.warn(`[AUTORESPONDER_FLOW] Gemini key fallback succeeded with ${candidate.source} key.`);
-        }
+            console.warn('[AUTORESPONDER_FLOW_ERROR] Prompt attempt failed:', {
+              model: event.model,
+              keySource: event.keySource,
+              attempt: event.attempt,
+              errorCode: event.errorCode,
+              retryable: event.retryable,
+              durationMs: event.durationMs,
+              errorMessage: event.errorMessage,
+            });
+          },
+        });
+        const result = promptRun.result;
+        output = result.output;
 
         // Log usage in the background without awaiting it.
         // This allows the flow to return faster.
@@ -588,7 +653,7 @@ const autoResponderFlow = ai.defineFlow(
           logAutopilotUsage({
             configId: input.config.id,
             flowName: 'autoResponderFlow',
-            modelName: model,
+            modelName: promptRun.model,
             inputTokens: result.usage.inputTokens ?? 0,
             outputTokens: result.usage.outputTokens ?? 0,
             totalTokens: result.usage.totalTokens ?? 0,
@@ -598,20 +663,10 @@ const autoResponderFlow = ai.defineFlow(
             console.error("[AUTOPILOT_USAGE_LOG_ERROR]", err);
           });
         }
-        break;
       } catch (error) {
-        lastPromptError = error;
-        console.error(`[AUTORESPONDER_FLOW_ERROR] Error calling prompt with ${candidate.source} key:`, error);
-
-        if (!isInvalidGeminiApiKeyError(error)) {
-          break;
-        }
+        console.error('[AUTORESPONDER_FLOW_ERROR] All prompt attempts failed:', error);
+        output = null;
       }
-    }
-
-    if (!output && lastPromptError) {
-      // Do not re-throw; allow the flow to proceed to fallback logic.
-      output = null;
     }
 
     // Only return a response if the AI decided a rule was triggered or it could answer.

@@ -4,7 +4,7 @@ import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { sendAutomatedMessageAction } from '@/actions/messages';
 import { logToDebugFile } from '@/lib/debug-file';
 import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact-identity';
-import { retrieveSupportContext } from '@/services/rag/retrieval';
+import { retrieveHybridSupportContext, type KnowledgeRetrievalStrategy } from '@/services/rag/hybrid-retrieval';
 import { runAgentTools } from '@/services/agent-tools/runtime';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 import { listAgentToolCatalogItems, listDefaultEnabledAgentToolNames } from '@/services/agent-tools/catalog';
@@ -16,6 +16,7 @@ import {
     routeDeterministicAgentTools,
     shouldHandoffToHuman,
     type ToolRouterTeam,
+    type ToolRoutingCandidate,
 } from '@/services/agent-tools/router';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 import { formatCustomerFacingAiResponse, splitIntoMessageBlocks } from '@/lib/ai-response-format';
@@ -38,6 +39,11 @@ import {
     ensureProcedureSgpLookupAction,
 } from '@/services/autopilot-sgp-response';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
+import type { KnowledgeCoverage } from '@/services/autopilot/intent-types';
+import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
+import type { WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
+import { planAutopilotTools } from '@/services/autopilot/tool-planner';
+import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
 
 /**
  * Sends an AI response as one or more separate WhatsApp message bubbles.
@@ -278,10 +284,27 @@ function filterImplicitTransferActions(input: {
     actions: AgentToolAction[];
     customerMessage: string;
     availableTeams: ToolRouterTeam[];
+    candidates?: ToolRoutingCandidate[];
 }): AgentToolAction[] {
     if (shouldHandoffToHuman(input.customerMessage)) {
         return input.actions;
     }
+
+    // Pre-compute: check if any transfer_chat targets a team that the deterministic
+    // router already identified as a routing candidate (domain keyword match).
+    const candidateTeamIds = new Set(
+        (input.candidates || []).map((c) => c.team.id)
+    );
+    const transferBackedByCandidate = candidateTeamIds.size > 0 && input.actions.some((action) => {
+        if (action.type !== 'transfer_chat') return false;
+        const p = action.payload && typeof action.payload === 'object' ? action.payload as Record<string, any> : {};
+        const resolved = typeof p.teamId === 'string'
+            ? input.availableTeams.find((team) => team.id === p.teamId)
+            : null;
+        if (resolved && candidateTeamIds.has(resolved.id)) return true;
+        const name = String(p.teamName || '').toLowerCase().trim();
+        return name.length > 0 && (input.candidates || []).some((c) => c.team.name.toLowerCase().trim() === name);
+    });
 
     return input.actions.filter((action) => {
         if (action.type !== 'transfer_chat' && action.type !== 'add_internal_note') {
@@ -298,11 +321,23 @@ function filterImplicitTransferActions(input: {
         const text = `${teamName} ${reason}`;
 
         if (action.type === 'transfer_chat') {
+            // Allow if the customer explicitly asked for this team
             const explicitByTarget = targetTeam ? hasExplicitTeamHandoff(input.customerMessage, targetTeam) : false;
             const explicitByName = teamName ? hasExplicitTeamHandoff(input.customerMessage, { name: teamName }) : false;
-            return explicitByTarget || explicitByName;
+            if (explicitByTarget || explicitByName) return true;
+
+            // Allow transfer when the deterministic router already identified
+            // this team as a candidate (e.g. "internet ruim" matched domain "suporte")
+            if (targetTeam && candidateTeamIds.has(targetTeam.id)) return true;
+            if (teamName && (input.candidates || []).some((c) =>
+                c.team.name.toLowerCase().trim() === teamName.toLowerCase().trim()
+            )) return true;
+
+            return false;
         }
 
+        // Allow accompanying internal notes when a candidate-backed transfer exists
+        if (transferBackedByCandidate) return true;
         return !/\b(transfer|encaminh|roteamento)\b/i.test(text);
     });
 }
@@ -418,15 +453,37 @@ async function listRuntimeAgentToolCatalog(workspaceId: string): Promise<AgentTo
         description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
         class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
         riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
+        sideEffect: tool.annotations?.destructiveHint ? 'high' : tool.annotations?.readOnlyHint ? 'none' : 'medium',
         idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
         timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
         maxAttempts: 1,
         requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
+        customerVisible: true,
+        allowedIntents: [
+            'purchase_inquiry',
+            'catalog_request',
+            'pricing_request',
+            'promotion_request',
+            'availability_request',
+            'billing_or_payment',
+            'scheduling_request',
+            'order_or_request_status',
+            'support_request',
+            'troubleshooting',
+            'change_request',
+            'return_or_refund',
+            'cancellation_request',
+            'document_request',
+            'complaint',
+        ],
+        requiredSlots: [],
+        fallbackAction: 'handoff',
         source: 'mcp',
         enabledByDefault: false,
         serverId: tool.serverId,
         serverName: tool.serverName,
         inputSchema: tool.inputSchema || null,
+        outputSchema: tool.outputSchema || null,
     }));
 
     return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
@@ -436,6 +493,33 @@ function resolveEnabledToolNames(config: AutopilotConfig) {
     return Array.isArray(config.enabled_tool_names)
         ? config.enabled_tool_names
         : listDefaultEnabledAgentToolNames();
+}
+
+async function loadWorkflowSlotMappings(workspaceId: string): Promise<WorkflowSlotMappings> {
+    const defaultCustomerIdentifierKeys = ['CPF/CNPJ', 'CPF', 'CNPJ', 'Documento'];
+    try {
+        const { rows } = await db.query(
+            `SELECT config->>'cpfFieldId' AS cpf_field_id
+             FROM workspace_integrations
+             WHERE workspace_id = $1
+               AND provider = 'sgp'
+               AND is_active = true
+               AND COALESCE(config->>'cpfFieldId', '') <> ''
+             ORDER BY updated_at DESC
+             LIMIT 1`,
+            [workspaceId]
+        );
+        const cpfFieldId = String(rows[0]?.cpf_field_id || '').trim();
+        return {
+            customerIdentifierFieldKeys: Array.from(new Set([
+                cpfFieldId,
+                ...defaultCustomerIdentifierKeys,
+            ].filter(Boolean))),
+        };
+    } catch (error) {
+        console.error('[AUTOPILOT_WORKFLOW] Failed to load slot mappings:', error);
+        return { customerIdentifierFieldKeys: defaultCustomerIdentifierKeys };
+    }
 }
 
 function buildEnabledAgentToolsDescription(config: AutopilotConfig, toolCatalog: AgentToolCatalogItem[]): string {
@@ -1047,6 +1131,39 @@ export async function processAutopilotForChat(
         lastMessageContent || '',
         mediaAnalysisContext,
     ].filter((part) => part.trim().length > 0).join('\n\n');
+    const staticKnowledgeDocuments = autopilotConfig.knowledge_base_documents || [];
+    const intentResolution = resolveAutopilotIntent({
+        customerMessage: enrichedLastMessageContent || '',
+        chatHistory: chatHistoryForAI,
+        knowledgeDocuments: staticKnowledgeDocuments,
+    });
+    let ragStrategy: KnowledgeRetrievalStrategy = staticKnowledgeDocuments.length > 0 ? 'static_documents' : 'none';
+    let knowledgeCoverage: KnowledgeCoverage = intentResolution.officialResponse
+        ? 'high'
+        : staticKnowledgeDocuments.length > 0
+            ? 'low'
+            : 'none';
+    await recordOrchestratorEvent({
+        run: orchestratorRun,
+        kind: 'intent_resolution',
+        status: intentResolution.intent === 'unknown' ? 'fallback' : 'success',
+        payload: {
+            intent: intentResolution.intent,
+            confidence: intentResolution.confidence,
+            confidenceLevel: intentResolution.confidence >= 0.85 ? 'high' : intentResolution.confidence >= 0.5 ? 'medium' : 'low',
+            workflowId: intentResolution.workflowId,
+            shouldRetrieveKnowledge: intentResolution.shouldRetrieveKnowledge,
+            shouldUseTool: intentResolution.shouldUseTool,
+            shouldTransfer: intentResolution.shouldTransfer,
+            requiredSlots: intentResolution.requiredSlots,
+            extractedSlots: intentResolution.extractedSlots,
+            knowledgeCategories: intentResolution.knowledgeCategories,
+            sourceDocumentId: intentResolution.sourceDocumentId ?? null,
+            sourceDocumentName: intentResolution.sourceDocumentName ?? null,
+            hasOfficialResponse: Boolean(intentResolution.officialResponse),
+            reason: intentResolution.reason,
+        },
+    });
 
     const activeRules = (autopilotRules || []).filter(rule => rule.enabled);
     const sanitizedContact: Contact = {
@@ -1093,7 +1210,8 @@ export async function processAutopilotForChat(
                         toolName: candidate.toolName,
                         targetTeamName: candidate.team.name,
                         candidateReason: candidate.reason,
-                        model: process.env.AI_TOOL_INTENT_GATE_MODEL || resolvedAiModel.model,
+                        escalationPolicy: autopilotConfig.escalation_policy || '',
+                        model: resolvedAiModel.model,
                         apiKey: workspaceGeminiApiKey,
                         timeoutMs: Number(process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS || 2500),
                     }),
@@ -1108,7 +1226,7 @@ export async function processAutopilotForChat(
             );
             orchestratorTimings.tool_intent_gate_ms = gateStage.durationMs;
 
-            if (gateStage.value.execute && gateStage.value.confidence === 'high') {
+            if (gateStage.value.execute && gateStage.value.confidence !== 'low') {
                 const reason = `Gate de intencao aprovou ${candidate.toolName} para ${candidate.team.name}: ${gateStage.value.reason}`;
                 deterministicRouting = {
                     actions: [
@@ -1297,7 +1415,7 @@ export async function processAutopilotForChat(
         return;
     }
 
-    let ragDocuments: KnowledgeBaseDocument[] = autopilotConfig.knowledge_base_documents || [];
+    let ragDocuments: KnowledgeBaseDocument[] = staticKnowledgeDocuments;
     let relevantHistory = '';
     let resolvedCases: Array<{
         summary: string;
@@ -1311,24 +1429,33 @@ export async function processAutopilotForChat(
 
     try {
         if (enrichedLastMessageContent && enrichedLastMessageContent.trim().length > 3) {
-            console.log(`[AUTOPILOT_RAG] Searching support context for: "${enrichedLastMessageContent.substring(0, 50)}..."`);
+            console.log(`[AUTOPILOT_RAG] Searching hybrid context for: "${enrichedLastMessageContent.substring(0, 50)}..."`);
             const ragStage = await timeOrchestratorStage(
                 orchestratorRun,
                 'rag_retrieval',
                 () => withTimeout(
-                    retrieveSupportContext({
+                    retrieveHybridSupportContext({
                         workspaceId,
                         autopilotConfigId: autopilotConfig.id,
                         query: enrichedLastMessageContent,
                         excludeChatId: chat.id,
+                        staticDocuments: staticKnowledgeDocuments,
+                        intent: intentResolution,
                     }),
                     orchestratorRun.budget.maxRagMs,
                     'rag retrieval'
                 ),
-                { queryLength: enrichedLastMessageContent.length }
+                {
+                    queryLength: enrichedLastMessageContent.length,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                    initialStaticDocuments: staticKnowledgeDocuments.length,
+                }
             );
             orchestratorTimings.rag_ms = ragStage.durationMs;
             const retrieval = ragStage.value;
+            ragStrategy = retrieval.strategy;
+            knowledgeCoverage = retrieval.knowledgeCoverage;
 
             if (retrieval.knowledgeBaseDocuments.length > 0) {
                 console.log(`[AUTOPILOT_RAG] Found ${retrieval.knowledgeBaseDocuments.length} document chunks.`);
@@ -1347,40 +1474,111 @@ export async function processAutopilotForChat(
                     ].filter(Boolean).join('\n');
                 }).join('\n\n');
             }
+
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: retrieval.fallbackReason ? 'rag_fallback_static_documents' : 'rag_selection',
+                status: retrieval.fallbackReason ? 'fallback' : 'success',
+                durationMs: ragStage.durationMs,
+                payload: {
+                    strategy: retrieval.strategy,
+                    knowledgeCoverage: retrieval.knowledgeCoverage,
+                    fallbackReason: retrieval.fallbackReason ?? null,
+                    error: retrieval.error ?? null,
+                    retrieved: retrieval.retrieved,
+                    selected: retrieval.selected,
+                    discarded: retrieval.discarded.slice(0, 8),
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                },
+            });
         }
     } catch (ragError) {
         console.error('[AUTOPILOT_RAG] Error during retrieval:', ragError);
+        const errorMessage = ragError instanceof Error ? ragError.message : String(ragError);
+        const hasStaticFallback = staticKnowledgeDocuments.length > 0;
+        ragStrategy = hasStaticFallback ? 'static_documents' : 'none';
+        knowledgeCoverage = hasStaticFallback ? 'low' : 'none';
+        ragDocuments = hasStaticFallback ? staticKnowledgeDocuments : [];
         await recordOrchestratorEvent({
             run: orchestratorRun,
-            kind: 'rag_retrieval',
+            kind: hasStaticFallback ? 'rag_fallback_static_documents' : 'rag_retrieval',
             status: 'fallback',
-            payload: { error: ragError instanceof Error ? ragError.message : String(ragError) },
+            payload: {
+                error: errorMessage,
+                fallbackReason: errorMessage.includes('timed out') ? 'rag_timeout' : 'rag_error',
+                strategy: ragStrategy,
+                knowledgeCoverage,
+                staticDocuments: staticKnowledgeDocuments.length,
+                intent: intentResolution.intent,
+                workflowId: intentResolution.workflowId,
+            },
         });
     }
 
     const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId);
+    const enabledToolNames = resolveEnabledToolNames(autopilotConfig);
     const knowledgeToolProcedures = formatKnowledgeToolProcedures(
         extractKnowledgeToolProcedures({
             documents: ragDocuments,
             tools: runtimeToolCatalog,
-            enabledToolNames: resolveEnabledToolNames(autopilotConfig),
+            enabledToolNames,
         })
     );
     const promptKnowledgeDocuments = compactKnowledgeDocumentsForPrompt(ragDocuments);
-    const intentResolution = resolveAutopilotIntent({
+    const deterministicOfficialResponse = intentResolution.officialResponse || null;
+    const workflowSlotMappings = await loadWorkflowSlotMappings(workspaceId);
+    const workflowPlan = resolveAutopilotWorkflowPlan({
+        intentResolution,
         customerMessage: enrichedLastMessageContent || '',
         chatHistory: chatHistoryForAI,
-        knowledgeDocuments: autopilotConfig.knowledge_base_documents || ragDocuments,
+        contact: sanitizedContact,
+        enabledToolNames,
+        availableTeams,
+        knowledgeCoverage,
+        slotMappings: workflowSlotMappings,
     });
-    const deterministicPlanCatalog = intentResolution.intent === 'catalogo_planos'
-        ? intentResolution.officialResponse || null
-        : null;
+    await recordOrchestratorEvent({
+        run: orchestratorRun,
+        kind: 'workflow_plan',
+        status: workflowPlan.handledByWorkflow ? 'success' : 'skipped',
+        payload: {
+            intent: intentResolution.intent,
+            workflowId: intentResolution.workflowId,
+            executionMode: workflowPlan.executionMode,
+            handledByWorkflow: workflowPlan.handledByWorkflow,
+            missingSlots: workflowPlan.missingSlots,
+            plannedActions: workflowPlan.actions.map((action) => action.type),
+            knowledgeCoverage,
+            reason: workflowPlan.reason,
+        },
+    });
+    let workflowPlannedActions: AgentToolAction[] = workflowPlan.executionMode === 'continue_llm'
+        ? []
+        : workflowPlan.actions;
+    const intentContextForAI = [
+        `intent=${intentResolution.intent}`,
+        `confidence=${intentResolution.confidence.toFixed(2)}`,
+        `workflowId=${intentResolution.workflowId}`,
+        `workflowExecutionMode=${workflowPlan.executionMode}`,
+        `workflowReason=${workflowPlan.reason}`,
+        `workflowMissingSlots=${workflowPlan.missingSlots.join(',') || 'none'}`,
+        `workflowPlannedTools=${workflowPlan.actions.map((action) => action.type).join(',') || 'none'}`,
+        `shouldRetrieveKnowledge=${intentResolution.shouldRetrieveKnowledge}`,
+        `shouldUseTool=${intentResolution.shouldUseTool}`,
+        `shouldTransfer=${intentResolution.shouldTransfer}`,
+        `requiredSlots=${intentResolution.requiredSlots.join(',') || 'none'}`,
+        `extractedSlots=${JSON.stringify(intentResolution.extractedSlots)}`,
+        `ragStrategy=${ragStrategy}`,
+        `knowledgeCoverage=${knowledgeCoverage}`,
+        `knowledgeCategories=${intentResolution.knowledgeCategories.join(',') || 'none'}`,
+        `reason=${intentResolution.reason}`,
+    ].join('\n');
 
-    if (deterministicPlanCatalog) {
-        const finalResponse = formatCustomerFacingAiResponse(deterministicPlanCatalog);
+    if (workflowPlan.executionMode === 'direct_response' && workflowPlan.response) {
+        let finalResponse = formatCustomerFacingAiResponse(workflowPlan.response);
 
         if (currentCopilotMode === 'suggest') {
-            console.log(`[AUTOPILOT_SERVICE] Modo sugestao - catalogo de planos deterministico: ${finalResponse.substring(0, 50)}...`);
             const { getSupabaseAdmin } = await import('@/lib/supabase');
             const supabase = getSupabaseAdmin();
             await supabase.channel(`chat:${chat.id}`).send({
@@ -1396,34 +1594,450 @@ export async function processAutopilotForChat(
                 configId: autopilotConfig.id,
                 chatId: chat.id,
                 systemAgentId: assignedSystemAgentId,
-                modelName: 'deterministic_plan_catalog',
+                modelName: 'workflow-engine',
                 customerMessage: enrichedLastMessageContent || '',
                 response: finalResponse,
                 status: 'suggested',
                 triggeredRule: null,
                 metadata: {
-                    deterministicPlanCatalog: true,
+                    workflowPlan: workflowPlan.metadata,
+                    workflowReason: workflowPlan.reason,
+                    workflowMissingSlots: workflowPlan.missingSlots,
+                    workflowActions: workflowPlan.actions.map((action) => action.type),
                     intent: intentResolution.intent,
                     confidence: intentResolution.confidence,
-                    reason: intentResolution.reason,
-                    sourceDocumentId: intentResolution.sourceDocumentId,
-                    sourceDocumentName: intentResolution.sourceDocumentName,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
                 },
             });
             await finishOrchestratorRun({
                 run: orchestratorRun,
                 status: 'success',
                 timings: orchestratorTimings,
-                intent: 'deterministic_plan_catalog',
+                intent: intentResolution.intent,
                 confidenceLevel: 'deterministic',
+                confidenceScore: intentResolution.confidence,
                 metadata: {
                     suggestionOnly: true,
-                    deterministicPlanCatalog: true,
+                    responseSent: false,
+                    workflowEngine: true,
+                    workflowReason: workflowPlan.reason,
+                    workflowMissingSlots: workflowPlan.missingSlots,
+                    workflowActions: workflowPlan.actions.map((action) => action.type),
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            return;
+        }
+
+        const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+            chatId: chat.id,
+            sourceMessageId: sourceMessageId ?? null,
+        });
+        if (!sourceMessageStillCurrent) {
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'stale_source_message_guard',
+                status: 'skipped',
+                payload: {
+                    sourceMessageId: sourceMessageId ?? null,
+                    reason: 'newer_customer_message_exists',
+                    workflowEngine: true,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'skipped',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    responseSent: false,
+                    staleSourceMessage: true,
+                    workflowEngine: true,
+                    workflowReason: workflowPlan.reason,
+                    sourceMessageId: sourceMessageId ?? null,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            return;
+        }
+
+        const responseValidator = validateAutopilotResponse({
+            response: finalResponse,
+            fallbackReply: autopilotConfig.default_fallback_reply || '',
+            customerMessage: enrichedLastMessageContent || '',
+            intentResolution,
+            slotExtraction: workflowPlan.slotExtraction,
+            plannedActions: workflowPlan.actions,
+            toolResults: [],
+            enabledToolNames,
+            availableTeams,
+            contact: sanitizedContact,
+            knowledgeCoverage,
+            source: 'workflow_direct',
+        });
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'response_validator',
+            status: responseValidator.decision === 'approve' || responseValidator.decision === 'repair' ? 'success' : 'fallback',
+            payload: {
+                intent: intentResolution.intent,
+                workflowId: intentResolution.workflowId,
+                ...responseValidator.metadata,
+            },
+        });
+        if (responseValidator.decision !== 'approve') {
+            finalResponse = formatCustomerFacingAiResponse(responseValidator.response);
+        }
+        const validatedWorkflowActions = responseValidator.actions.length > 0
+            ? mergeAgentActions(responseValidator.actions, workflowPlan.actions)
+            : workflowPlan.actions;
+
+        const sendStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'message_send',
+            () => sendMultiBlockResponse(
+                chat.id,
+                finalResponse,
+                assignedSystemAgentId,
+                true,
+                instanceName
+            ),
+            { responseLength: finalResponse.length, workflowEngine: true }
+        );
+        orchestratorTimings.send_ms = sendStage.durationMs;
+
+        let toolResults: AgentToolExecutionResult[] = [];
+        if (validatedWorkflowActions.length > 0) {
+            const toolsStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'tool_execution',
+                () => runRequestedAgentToolsWithStatus({
+                    workspaceId,
+                    chat,
+                    contact: sanitizedContact,
+                    systemAgentId: assignedSystemAgentId,
+                    systemAgentName: assignedSystemAgentName,
+                    autopilotConfig,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: validatedWorkflowActions,
+                    orchestratorRunId: orchestratorRun.id,
+                }),
+                {
+                    requestedActions: validatedWorkflowActions.map((action) => action.type),
+                    workflowEngine: true,
+                    afterResponse: true,
+                }
+            );
+            orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
+            toolResults = toolsStage.value;
+        }
+
+        await logIntelligentAttendantResponse({
+            configId: autopilotConfig.id,
+            chatId: chat.id,
+            systemAgentId: assignedSystemAgentId,
+            modelName: 'workflow-engine',
+            customerMessage: enrichedLastMessageContent || '',
+            response: finalResponse,
+            status: 'sent',
+            triggeredRule: null,
+            metadata: {
+                workflowPlan: workflowPlan.metadata,
+                workflowReason: workflowPlan.reason,
+                workflowMissingSlots: workflowPlan.missingSlots,
+                workflowActions: validatedWorkflowActions.map((action) => action.type),
+                ...(toolResults.length > 0 ? { toolResults } : {}),
+                responseValidator: responseValidator.metadata,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                workflowId: intentResolution.workflowId,
+                ragStrategy,
+                knowledgeCoverage,
+            },
+        });
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: 'success',
+            timings: orchestratorTimings,
+            intent: intentResolution.intent,
+            confidenceLevel: 'deterministic',
+            confidenceScore: intentResolution.confidence,
+            metadata: {
+                responseSent: true,
+                toolCount: toolResults.length,
+                workflowEngine: true,
+                workflowReason: workflowPlan.reason,
+                workflowMissingSlots: workflowPlan.missingSlots,
+                workflowActions: validatedWorkflowActions.map((action) => action.type),
+                responseValidator: responseValidator.metadata,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                workflowId: intentResolution.workflowId,
+                ragStrategy,
+                knowledgeCoverage,
+            },
+        });
+        return;
+    }
+
+    if (workflowPlan.executionMode === 'pre_response_tools' && currentCopilotMode === 'auto' && workflowPlan.actions.length > 0) {
+        const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+            chatId: chat.id,
+            sourceMessageId: sourceMessageId ?? null,
+        });
+        if (!sourceMessageStillCurrent) {
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'stale_source_message_guard',
+                status: 'skipped',
+                payload: {
+                    sourceMessageId: sourceMessageId ?? null,
+                    reason: 'newer_customer_message_exists',
+                    workflowEngine: true,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'skipped',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    responseSent: false,
+                    staleSourceMessage: true,
+                    workflowEngine: true,
+                    workflowReason: workflowPlan.reason,
+                    sourceMessageId: sourceMessageId ?? null,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            return;
+        }
+
+        const toolsStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'tool_execution',
+            () => runRequestedAgentToolsWithStatus({
+                workspaceId,
+                chat,
+                contact: sanitizedContact,
+                systemAgentId: assignedSystemAgentId,
+                systemAgentName: assignedSystemAgentName,
+                autopilotConfig,
+                customerMessage: enrichedLastMessageContent || '',
+                actions: workflowPlan.actions,
+                orchestratorRunId: orchestratorRun.id,
+            }),
+            {
+                requestedActions: workflowPlan.actions.map((action) => action.type),
+                workflowEngine: true,
+                beforeResponse: true,
+            }
+        );
+        orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
+        let toolResults = toolsStage.value;
+        const sgpResponse = buildSgpResponseFromToolResults(
+            toolResults,
+            enrichedLastMessageContent || ''
+        );
+        const toolFailureResponse = buildToolFailureResponse(
+            toolResults,
+            'Vou consultar o sistema para verificar status, cadastro, fatura ou contrato.'
+        );
+        let finalResponse = formatCustomerFacingAiResponse(
+            sgpResponse ||
+            toolFailureResponse ||
+            autopilotConfig.default_fallback_reply?.trim() ||
+            'Nao consegui concluir a consulta automatica agora. Nossa equipe vai acompanhar por aqui.'
+        );
+        const responseValidator = validateAutopilotResponse({
+            response: finalResponse,
+            fallbackReply: autopilotConfig.default_fallback_reply || '',
+            customerMessage: enrichedLastMessageContent || '',
+            intentResolution,
+            slotExtraction: workflowPlan.slotExtraction,
+            plannedActions: workflowPlan.actions,
+            toolResults,
+            enabledToolNames,
+            availableTeams,
+            contact: sanitizedContact,
+            knowledgeCoverage,
+            source: 'workflow_tools',
+        });
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'response_validator',
+            status: responseValidator.decision === 'approve' || responseValidator.decision === 'repair' ? 'success' : 'fallback',
+            payload: {
+                intent: intentResolution.intent,
+                workflowId: intentResolution.workflowId,
+                ...responseValidator.metadata,
+            },
+        });
+        if (responseValidator.decision !== 'approve') {
+            finalResponse = formatCustomerFacingAiResponse(responseValidator.response);
+        }
+
+        const sendStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'message_send',
+            () => sendMultiBlockResponse(
+                chat.id,
+                finalResponse,
+                assignedSystemAgentId,
+                true,
+                instanceName
+            ),
+            { responseLength: finalResponse.length, workflowEngine: true }
+        );
+        orchestratorTimings.send_ms = sendStage.durationMs;
+
+        if (responseValidator.actions.length > 0) {
+            const validatorToolsStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'tool_execution',
+                () => runRequestedAgentToolsWithStatus({
+                    workspaceId,
+                    chat,
+                    contact: sanitizedContact,
+                    systemAgentId: assignedSystemAgentId,
+                    systemAgentName: assignedSystemAgentName,
+                    autopilotConfig,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: responseValidator.actions,
+                    orchestratorRunId: orchestratorRun.id,
+                }),
+                {
+                    requestedActions: responseValidator.actions.map((action) => action.type),
+                    responseValidator: true,
+                    afterResponse: true,
+                }
+            );
+            orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + validatorToolsStage.durationMs;
+            toolResults = [...toolResults, ...validatorToolsStage.value];
+        }
+
+        const workflowHadToolFailure = toolResults.some((result) => result.status !== 'success');
+
+        await logIntelligentAttendantResponse({
+            configId: autopilotConfig.id,
+            chatId: chat.id,
+            systemAgentId: assignedSystemAgentId,
+            modelName: 'workflow-engine',
+            customerMessage: enrichedLastMessageContent || '',
+            response: finalResponse,
+            status: 'sent',
+            triggeredRule: null,
+            metadata: {
+                workflowPlan: workflowPlan.metadata,
+                workflowReason: workflowPlan.reason,
+                workflowActions: workflowPlan.actions.map((action) => action.type),
+                toolResults,
+                responseValidator: responseValidator.metadata,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                workflowId: intentResolution.workflowId,
+                ragStrategy,
+                knowledgeCoverage,
+            },
+        });
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: workflowHadToolFailure ? 'fallback' : 'success',
+            timings: orchestratorTimings,
+            intent: intentResolution.intent,
+            confidenceLevel: workflowHadToolFailure ? 'low' : 'deterministic',
+            confidenceScore: intentResolution.confidence,
+            metadata: {
+                responseSent: true,
+                toolCount: toolResults.length,
+                workflowEngine: true,
+                workflowReason: workflowPlan.reason,
+                workflowActions: workflowPlan.actions.map((action) => action.type),
+                toolResults,
+                responseValidator: responseValidator.metadata,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                workflowId: intentResolution.workflowId,
+                ragStrategy,
+                knowledgeCoverage,
+            },
+        });
+        return;
+    }
+
+    if (deterministicOfficialResponse) {
+        const finalResponse = formatCustomerFacingAiResponse(deterministicOfficialResponse);
+
+        if (currentCopilotMode === 'suggest') {
+            console.log(`[AUTOPILOT_SERVICE] Modo sugestao - resposta oficial deterministica: ${finalResponse.substring(0, 50)}...`);
+            const { getSupabaseAdmin } = await import('@/lib/supabase');
+            const supabase = getSupabaseAdmin();
+            await supabase.channel(`chat:${chat.id}`).send({
+                type: 'broadcast',
+                event: 'ai_suggestion',
+                payload: {
+                    suggestion: finalResponse,
+                    chatId: chat.id,
+                    configName: autopilotConfig.name,
+                },
+            });
+            await logIntelligentAttendantResponse({
+                configId: autopilotConfig.id,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                modelName: 'deterministic_official_response',
+                customerMessage: enrichedLastMessageContent || '',
+                response: finalResponse,
+                status: 'suggested',
+                triggeredRule: null,
+                metadata: {
+                    deterministicOfficialResponse: true,
                     intent: intentResolution.intent,
                     confidence: intentResolution.confidence,
                     reason: intentResolution.reason,
+                    workflowId: intentResolution.workflowId,
                     sourceDocumentId: intentResolution.sourceDocumentId,
                     sourceDocumentName: intentResolution.sourceDocumentName,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'success',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceLevel: 'deterministic',
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    suggestionOnly: true,
+                    deterministicOfficialResponse: true,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    reason: intentResolution.reason,
+                    workflowId: intentResolution.workflowId,
+                    sourceDocumentId: intentResolution.sourceDocumentId,
+                    sourceDocumentName: intentResolution.sourceDocumentName,
+                    ragStrategy,
+                    knowledgeCoverage,
                     responseLength: finalResponse.length,
                 },
             });
@@ -1443,7 +2057,7 @@ export async function processAutopilotForChat(
                 payload: {
                     sourceMessageId: sourceMessageId ?? null,
                     reason: 'newer_customer_message_exists',
-                    deterministicPlanCatalog: true,
+                    deterministicOfficialResponse: true,
                     intent: intentResolution.intent,
                     confidence: intentResolution.confidence,
                 },
@@ -1456,56 +2070,66 @@ export async function processAutopilotForChat(
                     responseSent: false,
                     toolCount: 0,
                     staleSourceMessage: true,
-                    deterministicPlanCatalog: true,
+                    deterministicOfficialResponse: true,
                     intent: intentResolution.intent,
                     confidence: intentResolution.confidence,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
                     sourceMessageId: sourceMessageId ?? null,
                 },
             });
             return;
         }
 
-        console.log(`[AUTOPILOT_SERVICE] Enviando catalogo de planos deterministico: ${finalResponse}`);
+        console.log(`[AUTOPILOT_SERVICE] Enviando resposta oficial deterministica: ${finalResponse}`);
         const sendStage = await timeOrchestratorStage(
             orchestratorRun,
             'message_send',
             () => sendAutomatedMessageAction(chat.id, finalResponse, assignedSystemAgentId, true, instanceName),
-            { responseLength: finalResponse.length, deterministicPlanCatalog: true }
+            { responseLength: finalResponse.length, deterministicOfficialResponse: true }
         );
         orchestratorTimings.send_ms = sendStage.durationMs;
         await logIntelligentAttendantResponse({
             configId: autopilotConfig.id,
             chatId: chat.id,
             systemAgentId: assignedSystemAgentId,
-            modelName: 'deterministic_plan_catalog',
+            modelName: 'deterministic_official_response',
             customerMessage: enrichedLastMessageContent || '',
             response: finalResponse,
             status: 'sent',
             triggeredRule: null,
             metadata: {
-                deterministicPlanCatalog: true,
+                deterministicOfficialResponse: true,
                 intent: intentResolution.intent,
                 confidence: intentResolution.confidence,
                 reason: intentResolution.reason,
+                workflowId: intentResolution.workflowId,
                 sourceDocumentId: intentResolution.sourceDocumentId,
                 sourceDocumentName: intentResolution.sourceDocumentName,
+                ragStrategy,
+                knowledgeCoverage,
             },
         });
         await finishOrchestratorRun({
             run: orchestratorRun,
             status: 'success',
             timings: orchestratorTimings,
-            intent: 'deterministic_plan_catalog',
+            intent: intentResolution.intent,
             confidenceLevel: 'deterministic',
+            confidenceScore: intentResolution.confidence,
             metadata: {
                 responseSent: true,
                 toolCount: 0,
-                deterministicPlanCatalog: true,
+                deterministicOfficialResponse: true,
                 intent: intentResolution.intent,
                 confidence: intentResolution.confidence,
                 reason: intentResolution.reason,
+                workflowId: intentResolution.workflowId,
                 sourceDocumentId: intentResolution.sourceDocumentId,
                 sourceDocumentName: intentResolution.sourceDocumentName,
+                ragStrategy,
+                knowledgeCoverage,
                 responseLength: finalResponse.length,
             },
         });
@@ -1539,12 +2163,17 @@ export async function processAutopilotForChat(
             workspaceGeminiApiKey,
             enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
             knowledgeToolProcedures,
+            intentContext: intentContextForAI,
             }), orchestratorRun.budget.maxLlmMs, 'llm response'),
             {
                 model: resolvedAiModel.model,
                 requestedModel: resolvedAiModel.requestedModel,
                 modelFallbackUsed: resolvedAiModel.fallbackUsed,
                 deterministicRouting: deterministicRouting.matchedReason,
+                intent: intentResolution.intent,
+                workflowId: intentResolution.workflowId,
+                ragStrategy,
+                knowledgeCoverage,
             }
         );
         orchestratorTimings.llm_ms = llmStage.durationMs;
@@ -1610,16 +2239,30 @@ export async function processAutopilotForChat(
                     response: finalResponse,
                     status: 'suggested',
                     triggeredRule: result.triggeredRule || null,
+                    metadata: {
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        workflowId: intentResolution.workflowId,
+                        ragStrategy,
+                        knowledgeCoverage,
+                        deterministicRouting: deterministicRouting.matchedReason,
+                    },
                 });
                 await finishOrchestratorRun({
                     run: orchestratorRun,
                     status: 'success',
                     timings: orchestratorTimings,
-                    intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : null,
+                    intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : intentResolution.intent,
                     confidenceLevel: deterministicRouting.matchedReason ? 'deterministic' : 'plausible',
+                    confidenceScore: deterministicRouting.matchedReason ? null : intentResolution.confidence,
                     metadata: {
                         suggestionOnly: true,
                         deterministicRouting: deterministicRouting.matchedReason,
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        workflowId: intentResolution.workflowId,
+                        ragStrategy,
+                        knowledgeCoverage,
                     },
                 });
             } else {
@@ -1647,12 +2290,16 @@ export async function processAutopilotForChat(
                             toolCount: 0,
                             staleSourceMessage: true,
                             sourceMessageId: sourceMessageId ?? null,
+                            intent: intentResolution.intent,
+                            confidence: intentResolution.confidence,
+                            workflowId: intentResolution.workflowId,
+                            ragStrategy,
+                            knowledgeCoverage,
                         },
                     });
                     return;
                 }
 
-                const enabledToolNames = resolveEnabledToolNames(autopilotConfig);
                 const promisedLookupActions = ensurePromisedSgpLookupAction({
                     response: finalResponse,
                     customerMessage: enrichedLastMessageContent || '',
@@ -1666,10 +2313,36 @@ export async function processAutopilotForChat(
                     enabledToolNames,
                     knowledgeToolProcedures,
                 });
+                const toolPlanner = planAutopilotTools({
+                    response: finalResponse,
+                    customerMessage: enrichedLastMessageContent || '',
+                    intentResolution,
+                    slotExtraction: workflowPlan.slotExtraction,
+                    actions: mergeAgentActions(deterministicRouting.actions, workflowPlannedActions, llmActions),
+                    enabledToolNames,
+                    toolCatalog: runtimeToolCatalog,
+                    availableTeams,
+                    contact: sanitizedContact,
+                });
+                await recordOrchestratorEvent({
+                    run: orchestratorRun,
+                    kind: 'tool_planner',
+                    status: toolPlanner.rejectedActions.length > 0 || toolPlanner.responseOverride ? 'fallback' : 'success',
+                    payload: {
+                        intent: intentResolution.intent,
+                        workflowId: intentResolution.workflowId,
+                        ...toolPlanner.metadata,
+                    },
+                });
+                if (toolPlanner.responseOverride) {
+                    finalResponse = toolPlanner.responseOverride;
+                    aiMessageBlocks = null;
+                }
                 const requestedActions = filterImplicitTransferActions({
-                    actions: mergeAgentActions(deterministicRouting.actions, llmActions),
+                    actions: toolPlanner.actions,
                     customerMessage: enrichedLastMessageContent || '',
                     availableTeams,
+                    candidates: deterministicRouting.candidates,
                 });
                 const preResponseActions = requestedActions
                     .filter(isPreResponseDataAction)
@@ -1764,6 +2437,7 @@ export async function processAutopilotForChat(
                                     workspaceGeminiApiKey,
                                     enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
                                     knowledgeToolProcedures,
+                                    intentContext: intentContextForAI,
                                 }), orchestratorRun.budget.maxLlmMs, 'llm tool continuation'),
                                 {
                                     model: resolvedAiModel.model,
@@ -1851,6 +2525,7 @@ export async function processAutopilotForChat(
                                     workspaceGeminiApiKey,
                                     enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
                                     knowledgeToolProcedures,
+                                    intentContext: intentContextForAI,
                                 }), orchestratorRun.budget.maxLlmMs, 'llm tool final response'),
                                 {
                                     model: resolvedAiModel.model,
@@ -1904,6 +2579,37 @@ export async function processAutopilotForChat(
                 }
 
                 finalResponse = formatCustomerFacingAiResponse(finalResponse);
+                const responseValidator = validateAutopilotResponse({
+                    response: finalResponse,
+                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                    customerMessage: enrichedLastMessageContent || '',
+                    intentResolution,
+                    slotExtraction: workflowPlan.slotExtraction,
+                    plannedActions: requestedActions,
+                    toolResults,
+                    enabledToolNames,
+                    availableTeams,
+                    contact: sanitizedContact,
+                    knowledgeCoverage,
+                    source: 'llm',
+                });
+                await recordOrchestratorEvent({
+                    run: orchestratorRun,
+                    kind: 'response_validator',
+                    status: responseValidator.decision === 'approve' || responseValidator.decision === 'repair' ? 'success' : 'fallback',
+                    payload: {
+                        intent: intentResolution.intent,
+                        workflowId: intentResolution.workflowId,
+                        ...responseValidator.metadata,
+                    },
+                });
+                if (responseValidator.decision !== 'approve') {
+                    finalResponse = formatCustomerFacingAiResponse(responseValidator.response);
+                    aiMessageBlocks = null;
+                }
+                const finalPostResponseActions = responseValidator.actions.length > 0
+                    ? mergeAgentActions(responseValidator.actions, postResponseActions)
+                    : postResponseActions;
 
                 console.log(`[AUTOPILOT_SERVICE] Enviando resposta: ${finalResponse}`);
                 const agentId = assignedSystemAgentId;
@@ -1932,10 +2638,10 @@ export async function processAutopilotForChat(
                         systemAgentName: assignedSystemAgentName,
                         autopilotConfig,
                         customerMessage: enrichedLastMessageContent || '',
-                        actions: postResponseActions,
+                        actions: finalPostResponseActions,
                         orchestratorRunId: orchestratorRun.id,
                     }),
-                    { requestedActions: postResponseActions.map((action) => action.type), afterResponse: true }
+                    { requestedActions: finalPostResponseActions.map((action) => action.type), afterResponse: true }
                 );
                 orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
                 toolResults = [...toolResults, ...toolsStage.value];
@@ -1952,27 +2658,65 @@ export async function processAutopilotForChat(
                         ...(webhookExecution ? { webhookExecution: webhookExecution.response } : {}),
                         ...(deterministicRouting.matchedReason ? { deterministicRouting: deterministicRouting.matchedReason } : {}),
                         ...(toolResults.length > 0 ? { toolResults } : {}),
+                        toolPlanner: toolPlanner.metadata,
+                        responseValidator: responseValidator.metadata,
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        workflowId: intentResolution.workflowId,
+                        ragStrategy,
+                        knowledgeCoverage,
                     },
                 });
                 await finishOrchestratorRun({
                     run: orchestratorRun,
                     status: 'success',
                     timings: orchestratorTimings,
-                    intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : null,
+                    intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : intentResolution.intent,
                     confidenceLevel: deterministicRouting.matchedReason ? 'deterministic' : 'plausible',
+                    confidenceScore: deterministicRouting.matchedReason ? null : intentResolution.confidence,
                     metadata: {
                         responseSent: true,
                         toolCount: toolResults.length,
                         deterministicRouting: deterministicRouting.matchedReason,
+                        toolPlanner: toolPlanner.metadata,
+                        responseValidator: responseValidator.metadata,
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        workflowId: intentResolution.workflowId,
+                        ragStrategy,
+                        knowledgeCoverage,
                     },
                 });
             }
         } else {
             console.log('[AUTOPILOT_SERVICE] Nenhuma resposta gerada.');
+            const emptyResponseToolPlanner = planAutopilotTools({
+                response: null,
+                customerMessage: enrichedLastMessageContent || '',
+                intentResolution,
+                slotExtraction: workflowPlan.slotExtraction,
+                actions: mergeAgentActions(deterministicRouting.actions, workflowPlannedActions, normalizeAgentActions(result?.actions)),
+                enabledToolNames,
+                toolCatalog: runtimeToolCatalog,
+                availableTeams,
+                contact: sanitizedContact,
+            });
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'tool_planner',
+                status: emptyResponseToolPlanner.rejectedActions.length > 0 || emptyResponseToolPlanner.responseOverride ? 'fallback' : 'success',
+                payload: {
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                    emptyResponse: true,
+                    ...emptyResponseToolPlanner.metadata,
+                },
+            });
             const fallbackActions = filterImplicitTransferActions({
-                actions: mergeAgentActions(deterministicRouting.actions, normalizeAgentActions(result?.actions)),
+                actions: emptyResponseToolPlanner.actions,
                 customerMessage: enrichedLastMessageContent || '',
                 availableTeams,
+                candidates: deterministicRouting.candidates,
             });
             const toolResults = currentCopilotMode === 'auto'
                 ? (await timeOrchestratorStage(
@@ -2001,31 +2745,45 @@ export async function processAutopilotForChat(
                 response: null,
                 status: 'empty',
                 triggeredRule: result?.triggeredRule || null,
-                metadata: toolResults.length > 0 || deterministicRouting.matchedReason
-                    ? {
-                        ...(deterministicRouting.matchedReason ? { deterministicRouting: deterministicRouting.matchedReason } : {}),
-                        ...(toolResults.length > 0 ? { toolResults } : {}),
-                    }
-                    : null,
+                metadata: {
+                    ...(deterministicRouting.matchedReason ? { deterministicRouting: deterministicRouting.matchedReason } : {}),
+                    ...(toolResults.length > 0 ? { toolResults } : {}),
+                    toolPlanner: emptyResponseToolPlanner.metadata,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
             });
             await finishOrchestratorRun({
                 run: orchestratorRun,
                 status: toolResults.length > 0 ? 'success' : 'fallback',
                 timings: orchestratorTimings,
-                intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : null,
+                intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : intentResolution.intent,
                 confidenceLevel: deterministicRouting.matchedReason ? 'deterministic' : 'low',
+                confidenceScore: deterministicRouting.matchedReason ? null : intentResolution.confidence,
                 metadata: {
                     responseSent: false,
                     toolCount: toolResults.length,
                     deterministicRouting: deterministicRouting.matchedReason,
+                    toolPlanner: emptyResponseToolPlanner.metadata,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
                 },
             });
         }
     } catch (error) {
         console.error('[AUTOPILOT_SERVICE] Erro ao processar:', error);
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (currentCopilotMode === 'auto' && errorMessage.includes('llm response timed out')) {
-            const timeoutFallback = formatCustomerFacingAiResponse(
+        if (currentCopilotMode === 'auto') {
+            const fallbackReason = errorMessage.includes('llm response timed out')
+                ? 'llm_timeout'
+                : 'autopilot_processing_error';
+            const automaticFallback = formatCustomerFacingAiResponse(
                 autopilotConfig.default_fallback_reply?.trim() ||
                 'Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.'
             );
@@ -2035,12 +2793,12 @@ export async function processAutopilotForChat(
                     'message_send',
                     () => sendAutomatedMessageAction(
                         chat.id,
-                        timeoutFallback,
+                        automaticFallback,
                         assignedSystemAgentId,
                         true,
                         instanceName
                     ),
-                    { responseLength: timeoutFallback.length, fallbackReason: 'llm_timeout' }
+                    { responseLength: automaticFallback.length, fallbackReason }
                 );
                 orchestratorTimings.send_ms = sendStage.durationMs;
                 await logIntelligentAttendantResponse({
@@ -2049,38 +2807,57 @@ export async function processAutopilotForChat(
                     systemAgentId: assignedSystemAgentId,
                     modelName: resolvedAiModel.model,
                     customerMessage: enrichedLastMessageContent || lastMessageContent || '',
-                    response: timeoutFallback,
+                    response: automaticFallback,
                     status: 'sent',
                     triggeredRule: null,
                     metadata: {
-                        fallbackReason: 'llm_timeout',
+                        fallbackReason,
                         deterministicRouting: deterministicRouting.matchedReason,
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        workflowId: intentResolution.workflowId,
+                        ragStrategy,
+                        knowledgeCoverage,
                     },
                 });
                 await finishOrchestratorRun({
                     run: orchestratorRun,
                     status: 'fallback',
                     timings: orchestratorTimings,
+                    intent: intentResolution.intent,
                     confidenceLevel: 'low',
+                    confidenceScore: intentResolution.confidence,
                     error: errorMessage,
                     metadata: {
                         responseSent: true,
-                        fallbackReason: 'llm_timeout',
+                        fallbackReason,
                         deterministicRouting: deterministicRouting.matchedReason,
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        workflowId: intentResolution.workflowId,
+                        ragStrategy,
+                        knowledgeCoverage,
                     },
                 });
                 return;
             } catch (fallbackError) {
-                console.error('[AUTOPILOT_SERVICE] Falha ao enviar fallback de timeout:', fallbackError);
+                console.error('[AUTOPILOT_SERVICE] Falha ao enviar fallback automatico:', fallbackError);
             }
         }
         await finishOrchestratorRun({
             run: orchestratorRun,
             status: 'error',
             timings: orchestratorTimings,
+            intent: intentResolution.intent,
+            confidenceScore: intentResolution.confidence,
             error: errorMessage,
             metadata: {
                 deterministicRouting: deterministicRouting.matchedReason,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                workflowId: intentResolution.workflowId,
+                ragStrategy,
+                knowledgeCoverage,
             },
         });
         await logIntelligentAttendantResponse({
@@ -2092,6 +2869,13 @@ export async function processAutopilotForChat(
             response: null,
             status: 'error',
             errorMessage: error instanceof Error ? error.message : String(error),
+            metadata: {
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                workflowId: intentResolution.workflowId,
+                ragStrategy,
+                knowledgeCoverage,
+            },
         });
     }
     } finally {

@@ -20,7 +20,8 @@
     "lint": "next lint",
     "i18n:sync-en": "node scripts/sync-en-us-i18n.mjs",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval:autopilot": "tsx scripts/eval-autopilot.ts --offline"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.997.0",

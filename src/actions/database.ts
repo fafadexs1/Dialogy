@@ -797,7 +797,43 @@ create index if not exists idx_autopilot_configs_workspace on public.autopilot_c
 alter table if exists public.autopilot_configs add column if not exists escalation_policy text;
 alter table if exists public.autopilot_configs add column if not exists closing_policy text;
 alter table if exists public.autopilot_configs add column if not exists enabled_tool_names jsonb;
+alter table if exists public.autopilot_configs add column if not exists transcription_model text;
 
+-- Autopilot: rascunhos e versoes
+create table if not exists public.autopilot_config_drafts (
+  config_id uuid primary key,
+  workspace_id uuid not null,
+  user_id uuid not null,
+  snapshot jsonb not null,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint autopilot_config_drafts_config_id_fkey
+    foreign key (config_id) references public.autopilot_configs(id) on delete cascade,
+  constraint autopilot_config_drafts_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade,
+  constraint autopilot_config_drafts_user_id_fkey
+    foreign key (user_id) references public.users(id) on delete cascade
+);
+create index if not exists idx_autopilot_config_drafts_workspace on public.autopilot_config_drafts(workspace_id);
+
+create table if not exists public.autopilot_config_versions (
+  id uuid primary key default gen_random_uuid(),
+  config_id uuid not null,
+  workspace_id uuid not null,
+  user_id uuid,
+  version_number int not null,
+  label text,
+  snapshot jsonb not null,
+  created_at timestamptz not null default timezone('utc', now()),
+  constraint autopilot_config_versions_config_id_fkey
+    foreign key (config_id) references public.autopilot_configs(id) on delete cascade,
+  constraint autopilot_config_versions_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade,
+  constraint autopilot_config_versions_user_id_fkey
+    foreign key (user_id) references public.users(id) on delete set null,
+  constraint autopilot_config_versions_config_number_key unique (config_id, version_number)
+);
+create index if not exists idx_autopilot_config_versions_config_created on public.autopilot_config_versions(config_id, version_number desc);
 
 -- Autopilot: regras
 create table if not exists public.autopilot_rules (

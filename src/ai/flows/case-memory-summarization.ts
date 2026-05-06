@@ -1,6 +1,7 @@
 import { z } from 'genkit';
 import { ai } from '@/ai/genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 
 const CaseMemoryInputSchema = z.object({
   workspaceId: z.string(),
@@ -60,7 +61,7 @@ Histórico do atendimento:
 const defaultPrompt = ai.definePrompt(promptConfig);
 
 export async function summarizeCaseMemory(input: CaseMemoryInput): Promise<CaseMemoryOutput> {
-  const model = input.model || 'googleai/gemini-2.0-flash';
+  const model = input.model || DEFAULT_AUTOPILOT_MODEL;
   const apiKey =
     input.apiKey?.trim() ||
     process.env.GEMINI_API_KEY?.trim() ||

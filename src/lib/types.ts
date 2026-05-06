@@ -512,6 +512,20 @@ export interface KnowledgeBaseDocument {
   content: string;
   tokens?: number;
   uploaded_at?: string;
+  summary?: string | null;
+  category?: string | null;
+  tags?: string[] | null;
+  priority?: number | null;
+  status?: 'draft' | 'active' | 'archived' | 'expired' | string | null;
+  validFrom?: string | null;
+  validUntil?: string | null;
+  audience?: string | string[] | null;
+  source?: string | null;
+  owner?: string | null;
+  updatedAt?: string | null;
+  workflowHints?: string[] | null;
+  requiredTools?: string[] | null;
+  canonicalAnswer?: string | null;
 }
 
 export interface NexusFlowInstance {
@@ -542,6 +556,40 @@ export interface AutopilotConfig {
   enabled_tool_names?: string[] | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AutopilotConfigDraftSnapshot {
+  name: string;
+  gemini_api_key: string | null;
+  ai_model: string | null;
+  transcription_model?: string | null;
+  knowledge_base: string | null;
+  knowledge_base_documents: KnowledgeBaseDocument[];
+  is_active: boolean;
+  is_private: boolean;
+  default_fallback_reply: string | null;
+  escalation_policy: string | null;
+  closing_policy: string | null;
+  enabled_tool_names: string[];
+}
+
+export interface AutopilotConfigDraft {
+  config_id: string;
+  workspace_id: string;
+  user_id: string;
+  snapshot: AutopilotConfigDraftSnapshot;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutopilotConfigVersionSummary {
+  id: string;
+  config_id: string;
+  workspace_id: string;
+  user_id: string | null;
+  version_number: number;
+  label: string | null;
+  created_at: string;
 }
 
 export interface AutopilotUsageLog {

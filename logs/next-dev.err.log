@@ -1,0 +1,9 @@
+Warning: Custom Cache-Control headers detected for the following routes:
+  - /_next/server-actions/:path*
+  - /_next/data/:path*
+
+Setting a custom Cache-Control header can break Next.js development behavior.
+[SUPABASE] No access token available for Realtime private channels.
+[SUPABASE] No access token available for Realtime private channels.
+[SUPABASE] No access token available for Realtime private channels.
+[SUPABASE] No access token available for Realtime private channels.

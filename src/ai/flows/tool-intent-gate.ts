@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 
 const ToolIntentGateInputSchema = z.object({
   customerMessage: z.string(),
@@ -7,6 +8,7 @@ const ToolIntentGateInputSchema = z.object({
   toolName: z.literal('transfer_chat'),
   targetTeamName: z.string(),
   candidateReason: z.string(),
+  escalationPolicy: z.string().optional(),
   model: z.string().optional(),
   apiKey: z.string().optional(),
   timeoutMs: z.number().int().positive().optional(),
@@ -22,7 +24,7 @@ export type ToolIntentGateInput = z.infer<typeof ToolIntentGateInputSchema>;
 export type ToolIntentGateOutput = z.infer<typeof ToolIntentGateOutputSchema>;
 
 function cleanModelName(model: string | undefined): string {
-  return (model || 'googleai/gemini-2.5-flash-lite').replace(/^googleai\//, '');
+  return (model || DEFAULT_AUTOPILOT_MODEL).replace(/^googleai\//, '');
 }
 
 function extractJson(text: string): unknown {
@@ -60,9 +62,13 @@ export async function classifyToolIntent(input: ToolIntentGateInput): Promise<To
     'Responda somente JSON: {"execute": boolean, "confidence": "low|medium|high", "reason": "curto"}.',
     '',
     'Regra para transfer_chat:',
-    '- execute=true somente se o cliente pediu claramente transferir o ATENDIMENTO, falar com humano, atendente, consultor, setor ou equipe.',
-    '- execute=false se o cliente esta continuando uma compra, suporte, pagamento, mudanca de plano, transferencia de endereco/internet, ou apenas mencionou um assunto.',
-    '- Na duvida, execute=false.',
+    '- execute=true, confidence=high: cliente pediu EXPLICITAMENTE falar com humano, atendente, consultor, setor ou equipe.',
+    '- execute=true, confidence=medium: cliente relata um PROBLEMA TECNICO claro (internet fora, lenta, sem sinal, roteador, etc.) que a equipe alvo pode resolver, E o agente virtual nao tem ferramentas para resolver sozinho.',
+    '- execute=true, confidence=medium: cliente esta frustrado/irritado e o contexto indica que precisa de atendimento humano.',
+    '- execute=false: cliente esta fazendo pergunta, comprando, consultando planos, pedindo informacao geral, ou mencionou um assunto sem precisar de atendimento humano.',
+    '- execute=false: cliente esta fazendo transferencia de endereco, mudanca de plano, ou outra operacao que o agente consegue conduzir.',
+    '- Na duvida entre medium e false, prefira false.',
+    parsedInput.escalationPolicy ? `\nPolitica de escalonamento do agente:\n${parsedInput.escalationPolicy.slice(0, 400)}` : '',
     '',
     `Ferramenta: ${parsedInput.toolName}`,
     `Equipe alvo: ${parsedInput.targetTeamName}`,

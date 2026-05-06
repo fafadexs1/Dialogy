@@ -194,7 +194,7 @@ export default function AiModelsSuperadminPage() {
                   <Input
                     value={model.label}
                     onChange={(event) => updateModel(index, { label: event.target.value })}
-                    placeholder="Ex: Gemini 2.5 Flash Lite"
+                    placeholder="Ex: Gemini 2.0 Flash Lite"
                   />
                 </div>
 
@@ -203,7 +203,7 @@ export default function AiModelsSuperadminPage() {
                   <Input
                     value={model.id}
                     onChange={(event) => updateModel(index, { id: event.target.value })}
-                    placeholder="Ex: googleai/gemini-2.5-flash-lite"
+                    placeholder="Ex: googleai/gemini-2.0-flash-lite"
                     className="font-mono text-xs"
                   />
                 </div>

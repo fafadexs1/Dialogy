@@ -67,7 +67,7 @@ const DOMAIN_KEYWORDS: Array<{ domain: string; terms: RegExp[]; teamHints: RegEx
   },
   {
     domain: 'suporte',
-    terms: [/\b(sem internet|internet caiu|sinal|los|lento|lentidao|lentidão|roteador|modem|tecnico|técnico|suporte)\b/i],
+    terms: [/\b(sem internet|internet caiu|internet|conexao|conexão|sinal|los|lento|lentidao|lentidão|roteador|modem|tecnico|técnico|suporte|merda|ruim|caindo)\b/i],
     teamHints: [/\b(suporte|tecnico|técnico|noc|atendimento)\b/i],
   },
   {
