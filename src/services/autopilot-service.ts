@@ -44,6 +44,7 @@ import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engi
 import type { WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
+import { selectAutopilotConfigForRuntime } from '@/services/autopilot/config-selection';
 
 /**
  * Sends an AI response as one or more separate WhatsApp message bubbles.
@@ -963,7 +964,13 @@ export async function getAutopilotConfigService(workspaceId: string, agentId?: s
             const documentsRaw = row.knowledge_base_documents;
             const normalizedDocs: KnowledgeBaseDocument[] =
                 typeof documentsRaw === 'string'
-                    ? JSON.parse(documentsRaw)
+                    ? (() => {
+                        try {
+                            return JSON.parse(documentsRaw);
+                        } catch {
+                            return [];
+                        }
+                    })()
                     : Array.isArray(documentsRaw)
                         ? documentsRaw
                         : [];
@@ -972,15 +979,12 @@ export async function getAutopilotConfigService(workspaceId: string, agentId?: s
                 knowledge_base_documents: normalizedDocs,
                 is_active: Boolean(row.is_active),
                 is_primary: Boolean(row.is_primary),
+                is_private: Boolean(row.is_private),
                 default_fallback_reply: row.default_fallback_reply || null,
             } as AutopilotConfig;
         });
 
-        const selectedConfig =
-            agents.find(agent => agent.id === agentId) ||
-            agents.find(agent => agent.is_primary && !agent.is_private) ||
-            agents.find(agent => !agent.is_private) ||
-            null;
+        const selectedConfig = selectAutopilotConfigForRuntime(agents, agentId);
 
         if (!selectedConfig) {
             return { config: null, rules: [], agents, workspace, hasGlobalKey: !!process.env.GOOGLE_GENAI_API_KEY };
@@ -1026,6 +1030,7 @@ export async function processAutopilotForChat(
     try {
     const chatConfigRes = await db.query(
         `SELECT
+            c.workspace_id,
             c.copilot_mode,
             c.is_autopilot_active,
             c.assigned_system_agent_id,
@@ -1033,19 +1038,31 @@ export async function processAutopilotForChat(
             sa.name AS assigned_system_agent_name,
             sa.type AS assigned_system_agent_type,
             sa.is_active AS assigned_system_agent_active,
-            sa.autopilot_config_id AS assigned_autopilot_config_id
+            sa.autopilot_config_id AS assigned_autopilot_config_id,
+            ac.id AS assigned_config_id,
+            ac.is_active AS assigned_config_active
          FROM chats c
-         LEFT JOIN system_agents sa ON sa.id = c.assigned_system_agent_id
-         WHERE c.id = $1`,
-        [chat.id]
+         LEFT JOIN system_agents sa
+           ON sa.id = c.assigned_system_agent_id
+          AND sa.workspace_id = c.workspace_id
+         LEFT JOIN autopilot_configs ac
+           ON ac.id = sa.autopilot_config_id
+          AND ac.workspace_id = c.workspace_id
+         WHERE c.id = $1
+           AND c.workspace_id = $2`,
+        [chat.id, workspaceId]
     );
     const chatConfig = chatConfigRes.rows[0];
+    if (!chatConfig) {
+        console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} nao encontrado no workspace ${workspaceId}. Ignorando.`);
+        return;
+    }
     const currentCopilotMode = chatConfig?.copilot_mode || 'auto';
     const rawIsActive = chatConfig?.is_autopilot_active ?? chat.is_autopilot_active;
     const currentIsActive = rawIsActive === true;
     const assignedSystemAgentId = chatConfig?.assigned_system_agent_id || null;
     const assignedSystemAgentName = chatConfig?.assigned_system_agent_name || 'Atendente Inteligente';
-    const assignedAutopilotConfigId = chatConfig?.assigned_autopilot_config_id || chatConfig?.autopilot_config_id || chat.autopilot_config_id;
+    const assignedAutopilotConfigId = chatConfig?.assigned_config_id || null;
 
     if (!assignedSystemAgentId || chatConfig?.assigned_system_agent_type !== 'intelligent_attendant') {
         console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} nao esta atribuido a um Atendente Inteligente. Ignorando.`);
@@ -1060,6 +1077,20 @@ export async function processAutopilotForChat(
     if (!assignedAutopilotConfigId) {
         console.log(`[AUTOPILOT_SERVICE] Atendente Inteligente sem configuracao de IA vinculada. Chat ${chat.id}.`);
         return;
+    }
+
+    if (chatConfig.autopilot_config_id !== assignedAutopilotConfigId) {
+        await db.query(
+            `UPDATE chats
+             SET autopilot_config_id = $1
+             WHERE id = $2
+               AND workspace_id = $3`,
+            [assignedAutopilotConfigId, chat.id, workspaceId]
+        );
+        chat = {
+            ...chat,
+            autopilot_config_id: assignedAutopilotConfigId,
+        };
     }
 
     console.error(

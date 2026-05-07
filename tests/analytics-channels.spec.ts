@@ -7,7 +7,9 @@ import {
 describe('analytics channel helpers', () => {
   it('normalizes instagram and messenger aliases', () => {
     expect(normalizeAnalyticsChannel('instagram')).toBe('Instagram');
+    expect(normalizeAnalyticsChannel('meta_instagram')).toBe('Instagram');
     expect(normalizeAnalyticsChannel('messenger')).toBe('Messenger');
+    expect(normalizeAnalyticsChannel('fb_messenger')).toBe('Messenger');
     expect(normalizeAnalyticsChannel('facebook')).toBe('Messenger');
   });
 
@@ -15,10 +17,13 @@ describe('analytics channel helpers', () => {
     expect(normalizeAnalyticsChannel('whatsapp')).toBe('WhatsApp');
     expect(normalizeAnalyticsChannel('baileys')).toBe('WhatsApp');
     expect(normalizeAnalyticsChannel('wa_cloud')).toBe('WhatsApp');
+    expect(normalizeAnalyticsChannel('wa-cloud')).toBe('WhatsApp');
+    expect(normalizeAnalyticsChannel('wa cloud')).toBe('WhatsApp');
     expect(normalizeAnalyticsChannel('5511999999999@s.whatsapp.net')).toBe('WhatsApp');
     expect(normalizeAnalyticsChannel('5511999999999@lid')).toBe('WhatsApp');
     expect(normalizeAnalyticsChannel('telegram')).toBe('Telegram');
     expect(normalizeAnalyticsChannel('telegram:123456')).toBe('Telegram');
+    expect(normalizeAnalyticsChannel('tg123456')).toBe('Telegram');
   });
 
   it('falls back to Outros for unknown values', () => {

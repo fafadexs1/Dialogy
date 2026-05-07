@@ -268,7 +268,22 @@ async function ensureContact(
 ): Promise<{ contact: ContactRow; metaContact: MetaContactRecord }> {
   const { rows } = await db.query(
     `
-      SELECT mc.*, c.*
+      SELECT
+        mc.id AS meta_contact_id,
+        mc.channel_id,
+        mc.contact_id,
+        mc.external_id,
+        mc.username,
+        mc.name AS meta_name,
+        mc.profile_pic,
+        c.id AS contact_row_id,
+        c.workspace_id,
+        c.name AS contact_name,
+        c.avatar_url,
+        c.email,
+        c.phone,
+        c.phone_number_jid,
+        c.address
       FROM meta_contacts mc 
       JOIN contacts c ON c.id = mc.contact_id
       WHERE mc.channel_id = $1 AND mc.external_id = $2
@@ -279,19 +294,19 @@ async function ensureContact(
 
   if (rows[0]) {
     const metaContact: MetaContactRecord = {
-      id: rows[0].id,
+      id: rows[0].meta_contact_id,
       channel_id: rows[0].channel_id,
       contact_id: rows[0].contact_id,
       external_id: rows[0].external_id,
       username: rows[0].username,
-      name: rows[0].name,
+      name: rows[0].meta_name,
       profile_pic: rows[0].profile_pic,
     };
 
     const contact: ContactRow = {
-      id: rows[0].contact_id,
+      id: rows[0].contact_row_id,
       workspace_id: rows[0].workspace_id,
-      name: rows[0].name || profile?.name || 'Contato Meta',
+      name: rows[0].contact_name || rows[0].meta_name || profile?.name || 'Contato Meta',
       avatar_url: rows[0].avatar_url,
       email: rows[0].email,
       phone: rows[0].phone,
@@ -308,41 +323,27 @@ async function ensureContact(
     `Meta User ${externalId.slice(-6)}`;
 
   // Cria contato (sem phone_number_jid para evitar conflito com índice único)
-  let contactRow: ContactRow | null = null;
-  try {
-    const contactInsert = await db.query(
-      `
-        INSERT INTO contacts (id, workspace_id, name, avatar_url, phone_number_jid)
-        VALUES ($1, $2, $3, $4, NULL)
-        RETURNING *
-      `,
-      [randomUUID(), channel.workspace_id, displayName, profile?.avatarUrl ?? null]
-    );
-    contactRow = contactInsert.rows[0];
-  } catch (error: any) {
-    // Se já existe um contato com phone_number_jid vazio/null, reutiliza para não quebrar o fluxo
-    const fallback = await db.query(
-      `
-        SELECT * FROM contacts
-        WHERE workspace_id = $1 AND (phone_number_jid IS NULL OR phone_number_jid = '')
-        ORDER BY created_at ASC
-        LIMIT 1
-      `,
-      [channel.workspace_id]
-    );
-    if (fallback.rows[0]) {
-      contactRow = fallback.rows[0];
-    } else {
-      throw error;
-    }
-  }
-
-  if (!contactRow) throw new Error("Failed to resolve contact");
+  const contactInsert = await db.query(
+    `
+      INSERT INTO contacts (id, workspace_id, name, avatar_url, phone_number_jid)
+      VALUES ($1, $2, $3, $4, NULL)
+      RETURNING *
+    `,
+    [randomUUID(), channel.workspace_id, displayName, profile?.avatarUrl ?? null]
+  );
+  const insertedContactRow = contactInsert.rows[0] as ContactRow | undefined;
+  if (!insertedContactRow) throw new Error("Failed to resolve contact");
+  let contactRow: ContactRow = insertedContactRow;
 
   const metaInsert = await db.query(
     `
       INSERT INTO meta_contacts (id, channel_id, contact_id, external_id, username, name, profile_pic)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (channel_id, external_id) DO UPDATE
+      SET username = COALESCE(EXCLUDED.username, meta_contacts.username),
+          name = COALESCE(EXCLUDED.name, meta_contacts.name),
+          profile_pic = COALESCE(EXCLUDED.profile_pic, meta_contacts.profile_pic),
+          updated_at = timezone('utc', now())
       RETURNING *
     `,
     [
@@ -357,6 +358,14 @@ async function ensureContact(
   );
 
   const metaContact: MetaContactRecord = metaInsert.rows[0];
+
+  if (metaContact.contact_id !== contactRow.id) {
+    const existingContact = await db.query(
+      `SELECT * FROM contacts WHERE id = $1 LIMIT 1`,
+      [metaContact.contact_id]
+    );
+    contactRow = existingContact.rows[0] || contactRow;
+  }
 
   // Update the contact to reference the meta_contact for easier debugging and queries
   await db.query(

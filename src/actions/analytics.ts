@@ -103,6 +103,17 @@ async function hasWorkspaceAccess(userId: string, workspaceId: string): Promise<
     return (result.rowCount || 0) > 0;
 }
 
+const activeConversationInRangeCondition = `
+    (
+        c.created_at BETWEEN $2 AND $3
+        OR EXISTS (
+            SELECT 1
+            FROM messages period_m
+            WHERE period_m.chat_id = c.id
+              AND period_m.created_at BETWEEN $2 AND $3
+        )
+    )
+`;
 
 export async function getAnalyticsData(
     workspaceId: string,
@@ -115,17 +126,16 @@ export async function getAnalyticsData(
 
     try {
         const baseParams: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
-        console.log('[GET_ANALYTICS_DATA] Input:', { workspaceId, filters, dateRange });
-
 
         // Total Conversations
         const [totalConvQuery, totalConvParams] = addFilters(
-            'SELECT COUNT(*) FROM chats c WHERE c.workspace_id = $1 AND c.created_at BETWEEN $2 AND $3',
+            `SELECT COUNT(*) FROM chats c
+             WHERE c.workspace_id = $1
+               AND ${activeConversationInRangeCondition}`,
             baseParams,
             filters
         );
         const totalConversationsRes = await db.query(totalConvQuery, totalConvParams);
-        console.log('[GET_ANALYTICS_DATA] Total Conversations Query:', { query: totalConvQuery, params: totalConvParams, rowCount: totalConversationsRes.rows[0]?.count });
         const totalConversations = parseInt(totalConversationsRes.rows[0].count, 10);
 
         // New Contacts (workspace-wide, not filtered by agent/team but by daterange)
@@ -191,14 +201,68 @@ export async function getAnalyticsData(
         const resolvedCount = parseInt(resolvedRes.rows[0].count, 10);
         const firstContactResolutionRate = totalConversations > 0 ? (resolvedCount / totalConversations) * 100 : 0;
 
-        // Conversations by Hour (always uses last 30 days for pattern analysis, not the selected range)
+        const [openConversationsQuery, openConversationsParams] = addFilters(
+            `SELECT COUNT(*) FROM chats c
+             WHERE c.workspace_id = $1
+               AND ${activeConversationInRangeCondition}
+               AND c.status <> 'encerrados'`,
+            baseParams,
+            filters
+        );
+        const openConversationsRes = await db.query(openConversationsQuery, openConversationsParams);
+        const openConversations = parseInt(openConversationsRes.rows[0].count, 10);
+
+        const [automationConversationsQuery, automationConversationsParams] = addFilters(
+            `SELECT COUNT(*) FROM chats c
+             WHERE c.workspace_id = $1
+               AND ${activeConversationInRangeCondition}
+               AND (
+                    c.assigned_system_agent_id IS NOT NULL
+                    OR LOWER(COALESCE(to_jsonb(c)->>'is_autopilot_active', 'false')) IN ('true', 't', '1')
+               )`,
+            baseParams,
+            filters
+        );
+        const automationConversationsRes = await db.query(automationConversationsQuery, automationConversationsParams);
+        const automationConversations = parseInt(automationConversationsRes.rows[0].count, 10);
+
+        const [messageStatsQuery, messageStatsParams] = addFilters(
+            `SELECT
+                COUNT(m.id)::int AS total_messages,
+                (COUNT(m.id) FILTER (WHERE m.from_me = false))::int AS customer_messages,
+                (COUNT(m.id) FILTER (WHERE m.from_me = true))::int AS agent_messages,
+                COALESCE(COUNT(m.id)::numeric / NULLIF(COUNT(DISTINCT c.id), 0), 0) AS avg_messages_per_conversation
+             FROM messages m
+             JOIN chats c ON m.chat_id = c.id
+             WHERE c.workspace_id = $1
+               AND m.created_at BETWEEN $2 AND $3`,
+            baseParams,
+            filters
+        );
+        const messageStatsRes = await db.query(messageStatsQuery, messageStatsParams);
+        const messageStats = messageStatsRes.rows[0] || {};
+        const totalMessages = Number(messageStats.total_messages || 0);
+        const customerMessages = Number(messageStats.customer_messages || 0);
+        const agentMessages = Number(messageStats.agent_messages || 0);
+        const avgMessagesPerConversation = Number(messageStats.avg_messages_per_conversation || 0);
+
+        // Conversations by Hour
         const [convByHourQuery, convByHourParams] = addFilters(
-            `SELECT EXTRACT(HOUR FROM c.created_at) as hour, COUNT(*) as count
+            `SELECT
+                EXTRACT(HOUR FROM COALESCE(period_activity.first_activity_at, c.created_at)) as hour,
+                COUNT(DISTINCT c.id) as count
              FROM chats c
-             WHERE c.workspace_id = $1 AND c.created_at > NOW() - INTERVAL '30 days'
+             LEFT JOIN LATERAL (
+                SELECT MIN(activity_m.created_at) AS first_activity_at
+                FROM messages activity_m
+                WHERE activity_m.chat_id = c.id
+                  AND activity_m.created_at BETWEEN $2 AND $3
+             ) period_activity ON TRUE
+             WHERE c.workspace_id = $1
+               AND (c.created_at BETWEEN $2 AND $3 OR period_activity.first_activity_at IS NOT NULL)
              GROUP BY hour
              ORDER BY hour`,
-            [workspaceId], // Use only workspaceId for this query
+            baseParams,
             filters
         );
         const conversationsByHourRes = await db.query(convByHourQuery, convByHourParams);
@@ -210,9 +274,9 @@ export async function getAnalyticsData(
         const [channelsQuery, channelsParams] = addFilters(
             `SELECT
                 COALESCE(
-                    LOWER(NULLIF(mc.platform::text, '')),
-                    last_platform.platform_signal,
-                    meta_contact_platform.platform_signal,
+                    NULLIF(meta_conversation_platform.platform_signal, 'unknown'),
+                    NULLIF(meta_contact_platform.platform_signal, 'unknown'),
+                    NULLIF(LOWER(NULLIF(to_jsonb(c)->>'meta_platform', '')), 'unknown'),
                     CASE
                         WHEN ct.phone_number_jid ILIKE '%@s.whatsapp.net'
                           OR ct.phone_number_jid ILIKE '%@g.us'
@@ -220,17 +284,34 @@ export async function getAnalyticsData(
                         THEN 'whatsapp'
                         ELSE NULL
                     END,
+                    NULLIF(last_platform.platform_signal, 'unknown'),
+                    NULLIF(LOWER(NULLIF(to_jsonb(c)->>'source', '')), 'unknown'),
+                    NULLIF(LOWER(NULLIF(to_jsonb(c)->>'instance_type', '')), 'unknown'),
                     'unknown'
                 ) as channel_signal,
-                COUNT(*) as count
+                COUNT(DISTINCT c.id) as count
              FROM chats c
              LEFT JOIN contacts ct ON c.contact_id = ct.id
-             LEFT JOIN meta_conversations mc ON c.id = mc.chat_id
              LEFT JOIN LATERAL (
-                SELECT LOWER(COALESCE(m.source_from_api, m.platform::text)) AS platform_signal
+                SELECT LOWER(mc.platform::text) AS platform_signal
+                FROM meta_conversations mc
+                WHERE mc.chat_id = c.id
+                ORDER BY mc.last_message_at DESC NULLS LAST, mc.updated_at DESC NULLS LAST, mc.created_at DESC NULLS LAST
+                LIMIT 1
+             ) meta_conversation_platform ON TRUE
+             LEFT JOIN LATERAL (
+                SELECT LOWER(COALESCE(
+                    NULLIF(m.platform::text, ''),
+                    NULLIF(m.source_from_api, ''),
+                    NULLIF(m.instance_name, '')
+                )) AS platform_signal
                 FROM messages m
                 WHERE m.chat_id = c.id
-                  AND COALESCE(m.source_from_api, m.platform::text) IS NOT NULL
+                  AND COALESCE(
+                    NULLIF(m.platform::text, ''),
+                    NULLIF(m.source_from_api, ''),
+                    NULLIF(m.instance_name, '')
+                  ) IS NOT NULL
                 ORDER BY m.created_at DESC
                 LIMIT 1
              ) last_platform ON TRUE
@@ -242,7 +323,8 @@ export async function getAnalyticsData(
                 ORDER BY mct.created_at DESC
                 LIMIT 1
              ) meta_contact_platform ON TRUE
-             WHERE c.workspace_id = $1 AND c.created_at BETWEEN $2 AND $3
+             WHERE c.workspace_id = $1
+               AND ${activeConversationInRangeCondition}
              GROUP BY 1
              ORDER BY count DESC`,
             baseParams,
@@ -265,13 +347,18 @@ export async function getAnalyticsData(
             }))
             .sort((a, b) => b.value - a.value);
 
-        console.log('[GET_ANALYTICS_DATA] Channels Result:', conversationsByChannel);
-
         return {
             totalConversations,
             newContacts,
             avgFirstResponseTime,
             firstContactResolutionRate,
+            resolvedConversations: resolvedCount,
+            openConversations,
+            automationConversations,
+            totalMessages,
+            customerMessages,
+            agentMessages,
+            avgMessagesPerConversation,
             conversationsByHour,
             conversationsByChannel
         };
@@ -508,7 +595,7 @@ export async function getAgentPerformance(
                     COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'encerrados') as resolved_chats
                 FROM chats c
                 WHERE c.workspace_id = $1
-                  AND c.created_at BETWEEN $2 AND $3
+                  AND ${activeConversationInRangeCondition}
                   AND c.agent_id IS NOT NULL
                 GROUP BY c.agent_id
             ),

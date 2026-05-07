@@ -118,7 +118,7 @@ import { shouldAcceptAiSuggestion } from '@/lib/inbox-ownership';
 
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
-import { getChatContactDisplayValue, resolveChatPlatform } from '@/lib/chat-platform';
+import { getChatIdentityDisplayValue, resolveChatPlatform } from '@/lib/chat-platform';
 
 
 
@@ -505,6 +505,16 @@ export default function ChatPanel({
     const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
     const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
     const [autopilotAgents, setAutopilotAgents] = useState<AutopilotConfig[]>([]);
+    const activeAutopilotConfig = useMemo(() => {
+        const chatConfigId = chat?.autopilot_config_id;
+        if (chatConfigId) {
+            return (
+                autopilotAgents.find((agent) => agent.id === chatConfigId) ||
+                (autopilotConfig?.id === chatConfigId ? autopilotConfig : null)
+            );
+        }
+        return autopilotConfig;
+    }, [autopilotAgents, autopilotConfig, chat?.autopilot_config_id]);
     const isProtocolScoped = !!(chat as any)?.protocolScoped;
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
     const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
@@ -608,7 +618,7 @@ export default function ChatPanel({
 
     const fetchAutopilotData = useCallback(async () => {
         if (!currentUser.activeWorkspaceId) return;
-        const data = await getAutopilotConfig(currentUser.activeWorkspaceId);
+        const data = await getAutopilotConfig(currentUser.activeWorkspaceId, chat?.autopilot_config_id || undefined);
         if (!data.error) {
             setAutopilotConfig(data.config);
             setAutopilotRules(data.rules || []);
@@ -616,7 +626,7 @@ export default function ChatPanel({
         } else {
             console.error("Failed to fetch autopilot config:", data.error);
         }
-    }, [currentUser.activeWorkspaceId]);
+    }, [chat?.autopilot_config_id, currentUser.activeWorkspaceId]);
 
     const fetchShortcuts = useCallback(async () => {
         if (!currentUser.activeWorkspaceId) return;
@@ -891,7 +901,7 @@ export default function ChatPanel({
             const chatHistoryForAI = storeMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
             const activeRules = autopilotRules.filter(rule => rule.enabled);
 
-            if (!autopilotConfig) {
+            if (!activeAutopilotConfig) {
                 console.warn("[AUTOPILOT] Configuração não carregada. Abortando.");
                 return;
             }
@@ -902,15 +912,15 @@ export default function ChatPanel({
             };
 
             const result = await generateAgentResponse({
-                config: autopilotConfig,
+                config: activeAutopilotConfig,
                 chatId: chat.id,
                 customerMessage: lastMessage.content || '',
                 chatHistory: chatHistoryForAI,
                 rules: activeRules,
-                knowledgeBase: autopilotConfig?.knowledge_base || '',
-                knowledgeBaseDocuments: autopilotConfig?.knowledge_base_documents || [],
-                fallbackReply: autopilotConfig?.default_fallback_reply || '',
-                model: autopilotConfig?.ai_model || DEFAULT_AUTOPILOT_MODEL,
+                knowledgeBase: activeAutopilotConfig.knowledge_base || '',
+                knowledgeBaseDocuments: activeAutopilotConfig.knowledge_base_documents || [],
+                fallbackReply: activeAutopilotConfig.default_fallback_reply || '',
+                model: activeAutopilotConfig.ai_model || DEFAULT_AUTOPILOT_MODEL,
                 contact: sanitizedContact
             });
 
@@ -918,7 +928,7 @@ export default function ChatPanel({
                 if (copilotMode === 'suggest') {
                     setAiSuggestion({
                         text: result.response,
-                        configName: autopilotConfig?.name || 'IA',
+                        configName: activeAutopilotConfig.name || 'IA',
                     });
                     return;
                 }
@@ -939,7 +949,7 @@ export default function ChatPanel({
         } finally {
             setIsAiTyping(false);
         }
-    }, [autopilotConfig, autopilotRules, chat, currentUser.id, isAiAgentActive, isAiTyping, onActionSuccess, toast, messagesByChat]);
+    }, [activeAutopilotConfig, autopilotRules, chat, currentUser.id, isAiAgentActive, isAiTyping, onActionSuccess, toast, messagesByChat]);
 
     useEffect(() => {
         runAiAgent();
@@ -1161,7 +1171,9 @@ export default function ChatPanel({
     const generateOptimisticId = () => uuidv4();
 
     const resolvedPlatform = resolveChatPlatform(chat);
-    const contactDisplayValue = getChatContactDisplayValue(chat?.contact, resolvedPlatform);
+    const isMetaPlatform = resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger';
+    const contactDisplayValue = getChatIdentityDisplayValue(chat, resolvedPlatform);
+    const headerContactValue = contactDisplayValue || (isMetaPlatform ? '' : chat?.contact.phone || chat?.contact.phone_number_jid || '');
 
     const optimisticPlatform =
         resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger' || resolvedPlatform === 'telegram'
@@ -1970,7 +1982,7 @@ export default function ChatPanel({
                                         <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
                                             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Contato</div>
                                             <div className="mt-1 break-all font-medium text-foreground">
-                                                {contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid || 'Nao informado'}
+                                                {headerContactValue || 'Nao informado'}
                                             </div>
                                         </div>
                                         <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
@@ -2003,10 +2015,10 @@ export default function ChatPanel({
                                     <span className="hidden max-w-[72px] truncate lg:inline xl:max-w-[96px]">{chat.instance_name}</span>
                                 </span>
                             )}
-                            {chat.instance_name && (contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid) && (
+                            {chat.instance_name && headerContactValue && (
                                 <span className="mx-1 hidden shrink-0 lg:inline">•</span>
                             )}
-                            <span className="min-w-0 truncate text-slate-600 dark:text-zinc-400">{contactDisplayValue || chat.contact.phone || chat.contact.phone_number_jid}</span>
+                            <span className="min-w-0 truncate text-slate-600 dark:text-zinc-400">{headerContactValue}</span>
                         </p>
                     </div>
                 </div>

@@ -10,6 +10,7 @@ export type AnalyticsChannelName = keyof typeof ANALYTICS_CHANNEL_COLORS;
 
 export function normalizeAnalyticsChannel(channel: string | null | undefined): AnalyticsChannelName {
   const normalized = (channel || '').trim().toLowerCase();
+  const compact = normalized.replace(/[\s-]+/g, '_');
 
   if (!normalized) {
     return 'Outros';
@@ -30,7 +31,7 @@ export function normalizeAnalyticsChannel(channel: string | null | undefined): A
   if (
     normalized.includes('whatsapp') ||
     normalized.includes('baileys') ||
-    normalized.includes('wa_cloud') ||
+    compact.includes('wa_cloud') ||
     normalized.includes('@s.whatsapp.net') ||
     normalized.includes('@g.us') ||
     normalized.includes('@lid')

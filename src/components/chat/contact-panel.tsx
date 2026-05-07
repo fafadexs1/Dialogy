@@ -83,7 +83,7 @@ import DealForm from '../crm/deal-form';
 import LeadScoreBadge from '../crm/lead-score-badge';
 import { CopyProtocolButton } from './copy-protocol-button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { getChatContactDisplayValue, getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
+import { getChatIdentityDisplayValue, getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
 import {
     createSGPPaymentPromise,
     createSGPServiceOrder,
@@ -1362,18 +1362,12 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                 : resolvedPlatform === 'messenger'
                     ? 'Messenger'
                     : 'WhatsApp';
-    const contactDisplayValue = getChatContactDisplayValue(contact, resolvedPlatform) || 'Sem numero';
+    const isMetaContact = resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger';
 
-    // For Meta chats (Instagram/Messenger), use the external_id from meta_contacts
-    // For other platforms, fall back to the message's external_sender_id
-    const lastMessage = (chat as any)?.messages?.[(chat as any)?.messages?.length - 1];
-    const externalId = chat.metaContactExternalId
-        || lastMessage?.externalSenderId
-        || lastMessage?.external_sender_id
-        || null;
-
-    // Instagram/Messenger username  
-    const metaUsername = chat.metaContactUsername || null;
+    const contactDisplayValue = getChatIdentityDisplayValue(chat, resolvedPlatform) || (isMetaContact ? 'Sem identificador' : 'Sem numero');
+    const contactCopyValue = contactDisplayValue === 'Sem identificador' || contactDisplayValue === 'Sem numero'
+        ? ''
+        : contactDisplayValue;
 
     return (
         <motion.div
@@ -1545,19 +1539,21 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     <div className="flex min-w-0 items-start gap-2.5">
                                         <div className={cn(
                                             "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border sm:h-8 sm:w-8",
-                                            contact.phone_number_jid?.includes('@g.us')
-                                                ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                            isMetaContact
+                                                ? "border-pink-500/20 bg-pink-500/10 text-pink-400"
+                                                : contact.phone_number_jid?.includes('@g.us')
+                                                    ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                         )}>
-                                            {contact.phone_number_jid?.includes('@g.us') ? <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+                                            {isMetaContact ? <Globe className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : contact.phone_number_jid?.includes('@g.us') ? <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center justify-between gap-2">
                                                 <span className="block truncate text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">{contactChannelLabel}</span>
-                                                <CopyButton value={(contact.phone_number_jid || contact.phone || '').replace(/@.*$/, '')} label="Telefone" />
+                                                {contactCopyValue && <CopyButton value={contactCopyValue} label={contactChannelLabel} />}
                                             </div>
                                             <span className="mt-0.5 block break-all text-[12px] font-semibold leading-tight tabular-nums text-slate-900 sm:text-[13px] dark:text-zinc-100">
-                                                {(contact.phone_number_jid || contact.phone || 'Sem número').replace(/@.*$/, '')}
+                                                {contactDisplayValue}
                                             </span>
                                         </div>
                                     </div>

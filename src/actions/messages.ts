@@ -515,8 +515,80 @@ async function resolveMetaSendContext(chatId: string, client: any): Promise<Meta
         [chatId]
     );
 
-    if (res.rowCount === 0) return null;
-    const row = res.rows[0];
+    let row = res.rows[0];
+
+    if (!row) {
+        const fallbackRes = await client.query(
+            `
+            WITH latest_meta_message AS (
+              SELECT
+                m.chat_id,
+                m.workspace_id,
+                CASE
+                  WHEN m.platform::text IN ('instagram', 'messenger') THEN m.platform::text
+                  WHEN lower(COALESCE(NULLIF(m.source_from_api, ''), '')) LIKE '%instagram%' THEN 'instagram'
+                  WHEN lower(COALESCE(NULLIF(m.source_from_api, ''), '')) LIKE '%messenger%' THEN 'messenger'
+                  ELSE NULL
+                END AS platform,
+                m.external_sender_id,
+                m.external_channel_id,
+                m.instance_name
+              FROM messages m
+              WHERE m.chat_id = $1
+                AND m.external_sender_id IS NOT NULL
+                AND (
+                  m.platform::text IN ('instagram', 'messenger')
+                  OR lower(COALESCE(NULLIF(m.source_from_api, ''), '')) IN ('instagram', 'messenger')
+                )
+              ORDER BY m.created_at DESC, m.id DESC
+              LIMIT 1
+            )
+            SELECT
+              lmm.platform,
+              lmm.external_sender_id as external_user_id,
+              lmm.external_sender_id as last_external_sender_id,
+              ch.id as channel_id,
+              ch.workspace_id,
+              ch.type,
+              ch.external_page_id,
+              ch.ig_business_id,
+              ch.access_token,
+              ch.app_secret,
+              ch.verify_token,
+              ch.settings,
+              ch.name as channel_name,
+              c.id as contact_id,
+              c.workspace_id as contact_workspace_id,
+              c.name as contact_name,
+              c.avatar_url as contact_avatar
+            FROM latest_meta_message lmm
+            JOIN chats chat ON chat.id = lmm.chat_id
+            JOIN contacts c ON c.id = chat.contact_id
+            JOIN meta_channels ch
+              ON ch.workspace_id = chat.workspace_id
+             AND ch.type::text = lmm.platform
+             AND (
+                lmm.external_channel_id IS NULL
+                OR ch.external_page_id = lmm.external_channel_id
+                OR ch.ig_business_id = lmm.external_channel_id
+                OR lower(ch.name) = lower(lmm.instance_name)
+             )
+            WHERE lmm.platform IS NOT NULL
+            ORDER BY
+              CASE
+                WHEN ch.external_page_id = lmm.external_channel_id OR ch.ig_business_id = lmm.external_channel_id THEN 0
+                WHEN lower(ch.name) = lower(lmm.instance_name) THEN 1
+                ELSE 2
+              END
+            LIMIT 1
+            `,
+            [chatId]
+        );
+
+        row = fallbackRes.rows[0];
+    }
+
+    if (!row) return null;
     const channel: MetaChannelRecord = {
         id: row.channel_id,
         workspace_id: row.workspace_id,

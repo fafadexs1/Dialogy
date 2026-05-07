@@ -933,6 +933,11 @@ type ChatRow = {
     last_message_api_message_status: string | null;
     last_message_is_read: boolean | null;
     last_message_sent_by_tab: string | null;
+    last_message_external_message_id?: string | null;
+    last_message_external_sender_id?: string | null;
+    last_message_external_channel_id?: string | null;
+    last_message_direction?: 'incoming' | 'outgoing' | null;
+    last_message_media_url?: string | null;
     contact_custom_fields: Record<string, any> | null;
     is_autopilot_active?: boolean | null;
     autopilot_config_id?: string | null;
@@ -1178,10 +1183,15 @@ async function fetchChats({
             lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
             lmd.sent_by_tab AS last_message_sent_by_tab,
+            lmd.external_message_id AS last_message_external_message_id,
+            lmd.external_sender_id AS last_message_external_sender_id,
+            lmd.external_channel_id AS last_message_external_channel_id,
+            lmd.direction AS last_message_direction,
+            lmd.media_url AS last_message_media_url,
             ccf.contact_custom_fields AS contact_custom_fields,
-            COALESCE(mct.external_id, mct_stable.external_id) AS meta_contact_external_id,
-            COALESCE(mct.username, mct_stable.username) AS meta_contact_username,
-            COALESCE(mc.platform, mct_stable.platform_type) AS meta_platform
+            COALESCE(mct.external_id, mct_from_message.external_id, CASE WHEN NULLIF(cont.phone_number_jid, '') IS NULL THEN mct_stable.external_id END) AS meta_contact_external_id,
+            COALESCE(mct.username, mct_from_message.username, CASE WHEN NULLIF(cont.phone_number_jid, '') IS NULL THEN mct_stable.username END) AS meta_contact_username,
+            COALESCE(mc.platform, mct_from_message.platform_type, CASE WHEN NULLIF(cont.phone_number_jid, '') IS NULL THEN mct_stable.platform_type END) AS meta_platform
         FROM merged_chats c
         LEFT JOIN LATERAL (
             SELECT
@@ -1201,7 +1211,12 @@ async function fetchChats({
                 m.message_id_from_api,
                 m.api_message_status,
                 m.is_read,
-                m.sent_by_tab
+                m.sent_by_tab,
+                m.external_message_id,
+                m.external_sender_id,
+                m.external_channel_id,
+                m.direction,
+                m.media_url
             FROM messages m
             WHERE m.chat_id = c.id
             ORDER BY m.created_at DESC, m.id DESC
@@ -1220,6 +1235,24 @@ async function fetchChats({
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
         LEFT JOIN contacts cont ON cont.id = c.contact_id
+        LEFT JOIN LATERAL (
+            SELECT mct2.username, mct2.external_id, mch.type as platform_type
+            FROM meta_contacts mct2
+            JOIN meta_channels mch ON mch.id = mct2.channel_id
+            WHERE mct2.external_id = lmd.external_sender_id
+              AND mch.workspace_id = c.workspace_id
+              AND (
+                lmd.external_channel_id IS NULL
+                OR mch.external_page_id = lmd.external_channel_id
+                OR mch.ig_business_id = lmd.external_channel_id
+              )
+              AND (
+                lmd.platform IS NULL
+                OR mch.type::text = lmd.platform::text
+              )
+            ORDER BY mct2.created_at DESC
+            LIMIT 1
+        ) mct_from_message ON true
         LEFT JOIN LATERAL (
             SELECT mct2.username, mct2.external_id, mch.type as platform_type
             FROM meta_contacts mct2
@@ -2130,10 +2163,15 @@ export const getMergedContactThreadAction = withDebug(
                     lmd.api_message_status AS last_message_api_message_status,
                     lmd.is_read AS last_message_is_read,
                     lmd.sent_by_tab AS last_message_sent_by_tab,
+                    lmd.external_message_id AS last_message_external_message_id,
+                    lmd.external_sender_id AS last_message_external_sender_id,
+                    lmd.external_channel_id AS last_message_external_channel_id,
+                    lmd.direction AS last_message_direction,
+                    lmd.media_url AS last_message_media_url,
                     NULL::json AS contact_custom_fields,
-                    COALESCE(mct.external_id, mct_stable.external_id) AS meta_contact_external_id,
-                    COALESCE(mct.username, mct_stable.username) AS meta_contact_username,
-                    COALESCE(mc.platform, mct_stable.platform_type) AS meta_platform
+                    COALESCE(mct.external_id, mct_from_message.external_id, CASE WHEN NULLIF(cont.phone_number_jid, '') IS NULL THEN mct_stable.external_id END) AS meta_contact_external_id,
+                    COALESCE(mct.username, mct_from_message.username, CASE WHEN NULLIF(cont.phone_number_jid, '') IS NULL THEN mct_stable.username END) AS meta_contact_username,
+                    COALESCE(mc.platform, mct_from_message.platform_type, CASE WHEN NULLIF(cont.phone_number_jid, '') IS NULL THEN mct_stable.platform_type END) AS meta_platform
                 FROM chats c
                 LEFT JOIN LATERAL (
                     SELECT
@@ -2153,7 +2191,12 @@ export const getMergedContactThreadAction = withDebug(
                         m.message_id_from_api,
                         m.api_message_status,
                         m.is_read,
-                        m.sent_by_tab
+                        m.sent_by_tab,
+                        m.external_message_id,
+                        m.external_sender_id,
+                        m.external_channel_id,
+                        m.direction,
+                        m.media_url
                     FROM messages m
                     WHERE m.chat_id = c.id
                     ORDER BY m.created_at DESC, m.id DESC
@@ -2170,6 +2213,24 @@ export const getMergedContactThreadAction = withDebug(
                 LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
                 LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
                 LEFT JOIN contacts cont ON cont.id = c.contact_id
+                LEFT JOIN LATERAL (
+                    SELECT mct2.username, mct2.external_id, mch.type as platform_type
+                    FROM meta_contacts mct2
+                    JOIN meta_channels mch ON mch.id = mct2.channel_id
+                    WHERE mct2.external_id = lmd.external_sender_id
+                      AND mch.workspace_id = c.workspace_id
+                      AND (
+                        lmd.external_channel_id IS NULL
+                        OR mch.external_page_id = lmd.external_channel_id
+                        OR mch.ig_business_id = lmd.external_channel_id
+                      )
+                      AND (
+                        lmd.platform IS NULL
+                        OR mch.type::text = lmd.platform::text
+                      )
+                    ORDER BY mct2.created_at DESC
+                    LIMIT 1
+                ) mct_from_message ON true
                 LEFT JOIN LATERAL (
                     SELECT mct2.username, mct2.external_id, mch.type as platform_type
                     FROM meta_contacts mct2
@@ -2590,6 +2651,11 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
                     api_message_status: row.last_message_api_message_status,
                     is_read: row.last_message_is_read,
                     sent_by_tab: row.last_message_sent_by_tab,
+                    external_message_id: row.last_message_external_message_id,
+                    external_sender_id: row.last_message_external_sender_id,
+                    external_channel_id: row.last_message_external_channel_id,
+                    direction: row.last_message_direction,
+                    media_url: row.last_message_media_url,
                     contact_id: contact?.id,
                     contact_name: contact?.name,
                     contact_avatar_url: contact?.avatar_url,

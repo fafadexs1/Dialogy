@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 import type { AutopilotConfig, AutopilotConfigDraftSnapshot, KnowledgeBaseDocument, NexusFlowInstance } from '@/lib/types';
 import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import type { AgentToolAction } from '@/services/agent-tools/types';
@@ -20,6 +21,11 @@ type PreviewPayload = {
   contactEmail?: string;
   chatHistory?: string;
   draftSnapshot?: AutopilotConfigDraftSnapshot | null;
+};
+
+type WorkspaceGeminiRuntime = {
+  apiKey?: string;
+  model?: string;
 };
 
 async function ensureMembership(userId: string, workspaceId: string): Promise<boolean> {
@@ -73,6 +79,53 @@ async function loadPreviewToolCatalog(workspaceId: string): Promise<AgentToolCat
   }));
 
   return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
+}
+
+function normalizeWorkspaceGeminiModel(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const model = value.trim();
+  if (!model) return undefined;
+  if (model.startsWith('googleai/')) return model;
+  if (model.startsWith('gemini-')) return `googleai/${model}`;
+  return model;
+}
+
+async function loadWorkspaceGeminiRuntime(workspaceId: string): Promise<WorkspaceGeminiRuntime> {
+  try {
+    const res = await db.query(
+      `SELECT config
+       FROM workspace_integrations
+       WHERE workspace_id = $1
+         AND provider = 'gemini'
+         AND is_active = true
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [workspaceId],
+    );
+
+    const config = res.rows[0]?.config || {};
+    return {
+      apiKey: typeof config.apiKey === 'string' && config.apiKey.trim().length > 0
+        ? config.apiKey.trim()
+        : undefined,
+      model: normalizeWorkspaceGeminiModel(config.aiModel),
+    };
+  } catch (error) {
+    console.error('[AUTOPILOT_TEST_API] Failed to load workspace Gemini integration:', error);
+    return {};
+  }
+}
+
+function getDefaultGeminiEnvKey(): string {
+  return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
+}
+
+function hasRuntimeGeminiKey(config: AutopilotConfig, workspaceRuntime: WorkspaceGeminiRuntime): boolean {
+  return Boolean(
+    config.gemini_api_key?.trim() ||
+    workspaceRuntime.apiKey ||
+    (getDefaultGeminiEnvKey() && getDefaultGeminiEnvKey() !== 'no-key-configured')
+  );
 }
 
 function buildIntentContext(trace: ReturnType<typeof buildAutopilotPlaygroundTrace>) {
@@ -204,6 +257,10 @@ export async function POST(request: Request) {
     }
 
     const config = applyDraftSnapshot(publishedConfig, draftSnapshot);
+    const workspaceGeminiRuntime = await loadWorkspaceGeminiRuntime(workspaceId);
+    const resolvedModel = await resolveAutopilotModelFromCatalog(
+      config.ai_model || workspaceGeminiRuntime.model || DEFAULT_AUTOPILOT_MODEL,
+    );
 
     const rulesRes = await db.query(
       'SELECT * FROM autopilot_rules WHERE config_id = $1 ORDER BY name',
@@ -249,6 +306,16 @@ export async function POST(request: Request) {
     };
 
     if (baseTrace.workflow.executionMode === 'continue_llm') {
+      if (!hasRuntimeGeminiKey(config, workspaceGeminiRuntime)) {
+        return NextResponse.json(
+          {
+            error: 'IA nao configurada para este teste. Configure uma chave em Integracoes > Gemini ou na chave personalizada do agente.',
+            trace: baseTrace,
+          },
+          { status: 409 },
+        );
+      }
+
       const generated = await generateAgentResponse({
         chatId: `preview-${Date.now()}`,
         customerMessage: message,
@@ -261,7 +328,8 @@ export async function POST(request: Request) {
         closingPolicy: config.closing_policy || '',
         enabledAgentToolsDescription: enabledToolNames.join(', '),
         intentContext: buildIntentContext(baseTrace),
-        model: config.ai_model || DEFAULT_AUTOPILOT_MODEL,
+        model: resolvedModel.model,
+        workspaceGeminiApiKey: workspaceGeminiRuntime.apiKey,
         contact: {
           id: contact.id,
           name: contact.name,
@@ -269,8 +337,23 @@ export async function POST(request: Request) {
         },
         config,
       });
+      const generatedResponse =
+        generated.response?.trim() ||
+        (generated.messageBlocks || []).filter((block) => block.trim().length > 0).join('\n\n');
+
+      if (!generatedResponse) {
+        return NextResponse.json(
+          {
+            error: 'A IA foi chamada, mas nao gerou uma resposta aproveitavel. Verifique a chave Gemini, o modelo selecionado e os logs do servidor.',
+            trace: baseTrace,
+          },
+          { status: 502 },
+        );
+      }
+
       result = {
         ...generated,
+        response: generatedResponse,
         actions: (generated.actions || []) as AgentToolAction[],
       };
     }
@@ -295,6 +378,13 @@ export async function POST(request: Request) {
         response: trace.finalResponse,
       },
       trace,
+      runtime: {
+        model: resolvedModel.model,
+        requestedModel: resolvedModel.requestedModel || null,
+        modelFallbackUsed: resolvedModel.fallbackUsed,
+        hasWorkspaceGeminiKey: Boolean(workspaceGeminiRuntime.apiKey),
+        hasAgentGeminiKey: Boolean(config.gemini_api_key?.trim()),
+      },
     });
   } catch (error) {
     console.error('[AUTOPILOT_TEST_API] Error running preview:', error);

@@ -116,6 +116,62 @@ export function getChatPlatformLabel(platform: ResolvedChatPlatform): string {
   }
 }
 
+function isMetaPlatform(platform: ResolvedChatPlatform): boolean {
+  return platform === 'instagram' || platform === 'messenger';
+}
+
+function isWhatsappIdentity(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized.includes('@s.whatsapp.net') ||
+    normalized.includes('@g.us') ||
+    normalized.includes('@lid')
+  );
+}
+
+function isPlainPhoneIdentity(value: string): boolean {
+  return /^\+?\d{8,15}$/.test(value.trim());
+}
+
+function findMessageExternalSenderId(messages: Message[] | undefined): string | null {
+  if (!Array.isArray(messages)) {
+    return null;
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const senderId = message?.externalSenderId?.trim();
+    if (senderId) {
+      return senderId;
+    }
+  }
+
+  return null;
+}
+
+export function getChatIdentityDisplayValue(
+  chat: Chat | null | undefined,
+  platform: ResolvedChatPlatform = resolveChatPlatform(chat)
+): string | null {
+  if (!chat) {
+    return null;
+  }
+
+  if (isMetaPlatform(platform)) {
+    const username = chat.metaContactUsername?.trim();
+    if (username) {
+      return username.startsWith('@') ? username : `@${username}`;
+    }
+
+    const externalId = chat.metaContactExternalId?.trim() || findMessageExternalSenderId(chat.messages);
+    if (externalId) {
+      return externalId;
+    }
+  }
+
+  return getChatContactDisplayValue(chat.contact, platform);
+}
+
 export function getChatContactDisplayValue(
   contact: Pick<Contact, 'phone' | 'phone_number_jid'> | undefined,
   platform: ResolvedChatPlatform
@@ -127,6 +183,10 @@ export function getChatContactDisplayValue(
 
   if (platform === 'telegram') {
     return rawValue.replace(/^telegram:/i, '');
+  }
+
+  if (isMetaPlatform(platform) && (isWhatsappIdentity(rawValue) || isPlainPhoneIdentity(rawValue))) {
+    return null;
   }
 
   return rawValue.replace(/@.*$/, '');

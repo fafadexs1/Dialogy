@@ -789,6 +789,13 @@ export interface AnalyticsData {
   newContacts: number;
   avgFirstResponseTime: string | null;
   firstContactResolutionRate: number;
+  resolvedConversations: number;
+  openConversations: number;
+  automationConversations: number;
+  totalMessages: number;
+  customerMessages: number;
+  agentMessages: number;
+  avgMessagesPerConversation: number;
   conversationsByHour: { hour: string; count: number }[];
   conversationsByChannel: { name: string; value: number; color: string }[];
 }
