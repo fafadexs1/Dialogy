@@ -58,6 +58,20 @@ export type AutopilotPlaygroundTrace = {
     reasons: string[];
     actions: string[];
   };
+  ragDiagnostics?: Record<string, unknown> | null;
+  procedure?: {
+    enabled: boolean;
+    compiledCount: number;
+    active: boolean;
+    procedureId: string | null;
+    procedureName: string | null;
+    status: string | null;
+    matchScore: number | null;
+    matchReason: string | null;
+    executedSteps: string[];
+    actions: string[];
+    completionReason: string | null;
+  };
 };
 
 function actionName(action: AgentToolAction): string {
@@ -75,6 +89,8 @@ export function buildAutopilotPlaygroundTrace(input: {
   customerMessage: string;
   chatHistory?: string | null;
   knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  vectorKnowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  staticKnowledgeDocuments?: KnowledgeBaseDocument[] | null;
   fallbackReply?: string | null;
   modelResponse?: string | null;
   modelActions?: AgentToolAction[] | null;
@@ -90,7 +106,8 @@ export function buildAutopilotPlaygroundTrace(input: {
     knowledgeDocuments,
   });
   const rag = mergeAndRerankKnowledgeDocuments({
-    staticDocuments: knowledgeDocuments,
+    vectorDocuments: input.vectorKnowledgeDocuments || [],
+    staticDocuments: input.staticKnowledgeDocuments || knowledgeDocuments,
     query: input.customerMessage,
     intent: intentResolution,
   });

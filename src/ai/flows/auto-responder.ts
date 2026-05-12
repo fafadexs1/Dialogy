@@ -117,7 +117,19 @@ const AgentResponseInputSchema = z.object({
     .optional()
     .describe('Contexto deterministico de intencao, workflow e cobertura de conhecimento resolvido pelo servidor.'),
   model: z.string().optional().describe('The AI model to use for the response.'),
-  contact: z.object({ id: z.string(), name: z.string(), email: z.string().optional() })
+  contact: z.object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string().optional(),
+    phone: z.string().optional().nullable(),
+    phone_number_jid: z.string().optional().nullable(),
+    address: z.string().optional().nullable(),
+    tags: z.array(z.any()).optional(),
+    custom_fields: z.record(z.any()).optional(),
+    lead_score: z.number().optional().nullable(),
+    owner: z.any().optional(),
+    crm: z.any().optional(),
+  })
     .describe('The contact details of the customer.'),
 });
 

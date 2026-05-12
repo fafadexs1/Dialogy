@@ -54,7 +54,25 @@ function buildWhereClause(workspaceId: string, criteria?: CriteriaGroup, search?
 
     if (search) {
         values.push(`%${search.toLowerCase()}%`);
-        whereParts.push(`(LOWER(c.name) LIKE $${values.length} OR LOWER(c.email) LIKE $${values.length})`);
+        const textParam = values.length;
+        const digits = search.replace(/\D/g, '');
+        if (digits.length >= 3) {
+            values.push(`%${digits}%`);
+            whereParts.push(`(
+                LOWER(c.name) LIKE $${textParam}
+                OR LOWER(c.email) LIKE $${textParam}
+                OR LOWER(COALESCE(c.phone_number_jid, '')) LIKE $${textParam}
+                OR LOWER(COALESCE(c.phone, '')) LIKE $${textParam}
+                OR regexp_replace(COALESCE(c.phone_number_jid, c.phone, ''), '[^0-9]', '', 'g') LIKE $${values.length}
+            )`);
+        } else {
+            whereParts.push(`(
+                LOWER(c.name) LIKE $${textParam}
+                OR LOWER(c.email) LIKE $${textParam}
+                OR LOWER(COALESCE(c.phone_number_jid, '')) LIKE $${textParam}
+                OR LOWER(COALESCE(c.phone, '')) LIKE $${textParam}
+            )`);
+        }
     }
 
     if (criteria && criteria.conditions.length > 0) {

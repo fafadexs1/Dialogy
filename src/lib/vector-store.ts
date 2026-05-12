@@ -45,6 +45,10 @@ type SearchSimilarDocumentsInput = {
     excludeIds?: string[];
 };
 
+type KeywordDocumentMatch = DocumentEmbeddingMatch & {
+    keyword_score: number;
+};
+
 type UpsertCaseMemoryInput = {
     chatId: string;
     workspaceId: string;
@@ -104,6 +108,141 @@ export const VectorStore = {
                 JSON.stringify(input.metadata ?? {}),
             ]
         );
+    },
+
+    async getDocumentEmbeddingStats(input: {
+        workspaceId: string;
+        autopilotConfigId?: string | null;
+        documentIds?: string[];
+    }) {
+        const params: any[] = [input.workspaceId];
+        const filters = ['workspace_id = $1'];
+
+        if (input.autopilotConfigId) {
+            params.push(input.autopilotConfigId);
+            filters.push(`autopilot_config_id = $${params.length}`);
+        }
+
+        if ((input.documentIds ?? []).length > 0) {
+            params.push(input.documentIds);
+            filters.push(`document_id = ANY($${params.length}::uuid[])`);
+        }
+
+        const { rows } = await db.query(
+            `SELECT
+                document_id,
+                document_name,
+                COUNT(*)::int AS chunks,
+                MIN(created_at) AS first_indexed_at,
+                MAX(created_at) AS last_indexed_at,
+                MIN(vector_dims(vector))::int AS min_dims,
+                MAX(vector_dims(vector))::int AS max_dims,
+                COUNT(*) FILTER (WHERE vector_dims(vector) <> 768)::int AS wrong_dims,
+                jsonb_agg(DISTINCT metadata->>'contentHash') FILTER (WHERE metadata ? 'contentHash') AS content_hashes,
+                jsonb_agg(DISTINCT metadata->>'indexingStatus') FILTER (WHERE metadata ? 'indexingStatus') AS statuses
+             FROM embeddings_documents
+             WHERE ${filters.join(' AND ')}
+             GROUP BY document_id, document_name
+             ORDER BY MAX(created_at) DESC`,
+            params,
+        );
+
+        return rows;
+    },
+
+    async searchKeywordDocuments(input: {
+        query: string;
+        workspaceId: string;
+        autopilotConfigId?: string | null;
+        limit?: number;
+        excludeIds?: string[];
+    }): Promise<KeywordDocumentMatch[]> {
+        const tokens = Array.from(new Set(
+            input.query
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .split(/[^a-z0-9]+/g)
+                .filter((token) => token.length >= 3)
+        )).slice(0, 12);
+
+        if (tokens.length === 0) return [];
+
+        const params: any[] = [input.workspaceId];
+        const filters = ['workspace_id = $1'];
+        const scoreParts: string[] = [];
+        const keywordConditions: string[] = [];
+
+        if (input.autopilotConfigId) {
+            params.push(input.autopilotConfigId);
+            filters.push(`autopilot_config_id = $${params.length}`);
+        }
+
+        if ((input.excludeIds ?? []).length > 0) {
+            params.push(input.excludeIds);
+            filters.push(`id <> ALL($${params.length}::uuid[])`);
+        }
+
+        for (const token of tokens) {
+            params.push(`%${token}%`);
+            const param = `$${params.length}`;
+            keywordConditions.push(`(unaccent(lower(content)) LIKE ${param} OR unaccent(lower(COALESCE(document_name, ''))) LIKE ${param})`);
+            scoreParts.push(`CASE WHEN unaccent(lower(content)) LIKE ${param} THEN 1 ELSE 0 END`);
+            scoreParts.push(`CASE WHEN unaccent(lower(COALESCE(document_name, ''))) LIKE ${param} THEN 2 ELSE 0 END`);
+        }
+        filters.push(`(${keywordConditions.join(' OR ')})`);
+
+        params.push(input.limit ?? 5);
+        const limitParam = `$${params.length}`;
+
+        try {
+            const { rows } = await db.query(
+                `SELECT
+                    id,
+                    content,
+                    document_id,
+                    document_name,
+                    workspace_id,
+                    autopilot_config_id,
+                    metadata,
+                    0::float AS similarity,
+                    (${scoreParts.join(' + ')})::float AS keyword_score
+                 FROM embeddings_documents
+                 WHERE ${filters.join(' AND ')}
+                 ORDER BY keyword_score DESC, created_at DESC
+                 LIMIT ${limitParam}`,
+                params,
+            );
+
+            return rows.filter((row) => Number(row.keyword_score || 0) > 0);
+        } catch (error) {
+            if ((error as any)?.code !== '42883') throw error;
+
+            const withoutUnaccent = (sql: string) => sql
+                .replace(/unaccent\(lower\(content\)\)/g, 'lower(content)')
+                .replace(/unaccent\(lower\(COALESCE\(document_name, ''\)\)\)/g, "lower(COALESCE(document_name, ''))");
+            const fallbackFilters = filters.map(withoutUnaccent);
+            const fallbackScoreParts = scoreParts.map(withoutUnaccent);
+            const { rows } = await db.query(
+                `SELECT
+                    id,
+                    content,
+                    document_id,
+                    document_name,
+                    workspace_id,
+                    autopilot_config_id,
+                    metadata,
+                    0::float AS similarity,
+                    (${fallbackScoreParts.join(' + ')})::float AS keyword_score
+                 FROM embeddings_documents
+                 WHERE ${fallbackFilters.join(' AND ')}
+                 ORDER BY keyword_score DESC, created_at DESC
+                 LIMIT ${limitParam}`,
+                params,
+            );
+
+            return rows.filter((row) => Number(row.keyword_score || 0) > 0);
+        }
     },
 
     async searchSimilarDocuments(input: SearchSimilarDocumentsInput): Promise<DocumentEmbeddingMatch[]> {

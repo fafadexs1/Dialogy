@@ -399,9 +399,8 @@ export async function createEvolutionApiInstance(
         await client.query(
             `INSERT INTO evolution_api_instances (
                 workspace_id, cluster_id, instance_name, webhook_key, display_name, type, webhook_url,
-                business_name, waba_name, display_phone_number, verified_name, waba_id, phone_number_id,
-                telegram_bot_id, telegram_bot_username, telegram_bot_name, telegram_bot_token, telegram_webhook_url
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+                business_name, waba_name, display_phone_number, verified_name, waba_id, phone_number_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
             [
                 workspaceId,
                 cluster.id,
@@ -415,12 +414,7 @@ export async function createEvolutionApiInstance(
                 meta.displayPhoneNumber || null,
                 meta.verifiedName || null,
                 payload.businessId || null,
-                payload.number || null,
-                telegramBot ? String(telegramBot.id) : null,
-                telegramBot?.username || null,
-                telegramBot?.first_name || null,
-                isTelegram ? telegramBotToken : null,
-                telegramWebhookUrl
+                payload.number || null
             ]
         );
 

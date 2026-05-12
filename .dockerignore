@@ -13,6 +13,8 @@ node_modules
 out
 build
 dist
+public/sw.js
+public/workbox-*.js
 
 # testing
 coverage
@@ -26,6 +28,12 @@ yarn-error.log*
 # misc
 .DS_Store
 *.pem
+
+# local environment / secrets
+.env
+.env.*
+!.env.example
+!.env.sample
 
 # vercel
 .vercel
@@ -48,6 +56,8 @@ ffmpeg-2026-*
 .gemini
 .idx
 .vscode
+tmp
+scratch
 
 # repository-only directories
 tests
@@ -57,6 +67,8 @@ delivery-app
 # local artifacts
 *.bak
 *.log
+*.sqlite
+*.sqlite3
 errors.txt
 lint_log.txt
 s3_error.txt

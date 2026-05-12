@@ -1,7 +1,9 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-slim AS base
 
 FROM base AS deps
-RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
@@ -14,7 +16,7 @@ RUN \
   fi
 
 FROM base AS worker-deps
-RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
@@ -24,7 +26,7 @@ RUN npm install --package-lock-only --legacy-peer-deps
 RUN npm ci --omit=dev --legacy-peer-deps
 
 FROM base AS worker-ai-deps
-RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
@@ -34,22 +36,23 @@ RUN npm install --package-lock-only --legacy-peer-deps
 RUN npm ci --omit=dev --legacy-peer-deps
 
 FROM base AS builder
-RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN if grep -Eq '^[[:space:]]*model[[:space:]]+' prisma/schema.prisma; then npx prisma generate; else echo "No Prisma models found, skipping prisma generate"; fi
+RUN --mount=type=secret,id=dotenv,target=/app/.env if grep -Eq '^[[:space:]]*model[[:space:]]+' prisma/schema.prisma; then npx prisma generate; else echo "No Prisma models found, skipping prisma generate"; fi
 
-RUN \
+RUN --mount=type=secret,id=dotenv,target=/app/.env \
   if [ -f yarn.lock ]; then yarn run build; \
   elif [ -f package-lock.json ]; then npm run build; \
   elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
   else echo "Lockfile not found." && exit 1; \
   fi
 
-RUN npm run worker:build
-RUN npm run worker:ai:build
+RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:build
+RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:ai:build
+RUN rm -f .next/standalone/.env .next/standalone/.env.*
 
 FROM base AS runtime-base
 WORKDIR /app
@@ -58,11 +61,11 @@ ENV NODE_ENV=production
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
-RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 FROM runtime-base AS runner
 
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
 ENV FFMPEG_PATH=/usr/bin/ffmpeg
 ENV FFPROBE_PATH=/usr/bin/ffprobe

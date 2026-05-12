@@ -4,12 +4,16 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Bot,
   CheckCircle2,
+  Database,
   Loader2,
   MessageSquareText,
+  Phone,
   Plus,
+  Search,
   Send,
   ShieldAlert,
   Trash2,
+  UserRound,
   Wrench,
   XCircle,
 } from 'lucide-react';
@@ -21,8 +25,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
-import type { AutopilotConfigDraftSnapshot } from '@/lib/types';
+import type { AutopilotConfigDraftSnapshot, Contact } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { getContacts } from '@/actions/crm';
 
 type PlaygroundResult = {
   response?: string | null;
@@ -44,8 +49,13 @@ type PlaygroundMessage = {
 
 type PlaygroundSession = {
   id: string;
+  procedureChatId: string;
+  draftProcedureChatId: string;
   title: string;
   contactName: string;
+  contactId?: string | null;
+  contactPhone?: string | null;
+  contactEmail?: string | null;
   messages: PlaygroundMessage[];
   updatedAt: string;
   lastResult?: PlaygroundResult | null;
@@ -68,8 +78,13 @@ interface AutopilotPlaygroundProps {
 
 const DEFAULT_SESSION: PlaygroundSession = {
   id: 'default',
+  procedureChatId: '00000000-0000-4000-8000-000000000001',
+  draftProcedureChatId: '00000000-0000-4000-8000-000000000002',
   title: 'Novo chat',
   contactName: 'Cliente Teste',
+  contactId: null,
+  contactPhone: '',
+  contactEmail: '',
   messages: [],
   updatedAt: '1970-01-01T00:00:00.000Z',
   lastResult: null,
@@ -84,10 +99,23 @@ function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function makeUuid() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const value = Math.random() * 16 | 0;
+    const nibble = char === 'x' ? value : (value & 0x3) | 0x8;
+    return nibble.toString(16);
+  });
+}
+
 function createSession(): PlaygroundSession {
   return {
     ...DEFAULT_SESSION,
     id: makeId('chat'),
+    procedureChatId: makeUuid(),
+    draftProcedureChatId: makeUuid(),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -109,10 +137,19 @@ function normalizeSession(raw: unknown): PlaygroundSession | null {
 
   return {
     id,
+    procedureChatId: typeof item.procedureChatId === 'string' && item.procedureChatId.trim().length > 0
+      ? item.procedureChatId
+      : makeUuid(),
+    draftProcedureChatId: typeof item.draftProcedureChatId === 'string' && item.draftProcedureChatId.trim().length > 0
+      ? item.draftProcedureChatId
+      : makeUuid(),
     title: typeof item.title === 'string' && item.title.trim().length > 0 ? item.title : 'Novo chat',
     contactName: typeof item.contactName === 'string' && item.contactName.trim().length > 0
       ? item.contactName
       : 'Cliente Teste',
+    contactId: typeof item.contactId === 'string' && item.contactId.trim().length > 0 ? item.contactId : null,
+    contactPhone: typeof item.contactPhone === 'string' ? item.contactPhone : '',
+    contactEmail: typeof item.contactEmail === 'string' ? item.contactEmail : '',
     messages,
     updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
     lastResult: item.lastResult || null,
@@ -284,6 +321,10 @@ export function AutopilotPlayground({
   const [trace, setTrace] = useState<AutopilotPlaygroundTrace | null>(null);
   const [publishedRun, setPublishedRun] = useState<PreviewRun | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [contactSearch, setContactSearch] = useState('');
+  const [contactOptions, setContactOptions] = useState<Contact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
 
   const storageKey = useMemo(() => (
     workspaceId && agentId ? `dialogy:autopilot-playground:${workspaceId}:${agentId}` : null
@@ -335,6 +376,41 @@ export function AutopilotPlayground({
   const activeSession = useMemo(() => (
     sessions.find((session) => session.id === activeSessionId) || sessions[0] || DEFAULT_SESSION
   ), [activeSessionId, sessions]);
+
+  useEffect(() => {
+    if (!workspaceId || !isChatOpen) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setContactsLoading(true);
+      setContactsError(null);
+      try {
+        const res = await getContacts(workspaceId, {
+          page: 1,
+          limit: 8,
+          search: contactSearch.trim() || undefined,
+        });
+        if (cancelled) return;
+        if (res.error) {
+          setContactsError(res.error);
+          setContactOptions([]);
+        } else {
+          setContactOptions(res.contacts || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setContactsError('Falha ao buscar contatos.');
+          setContactOptions([]);
+        }
+      } finally {
+        if (!cancelled) setContactsLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [contactSearch, isChatOpen, workspaceId]);
 
   const canRun = Boolean(workspaceId && agentId && message.trim() && !disabled);
   const shouldCompare = Boolean(draftSnapshot);
@@ -392,6 +468,7 @@ export function AutopilotPlayground({
     setPublishedRun(session.lastPublishedRun || null);
     setError(null);
     onTrace(session.lastTrace || null);
+    setContactSearch(session.contactName || session.contactPhone || '');
     if (open) setIsChatOpen(true);
   };
 
@@ -405,6 +482,7 @@ export function AutopilotPlayground({
     setTrace(null);
     setPublishedRun(null);
     onTrace(null);
+    setContactSearch('');
     setIsChatOpen(true);
   };
 
@@ -440,11 +518,40 @@ export function AutopilotPlayground({
     setIsChatOpen(false);
   };
 
+  const selectContact = (contact: Contact) => {
+    updateActiveSession((session) => ({
+      ...session,
+      contactId: contact.id,
+      contactName: contact.name || contact.phone_number_jid || contact.phone || 'Contato do CRM',
+      contactPhone: contact.phone_number_jid || contact.phone || '',
+      contactEmail: contact.email || '',
+      updatedAt: new Date().toISOString(),
+    }));
+    setContactSearch(contact.name || contact.phone_number_jid || contact.phone || '');
+  };
+
+  const useManualNumber = () => {
+    const value = contactSearch.trim();
+    if (!value) return;
+    updateActiveSession((session) => ({
+      ...session,
+      contactId: null,
+      contactName: session.contactName === 'Cliente Teste' || !session.contactName ? value : session.contactName,
+      contactPhone: value,
+      contactEmail: '',
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
   const runSinglePreview = async (input: {
     snapshot: AutopilotConfigDraftSnapshot | null;
     outboundMessage: string;
     chatHistory: string;
+    procedureChatId: string;
+    contactId?: string | null;
     contactName: string;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
   }): Promise<PreviewRun> => {
     if (!workspaceId || !agentId || !input.outboundMessage.trim()) {
       throw new Error('Preencha uma mensagem para testar o agente.');
@@ -456,9 +563,13 @@ export function AutopilotPlayground({
       body: JSON.stringify({
         workspaceId,
         agentId,
+        procedureChatId: input.procedureChatId,
         message: input.outboundMessage,
         chatHistory: input.chatHistory,
+        contactId: input.contactId || undefined,
         contactName: input.contactName,
+        contactPhone: input.contactPhone || undefined,
+        contactEmail: input.contactEmail || undefined,
         draftSnapshot: input.snapshot,
       }),
     });
@@ -523,16 +634,37 @@ export function AutopilotPlayground({
 
     const outboundMessage = message.trim();
     const chatHistory = formatChatHistory(activeSession.messages);
-    const contactName = activeSession.contactName || 'Cliente Teste';
+    const contactName = activeSession.contactName || activeSession.contactPhone || 'Cliente Teste';
     const sessionId = activeSession.id;
+    const contactId = activeSession.contactId || null;
+    const contactPhone = activeSession.contactPhone || null;
+    const contactEmail = activeSession.contactEmail || null;
 
     setLoading(true);
     setError(null);
     try {
       if (shouldCompare) {
         const [published, draft] = await Promise.all([
-          runSinglePreview({ snapshot: null, outboundMessage, chatHistory, contactName }),
-          runSinglePreview({ snapshot: draftSnapshot, outboundMessage, chatHistory, contactName }),
+          runSinglePreview({
+            snapshot: null,
+            outboundMessage,
+            chatHistory,
+            procedureChatId: activeSession.procedureChatId,
+            contactId,
+            contactName,
+            contactPhone,
+            contactEmail,
+          }),
+          runSinglePreview({
+            snapshot: draftSnapshot,
+            outboundMessage,
+            chatHistory,
+            procedureChatId: activeSession.draftProcedureChatId,
+            contactId,
+            contactName,
+            contactPhone,
+            contactEmail,
+          }),
         ]);
         const assistantResponse = draft.result?.response || 'Sem resposta.';
         setPublishedRun(published);
@@ -548,7 +680,16 @@ export function AutopilotPlayground({
           nextPublishedRun: published,
         });
       } else {
-        const published = await runSinglePreview({ snapshot: null, outboundMessage, chatHistory, contactName });
+        const published = await runSinglePreview({
+          snapshot: null,
+          outboundMessage,
+          chatHistory,
+          procedureChatId: activeSession.procedureChatId,
+          contactId,
+          contactName,
+          contactPhone,
+          contactEmail,
+        });
         const assistantResponse = published.result?.response || 'Sem resposta.';
         setPublishedRun(null);
         setResult(published.result);
@@ -632,7 +773,9 @@ export function AutopilotPlayground({
                     </div>
                     <div className="min-w-0">
                       <h3 className="truncate text-base font-semibold text-foreground">{session.title}</h3>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">{session.contactName}</p>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {session.contactName}{session.contactPhone ? ` - ${session.contactPhone}` : ''}
+                      </p>
                     </div>
                   </div>
                   <Button
@@ -694,22 +837,100 @@ export function AutopilotPlayground({
 
           <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
             <div className="grid min-h-0 gap-4">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
                 <div className="space-y-2">
-                  <Label htmlFor="playground-contact">Contato</Label>
-                  <Input
-                    id="playground-contact"
-                    value={activeSession.contactName}
-                    onChange={(event) => {
-                      const contactName = event.target.value;
-                      updateActiveSession((session) => ({
-                        ...session,
-                        contactName,
-                        updatedAt: new Date().toISOString(),
-                      }));
-                    }}
-                    placeholder="Nome do cliente"
-                  />
+                  <Label htmlFor="playground-contact-search">Contato ou numero</Label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="playground-contact-search"
+                      value={contactSearch}
+                      onChange={(event) => setContactSearch(event.target.value)}
+                      placeholder="Buscar no CRM ou digitar numero"
+                      className="pl-9"
+                    />
+                  </div>
+                  <div className="rounded-2xl border border-border bg-background">
+                    <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
+                        <Database className="h-3.5 w-3.5" />
+                        <span className="truncate">
+                          {activeSession.contactId ? 'Contato do CRM selecionado' : activeSession.contactPhone ? 'Numero manual selecionado' : 'Selecione uma identidade'}
+                        </span>
+                      </div>
+                      {contactSearch.trim() && (
+                        <Button type="button" variant="ghost" size="sm" onClick={useManualNumber} className="h-7 rounded-full px-2 text-xs">
+                          <Phone className="mr-1.5 h-3.5 w-3.5" />
+                          Usar numero
+                        </Button>
+                      )}
+                    </div>
+                    <div className="max-h-44 overflow-y-auto p-2">
+                      {contactsLoading ? (
+                        <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Buscando contatos...
+                        </div>
+                      ) : contactsError ? (
+                        <div className="px-2 py-3 text-sm text-destructive">{contactsError}</div>
+                      ) : contactOptions.length > 0 ? (
+                        <div className="grid gap-1">
+                          {contactOptions.map((contact) => {
+                            const selected = activeSession.contactId === contact.id;
+                            const phone = contact.phone_number_jid || contact.phone || '';
+                            return (
+                              <button
+                                key={contact.id}
+                                type="button"
+                                onClick={() => selectContact(contact)}
+                                className={cn(
+                                  'flex min-w-0 items-center gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-muted/60',
+                                  selected && 'bg-primary/10 text-primary'
+                                )}
+                              >
+                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                                  <UserRound className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-medium">{contact.name || phone || 'Contato sem nome'}</span>
+                                  <span className="block truncate text-xs text-muted-foreground">{phone || contact.email || 'Sem telefone'}</span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="px-2 py-3 text-sm text-muted-foreground">Nenhum contato encontrado.</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Input
+                      value={activeSession.contactName}
+                      onChange={(event) => {
+                        const contactName = event.target.value;
+                        updateActiveSession((session) => ({
+                          ...session,
+                          contactName,
+                          updatedAt: new Date().toISOString(),
+                        }));
+                      }}
+                      placeholder="Nome simulado"
+                    />
+                    <Input
+                      value={activeSession.contactPhone || ''}
+                      onChange={(event) => {
+                        const contactPhone = event.target.value;
+                        updateActiveSession((session) => ({
+                          ...session,
+                          contactId: null,
+                          contactPhone,
+                          updatedAt: new Date().toISOString(),
+                        }));
+                      }}
+                      placeholder="Numero simulado"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Status</Label>
@@ -786,6 +1007,18 @@ export function AutopilotPlayground({
 
               {trace && (
                 <div className="grid gap-3">
+                  {trace.procedure && (
+                    <TraceSection title="PRE" value={trace.procedure.active ? trace.procedure.status || 'active' : trace.procedure.enabled ? 'ready' : 'none'}>
+                      <div className="space-y-1">
+                        <div>Procedimentos compilados: {trace.procedure.compiledCount}</div>
+                        <div>Ativo: {trace.procedure.procedureName || 'nenhum'}</div>
+                        <div>Passos: {trace.procedure.executedSteps.join(', ') || 'nenhum'}</div>
+                        <div>Acoes: {trace.procedure.actions.join(', ') || 'nenhuma'}</div>
+                        {trace.procedure.matchReason && <div className="line-clamp-2">Motivo: {trace.procedure.matchReason}</div>}
+                      </div>
+                    </TraceSection>
+                  )}
+
                   <TraceSection title="Intent" value={trace.intent.intent}>
                     <div className="space-y-1">
                       <div>Confianca: {(trace.intent.confidence * 100).toFixed(0)}%</div>
@@ -797,9 +1030,26 @@ export function AutopilotPlayground({
                   <TraceSection title="RAG" value={trace.rag.knowledgeCoverage}>
                     <div className="space-y-1">
                       <div>Estrategia: {trace.rag.strategy}</div>
+                      {trace.ragDiagnostics && (
+                        <>
+                          <div>Vector matches: {String((trace.ragDiagnostics as any).vectorMatches ?? '0')}</div>
+                          <div>Keyword matches: {String((trace.ragDiagnostics as any).keywordMatches ?? '0')}</div>
+                          <div>Threshold: {String((trace.ragDiagnostics as any).documentMinSimilarity ?? 'padrao')}</div>
+                        </>
+                      )}
                       <div>
                         Docs: {trace.rag.selected.length > 0 ? trace.rag.selected.map((doc) => doc.name).join(', ') : 'nenhum'}
                       </div>
+                      {trace.rag.selected.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          {trace.rag.selected.slice(0, 4).map((doc) => (
+                            <div key={`${doc.source}-${doc.id}`} className="flex items-center justify-between gap-2 rounded-lg bg-background px-2 py-1">
+                              <span className="min-w-0 truncate">{doc.name}</span>
+                              <span className="shrink-0 text-[10px] uppercase text-muted-foreground">{doc.source} · {doc.score}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </TraceSection>
 

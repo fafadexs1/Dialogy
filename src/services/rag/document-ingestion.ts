@@ -1,6 +1,7 @@
 import { defaultSplitter } from '@/lib/text-splitter';
 import { generateDocumentPassageEmbedding } from '@/lib/embeddings';
 import { VectorStore } from '@/lib/vector-store';
+import { createHash } from 'crypto';
 
 type IngestKnowledgeBaseDocumentInput = {
     workspaceId: string;
@@ -13,10 +14,35 @@ type IngestKnowledgeBaseDocumentInput = {
 export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocumentInput) {
     console.log(`[RAG] Processing document ${input.documentId} (${input.documentName})`);
 
+    const contentHash = createHash('sha256').update(input.content).digest('hex');
+    const existingStats = await VectorStore.getDocumentEmbeddingStats({
+        workspaceId: input.workspaceId,
+        autopilotConfigId: input.autopilotConfigId ?? null,
+        documentIds: [input.documentId],
+    }).catch(() => []);
+    const existing = existingStats[0];
+    const existingHashes = Array.isArray(existing?.content_hashes) ? existing.content_hashes : [];
+    if (
+        existing &&
+        Number(existing.chunks || 0) > 0 &&
+        Number(existing.wrong_dims || 0) === 0 &&
+        existingHashes.length === 1 &&
+        existingHashes[0] === contentHash
+    ) {
+        console.log(`[RAG] Document ${input.documentId} unchanged; skipping embedding regeneration.`);
+        return {
+            status: 'skipped_unchanged' as const,
+            chunks: Number(existing.chunks || 0),
+            contentHash,
+        };
+    }
+
     const chunks = await defaultSplitter.splitText(input.content);
     await VectorStore.deleteDocumentEmbeddings(input.documentId);
 
-    for (const chunk of chunks) {
+    let embeddedChunks = 0;
+    for (let index = 0; index < chunks.length; index++) {
+        const chunk = chunks[index];
         const vector = await generateDocumentPassageEmbedding(chunk);
         if (vector.length === 0) {
             continue;
@@ -30,11 +56,22 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
             content: chunk,
             vector,
             metadata: {
+                contentHash,
+                chunkIndex: index,
+                chunkCount: chunks.length,
                 chunkLength: chunk.length,
                 sourceType: 'knowledge_base_document',
+                indexingStatus: 'indexed',
+                indexedAt: new Date().toISOString(),
             },
         });
+        embeddedChunks += 1;
     }
 
-    console.log(`[RAG] Document ${input.documentId} embedded with ${chunks.length} chunks.`);
+    console.log(`[RAG] Document ${input.documentId} embedded with ${embeddedChunks}/${chunks.length} chunks.`);
+    return {
+        status: 'indexed' as const,
+        chunks: embeddedChunks,
+        contentHash,
+    };
 }

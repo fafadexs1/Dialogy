@@ -11,12 +11,24 @@ import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services
 import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
-import { buildAutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
+import { buildAutopilotPlaygroundTrace, type AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
+import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
+import { matchProcedure } from '@/services/autopilot/procedure-matcher';
+import { advanceProcedure } from '@/services/autopilot/procedure-executor';
+import {
+  createProcedureExecution,
+  getActiveProcedureExecution,
+} from '@/services/autopilot/procedure-store';
+import { resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 
 type PreviewPayload = {
   workspaceId: string;
   message: string;
   agentId?: string;
+  procedureChatId?: string;
+  contactId?: string;
+  contactPhone?: string;
   contactName?: string;
   contactEmail?: string;
   chatHistory?: string;
@@ -51,6 +63,142 @@ async function loadPreviewTeams(workspaceId: string): Promise<ToolRouterTeam[]> 
   } catch {
     return [];
   }
+}
+
+function onlyDigits(value?: string | null): string {
+  return String(value || '').replace(/\D/g, '');
+}
+
+async function loadPreviewContact(input: {
+  workspaceId: string;
+  contactId?: string;
+  contactPhone?: string;
+  contactName?: string;
+  contactEmail?: string;
+}) {
+  const phoneDigits = onlyDigits(input.contactPhone);
+  const values: unknown[] = [input.workspaceId];
+  let selector = '';
+
+  if (input.contactId) {
+    values.push(input.contactId);
+    selector = `AND c.id = $${values.length}`;
+  } else if (phoneDigits.length >= 6) {
+    values.push(`%${phoneDigits}%`);
+    selector = `AND regexp_replace(COALESCE(c.phone_number_jid, c.phone, ''), '[^0-9]', '', 'g') LIKE $${values.length}`;
+  }
+
+  if (!selector) {
+    return {
+      id: `preview-contact-${Date.now()}`,
+      workspace_id: input.workspaceId,
+      name: input.contactName || input.contactPhone || 'Cliente em teste',
+      email: input.contactEmail || '',
+      phone: input.contactPhone || '',
+      phone_number_jid: input.contactPhone || '',
+      crm: { source: 'manual', matched: false },
+    };
+  }
+
+  let row: any = null;
+  try {
+    const res = await db.query(
+      `
+      SELECT
+        c.*,
+        u.full_name AS owner_name,
+        COALESCE(
+          (
+            SELECT json_agg(json_build_object('id', t.id, 'label', t.label, 'value', t.value, 'color', t.color))
+            FROM contact_tags ct
+            JOIN tags t ON t.id = ct.tag_id
+            WHERE ct.contact_id = c.id
+          ),
+          '[]'::json
+        ) AS tags,
+        COALESCE(
+          (
+            SELECT json_object_agg(COALESCE(NULLIF(cfd.label, ''), ccfv.field_id::text), ccfv.value)
+            FROM contact_custom_field_values ccfv
+            LEFT JOIN custom_field_definitions cfd ON cfd.id = ccfv.field_id AND cfd.workspace_id = c.workspace_id
+            WHERE ccfv.contact_id = c.id
+          ),
+          '{}'::json
+        ) AS custom_fields,
+        COALESCE(
+          (
+            SELECT json_agg(json_build_object('type', a.type, 'notes', a.notes, 'date', a.date) ORDER BY a.date DESC)
+            FROM (
+              SELECT type, notes, date
+              FROM activities
+              WHERE contact_id = c.id
+              ORDER BY date DESC
+              LIMIT 5
+            ) a
+          ),
+          '[]'::json
+        ) AS recent_activities,
+        COALESCE(
+          (
+            SELECT json_agg(json_build_object('title', d.title, 'value', d.value, 'stage', d.stage, 'expected_close_date', d.expected_close_date) ORDER BY d.updated_at DESC)
+            FROM (
+              SELECT title, value, stage, expected_close_date, updated_at
+              FROM deals
+              WHERE contact_id = c.id
+              ORDER BY updated_at DESC
+              LIMIT 5
+            ) d
+          ),
+          '[]'::json
+        ) AS deals
+      FROM contacts c
+      LEFT JOIN users u ON u.id = c.owner_id
+      WHERE c.workspace_id = $1
+        ${selector}
+      ORDER BY c.created_at DESC
+      LIMIT 1
+      `,
+      values,
+    );
+    row = res.rows[0];
+  } catch (error) {
+    console.warn('[AUTOPILOT_TEST_API] Failed to load rich CRM contact context:', error);
+    const fallbackRes = await db.query(
+      `
+      SELECT c.*
+      FROM contacts c
+      WHERE c.workspace_id = $1
+        ${selector}
+      ORDER BY c.created_at DESC
+      LIMIT 1
+      `,
+      values,
+    );
+    row = fallbackRes.rows[0];
+  }
+
+  if (!row) {
+    return {
+      id: `preview-contact-${Date.now()}`,
+      workspace_id: input.workspaceId,
+      name: input.contactName || input.contactPhone || 'Cliente em teste',
+      email: input.contactEmail || '',
+      phone: input.contactPhone || '',
+      phone_number_jid: input.contactPhone || '',
+      crm: { source: 'manual', matched: false, searchedPhone: input.contactPhone || null },
+    };
+  }
+
+  return {
+    ...row,
+    owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : undefined,
+    crm: {
+      source: 'crm',
+      matched: true,
+      recent_activities: row.recent_activities || [],
+      deals: row.deals || [],
+    },
+  };
 }
 
 async function loadPreviewToolCatalog(workspaceId: string, enabledToolNames: string[]): Promise<AgentToolCatalogItem[]> {
@@ -201,7 +349,18 @@ function applyDraftSnapshot(config: AutopilotConfig, snapshot?: AutopilotConfigD
 export async function POST(request: Request) {
   try {
     const payload: PreviewPayload = await request.json();
-    const { workspaceId, message, contactName, contactEmail, chatHistory, agentId, draftSnapshot } = payload;
+    const {
+      workspaceId,
+      message,
+      contactId,
+      contactPhone,
+      contactName,
+      contactEmail,
+      chatHistory,
+      agentId,
+      procedureChatId,
+      draftSnapshot,
+    } = payload;
 
     if (!workspaceId || !message) {
       return NextResponse.json(
@@ -279,16 +438,37 @@ export async function POST(request: Request) {
       : listAgentToolCatalogItems().filter((tool) => tool.enabledByDefault).map((tool) => tool.name);
     const toolCatalog = await loadPreviewToolCatalog(workspaceId, enabledToolNames);
     const availableTeams = await loadPreviewTeams(workspaceId);
-    const contact = {
-      id: `preview-contact-${Date.now()}`,
-      workspace_id: workspaceId,
-      name: contactName || 'Cliente em teste',
-      email: contactEmail || '',
-    };
+    const contact = await loadPreviewContact({
+      workspaceId,
+      contactId,
+      contactPhone,
+      contactName,
+      contactEmail,
+    });
+    const previewIntent = resolveAutopilotIntent({
+      customerMessage: message,
+      chatHistory: chatHistory || '',
+      knowledgeDocuments: config.knowledge_base_documents || [],
+    });
+    const ragContext = await retrieveHybridSupportContext({
+      workspaceId,
+      autopilotConfigId: config.id,
+      query: message,
+      staticDocuments: config.knowledge_base_documents || [],
+      intent: previewIntent,
+    }).catch((error) => {
+      console.warn('[AUTOPILOT_TEST_API] RAG diagnostics failed; using static documents:', error);
+      return null;
+    });
+    const vectorKnowledgeDocuments = ragContext?.knowledgeBaseDocuments.filter((doc) => doc.source === 'vector' || doc.source === 'keyword') || [];
+    const staticKnowledgeDocuments = config.knowledge_base_documents || [];
+
     const baseTrace = buildAutopilotPlaygroundTrace({
       customerMessage: message,
       chatHistory: chatHistory ?? '',
       knowledgeDocuments: config.knowledge_base_documents || [],
+      vectorKnowledgeDocuments,
+      staticKnowledgeDocuments,
       fallbackReply: config.default_fallback_reply || '',
       contact,
       enabledToolNames,
@@ -308,6 +488,118 @@ export async function POST(request: Request) {
       actions: [] as AgentToolAction[],
     };
 
+    const compiledProcedures = compileAllProcedures({
+      documents: config.knowledge_base_documents || [],
+      tools: toolCatalog,
+      enabledToolNames,
+    });
+    const validProcedureChatId =
+      typeof procedureChatId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(procedureChatId)
+        ? procedureChatId
+        : null;
+
+    if (validProcedureChatId && compiledProcedures.length > 0) {
+      try {
+        let activeProcedure = await getActiveProcedureExecution(validProcedureChatId);
+        let activeGraph = activeProcedure
+          ? compiledProcedures.find((graph) => graph.id === activeProcedure?.procedureId) || null
+          : null;
+        let procedureMatchReason: string | null = activeProcedure ? 'procedimento ativo no chat de teste' : null;
+        let procedureMatchScore: number | null = activeProcedure ? 999 : null;
+
+        if (!activeProcedure) {
+          const procedureMatch = matchProcedure({
+            intent: previewIntent.intent,
+            customerMessage: message,
+            compiledProcedures,
+          });
+
+          if (procedureMatch) {
+            activeGraph = procedureMatch.graph;
+            procedureMatchReason = procedureMatch.matchReason;
+            procedureMatchScore = procedureMatch.score;
+            activeProcedure = await createProcedureExecution({
+              chatId: validProcedureChatId,
+              workspaceId,
+              systemAgentId: config.id,
+              procedureId: procedureMatch.graph.id,
+              procedureName: procedureMatch.graph.documentName,
+              currentStepId: procedureMatch.graph.steps[0]?.id || 'step_1',
+              status: 'running',
+            });
+          }
+        }
+
+        if (activeProcedure && activeGraph) {
+          const procedureResult = await advanceProcedure({
+            graph: activeGraph,
+            context: activeProcedure,
+            customerMessage: message,
+            availableTeams,
+          });
+
+          if (procedureResult.handled && (procedureResult.response || procedureResult.actions.length > 0)) {
+            result = {
+              response: procedureResult.response || config.default_fallback_reply || 'Procedimento executado.',
+              messageBlocks: null,
+              triggeredRule: `PRE: ${activeGraph.documentName}`,
+              actions: procedureResult.actions as AgentToolAction[],
+            };
+
+            const procedureTrace = buildAutopilotPlaygroundTrace({
+              customerMessage: message,
+              chatHistory: chatHistory ?? '',
+              knowledgeDocuments: config.knowledge_base_documents || [],
+              vectorKnowledgeDocuments,
+              staticKnowledgeDocuments,
+              fallbackReply: config.default_fallback_reply || '',
+              modelResponse: result.response || null,
+              modelActions: (result.actions || []) as AgentToolAction[],
+              contact,
+              enabledToolNames,
+              toolCatalog,
+              availableTeams,
+            }) as AutopilotPlaygroundTrace;
+
+            procedureTrace.procedure = {
+              enabled: true,
+              compiledCount: compiledProcedures.length,
+              active: true,
+              procedureId: activeGraph.id,
+              procedureName: activeGraph.documentName,
+              status: procedureResult.status,
+              matchScore: procedureMatchScore,
+              matchReason: procedureMatchReason,
+              executedSteps: procedureResult.executedSteps,
+              actions: procedureResult.actions.map((action) => action.type),
+              completionReason: procedureResult.completionReason || null,
+            };
+            (procedureTrace as any).ragDiagnostics = ragContext?.diagnostics || null;
+
+            return NextResponse.json({
+              success: true,
+              result: {
+                ...result,
+                response: procedureTrace.finalResponse,
+              },
+              trace: procedureTrace,
+              runtime: {
+                model: resolvedModel.model,
+                requestedModel: resolvedModel.requestedModel || null,
+                modelFallbackUsed: resolvedModel.fallbackUsed,
+                hasWorkspaceGeminiKey: Boolean(workspaceGeminiRuntime.apiKey),
+                hasAgentGeminiKey: Boolean(config.gemini_api_key?.trim()),
+                procedureRuntime: true,
+              },
+            });
+          }
+        }
+      } catch (procedureError) {
+        console.warn('[AUTOPILOT_TEST_API] Procedure runtime preview failed; falling back to LLM:', procedureError);
+      }
+    }
+
     if (baseTrace.workflow.executionMode === 'continue_llm') {
       if (!hasRuntimeGeminiKey(config, workspaceGeminiRuntime)) {
         return NextResponse.json(
@@ -325,7 +617,7 @@ export async function POST(request: Request) {
         chatHistory: chatHistory ?? '',
         rules: rules.filter((rule) => rule.enabled),
         knowledgeBase: config.knowledge_base || '',
-        knowledgeBaseDocuments: config.knowledge_base_documents || [],
+        knowledgeBaseDocuments: ragContext?.knowledgeBaseDocuments || config.knowledge_base_documents || [],
         fallbackReply: config.default_fallback_reply || '',
         escalationPolicy: config.escalation_policy || '',
         closingPolicy: config.closing_policy || '',
@@ -337,6 +629,14 @@ export async function POST(request: Request) {
           id: contact.id,
           name: contact.name,
           email: contact.email,
+          phone: contact.phone || '',
+          phone_number_jid: contact.phone_number_jid || '',
+          address: contact.address || '',
+          tags: contact.tags || [],
+          custom_fields: contact.custom_fields || {},
+          lead_score: contact.lead_score ?? null,
+          owner: contact.owner || null,
+          crm: contact.crm || null,
         },
         config,
       });
@@ -365,6 +665,8 @@ export async function POST(request: Request) {
       customerMessage: message,
       chatHistory: chatHistory ?? '',
       knowledgeDocuments: config.knowledge_base_documents || [],
+      vectorKnowledgeDocuments,
+      staticKnowledgeDocuments,
       fallbackReply: config.default_fallback_reply || '',
       modelResponse: result.response || null,
       modelActions: (result.actions || []) as AgentToolAction[],
@@ -373,6 +675,20 @@ export async function POST(request: Request) {
       toolCatalog,
       availableTeams,
     });
+    trace.procedure = {
+      enabled: compiledProcedures.length > 0,
+      compiledCount: compiledProcedures.length,
+      active: false,
+      procedureId: null,
+      procedureName: null,
+      status: null,
+      matchScore: null,
+      matchReason: compiledProcedures.length > 0 ? 'Nenhum procedimento PRE assumiu esta mensagem.' : null,
+      executedSteps: [],
+      actions: [],
+      completionReason: null,
+    };
+    (trace as any).ragDiagnostics = ragContext?.diagnostics || null;
 
     return NextResponse.json({
       success: true,

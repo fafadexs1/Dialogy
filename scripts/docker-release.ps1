@@ -180,9 +180,11 @@ try {
     if ($SkipDocker) {
         Write-Host "Modo dry-run: .env e docker-compose.yml atualizados sem executar build/push."
     } else {
-        Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "runner", "-t", $dialogyImage, ".")
-        Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "worker-runner", "-t", $workerImage, ".")
-        Invoke-CheckedCommand -Command @("docker", "build", "-f", "Dockerfile", "--target", "worker-ai-runner", "-t", $workerAiImage, ".")
+        $env:DOCKER_BUILDKIT = "1"
+        $dockerBuildSecret = "id=dotenv,src=$envPath"
+        Invoke-CheckedCommand -Command @("docker", "build", "--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "runner", "-t", $dialogyImage, ".")
+        Invoke-CheckedCommand -Command @("docker", "build", "--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "worker-runner", "-t", $workerImage, ".")
+        Invoke-CheckedCommand -Command @("docker", "build", "--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "worker-ai-runner", "-t", $workerAiImage, ".")
         Invoke-CheckedCommand -Command @("docker", "push", $dialogyImage)
         Invoke-CheckedCommand -Command @("docker", "push", $workerImage)
         Invoke-CheckedCommand -Command @("docker", "push", $workerAiImage)

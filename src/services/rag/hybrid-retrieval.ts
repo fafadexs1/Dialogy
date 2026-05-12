@@ -1,4 +1,5 @@
 import type { KnowledgeBaseDocument } from '@/lib/types';
+import { db } from '@/lib/db';
 import type { AutopilotIntentResolution, KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import type { ResolvedCasePromptItem } from './retrieval';
 
@@ -36,6 +37,7 @@ export type HybridKnowledgeRetrievalResult = {
   }>;
   fallbackReason?: string | null;
   error?: string | null;
+  diagnostics?: Record<string, unknown> | null;
 };
 
 type ScoredDocument = {
@@ -197,6 +199,10 @@ function scoreVectorDocument(input: {
 
   const category = getDocumentCategory(input.document);
   let score = 75;
+  const source = String(getDocumentValue(input.document, ['source']) || '');
+  const priority = Number(getDocumentValue(input.document, ['priority']));
+  if (source === 'keyword') score += 18;
+  if (Number.isFinite(priority)) score += Math.min(40, Math.max(0, priority));
   if (matchesIntentCategory(input.document, input.intent)) score += 45;
   score += Math.min(6, countKeywordOverlap(input.queryTokens, input.document)) * 8;
 
@@ -206,6 +212,76 @@ function scoreVectorDocument(input: {
     source: 'vector',
     category,
   };
+}
+
+let ragLogTableReady = false;
+
+async function ensureRagLogTable() {
+  if (ragLogTableReady) return true;
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS rag_retrieval_logs (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL,
+        autopilot_config_id uuid,
+        query text NOT NULL,
+        intent text,
+        strategy text,
+        knowledge_coverage text,
+        selected jsonb NOT NULL DEFAULT '[]'::jsonb,
+        discarded jsonb NOT NULL DEFAULT '[]'::jsonb,
+        diagnostics jsonb NOT NULL DEFAULT '{}'::jsonb,
+        error text,
+        created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
+      );
+      CREATE INDEX IF NOT EXISTS idx_rag_retrieval_logs_workspace_created
+        ON rag_retrieval_logs(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_rag_retrieval_logs_config_created
+        ON rag_retrieval_logs(autopilot_config_id, created_at DESC);
+    `);
+    ragLogTableReady = true;
+    return true;
+  } catch (error) {
+    console.warn('[RAG] Could not ensure rag_retrieval_logs table:', error);
+    return false;
+  }
+}
+
+async function logRagRetrieval(input: BaseRetrievalInput & {
+  intent?: AutopilotIntentResolution | null;
+  result: Pick<HybridKnowledgeRetrievalResult, 'strategy' | 'knowledgeCoverage' | 'selected' | 'discarded' | 'diagnostics' | 'error'>;
+}) {
+  if (!(await ensureRagLogTable())) return;
+  try {
+    await db.query(
+      `INSERT INTO rag_retrieval_logs (
+        workspace_id,
+        autopilot_config_id,
+        query,
+        intent,
+        strategy,
+        knowledge_coverage,
+        selected,
+        discarded,
+        diagnostics,
+        error
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        input.workspaceId,
+        input.autopilotConfigId || null,
+        input.query,
+        input.intent?.intent || null,
+        input.result.strategy,
+        input.result.knowledgeCoverage,
+        JSON.stringify(input.result.selected),
+        JSON.stringify(input.result.discarded),
+        JSON.stringify(input.result.diagnostics || {}),
+        input.result.error || null,
+      ],
+    );
+  } catch (error) {
+    console.warn('[RAG] Failed to log retrieval:', error);
+  }
 }
 
 export function mergeAndRerankKnowledgeDocuments(input: {
@@ -291,6 +367,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       autopilotConfigId: input.autopilotConfigId ?? null,
       query: input.query,
       excludeChatId: input.excludeChatId ?? null,
+      intent: input.intent ?? null,
     });
     const merged = mergeAndRerankKnowledgeDocuments({
       vectorDocuments: vectorRetrieval.knowledgeBaseDocuments,
@@ -299,7 +376,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       intent: input.intent,
     });
 
-    return {
+    const result: HybridKnowledgeRetrievalResult = {
       ...merged,
       resolvedCases: vectorRetrieval.resolvedCases,
       retrieved: {
@@ -307,8 +384,11 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
         staticDocuments: input.staticDocuments?.length || 0,
         resolvedCases: vectorRetrieval.resolvedCases.length,
       },
+      diagnostics: (vectorRetrieval as any).diagnostics || null,
       fallbackReason: merged.strategy === 'static_documents' ? 'vector_returned_no_selected_documents' : null,
     };
+    await logRagRetrieval({ ...input, result });
+    return result;
   } catch (error) {
     const merged = mergeAndRerankKnowledgeDocuments({
       vectorDocuments: [],
@@ -321,7 +401,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       throw error;
     }
 
-    return {
+    const result: HybridKnowledgeRetrievalResult = {
       ...merged,
       resolvedCases: [],
       retrieved: {
@@ -332,5 +412,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       fallbackReason: 'vector_retrieval_error',
       error: error instanceof Error ? error.message : String(error),
     };
+    await logRagRetrieval({ ...input, result });
+    return result;
   }
 }
