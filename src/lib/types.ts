@@ -590,6 +590,7 @@ export interface AutopilotConfigVersionSummary {
   version_number: number;
   label: string | null;
   created_at: string;
+  snapshot?: AutopilotConfigDraftSnapshot;
 }
 
 export interface AutopilotUsageLog {

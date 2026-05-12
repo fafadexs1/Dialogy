@@ -12,8 +12,10 @@ import {
   Save,
   ArrowLeft,
   ShieldCheck,
-  Bot,
   History,
+  LineChart,
+  RotateCcw,
+  TestTube2,
 } from 'lucide-react';
 
 import type {
@@ -32,6 +34,7 @@ import {
   saveAutopilotDraft,
   publishAutopilotDraft,
   discardAutopilotDraft,
+  restoreAutopilotVersion,
   deleteAutopilotRule,
   toggleAutopilotRule,
   getAutopilotUsageLogs,
@@ -145,6 +148,93 @@ function normalizeLoadedSnapshot(
   };
 }
 
+function normalizeTextForVersion(value: string | null | undefined) {
+  return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function listDiff(previous: string[], next: string[]) {
+  const previousSet = new Set(previous);
+  const nextSet = new Set(next);
+  return {
+    added: next.filter((item) => !previousSet.has(item)),
+    removed: previous.filter((item) => !nextSet.has(item)),
+  };
+}
+
+function summarizeVersionChanges(
+  version: AutopilotConfigVersionSummary,
+  previousVersion: AutopilotConfigVersionSummary | null,
+  modelOptions: AiModelCatalogEntry[],
+) {
+  const snapshot = version.snapshot;
+  if (!snapshot) return ['Snapshot nao disponivel para esta versao.'];
+
+  const previous = previousVersion?.snapshot || null;
+  if (!previous) {
+    return [
+      `Primeira publicacao com ${snapshot.knowledge_base_documents.length} documento(s), ${snapshot.enabled_tool_names.length} ferramenta(s) e modelo ${getAiModelLabel(snapshot.ai_model || '', modelOptions)}.`,
+    ];
+  }
+
+  const changes: string[] = [];
+
+  if (snapshot.name !== previous.name) {
+    changes.push(`Nome alterado de "${previous.name}" para "${snapshot.name}".`);
+  }
+
+  if (snapshot.ai_model !== previous.ai_model) {
+    changes.push(`Modelo alterado de ${getAiModelLabel(previous.ai_model || '', modelOptions)} para ${getAiModelLabel(snapshot.ai_model || '', modelOptions)}.`);
+  }
+
+  if (snapshot.is_active !== previous.is_active) {
+    changes.push(snapshot.is_active ? 'Agente ativado.' : 'Agente pausado.');
+  }
+
+  if (snapshot.is_private !== previous.is_private) {
+    changes.push(snapshot.is_private ? 'Visibilidade alterada para privado.' : 'Visibilidade alterada para compartilhado.');
+  }
+
+  if (normalizeTextForVersion(snapshot.knowledge_base) !== normalizeTextForVersion(previous.knowledge_base)) {
+    changes.push('Persona/prompt base atualizado.');
+  }
+
+  if (normalizeTextForVersion(snapshot.default_fallback_reply) !== normalizeTextForVersion(previous.default_fallback_reply)) {
+    changes.push('Resposta de fallback atualizada.');
+  }
+
+  if (normalizeTextForVersion(snapshot.escalation_policy) !== normalizeTextForVersion(previous.escalation_policy)) {
+    changes.push('Politica de escalonamento atualizada.');
+  }
+
+  if (normalizeTextForVersion(snapshot.closing_policy) !== normalizeTextForVersion(previous.closing_policy)) {
+    changes.push('Politica de encerramento atualizada.');
+  }
+
+  const previousDocNames = previous.knowledge_base_documents.map((doc) => doc.name);
+  const nextDocNames = snapshot.knowledge_base_documents.map((doc) => doc.name);
+  const docDiff = listDiff(previousDocNames, nextDocNames);
+  if (docDiff.added.length > 0) {
+    changes.push(`Documentos adicionados: ${docDiff.added.slice(0, 3).join(', ')}${docDiff.added.length > 3 ? ` +${docDiff.added.length - 3}` : ''}.`);
+  }
+  if (docDiff.removed.length > 0) {
+    changes.push(`Documentos removidos: ${docDiff.removed.slice(0, 3).join(', ')}${docDiff.removed.length > 3 ? ` +${docDiff.removed.length - 3}` : ''}.`);
+  }
+
+  const toolDiff = listDiff(previous.enabled_tool_names, snapshot.enabled_tool_names);
+  if (toolDiff.added.length > 0) {
+    changes.push(`Ferramentas habilitadas: ${toolDiff.added.slice(0, 4).join(', ')}${toolDiff.added.length > 4 ? ` +${toolDiff.added.length - 4}` : ''}.`);
+  }
+  if (toolDiff.removed.length > 0) {
+    changes.push(`Ferramentas desabilitadas: ${toolDiff.removed.slice(0, 4).join(', ')}${toolDiff.removed.length > 4 ? ` +${toolDiff.removed.length - 4}` : ''}.`);
+  }
+
+  if ((snapshot.gemini_api_key ? 'set' : 'empty') !== (previous.gemini_api_key ? 'set' : 'empty')) {
+    changes.push(snapshot.gemini_api_key ? 'Credencial personalizada adicionada.' : 'Credencial personalizada removida.');
+  }
+
+  return changes.length > 0 ? changes : ['Publicacao sem mudancas estruturais detectadas no snapshot.'];
+}
+
 export default function AutopilotDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -182,6 +272,7 @@ export default function AutopilotDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isDiscardingDraft, setIsDiscardingDraft] = useState(false);
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<NexusFlowInstance | null>(null);
@@ -437,6 +528,32 @@ export default function AutopilotDetailPage() {
     }
   };
 
+  const handleRestoreVersion = async (versionId: string, versionNumber: number) => {
+    if (!config) return;
+    if (!confirm(`Restaurar a versao v${versionNumber}? A configuracao atual sera substituida e um novo ponto no historico sera criado.`)) return;
+
+    setRestoringVersionId(versionId);
+    try {
+      const result = await restoreAutopilotVersion(config.id, versionId);
+      if (result.success) {
+        toast({
+          title: 'Versao restaurada',
+          description: result.versionNumber
+            ? `Rollback publicado como v${result.versionNumber}.`
+            : `A versao v${versionNumber} foi restaurada.`,
+        });
+        setLastPlaygroundTrace(null);
+        await fetchData();
+      } else {
+        toast({ title: 'Erro ao restaurar versao', description: result.error, variant: 'destructive' });
+      }
+    } catch (error: any) {
+      toast({ title: 'Erro inesperado', description: error.message, variant: 'destructive' });
+    } finally {
+      setRestoringVersionId(null);
+    }
+  };
+
   const handleKnowledgeUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -649,7 +766,7 @@ export default function AutopilotDetailPage() {
         )}
       </header>
 
-      <main className="mx-auto grid w-full max-w-[1600px] min-w-0 flex-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <main className="mx-auto grid w-full max-w-[1600px] min-w-0 flex-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <Tabs defaultValue="overview" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm">
             <TabsTrigger value="overview" className="gap-2 rounded-xl px-4 py-2">
@@ -661,8 +778,17 @@ export default function AutopilotDetailPage() {
             <TabsTrigger value="rules" className="gap-2 rounded-xl px-4 py-2">
               <Zap className="h-4 w-4" /> O que ele pode fazer
             </TabsTrigger>
+            <TabsTrigger value="analytics" className="gap-2 rounded-xl px-4 py-2">
+              <LineChart className="h-4 w-4" /> Analytics
+            </TabsTrigger>
             <TabsTrigger value="settings" className="gap-2 rounded-xl px-4 py-2">
               <Settings2 className="h-4 w-4" /> Ajustes
+            </TabsTrigger>
+            <TabsTrigger value="playground" className="gap-2 rounded-xl px-4 py-2">
+              <TestTube2 className="h-4 w-4" /> Playground
+            </TabsTrigger>
+            <TabsTrigger value="versions" className="gap-2 rounded-xl px-4 py-2">
+              <History className="h-4 w-4" /> Versionamento
             </TabsTrigger>
           </TabsList>
 
@@ -687,7 +813,7 @@ export default function AutopilotDetailPage() {
 
                     <div className="space-y-3">
                       <h2 className="text-3xl font-bold tracking-tight text-foreground">{agentName || config.name}</h2>
-                      <p className="max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
+                      <p className="line-clamp-6 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
                         {knowledgeBase?.trim()
                           ? knowledgeBase.trim()
                           : 'Defina a persona do agente na aba de ajustes para orientar tom, regras de atendimento e objetivo operacional.'}
@@ -759,8 +885,6 @@ export default function AutopilotDetailPage() {
                       </div>
                     </CardContent>
                   </Card>
-
-                  <AutopilotStats usageLogs={usageLogs} loading={loading} />
                 </div>
               </div>
             </TabsContent>
@@ -799,6 +923,10 @@ export default function AutopilotDetailPage() {
               />
             </TabsContent>
 
+            <TabsContent value="analytics" className="mt-0 min-w-0 pb-10">
+              <AutopilotStats usageLogs={usageLogs} loading={loading} />
+            </TabsContent>
+
             <TabsContent value="settings" className="mt-0 min-w-0 pb-10">
               <AutopilotSettings
                 agentName={agentName}
@@ -831,10 +959,123 @@ export default function AutopilotDetailPage() {
                 workspace={workspace}
               />
             </TabsContent>
+
+            <TabsContent value="playground" className="mt-0 min-w-0 pb-10">
+              <AutopilotPlayground
+                workspaceId={user?.activeWorkspaceId}
+                agentId={agentId}
+                disabled={isSaving || isPublishing}
+                stale={hasUnpublishedChanges}
+                draftSnapshot={previewDraftSnapshot}
+                onTrace={setLastPlaygroundTrace}
+              />
+            </TabsContent>
+
+            <TabsContent value="versions" className="mt-0 min-w-0 pb-10">
+              <div className="grid gap-5">
+                <Card className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+                  <CardContent className="grid gap-5 p-6 sm:p-8 lg:grid-cols-[minmax(0,1fr)_280px]">
+                    <div className="min-w-0 space-y-3">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                        <History className="h-3.5 w-3.5" />
+                        Versionamento
+                      </div>
+                      <div>
+                        <h2 className="text-2xl font-semibold tracking-tight text-foreground">Historico publicado do agente</h2>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                          Restaure uma versao anterior quando ela estiver performando melhor. O rollback vira uma nova publicacao, preservando o historico.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-border bg-muted/25 p-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Versao atual</div>
+                      <div className="mt-2 text-2xl font-semibold text-foreground">
+                        {versions[0] ? `v${versions[0].version_number}` : 'Sem versao'}
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {versions[0]?.created_at ? new Date(versions[0].created_at).toLocaleString('pt-BR') : 'Publique o agente para criar o primeiro ponto de restauracao.'}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {versions.length > 0 ? (
+                  <div className="grid gap-3">
+                    {versions.map((version, index) => {
+                      const isCurrent = index === 0;
+                      const isRestoring = restoringVersionId === version.id;
+                      const changes = summarizeVersionChanges(version, versions[index + 1] || null, modelCatalog);
+                      return (
+                        <Card key={version.id} className="overflow-hidden rounded-[24px] border border-border bg-card shadow-sm">
+                          <CardContent className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                            <div className="grid min-w-0 gap-4">
+                              <div className="flex min-w-0 items-start gap-4">
+                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-muted text-primary">
+                                  {isCurrent ? <CheckCircle2 className="h-5 w-5" /> : <History className="h-5 w-5" />}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="text-base font-semibold text-foreground">Versao v{version.version_number}</h3>
+                                    {isCurrent && (
+                                      <Badge className="rounded-full border-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                                        Atual
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="mt-1 text-sm text-muted-foreground">
+                                    {version.label || `Publicacao v${version.version_number}`}
+                                  </p>
+                                  <p className="mt-2 text-xs text-muted-foreground">
+                                    Publicada em {new Date(version.created_at).toLocaleString('pt-BR')}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-border bg-muted/20 p-4">
+                                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">O que mudou nesta versao</div>
+                                <ul className="mt-3 grid gap-2">
+                                  {changes.map((change) => (
+                                    <li key={change} className="flex gap-2 text-sm leading-6 text-muted-foreground">
+                                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                                      <span>{change}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant={isCurrent ? 'outline' : 'default'}
+                              disabled={isCurrent || Boolean(restoringVersionId)}
+                              onClick={() => handleRestoreVersion(version.id, version.version_number)}
+                              className="rounded-full"
+                            >
+                              {isRestoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                              {isCurrent ? 'Em uso' : 'Restaurar'}
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <Card className="overflow-hidden rounded-[28px] border border-dashed border-border bg-card shadow-sm">
+                    <CardContent className="flex min-h-[280px] flex-col items-center justify-center px-6 py-12 text-center">
+                      <History className="h-12 w-12 text-muted-foreground/50" />
+                      <h3 className="mt-5 text-lg font-semibold text-foreground">Nenhuma versao publicada</h3>
+                      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                        Salve e publique o agente para criar o primeiro ponto de restauracao.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </TabsContent>
           </div>
         </Tabs>
 
-        <aside className="grid min-w-0 gap-4 self-start xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pr-1">
+        <aside className="min-w-0 self-start xl:sticky xl:top-4">
           <AutopilotReadiness
             aiModel={aiModel}
             modelOptions={selectableModels}
@@ -847,14 +1088,6 @@ export default function AutopilotDetailPage() {
             isActive={isActive}
             isDirty={hasUnpublishedChanges}
             lastTrace={lastPlaygroundTrace}
-          />
-          <AutopilotPlayground
-            workspaceId={user?.activeWorkspaceId}
-            agentId={agentId}
-            disabled={isSaving || isPublishing}
-            stale={hasUnpublishedChanges}
-            draftSnapshot={previewDraftSnapshot}
-            onTrace={setLastPlaygroundTrace}
           />
         </aside>
       </main>

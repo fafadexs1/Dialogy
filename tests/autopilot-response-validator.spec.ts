@@ -145,4 +145,27 @@ describe('autopilot response validator', () => {
     expect(result.decision).toBe('handoff');
     expect(result.actions.map((action) => action.type)).toEqual(['add_internal_note', 'transfer_chat']);
   });
+
+  it('adds close_chat action when response promises closure without action', () => {
+    const result = validate({
+      message: 'pode encerrar o atendimento',
+      response: 'Atendimento encerrado conforme solicitado.',
+      enabledToolNames: ['close_chat', 'add_internal_note'],
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.actions.map((action) => action.type)).toEqual(['close_chat']);
+    expect((result.actions[0] as any).payload.sendCloseMessage).toBe(false);
+  });
+
+  it('repairs first-person closure claims without close action', () => {
+    const result = validate({
+      message: 'Encerra ai',
+      response: 'Compreendido, Fabricio. Finalizei o atendimento por aqui, conforme solicitado.',
+      enabledToolNames: ['close_chat', 'add_internal_note'],
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.actions.map((action) => action.type)).toEqual(['close_chat']);
+  });
 });

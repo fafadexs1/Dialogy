@@ -481,7 +481,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             : null;
 
         const versionsRes = await db.query(
-            `SELECT id, config_id, workspace_id, user_id, version_number, label, created_at
+            `SELECT id, config_id, workspace_id, user_id, version_number, label, snapshot, created_at
              FROM autopilot_config_versions
              WHERE config_id = $1
              ORDER BY version_number DESC
@@ -491,6 +491,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         const versions = versionsRes.rows.map((row) => ({
             ...row,
             version_number: Number(row.version_number),
+            snapshot: normalizeDraftSnapshot(row.snapshot, selectedSnapshot),
         })) as AutopilotConfigVersionSummary[];
 
         // Fetch Gemini Integration Config
@@ -967,6 +968,142 @@ export async function publishAutopilotDraft(configId: string): Promise<{
         await client.query('ROLLBACK').catch(() => undefined);
         console.error('[PUBLISH_AUTOPILOT_DRAFT] Erro ao publicar rascunho:', error);
         return { success: false, error: 'Falha ao publicar rascunho.' };
+    } finally {
+        client.release();
+    }
+}
+
+export async function restoreAutopilotVersion(configId: string, versionId: string): Promise<{
+    success: boolean;
+    error?: string;
+    versionNumber?: number;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return { success: false, error: 'Usuario nao autenticado.' };
+    }
+
+    const client = await db.connect();
+    let previousDocs: KnowledgeBaseDocument[] = [];
+    let nextDocs: KnowledgeBaseDocument[] = [];
+    let versionNumber = 0;
+
+    try {
+        await ensureAutopilotVersioningTables();
+        await client.query('BEGIN');
+
+        const configRes = await client.query(
+            'SELECT * FROM autopilot_configs WHERE id = $1 FOR UPDATE',
+            [configId]
+        );
+        if (configRes.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Agente nao encontrado.' };
+        }
+
+        const configRow = configRes.rows[0];
+        const currentWorkspaceId = String(configRow.workspace_id);
+        if (!await isWorkspaceMember(user.id, currentWorkspaceId)) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Acesso nao autorizado.' };
+        }
+
+        const versionRes = await client.query(
+            `SELECT version_number, snapshot
+             FROM autopilot_config_versions
+             WHERE id = $1 AND config_id = $2
+             LIMIT 1`,
+            [versionId, configId]
+        );
+        if (versionRes.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Versao nao encontrada.' };
+        }
+
+        const fallback = buildSnapshotFromConfigRow(configRow);
+        const snapshot = normalizeDraftSnapshot(versionRes.rows[0].snapshot, fallback);
+        if (snapshot.ai_model && !(await isAllowedAutopilotModel(snapshot.ai_model))) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'Modelo de IA desta versao nao esta habilitado no catalogo global.' };
+        }
+
+        previousDocs = fallback.knowledge_base_documents;
+        nextDocs = snapshot.knowledge_base_documents;
+
+        const nextVersionRes = await client.query(
+            'SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version FROM autopilot_config_versions WHERE config_id = $1',
+            [configId]
+        );
+        versionNumber = Number(nextVersionRes.rows[0]?.next_version || 1);
+
+        await client.query(
+            `UPDATE autopilot_configs
+             SET
+                name = $3,
+                gemini_api_key = $4,
+                ai_model = $5,
+                transcription_model = $6,
+                knowledge_base = $7,
+                knowledge_base_documents = $8,
+                is_active = $9,
+                is_private = $10,
+                default_fallback_reply = $11,
+                escalation_policy = $12,
+                closing_policy = $13,
+                enabled_tool_names = $14,
+                updated_at = NOW()
+             WHERE workspace_id = $1 AND id = $2`,
+            [
+                currentWorkspaceId,
+                configId,
+                snapshot.name,
+                snapshot.gemini_api_key,
+                snapshot.ai_model,
+                snapshot.transcription_model || null,
+                snapshot.knowledge_base,
+                JSON.stringify(snapshot.knowledge_base_documents),
+                snapshot.is_active,
+                snapshot.is_private,
+                snapshot.default_fallback_reply,
+                snapshot.escalation_policy,
+                snapshot.closing_policy,
+                JSON.stringify(snapshot.enabled_tool_names),
+            ]
+        );
+
+        await client.query(
+            `INSERT INTO autopilot_config_versions
+                (config_id, workspace_id, user_id, version_number, label, snapshot)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+                configId,
+                currentWorkspaceId,
+                user.id,
+                versionNumber,
+                `Rollback para v${Number(versionRes.rows[0].version_number)}`,
+                JSON.stringify(snapshot),
+            ]
+        );
+
+        await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
+        await client.query('COMMIT');
+
+        await reindexChangedKnowledgeDocuments({
+            workspaceId: currentWorkspaceId,
+            configId,
+            previousDocs,
+            nextDocs,
+        });
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${configId}`);
+        return { success: true, versionNumber };
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        console.error('[RESTORE_AUTOPILOT_VERSION] Erro ao restaurar versao:', error);
+        return { success: false, error: 'Falha ao restaurar versao.' };
     } finally {
         client.release();
     }

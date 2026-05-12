@@ -2,6 +2,7 @@ import type { AutopilotConfig, Chat, Contact } from '@/lib/types';
 
 export type AgentToolName =
   | 'transfer_chat'
+  | 'close_chat'
   | 'add_internal_note'
   | 'crm_update_contact_custom_fields'
   | 'sgp_fetch_contracts'
@@ -20,6 +21,15 @@ export type AgentToolAction =
         teamId?: string | null;
         teamName?: string | null;
         agentId?: string | null;
+      } | null;
+    }
+  | {
+      type: 'close_chat';
+      reason?: string | null;
+      payload?: {
+        reasonTagId?: string | null;
+        notes?: string | null;
+        sendCloseMessage?: boolean | null;
       } | null;
     }
   | {

@@ -44,6 +44,7 @@
   AI_TOOL_INTENT_GATE_MODEL: ${AI_TOOL_INTENT_GATE_MODEL:-}
   AI_TOOL_INTENT_GATE_TIMEOUT_MS: ${AI_TOOL_INTENT_GATE_TIMEOUT_MS:-2500}
   AGENT_TOOL_TRANSFER_TIMEOUT_MS: ${AGENT_TOOL_TRANSFER_TIMEOUT_MS:-8000}
+  AGENT_TOOL_CLOSE_TIMEOUT_MS: ${AGENT_TOOL_CLOSE_TIMEOUT_MS:-8000}
   AGENT_TOOL_NOTE_TIMEOUT_MS: ${AGENT_TOOL_NOTE_TIMEOUT_MS:-3000}
   EVOLUTION_WEBHOOK_CONCURRENCY: ${EVOLUTION_WEBHOOK_CONCURRENCY}
   EVOLUTION_LIVE_EVENT_MAX_AGE_SECONDS: ${EVOLUTION_LIVE_EVENT_MAX_AGE_SECONDS}
@@ -92,7 +93,7 @@ x-worker-ai-environment: &worker-ai-environment
 
 services:
   dialogy:
-    image: fafadexs/dialogy:PBE-5.50
+    image: fafadexs/dialogy:PBE-5.68
     restart: unless-stopped
     init: true
     environment:
@@ -114,7 +115,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PBE-5.50
+    image: fafadexs/dialogy-worker:PBE-5.68
     restart: unless-stopped
     init: true
     depends_on:
@@ -125,7 +126,7 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PBE-5.50
+    image: fafadexs/dialogy-worker-ai:PBE-5.68
     restart: unless-stopped
     init: true
     depends_on:

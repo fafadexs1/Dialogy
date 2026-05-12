@@ -70,7 +70,7 @@ const INTENT_KEYWORDS: Record<UniversalAutopilotIntent, RegExp[]> = {
     /\b(preco|precos|valor|valores|quanto custa|custa quanto|orcamento|mensalidade|taxa|tarifa|condicoes|condicao)\b/,
     /\br\$\s*\d+/,
   ],
-  promotion_request: [/\b(promocao|promocoes|desconto|oferta|cupom|campanha|condicao especial)\b/],
+  promotion_request: [/\b(promocao|promocoes|promocional|promo|desconto|oferta|cupom|campanha|condicao especial)\b/],
   availability_request: [/\b(disponivel|disponibilidade|tem vaga|tem estoque|em estoque|atende minha regiao|area de entrega|tem horario)\b/],
   billing_or_payment: [/\b(boleto|fatura|pix|pagamento|pagar|cobranca|segunda via|2a via|vencimento|debito|mensalidade atrasada)\b/],
   scheduling_request: [/\b(agendar|marcar|remarcar|desmarcar|horario|agenda|consulta|reserva|visita|reuniao)\b/],
@@ -130,6 +130,14 @@ function getCanonicalAnswer(document: KnowledgeBaseDocument): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function hasExactResponseDirective(document: KnowledgeBaseDocument): boolean {
+  const content = normalizeForIntent(`${document.name || ''}\n${getCanonicalAnswer(document)}\n${document.content || ''}`).slice(0, 1200);
+  return (
+    /\b(?:voce\s+deve\s+mandar|deve\s+mandar|envie|mande|responda|usar)\b.{0,100}\b(?:exatamente|mesmo\s+espacamento|mesmos?\s+emojis?|sem\s+alterar|nao\s+mude)\b/.test(content) ||
+    /\b(?:exatamente|mesmo\s+espacamento)\b.{0,100}\b(?:emojis?|quebras?\s+de\s+linha|espacamento)\b/.test(content)
+  );
+}
+
 function getDocumentPriority(document: KnowledgeBaseDocument): number {
   const value = Number(getDocumentValue(document, ['priority']));
   return Number.isFinite(value) ? value : 0;
@@ -184,10 +192,17 @@ function getOfficialDocumentScore(document: KnowledgeBaseDocument, intent: Unive
 
   if (hasCategoryMatch) score += 120;
   if (canonicalAnswer) score += 90;
+  if (
+    hasExactResponseDirective(document) &&
+    /\br\$\s*\d+/i.test(content) &&
+    /\b\d{2,4}\s*(?:mega|megas|mb|gb)\b/.test(haystack)
+  ) {
+    score += 150;
+  }
   score += Math.max(0, Math.min(20, getDocumentPriority(document))) * 4;
   score += countRegexMatches(haystack, INTENT_KEYWORDS[intent] || []) * 30;
 
-  if (/\br\$\s*\d+/.test(content) && (intent === 'pricing_request' || intent === 'catalog_request' || intent === 'purchase_inquiry')) {
+  if (/\br\$\s*\d+/i.test(content) && (intent === 'pricing_request' || intent === 'catalog_request' || intent === 'purchase_inquiry')) {
     score += 35;
   }
   if (categories.includes('internal_only')) score -= 180;
@@ -203,19 +218,46 @@ function getOfficialDocumentScore(document: KnowledgeBaseDocument, intent: Unive
   return score;
 }
 
-export function cleanKnowledgeCatalogContent(content: string): string {
-  let normalized = content
-    .replace(/\r\n?/g, '\n')
-    .split('\n')
-    .map((line) => line.replace(/[ \t]+$/g, '').trimStart())
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+function extractPromotionSection(content: string): string {
+  const lines = content.split('\n');
+  const startIndex = lines.findIndex((line) => /\b(promocao|promocoes|promocional|promo|oferta)\b/.test(normalizeForIntent(line)));
+  if (startIndex < 0) return content;
+
+  const section = lines.slice(startIndex);
+  const validUntilIndex = section.findIndex((line) => /\b(oferta\s+valida|valido\s+ate|valida\s+ate)\b/.test(normalizeForIntent(line)));
+  if (validUntilIndex >= 0) {
+    return section.slice(0, validUntilIndex + 1).join('\n').trim();
+  }
+
+  return section.join('\n').trim();
+}
+
+export function cleanKnowledgeCatalogContent(
+  content: string,
+  preserveSpacing = false,
+  intent?: UniversalAutopilotIntent
+): string {
+  let normalized = content.replace(/\r\n?/g, '\n');
+
+  if (preserveSpacing) {
+    normalized = normalized
+      .split('\n')
+      .map((line) => line.replace(/[ \t]+$/g, ''))
+      .join('\n')
+      .trim();
+  } else {
+    normalized = normalized
+      .split('\n')
+      .map((line) => line.replace(/[ \t]+$/g, '').trimStart())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
 
   const lines = normalized.split('\n');
   while (lines.length > 0) {
     const first = normalizeForIntent(lines[0] || '');
-    if (!first || /^(nao mude|nao altere|envie exatamente|mande dessa forma|responda exatamente|resposta oficial|use esta resposta|instrucoes?|observacao interna)/.test(first)) {
+    if (!first || /^(voce deve mandar|deve mandar|nao mude|nao altere|envie exatamente|mande dessa forma|mande exatamente|responda exatamente|resposta oficial|use esta resposta|instrucoes?|observacao interna)/.test(first)) {
       lines.shift();
       continue;
     }
@@ -223,13 +265,16 @@ export function cleanKnowledgeCatalogContent(content: string): string {
   }
 
   normalized = lines.join('\n').replace(/^\s*(resposta oficial|resposta canonica|catalogo|cardapio)\s*:\s*/i, '').trim();
+  if (intent === 'promotion_request') {
+    normalized = extractPromotionSection(normalized);
+  }
   return normalized;
 }
 
 export function findOfficialKnowledgeAnswer(input: {
   documents: KnowledgeBaseDocument[] | null | undefined;
   intent: UniversalAutopilotIntent;
-}): { content: string; document: KnowledgeBaseDocument; score: number } | null {
+}): { content: string; document: KnowledgeBaseDocument; score: number; preserveFormatting: boolean } | null {
   if (input.intent === 'unknown' || input.intent === 'greeting' || input.intent === 'thanks' || input.intent === 'human_handoff') {
     return null;
   }
@@ -237,10 +282,12 @@ export function findOfficialKnowledgeAnswer(input: {
   const candidates = (input.documents || [])
     .map((document) => {
       const canonicalAnswer = getCanonicalAnswer(document);
-      const content = cleanKnowledgeCatalogContent(canonicalAnswer || String(document.content || ''));
+      const preserveFormatting = hasExactResponseDirective(document);
+      const content = cleanKnowledgeCatalogContent(canonicalAnswer || String(document.content || ''), preserveFormatting, input.intent);
       return {
         document,
         content,
+        preserveFormatting,
         score: getOfficialDocumentScore(document, input.intent),
       };
     })
@@ -260,7 +307,7 @@ export function findOfficialKnowledgeAnswer(input: {
 
 export function findOfficialPlanCatalog(
   documents: KnowledgeBaseDocument[] | null | undefined
-): { content: string; document: KnowledgeBaseDocument; score: number } | null {
+): { content: string; document: KnowledgeBaseDocument; score: number; preserveFormatting: boolean } | null {
   return (
     findOfficialKnowledgeAnswer({ documents, intent: 'catalog_request' }) ||
     findOfficialKnowledgeAnswer({ documents, intent: 'pricing_request' })
@@ -279,12 +326,24 @@ function isAffirmativeFollowUp(normalizedMessage: string): boolean {
   return /^(sim|quero|pode|manda|manda sim|mostrar|mostra|envia|envia sim|ok|beleza|claro|isso|esse|essa|pode ser)\b/.test(normalizedMessage);
 }
 
+function hasPurchaseCommitment(normalizedMessage: string): boolean {
+  return (
+    /\b(?:quero|vou querer|fico com|fechar|fecho|contratar|assinar|aderir|pegar)\b.{0,50}\b(?:esse|essa|ele|ela|plano|pacote|promo|promocional|oferta)\b/.test(normalizedMessage) ||
+    /\b(?:esse|essa|ele|ela|plano|pacote|promo|promocional|oferta)\b.{0,50}\b(?:quero|vou querer|fico com|fechar|fecho|contratar|assinar|aderir|pegar)\b/.test(normalizedMessage) ||
+    /\bacho que quero\b/.test(normalizedMessage)
+  );
+}
+
 function detectIntent(customerMessage: string, chatHistory = ''): { intent: UniversalAutopilotIntent; confidence: number; reason: string } {
   const normalized = normalizeForIntent(customerMessage);
   const normalizedHistory = normalizeForIntent(chatHistory).slice(-1600);
 
   if (!normalized) {
     return { intent: 'unknown', confidence: 0, reason: 'Mensagem vazia.' };
+  }
+
+  if (hasPurchaseCommitment(normalized)) {
+    return { intent: 'purchase_inquiry', confidence: 0.9, reason: 'Cliente indicou compromisso de compra/contratacao.' };
   }
 
   if (
@@ -394,5 +453,6 @@ export function resolveAutopilotIntent(input: {
     sourceDocumentId: official?.document.id,
     sourceDocumentName: official?.document.name,
     officialResponse: official?.content,
+    officialResponsePreserveFormatting: official?.preserveFormatting,
   };
 }

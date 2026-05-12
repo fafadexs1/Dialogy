@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Bot,
   CheckCircle2,
-  History,
   Loader2,
   MessageSquareText,
   Plus,
@@ -17,6 +16,7 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -130,6 +130,22 @@ function formatChatHistory(messages: PlaygroundMessage[]): string {
 function buildSessionTitle(message: string) {
   const compact = message.replace(/\s+/g, ' ').trim();
   return compact.length > 42 ? `${compact.slice(0, 39)}...` : compact || 'Novo chat';
+}
+
+function getSessionPreview(session: PlaygroundSession) {
+  const lastMessage = [...session.messages].reverse().find((item) => item.content.trim().length > 0);
+  return lastMessage?.content || 'Sem mensagens neste chat.';
+}
+
+function formatSessionDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Agora';
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function traceBadgeClass(value: string) {
@@ -267,6 +283,7 @@ export function AutopilotPlayground({
   const [result, setResult] = useState<PlaygroundResult | null>(null);
   const [trace, setTrace] = useState<AutopilotPlaygroundTrace | null>(null);
   const [publishedRun, setPublishedRun] = useState<PreviewRun | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const storageKey = useMemo(() => (
     workspaceId && agentId ? `dialogy:autopilot-playground:${workspaceId}:${agentId}` : null
@@ -368,13 +385,14 @@ export function AutopilotPlayground({
     )));
   };
 
-  const selectSession = (session: PlaygroundSession) => {
+  const selectSession = (session: PlaygroundSession, open = false) => {
     setActiveSessionId(session.id);
     setResult(session.lastResult || null);
     setTrace(session.lastTrace || null);
     setPublishedRun(session.lastPublishedRun || null);
     setError(null);
     onTrace(session.lastTrace || null);
+    if (open) setIsChatOpen(true);
   };
 
   const startNewChat = () => {
@@ -387,6 +405,7 @@ export function AutopilotPlayground({
     setTrace(null);
     setPublishedRun(null);
     onTrace(null);
+    setIsChatOpen(true);
   };
 
   const clearCurrentChat = () => {
@@ -404,6 +423,21 @@ export function AutopilotPlayground({
     setTrace(null);
     setPublishedRun(null);
     onTrace(null);
+  };
+
+  const deleteSession = (sessionId: string) => {
+    const remaining = sessions.filter((session) => session.id !== sessionId);
+    const nextSessions = remaining.length > 0 ? remaining : [createSession()];
+    const nextActive = nextSessions[0];
+    setSessions(nextSessions);
+    setActiveSessionId(nextActive.id);
+    setMessage('');
+    setError(null);
+    setResult(nextActive.lastResult || null);
+    setTrace(nextActive.lastTrace || null);
+    setPublishedRun(nextActive.lastPublishedRun || null);
+    onTrace(nextActive.lastTrace || null);
+    setIsChatOpen(false);
   };
 
   const runSinglePreview = async (input: {
@@ -544,201 +578,268 @@ export function AutopilotPlayground({
   };
 
   return (
-    <section className="rounded-[26px] border border-border bg-card shadow-sm">
-      <div className="border-b border-border/60 px-5 py-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Playground</h2>
-            <p className="text-xs text-muted-foreground">Teste o agente antes de publicar.</p>
+    <>
+      <section className="rounded-[28px] border border-border bg-card shadow-sm">
+        <div className="border-b border-border/60 px-6 py-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">Playground</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Teste o agente em conversas isoladas antes de publicar.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {traceSummary && (
+                <Badge variant="outline" className="max-w-[260px] truncate rounded-full">
+                  {traceSummary}
+                </Badge>
+              )}
+              <Button type="button" onClick={startNewChat} className="rounded-full">
+                <Plus className="mr-2 h-4 w-4" />
+                Novo chat
+              </Button>
+            </div>
           </div>
-          {traceSummary && (
-            <Badge variant="outline" className="max-w-[180px] truncate rounded-full">
-              {traceSummary}
-            </Badge>
+          {stale && (
+            <div className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+              Os testes com rascunho comparam a versao publicada com as alteracoes atuais.
+            </div>
           )}
         </div>
-        {stale && (
-          <div className="mt-3 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            O teste compara a versao publicada com o rascunho atual.
-          </div>
-        )}
-      </div>
 
-      <div className="grid gap-4 p-5">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="playground-contact">Contato</Label>
-            <Input
-              id="playground-contact"
-              value={activeSession.contactName}
-              onChange={(event) => {
-                const contactName = event.target.value;
-                updateActiveSession((session) => ({
-                  ...session,
-                  contactName,
-                  updatedAt: new Date().toISOString(),
-                }));
-              }}
-              placeholder="Nome do cliente"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : trace ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Bot className="h-4 w-4" />}
-              {loading ? 'Executando' : trace ? 'Trace pronto' : 'Aguardando teste'}
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label>Chats de teste</Label>
-            <Button type="button" variant="outline" size="sm" onClick={startNewChat} className="h-8 rounded-full">
-              <Plus className="mr-2 h-3.5 w-3.5" />
-              Novo
-            </Button>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {sessions.map((session) => (
-              <button
+        <div className="grid gap-4 p-5 sm:p-6 md:grid-cols-2 2xl:grid-cols-3">
+          {sessions.map((session) => {
+            const isActiveSession = session.id === activeSession.id;
+            return (
+              <div
                 key={session.id}
-                type="button"
-                onClick={() => selectSession(session)}
+                role="button"
+                tabIndex={0}
+                onClick={() => selectSession(session, true)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectSession(session, true);
+                  }
+                }}
                 className={cn(
-                  'flex max-w-[190px] shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-xs transition-colors',
-                  session.id === activeSession.id
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                  'group flex min-h-[210px] cursor-pointer flex-col rounded-[24px] border bg-background/80 p-5 text-left shadow-sm transition-all hover:border-primary/40 hover:bg-primary/5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40',
+                  isActiveSession ? 'border-primary/45' : 'border-border'
                 )}
               >
-                <History className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{session.title}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <ChatTranscript messages={activeSession.messages} />
-
-        <div className="space-y-2">
-          <Label htmlFor="playground-message">Mensagem do cliente</Label>
-          <Textarea
-            id="playground-message"
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                event.preventDefault();
-                runPreview();
-              }
-            }}
-            className="min-h-[88px] resize-y"
-            placeholder="Digite uma pergunta real do cliente"
-          />
-        </div>
-
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <Button onClick={runPreview} disabled={!canRun || loading} className="rounded-full">
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            Enviar para IA
-          </Button>
-          <Button type="button" variant="outline" onClick={clearCurrentChat} disabled={loading || activeSession.messages.length === 0} className="rounded-full">
-            <Trash2 className="mr-2 h-4 w-4" />
-            Limpar
-          </Button>
-        </div>
-
-        {error && (
-          <div className="flex items-start gap-2 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            {error}
-          </div>
-        )}
-
-        {shouldCompare && result?.response && publishedRun && (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-            <ResponsePreview title="Publicado" result={publishedRun.result} />
-            <ResponsePreview title="Rascunho" result={result} />
-          </div>
-        )}
-
-        {shouldCompare && compareRows.length > 0 && (
-          <div className="rounded-2xl border border-border bg-muted/20 px-4 py-3">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Comparacao de trace
-              </div>
-              <Badge variant="outline" className="rounded-full text-[10px]">
-                publicado x rascunho
-              </Badge>
-            </div>
-            <div className="grid gap-2">
-              {compareRows.map((row) => (
-                <TraceCompareRow
-                  key={row.label}
-                  label={row.label}
-                  published={row.published}
-                  draft={row.draft}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {trace && (
-          <div className="grid gap-3">
-            <TraceSection title="Intent" value={trace.intent.intent}>
-              <div className="space-y-1">
-                <div>Confianca: {(trace.intent.confidence * 100).toFixed(0)}%</div>
-                <div>Workflow: {trace.intent.workflowId}</div>
-                <div className="line-clamp-2">Motivo: {trace.intent.reason}</div>
-              </div>
-            </TraceSection>
-
-            <TraceSection title="RAG" value={trace.rag.knowledgeCoverage}>
-              <div className="space-y-1">
-                <div>Estrategia: {trace.rag.strategy}</div>
-                <div>
-                  Docs: {trace.rag.selected.length > 0 ? trace.rag.selected.map((doc) => doc.name).join(', ') : 'nenhum'}
-                </div>
-              </div>
-            </TraceSection>
-
-            <TraceSection title="Workflow" value={trace.workflow.executionMode}>
-              <div className="space-y-1">
-                <div>{trace.workflow.reason}</div>
-                <div>Slots ausentes: {trace.workflow.missingSlots.join(', ') || 'nenhum'}</div>
-                <div>Acoes: {trace.workflow.actions.join(', ') || 'nenhuma'}</div>
-              </div>
-            </TraceSection>
-
-            <TraceSection title="Tool planner" value={trace.toolPlanner.repairReason || (trace.toolPlanner.rejectedActions.length ? 'rejected' : 'accepted')}>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Wrench className="h-3.5 w-3.5" />
-                  Aceitas: {trace.toolPlanner.acceptedActions.join(', ') || 'nenhuma'}
-                </div>
-                {trace.toolPlanner.rejectedActions.length > 0 && (
-                  <div>
-                    Rejeitadas: {trace.toolPlanner.rejectedActions.map((item) => `${item.tool} (${item.code})`).join(', ')}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-muted text-primary">
+                      <MessageSquareText className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-base font-semibold text-foreground">{session.title}</h3>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">{session.contactName}</p>
+                    </div>
                   </div>
-                )}
-                {trace.toolPlanner.promisedExternalLookup && (
-                  <div>Promessa de consulta: {trace.toolPlanner.hasExecutableLookupTool ? 'com tool' : 'sem tool executavel'}</div>
-                )}
-              </div>
-            </TraceSection>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-full text-muted-foreground opacity-100 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteSession(session.id);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
 
-            <TraceSection title="Validator" value={trace.validator.decision}>
-              <div className="flex items-start gap-2">
-                <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>{trace.validator.reasons.join(', ') || 'Resposta aprovada.'}</span>
+                <p className="mt-4 line-clamp-3 text-sm leading-6 text-muted-foreground">{getSessionPreview(session)}</p>
+
+                <div className="mt-auto flex flex-wrap items-center gap-2 pt-5">
+                  <Badge variant="outline" className="rounded-full">
+                    {session.messages.length} mensagens
+                  </Badge>
+                  {session.lastTrace ? (
+                    <Badge variant="outline" className={cn('rounded-full', traceBadgeClass(session.lastTrace.validator.decision))}>
+                      {session.lastTrace.validator.decision}
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="rounded-full">
+                      sem teste
+                    </Badge>
+                  )}
+                  <span className="ml-auto text-xs text-muted-foreground">{formatSessionDate(session.updatedAt)}</span>
+                </div>
               </div>
-            </TraceSection>
+            );
+          })}
+        </div>
+      </section>
+
+      <Dialog open={isChatOpen} onOpenChange={setIsChatOpen}>
+        <DialogContent className="flex h-[90vh] max-h-[90vh] max-w-5xl flex-col overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl">
+          <DialogHeader className="border-b border-border bg-muted/25 px-6 py-5">
+            <div className="flex flex-col gap-4 pr-8 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-xl">{activeSession.title}</DialogTitle>
+                <DialogDescription className="mt-2">Conversa de teste com {activeSession.contactName}.</DialogDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="rounded-full">
+                  {loading ? 'Executando' : trace ? 'Trace pronto' : 'Aguardando teste'}
+                </Badge>
+                <Button type="button" variant="outline" onClick={() => deleteSession(activeSession.id)} className="rounded-full text-destructive hover:text-destructive">
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Apagar chat
+                </Button>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+            <div className="grid min-h-0 gap-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="playground-contact">Contato</Label>
+                  <Input
+                    id="playground-contact"
+                    value={activeSession.contactName}
+                    onChange={(event) => {
+                      const contactName = event.target.value;
+                      updateActiveSession((session) => ({
+                        ...session,
+                        contactName,
+                        updatedAt: new Date().toISOString(),
+                      }));
+                    }}
+                    placeholder="Nome do cliente"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : trace ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Bot className="h-4 w-4" />}
+                    {loading ? 'Executando' : trace ? 'Trace pronto' : 'Aguardando teste'}
+                  </div>
+                </div>
+              </div>
+
+              <ChatTranscript messages={activeSession.messages} />
+
+              <div className="space-y-2">
+                <Label htmlFor="playground-message">Mensagem do cliente</Label>
+                <Textarea
+                  id="playground-message"
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      runPreview();
+                    }
+                  }}
+                  className="min-h-[92px] resize-y"
+                  placeholder="Digite uma pergunta real do cliente"
+                />
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <Button onClick={runPreview} disabled={!canRun || loading} className="rounded-full">
+                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                  Enviar para IA
+                </Button>
+                <Button type="button" variant="outline" onClick={clearCurrentChat} disabled={loading || activeSession.messages.length === 0} className="rounded-full">
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Limpar mensagens
+                </Button>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  {error}
+                </div>
+              )}
+            </div>
+
+            <div className="grid content-start gap-3">
+              {shouldCompare && result?.response && publishedRun && (
+                <div className="grid gap-3">
+                  <ResponsePreview title="Publicado" result={publishedRun.result} />
+                  <ResponsePreview title="Rascunho" result={result} />
+                </div>
+              )}
+
+              {shouldCompare && compareRows.length > 0 && (
+                <div className="rounded-2xl border border-border bg-muted/20 px-4 py-3">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Comparacao de trace
+                    </div>
+                    <Badge variant="outline" className="rounded-full text-[10px]">
+                      publicado x rascunho
+                    </Badge>
+                  </div>
+                  <div className="grid gap-2">
+                    {compareRows.map((row) => (
+                      <TraceCompareRow key={row.label} label={row.label} published={row.published} draft={row.draft} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {trace && (
+                <div className="grid gap-3">
+                  <TraceSection title="Intent" value={trace.intent.intent}>
+                    <div className="space-y-1">
+                      <div>Confianca: {(trace.intent.confidence * 100).toFixed(0)}%</div>
+                      <div>Workflow: {trace.intent.workflowId}</div>
+                      <div className="line-clamp-2">Motivo: {trace.intent.reason}</div>
+                    </div>
+                  </TraceSection>
+
+                  <TraceSection title="RAG" value={trace.rag.knowledgeCoverage}>
+                    <div className="space-y-1">
+                      <div>Estrategia: {trace.rag.strategy}</div>
+                      <div>
+                        Docs: {trace.rag.selected.length > 0 ? trace.rag.selected.map((doc) => doc.name).join(', ') : 'nenhum'}
+                      </div>
+                    </div>
+                  </TraceSection>
+
+                  <TraceSection title="Workflow" value={trace.workflow.executionMode}>
+                    <div className="space-y-1">
+                      <div>{trace.workflow.reason}</div>
+                      <div>Slots ausentes: {trace.workflow.missingSlots.join(', ') || 'nenhum'}</div>
+                      <div>Acoes: {trace.workflow.actions.join(', ') || 'nenhuma'}</div>
+                    </div>
+                  </TraceSection>
+
+                  <TraceSection title="Tool planner" value={trace.toolPlanner.repairReason || (trace.toolPlanner.rejectedActions.length ? 'rejected' : 'accepted')}>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Wrench className="h-3.5 w-3.5" />
+                        Aceitas: {trace.toolPlanner.acceptedActions.join(', ') || 'nenhuma'}
+                      </div>
+                      {trace.toolPlanner.rejectedActions.length > 0 && (
+                        <div>
+                          Rejeitadas: {trace.toolPlanner.rejectedActions.map((item) => `${item.tool} (${item.code})`).join(', ')}
+                        </div>
+                      )}
+                      {trace.toolPlanner.promisedExternalLookup && (
+                        <div>Promessa de consulta: {trace.toolPlanner.hasExecutableLookupTool ? 'com tool' : 'sem tool executavel'}</div>
+                      )}
+                    </div>
+                  </TraceSection>
+
+                  <TraceSection title="Validator" value={trace.validator.decision}>
+                    <div className="flex items-start gap-2">
+                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>{trace.validator.reasons.join(', ') || 'Resposta aprovada.'}</span>
+                    </div>
+                  </TraceSection>
+                </div>
+              )}
+            </div>
           </div>
-        )}
-      </div>
-    </section>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -3,6 +3,7 @@ import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } from './intent-types';
 import { labelSlotForCustomer, type SlotExtractionResult } from './slots';
+import { hasConversationCloseClaim } from './close-intent';
 import { hasExternalLookupPromise } from './tool-planner';
 
 export type ResponseValidatorDecision =
@@ -88,6 +89,10 @@ function hasTransferPromise(response: string): boolean {
     /\b(equipe|setor|atendente|humano|responsavel)\b/.test(normalized);
 }
 
+function hasPlannedClose(actions: AgentToolAction[]): boolean {
+  return actions.some((action) => action.type === 'close_chat');
+}
+
 function hasInternalLeak(response: string): boolean {
   const trimmed = response.trim();
   if (/^[{[][\s\S]*[}\]]$/.test(trimmed) && /\b(actions|payload|toolName|triggeredRule|response|metadata)\b/i.test(trimmed)) {
@@ -97,7 +102,7 @@ function hasInternalLeak(response: string): boolean {
   return (
     /\b(TypeError|ReferenceError|SyntaxError|stack trace|Unhandled|ECONNRESET|ETIMEDOUT)\b/i.test(response) ||
     /\b(api[_-]?key|authorization|bearer\s+[a-z0-9._-]+|token|command_id|cpfFieldId)\b/i.test(response) ||
-    /\b(sgp_fetch_|mcp_call_tool|crm_update_contact_custom_fields|transfer_chat|add_internal_note)\b/i.test(response)
+    /\b(sgp_fetch_|mcp_call_tool|crm_update_contact_custom_fields|transfer_chat|close_chat|add_internal_note)\b/i.test(response)
   );
 }
 
@@ -308,6 +313,35 @@ export function validateAutopilotResponse(input: {
         metadata: { decision: 'handoff', reasons, teamId: team.id, teamName: team.name, source: input.source },
       };
     }
+  }
+
+  if (hasConversationCloseClaim(originalResponse) && !hasPlannedClose(input.plannedActions)) {
+    if (input.enabledToolNames.includes('close_chat')) {
+      reasons.push('close_promise_without_action');
+      return {
+        decision: 'repair',
+        response: 'Atendimento encerrado conforme solicitado.',
+        actions: [{
+          type: 'close_chat',
+          reason: 'Resposta prometeu encerramento sem acao planejada.',
+          payload: {
+            notes: `Encerramento solicitado pelo cliente. Mensagem: ${input.customerMessage.replace(/\s+/g, ' ').trim().slice(0, 220)}`,
+            sendCloseMessage: false,
+          },
+        }],
+        reasons,
+        metadata: { decision: 'repair', reasons, source: input.source },
+      };
+    }
+
+    reasons.push('close_promise_without_tool');
+    return {
+      decision: 'repair',
+      response: 'Entendido. Nao vou enviar novas mensagens por aqui agora, mas a ferramenta de encerramento nao esta habilitada neste agente.',
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
   }
 
   const repaired = removeTechnicalFragments(originalResponse);

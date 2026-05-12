@@ -377,7 +377,7 @@ function recordStageMetric(
 export function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return task;
 
-  let timeout: NodeJS.Timeout | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
   });

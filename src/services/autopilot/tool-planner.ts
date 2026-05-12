@@ -107,6 +107,19 @@ function validatePayload(action: AgentToolAction): string | null {
     }
   }
 
+  if (action.type === 'close_chat') {
+    const payload = action.payload || {};
+    if (payload.reasonTagId != null && typeof payload.reasonTagId !== 'string') {
+      return 'reasonTagId do encerramento deve ser texto ou nulo.';
+    }
+    if (payload.notes != null && typeof payload.notes !== 'string') {
+      return 'notes do encerramento deve ser texto ou nulo.';
+    }
+    if (payload.sendCloseMessage != null && typeof payload.sendCloseMessage !== 'boolean') {
+      return 'sendCloseMessage do encerramento deve ser booleano ou nulo.';
+    }
+  }
+
   if (action.type === 'sgp_generate_invoice_pix') {
     if (!action.payload?.invoiceId || !action.payload?.contractId) {
       return 'Geracao de PIX exige invoiceId e contractId.';

@@ -41,10 +41,16 @@ import {
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import type { KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
-import type { WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
+import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
 import { selectAutopilotConfigForRuntime } from '@/services/autopilot/config-selection';
+import { isConversationCloseRequest } from '@/services/autopilot/close-intent';
+import { getActiveProcedureExecution, createProcedureExecution, saveProcedureExecution } from '@/services/autopilot/procedure-store';
+import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
+import { matchProcedure } from '@/services/autopilot/procedure-matcher';
+import { advanceProcedure } from '@/services/autopilot/procedure-executor';
+import type { ProcedureGraph, ProcedureAdvanceResult } from '@/services/autopilot/procedure-types';
 
 /**
  * Sends an AI response as one or more separate WhatsApp message bubbles.
@@ -62,12 +68,16 @@ async function sendMultiBlockResponse(
     aiMessageBlocks?: string[] | null,
 ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
     // Prefer AI-decided blocks; fall back to heuristic splitting
-    const blocks = (aiMessageBlocks && aiMessageBlocks.length > 1)
+    const sourceBlocks = (aiMessageBlocks && aiMessageBlocks.length > 1)
         ? aiMessageBlocks
         : splitIntoMessageBlocks(formattedResponse);
+    const blocks = sourceBlocks
+        .map((block) => formatCustomerFacingAiResponse(block))
+        .filter((block) => block.trim() !== '');
 
     if (blocks.length <= 1) {
-        return sendAutomatedMessageAction(chatId, formattedResponse, agentId, isSystemAgent, instanceName);
+        const singleMessage = blocks[0] || formatCustomerFacingAiResponse(formattedResponse);
+        return sendAutomatedMessageAction(chatId, singleMessage, agentId, isSystemAgent, instanceName);
     }
 
     let lastResult: { success: boolean; error?: string; apiResponse?: any } = { success: true };
@@ -237,6 +247,7 @@ function normalizeAgentActions(actions: unknown): AgentToolAction[] {
 
     const allowedTypes = new Set([
         'transfer_chat',
+        'close_chat',
         'add_internal_note',
         'crm_update_contact_custom_fields',
         'sgp_fetch_contracts',
@@ -260,6 +271,7 @@ function normalizeAgentActions(actions: unknown): AgentToolAction[] {
 function mergeAgentActions(...actionSets: Array<AgentToolAction[] | null | undefined>): AgentToolAction[] {
     const merged: AgentToolAction[] = [];
     let hasTransfer = false;
+    let hasClose = false;
     let hasInternalNote = false;
 
     for (const actions of actionSets) {
@@ -267,6 +279,11 @@ function mergeAgentActions(...actionSets: Array<AgentToolAction[] | null | undef
             if (action.type === 'transfer_chat') {
                 if (hasTransfer) continue;
                 hasTransfer = true;
+            }
+
+            if (action.type === 'close_chat') {
+                if (hasClose) continue;
+                hasClose = true;
             }
 
             if (action.type === 'add_internal_note') {
@@ -442,50 +459,53 @@ function filterAlreadyExecutedActions(actions: AgentToolAction[], results: Agent
     return actions.filter((action) => !executed.has(actionKey(action)));
 }
 
-async function listRuntimeAgentToolCatalog(workspaceId: string): Promise<AgentToolCatalogItem[]> {
+async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames: string[]): Promise<AgentToolCatalogItem[]> {
+    const enabledToolSet = new Set(enabledToolNames);
     const mcpTools = await listMcpToolsForWorkspace(workspaceId).catch((error) => {
         console.error('[AUTOPILOT_MCP] Failed to list MCP tools:', error);
         return [];
     });
 
-    const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools.map((tool) => ({
-        name: tool.qualifiedName as any,
-        version: 'mcp',
-        description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
-        class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
-        riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
-        sideEffect: tool.annotations?.destructiveHint ? 'high' : tool.annotations?.readOnlyHint ? 'none' : 'medium',
-        idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
-        timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
-        maxAttempts: 1,
-        requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
-        customerVisible: true,
-        allowedIntents: [
-            'purchase_inquiry',
-            'catalog_request',
-            'pricing_request',
-            'promotion_request',
-            'availability_request',
-            'billing_or_payment',
-            'scheduling_request',
-            'order_or_request_status',
-            'support_request',
-            'troubleshooting',
-            'change_request',
-            'return_or_refund',
-            'cancellation_request',
-            'document_request',
-            'complaint',
-        ],
-        requiredSlots: [],
-        fallbackAction: 'handoff',
-        source: 'mcp',
-        enabledByDefault: false,
-        serverId: tool.serverId,
-        serverName: tool.serverName,
-        inputSchema: tool.inputSchema || null,
-        outputSchema: tool.outputSchema || null,
-    }));
+    const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools
+        .filter((tool) => enabledToolSet.has(tool.qualifiedName))
+        .map((tool) => ({
+            name: tool.qualifiedName as any,
+            version: 'mcp',
+            description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
+            class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
+            riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
+            sideEffect: tool.annotations?.destructiveHint ? 'high' : tool.annotations?.readOnlyHint ? 'none' : 'medium',
+            idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
+            timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
+            maxAttempts: 1,
+            requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
+            customerVisible: true,
+            allowedIntents: [
+                'purchase_inquiry',
+                'catalog_request',
+                'pricing_request',
+                'promotion_request',
+                'availability_request',
+                'billing_or_payment',
+                'scheduling_request',
+                'order_or_request_status',
+                'support_request',
+                'troubleshooting',
+                'change_request',
+                'return_or_refund',
+                'cancellation_request',
+                'document_request',
+                'complaint',
+            ],
+            requiredSlots: [],
+            fallbackAction: 'handoff',
+            source: 'mcp',
+            enabledByDefault: false,
+            serverId: tool.serverId,
+            serverName: tool.serverName,
+            inputSchema: tool.inputSchema || null,
+            outputSchema: tool.outputSchema || null,
+        }));
 
     return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
 }
@@ -494,6 +514,17 @@ function resolveEnabledToolNames(config: AutopilotConfig) {
     return Array.isArray(config.enabled_tool_names)
         ? config.enabled_tool_names
         : listDefaultEnabledAgentToolNames();
+}
+
+function shouldRunCloseIntentGate(input: {
+    customerMessage: string;
+    enabledToolNames: string[];
+}) {
+    const message = input.customerMessage.trim();
+    if (!input.enabledToolNames.includes('close_chat')) return false;
+    if (!message || message.length > 180) return false;
+    if (isConversationCloseRequest(message)) return false;
+    return true;
 }
 
 async function loadWorkflowSlotMappings(workspaceId: string): Promise<WorkflowSlotMappings> {
@@ -672,6 +703,7 @@ function describeAgentToolAction(action: AgentToolAction): string {
         return `Executar ferramenta MCP ${toolName}`;
     }
     if (action.type === 'transfer_chat') return 'Transferir atendimento';
+    if (action.type === 'close_chat') return 'Encerrar atendimento';
     if (action.type === 'add_internal_note') return 'Registrar nota interna';
     if (action.type === 'crm_update_contact_custom_fields') return 'Atualizar dados do CRM';
     if (action.type === 'sgp_generate_invoice_pix') return 'Gerar PIX de fatura no SGP';
@@ -737,6 +769,24 @@ async function insertAgentToolStatusMessage(input: {
                 input.systemAgentId,
             ]
         );
+
+        // Broadcast tool status in real-time so the operator panel updates instantly
+        try {
+            const { getSupabaseAdmin } = await import('@/lib/supabase');
+            const supabase = getSupabaseAdmin();
+            await supabase.channel(`chat:${input.chatId}`).send({
+                type: 'broadcast',
+                event: 'agent_tool_status',
+                payload: {
+                    chatId: input.chatId,
+                    toolName: input.toolName,
+                    status: input.status,
+                    content: input.content,
+                },
+            });
+        } catch (broadcastError) {
+            console.warn('[AUTOPILOT_TOOL_STATUS] Broadcast failed (non-blocking):', broadcastError);
+        }
     } catch (error) {
         console.error('[AUTOPILOT_TOOL_STATUS] Failed to insert tool status message:', error);
     }
@@ -891,6 +941,8 @@ async function runRequestedAgentToolsWithStatus(input: {
     const normalizedActions = normalizeAgentActions(input.actions);
     if (normalizedActions.length === 0) return [];
 
+    console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${input.chat.id} planned_tools=${normalizedActions.length} tools=[${normalizedActions.map((a) => a.type === 'mcp_call_tool' ? String(a.payload?.toolName || a.type) : a.type).join(',')}]`);
+
     for (const action of normalizedActions) {
         await insertAgentToolStatusMessage({
             workspaceId: input.workspaceId,
@@ -906,6 +958,11 @@ async function runRequestedAgentToolsWithStatus(input: {
         ...input,
         actions: normalizedActions,
     });
+
+    const succeeded = results.filter((r) => r.status === 'success').length;
+    const failed = results.filter((r) => r.status === 'error').length;
+    const rejected = results.filter((r) => r.status === 'rejected').length;
+    console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${input.chat.id} executed=${results.length} success=${succeeded} error=${failed} rejected=${rejected}`);
 
     for (const result of results) {
         await insertAgentToolStatusMessage({
@@ -1547,8 +1604,8 @@ export async function processAutopilotForChat(
         });
     }
 
-    const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId);
     const enabledToolNames = resolveEnabledToolNames(autopilotConfig);
+    const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId, enabledToolNames);
     const knowledgeToolProcedures = formatKnowledgeToolProcedures(
         extractKnowledgeToolProcedures({
             documents: ragDocuments,
@@ -1559,6 +1616,54 @@ export async function processAutopilotForChat(
     const promptKnowledgeDocuments = compactKnowledgeDocumentsForPrompt(ragDocuments);
     const deterministicOfficialResponse = intentResolution.officialResponse || null;
     const workflowSlotMappings = await loadWorkflowSlotMappings(workspaceId);
+    let closeIntentGate: CloseIntentGateDecision = null;
+    if (shouldRunCloseIntentGate({
+        customerMessage: enrichedLastMessageContent || '',
+        enabledToolNames,
+    })) {
+        try {
+            const closeGateStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'close_intent_gate',
+                () => withTimeout(
+                    classifyToolIntent({
+                        customerMessage: enrichedLastMessageContent || '',
+                        chatHistory: chatHistoryForAI,
+                        toolName: 'close_chat',
+                        candidateReason: 'Mensagem curta ou ambigua pode indicar pedido de encerramento do atendimento.',
+                        closingPolicy: autopilotConfig.closing_policy || '',
+                        model: resolvedAiModel.model,
+                        apiKey: workspaceGeminiApiKey,
+                        timeoutMs: Number(process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS || 2500),
+                    }),
+                    Number(process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS || 2500) + 500,
+                    'close intent gate'
+                ),
+                { candidateTool: 'close_chat' }
+            );
+            orchestratorTimings.tool_intent_gate_ms = (orchestratorTimings.tool_intent_gate_ms || 0) + closeGateStage.durationMs;
+            closeIntentGate = closeGateStage.value;
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'close_intent_gate',
+                status: closeGateStage.value.execute && closeGateStage.value.confidence !== 'low' ? 'success' : 'skipped',
+                durationMs: closeGateStage.durationMs,
+                payload: {
+                    decision: closeGateStage.value,
+                },
+            });
+        } catch (error) {
+            console.warn('[AUTOPILOT_CLOSE_INTENT_GATE] Gate failed, continuing with deterministic workflow:', error);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'close_intent_gate',
+                status: 'fallback',
+                payload: {
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+        }
+    }
     const workflowPlan = resolveAutopilotWorkflowPlan({
         intentResolution,
         customerMessage: enrichedLastMessageContent || '',
@@ -1568,6 +1673,7 @@ export async function processAutopilotForChat(
         availableTeams,
         knowledgeCoverage,
         slotMappings: workflowSlotMappings,
+        closeIntentGate,
     });
     await recordOrchestratorEvent({
         run: orchestratorRun,
@@ -2014,9 +2120,218 @@ export async function processAutopilotForChat(
         return;
     }
 
-    if (deterministicOfficialResponse) {
-        const finalResponse = formatCustomerFacingAiResponse(deterministicOfficialResponse);
+    // ═══════════════════════════════════════════════════════════════════════
+    // PROCEDURE RUNTIME ENGINE (PRE) GATE
+    //
+    // Before falling through to the LLM, check:
+    //   1. Is there an active ProcedureExecutionContext for this chat? → resume it
+    //   2. Does a compiled ProcedureGraph match the intent? → start a new one
+    //
+    // If the PRE handles the message, we return immediately (no LLM call).
+    // ═══════════════════════════════════════════════════════════════════════
+    try {
+        // 1. Check for active procedure
+        const activePEC = await getActiveProcedureExecution(chat.id);
+        let procedureResult: ProcedureAdvanceResult | null = null;
 
+        if (activePEC) {
+            // Resume the active procedure
+            const compiledProcedures = compileAllProcedures({
+                documents: staticKnowledgeDocuments,
+                tools: runtimeToolCatalog,
+                enabledToolNames: resolveEnabledToolNames(autopilotConfig),
+            });
+            const graph = compiledProcedures.find((g) => g.id === activePEC.procedureId);
+            if (graph) {
+                console.log(
+                    `[PROCEDURE_RUNTIME] Resuming procedure "${activePEC.procedureName}" ` +
+                    `step=${activePEC.currentStepId} for chat=${chat.id}`,
+                );
+                procedureResult = await advanceProcedure({
+                    graph,
+                    context: activePEC,
+                    customerMessage: enrichedLastMessageContent || '',
+                    availableTeams: availableTeams.map((t) => ({ id: t.teamId, name: t.teamName })),
+                });
+            }
+        }
+
+        if (!procedureResult) {
+            // 2. Try to match a new procedure
+            const compiledProcedures = compileAllProcedures({
+                documents: staticKnowledgeDocuments,
+                tools: runtimeToolCatalog,
+                enabledToolNames: resolveEnabledToolNames(autopilotConfig),
+            });
+
+            if (compiledProcedures.length > 0) {
+                const match = matchProcedure({
+                    intent: intentResolution.intent,
+                    customerMessage: enrichedLastMessageContent || '',
+                    compiledProcedures,
+                });
+
+                if (match) {
+                    console.log(
+                        `[PROCEDURE_RUNTIME] Starting procedure "${match.graph.documentName}" ` +
+                        `(score=${match.score}, reason=${match.matchReason}) for chat=${chat.id}`,
+                    );
+                    const firstStep = match.graph.steps[0];
+                    if (firstStep) {
+                        const newPEC = await createProcedureExecution({
+                            chatId: chat.id,
+                            workspaceId: workspaceId,
+                            systemAgentId: assignedSystemAgentId,
+                            procedureId: match.graph.id,
+                            procedureName: match.graph.documentName,
+                            currentStepId: firstStep.id,
+                            status: 'running',
+                        });
+
+                        if (newPEC) {
+                            procedureResult = await advanceProcedure({
+                                graph: match.graph,
+                                context: newPEC,
+                                customerMessage: enrichedLastMessageContent || '',
+                                availableTeams: availableTeams.map((t) => ({ id: t.teamId, name: t.teamName })),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Process PRE result
+        if (procedureResult && procedureResult.handled) {
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'procedure_runtime',
+                status: procedureResult.status === 'completed' ? 'success'
+                    : procedureResult.status === 'failed' ? 'fallback'
+                    : 'success',
+                payload: {
+                    status: procedureResult.status,
+                    executedSteps: procedureResult.executedSteps,
+                    actionsCount: procedureResult.actions.length,
+                    completionReason: procedureResult.completionReason,
+                    hasResponse: Boolean(procedureResult.response),
+                },
+            });
+
+            // Execute any tool actions returned by the PRE
+            if (procedureResult.actions.length > 0) {
+                const preToolActions: AgentToolAction[] = procedureResult.actions.map((a) => ({
+                    type: a.type as any,
+                    reason: a.reason,
+                    payload: a.payload,
+                }));
+
+                const preToolResults = await runRequestedAgentToolsWithStatus(
+                    preToolActions,
+                    {
+                        workspaceId,
+                        chat,
+                        contact: sanitizedContact,
+                        autopilotConfig,
+                        message: null as any,
+                        systemAgentId: assignedSystemAgentId,
+                        orchestratorRunId: orchestratorRun?.id,
+                    },
+                    assignedSystemAgentId,
+                );
+
+                if (preToolResults.length > 0) {
+                    console.log(
+                        `[PROCEDURE_RUNTIME] Executed ${preToolResults.length} tool(s): ` +
+                        preToolResults.map((r) => `${r.toolName}=${r.status}`).join(', '),
+                    );
+                }
+            }
+
+            // Send the response to the customer
+            if (procedureResult.response) {
+                const finalResponse = formatCustomerFacingAiResponse(procedureResult.response);
+
+                if (currentCopilotMode === 'suggest') {
+                    const { getSupabaseAdmin } = await import('@/lib/supabase');
+                    const supabase = getSupabaseAdmin();
+                    await supabase.channel(`chat:${chat.id}`).send({
+                        type: 'broadcast',
+                        event: 'ai_suggestion',
+                        payload: {
+                            suggestion: finalResponse,
+                            chatId: chat.id,
+                            configName: autopilotConfig.name,
+                        },
+                    });
+                } else {
+                    await sendMultiBlockResponse(chat.id, finalResponse, assignedSystemAgentId);
+                }
+
+                await logIntelligentAttendantResponse({
+                    configId: autopilotConfig.id,
+                    chatId: chat.id,
+                    systemAgentId: assignedSystemAgentId,
+                    modelName: 'procedure_runtime_engine',
+                    customerMessage: enrichedLastMessageContent || '',
+                    response: finalResponse,
+                    status: currentCopilotMode === 'suggest' ? 'suggested' : 'sent',
+                    triggeredRule: null,
+                    metadata: {
+                        procedureRuntime: true,
+                        procedureStatus: procedureResult.status,
+                        executedSteps: procedureResult.executedSteps,
+                        actionsExecuted: procedureResult.actions.map((a) => a.type),
+                        completionReason: procedureResult.completionReason,
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        workflowId: intentResolution.workflowId,
+                        ragStrategy,
+                        knowledgeCoverage,
+                    },
+                });
+            }
+
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: procedureResult.status === 'failed' ? 'fallback' : 'success',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceLevel: 'deterministic',
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    procedureRuntime: true,
+                    procedureStatus: procedureResult.status,
+                    executedSteps: procedureResult.executedSteps,
+                    actionsExecuted: procedureResult.actions.map((a) => a.type),
+                    responseSent: Boolean(procedureResult.response),
+                    intent: intentResolution.intent,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            return;
+        }
+    } catch (procedureError) {
+        console.warn('[PROCEDURE_RUNTIME] PRE gate failed, falling through to LLM:', procedureError);
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'procedure_runtime',
+            status: 'fallback',
+            payload: {
+                error: procedureError instanceof Error ? procedureError.message : String(procedureError),
+            },
+        });
+        // Fall through to LLM
+    }
+    // ═══════════════════════════════════════════════════════════════════════
+    // END PRE GATE — if we reach here, no procedure handled the message
+    // ═══════════════════════════════════════════════════════════════════════
+
+    if (deterministicOfficialResponse) {
+        const finalResponse = intentResolution.officialResponsePreserveFormatting
+            ? deterministicOfficialResponse.replace(/\r\n?/g, '\n').trim()
+            : formatCustomerFacingAiResponse(deterministicOfficialResponse);
         if (currentCopilotMode === 'suggest') {
             console.log(`[AUTOPILOT_SERVICE] Modo sugestao - resposta oficial deterministica: ${finalResponse.substring(0, 50)}...`);
             const { getSupabaseAdmin } = await import('@/lib/supabase');
@@ -2369,6 +2684,24 @@ export async function processAutopilotForChat(
                     finalResponse = toolPlanner.responseOverride;
                     aiMessageBlocks = null;
                 }
+
+                // Log tool planner decisions for observability
+                console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${chat.id} tool_planner approved=${toolPlanner.actions.length} rejected=${toolPlanner.rejectedActions.length} override=${!!toolPlanner.responseOverride}`);
+                if (toolPlanner.rejectedActions.length > 0) {
+                    const rejectionSummary = toolPlanner.rejectedActions
+                        .map((r: any) => `${r.type || r.toolName || 'unknown'}: ${r.reason || 'motivo nao especificado'}`)
+                        .join('; ');
+                    console.warn(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${chat.id} rejected_tools: ${rejectionSummary}`);
+                    await insertAgentToolStatusMessage({
+                        workspaceId,
+                        chatId: chat.id,
+                        systemAgentId: assignedSystemAgentId,
+                        content: `Ferramentas rejeitadas pelo validador: ${rejectionSummary}`,
+                        toolName: 'tool_planner',
+                        status: 'rejected',
+                    });
+                }
+
                 const requestedActions = filterImplicitTransferActions({
                     actions: toolPlanner.actions,
                     customerMessage: enrichedLastMessageContent || '',
@@ -2524,9 +2857,45 @@ export async function processAutopilotForChat(
                         }
                     }
 
+                    const sgpResponse = buildSgpResponseFromToolResults(
+                        toolResults,
+                        `${enrichedLastMessageContent || ''}\n${finalResponse || ''}`
+                    );
+                    if (sgpResponse) {
+                        console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${chat.id} sgp_response_mapped=true`);
+                        finalResponse = formatCustomerFacingAiResponse(sgpResponse);
+                        aiMessageBlocks = null; // Tool response overrode AI blocks
+                    } else {
+                        console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${chat.id} sgp_response_mapped=false`);
+                    }
+                    const mcpResponse = buildMcpCustomerResponseFromToolResults(toolResults) ||
+                        buildMcpResponseFromToolResults(toolResults);
+                    if (mcpResponse) {
+                        finalResponse = formatCustomerFacingAiResponse(mcpResponse);
+                        aiMessageBlocks = null;
+                    }
+                    const toolFailureResponse = buildToolFailureResponse(toolResults, finalResponse);
+                    if (toolFailureResponse) {
+                        finalResponse = formatCustomerFacingAiResponse(toolFailureResponse);
+                        aiMessageBlocks = null;
+                    }
+
+                    // Generate a post-tool LLM response when:
+                    // - MCP tools were executed (original behavior), OR
+                    // - SGP tools executed successfully but buildSgpResponseFromToolResults returned null
+                    //   (data exists but didn't match expected patterns — LLM can still present it)
+                    const hasMcpToolResults = toolResults.some((toolResult) => toolResult.toolName.startsWith('mcp:'));
+                    const hasSuccessfulSgpWithoutMappedResponse =
+                        !sgpResponse &&
+                        !toolFailureResponse &&
+                        toolResults.some((toolResult) =>
+                            toolResult.toolName.startsWith('sgp_') && toolResult.status === 'success'
+                        );
+                    const shouldGeneratePostToolResponse = hasMcpToolResults || hasSuccessfulSgpWithoutMappedResponse;
+
                     let postToolAiResponse: string | null = null;
-                    const shouldGeneratePostToolResponse = toolResults.some((toolResult) => toolResult.toolName.startsWith('mcp:'));
                     if (shouldGeneratePostToolResponse) {
+                        console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${chat.id} generating_post_tool_response=true reason=${hasMcpToolResults ? 'mcp_tool' : 'sgp_unmapped'}`);
                         try {
                             const finalToolContext = [
                                 buildToolContinuationContext(toolResults),
@@ -2560,7 +2929,7 @@ export async function processAutopilotForChat(
                                 }), orchestratorRun.budget.maxLlmMs, 'llm tool final response'),
                                 {
                                     model: resolvedAiModel.model,
-                                    reason: 'post_tool_customer_response',
+                                    reason: hasSuccessfulSgpWithoutMappedResponse ? 'sgp_unmapped_response' : 'post_tool_customer_response',
                                     toolResults: toolResults.map((toolResult) => ({
                                         toolName: toolResult.toolName,
                                         status: toolResult.status,
@@ -2584,25 +2953,6 @@ export async function processAutopilotForChat(
                         }
                     }
 
-                    const sgpResponse = buildSgpResponseFromToolResults(
-                        toolResults,
-                        `${enrichedLastMessageContent || ''}\n${finalResponse || ''}`
-                    );
-                    if (sgpResponse) {
-                        finalResponse = formatCustomerFacingAiResponse(sgpResponse);
-                        aiMessageBlocks = null; // Tool response overrode AI blocks
-                    }
-                    const mcpResponse = buildMcpCustomerResponseFromToolResults(toolResults) ||
-                        buildMcpResponseFromToolResults(toolResults);
-                    if (mcpResponse) {
-                        finalResponse = formatCustomerFacingAiResponse(mcpResponse);
-                        aiMessageBlocks = null;
-                    }
-                    const toolFailureResponse = buildToolFailureResponse(toolResults, finalResponse);
-                    if (toolFailureResponse) {
-                        finalResponse = formatCustomerFacingAiResponse(toolFailureResponse);
-                        aiMessageBlocks = null;
-                    }
                     if (postToolAiResponse) {
                         finalResponse = formatCustomerFacingAiResponse(postToolAiResponse);
                         aiMessageBlocks = null;

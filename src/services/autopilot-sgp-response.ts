@@ -250,23 +250,52 @@ export function buildMcpCustomerResponseFromToolResults(results: AgentToolExecut
 }
 
 export function buildToolFailureResponse(results: AgentToolExecutionResult[], response: string): string | null {
-  const failedTool = results.find((result) => (
+  // Check for failed critical tools first (SGP and MCP)
+  const failedCriticalTool = results.find((result) =>
     result.status !== 'success' &&
     (
       result.toolName === 'sgp_fetch_contact_panel_data' ||
       result.toolName === 'sgp_fetch_contracts' ||
       result.toolName.startsWith('mcp:')
     )
-  ));
-  if (!failedTool) return null;
+  );
 
-  if (failedTool.toolName.startsWith('mcp:')) {
-    return 'Nao consegui concluir a acao tecnica automaticamente agora. Vou encaminhar seu atendimento para nossa equipe verificar manualmente e evitar te passar uma informacao errada.';
+  if (failedCriticalTool) {
+    if (failedCriticalTool.toolName.startsWith('mcp:')) {
+      return 'Nao consegui concluir a acao tecnica automaticamente agora. Vou encaminhar seu atendimento para nossa equipe verificar manualmente e evitar te passar uma informacao errada.';
+    }
+
+    if (hasPromisedOperationalLookup(response)) {
+      return 'Nao consegui concluir a consulta no sistema agora. Vou encaminhar seu atendimento para nossa equipe verificar manualmente e evitar te passar uma informacao errada.';
+    }
   }
 
-  if (hasPromisedOperationalLookup(response)) {
-    return 'Nao consegui concluir a consulta no sistema agora. Vou encaminhar seu atendimento para nossa equipe verificar manualmente e evitar te passar uma informacao errada.';
+  // Check for failed operational tools (transfer, close, etc.) that should not be silently ignored
+  const failedOperationalTool = results.find((result) =>
+    result.status === 'error' &&
+    (
+      result.toolName === 'transfer_chat' ||
+      result.toolName === 'close_chat' ||
+      result.toolName === 'sgp_generate_invoice_pix' ||
+      result.toolName === 'sgp_create_payment_promise'
+    )
+  );
+
+  if (failedOperationalTool) {
+    if (failedOperationalTool.toolName === 'transfer_chat') {
+      return 'Nao consegui encaminhar seu atendimento automaticamente agora. Nossa equipe sera notificada para dar seguimento.';
+    }
+    if (failedOperationalTool.toolName === 'close_chat') {
+      return 'Nao consegui encerrar o atendimento automaticamente. Nossa equipe sera notificada.';
+    }
+    if (failedOperationalTool.toolName === 'sgp_generate_invoice_pix') {
+      return 'Nao consegui gerar o PIX da fatura automaticamente agora. Por favor, entre em contato com nosso atendimento para resolver manualmente.';
+    }
+    if (failedOperationalTool.toolName === 'sgp_create_payment_promise') {
+      return 'Nao consegui registrar a promessa de pagamento automaticamente. Nossa equipe sera notificada para dar seguimento.';
+    }
   }
 
   return null;
 }
+

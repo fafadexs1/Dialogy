@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import Link from 'next/link';
 import { Edit, Loader2, MessageCircle, Plus, Save, Server, Trash2, Webhook, Wrench, Zap } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import type { NexusFlowInstance } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -34,6 +36,16 @@ interface AutopilotRulesProps {
   onToggle: (id: string, enabled: boolean) => void;
 }
 
+type ToolGroup = {
+  id: string;
+  title: string;
+  eyebrow: string;
+  description: string;
+  tools: AgentToolCatalogItem[];
+  source: 'dialogy' | 'mcp';
+  href?: string;
+};
+
 function getRuleActionSummary(rule: NexusFlowInstance) {
   if (rule.action.type === 'reply') {
     return rule.action.value || 'Resposta textual configurada.';
@@ -58,6 +70,111 @@ function groupMcpToolsByServer(tools: AgentToolCatalogItem[]) {
   }, []);
 }
 
+function buildInternalToolGroups(tools: AgentToolCatalogItem[]): ToolGroup[] {
+  const groupDefinitions = [
+    {
+      id: 'internal-attendance',
+      title: 'Atendimento',
+      eyebrow: 'Ferramentas internas',
+      description: 'Transferir, encerrar conversa e registrar notas internas no atendimento atual.',
+      names: ['transfer_chat', 'close_chat', 'add_internal_note'],
+    },
+    {
+      id: 'internal-crm',
+      title: 'CRM',
+      eyebrow: 'Ferramentas internas',
+      description: 'Atualizar dados operacionais do contato vinculado ao chat.',
+      names: ['crm_update_contact_custom_fields'],
+    },
+    {
+      id: 'internal-sgp',
+      title: 'SGP',
+      eyebrow: 'Ferramentas internas',
+      description: 'Consultar contratos, faturas, PIX e rotinas integradas ao SGP.',
+      names: ['sgp_fetch_contracts', 'sgp_fetch_contact_panel_data', 'sgp_generate_invoice_pix', 'sgp_create_payment_promise', 'sgp_open_support_ticket'],
+    },
+  ];
+
+  const toolByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const groupedNames = new Set(groupDefinitions.flatMap((group) => group.names));
+  const groups = groupDefinitions
+    .map((group) => ({
+      id: group.id,
+      title: group.title,
+      eyebrow: group.eyebrow,
+      description: group.description,
+      source: 'dialogy' as const,
+      tools: group.names.map((name) => toolByName.get(name)).filter((tool): tool is AgentToolCatalogItem => Boolean(tool)),
+    }))
+    .filter((group) => group.tools.length > 0);
+
+  const otherTools = tools.filter((tool) => !groupedNames.has(tool.name));
+  if (otherTools.length > 0) {
+    groups.push({
+      id: 'internal-other',
+      title: 'Outras ferramentas',
+      eyebrow: 'Ferramentas internas',
+      description: 'Permissoes internas adicionais disponiveis para este agente.',
+      source: 'dialogy',
+      tools: otherTools,
+    });
+  }
+
+  return groups;
+}
+
+function ToolGroupCard({
+  group,
+  enabledToolSet,
+  onOpen,
+}: {
+  group: ToolGroup;
+  enabledToolSet: Set<string>;
+  onOpen: (group: ToolGroup) => void;
+}) {
+  const enabledCount = group.tools.filter((tool) => enabledToolSet.has(tool.name)).length;
+  const highRiskCount = group.tools.filter((tool) => tool.riskLevel === 'high').length;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(group)}
+      className="group flex min-h-[176px] w-full flex-col rounded-[24px] border border-border bg-background/80 p-5 text-left shadow-sm transition-all hover:border-primary/40 hover:bg-primary/5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-muted text-primary">
+            {group.source === 'mcp' ? <Server className="h-5 w-5" /> : <Wrench className="h-5 w-5" />}
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-primary">{group.eyebrow}</div>
+            <h3 className="mt-1 truncate text-base font-semibold text-foreground">{group.title}</h3>
+          </div>
+        </div>
+        <Badge variant="outline" className="shrink-0 rounded-full">
+          {enabledCount}/{group.tools.length}
+        </Badge>
+      </div>
+
+      <p className="mt-4 line-clamp-3 text-sm leading-6 text-muted-foreground">{group.description}</p>
+
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-5">
+        <Badge variant="secondary" className="rounded-full">
+          {group.tools.length} tool(s)
+        </Badge>
+        {highRiskCount > 0 && (
+          <Badge variant="destructive" className="rounded-full">
+            {highRiskCount} alto risco
+          </Badge>
+        )}
+        <span className="ml-auto text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+          Configurar
+        </span>
+      </div>
+    </button>
+  );
+}
+
 export function AutopilotRules({
   rules,
   toolCatalog,
@@ -70,12 +187,79 @@ export function AutopilotRules({
   onDelete,
   onToggle,
 }: AutopilotRulesProps) {
+  const [selectedToolGroup, setSelectedToolGroup] = useState<ToolGroup | null>(null);
   const enabledToolSet = new Set(enabledToolNames);
+  const internalTools = toolCatalog.filter((tool) => tool.source === 'dialogy');
   const mcpTools = toolCatalog.filter((tool) => tool.source === 'mcp');
   const mcpToolGroups = groupMcpToolsByServer(mcpTools);
+  const internalToolGroups = buildInternalToolGroups(internalTools);
+  const mcpCards: ToolGroup[] = mcpToolGroups.map((group) => ({
+    id: `mcp-${group.serverId}`,
+    title: group.serverName,
+    eyebrow: 'Servidor MCP',
+    description: `${group.tools.length} ferramenta(s) sincronizada(s) neste servidor MCP.`,
+    tools: group.tools,
+    source: 'mcp',
+    href: '/integrations/mcp',
+  }));
+  const selectedEnabledCount = selectedToolGroup
+    ? selectedToolGroup.tools.filter((tool) => enabledToolSet.has(tool.name)).length
+    : 0;
+  const toggleTool = (toolName: string, nextChecked: boolean) => {
+    setEnabledToolNames(
+      nextChecked
+        ? Array.from(new Set([...enabledToolNames, toolName]))
+        : enabledToolNames.filter((name) => name !== toolName)
+    );
+  };
 
   return (
     <div className="space-y-6">
+      <Card className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+        <CardContent className="grid gap-5 p-5 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                <Wrench className="h-3.5 w-3.5" />
+                Ferramentas internas
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-foreground">Permissoes operacionais do agente</h2>
+                <p className="text-sm text-muted-foreground">
+                  Entre em um card para escolher quais acoes internas este agente pode executar.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Badge variant="outline" className="rounded-full">
+                {internalTools.filter((tool) => enabledToolSet.has(tool.name)).length} internas ativas
+              </Badge>
+              <Button onClick={onSaveTools} disabled={isSavingTools} className="rounded-full">
+                {isSavingTools ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Salvar tools
+              </Button>
+            </div>
+          </div>
+
+          {internalToolGroups.length > 0 ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {internalToolGroups.map((group) => (
+                <ToolGroupCard key={group.id} group={group} enabledToolSet={enabledToolSet} onOpen={setSelectedToolGroup} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-[24px] border border-dashed border-border bg-muted/20 p-6 text-center">
+              <Wrench className="mx-auto h-10 w-10 text-muted-foreground/50" />
+              <h3 className="mt-3 text-base font-semibold text-foreground">Nenhuma ferramenta interna disponivel</h3>
+              <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                O catalogo interno nao retornou ferramentas para este agente.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
         <CardContent className="grid gap-5 p-5 sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -87,7 +271,7 @@ export function AutopilotRules({
               <div>
                 <h2 className="text-xl font-semibold text-foreground">Servidores e tools do agente</h2>
                 <p className="text-sm text-muted-foreground">
-                  Habilite aqui quais tools MCP este agente pode chamar durante o atendimento.
+                  Entre em um servidor para escolher quais tools MCP este agente pode chamar.
                 </p>
               </div>
             </div>
@@ -103,54 +287,10 @@ export function AutopilotRules({
             </div>
           </div>
 
-          {mcpToolGroups.length > 0 ? (
-            <div className="grid gap-4">
-              {mcpToolGroups.map((group) => (
-                <div key={group.serverId} className="rounded-[24px] border border-border bg-muted/20 p-4">
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-background text-primary shadow-sm">
-                        <Server className="h-5 w-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-foreground">{group.serverName}</div>
-                        <div className="text-xs text-muted-foreground">{group.tools.length} tool(s) sincronizada(s)</div>
-                      </div>
-                    </div>
-                    <Button asChild variant="outline" size="sm" className="rounded-full">
-                      <Link href="/integrations/mcp">Gerenciar servidor</Link>
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {group.tools.map((tool) => {
-                      const checked = enabledToolSet.has(tool.name);
-                      return (
-                        <div key={tool.name} className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-background/80 px-4 py-4">
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate font-mono text-xs font-semibold text-foreground">{tool.name}</span>
-                              <Badge variant={tool.riskLevel === 'high' ? 'destructive' : 'outline'} className="rounded-full text-[10px]">
-                                {tool.riskLevel}
-                              </Badge>
-                            </div>
-                            <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">{tool.description}</p>
-                          </div>
-                          <Switch
-                            checked={checked}
-                            onCheckedChange={(nextChecked) => {
-                              setEnabledToolNames(
-                                nextChecked
-                                  ? Array.from(new Set([...enabledToolNames, tool.name]))
-                                  : enabledToolNames.filter((name) => name !== tool.name)
-                              );
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+          {mcpCards.length > 0 ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {mcpCards.map((group) => (
+                <ToolGroupCard key={group.id} group={group} enabledToolSet={enabledToolSet} onOpen={setSelectedToolGroup} />
               ))}
             </div>
           ) : (
@@ -167,6 +307,71 @@ export function AutopilotRules({
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(selectedToolGroup)} onOpenChange={(open) => !open && setSelectedToolGroup(null)}>
+        <DialogContent className="flex max-h-[86vh] max-w-3xl flex-col overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl">
+          {selectedToolGroup && (
+            <>
+              <DialogHeader className="border-b border-border bg-muted/25 px-6 py-5">
+                <div className="flex flex-col gap-4 pr-8 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                      {selectedToolGroup.source === 'mcp' ? <Server className="h-3.5 w-3.5" /> : <Wrench className="h-3.5 w-3.5" />}
+                      {selectedToolGroup.eyebrow}
+                    </div>
+                    <DialogTitle className="mt-3 truncate text-xl">{selectedToolGroup.title}</DialogTitle>
+                    <DialogDescription className="mt-2 leading-6">{selectedToolGroup.description}</DialogDescription>
+                  </div>
+                  <Badge variant="outline" className="shrink-0 rounded-full">
+                    {selectedEnabledCount}/{selectedToolGroup.tools.length} ativas
+                  </Badge>
+                </div>
+              </DialogHeader>
+
+              <div className="min-h-0 overflow-y-auto px-6 py-5">
+                <div className="grid gap-3">
+                  {selectedToolGroup.tools.map((tool) => {
+                    const checked = enabledToolSet.has(tool.name);
+                    return (
+                      <div key={tool.name} className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-card px-4 py-4">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="break-all font-mono text-xs font-semibold text-foreground">{tool.name}</span>
+                            <Badge variant={tool.riskLevel === 'high' ? 'destructive' : 'outline'} className="rounded-full text-[10px]">
+                              {tool.riskLevel}
+                            </Badge>
+                            {tool.requiresHumanApproval && (
+                              <Badge variant="outline" className="rounded-full text-[10px]">
+                                aprovacao humana
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs leading-5 text-muted-foreground">{tool.description}</p>
+                        </div>
+                        <Switch checked={checked} onCheckedChange={(nextChecked) => toggleTool(tool.name, nextChecked)} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/20 px-6 py-4">
+                {selectedToolGroup.href ? (
+                  <Button asChild variant="outline" className="rounded-full">
+                    <Link href={selectedToolGroup.href}>Gerenciar servidor</Link>
+                  </Button>
+                ) : (
+                  <div className="text-xs text-muted-foreground">As alteracoes entram no rascunho do agente.</div>
+                )}
+                <Button onClick={onSaveTools} disabled={isSavingTools} className="rounded-full">
+                  {isSavingTools ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Salvar tools
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Card className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
         <CardContent className="flex flex-col gap-4 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">

@@ -23,6 +23,11 @@ function planFor(input: {
   teams?: ToolRouterTeam[];
   contactOverride?: Contact;
   knowledgeCoverage?: 'high' | 'medium' | 'low' | 'none';
+  closeIntentGate?: {
+    execute: boolean;
+    confidence: 'low' | 'medium' | 'high';
+    reason?: string | null;
+  } | null;
 }) {
   const intentResolution = resolveAutopilotIntent({ customerMessage: input.message });
   return resolveAutopilotWorkflowPlan({
@@ -33,6 +38,7 @@ function planFor(input: {
     availableTeams: input.teams || [supportTeam],
     knowledgeCoverage: input.knowledgeCoverage || 'low',
     slotMappings: { customerIdentifierFieldKeys: ['cpf-field-id'] },
+    closeIntentGate: input.closeIntentGate,
     now: new Date(2026, 4, 5),
   });
 }
@@ -47,6 +53,52 @@ describe('autopilot workflow engine', () => {
     expect(plan.executionMode).toBe('direct_response');
     expect(plan.response).toContain('equipe Suporte');
     expect(plan.actions.map((action) => action.type)).toEqual(['add_internal_note', 'transfer_chat']);
+  });
+
+  it('closes the chat when the customer explicitly asks to end the atendimento', () => {
+    const plan = planFor({
+      message: 'Nao gostei de nenhum dos planos, pode encerrar',
+      enabledToolNames: ['close_chat', 'add_internal_note'],
+    });
+
+    expect(plan.executionMode).toBe('direct_response');
+    expect(plan.response).toContain('encerrado');
+    expect(plan.actions.map((action) => action.type)).toEqual(['close_chat']);
+    expect((plan.actions[0] as any).payload.sendCloseMessage).toBe(false);
+  });
+
+  it('closes the chat for short colloquial close requests', () => {
+    const plan = planFor({
+      message: 'Encerra ai',
+      enabledToolNames: ['close_chat', 'add_internal_note'],
+    });
+
+    expect(plan.executionMode).toBe('direct_response');
+    expect(plan.actions.map((action) => action.type)).toEqual(['close_chat']);
+  });
+
+  it('uses the close intent gate for ambiguous close requests', () => {
+    const plan = planFor({
+      message: 'ja deu por aqui',
+      enabledToolNames: ['close_chat', 'add_internal_note'],
+      closeIntentGate: {
+        execute: true,
+        confidence: 'medium',
+        reason: 'Cliente indicou que quer terminar a conversa.',
+      },
+    });
+
+    expect(plan.executionMode).toBe('direct_response');
+    expect(plan.actions.map((action) => action.type)).toEqual(['close_chat']);
+  });
+
+  it('does not confuse contract cancellation with chat close', () => {
+    const plan = planFor({
+      message: 'Quero encerrar meu contrato de internet',
+      enabledToolNames: ['close_chat', 'transfer_chat', 'add_internal_note'],
+    });
+
+    expect(plan.actions.map((action) => action.type)).not.toContain('close_chat');
   });
 
   it('asks for CPF/CNPJ before billing lookup when SGP is enabled', () => {
@@ -107,5 +159,26 @@ describe('autopilot workflow engine', () => {
       'crm_update_contact_custom_fields',
       'sgp_fetch_contact_panel_data',
     ]);
+  });
+
+  it('continues the sale when the customer confirms the promotional internet plan', () => {
+    const intentResolution = resolveAutopilotIntent({
+      customerMessage: 'Esse plano promocional, acho que quero ele',
+    });
+    const plan = resolveAutopilotWorkflowPlan({
+      intentResolution,
+      customerMessage: 'Esse plano promocional, acho que quero ele',
+      contact,
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+      availableTeams: [supportTeam],
+      knowledgeCoverage: 'high',
+    });
+
+    expect(intentResolution.intent).toBe('purchase_inquiry');
+    expect(plan.executionMode).toBe('direct_response');
+    expect(plan.response).toContain('esse plano promocional');
+    expect(plan.response).toContain('nome completo');
+    expect(plan.response).toContain('CPF/CNPJ');
+    expect(plan.response).toContain('endereco completo');
   });
 });

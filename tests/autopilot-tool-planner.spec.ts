@@ -121,6 +121,46 @@ describe('autopilot tool planner', () => {
     expect(result.promiseValidation.hasExecutableLookupTool).toBe(true);
   });
 
+  it('allows close_chat with configurable close options', () => {
+    const result = runPlanner({
+      message: 'pode encerrar o atendimento',
+      enabledToolNames: ['close_chat'],
+      actions: [
+        {
+          type: 'close_chat',
+          reason: 'Cliente pediu encerramento.',
+          payload: {
+            reasonTagId: 'tag-1',
+            notes: 'Cliente pediu encerramento pelo WhatsApp.',
+            sendCloseMessage: false,
+          },
+        },
+      ],
+    });
+
+    expect(result.rejectedActions).toHaveLength(0);
+    expect(result.actions.map((action) => action.type)).toEqual(['close_chat']);
+  });
+
+  it('rejects invalid close_chat payloads', () => {
+    const result = runPlanner({
+      message: 'pode encerrar o atendimento',
+      enabledToolNames: ['close_chat'],
+      actions: [
+        {
+          type: 'close_chat',
+          reason: 'Payload invalido',
+          payload: {
+            sendCloseMessage: 'sim',
+          } as any,
+        },
+      ],
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.rejectedActions[0]).toMatchObject({ code: 'invalid_payload' });
+  });
+
   it('repairs lookup promises with handoff when no executable tool exists', () => {
     const result = runPlanner({
       message: 'Voce consegue verificar o status do meu pedido?',

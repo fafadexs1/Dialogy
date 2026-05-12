@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
+import { sendAutomatedMessageAction } from '@/actions/messages';
 import { auditAgentToolExecution } from './audit';
 import { getAgentToolDefinition, listDefaultEnabledAgentToolNames } from './catalog';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
@@ -15,11 +16,15 @@ import {
   withTimeout,
   type OrchestratorRunHandle,
 } from '@/services/orchestrator/runtime';
+import { getWorkspaceTemplates } from '@/lib/workspace-config';
+import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
+import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 
 const MAX_ACTIONS_PER_MESSAGE = 4;
 const MAX_INTERNAL_NOTE_CHARS = 500;
 const ALLOWED_TOOLS = new Set([
   'transfer_chat',
+  'close_chat',
   'add_internal_note',
   'crm_update_contact_custom_fields',
   'sgp_fetch_contracts',
@@ -281,6 +286,207 @@ async function runTransferChatTool(
   }
 }
 
+async function runCloseChatTool(
+  context: AgentToolRuntimeContext,
+  action: Extract<AgentToolAction, { type: 'close_chat' }>
+): Promise<AgentToolExecutionResult> {
+  const payload = action.payload || {};
+  const reasonTagId = typeof payload.reasonTagId === 'string' && payload.reasonTagId.trim()
+    ? payload.reasonTagId.trim()
+    : null;
+  const notes = typeof payload.notes === 'string' && payload.notes.trim()
+    ? payload.notes.trim().slice(0, 1000)
+    : (action.reason?.trim() || 'Encerramento solicitado pelo cliente via Atendente Inteligente.');
+  const sendCloseMessage = payload.sendCloseMessage === true;
+
+  const client = await db.connect();
+  let closeTemplate: string | undefined;
+  let workspaceId = context.workspaceId;
+  let lastInstanceName: string | null = null;
+
+  try {
+    await client.query('BEGIN');
+
+    const chatRes = await client.query(
+      `SELECT
+          workspace_id,
+          status,
+          tag AS current_tag,
+          color AS current_color,
+          (
+            SELECT m.instance_name
+            FROM messages m
+            WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ) AS last_instance_name
+       FROM chats c
+       WHERE id = $1 AND workspace_id = $2
+       FOR UPDATE`,
+      [context.chat.id, context.workspaceId]
+    );
+
+    const chatRow = chatRes.rows[0];
+    if (!chatRow) {
+      await client.query('ROLLBACK');
+      return reject(action, 'Chat nao encontrado neste workspace.');
+    }
+
+    if (chatRow.status === 'encerrados') {
+      await client.query('ROLLBACK');
+      return {
+        toolName: 'close_chat',
+        status: 'success',
+        input: action,
+        output: { closed: true, alreadyClosed: true },
+      };
+    }
+
+    workspaceId = chatRow.workspace_id;
+    lastInstanceName = chatRow.last_instance_name || null;
+
+    const { closeMessageTemplate } = await getWorkspaceTemplates(workspaceId);
+    closeTemplate = closeMessageTemplate || undefined;
+
+    let tagInfo = { label: null as string | null, color: null as string | null };
+    if (reasonTagId) {
+      const tagRes = await client.query(
+        `SELECT label, color
+         FROM tags
+         WHERE id = $1 AND workspace_id = $2
+         LIMIT 1`,
+        [reasonTagId, workspaceId]
+      );
+      if (tagRes.rows[0]) {
+        tagInfo = tagRes.rows[0];
+      }
+    }
+
+    await client.query(
+      `UPDATE chats
+       SET
+          status = 'encerrados',
+          closed_at = clock_timestamp(),
+          close_reason_tag_id = $1,
+          close_notes = $2,
+          tag = $3,
+          color = $4
+       WHERE id = $5 AND workspace_id = $6`,
+      [
+        reasonTagId,
+        notes,
+        tagInfo.label ?? chatRow.current_tag ?? '',
+        tagInfo.color ?? chatRow.current_color ?? '',
+        context.chat.id,
+        workspaceId,
+      ]
+    );
+
+    await client.query(
+      `UPDATE meta_conversations
+       SET status = 'closed', updated_at = timezone('utc', now())
+       WHERE chat_id = $1`,
+      [context.chat.id]
+    );
+
+    await client.query(
+      `INSERT INTO messages (
+          workspace_id,
+          chat_id,
+          type,
+          content,
+          metadata,
+          sender_system_agent_id,
+          created_at
+       ) VALUES ($1, $2, 'system', $3, $4, $5, clock_timestamp())`,
+      [
+        workspaceId,
+        context.chat.id,
+        `Atendimento encerrado via Atendente Inteligente por ${context.systemAgentName}.`,
+        JSON.stringify({
+          event: 'close',
+          closed_by_system_agent_id: context.systemAgentId,
+          reason_tag_id: reasonTagId,
+          notes,
+          customerMessage: context.customerMessage,
+          tool: 'close_chat',
+        }),
+        context.systemAgentId,
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    try {
+      const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [context.chat.id]);
+      const closedAt = closedAtRes.rows[0]?.closed_at
+        ? new Date(closedAtRes.rows[0].closed_at).toISOString()
+        : null;
+
+      if (shouldEnqueueJob('ai_case_memory_refresh')) {
+        await enqueueAiCaseMemoryRefresh({
+          workspaceId,
+          chatId: context.chat.id,
+          closedAt,
+        });
+      } else {
+        await refreshCaseMemoryForChat({
+          workspaceId,
+          chatId: context.chat.id,
+          closedAt,
+        });
+      }
+    } catch (caseMemoryError) {
+      console.error('[AGENT_TOOL_CLOSE_CHAT] Falha ao atualizar memoria de caso:', caseMemoryError);
+    }
+
+    if (closeTemplate && sendCloseMessage) {
+      try {
+        await sendAutomatedMessageAction(
+          context.chat.id,
+          closeTemplate,
+          context.systemAgentId,
+          true,
+          lastInstanceName || undefined,
+          {
+            event: 'close_notice',
+            authored_by_system_agent_id: context.systemAgentId,
+            template_applied: true,
+            reason_tag_id: reasonTagId,
+          }
+        );
+      } catch (templateError) {
+        console.error('[AGENT_TOOL_CLOSE_CHAT] Falha ao enviar template de encerramento:', templateError);
+      }
+    }
+
+    return {
+      toolName: 'close_chat',
+      status: 'success',
+      input: action,
+      output: {
+        closed: true,
+        reasonTagId,
+        sendCloseMessage,
+      },
+    };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Ignore rollback errors after connection-level failures.
+    }
+    return {
+      toolName: 'close_chat',
+      status: 'error',
+      input: action,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    client.release();
+  }
+}
+
 async function runAddInternalNoteTool(
   context: AgentToolRuntimeContext,
   action: Extract<AgentToolAction, { type: 'add_internal_note' }>
@@ -479,6 +685,7 @@ export async function runAgentTools(
     try {
       result = await withTimeout((async () => {
         if (action.type === 'transfer_chat') return runTransferChatTool(context, action);
+        if (action.type === 'close_chat') return runCloseChatTool(context, action);
         if (action.type === 'add_internal_note') return runAddInternalNoteTool(context, action);
         if (action.type === 'mcp_call_tool') return runMcpCallTool(context, action);
         if (action.type === 'crm_update_contact_custom_fields') {

@@ -5,10 +5,11 @@ import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 const ToolIntentGateInputSchema = z.object({
   customerMessage: z.string(),
   chatHistory: z.string().optional(),
-  toolName: z.literal('transfer_chat'),
-  targetTeamName: z.string(),
+  toolName: z.enum(['transfer_chat', 'close_chat']),
+  targetTeamName: z.string().optional().default(''),
   candidateReason: z.string(),
   escalationPolicy: z.string().optional(),
+  closingPolicy: z.string().optional(),
   model: z.string().optional(),
   apiKey: z.string().optional(),
   timeoutMs: z.number().int().positive().optional(),
@@ -20,7 +21,7 @@ const ToolIntentGateOutputSchema = z.object({
   reason: z.string().default(''),
 });
 
-export type ToolIntentGateInput = z.infer<typeof ToolIntentGateInputSchema>;
+export type ToolIntentGateInput = z.input<typeof ToolIntentGateInputSchema>;
 export type ToolIntentGateOutput = z.infer<typeof ToolIntentGateOutputSchema>;
 
 function cleanModelName(model: string | undefined): string {
@@ -56,22 +57,36 @@ export async function classifyToolIntent(input: ToolIntentGateInput): Promise<To
     },
   });
 
+  const toolSpecificRules = parsedInput.toolName === 'close_chat'
+    ? [
+        'Regra para close_chat:',
+        '- execute=true, confidence=high: cliente pediu claramente para encerrar, finalizar, fechar, desligar ou parar a CONVERSA/CHAT/ATENDIMENTO atual.',
+        '- execute=true, confidence=medium: mensagem curta e contextual indica que o cliente quer terminar o atendimento atual, mesmo com linguagem informal ou gíria.',
+        '- execute=false: cliente quer cancelar/encerrar contrato, plano, assinatura, serviço, internet, instalação ou produto. Isso é solicitação comercial/suporte, não fechamento do chat.',
+        '- execute=false: cliente só agradeceu, disse ok, ou respondeu algo ambíguo sem pedir para terminar o atendimento.',
+        '- Na duvida entre medium e false, prefira false.',
+      ]
+    : [
+        'Regra para transfer_chat:',
+        '- execute=true, confidence=high: cliente pediu EXPLICITAMENTE falar com humano, atendente, consultor, setor ou equipe.',
+        '- execute=true, confidence=medium: cliente relata um PROBLEMA TECNICO claro (internet fora, lenta, sem sinal, roteador, etc.) que a equipe alvo pode resolver, E o agente virtual nao tem ferramentas para resolver sozinho.',
+        '- execute=true, confidence=medium: cliente esta frustrado/irritado e o contexto indica que precisa de atendimento humano.',
+        '- execute=false: cliente esta fazendo pergunta, comprando, consultando planos, pedindo informacao geral, ou mencionou um assunto sem precisar de atendimento humano.',
+        '- execute=false: cliente esta fazendo transferencia de endereco, mudanca de plano, ou outra operacao que o agente consegue conduzir.',
+        '- Na duvida entre medium e false, prefira false.',
+      ];
+
   const prompt = [
     'Voce e um classificador de intencao de ferramenta para atendimento.',
     'Decida se a ferramenta candidata deve ser executada agora.',
     'Responda somente JSON: {"execute": boolean, "confidence": "low|medium|high", "reason": "curto"}.',
     '',
-    'Regra para transfer_chat:',
-    '- execute=true, confidence=high: cliente pediu EXPLICITAMENTE falar com humano, atendente, consultor, setor ou equipe.',
-    '- execute=true, confidence=medium: cliente relata um PROBLEMA TECNICO claro (internet fora, lenta, sem sinal, roteador, etc.) que a equipe alvo pode resolver, E o agente virtual nao tem ferramentas para resolver sozinho.',
-    '- execute=true, confidence=medium: cliente esta frustrado/irritado e o contexto indica que precisa de atendimento humano.',
-    '- execute=false: cliente esta fazendo pergunta, comprando, consultando planos, pedindo informacao geral, ou mencionou um assunto sem precisar de atendimento humano.',
-    '- execute=false: cliente esta fazendo transferencia de endereco, mudanca de plano, ou outra operacao que o agente consegue conduzir.',
-    '- Na duvida entre medium e false, prefira false.',
+    ...toolSpecificRules,
     parsedInput.escalationPolicy ? `\nPolitica de escalonamento do agente:\n${parsedInput.escalationPolicy.slice(0, 400)}` : '',
+    parsedInput.closingPolicy ? `\nPolitica de encerramento do agente:\n${parsedInput.closingPolicy.slice(0, 400)}` : '',
     '',
     `Ferramenta: ${parsedInput.toolName}`,
-    `Equipe alvo: ${parsedInput.targetTeamName}`,
+    parsedInput.targetTeamName ? `Equipe alvo: ${parsedInput.targetTeamName}` : '',
     `Motivo candidato: ${parsedInput.candidateReason}`,
     parsedInput.chatHistory ? `Historico recente:\n${parsedInput.chatHistory.slice(-1200)}` : '',
     `Mensagem do cliente:\n${parsedInput.customerMessage}`,

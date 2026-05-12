@@ -143,6 +143,7 @@ const AgentResponseOutputSchema = z.object({
     .array(z.object({
       type: z.enum([
         'transfer_chat',
+        'close_chat',
         'add_internal_note',
         'crm_update_contact_custom_fields',
         'sgp_fetch_contracts',
@@ -277,6 +278,17 @@ function limitEmojis(response: string, maxEmojis: number): string {
   return updated.replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1').trim();
 }
 
+function shouldPreserveCatalogEmojis(response: string): boolean {
+  const upper = response.toUpperCase();
+  const planMatches = upper.match(/\b\d{2,4}\s*(?:MEGA|MEGAS|MB|GB)\b/g) || [];
+  return (
+    planMatches.length >= 1 &&
+    /\bR\$\s*\d+/i.test(response) &&
+    (upper.includes('PLAN') || upper.includes('PROMO') || upper.includes('WI-FI') || upper.includes('WIFI') || upper.includes('CANAIS') || upper.includes('FIBRA')) &&
+    emojiRegex.test(response)
+  );
+}
+
 function stripRepeatedGreeting(response: string, chatHistory?: string): string {
   if (!response || !historyContainsGreeting(chatHistory)) return response;
 
@@ -332,6 +344,7 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
     - Verifique **REGRAS DE AUTOMAÇÃO**. Se o gatilho for acionado, siga a regra cegamente.
 2. **Base de Conhecimento**:
     - Use os **DOCUMENTOS CARREGADOS** para fatos e procedimentos.
+    - Se um documento disser para enviar uma resposta exatamente, com o mesmo espacamento, quebras de linha ou emojis, copie o trecho oficial literalmente. Nao reescreva, nao resuma, nao reorganize, nao remova emojis e nao troque valores.
 3. **Resposta Natural**:
     - Se não houver regra, construa uma resposta baseada na sua persona + documentos + análise emocional.
 4. **Formato e tamanho para WhatsApp**:
@@ -456,28 +469,34 @@ Ferramentas permitidas:
    - Use quando precisar envolver humano ou setor.
    - Payload aceito: {"teamName":"Financeiro"} ou {"teamId":"..."} ou {"agentId":"..."}.
    - Sempre explique ao cliente em "response" que vai transferir.
-2. add_internal_note
+2. close_chat
+   - Use quando o cliente pedir claramente para encerrar/finalizar/fechar/desligar a conversa, chat, chamado ou atendimento.
+   - Tambem use em pedidos curtos como "encerra ai", "pode finalizar", "fecha por aqui", "pode desligar o chat", quando o contexto for terminar a conversa.
+   - Nao use para cancelar/encerrar contrato, plano, assinatura, servico ou internet; nesses casos trate como cancelamento comercial/suporte.
+   - Payload aceito: {"notes":"Cliente pediu encerramento pelo WhatsApp.","sendCloseMessage":false}.
+   - Se disser que encerrou/finalizou/fechou o atendimento, inclua obrigatoriamente esta action na mesma saida.
+3. add_internal_note
    - Use para deixar uma nota interna para a equipe.
    - Use somente quando houver transferencia, escalonamento ou um detalhe critico que um humano precise saber.
    - Payload aceito: {"content":"Resumo objetivo para o humano"}.
    - A nota deve ter no maximo 3 frases curtas e 280 caracteres.
    - Nunca escreva texto de auditoria, assinatura, repeticao da persona, "fim da nota", "registro concluido" ou explicacoes sobre o proprio sistema.
    - A nota nao sera enviada ao cliente.
-3. crm_update_contact_custom_fields
+4. crm_update_contact_custom_fields
    - Use para preencher/atualizar campos do CRM do contato atual quando o cliente informar um dado claro.
    - Exemplo para CPF: {"fields":{"CPF":"01298570174"}}. Pode usar o nome do campo ou o ID do campo.
    - Nunca atualize contato de outra pessoa. Nunca invente valores.
-4. sgp_fetch_contact_panel_data
+5. sgp_fetch_contact_panel_data
    - Use para consultar dados do SGP do contato atual depois que o CPF/CNPJ estiver salvo no CRM.
    - Retorna cliente, contratos, status de conexao e faturas.
    - Nao diga que acessou/verificou o SGP antes da ferramenta ser executada com sucesso.
-5. sgp_fetch_contracts
+6. sgp_fetch_contracts
    - Use para listar contratos do cliente no SGP.
-6. sgp_generate_invoice_pix
+7. sgp_generate_invoice_pix
    - Use apenas quando houver fatura e contrato claros. Payload: {"invoiceId":"...","contractId":"..."}.
-7. sgp_create_payment_promise
+8. sgp_create_payment_promise
    - Use apenas quando o cliente pedir promessa de pagamento e informar data. Payload: {"contractId":"...","promiseDate":"yyyy-MM-dd","sendSms":true}.
-8. mcp_call_tool
+9. mcp_call_tool
    - Use para chamar uma ferramenta MCP externa habilitada para este agente.
    - Payload aceito: {"toolName":"mcp:<serverId>:<toolName>","arguments":{"campo":"valor"}}.
    - "arguments" deve ser sempre um objeto JSON, nunca uma string. Exemplo correto para reboot_router: {"toolName":"mcp:<serverId>:reboot_router","arguments":{"device_id":"...","client_ip":"...","reason":"Cliente solicitou reinicializacao"}}.
@@ -676,6 +695,7 @@ const autoResponderFlow = ai.defineFlow(
       const sanitizeBlock = (text: string, isFirstBlock: boolean) => {
         let result = stripRepeatedName(text, input.contact?.name ?? '', input.chatHistory);
         if (isFirstBlock) result = stripRepeatedGreeting(result, input.chatHistory);
+        if (shouldPreserveCatalogEmojis(result)) return result;
         return limitEmojis(result, emojiBudget);
       };
 

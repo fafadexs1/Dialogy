@@ -79,4 +79,5 @@ export type AutopilotIntentResolution = {
   sourceDocumentId?: string;
   sourceDocumentName?: string;
   officialResponse?: string;
+  officialResponsePreserveFormatting?: boolean;
 };

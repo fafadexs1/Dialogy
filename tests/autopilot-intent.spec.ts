@@ -102,4 +102,95 @@ describe('autopilot universal intent resolver', () => {
     expect(catalog?.content).toContain('*Catalogo oficial*');
     expect(catalog?.content).not.toContain('Nao mude nada');
   });
+
+  it('uses literal plan documents that require exact spacing and emojis', () => {
+    const exactPlanDocument: KnowledgeBaseDocument = {
+      id: 'plans-exact',
+      name: 'Planos Velpro',
+      content: [
+        'Voce deve mandar os planos exatamente com o mesmo espacamento e com os emojis.',
+        '',
+        '\u{1F310} NOSSOS PLANOS DE INTERNET:',
+        '',
+        '\u{1F4F6} 500 MEGA (somente internet)',
+        '\u{1F4E1} Wi-Fi 5',
+        '\u{2733} R$99,90/mes valor com desconto de pontualidade',
+        '\u{1F911}  R$109,90/mes valor do plano',
+        '',
+        '',
+        '\u{1F4F6} 1000 MEGA (+ 100 canais de TV)',
+        '\u{1F4E1} Wi-Fi 6 (ultima geracao)',
+        '\u{2733} R$149,90/mes valor com desconto de pontualidade',
+        '\u{1F911}  R$159,90/mes valor do plano',
+      ].join('\n'),
+    };
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'me manda os planos de internet',
+      knowledgeDocuments: [exactPlanDocument],
+    });
+
+    expect(resolution.shouldUseLlm).toBe(false);
+    expect(resolution.officialResponsePreserveFormatting).toBe(true);
+    expect(resolution.officialResponse).toContain('\u{1F310} NOSSOS PLANOS DE INTERNET:');
+    expect(resolution.officialResponse).toContain('\u{1F911}  R$109,90/mes valor do plano');
+    expect(resolution.officialResponse).toContain('valor do plano\n\n\n\u{1F4F6} 1000 MEGA');
+    expect(resolution.officialResponse).not.toContain('Voce deve mandar');
+  });
+
+  it('answers only the promotional block when the customer asks for the promo plan', () => {
+    const exactPlanDocument: KnowledgeBaseDocument = {
+      id: 'plans-with-promo',
+      name: 'Planos Velpro',
+      content: [
+        'Voce deve mandar os planos exatamente com o mesmo espacamento e com os emojis.',
+        '',
+        '\u{1F310} NOSSOS PLANOS DE INTERNET:',
+        '',
+        '\u{1F4F6} 500 MEGA (somente internet)',
+        '\u{1F4E1} Wi-Fi 5',
+        '\u{2733} R$99,90/mes valor com desconto de pontualidade',
+        '\u{1F911}  R$109,90/mes valor do plano',
+        '',
+        '',
+        'Plano de internet.',
+        '',
+        '\u{1F381} PROMOCAO DE ABRIL\u{1F381}\u{1F31E}',
+        '',
+        '\u{1F4F6} 1000 MEGAS + 60 CANAIS! \u{1F929}',
+        '\u{1F4E1} Wi-Fi 6',
+        '',
+        '\u{2705} R$99,90/mes valor com desconto de pontualidade (ate o vencimento)',
+        '\u{1F911} R$119,90/mes valor do plano (apos vencimento)',
+        '',
+        '\u{1F4FA} Quer conhecer os canais de TV?',
+        '\u{1F449} https://velpro.net.br/tv',
+        'Clique no link acima',
+        '',
+        'Oferta valida ate 06/05/2026.',
+      ].join('\n'),
+    };
+
+    const promoResolution = resolveAutopilotIntent({
+      customerMessage: 'Me mostra o plano promocional',
+      knowledgeDocuments: [exactPlanDocument],
+    });
+
+    expect(promoResolution.intent).toBe('promotion_request');
+    expect(promoResolution.shouldUseLlm).toBe(false);
+    expect(promoResolution.officialResponsePreserveFormatting).toBe(true);
+    expect(promoResolution.officialResponse).toContain('\u{1F381} PROMOCAO DE ABRIL');
+    expect(promoResolution.officialResponse).toContain('\u{1F4F6} 1000 MEGAS + 60 CANAIS!');
+    expect(promoResolution.officialResponse).toContain('Oferta valida ate 06/05/2026.');
+    expect(promoResolution.officialResponse).not.toContain('\u{1F310} NOSSOS PLANOS DE INTERNET');
+    expect(promoResolution.officialResponse).not.toContain('500 MEGA');
+
+    const purchaseResolution = resolveAutopilotIntent({
+      customerMessage: 'Esse plano promocional, acho que quero ele',
+      knowledgeDocuments: [exactPlanDocument],
+    });
+
+    expect(purchaseResolution.intent).toBe('purchase_inquiry');
+    expect(purchaseResolution.shouldUseLlm).toBe(true);
+  });
 });

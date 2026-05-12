@@ -3,6 +3,7 @@ import type { AgentToolAction, AgentToolName } from '@/services/agent-tools/type
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } from './intent-types';
 import { getAutopilotWorkflow } from './workflows';
+import { isConversationCloseRequest } from './close-intent';
 import {
   extractAutopilotSlots,
   getMissingSlots,
@@ -26,6 +27,12 @@ export type AutopilotWorkflowPlan = {
   handledByWorkflow: boolean;
   metadata: Record<string, unknown>;
 };
+
+export type CloseIntentGateDecision = {
+  execute: boolean;
+  confidence: 'low' | 'medium' | 'high';
+  reason?: string | null;
+} | null;
 
 export type WorkflowSlotMappings = {
   customerIdentifierFieldKeys?: string[];
@@ -153,6 +160,23 @@ function hasOperationalLookupIntent(message: string): boolean {
   return /\b(consult|verific|checar|status|sinal|conexao|conexao|fatura|boleto|pagamento|cadastro|contrato|pedido|protocolo|funciona|erro|falha|sem acesso|sem sinal)\b/.test(normalized);
 }
 
+function isInternetPlanPurchaseCommitment(message: string): boolean {
+  const normalized = normalizeText(message);
+  return (
+    /\b(plano|pacote|internet|fibra|mega|megas|promo|promocional|oferta)\b/.test(normalized) &&
+    /\b(quero|vou querer|fico com|fechar|fecho|contratar|assinar|aderir|pegar)\b/.test(normalized)
+  );
+}
+
+function buildInternetPlanPurchaseResponse(message: string): string {
+  const normalized = normalizeText(message);
+  const planLabel = /\b(promo|promocional|oferta)\b/.test(normalized)
+    ? 'esse plano promocional'
+    : 'esse plano';
+
+  return `Perfeito, vamos seguir com ${planLabel}. Para continuar, me envie nome completo, CPF/CNPJ e endereco completo para verificarmos a cobertura e prosseguir com a contratacao.`;
+}
+
 function buildCustomerIdentifierFields(input: {
   value: string;
   mappings?: WorkflowSlotMappings;
@@ -217,6 +241,25 @@ function shouldAskCustomerIdentifierForOperationalWorkflow(input: {
   return false;
 }
 
+function shouldCloseFromHybridSignal(input: {
+  customerMessage: string;
+  closeIntentGate?: CloseIntentGateDecision;
+}) {
+  if (isConversationCloseRequest(input.customerMessage)) {
+    return { shouldClose: true, reason: 'Cliente pediu explicitamente para encerrar o atendimento.' };
+  }
+
+  const gate = input.closeIntentGate;
+  if (gate?.execute && gate.confidence !== 'low') {
+    return {
+      shouldClose: true,
+      reason: `Classificador de encerramento aprovou close_chat (${gate.confidence}): ${gate.reason || 'sem motivo'}.`,
+    };
+  }
+
+  return { shouldClose: false, reason: null };
+}
+
 export function resolveAutopilotWorkflowPlan(input: {
   intentResolution: AutopilotIntentResolution;
   customerMessage: string;
@@ -226,6 +269,7 @@ export function resolveAutopilotWorkflowPlan(input: {
   availableTeams: ToolRouterTeam[];
   knowledgeCoverage: KnowledgeCoverage;
   slotMappings?: WorkflowSlotMappings;
+  closeIntentGate?: CloseIntentGateDecision;
   now?: Date;
 }): AutopilotWorkflowPlan {
   const workflow = getAutopilotWorkflow(input.intentResolution.intent);
@@ -254,6 +298,57 @@ export function resolveAutopilotWorkflowPlan(input: {
       slotExtraction,
       handledByWorkflow: true,
       metadata: baseMetadata,
+    };
+  }
+
+  const closeDecision = shouldCloseFromHybridSignal({
+    customerMessage: input.customerMessage,
+    closeIntentGate: input.closeIntentGate,
+  });
+  if (closeDecision.shouldClose) {
+    const reason = closeDecision.reason || 'Cliente pediu para encerrar o atendimento.';
+
+    if (isToolEnabled(input.enabledToolNames, 'close_chat')) {
+      return {
+        executionMode: 'direct_response',
+        response: 'Atendimento encerrado conforme solicitado.',
+        actions: [{
+          type: 'close_chat',
+          reason,
+          payload: {
+            notes: `${reason} Mensagem: ${input.customerMessage.replace(/\s+/g, ' ').trim().slice(0, 220)}`,
+            sendCloseMessage: false,
+          },
+        }],
+        reason,
+        missingSlots: [],
+        slotExtraction,
+        handledByWorkflow: true,
+        metadata: { ...baseMetadata, closeRequested: true },
+      };
+    }
+
+    return {
+      executionMode: 'direct_response',
+      response: 'Entendido. Nao vou enviar novas mensagens por aqui agora, mas a ferramenta de encerramento nao esta habilitada neste agente.',
+      actions: isToolEnabled(input.enabledToolNames, 'add_internal_note')
+        ? [{
+            type: 'add_internal_note',
+            reason,
+            payload: {
+              content: buildInternalNote({
+                contact: input.contact,
+                customerMessage: input.customerMessage,
+                reason: 'Pedido de encerramento sem close_chat habilitado.',
+              }),
+            },
+          }]
+        : [],
+      reason: 'Pedido de encerramento sem ferramenta close_chat habilitada.',
+      missingSlots: [],
+      slotExtraction,
+      handledByWorkflow: true,
+      metadata: { ...baseMetadata, closeRequested: true, closeToolDisabled: true },
     };
   }
 
@@ -306,6 +401,22 @@ export function resolveAutopilotWorkflowPlan(input: {
       slotExtraction,
       handledByWorkflow: true,
       metadata: baseMetadata,
+    };
+  }
+
+  if (
+    input.intentResolution.intent === 'purchase_inquiry' &&
+    isInternetPlanPurchaseCommitment(input.customerMessage)
+  ) {
+    return {
+      executionMode: 'direct_response',
+      response: buildInternetPlanPurchaseResponse(input.customerMessage),
+      actions: [],
+      reason: 'Cliente confirmou interesse em contratar plano de internet.',
+      missingSlots: [],
+      slotExtraction,
+      handledByWorkflow: true,
+      metadata: { ...baseMetadata, purchaseCommitment: true },
     };
   }
 

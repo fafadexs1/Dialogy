@@ -33,6 +33,37 @@ describe('AI customer response formatting', () => {
     expect(formatted).not.toContain('comparar com cada plano antigo');
   });
 
+  it('adds WhatsApp line breaks to compact plan catalogs generated as one paragraph', () => {
+    const response = [
+      'Com certeza! CONHECA NOSSOS PLANOS DE INTERNET FIBRA - PLANOS SOMENTE INTERNET',
+      '500 MEGA Wi-Fi 5 R$99,90/mes pagando em dia R$109,90/mes - PLANOS COM INTERNET + TV',
+      '600 MEGA + 60 CANAIS Wi-Fi 5 R$109,90/mes pagando em dia R$119,90/mes',
+      '800 MEGA + 75 CANAIS Wi-Fi 5 R$125,90/mes pagando em dia R$135,90/mes',
+      '1000 MEGA + 100 CANAIS Wi-Fi 6 R$149,90/mes pagando em dia R$159,90/mes',
+    ].join(' ');
+
+    const formatted = formatCustomerFacingAiResponse(response);
+
+    expect(formatted).toContain('PLANOS SOMENTE INTERNET\n\n500 MEGA\nWi-Fi 5\nR$99,90/mes pagando em dia\nR$109,90/mes');
+    expect(formatted).toContain('PLANOS COM INTERNET + TV\n\n600 MEGA + 60 CANAIS\nWi-Fi 5\nR$109,90/mes pagando em dia\nR$119,90/mes');
+    expect(formatted).not.toContain('500 MEGA Wi-Fi 5 R$99,90');
+  });
+
+  it('adds WhatsApp line breaks to compact one-plan promotion blocks', () => {
+    const response = [
+      'PROMOCAO DE ABRIL (Valida ate 06/05/2026) 1000 MEGAS + 60 CANAIS',
+      'Wi-Fi 6 R$99,90/mes pagando em dia R$119,90/mes Para ver a lista completa de canais, acesse: https://velpro.net.br/tv',
+      'Algum desses planos te interessou? Se sim, me envie seu CPF e endereco para eu confirmar a cobertura para voce!',
+    ].join(' ');
+
+    const formatted = formatCustomerFacingAiResponse(response);
+
+    expect(formatted).toContain('PROMOCAO DE ABRIL (Valida ate 06/05/2026)\n\n1000 MEGAS + 60 CANAIS\nWi-Fi 6\nR$99,90/mes pagando em dia\nR$119,90/mes');
+    expect(formatted).toContain('acesse:\nhttps://velpro.net.br/tv');
+    expect(formatted).toContain('\n\nAlgum desses planos te interessou?');
+    expect(formatted).not.toContain('1000 MEGAS + 60 CANAIS Wi-Fi 6 R$99,90');
+  });
+
   it('preserves WhatsApp spacing for full internet plan catalogs', () => {
     const response = [
       '🚀 *CONHECA NOSSOS PLANOS DE INTERNET FIBRA*',

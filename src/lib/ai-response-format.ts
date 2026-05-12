@@ -21,7 +21,10 @@ const MAX_MESSAGE_BLOCKS = 3;
  */
 const LIST_LINE_PATTERN = /^(\s*)([\p{Extended_Pictographic}\u2022\u00b7\u2013\u2014\-\*\u25b8\u25aa\u25cf\u25cb]|\d+[.)]\s)/u;
 const MONEY_PATTERN = /\bR\$\s*\d+/i;
-const PLAN_SECTION_PATTERN = /\bPLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET|COM\s+TV|INTERNET\s*\+\s*TV)\b/i;
+const PLAN_SPEED_LOOKAHEAD = String.raw`\d{2,4}\s*(?:MEGA|MEGAS|MB|GB)\b`;
+const PLAN_SECTION_LOOKAHEAD = String.raw`PLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET(?:\s*\+\s*TV)?|COM\s+TV|INTERNET\s*\+\s*TV)\b`;
+const PLAN_SECTION_PATTERN = new RegExp(String.raw`\b${PLAN_SECTION_LOOKAHEAD}`, 'i');
+const INLINE_LIST_MARKER_CLASS = String.raw`\p{Extended_Pictographic}\ufe0f\u2022\u00b7\u2013\u2014\-\*\u25b8\u25aa\u25cf\u25cb`;
 
 function normalizeWhitespace(value: string): string {
   return value
@@ -62,7 +65,7 @@ function trimToMaxLength(value: string, maxChars: number): string {
 
 function isStructuredCatalogResponse(value: string): boolean {
   const upper = value.toUpperCase();
-  const planMatches = upper.match(/\b\d{2,4}\s*(?:MEGA|MB|GB)\b/g) || [];
+  const planMatches = upper.match(/\b\d{2,4}\s*(?:MEGA|MEGAS|MB|GB)\b/g) || [];
   return (
     planMatches.length >= 3 &&
     MONEY_PATTERN.test(value) &&
@@ -70,15 +73,83 @@ function isStructuredCatalogResponse(value: string): boolean {
   );
 }
 
-function expandCompactPlanCatalog(value: string): string {
-  if (!isStructuredCatalogResponse(value)) return value;
+function isPlanOfferResponse(value: string): boolean {
+  const upper = value.toUpperCase();
+  const planMatches = upper.match(/\b\d{2,4}\s*(?:MEGA|MEGAS|MB|GB)\b/g) || [];
+  return (
+    planMatches.length >= 1 &&
+    MONEY_PATTERN.test(value) &&
+    (PLAN_SECTION_PATTERN.test(value) ||
+      upper.includes('WI-FI') ||
+      upper.includes('WIFI') ||
+      upper.includes('CANAIS') ||
+      upper.includes('FIBRA') ||
+      upper.includes('PROMO'))
+  );
+}
 
-  return value
-    .replace(/\s+(?=PLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET|COM\s+TV|INTERNET\s*\+\s*TV)\b)/gi, '\n\n')
-    .replace(/\s+\*(?=(?:PROMO|VALORES)\b)/gi, '\n\n*')
-    .replace(/\s+(?=\d{2,4}\s*(?:MEGA|MB|GB)\b)/gi, '\n')
-    .replace(/(PLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET|COM\s+TV|INTERNET\s*\+\s*TV))\s+(?=\d{2,4}\s*(?:MEGA|MB|GB)\b)/gi, '$1\n')
-    .replace(/(\S)\s+(?=(?:Algum desses planos|Qual desses planos|Quer que eu|Posso te ajudar)\b)/gi, '$1\n\n');
+function insertCatalogBreakBefore(value: string, lookaheadPattern: string, breakText = '\n'): string {
+  return value.replace(
+    new RegExp(`([^\\n${INLINE_LIST_MARKER_CLASS}])[ \\t]+(?=${lookaheadPattern})`, 'giu'),
+    `$1${breakText}`
+  );
+}
+
+function expandCompactPlanCatalog(value: string): string {
+  if (!isPlanOfferResponse(value)) return value;
+
+  let formatted = value;
+
+  formatted = formatted.replace(/[ \t]*(?:\u2500|\u2501){4,}[ \t]*/g, '\n\n');
+  formatted = formatted.replace(
+    new RegExp(`[ \\t]*[-\\u2013\\u2014][ \\t]*(?=${PLAN_SECTION_LOOKAHEAD})`, 'giu'),
+    '\n\n'
+  );
+  formatted = insertCatalogBreakBefore(formatted, PLAN_SECTION_LOOKAHEAD, '\n\n');
+  formatted = insertCatalogBreakBefore(formatted, String.raw`\*?\s*(?:PROMO[^\s]*|VALORES\b)`, '\n\n');
+  formatted = insertCatalogBreakBefore(
+    formatted,
+    String.raw`(?:[\p{Extended_Pictographic}\ufe0f]\s*)*PROMO[^\s]*`,
+    '\n\n'
+  );
+  formatted = insertCatalogBreakBefore(
+    formatted,
+    String.raw`(?:Quer\s+(?:conhecer|ver)|Para\s+ver|acesse:|Oferta\s+v(?:a|\u00e1)lida|Plano\s+de\s+internet)\b`,
+    '\n\n'
+  );
+  formatted = insertCatalogBreakBefore(formatted, String.raw`Clique\s+no\s+link\b`, '\n');
+  formatted = formatted.replace(
+    new RegExp(`([\\p{Extended_Pictographic}\\ufe0f])[ \\t]+(?=[\\p{Extended_Pictographic}\\ufe0f]\\s*${PLAN_SPEED_LOOKAHEAD})`, 'giu'),
+    '$1\n\n'
+  );
+  formatted = insertCatalogBreakBefore(
+    formatted,
+    String.raw`[\p{Extended_Pictographic}\ufe0f]\s*${PLAN_SPEED_LOOKAHEAD}`,
+    '\n\n'
+  );
+  formatted = insertCatalogBreakBefore(
+    formatted,
+    String.raw`[\p{Extended_Pictographic}\ufe0f]\s*Wi[-\s]?Fi\b`,
+    '\n'
+  );
+  formatted = insertCatalogBreakBefore(
+    formatted,
+    String.raw`[\p{Extended_Pictographic}\ufe0f]\s*R\$\s*\d`,
+    '\n'
+  );
+  formatted = insertCatalogBreakBefore(formatted, PLAN_SPEED_LOOKAHEAD, '\n\n');
+  formatted = insertCatalogBreakBefore(formatted, String.raw`Wi[-\s]?Fi\b`, '\n');
+  formatted = insertCatalogBreakBefore(formatted, String.raw`R\$\s*\d`, '\n');
+  formatted = insertCatalogBreakBefore(formatted, String.raw`https?:\/\/`, '\n');
+  formatted = insertCatalogBreakBefore(
+    formatted,
+    String.raw`(?:Algum desses planos|Qual desses planos|Quer que eu|Posso te ajudar)\b`,
+    '\n\n'
+  );
+
+  return formatted
+    .replace(/[ \t]*[-\u2013\u2014][ \t]*(?=\n)/g, '')
+    .replace(/\n{2,}[ \t]*[-\u2013\u2014][ \t]*/g, '\n\n');
 }
 
 /**
@@ -147,7 +218,7 @@ export function formatCustomerFacingAiResponse(
   const normalized = normalizeWhitespace(expandCompactPlanCatalog(response));
   if (!normalized) return '';
 
-  const isCatalog = isStructuredCatalogResponse(normalized);
+  const isCatalog = isStructuredCatalogResponse(normalized) || isPlanOfferResponse(normalized);
   const effectiveMaxChars =
     isCatalog && maxChars === DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
       ? STRUCTURED_CATALOG_MAX_CHARS

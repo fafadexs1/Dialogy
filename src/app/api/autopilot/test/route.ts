@@ -53,30 +53,33 @@ async function loadPreviewTeams(workspaceId: string): Promise<ToolRouterTeam[]> 
   }
 }
 
-async function loadPreviewToolCatalog(workspaceId: string): Promise<AgentToolCatalogItem[]> {
+async function loadPreviewToolCatalog(workspaceId: string, enabledToolNames: string[]): Promise<AgentToolCatalogItem[]> {
+  const enabledToolSet = new Set(enabledToolNames);
   const mcpTools = await listMcpToolsForWorkspace(workspaceId).catch(() => []);
-  const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools.map((tool) => ({
-    name: tool.qualifiedName as any,
-    version: 'mcp',
-    description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
-    class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
-    riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
-    sideEffect: tool.annotations?.destructiveHint ? 'high' : tool.annotations?.readOnlyHint ? 'none' : 'medium',
-    idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
-    timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
-    maxAttempts: 1,
-    requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
-    customerVisible: true,
-    allowedIntents: [],
-    requiredSlots: [],
-    fallbackAction: 'handoff',
-    source: 'mcp',
-    enabledByDefault: false,
-    serverId: tool.serverId,
-    serverName: tool.serverName,
-    inputSchema: tool.inputSchema || null,
-    outputSchema: null,
-  }));
+  const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools
+    .filter((tool) => enabledToolSet.has(tool.qualifiedName))
+    .map((tool) => ({
+      name: tool.qualifiedName as any,
+      version: 'mcp',
+      description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
+      class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
+      riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
+      sideEffect: tool.annotations?.destructiveHint ? 'high' : tool.annotations?.readOnlyHint ? 'none' : 'medium',
+      idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
+      timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
+      maxAttempts: 1,
+      requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
+      customerVisible: true,
+      allowedIntents: [],
+      requiredSlots: [],
+      fallbackAction: 'handoff',
+      source: 'mcp',
+      enabledByDefault: false,
+      serverId: tool.serverId,
+      serverName: tool.serverName,
+      inputSchema: tool.inputSchema || null,
+      outputSchema: null,
+    }));
 
   return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
 }
@@ -271,10 +274,10 @@ export async function POST(request: Request) {
       ...rule,
       action: typeof rule.action === 'string' ? JSON.parse(rule.action) : rule.action,
     }));
-    const toolCatalog = await loadPreviewToolCatalog(workspaceId);
     const enabledToolNames = Array.isArray(config.enabled_tool_names)
       ? config.enabled_tool_names
-      : toolCatalog.filter((tool) => tool.enabledByDefault).map((tool) => tool.name);
+      : listAgentToolCatalogItems().filter((tool) => tool.enabledByDefault).map((tool) => tool.name);
+    const toolCatalog = await loadPreviewToolCatalog(workspaceId, enabledToolNames);
     const availableTeams = await loadPreviewTeams(workspaceId);
     const contact = {
       id: `preview-contact-${Date.now()}`,
