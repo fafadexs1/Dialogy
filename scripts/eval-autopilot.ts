@@ -1,5 +1,4 @@
 import { config } from 'dotenv';
-import { runOfflineAutopilotEvals } from '../src/services/autopilot/eval-runner';
 
 config({ quiet: true });
 
@@ -10,7 +9,7 @@ function printUsage() {
   console.log('  --offline  Runs deterministic intent/RAG/workflow/tool/validator evals without LLM calls.');
 }
 
-function main() {
+async function main() {
   const args = new Set(process.argv.slice(2));
 
   if (args.has('--help') || args.has('-h')) {
@@ -23,6 +22,7 @@ function main() {
     process.exit(1);
   }
 
+  const { runOfflineAutopilotEvals } = await import('../src/services/autopilot/eval-runner');
   const report = runOfflineAutopilotEvals();
   const failedCases = report.failures.map((failure) => ({
     id: failure.id,
@@ -43,4 +43,7 @@ function main() {
   }
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

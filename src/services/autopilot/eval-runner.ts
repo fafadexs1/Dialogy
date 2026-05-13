@@ -1,6 +1,6 @@
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import type { AgentToolName } from '@/services/agent-tools/types';
-import { resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { findOfficialKnowledgeAnswer, resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { mergeAndRerankKnowledgeDocuments } from '@/services/rag/hybrid-retrieval';
 import { extractAutopilotSlots } from './slots';
 import { planAutopilotTools } from './tool-planner';
@@ -160,6 +160,12 @@ function runOfflineAutopilotEvalCase(evalCase: AutopilotEvalCase): AutopilotEval
     slotMappings: { customerIdentifierFieldKeys: ['CPF'] },
     now: new Date(2026, 4, 5),
   });
+  const retrievedOfficialResponse = intentResolution.officialResponse
+    ? null
+    : findOfficialKnowledgeAnswer({
+        documents: rag.knowledgeBaseDocuments,
+        intent: intentResolution.intent,
+      });
   const slotExtraction = extractAutopilotSlots({
     customerMessage: evalCase.customerMessage,
     chatHistory: evalCase.chatHistory || '',
@@ -168,7 +174,7 @@ function runOfflineAutopilotEvalCase(evalCase: AutopilotEvalCase): AutopilotEval
   });
   const responseBeforePlanner = defaultResponseForCase({
     evalCase,
-    officialResponse: intentResolution.officialResponse,
+    officialResponse: intentResolution.officialResponse || retrievedOfficialResponse?.content,
     workflowResponse: workflowPlan.response,
   });
   const initialActions = evalCase.simulatedActions !== undefined

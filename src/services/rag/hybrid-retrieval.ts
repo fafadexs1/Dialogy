@@ -162,6 +162,20 @@ function stableDocumentKey(document: KnowledgeBaseDocument): string {
   return contentKey || normalize(document.name || document.id || 'doc');
 }
 
+function hydrateVectorDocumentFromStatic(
+  vectorDocument: KnowledgeBaseDocument,
+  staticDocuments?: KnowledgeBaseDocument[] | null
+): KnowledgeBaseDocument {
+  const fullDocument = (staticDocuments || []).find((document) => document.id === vectorDocument.id);
+  if (!fullDocument) return vectorDocument;
+
+  return {
+    ...fullDocument,
+    source: vectorDocument.source || 'vector',
+    priority: vectorDocument.priority ?? fullDocument.priority,
+  };
+}
+
 function scoreStaticDocument(input: {
   document: KnowledgeBaseDocument;
   queryTokens: string[];
@@ -293,7 +307,11 @@ export function mergeAndRerankKnowledgeDocuments(input: {
 }): Pick<HybridKnowledgeRetrievalResult, 'knowledgeBaseDocuments' | 'strategy' | 'knowledgeCoverage' | 'selected' | 'discarded'> {
   const queryTokens = tokenize(input.query);
   const scored: ScoredDocument[] = [
-    ...(input.vectorDocuments || []).map((document) => scoreVectorDocument({ document, queryTokens, intent: input.intent })),
+    ...(input.vectorDocuments || []).map((document) => scoreVectorDocument({
+      document: hydrateVectorDocumentFromStatic(document, input.staticDocuments),
+      queryTokens,
+      intent: input.intent,
+    })),
     ...(input.staticDocuments || []).map((document) => scoreStaticDocument({ document, queryTokens, intent: input.intent })),
   ].filter((item): item is ScoredDocument => Boolean(item));
 

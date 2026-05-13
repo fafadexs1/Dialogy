@@ -55,6 +55,10 @@ const VERTICAL_CATEGORY_EQUIVALENTS: Partial<Record<UniversalAutopilotIntent, st
   cancellation_request: ['cancelamento', 'cancellation_policy', 'subscription_cancellation'],
 };
 
+const LLM_COMPOSED_INTENTS = new Set<UniversalAutopilotIntent>([
+  'purchase_inquiry',
+]);
+
 const INTENT_KEYWORDS: Record<UniversalAutopilotIntent, RegExp[]> = {
   greeting: [/\b(ola|oi|oie|oii|bom dia|boa tarde|boa noite|hey)\b/],
   human_handoff: [
@@ -275,7 +279,13 @@ export function findOfficialKnowledgeAnswer(input: {
   documents: KnowledgeBaseDocument[] | null | undefined;
   intent: UniversalAutopilotIntent;
 }): { content: string; document: KnowledgeBaseDocument; score: number; preserveFormatting: boolean } | null {
-  if (input.intent === 'unknown' || input.intent === 'greeting' || input.intent === 'thanks' || input.intent === 'human_handoff') {
+  if (
+    input.intent === 'unknown' ||
+    input.intent === 'greeting' ||
+    input.intent === 'thanks' ||
+    input.intent === 'human_handoff' ||
+    LLM_COMPOSED_INTENTS.has(input.intent)
+  ) {
     return null;
   }
 
@@ -326,6 +336,39 @@ function isAffirmativeFollowUp(normalizedMessage: string): boolean {
   return /^(sim|quero|pode|manda|manda sim|mostrar|mostra|envia|envia sim|ok|beleza|claro|isso|esse|essa|pode ser)\b/.test(normalizedMessage);
 }
 
+function hasCatalogOfferContext(normalizedHistory: string): boolean {
+  return /\b(catalogo|cardapio|menu|opcoes|produtos|servicos|planos|pacotes|precos|valores|oferta|promocao|promocional|conhecer|interesse|internet|fibra|mega|megas)\b/.test(normalizedHistory);
+}
+
+function hasQuestionOrCatalogVerb(normalizedMessage: string): boolean {
+  return (
+    normalizedMessage.includes('?') ||
+    /\b(qual|quais|quanto|preco|precos|valor|valores|custa|tem|existe|ha|alguma|algum|mostra|mostrar|manda|mandar|envia|enviar|ver|conhecer|detalhe|detalhes|explica|canais|canal)\b/.test(normalizedMessage)
+  );
+}
+
+function hasSpecificCatalogSelection(normalizedMessage: string): boolean {
+  if (!normalizedMessage || hasQuestionOrCatalogVerb(normalizedMessage)) return false;
+
+  const hasSpeed = /\b\d{2,4}\s*(?:mega|megas|mb|gb)\b/.test(normalizedMessage);
+  const hasPointer = /\b(esse|essa|este|esta|desse|dessa|do|da|de|o|a)\b/.test(normalizedMessage);
+  const hasMoney = /\br\$\s*\d+|\b\d+[,.]\d{2}\b/.test(normalizedMessage);
+  const hasOrdinal = /\b(primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|setim[oa]|oitav[oa]|non[oa]|decim[oa])\b/.test(normalizedMessage);
+  const hasProductReference = /\b(plano|pacote|combo|produto|servico|curso|modelo|item|opcao|oferta|promo|promocional)\b/.test(normalizedMessage);
+  const hasNumberedOption = /\b(?:opcao|numero|n[ºo]?|item)\s*#?\s*\d{1,2}\b/.test(normalizedMessage);
+  const hasPromoSelection = /\b(?:esse|essa|este|esta|desse|dessa|o|a)?\s*(?:plano|pacote)?\s*(?:promo|promocional|oferta)\b/.test(normalizedMessage);
+
+  return (
+    (hasPointer && (hasSpeed || hasMoney || hasOrdinal || hasProductReference)) ||
+    hasNumberedOption ||
+    hasPromoSelection
+  );
+}
+
+function isSpecificCatalogSelectionFollowUp(normalizedMessage: string, normalizedHistory: string): boolean {
+  return hasSpecificCatalogSelection(normalizedMessage) && hasCatalogOfferContext(normalizedHistory);
+}
+
 function hasPurchaseCommitment(normalizedMessage: string): boolean {
   return (
     /\b(?:quero|vou querer|fico com|fechar|fecho|contratar|assinar|aderir|pegar)\b.{0,50}\b(?:esse|essa|ele|ela|plano|pacote|promo|promocional|oferta)\b/.test(normalizedMessage) ||
@@ -346,9 +389,13 @@ function detectIntent(customerMessage: string, chatHistory = ''): { intent: Univ
     return { intent: 'purchase_inquiry', confidence: 0.9, reason: 'Cliente indicou compromisso de compra/contratacao.' };
   }
 
+  if (isSpecificCatalogSelectionFollowUp(normalized, normalizedHistory)) {
+    return { intent: 'purchase_inquiry', confidence: 0.88, reason: 'Cliente selecionou uma opcao especifica apos catalogo/oferta no historico recente.' };
+  }
+
   if (
     isAffirmativeFollowUp(normalized) &&
-    /\b(catalogo|cardapio|menu|opcoes|produtos|servicos|planos|precos|valores|oferta|conhecer|interesse)\b/.test(normalizedHistory)
+    hasCatalogOfferContext(normalizedHistory)
   ) {
     return { intent: 'catalog_request', confidence: 0.82, reason: 'Confirmacao curta apos oferta/catalogo no historico recente.' };
   }

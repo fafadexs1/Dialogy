@@ -77,6 +77,59 @@ describe('autopilot universal intent resolver', () => {
     expect(resolution.confidence).toBeGreaterThan(0.8);
   });
 
+  it('treats short specific option selections after a catalog as purchase intent', () => {
+    const exactPlanDocument: KnowledgeBaseDocument = {
+      id: 'plans-exact',
+      name: 'Planos Velpro',
+      category: 'product_or_service_catalog',
+      content: [
+        'Voce deve mandar os planos exatamente com o mesmo espacamento e com os emojis.',
+        '',
+        'NOSSOS PLANOS DE INTERNET:',
+        '',
+        '500 MEGA (somente internet)',
+        'R$99,90/mes valor com desconto de pontualidade',
+        '',
+        '1000 MEGA (+ 100 canais de TV)',
+        'Wi-Fi 6',
+        'R$149,90/mes valor com desconto de pontualidade',
+      ].join('\n'),
+    };
+    const history = [
+      'Atendente: NOSSOS PLANOS DE INTERNET:',
+      '500 MEGA (somente internet)',
+      '1000 MEGA (+ 100 canais de TV)',
+      'Algum desses planos te interessou?',
+    ].join('\n');
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Esse de 1000 MEGA',
+      chatHistory: history,
+      knowledgeDocuments: [exactPlanDocument],
+    });
+
+    expect(resolution.intent).toBe('purchase_inquiry');
+    expect(resolution.reason).toContain('selecionou uma opcao especifica');
+  });
+
+  it('treats price-based selections after a catalog as purchase intent', () => {
+    const history = [
+      'Atendente: NOSSOS PLANOS DE INTERNET:',
+      '500 MEGA (somente internet)',
+      'R$99,90/mes valor com desconto de pontualidade',
+      '1000 MEGA (+ 100 canais de TV)',
+      'R$149,90/mes valor com desconto de pontualidade',
+    ].join('\n');
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Esse de R$99,90',
+      chatHistory: history,
+      knowledgeDocuments: [catalogDocument],
+    });
+
+    expect(resolution.intent).toBe('purchase_inquiry');
+  });
+
   it('does not use expired official documents', () => {
     const expiredDocument: KnowledgeBaseDocument = {
       id: 'expired-1',

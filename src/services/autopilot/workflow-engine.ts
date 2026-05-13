@@ -160,21 +160,13 @@ function hasOperationalLookupIntent(message: string): boolean {
   return /\b(consult|verific|checar|status|sinal|conexao|conexao|fatura|boleto|pagamento|cadastro|contrato|pedido|protocolo|funciona|erro|falha|sem acesso|sem sinal)\b/.test(normalized);
 }
 
-function isInternetPlanPurchaseCommitment(message: string): boolean {
+function hasOperationalDocumentLookupIntent(message: string): boolean {
   const normalized = normalizeText(message);
-  return (
-    /\b(plano|pacote|internet|fibra|mega|megas|promo|promocional|oferta)\b/.test(normalized) &&
-    /\b(quero|vou querer|fico com|fechar|fecho|contratar|assinar|aderir|pegar)\b/.test(normalized)
-  );
-}
+  const mentionsContractOrRegistration = /\b(contrato|cadastro|dados cadastrais|assinatura)\b/.test(normalized);
+  const asksForOperationalInfo = /\b(informac|dados|status|situacao|consult|verific|checar|sobre|detalhes?)\b/.test(normalized);
+  const asksForDocumentCopy = /\b(enviar|manda|mandar|emitir|baixar|download|copia|segunda via|2a via|pdf|documento)\b/.test(normalized);
 
-function buildInternetPlanPurchaseResponse(message: string): string {
-  const normalized = normalizeText(message);
-  const planLabel = /\b(promo|promocional|oferta)\b/.test(normalized)
-    ? 'esse plano promocional'
-    : 'esse plano';
-
-  return `Perfeito, vamos seguir com ${planLabel}. Para continuar, me envie nome completo, CPF/CNPJ e endereco completo para verificarmos a cobertura e prosseguir com a contratacao.`;
+  return mentionsContractOrRegistration && asksForOperationalInfo && !asksForDocumentCopy;
 }
 
 function buildCustomerIdentifierFields(input: {
@@ -238,6 +230,7 @@ function shouldAskCustomerIdentifierForOperationalWorkflow(input: {
   if (input.intent === 'order_or_request_status') return !input.slotExtraction.slots.order_or_request_id;
   if (input.intent === 'troubleshooting') return true;
   if (input.intent === 'support_request') return hasOperationalLookupIntent(input.customerMessage);
+  if (input.intent === 'document_request') return hasOperationalDocumentLookupIntent(input.customerMessage);
   return false;
 }
 
@@ -404,22 +397,6 @@ export function resolveAutopilotWorkflowPlan(input: {
     };
   }
 
-  if (
-    input.intentResolution.intent === 'purchase_inquiry' &&
-    isInternetPlanPurchaseCommitment(input.customerMessage)
-  ) {
-    return {
-      executionMode: 'direct_response',
-      response: buildInternetPlanPurchaseResponse(input.customerMessage),
-      actions: [],
-      reason: 'Cliente confirmou interesse em contratar plano de internet.',
-      missingSlots: [],
-      slotExtraction,
-      handledByWorkflow: true,
-      metadata: { ...baseMetadata, purchaseCommitment: true },
-    };
-  }
-
   if (shouldAskCustomerIdentifierForOperationalWorkflow({
     intent: input.intentResolution.intent,
     customerMessage: input.customerMessage,
@@ -461,7 +438,14 @@ export function resolveAutopilotWorkflowPlan(input: {
   }
 
   if (
-    (input.intentResolution.intent === 'troubleshooting' || input.intentResolution.intent === 'support_request') &&
+    (
+      input.intentResolution.intent === 'troubleshooting' ||
+      input.intentResolution.intent === 'support_request' ||
+      (
+        input.intentResolution.intent === 'document_request' &&
+        hasOperationalDocumentLookupIntent(input.customerMessage)
+      )
+    ) &&
     hasCustomerIdentifier(slotExtraction) &&
     hasOperationalLookupIntent(input.customerMessage)
   ) {
@@ -477,7 +461,7 @@ export function resolveAutopilotWorkflowPlan(input: {
         executionMode: 'pre_response_tools',
         response: null,
         actions,
-        reason: 'Workflow de suporte com identificador suficiente para consulta operacional.',
+        reason: 'Workflow operacional com identificador suficiente para consulta.',
         missingSlots: [],
         slotExtraction,
         handledByWorkflow: true,

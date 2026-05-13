@@ -157,6 +157,29 @@ const contactWithCpf: Contact = {
   custom_fields: { cpf: '529.982.247-25' },
 };
 
+const velproPlanCatalogDocument: KnowledgeBaseDocument = {
+  id: 'velpro-plan-catalog',
+  name: 'Planos de Internet',
+  category: 'product_or_service_catalog',
+  tags: ['isp_plan_catalog', 'pricing', 'offers'],
+  priority: 10,
+  content: [
+    'Voce deve mandar os planos exatamente com o mesmo espacamento e com os emojis.',
+    '',
+    'NOSSOS PLANOS DE INTERNET:',
+    '',
+    '500 MEGA (somente internet)',
+    'Wi-Fi 5',
+    'R$99,90/mes valor com desconto de pontualidade',
+    'R$109,90/mes valor do plano',
+    '',
+    '1000 MEGA (+ 100 canais de TV)',
+    'Wi-Fi 6',
+    'R$149,90/mes valor com desconto de pontualidade',
+    'R$159,90/mes valor do plano',
+  ].join('\n'),
+};
+
 export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
   {
     id: 'catalog_restaurant_menu',
@@ -199,6 +222,27 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
       ragTopDocumentId: 'active-offers',
       validatorDecision: 'approve',
       responseIncludes: ['BEMVINDO10'],
+    },
+  },
+  {
+    id: 'isp_specific_plan_selection_after_catalog',
+    title: 'Cliente escolhe plano especifico apos receber catalogo',
+    vertical: 'isp',
+    customerMessage: 'Esse de 1000 MEGA',
+    chatHistory: [
+      'Atendente: NOSSOS PLANOS DE INTERNET:',
+      '500 MEGA (somente internet)',
+      '1000 MEGA (+ 100 canais de TV)',
+      'Algum desses planos te interessou?',
+    ].join('\n'),
+    knowledgeDocuments: [velproPlanCatalogDocument],
+    expected: {
+      intent: 'purchase_inquiry',
+      ragCoverageAtLeast: 'high',
+      ragTopDocumentId: 'velpro-plan-catalog',
+      workflowExecutionMode: 'continue_llm',
+      workflowHandled: false,
+      validatorDecision: 'approve',
     },
   },
   {

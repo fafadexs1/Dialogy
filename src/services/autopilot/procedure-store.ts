@@ -61,7 +61,7 @@ async function ensureTable(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 /**
- * Get the active (running or waiting_input) procedure execution for a chat.
+ * Get the active (running, waiting_input, or waiting_tool) procedure execution for a chat.
  * Returns null if none exists.
  */
 export async function getActiveProcedureExecution(
@@ -73,7 +73,7 @@ export async function getActiveProcedureExecution(
   try {
     const result = await db.query(
       `SELECT * FROM procedure_executions
-       WHERE chat_id = $1 AND status IN ('running', 'waiting_input')
+       WHERE chat_id = $1 AND status IN ('running', 'waiting_input', 'waiting_tool')
        ORDER BY created_at DESC
        LIMIT 1`,
       [chatId],
@@ -199,7 +199,7 @@ export async function abortActiveProcedures(chatId: string): Promise<number> {
     const result = await db.query(
       `UPDATE procedure_executions SET
         status = 'aborted', completed_at = NOW(), updated_at = NOW()
-       WHERE chat_id = $1 AND status IN ('running', 'waiting_input')`,
+       WHERE chat_id = $1 AND status IN ('running', 'waiting_input', 'waiting_tool')`,
       [chatId],
     );
     return result.rowCount || 0;

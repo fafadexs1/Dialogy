@@ -161,7 +161,53 @@ describe('autopilot workflow engine', () => {
     ]);
   });
 
-  it('continues the sale when the customer confirms the promotional internet plan', () => {
+  it('uses CPF/CNPJ from CRM to consult contract information without asking again', () => {
+    const intentResolution = resolveAutopilotIntent({
+      customerMessage: 'Quero informacoes sobre meu contrato',
+    });
+    const plan = resolveAutopilotWorkflowPlan({
+      intentResolution,
+      customerMessage: 'Quero informacoes sobre meu contrato',
+      contact: {
+        ...contact,
+        custom_fields: { CPF: '529.982.247-25' },
+      },
+      enabledToolNames: ['sgp_fetch_contact_panel_data', 'crm_update_contact_custom_fields'],
+      availableTeams: [supportTeam],
+      knowledgeCoverage: 'low',
+      slotMappings: { customerIdentifierFieldKeys: ['CPF'] },
+    });
+
+    expect(intentResolution.intent).toBe('document_request');
+    expect(plan.executionMode).toBe('pre_response_tools');
+    expect(plan.missingSlots).toEqual([]);
+    expect(plan.slotExtraction.slots.customer_identifier).toBe('52998224725');
+    expect(plan.actions.map((action) => action.type)).toEqual(['sgp_fetch_contact_panel_data']);
+  });
+
+  it('asks for CPF/CNPJ before contract information lookup when CRM has no identifier', () => {
+    const intentResolution = resolveAutopilotIntent({
+      customerMessage: 'Quero informacoes sobre meu contrato',
+    });
+    const plan = resolveAutopilotWorkflowPlan({
+      intentResolution,
+      customerMessage: 'Quero informacoes sobre meu contrato',
+      contact: {
+        ...contact,
+        custom_fields: {},
+      },
+      enabledToolNames: ['sgp_fetch_contact_panel_data', 'crm_update_contact_custom_fields'],
+      availableTeams: [supportTeam],
+      knowledgeCoverage: 'low',
+      slotMappings: { customerIdentifierFieldKeys: ['CPF'] },
+    });
+
+    expect(plan.executionMode).toBe('direct_response');
+    expect(plan.response).toContain('CPF/CNPJ');
+    expect(plan.actions).toEqual([]);
+  });
+
+  it('lets the LLM continue the sale when the customer confirms the promotional internet plan', () => {
     const intentResolution = resolveAutopilotIntent({
       customerMessage: 'Esse plano promocional, acho que quero ele',
     });
@@ -175,10 +221,64 @@ describe('autopilot workflow engine', () => {
     });
 
     expect(intentResolution.intent).toBe('purchase_inquiry');
-    expect(plan.executionMode).toBe('direct_response');
-    expect(plan.response).toContain('esse plano promocional');
-    expect(plan.response).toContain('nome completo');
-    expect(plan.response).toContain('CPF/CNPJ');
-    expect(plan.response).toContain('endereco completo');
+    expect(plan.executionMode).toBe('continue_llm');
+    expect(plan.response).toBeNull();
+    expect(plan.handledByWorkflow).toBe(false);
+  });
+
+  it('lets the LLM continue the sale when the customer selects a specific internet plan after the catalog', () => {
+    const history = [
+      'Atendente: NOSSOS PLANOS DE INTERNET:',
+      '500 MEGA (somente internet)',
+      '1000 MEGA (+ 100 canais de TV)',
+      'Algum desses planos te interessou?',
+    ].join('\n');
+    const intentResolution = resolveAutopilotIntent({
+      customerMessage: 'Esse de 1000 MEGA',
+      chatHistory: history,
+    });
+    const plan = resolveAutopilotWorkflowPlan({
+      intentResolution,
+      customerMessage: 'Esse de 1000 MEGA',
+      chatHistory: history,
+      contact,
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+      availableTeams: [supportTeam],
+      knowledgeCoverage: 'high',
+    });
+
+    expect(intentResolution.intent).toBe('purchase_inquiry');
+    expect(plan.executionMode).toBe('continue_llm');
+    expect(plan.response).toBeNull();
+    expect(plan.handledByWorkflow).toBe(false);
+  });
+
+  it('lets the LLM continue the sale when the customer selects an internet catalog option by price', () => {
+    const history = [
+      'Atendente: NOSSOS PLANOS DE INTERNET:',
+      '500 MEGA (somente internet)',
+      'R$99,90/mes valor com desconto de pontualidade',
+      '1000 MEGA (+ 100 canais de TV)',
+      'R$149,90/mes valor com desconto de pontualidade',
+      'Algum desses planos te interessou?',
+    ].join('\n');
+    const intentResolution = resolveAutopilotIntent({
+      customerMessage: 'Esse de R$99,90',
+      chatHistory: history,
+    });
+    const plan = resolveAutopilotWorkflowPlan({
+      intentResolution,
+      customerMessage: 'Esse de R$99,90',
+      chatHistory: history,
+      contact,
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+      availableTeams: [supportTeam],
+      knowledgeCoverage: 'high',
+    });
+
+    expect(intentResolution.intent).toBe('purchase_inquiry');
+    expect(plan.executionMode).toBe('continue_llm');
+    expect(plan.response).toBeNull();
+    expect(plan.handledByWorkflow).toBe(false);
   });
 });

@@ -117,6 +117,38 @@ function extractTriggerKeywords(content: string): string[] {
   return [...new Set(keywords)].slice(0, 10);
 }
 
+function inferRequiredSlots(text: string): string[] {
+  const slots: string[] = [];
+  const normalized = text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (/\b(cpf|cnpj|documento|identificador)\b/.test(normalized)) {
+    slots.push('customer_identifier');
+  }
+  if (/\b(nome completo|nome do cliente|nome)\b/.test(normalized)) {
+    slots.push('name');
+  }
+  if (/\b(endereco|rua|bairro|cep)\b/.test(normalized)) {
+    slots.push('address');
+  }
+  if (/\b(telefone|whatsapp|celular)\b/.test(normalized)) {
+    slots.push('phone');
+  }
+  if (/\b(email|e-mail)\b/.test(normalized)) {
+    slots.push('email');
+  }
+  if (/\b(data|dia)\b/.test(normalized)) {
+    slots.push('date');
+  }
+  if (/\b(horario|hora)\b/.test(normalized)) {
+    slots.push('time');
+  }
+
+  return [...new Set(slots)];
+}
+
 // ---------------------------------------------------------------------------
 // Sentence Splitter
 // ---------------------------------------------------------------------------
@@ -240,7 +272,7 @@ function buildStepsFromSegments(segments: SentenceSegment[]): ProcedureStep[] {
         break;
       case 'gather_data':
         step.promptTemplate = segment.text;
-        step.requiredSlots = [];
+        step.requiredSlots = inferRequiredSlots(segment.text);
         break;
       case 'validate':
         step.condition = segment.text;

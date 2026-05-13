@@ -76,6 +76,7 @@ export type ProcedureGraph = {
 export type ProcedureExecutionStatus =
   | 'running'
   | 'waiting_input'
+  | 'waiting_tool'
   | 'completed'
   | 'failed'
   | 'aborted';
@@ -85,7 +86,7 @@ export type StepExecutionRecord = {
   stepLabel: string;
   startedAt: string;
   completedAt?: string;
-  status: 'success' | 'error' | 'skipped' | 'retried' | 'waiting';
+  status: 'success' | 'error' | 'skipped' | 'retried' | 'waiting' | 'waiting_tool';
   input?: unknown;
   output?: unknown;
   error?: string;

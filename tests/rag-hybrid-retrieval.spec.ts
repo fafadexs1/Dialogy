@@ -99,4 +99,45 @@ describe('hybrid RAG deterministic reranker', () => {
     expect(result.knowledgeBaseDocuments.length).toBeGreaterThan(0);
     expect(new Set(result.knowledgeBaseDocuments.map((document) => document.id)).size).toBe(result.knowledgeBaseDocuments.length);
   });
+
+  it('hydrates vector chunks with the full published knowledge document', () => {
+    const fullPlanDocument: KnowledgeBaseDocument = {
+      id: 'plans-full',
+      name: 'Planos de Internet',
+      category: 'product_or_service_catalog',
+      content: [
+        'Voce deve mandar os planos exatamente como estao na base.',
+        '',
+        '500 MEGA - R$99,90',
+        '600 MEGA - R$109,90',
+        '800 MEGA - R$125,90',
+        '1000 MEGA - R$149,90',
+      ].join('\n'),
+    };
+    const vectorChunk: KnowledgeBaseDocument = {
+      id: 'plans-full',
+      name: 'Planos de Internet',
+      content: '1000 MEGA - R$149,90',
+      source: 'vector',
+      priority: 100,
+    };
+    const intent = resolveAutopilotIntent({
+      customerMessage: 'Quais planos de internet?',
+      knowledgeDocuments: [fullPlanDocument],
+    });
+
+    const result = mergeAndRerankKnowledgeDocuments({
+      vectorDocuments: [vectorChunk],
+      staticDocuments: [fullPlanDocument],
+      query: 'Quais planos de internet?',
+      intent,
+    });
+
+    expect(result.selected[0]).toMatchObject({
+      id: 'plans-full',
+      source: 'vector',
+    });
+    expect(result.knowledgeBaseDocuments[0].content).toContain('500 MEGA');
+    expect(result.knowledgeBaseDocuments[0].content).toContain('1000 MEGA');
+  });
 });
