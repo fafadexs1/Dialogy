@@ -28,6 +28,16 @@ describe('autopilot slot extraction', () => {
     expect(result.invalidSlots[0]).toMatchObject({ name: 'customer_identifier' });
   });
 
+  it('does not block a new turn because an older history identifier was invalid', () => {
+    const result = extractAutopilotSlots({
+      customerMessage: 'Quais sao meus contratos?',
+      chatHistory: 'Cliente: 111.111.111-11\nAtendente: Vou consultar.',
+    });
+
+    expect(result.slots.customer_identifier).toBeUndefined();
+    expect(result.invalidSlots).toHaveLength(0);
+  });
+
   it('uses contact custom fields when the identifier is already known', () => {
     const contact = {
       id: 'contact-1',

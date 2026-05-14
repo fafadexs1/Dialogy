@@ -7,6 +7,7 @@ import type {
 } from '@/services/autopilot/intent-types';
 import { extractAutopilotSlots } from '@/services/autopilot/slots';
 import { getAutopilotWorkflow } from '@/services/autopilot/workflows';
+import { getCanonicalKnowledgeAnswer, isUnsafeAsCustomerFacingKnowledge } from '@/services/rag/document-safety';
 
 export type AutopilotIntentName = UniversalAutopilotIntent;
 
@@ -76,7 +77,7 @@ const INTENT_KEYWORDS: Record<UniversalAutopilotIntent, RegExp[]> = {
   ],
   promotion_request: [/\b(promocao|promocoes|promocional|promo|desconto|oferta|cupom|campanha|condicao especial)\b/],
   availability_request: [/\b(disponivel|disponibilidade|tem vaga|tem estoque|em estoque|atende minha regiao|area de entrega|tem horario)\b/],
-  billing_or_payment: [/\b(boleto|fatura|pix|pagamento|pagar|cobranca|segunda via|2a via|vencimento|debito|mensalidade atrasada)\b/],
+  billing_or_payment: [/\b(boletos?|faturas?|pix|pagamento|pagar|cobranca|segunda via|2a via|vencimento|debito|mensalidade atrasada)\b/],
   scheduling_request: [/\b(agendar|marcar|remarcar|desmarcar|horario|agenda|consulta|reserva|visita|reuniao)\b/],
   order_or_request_status: [/\b(status|andamento|rastreio|rastreamento|pedido|solicitacao|protocolo|entrega|chegou|atrasado)\b/],
   support_request: [/\b(suporte|ajuda|duvida|orientacao|como faco|como fazer|nao sei)\b/],
@@ -84,7 +85,7 @@ const INTENT_KEYWORDS: Record<UniversalAutopilotIntent, RegExp[]> = {
   change_request: [/\b(alterar|mudar|trocar|atualizar|corrigir).{0,40}\b(cadastro|dados|endereco|plano|pedido|horario|produto|servico)\b/],
   return_or_refund: [/\b(devolver|devolucao|troca|estorno|reembolso|garantia|arrependimento)\b/],
   cancellation_request: [/\b(cancelar|cancelamento|encerrar|desistir|suspender|rescindir)\b/],
-  document_request: [/\b(documento|contrato|nota fiscal|nf|comprovante|recibo|termo|declaracao|laudo|resultado)\b/],
+  document_request: [/\b(documento|contratos?|nota fiscal|nf|comprovante|recibo|termo|declaracao|laudo|resultado)\b/],
   complaint: [/\b(reclamacao|reclamar|insatisfeito|absurdo|pessimo|horrivel|raiva|procon|processo)\b/],
   thanks: [/\b(obrigado|obrigada|valeu|agradeco|grato|grata|perfeito|beleza|ok obrigado)\b/],
   unknown: [],
@@ -130,8 +131,7 @@ function getDocumentCategories(document: KnowledgeBaseDocument): string[] {
 }
 
 function getCanonicalAnswer(document: KnowledgeBaseDocument): string {
-  const value = getDocumentValue(document, ['canonicalAnswer', 'canonical_answer']);
-  return typeof value === 'string' ? value.trim() : '';
+  return getCanonicalKnowledgeAnswer(document);
 }
 
 function hasExactResponseDirective(document: KnowledgeBaseDocument): boolean {
@@ -186,6 +186,7 @@ function countRegexMatches(haystack: string, patterns: RegExp[]): number {
 
 function getOfficialDocumentScore(document: KnowledgeBaseDocument, intent: UniversalAutopilotIntent): number {
   if (!isDocumentActive(document)) return -500;
+  if (isUnsafeAsCustomerFacingKnowledge(document)) return -500;
 
   const content = String(document.content || '');
   const canonicalAnswer = getCanonicalAnswer(document);
@@ -236,10 +237,191 @@ function extractPromotionSection(content: string): string {
   return section.join('\n').trim();
 }
 
+const REQUEST_SCOPE_STOP_WORDS = new Set([
+  'a',
+  'as',
+  'ao',
+  'aos',
+  'com',
+  'da',
+  'das',
+  'de',
+  'do',
+  'dos',
+  'e',
+  'em',
+  'eu',
+  'me',
+  'meu',
+  'minha',
+  'no',
+  'na',
+  'nos',
+  'nas',
+  'o',
+  'os',
+  'para',
+  'por',
+  'que',
+  'queria',
+  'quero',
+  'quer',
+  'ver',
+  'veja',
+  'mostrar',
+  'mostra',
+  'mande',
+  'manda',
+  'envie',
+  'envia',
+  'apenas',
+  'somente',
+  'so',
+  'só',
+  'todos',
+  'todas',
+  'todo',
+  'toda',
+  'opcoes',
+  'opcao',
+  'catalogo',
+  'cardapio',
+  'lista',
+  'planos',
+  'plano',
+  'pacotes',
+  'pacote',
+  'produtos',
+  'produto',
+  'servicos',
+  'servico',
+  'itens',
+  'item',
+]);
+
+function uniqueValues(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function wordsFromScopeText(value: string): string[] {
+  const words = normalizeForIntent(value)
+    .split(/[^a-z0-9]+/g)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 2 && !REQUEST_SCOPE_STOP_WORDS.has(word) && !/^\d+$/.test(word));
+
+  return uniqueValues(
+    words
+  );
+}
+
+function hasScopeTerm(haystack: string, term: string): boolean {
+  const variants = [term];
+  if (term.length > 3 && term.endsWith('s') && !term.endsWith('ais') && !term.endsWith('eis') && !term.endsWith('ois')) {
+    variants.push(term.slice(0, -1));
+  }
+  if (term.length > 4 && term.endsWith('a')) variants.push(`${term.slice(0, -1)}o`);
+  if (term.length > 4 && term.endsWith('o')) variants.push(`${term.slice(0, -1)}a`);
+  return uniqueValues(variants).some((variant) => new RegExp(`\\b${variant}\\b`).test(haystack));
+}
+
+function hasScopeNumber(haystack: string, number: string): boolean {
+  return new RegExp(`\\b${number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[,.]0+)?\\b`).test(haystack);
+}
+
+function getRequestScope(customerMessage?: string | null): {
+  includeTerms: string[];
+  excludeTerms: string[];
+  numbers: string[];
+  hasExplicitScope: boolean;
+} {
+  const normalized = normalizeForIntent(customerMessage || '');
+  const includeFragments: string[] = [];
+  const excludeFragments: string[] = [];
+
+  for (const match of normalized.matchAll(/\b(?:com|inclui|incluindo|tem|contendo)\s+([^,.?!;]+)/g)) {
+    includeFragments.push(match[1]);
+  }
+  for (const match of normalized.matchAll(/\b(?:apenas|somente|so)\s+(?:os?|as?|opcoes?|itens?|pacotes?|planos?|produtos?|servicos?)?\s*(?:(?:com|de|do|da|para|sobre)\b)?\s*([^,.?!;]+)/g)) {
+    includeFragments.push(match[1]);
+  }
+  for (const match of normalized.matchAll(/\b(?:sem|exceto|menos|tirando|nao quero)\s+([^,.?!;]+)/g)) {
+    excludeFragments.push(match[1]);
+  }
+
+  const numbers = uniqueValues((normalized.match(/\b\d+(?:[,.]\d+)?\b/g) || []).map((value) => value.replace(',', '.')));
+  const includeTerms = wordsFromScopeText(includeFragments.join(' '));
+  const excludeTerms = wordsFromScopeText(excludeFragments.join(' '));
+
+  return {
+    includeTerms,
+    excludeTerms,
+    numbers,
+    hasExplicitScope: includeTerms.length > 0 || excludeTerms.length > 0 || numbers.length > 0,
+  };
+}
+
+function splitCatalogBlocks(content: string): { header: string[]; blocks: string[] } {
+  const normalized = content.replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return { header: [], blocks: [] };
+
+  const blocks = normalized
+    .split(/\n{2,}/g)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  const firstPlanIndex = blocks.findIndex((block) => {
+    const normalizedBlock = normalizeForIntent(block);
+    return /\b\d+(?:[,.]\d+)?\b/.test(normalizedBlock) || /\br\$\s*\d+/i.test(block);
+  });
+
+  if (firstPlanIndex <= 0) return { header: firstPlanIndex === 0 ? [] : [], blocks };
+  return {
+    header: blocks.slice(0, firstPlanIndex),
+    blocks: blocks.slice(firstPlanIndex),
+  };
+}
+
+function blockMatchesCatalogFilters(
+  block: string,
+  scope: ReturnType<typeof getRequestScope>
+): boolean {
+  const normalized = normalizeForIntent(block);
+  const isCatalogItem = (
+    /\b\d+(?:[,.]\d+)?\b/.test(normalized) ||
+    /\br\$\s*\d+/i.test(block) ||
+    /\b(?:plano|pacote|servico|produto|combo|item|curso|aula|imovel|casa|apartamento|consulta|procedimento|opcao|menu|prato)\b/.test(normalized)
+  );
+  if (!isCatalogItem) return false;
+  if (scope.excludeTerms.some((term) => hasScopeTerm(normalized, term))) return false;
+  if (scope.includeTerms.length > 0 && !scope.includeTerms.every((term) => hasScopeTerm(normalized, term))) return false;
+  if (scope.numbers.length > 0 && !scope.numbers.some((number) => hasScopeNumber(normalized, number))) return false;
+  return true;
+}
+
+function scopeCatalogContentToRequest(
+  content: string,
+  customerMessage: string | null | undefined,
+  intent?: UniversalAutopilotIntent
+): string {
+  if (!['catalog_request', 'pricing_request', 'promotion_request'].includes(intent || 'unknown')) return content;
+
+  const scope = getRequestScope(customerMessage);
+  if (!scope.hasExplicitScope) {
+    return content;
+  }
+
+  const { header, blocks } = splitCatalogBlocks(content);
+  const selected = blocks.filter((block) => blockMatchesCatalogFilters(block, scope));
+  if (selected.length === 0) return content;
+
+  return [...header, ...selected].join('\n\n').trim();
+}
+
 export function cleanKnowledgeCatalogContent(
   content: string,
   preserveSpacing = false,
-  intent?: UniversalAutopilotIntent
+  intent?: UniversalAutopilotIntent,
+  customerMessage?: string | null
 ): string {
   let normalized = content.replace(/\r\n?/g, '\n');
 
@@ -272,12 +454,14 @@ export function cleanKnowledgeCatalogContent(
   if (intent === 'promotion_request') {
     normalized = extractPromotionSection(normalized);
   }
+  normalized = scopeCatalogContentToRequest(normalized, customerMessage, intent);
   return normalized;
 }
 
 export function findOfficialKnowledgeAnswer(input: {
   documents: KnowledgeBaseDocument[] | null | undefined;
   intent: UniversalAutopilotIntent;
+  customerMessage?: string | null;
 }): { content: string; document: KnowledgeBaseDocument; score: number; preserveFormatting: boolean } | null {
   if (
     input.intent === 'unknown' ||
@@ -293,7 +477,12 @@ export function findOfficialKnowledgeAnswer(input: {
     .map((document) => {
       const canonicalAnswer = getCanonicalAnswer(document);
       const preserveFormatting = hasExactResponseDirective(document);
-      const content = cleanKnowledgeCatalogContent(canonicalAnswer || String(document.content || ''), preserveFormatting, input.intent);
+      const content = cleanKnowledgeCatalogContent(
+        canonicalAnswer || String(document.content || ''),
+        preserveFormatting,
+        input.intent,
+        input.customerMessage
+      );
       return {
         document,
         content,
@@ -338,6 +527,28 @@ function isAffirmativeFollowUp(normalizedMessage: string): boolean {
 
 function hasCatalogOfferContext(normalizedHistory: string): boolean {
   return /\b(catalogo|cardapio|menu|opcoes|produtos|servicos|planos|pacotes|precos|valores|oferta|promocao|promocional|conhecer|interesse|internet|fibra|mega|megas)\b/.test(normalizedHistory);
+}
+
+function hasCommercialCollectionContext(normalizedHistory: string): boolean {
+  return (
+    hasCatalogOfferContext(normalizedHistory) ||
+    /\b(contratar|assinar|adesao|instalacao|cadastro|comercial|disponibilidade|atende|regiao|bairro|endereco|cpf|cnpj|documento)\b/.test(normalizedHistory)
+  );
+}
+
+function isCustomerIdentifierOnly(normalizedMessage: string): boolean {
+  const digits = normalizedMessage.replace(/\D/g, '');
+  return (
+    (digits.length === 11 || digits.length === 14) &&
+    normalizedMessage.replace(/[\d.\-/\s]/g, '').length === 0
+  );
+}
+
+function isLocationFollowUp(normalizedMessage: string): boolean {
+  return (
+    /\b(?:moro|resido|fico|estou|sou)\s+(?:no|na|em|do|da)\s+[\p{L}\d][\p{L}\d\s.'-]{2,}$/u.test(normalizedMessage) ||
+    /\b(?:bairro|setor|condominio|condominio|quadra|rua|avenida|av\.?|cidade|regiao)\s+[\p{L}\d][\p{L}\d\s.'-]{2,}$/u.test(normalizedMessage)
+  );
 }
 
 function hasQuestionOrCatalogVerb(normalizedMessage: string): boolean {
@@ -393,6 +604,38 @@ function detectIntent(customerMessage: string, chatHistory = ''): { intent: Univ
     return { intent: 'purchase_inquiry', confidence: 0.88, reason: 'Cliente selecionou uma opcao especifica apos catalogo/oferta no historico recente.' };
   }
 
+  if (isLocationFollowUp(normalized) && hasCommercialCollectionContext(normalizedHistory)) {
+    return { intent: 'availability_request', confidence: 0.88, reason: 'Cliente informou localizacao em contexto comercial/disponibilidade.' };
+  }
+
+  if (isCustomerIdentifierOnly(normalized) && hasCommercialCollectionContext(normalizedHistory)) {
+    return { intent: 'purchase_inquiry', confidence: 0.88, reason: 'Cliente informou CPF/CNPJ como follow-up de atendimento comercial.' };
+  }
+
+  const explicitNonCatalogIntents: UniversalAutopilotIntent[] = [
+    'human_handoff',
+    'complaint',
+    'cancellation_request',
+    'return_or_refund',
+    'billing_or_payment',
+    'scheduling_request',
+    'order_or_request_status',
+    'troubleshooting',
+    'support_request',
+    'document_request',
+    'change_request',
+  ];
+
+  for (const intent of explicitNonCatalogIntents) {
+    if (matchesAny(normalized, intent)) {
+      return {
+        intent,
+        confidence: intent === 'human_handoff' ? 0.96 : 0.86,
+        reason: `Intencao explicita reconhecida antes de contexto de catalogo: ${intent}.`,
+      };
+    }
+  }
+
   if (
     isAffirmativeFollowUp(normalized) &&
     hasCatalogOfferContext(normalizedHistory)
@@ -413,6 +656,10 @@ function detectIntent(customerMessage: string, chatHistory = ''): { intent: Univ
     !/\b(agendar|marcar|remarcar|desmarcar|agenda|horario|reserva|visita|reuniao)\b/.test(normalized)
   ) {
     return { intent: 'pricing_request', confidence: 0.87, reason: 'Cliente perguntou valores, preco ou custo.' };
+  }
+
+  if (hasQuestionOrCatalogVerb(normalized) && getRequestScope(normalized).hasExplicitScope) {
+    return { intent: 'catalog_request', confidence: 0.84, reason: 'Cliente pediu um recorte especifico de catalogo/lista.' };
   }
 
   const orderedIntents: UniversalAutopilotIntent[] = [
@@ -478,6 +725,7 @@ export function resolveAutopilotIntent(input: {
   const official = findOfficialKnowledgeAnswer({
     documents: input.knowledgeDocuments,
     intent: detected.intent,
+    customerMessage: input.customerMessage,
   });
   const extractedSlots = extractSlots(input.customerMessage);
   const shouldRetrieveKnowledge = !['greeting', 'thanks', 'human_handoff'].includes(detected.intent);

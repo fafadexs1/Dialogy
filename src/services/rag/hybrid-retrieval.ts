@@ -2,6 +2,7 @@ import type { KnowledgeBaseDocument } from '@/lib/types';
 import { db } from '@/lib/db';
 import type { AutopilotIntentResolution, KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import type { ResolvedCasePromptItem } from './retrieval';
+import { getCanonicalKnowledgeAnswer, isUnsafeAsCustomerFacingKnowledge } from './document-safety';
 
 const DEFAULT_SELECTED_DOCUMENT_LIMIT = 5;
 const MAX_DOCUMENTS_PER_CATEGORY = 2;
@@ -103,8 +104,7 @@ function getDocumentCategories(document: KnowledgeBaseDocument): string[] {
 }
 
 function getCanonicalAnswer(document: KnowledgeBaseDocument): string {
-  const value = getDocumentValue(document, ['canonicalAnswer', 'canonical_answer']);
-  return typeof value === 'string' ? value.trim() : '';
+  return getCanonicalKnowledgeAnswer(document);
 }
 
 function getDocumentPriority(document: KnowledgeBaseDocument): number {
@@ -121,6 +121,7 @@ function parseDate(value: unknown): number | null {
 function isDocumentUsable(document: KnowledgeBaseDocument): boolean {
   const content = String(document.content || '').trim();
   if (!content && !getCanonicalAnswer(document)) return false;
+  if (isUnsafeAsCustomerFacingKnowledge(document)) return false;
 
   const status = normalizeCategory(String(getDocumentValue(document, ['status']) || 'active'));
   if (status === 'draft' || status === 'archived' || status === 'expired' || status === 'inactive') return false;
@@ -210,6 +211,7 @@ function scoreVectorDocument(input: {
   intent?: AutopilotIntentResolution | null;
 }): ScoredDocument | null {
   if (!String(input.document.content || '').trim()) return null;
+  if (isUnsafeAsCustomerFacingKnowledge(input.document)) return null;
 
   const category = getDocumentCategory(input.document);
   let score = 75;

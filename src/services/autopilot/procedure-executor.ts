@@ -20,6 +20,7 @@ import type {
 import { saveProcedureExecution } from './procedure-store';
 import { extractAutopilotSlots, isValidCustomerIdentifier, labelSlotForCustomer } from './slots';
 import type { AutopilotSlotName } from './intent-types';
+import { isConversationCloseRequest } from './close-intent';
 
 const MAX_STEPS_PER_INVOCATION = 6;
 
@@ -287,9 +288,20 @@ function executeGatherDataStep(
 function executeToolCallStep(
   step: ProcedureStep,
   context: ProcedureExecutionContext,
+  customerMessage: string,
 ): StepResult {
   if (!step.toolName) {
     return { status: 'error', error: 'Passo de tool_call sem toolName definido.' };
+  }
+
+  if (step.toolName === 'close_chat' && !isConversationCloseRequest(customerMessage)) {
+    return {
+      status: 'complete',
+      output: {
+        skipped: true,
+        reason: 'close_chat bloqueado porque a mensagem atual nao pediu encerramento.',
+      },
+    };
   }
 
   const existingResults = getToolResultsForStep(context, step.id);
@@ -494,7 +506,7 @@ export async function advanceProcedure(input: {
           result = executeGatherDataStep(currentStep, customerMessage, context, isResuming);
           break;
         case 'tool_call':
-          result = executeToolCallStep(currentStep, context);
+          result = executeToolCallStep(currentStep, context, customerMessage);
           break;
         case 'validate':
           result = executeValidateStep(currentStep, context);

@@ -196,6 +196,12 @@ export type MessageMetadata = {
   isAiAnalysis?: boolean;
   isToolExecution?: boolean;
   tool?: string;
+  agentToolRunId?: string;
+  agentToolName?: string;
+  agentToolStatus?: 'running' | 'success' | 'error' | 'rejected' | string;
+  agentToolInput?: unknown;
+  agentToolOutput?: unknown;
+  agentToolError?: string | null;
   customerMessage?: string;
   analysisKind?: 'transcription' | 'visual_summary' | 'video_summary' | 'media_summary' | 'routing_context';
   sourceMessageId?: string;

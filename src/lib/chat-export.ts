@@ -1,4 +1,5 @@
 import { Chat, Message, User } from './types';
+import { resolveClientMediaUrl } from './storage-url';
 
 type ExportSenderKind = 'user' | 'contact' | 'system_agent';
 
@@ -314,28 +315,42 @@ function renderAvatarHtml(avatarUrl: string | undefined, sender: ExportSenderInf
     `;
 }
 
-function renderMediaHtml(message: Message): string {
-    const mediaUrl = normalizeAssetUrl(pickString(message.mediaUrl, message.metadata?.mediaUrl));
+async function renderMediaHtml(
+    message: Message,
+    cache: Map<string, Promise<string | undefined>>
+): Promise<string> {
+    const rawMediaUrl = pickString(message.mediaUrl, message.metadata?.mediaUrl, message.metadata?.thumbnail);
+    const mediaUrl = normalizeAssetUrl(resolveClientMediaUrl(rawMediaUrl, { kind: 'media' }));
+    const imageUrl = normalizeAssetUrl(resolveClientMediaUrl(rawMediaUrl, { kind: 'image' }));
     const fileName = pickString(message.metadata?.fileName, message.metadata?.mimetype);
+    const mimetype = pickString(message.metadata?.mimetype) || '';
+    const isImage = message.type === 'image' || mimetype.startsWith('image/');
+    const isVideo = message.type === 'video' || mimetype.startsWith('video/');
+    const isAudio = message.type === 'audio' || mimetype.startsWith('audio/');
+    const isDocument = message.type === 'document' || (!isImage && !isVideo && !isAudio && Boolean(mediaUrl));
 
-    if (message.type === 'image' && mediaUrl) {
+    if (isImage && imageUrl) {
+        const embeddedImageUrl = await inlineAsset(imageUrl, cache);
+        const href = embeddedImageUrl || imageUrl;
         return `
-            <a href="${escapeAttribute(mediaUrl)}" target="_blank" rel="noopener noreferrer" class="media-link">
-                <img src="${escapeAttribute(mediaUrl)}" class="media-image" alt="Imagem da conversa" />
+            <a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="media-link">
+                <img src="${escapeAttribute(href)}" class="media-image" alt="Imagem da conversa" />
             </a>
         `;
     }
 
-    if ((message.type === 'video' || message.type === 'audio' || message.type === 'document') && mediaUrl) {
+    if ((isVideo || isAudio || isDocument) && mediaUrl) {
         const label =
-            message.type === 'video'
+            isVideo
                 ? 'Video'
-                : message.type === 'audio'
+                : isAudio
                     ? 'Audio'
                     : 'Arquivo';
+        const embeddedMediaUrl = mediaUrl.startsWith('data:') ? mediaUrl : undefined;
+        const href = embeddedMediaUrl || mediaUrl;
 
         return `
-            <a href="${escapeAttribute(mediaUrl)}" target="_blank" rel="noopener noreferrer" class="file-card">
+            <a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" class="file-card">
                 <span class="file-card-label">${label}</span>
                 <span class="file-card-name">${escapeHtml(fileName || 'Abrir anexo')}</span>
             </a>
@@ -345,8 +360,8 @@ function renderMediaHtml(message: Message): string {
     return '';
 }
 
-export async function generateChatHtml(chat: Chat, currentUser: User): Promise<string> {
-    const messages = chat.messages || [];
+export async function generateChatHtml(chat: Chat, currentUser: User, exportMessages?: Message[]): Promise<string> {
+    const messages = exportMessages?.length ? exportMessages : (chat.messages || []);
     const contactName = pickString(chat.contact.name, 'Contato') ?? 'Contato';
     const contactPhone = pickString(chat.contact.phone, chat.contact.phone_number_jid, 'Sem identificacao') ?? 'Sem identificacao';
     const instanceName = pickString(chat.instance_name);
@@ -757,7 +772,7 @@ export async function generateChatHtml(chat: Chat, currentUser: User): Promise<s
                 <span class="meta-pill"><strong>Exportado por</strong> ${escapeHtml(currentUser.name)}</span>
                 ${protocol ? `<span class="meta-pill"><strong>Protocolo</strong> ${escapeHtml(protocol)}</span>` : ''}
             </div>
-            <div class="chat-body">
+            <div class="chat-body" id="chat-body">
     `;
 
     let lastDate = '';
@@ -782,7 +797,7 @@ export async function generateChatHtml(chat: Chat, currentUser: User): Promise<s
         const messageText = message.content?.trim()
             ? `<div class="message-text">${formatExportText(message.content, Boolean(message.from_me))}</div>`
             : '';
-        const mediaHtml = renderMediaHtml(message);
+        const mediaHtml = await renderMediaHtml(message, assetCache);
         const senderChip =
             sender.kind === 'system_agent'
                 ? '<span class="sender-kind-chip">IA</span>'
@@ -814,8 +829,27 @@ export async function generateChatHtml(chat: Chat, currentUser: User): Promise<s
     }
 
     html += `
+                <div id="chat-end" class="chat-end" aria-hidden="true"></div>
             </div>
         </div>
+        <script>
+            (function () {
+                function scrollToLatestMessage() {
+                    var end = document.getElementById('chat-end');
+                    if (end && typeof end.scrollIntoView === 'function') {
+                        end.scrollIntoView({ block: 'end' });
+                        return;
+                    }
+                    window.scrollTo(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
+                }
+
+                window.addEventListener('load', function () {
+                    scrollToLatestMessage();
+                    window.setTimeout(scrollToLatestMessage, 100);
+                    window.setTimeout(scrollToLatestMessage, 500);
+                });
+            })();
+        </script>
     </body>
     </html>
     `;

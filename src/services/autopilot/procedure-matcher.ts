@@ -55,8 +55,10 @@ export function matchProcedure(input: {
     // Intent overlap
     const intentMatch = graph.triggerIntents.includes(intent);
     if (intentMatch) {
-      score += 3;
-      reasons.push(`intent "${intent}" match`);
+      if (intent !== 'unknown') {
+        score += 3;
+        reasons.push(`intent "${intent}" match`);
+      }
     }
 
     // Keyword hits

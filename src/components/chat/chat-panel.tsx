@@ -57,7 +57,11 @@ import {
     Contrast,
     Languages,
     Pencil,
-    SpellCheck2
+    SpellCheck2,
+    Activity,
+    AlertTriangle,
+    CheckCircle2,
+    Code2
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { createClient } from '@/lib/supabase/client';
@@ -107,6 +111,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../ui/sheet';
 import { AudioRecorder } from './audio-recorder';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
@@ -151,6 +156,307 @@ type TextSendJob = {
     metadata: MessageMetadata;
     startedAt: number;
 };
+
+const TOOL_EXECUTION_STALE_MS = 5 * 60 * 1000;
+
+type ToolExecutionStatus = 'running' | 'success' | 'error' | 'rejected' | 'stale' | string;
+
+type ToolExecutionItem = {
+    id: string;
+    toolName: string;
+    status: ToolExecutionStatus;
+    content: string;
+    startMessage?: Message;
+    resultMessage?: Message;
+    createdAt: string;
+    finishedAt?: string | null;
+    timestamp?: string;
+};
+
+function isToolExecutionMessage(message: Message): boolean {
+    return Boolean(message.metadata?.isToolExecution || message.metadata?.tool === 'agent_tool_status');
+}
+
+function resolveToolStatusLabel(status?: ToolExecutionStatus): string {
+    if (status === 'running') return 'Executando';
+    if (status === 'success') return 'Concluido';
+    if (status === 'error') return 'Falhou';
+    if (status === 'rejected') return 'Rejeitado';
+    if (status === 'stale') return 'Sem retorno';
+    return 'Registrado';
+}
+
+function resolveToolStatusClass(status?: ToolExecutionStatus): string {
+    if (status === 'success') return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200';
+    if (status === 'error') return 'border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-200';
+    if (status === 'rejected' || status === 'stale') return 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200';
+    if (status === 'running') return 'border-cyan-500/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200';
+    return 'border-slate-500/20 bg-slate-500/10 text-slate-700 dark:text-slate-200';
+}
+
+function resolveToolStatusIcon(status?: ToolExecutionStatus) {
+    if (status === 'success') return CheckCircle2;
+    if (status === 'error' || status === 'rejected' || status === 'stale') return AlertTriangle;
+    if (status === 'running') return Loader2;
+    return Activity;
+}
+
+function getToolMessageTime(message: Message): number {
+    const parsed = new Date(message.createdAt).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function resolveToolMessageKey(message: Message): string {
+    const metadata = message.metadata || {};
+    return metadata.agentToolRunId || metadata.agentToolName || metadata.tool || 'agent_tool';
+}
+
+function buildToolExecutionItems(messages: Message[], now = Date.now()): ToolExecutionItem[] {
+    const sortedMessages = messages
+        .slice()
+        .sort((a, b) => getToolMessageTime(a) - getToolMessageTime(b));
+    const pendingByKey = new Map<string, Message[]>();
+    const executions: ToolExecutionItem[] = [];
+
+    for (const message of sortedMessages) {
+        const metadata = message.metadata || {};
+        const status = metadata.agentToolStatus || 'registered';
+        const key = resolveToolMessageKey(message);
+        const toolName = metadata.agentToolName || metadata.tool || 'agent_tool';
+
+        if (status === 'running') {
+            const pending = pendingByKey.get(key) || [];
+            pending.push(message);
+            pendingByKey.set(key, pending);
+            continue;
+        }
+
+        const pending = pendingByKey.get(key) || [];
+        const startMessage = pending.pop();
+        if (pending.length > 0) {
+            pendingByKey.set(key, pending);
+        } else {
+            pendingByKey.delete(key);
+        }
+
+        executions.push({
+            id: startMessage ? `${startMessage.id}:${message.id}` : message.id,
+            toolName,
+            status,
+            content: message.content,
+            startMessage,
+            resultMessage: message,
+            createdAt: startMessage?.createdAt || message.createdAt,
+            finishedAt: message.createdAt,
+            timestamp: message.timestamp,
+        });
+    }
+
+    for (const pendingMessages of pendingByKey.values()) {
+        for (const message of pendingMessages) {
+            const metadata = message.metadata || {};
+            const ageMs = now - getToolMessageTime(message);
+            executions.push({
+                id: message.id,
+                toolName: metadata.agentToolName || metadata.tool || 'agent_tool',
+                status: ageMs > TOOL_EXECUTION_STALE_MS ? 'stale' : 'running',
+                content: message.content,
+                startMessage: message,
+                createdAt: message.createdAt,
+                finishedAt: null,
+                timestamp: message.timestamp,
+            });
+        }
+    }
+
+    return executions.sort((a, b) => {
+        const left = new Date(a.finishedAt || a.createdAt).getTime();
+        const right = new Date(b.finishedAt || b.createdAt).getTime();
+        return (Number.isNaN(right) ? 0 : right) - (Number.isNaN(left) ? 0 : left);
+    });
+}
+
+function resolveToolOutputText(execution: ToolExecutionItem): string {
+    const metadata = execution.resultMessage?.metadata || execution.startMessage?.metadata || {};
+    const output = metadata.agentToolOutput;
+    const error = metadata.agentToolError;
+
+    if (error) return String(error);
+    if (output !== undefined && output !== null) {
+        try {
+            return JSON.stringify(output, null, 2);
+        } catch {
+            return String(output);
+        }
+    }
+    if (execution.status === 'running') {
+        return 'Aguardando retorno da API.';
+    }
+    if (execution.status === 'stale') {
+        return 'A ferramenta foi iniciada, mas nenhum retorno final foi registrado. Ela nao esta mais em execucao agora.';
+    }
+    return 'Resultado detalhado nao esta disponivel para esta execucao.';
+}
+
+function ToolExecutionsSheet({
+    open,
+    onOpenChange,
+    executions,
+    workspaceTimezone,
+}: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    executions: ToolExecutionItem[];
+    workspaceTimezone: string;
+}) {
+    const latestStatus = executions[0]?.status;
+    const runningCount = executions.filter((execution) => execution.status === 'running').length;
+    const successCount = executions.filter((execution) => execution.status === 'success').length;
+    const failedCount = executions.filter((execution) => ['error', 'rejected', 'stale'].includes(String(execution.status || ''))).length;
+
+    return (
+        <Sheet open={open} onOpenChange={onOpenChange}>
+            <SheetContent side="right" className="flex w-full flex-col overflow-hidden border-slate-200/80 bg-white/95 p-0 backdrop-blur-xl dark:border-white/10 dark:bg-[#050507]/95 sm:max-w-[520px]">
+                <SheetHeader className="border-b border-slate-200/80 px-5 py-4 text-left dark:border-white/10">
+                    <div className="flex items-start gap-3">
+                        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 text-cyan-600 dark:text-cyan-200">
+                            <Activity className="h-5 w-5" />
+                            {runningCount > 0 && (
+                                <motion.span
+                                    className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-cyan-400"
+                                    animate={{ opacity: [0.35, 1, 0.35], scale: [0.8, 1.12, 0.8] }}
+                                    transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+                                />
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <SheetTitle className="text-base">Execucoes da IA</SheetTitle>
+                            <SheetDescription className="mt-1">
+                                Ferramentas, chamadas e retornos tecnicos deste atendimento.
+                            </SheetDescription>
+                        </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                        <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Sucesso</div>
+                            <div className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-300">{successCount}</div>
+                        </div>
+                        <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Rodando</div>
+                            <div className="mt-1 text-lg font-semibold text-cyan-600 dark:text-cyan-300">{runningCount}</div>
+                        </div>
+                        <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Falhas</div>
+                            <div className="mt-1 text-lg font-semibold text-red-600 dark:text-red-300">{failedCount}</div>
+                        </div>
+                    </div>
+                    {latestStatus && (
+                        <div className={cn("mt-3 inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium", resolveToolStatusClass(latestStatus))}>
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                            Ultimo status: {resolveToolStatusLabel(latestStatus)}
+                        </div>
+                    )}
+                </SheetHeader>
+
+                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                    {executions.length === 0 ? (
+                        <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center text-sm text-muted-foreground">
+                            <div className="mb-3 rounded-lg border border-border bg-muted/40 p-3">
+                                <Activity className="h-6 w-6" />
+                            </div>
+                            Nenhuma execucao registrada neste chat.
+                        </div>
+                    ) : (
+                        <div className="relative space-y-3">
+                            <div className="absolute bottom-3 left-5 top-3 w-px bg-gradient-to-b from-cyan-400/40 via-border to-transparent" />
+                            {executions.map((execution, index) => {
+                                const status = execution.status || 'registered';
+                                const StatusIcon = resolveToolStatusIcon(status);
+                                const createdAt = new Date(execution.finishedAt || execution.createdAt);
+                                const timeLabel = Number.isNaN(createdAt.getTime())
+                                    ? execution.timestamp
+                                    : formatInTimeZone(createdAt, workspaceTimezone, "dd/MM/yyyy 'as' HH:mm", { locale: ptBR });
+                                const outputText = resolveToolOutputText(execution);
+                                const canCopy = outputText
+                                    && !outputText.startsWith('Aguardando retorno')
+                                    && !outputText.startsWith('A ferramenta foi iniciada')
+                                    && !outputText.startsWith('Resultado detalhado');
+
+                                return (
+                                    <motion.div
+                                        key={execution.id}
+                                        initial={{ opacity: 0, x: 24 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ duration: 0.28, delay: Math.min(index * 0.03, 0.18), ease: 'easeOut' }}
+                                        className="relative pl-12"
+                                    >
+                                        <div className={cn("absolute left-0 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-lg border bg-background shadow-sm", resolveToolStatusClass(status))}>
+                                            <StatusIcon className={cn("h-4 w-4", status === 'running' && "animate-spin")} />
+                                        </div>
+                                        <div className="overflow-hidden rounded-lg border border-border/80 bg-background/80 shadow-sm dark:border-white/10 dark:bg-white/[0.03]">
+                                            {status === 'running' && (
+                                                <motion.div
+                                                    className="h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
+                                                    animate={{ x: ['-100%', '100%'] }}
+                                                    transition={{ duration: 1.3, repeat: Infinity, ease: 'easeInOut' }}
+                                                />
+                                            )}
+                                            <div className="p-3">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium", resolveToolStatusClass(status))}>
+                                                                {resolveToolStatusLabel(status)}
+                                                            </span>
+                                                            <span className="truncate font-mono text-xs text-muted-foreground">{execution.toolName}</span>
+                                                        </div>
+                                                        <p className="mt-2 text-sm text-foreground">{execution.content}</p>
+                                                        <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                                                            <Clock className="h-3 w-3" />
+                                                            {timeLabel}
+                                                        </p>
+                                                    </div>
+                                                    {canCopy && (
+                                                        <TooltipProvider delayDuration={150}>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                                                                        onClick={() => navigator.clipboard?.writeText(outputText)}
+                                                                    >
+                                                                        <Copy className="h-3.5 w-3.5" />
+                                                                    </Button>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>Copiar resultado</TooltipContent>
+                                                            </Tooltip>
+                                                        </TooltipProvider>
+                                                    )}
+                                                </div>
+
+                                                <div className="mt-3 rounded-lg border border-border/70 bg-muted/30">
+                                                    <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                        <Code2 className="h-3.5 w-3.5" />
+                                                        Resultado da API
+                                                    </div>
+                                                    <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words p-3 text-xs leading-relaxed text-foreground">
+                                                        {outputText}
+                                                    </pre>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </SheetContent>
+        </Sheet>
+    );
+}
 
 function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
     const [internalIsOpen, setInternalIsOpen] = React.useState(false);
@@ -480,6 +786,8 @@ export default function ChatPanel({
 
     const [isAiAgentActive, setIsAiAgentActive] = useState(chat?.is_autopilot_active ?? false);
     const [isInternalNote, setIsInternalNote] = useState(false);
+    const [isToolExecutionsOpen, setIsToolExecutionsOpen] = useState(false);
+    const [toolExecutionNow, setToolExecutionNow] = useState(() => Date.now());
     const autopilotSwitchTouchedRef = useRef(false);
     const [isAiTyping, setIsAiTyping] = useState(false);
     const canLoadOlderRef = useRef(canLoadOlder);
@@ -751,7 +1059,7 @@ export default function ChatPanel({
         }
     }, [showFullHistory, chat?.contact?.id, currentUser.activeWorkspaceId, isProtocolScoped]);
 
-    const messagesToRender = useMemo(() => {
+    const timelineMessages = useMemo(() => {
         if (isProtocolScoped) {
             return chat?.messages || [];
         }
@@ -761,6 +1069,34 @@ export default function ChatPanel({
         // FIX: Use messagesByChat from store instead of chat.messages (which only has latest)
         return chat && messagesByChat[chat.id] ? messagesByChat[chat.id] : (chat?.messages || []);
     }, [isProtocolScoped, showFullHistory, allContactMessages, chat?.messages, chat?.id, messagesByChat]);
+
+    const hasRawRunningToolExecution = useMemo(() => {
+        return timelineMessages.some((message) => (
+            isToolExecutionMessage(message) && message.metadata?.agentToolStatus === 'running'
+        ));
+    }, [timelineMessages]);
+
+    useEffect(() => {
+        if (!hasRawRunningToolExecution) return;
+
+        const intervalId = window.setInterval(() => {
+            setToolExecutionNow(Date.now());
+        }, 30000);
+
+        return () => window.clearInterval(intervalId);
+    }, [hasRawRunningToolExecution]);
+
+    const toolExecutionEntries = useMemo(() => {
+        return buildToolExecutionItems(timelineMessages.filter(isToolExecutionMessage), toolExecutionNow);
+    }, [timelineMessages, toolExecutionNow]);
+
+    const hasRunningToolExecution = useMemo(() => {
+        return toolExecutionEntries.some((execution) => execution.status === 'running');
+    }, [toolExecutionEntries]);
+
+    const messagesToRender = useMemo(() => {
+        return timelineMessages.filter((message) => !isToolExecutionMessage(message));
+    }, [timelineMessages]);
 
     const pendingStatusIds = useMemo(() => {
         if (!chat?.id) return [];
@@ -862,7 +1198,9 @@ export default function ChatPanel({
     const padBottom = 0;
 
     const runAiAgent = useCallback(async () => {
-        const storeMessages = chat?.id ? (messagesByChat[chat.id] || []) : [];
+        const storeMessages = chat?.id
+            ? (messagesByChat[chat.id] || []).filter((message) => !isToolExecutionMessage(message))
+            : [];
         const lastMessage = storeMessages.length ? storeMessages[storeMessages.length - 1] : null;
         const chatId = chat?.id;
 
@@ -980,7 +1318,8 @@ export default function ChatPanel({
     const handleExportChat = async () => {
         if (!chat) return;
         try {
-            const html = await generateChatHtml(chat, currentUser);
+            const exportMessages = messagesToRender.length > 0 ? messagesToRender : (messagesByChat[chat.id] || chat.messages || []);
+            const html = await generateChatHtml(chat, currentUser, exportMessages);
             const blob = new Blob([html], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1003,7 +1342,7 @@ export default function ChatPanel({
         if (!chat) return;
 
         // Use store messages for complete data
-        const msgs = messagesByChat[chat.id] || chat.messages || [];
+        const msgs = (messagesByChat[chat.id] || chat.messages || []).filter((message) => !isToolExecutionMessage(message));
         if (!msgs.length) {
             toast({ title: "Aviso", description: "Nenhuma mensagem carregada para treinar.", variant: 'destructive' });
             return;
@@ -1912,6 +2251,12 @@ export default function ChatPanel({
 
     return (
         <div className="flex-1 flex flex-col min-w-0 relative h-full bg-transparent">
+            <ToolExecutionsSheet
+                open={isToolExecutionsOpen}
+                onOpenChange={setIsToolExecutionsOpen}
+                executions={toolExecutionEntries}
+                workspaceTimezone={workspaceTimezone}
+            />
             {/* Header */}
             {/* Header */}
             <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.18)] backdrop-blur-xl md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]/95 dark:shadow-[0_12px_30px_-24px_rgba(0,0,0,0.8)]">
@@ -2052,6 +2397,15 @@ export default function ChatPanel({
                                     <FileText className="mr-2 h-4 w-4" />
                                     <span>Salvar conversa</span>
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
+                                    <Activity className="mr-2 h-4 w-4" />
+                                    <span>Execucoes da IA</span>
+                                    {toolExecutionEntries.length > 0 && (
+                                        <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
+                                            {toolExecutionEntries.length}
+                                        </Badge>
+                                    )}
+                                </DropdownMenuItem>
 
 
 
@@ -2093,6 +2447,15 @@ export default function ChatPanel({
                                     <DropdownMenuItem onClick={handleTrainAgent}>
                                         <Brain className="mr-2 h-4 w-4" />
                                         <span>Treinar Agente</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
+                                        <Activity className="mr-2 h-4 w-4" />
+                                        <span>Execucoes da IA</span>
+                                        {toolExecutionEntries.length > 0 && (
+                                            <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
+                                                {toolExecutionEntries.length}
+                                            </Badge>
+                                        )}
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <div className="px-2 py-1.5 flex items-center justify-between">
@@ -2167,6 +2530,25 @@ export default function ChatPanel({
                                         </Button>
                                     </TooltipTrigger>
                                     <TooltipContent><p>Treinar Agente</p></TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="relative text-slate-500 hover:bg-cyan-500/10 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-300"
+                                            onClick={() => setIsToolExecutionsOpen(true)}
+                                        >
+                                            <Activity className={cn("h-4 w-4", hasRunningToolExecution && "animate-pulse")} />
+                                            {toolExecutionEntries.length > 0 && (
+                                                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-1 text-[10px] font-semibold text-white">
+                                                    {toolExecutionEntries.length > 9 ? '9+' : toolExecutionEntries.length}
+                                                </span>
+                                            )}
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent><p>Execucoes da IA</p></TooltipContent>
                                 </Tooltip>
 
                                 <Popover>

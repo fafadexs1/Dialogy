@@ -598,6 +598,13 @@ export default function AutopilotDetailPage() {
     setKnowledgeDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, name } : doc)));
   };
 
+  const handleUpdateDocCategory = (id: string, category: string) => {
+    const normalizedCategory = category.trim() || null;
+    setKnowledgeDocuments((prev) =>
+      prev.map((doc) => (doc.id === id ? { ...doc, category: normalizedCategory } : doc))
+    );
+  };
+
   const handleRemoveDoc = (id: string) => {
     setKnowledgeDocuments((prev) => prev.filter((doc) => doc.id !== id));
   };
@@ -897,6 +904,7 @@ export default function AutopilotDetailPage() {
                 onRemove={handleRemoveDoc}
                 onUpdateContent={handleUpdateDoc}
                 onUpdateName={handleUpdateDocName}
+                onUpdateCategory={handleUpdateDocCategory}
                 onAddManual={handleAddManualDoc}
                 isUploading={isUploading}
               />

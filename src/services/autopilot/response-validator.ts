@@ -5,6 +5,7 @@ import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } 
 import { labelSlotForCustomer, type SlotExtractionResult } from './slots';
 import { hasConversationCloseClaim } from './close-intent';
 import { hasExternalLookupPromise } from './tool-planner';
+import { buildSgpResponseFromToolResults } from '@/services/autopilot-sgp-response';
 
 export type ResponseValidatorDecision =
   | 'approve'
@@ -83,10 +84,56 @@ function hasLookupSuccessClaim(response: string): boolean {
   );
 }
 
+function asksForPaymentArtifact(message: string): boolean {
+  const normalized = normalizeText(message);
+  const asksToSendInvoice = (
+    /\b(manda|mandar|envia|enviar|passa|passar|informa|informar|preciso|quero|gerar|emitir)\b.{0,60}\b(boleto|fatura)\b/.test(normalized) ||
+    /\b(boleto|fatura)\b.{0,60}\b(manda|mandar|envia|enviar|passa|passar|informa|informar|gerar|emitir)\b/.test(normalized)
+  );
+  return /\b(pix|segunda via|2a via|link de pagamento|linha digitavel|codigo de barras)\b/.test(normalized) || asksToSendInvoice;
+}
+
+function hasPaymentArtifact(response: string): boolean {
+  const normalized = normalizeText(response);
+  return (
+    /\bpix copia e cola\b/.test(normalized) ||
+    /\bhttps?:\/\/\S+/i.test(response) ||
+    /\b\d{5}\.?\d{5}\s+\d{5}\.?\d{6}\s+\d{5}\.?\d{6}\s+\d\s+\d{14}\b/.test(response) ||
+    /\b\d{40,}\b/.test(response)
+  );
+}
+
+function hasSuccessfulPaymentData(toolResults: AgentToolExecutionResult[]): boolean {
+  return toolResults.some((result) => {
+    if (result.status !== 'success' || result.toolName !== 'sgp_fetch_contact_panel_data') return false;
+    const output = result.output as any;
+    const invoices = Array.isArray(output?.invoices) ? output.invoices : [];
+    return invoices.some((invoice: any) => (
+      invoice &&
+      invoice.isPaid !== true &&
+      invoice.isCancelled !== true &&
+      (invoice.isOpen === true || /\b(aberto|open|pendente|pending|vencido|overdue)\b/.test(normalizeText(String(invoice.status || '')))) &&
+      Boolean(invoice.pixCode || invoice.paymentLink || invoice.digitableLine || invoice.barcode)
+    ));
+  });
+}
+
 function hasTransferPromise(response: string): boolean {
   const normalized = normalizeText(response);
   return /\b(vou|irei|vamos)\s+(encaminhar|transferir|passar|chamar)\b/.test(normalized) &&
     /\b(equipe|setor|atendente|humano|responsavel)\b/.test(normalized);
+}
+
+function hasExplicitHandoffRequest(message: string): boolean {
+  const normalized = normalizeText(message);
+  return (
+    /\b(atendente|humano|pessoa|consultor|vendedor|equipe|setor)\b/.test(normalized) &&
+    /\b(falar|conversar|chamar|transferir|encaminhar|passar|me passa|quero)\b/.test(normalized)
+  );
+}
+
+function isCommercialSelfServiceIntent(intent: AutopilotIntentResolution['intent']): boolean {
+  return ['purchase_inquiry', 'catalog_request', 'pricing_request', 'promotion_request', 'availability_request'].includes(intent);
 }
 
 function hasPlannedClose(actions: AgentToolAction[]): boolean {
@@ -103,6 +150,17 @@ function hasInternalLeak(response: string): boolean {
     /\b(TypeError|ReferenceError|SyntaxError|stack trace|Unhandled|ECONNRESET|ETIMEDOUT)\b/i.test(response) ||
     /\b(api[_-]?key|authorization|bearer\s+[a-z0-9._-]+|token|command_id|cpfFieldId)\b/i.test(response) ||
     /\b(sgp_fetch_|mcp_call_tool|crm_update_contact_custom_fields|transfer_chat|close_chat|add_internal_note)\b/i.test(response)
+  );
+}
+
+function hasConversationTranscriptLeak(response: string): boolean {
+  const compacted = compact(response);
+  const speakerLabels = compacted.match(/\b(?:Cliente|Atendente|Agente|Usuario|Usuário|Bot)\s*:/g) || [];
+
+  return (
+    speakerLabels.length >= 3 ||
+    /\bCliente:\s+[\s\S]{10,}\bAtendente:\s+[\s\S]{10,}\bCliente:/.test(compacted) ||
+    /\bAtendente:\s+[\s\S]{10,}\bCliente:\s+[\s\S]{10,}\bAtendente:/.test(compacted)
   );
 }
 
@@ -219,11 +277,40 @@ export function validateAutopilotResponse(input: {
     };
   }
 
+  if (hasConversationTranscriptLeak(originalResponse)) {
+    reasons.push('conversation_transcript_leak');
+    return {
+      decision: 'replace_with_fallback',
+      response: fallbackResponse(input.fallbackReply),
+      actions: [],
+      reasons,
+      metadata: { decision: 'replace_with_fallback', reasons, source: input.source },
+    };
+  }
+
   const plannedLookup = hasPlannedLookup(input.plannedActions);
   const successfulLookup = hasSuccessfulLookup(input.toolResults);
   const failedLookup = hasFailedLookup(input.toolResults);
   const lookupPromise = hasExternalLookupPromise(originalResponse);
   const lookupSuccessClaim = hasLookupSuccessClaim(originalResponse);
+
+  if (
+    asksForPaymentArtifact(input.customerMessage) &&
+    hasSuccessfulPaymentData(input.toolResults) &&
+    !hasPaymentArtifact(originalResponse)
+  ) {
+    const repairedPaymentResponse = buildSgpResponseFromToolResults(input.toolResults, input.customerMessage);
+    if (repairedPaymentResponse && hasPaymentArtifact(repairedPaymentResponse)) {
+      reasons.push('payment_artifact_missing_from_response');
+      return {
+        decision: 'repair',
+        response: repairedPaymentResponse,
+        actions: [],
+        reasons,
+        metadata: { decision: 'repair', reasons, source: input.source },
+      };
+    }
+  }
 
   if (lookupPromise && !plannedLookup && !successfulLookup) {
     const missingSlots = findMissingLookupSlots({
@@ -286,6 +373,22 @@ export function validateAutopilotResponse(input: {
       actions: [],
       reasons,
       metadata: { decision: 'replace_with_fallback', reasons, source: input.source },
+    };
+  }
+
+  if (
+    hasTransferPromise(originalResponse) &&
+    !hasPlannedTransfer(input.plannedActions) &&
+    isCommercialSelfServiceIntent(input.intentResolution.intent) &&
+    !hasExplicitHandoffRequest(input.customerMessage)
+  ) {
+    reasons.push('commercial_transfer_promise_suppressed');
+    return {
+      decision: 'repair',
+      response: 'Posso seguir com seu atendimento por aqui. Para continuar, me informe os dados solicitados ou a informacao que falta para a contratacao.',
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
     };
   }
 

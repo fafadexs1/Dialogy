@@ -79,6 +79,16 @@ describe('autopilot response validator', () => {
     expect(result.reasons).toContain('internal_or_technical_leak');
   });
 
+  it('replaces leaked conversation transcripts with fallback', () => {
+    const result = validate({
+      message: 'Pode me mandar as faturas?',
+      response: 'Cliente: Ola Cliente: Quanto ta os plano? Atendente: Temos planos. Cliente: Tem no meu bairro? Atendente: Sim, atendemos.',
+    });
+
+    expect(result.decision).toBe('replace_with_fallback');
+    expect(result.reasons).toContain('conversation_transcript_leak');
+  });
+
   it('asks for CPF/CNPJ when response promises lookup but required slot is missing', () => {
     const result = validate({
       message: 'Preciso da segunda via do boleto',
@@ -117,6 +127,45 @@ describe('autopilot response validator', () => {
     expect(result.decision).toBe('approve');
   });
 
+  it('repairs generic billing summaries when the customer asked for a payment artifact', () => {
+    const result = validate({
+      message: 'Pode me informar o PIX dessas duas faturas em aberto?',
+      response: 'Consultei o cadastro no sistema e encontrei 2 faturas em aberto.',
+      toolResults: [
+        {
+          toolName: 'sgp_fetch_contact_panel_data',
+          status: 'success',
+          input: { type: 'sgp_fetch_contact_panel_data', payload: {} },
+          output: {
+            invoices: [
+              {
+                id: '886081',
+                isOpen: true,
+                isPaid: false,
+                amount: 54.95,
+                dueDate: '2026-06-10',
+                pixCode: 'PIX_886081',
+              },
+              {
+                id: '886082',
+                isOpen: true,
+                isPaid: false,
+                amount: 54.95,
+                dueDate: '2026-07-10',
+                pixCode: 'PIX_886082',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('payment_artifact_missing_from_response');
+    expect(result.response).toContain('PIX copia e cola: PIX_886081');
+    expect(result.response).toContain('PIX copia e cola: PIX_886082');
+  });
+
   it('replaces lookup success claim when the lookup tool failed', () => {
     const result = validate({
       message: 'Preciso da segunda via do boleto. CPF 529.982.247-25',
@@ -144,6 +193,18 @@ describe('autopilot response validator', () => {
 
     expect(result.decision).toBe('handoff');
     expect(result.actions.map((action) => action.type)).toEqual(['add_internal_note', 'transfer_chat']);
+  });
+
+  it('does not auto-transfer commercial self-service when the customer did not ask for a human', () => {
+    const result = validate({
+      message: 'Tenho interesse em contratar esse plano',
+      response: 'Vou encaminhar seu atendimento para a equipe Comercial.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.actions).toEqual([]);
+    expect(result.reasons).toContain('commercial_transfer_promise_suppressed');
+    expect(result.response).toContain('seguir com seu atendimento por aqui');
   });
 
   it('adds close_chat action when response promises closure without action', () => {

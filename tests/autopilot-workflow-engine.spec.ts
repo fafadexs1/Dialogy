@@ -207,6 +207,40 @@ describe('autopilot workflow engine', () => {
     expect(plan.actions).toEqual([]);
   });
 
+  it('does not ask for CPF/CNPJ again when a recent SGP lookup already exists', () => {
+    const intentResolution = resolveAutopilotIntent({
+      customerMessage: 'Quais sao meus contratos?',
+    });
+    const plan = resolveAutopilotWorkflowPlan({
+      intentResolution,
+      customerMessage: 'Quais sao meus contratos?',
+      contact: {
+        ...contact,
+        custom_fields: {},
+      },
+      enabledToolNames: ['sgp_fetch_contact_panel_data', 'crm_update_contact_custom_fields'],
+      availableTeams: [supportTeam],
+      knowledgeCoverage: 'low',
+      slotMappings: { customerIdentifierFieldKeys: ['CPF'] },
+      recentToolResults: [
+        {
+          toolName: 'sgp_fetch_contact_panel_data',
+          status: 'success',
+          input: { type: 'sgp_fetch_contact_panel_data', payload: {} },
+          output: {
+            contracts: [{ id: '24123', planDescription: 'PLANO 1000 MEGA' }],
+          },
+        },
+      ],
+    });
+
+    expect(intentResolution.intent).toBe('document_request');
+    expect(plan.executionMode).toBe('continue_llm');
+    expect(plan.response).toBeNull();
+    expect(plan.missingSlots).toEqual([]);
+    expect(plan.metadata.recentToolMemory).toBe(true);
+  });
+
   it('lets the LLM continue the sale when the customer confirms the promotional internet plan', () => {
     const intentResolution = resolveAutopilotIntent({
       customerMessage: 'Esse plano promocional, acho que quero ele',

@@ -26,6 +26,7 @@ interface AutopilotKnowledgeProps {
   onRemove: (id: string) => void;
   onUpdateContent: (id: string, content: string) => void;
   onUpdateName: (id: string, name: string) => void;
+  onUpdateCategory: (id: string, category: string) => void;
   onAddManual: () => void;
   isUploading: boolean;
 }
@@ -37,6 +38,7 @@ export function AutopilotKnowledge({
   onRemove,
   onUpdateContent,
   onUpdateName,
+  onUpdateCategory,
   onAddManual,
   isUploading,
 }: AutopilotKnowledgeProps) {
@@ -259,7 +261,7 @@ export function AutopilotKnowledge({
             Ex: <span className="font-mono font-semibold text-foreground">@mcp:servidor:trocar_wifi</span>.
           </div>
 
-          <ScrollArea className="max-h-[520px] rounded-[24px] border border-border bg-muted/20">
+          <ScrollArea className="h-[min(52vh,520px)] rounded-[24px] border border-border bg-muted/20">
             <div className="grid gap-2 p-3">
               {documents.length > 0 ? (
                 documents.map((doc) => {
@@ -335,20 +337,36 @@ export function AutopilotKnowledge({
           <>
             <CardHeader className="border-b border-border/60 bg-muted/30">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0 space-y-1">
+                <div className="min-w-0 flex-1 space-y-3">
                   <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     <PencilLine className="h-3.5 w-3.5 text-primary" />
                     Editor de documento
                   </div>
-                  <Label htmlFor="autopilot-doc-name" className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Título do documento
-                  </Label>
-                  <Input
-                    id="autopilot-doc-name"
-                    value={selectedDoc.name}
-                    onChange={(event) => onUpdateName(selectedDoc.id, event.target.value)}
-                    className="h-12 rounded-2xl border-border bg-background text-base font-semibold"
-                  />
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(220px,0.7fr)]">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="autopilot-doc-name" className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Título do documento
+                      </Label>
+                      <Input
+                        id="autopilot-doc-name"
+                        value={selectedDoc.name}
+                        onChange={(event) => onUpdateName(selectedDoc.id, event.target.value)}
+                        className="h-12 rounded-2xl border-border bg-background text-base font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="autopilot-doc-category" className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Categoria
+                      </Label>
+                      <Input
+                        id="autopilot-doc-category"
+                        value={selectedDoc.category || ''}
+                        onChange={(event) => onUpdateCategory(selectedDoc.id, event.target.value)}
+                        placeholder="Ex: commercial_sales_flow"
+                        className="h-12 rounded-2xl border-border bg-background font-mono text-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -364,11 +382,11 @@ export function AutopilotKnowledge({
 
             <CardContent className="min-w-0 p-4 sm:p-5">
               <div className="grid gap-4">
-                <div className="relative min-h-[440px] rounded-[24px] border border-border bg-background shadow-sm">
+                <div className="relative h-[min(68vh,720px)] min-h-[440px] rounded-[24px] border border-border bg-background shadow-sm">
                   <pre
                     ref={highlightRef}
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap break-words rounded-[24px] px-5 py-4 font-mono text-sm leading-6 text-foreground"
+                    className="pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre-wrap break-words rounded-[24px] px-5 py-4 font-mono text-sm leading-6 text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   >
                     {selectedDoc.content ? (
                       renderHighlightedContent(selectedDoc.content)
@@ -380,8 +398,8 @@ export function AutopilotKnowledge({
                   </pre>
                   <Textarea
                     ref={textareaRef}
-                    className="relative z-10 min-h-[440px] resize-y rounded-[24px] border-0 bg-transparent px-5 py-4 font-mono text-sm leading-6 text-transparent shadow-none caret-foreground placeholder:text-transparent selection:bg-primary/20 focus-visible:ring-2"
-                  placeholder="Insira o conteúdo que o agente deve consultar durante o atendimento."
+                    className="relative z-10 h-full min-h-0 resize-none overflow-y-auto rounded-[24px] border-0 bg-transparent px-5 py-4 font-mono text-sm leading-6 text-transparent shadow-none caret-foreground placeholder:text-transparent selection:bg-primary/20 focus-visible:ring-2"
+                    placeholder="Insira o conteúdo que o agente deve consultar durante o atendimento."
                     value={selectedDoc.content}
                     onChange={(event) => {
                       onUpdateContent(selectedDoc.id, event.target.value);

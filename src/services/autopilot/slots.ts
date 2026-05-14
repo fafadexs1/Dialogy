@@ -90,9 +90,9 @@ export function normalizeCustomerIdentifier(value: string): string {
   return onlyDigits(value);
 }
 
-function extractCustomerIdentifierFromText(text: string): { raw: string; digits: string; valid: boolean } | null {
+function extractCustomerIdentifierFromText(text: string, takeLast = false): { raw: string; digits: string; valid: boolean } | null {
   const matches = text.match(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g) || [];
-  const match = matches[0];
+  const match = takeLast && matches.length > 0 ? matches[matches.length - 1] : matches[0];
   if (!match) return null;
 
   const digits = onlyDigits(match);
@@ -192,19 +192,28 @@ export function extractAutopilotSlots(input: {
 }): SlotExtractionResult {
   const result: SlotExtractionResult = { slots: {}, details: [], invalidSlots: [] };
   const message = input.customerMessage || '';
+  const historyText = input.chatHistory || '';
   const now = input.now || new Date();
 
-  const identifier = extractCustomerIdentifierFromText(message);
+  let identifier = extractCustomerIdentifierFromText(message);
+  let identifierSource: SlotSource = 'message';
+
+  if (!identifier && historyText) {
+    // If not in message, look for the most recent one in the chat history
+    identifier = extractCustomerIdentifierFromText(historyText, true);
+    if (identifier) identifierSource = 'history';
+  }
+
   if (identifier) {
     if (identifier.valid) {
       addSlot(result, {
         name: 'customer_identifier',
         value: identifier.digits,
-        source: 'message',
+        source: identifierSource,
         confidence: 0.99,
         raw: identifier.raw,
       });
-    } else {
+    } else if (identifierSource === 'message') {
       result.invalidSlots.push({
         name: 'customer_identifier',
         value: identifier.raw,
@@ -223,26 +232,48 @@ export function extractAutopilotSlots(input: {
     });
   }
 
-  const email = message.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || input.contact?.email || null;
-  if (email) addSlot(result, { name: 'email', value: email, source: email === input.contact?.email ? 'contact' : 'message', confidence: 0.95 });
+  const extractFromTextOrHistory = <T>(
+    extractor: (text: string, takeLast?: boolean) => T | null
+  ): { value: T; source: SlotSource } | null => {
+    const fromMsg = extractor(message);
+    if (fromMsg) return { value: fromMsg, source: 'message' };
+    if (historyText) {
+      const fromHist = extractor(historyText, true); // Attempt to grab latest from history
+      if (fromHist) return { value: fromHist, source: 'history' };
+    }
+    return null;
+  };
 
-  const phone = message.match(/(?:\+?\d{1,3}\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}/)?.[0] || input.contact?.phone || null;
-  if (phone) addSlot(result, { name: 'phone', value: phone.replace(/\s+/g, ' ').trim(), source: phone === input.contact?.phone ? 'contact' : 'message', confidence: 0.85 });
+  const emailExtract = extractFromTextOrHistory((text, takeLast) => {
+    const matches = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig);
+    if (!matches) return null;
+    return takeLast ? matches[matches.length - 1] : matches[0];
+  });
+  const email = emailExtract?.value || input.contact?.email || null;
+  if (email) addSlot(result, { name: 'email', value: email, source: email === input.contact?.email ? 'contact' : emailExtract?.source || 'message', confidence: 0.95 });
 
-  const date = extractDate(message, now);
-  if (date) addSlot(result, { name: 'date', value: date, source: 'message', confidence: 0.88 });
+  const phoneExtract = extractFromTextOrHistory((text, takeLast) => {
+    const matches = text.match(/(?:\+?\d{1,3}\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}/g);
+    if (!matches) return null;
+    return takeLast ? matches[matches.length - 1] : matches[0];
+  });
+  const phone = phoneExtract?.value || input.contact?.phone || null;
+  if (phone) addSlot(result, { name: 'phone', value: phone.replace(/\s+/g, ' ').trim(), source: phone === input.contact?.phone ? 'contact' : phoneExtract?.source || 'message', confidence: 0.85 });
 
-  const time = extractTime(message);
-  if (time) addSlot(result, { name: 'time', value: time, source: 'message', confidence: 0.88 });
+  const dateExtract = extractFromTextOrHistory((text) => extractDate(text, now));
+  if (dateExtract) addSlot(result, { name: 'date', value: dateExtract.value, source: dateExtract.source, confidence: 0.88 });
 
-  const orderId = extractOrderId(message);
-  if (orderId) addSlot(result, { name: 'order_or_request_id', value: orderId, source: 'message', confidence: 0.86 });
+  const timeExtract = extractFromTextOrHistory((text) => extractTime(text));
+  if (timeExtract) addSlot(result, { name: 'time', value: timeExtract.value, source: timeExtract.source, confidence: 0.88 });
 
-  const invoiceId = extractInvoiceId(message);
-  if (invoiceId) addSlot(result, { name: 'invoice_or_payment_id', value: invoiceId, source: 'message', confidence: 0.86 });
+  const orderIdExtract = extractFromTextOrHistory((text) => extractOrderId(text));
+  if (orderIdExtract) addSlot(result, { name: 'order_or_request_id', value: orderIdExtract.value, source: orderIdExtract.source, confidence: 0.86 });
 
-  const quantity = extractQuantity(message);
-  if (quantity) addSlot(result, { name: 'quantity', value: quantity, source: 'message', confidence: 0.7 });
+  const invoiceIdExtract = extractFromTextOrHistory((text) => extractInvoiceId(text));
+  if (invoiceIdExtract) addSlot(result, { name: 'invoice_or_payment_id', value: invoiceIdExtract.value, source: invoiceIdExtract.source, confidence: 0.86 });
+
+  const quantityExtract = extractFromTextOrHistory((text) => extractQuantity(text));
+  if (quantityExtract) addSlot(result, { name: 'quantity', value: quantityExtract.value, source: quantityExtract.source, confidence: 0.7 });
 
   if (input.contact?.address) {
     addSlot(result, { name: 'address', value: input.contact.address, source: 'contact', confidence: 0.7 });

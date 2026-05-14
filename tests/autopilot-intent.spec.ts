@@ -55,6 +55,49 @@ describe('autopilot universal intent resolver', () => {
     expect(resolution.shouldUseLlm).toBe(false);
   });
 
+  it('scopes official catalog answers by requested terms in non-telecom niches', () => {
+    const menuDocument: KnowledgeBaseDocument = {
+      id: 'menu-filtered',
+      name: 'Cardapio oficial',
+      category: 'menu',
+      content: [
+        'Cardapio oficial',
+        '',
+        'Pizza media',
+        'Mussarela tradicional',
+        'R$49,90',
+        '',
+        '',
+        'Combo familia',
+        'Pizza grande + refrigerante',
+        'R$89,90',
+        '',
+        '',
+        'Prato vegetariano',
+        'Legumes grelhados',
+        'R$39,90',
+      ].join('\n'),
+    };
+
+    const comboResolution = resolveAutopilotIntent({
+      customerMessage: 'Me mostra apenas os combos',
+      knowledgeDocuments: [menuDocument],
+    });
+
+    expect(comboResolution.intent).toBe('catalog_request');
+    expect(comboResolution.officialResponse).toContain('Combo familia');
+    expect(comboResolution.officialResponse).not.toContain('Pizza media');
+    expect(comboResolution.officialResponse).not.toContain('Prato vegetariano');
+
+    const vegetarianResolution = resolveAutopilotIntent({
+      customerMessage: 'Tem opção vegetariana?',
+      knowledgeDocuments: [menuDocument],
+    });
+
+    expect(vegetarianResolution.officialResponse).toContain('Prato vegetariano');
+    expect(vegetarianResolution.officialResponse).not.toContain('Combo familia');
+  });
+
   it('routes billing, scheduling and human requests deterministically', () => {
     expect(resolveAutopilotIntent({ customerMessage: 'Preciso da segunda via do boleto' }).intent).toBe('billing_or_payment');
     expect(resolveAutopilotIntent({ customerMessage: 'Quero agendar uma consulta amanha' }).intent).toBe('scheduling_request');
@@ -75,6 +118,45 @@ describe('autopilot universal intent resolver', () => {
 
     expect(resolution.intent).toBe('catalog_request');
     expect(resolution.confidence).toBeGreaterThan(0.8);
+  });
+
+  it('does not let catalog history override explicit billing requests', () => {
+    const history = [
+      'Atendente: Deseja conhecer nossas opcoes de servicos?',
+      'Atendente: 1. Assinar Internet',
+      'Atendente: 4. Financeiro',
+    ].join('\n');
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Pode me mandar as 2 faturas em aberto?',
+      chatHistory: history,
+      knowledgeDocuments: [catalogDocument],
+    });
+
+    expect(resolution.intent).toBe('billing_or_payment');
+    expect(resolution.officialResponse).toBeUndefined();
+  });
+
+  it('does not use exported conversation transcripts as official answers', () => {
+    const transcriptDocument: KnowledgeBaseDocument = {
+      id: 'conversation-1',
+      name: 'Conversa - Eric Trindade - 13/05/2026',
+      category: 'product_or_service_catalog',
+      content: [
+        'Cliente: Ola',
+        'Atendente: Ola, sou o assistente virtual.',
+        'Cliente: Quanto ta os plano?',
+        'Atendente: Temos planos de internet.',
+        'Cliente: Tem pro jardim inga?',
+      ].join('\n'),
+    };
+
+    const official = findOfficialKnowledgeAnswer({
+      documents: [transcriptDocument],
+      intent: 'catalog_request',
+    });
+
+    expect(official).toBeNull();
   });
 
   it('treats short specific option selections after a catalog as purchase intent', () => {
@@ -128,6 +210,38 @@ describe('autopilot universal intent resolver', () => {
     });
 
     expect(resolution.intent).toBe('purchase_inquiry');
+  });
+
+  it('treats a location follow-up after plans as availability intent', () => {
+    const history = [
+      'Atendente: Temos planos de internet fibra.',
+      'Atendente: Para verificar disponibilidade, me informe sua regiao ou bairro.',
+    ].join('\n');
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Moro no Ocidental Park',
+      chatHistory: history,
+      knowledgeDocuments: [catalogDocument],
+    });
+
+    expect(resolution.intent).toBe('availability_request');
+    expect(resolution.reason).toContain('localizacao');
+  });
+
+  it('treats a CPF-only follow-up after commercial collection as purchase intent', () => {
+    const history = [
+      'Cliente: Quero conhecer os planos',
+      'Atendente: Temos planos de internet. Para continuar a contratacao, me informe seu CPF.',
+    ].join('\n');
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: '06620056199',
+      chatHistory: history,
+      knowledgeDocuments: [catalogDocument],
+    });
+
+    expect(resolution.intent).toBe('purchase_inquiry');
+    expect(resolution.extractedSlots.customer_identifier).toBe('06620056199');
   });
 
   it('does not use expired official documents', () => {
@@ -189,6 +303,51 @@ describe('autopilot universal intent resolver', () => {
     expect(resolution.officialResponse).toContain('\u{1F911}  R$109,90/mes valor do plano');
     expect(resolution.officialResponse).toContain('valor do plano\n\n\n\u{1F4F6} 1000 MEGA');
     expect(resolution.officialResponse).not.toContain('Voce deve mandar');
+  });
+
+  it('scopes official catalog answers to the requested TV packages only', () => {
+    const exactPlanDocument: KnowledgeBaseDocument = {
+      id: 'plans-tv',
+      name: 'Planos de Internet',
+      category: 'isp_plan_catalog',
+      content: [
+        'Voce deve mandar os planos exatamente com o mesmo espacamento e com os emojis.',
+        '',
+        '\u{1F310} NOSSOS PLANOS DE INTERNET:',
+        '',
+        '\u{1F4F6} 500 MEGA (somente internet)',
+        '\u{1F4E1} Wi-Fi 5',
+        '\u{2733} R$99,90/mes valor com desconto de pontualidade',
+        '',
+        '',
+        '\u{1F4F6} 600 MEGA (+ 60 canais de TV)',
+        '\u{1F4E1} Wi-Fi 5',
+        '\u{2733} R$109,90/mes valor com desconto de pontualidade',
+        '',
+        '',
+        '\u{1F4F6} 1000 MEGA (+ 100 canais de TV)',
+        '\u{1F4E1} Wi-Fi 6',
+        '\u{2733} R$149,90/mes valor com desconto de pontualidade',
+        '',
+        '',
+        '\u{1F4FA} Quer conhecer os canais de TV?',
+        '\u{1F449} https://velpro.net.br/tv',
+      ].join('\n'),
+    };
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Queria ver apenas os pacotes com tv',
+      knowledgeDocuments: [exactPlanDocument],
+    });
+
+    expect(resolution.intent).toBe('catalog_request');
+    expect(resolution.officialResponsePreserveFormatting).toBe(true);
+    expect(resolution.officialResponse).toContain('\u{1F310} NOSSOS PLANOS DE INTERNET:');
+    expect(resolution.officialResponse).toContain('600 MEGA (+ 60 canais de TV)');
+    expect(resolution.officialResponse).toContain('1000 MEGA (+ 100 canais de TV)');
+    expect(resolution.officialResponse).not.toContain('500 MEGA (somente internet)');
+    expect(resolution.officialResponse).not.toContain('Quer conhecer os canais de TV?');
+    expect(resolution.officialResponse).not.toContain('https://velpro.net.br/tv');
   });
 
   it('answers only the promotional block when the customer asks for the promo plan', () => {

@@ -1030,6 +1030,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     [onlineAgents]
   );
   const [searchTerm, setSearchTerm] = useState('');
+  const [submittedSearchQuery, setSubmittedSearchQuery] = useState('');
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ChatListTabId>('gerais');
@@ -1068,6 +1069,15 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isAgentBulkConfigOpen, setIsAgentBulkConfigOpen] = useState(false);
   const [bulkAgentStatus, setBulkAgentStatus] = useState(true);
   const [bulkAgentMode, setBulkAgentMode] = useState<'suggest' | 'auto'>('suggest');
+
+  const handleSubmitSearch = useCallback(() => {
+    const query = searchTerm.trim();
+    if (!query) return;
+
+    setSubmittedSearchQuery(query);
+    setIsSearchDialogOpen(true);
+    setSearchTerm('');
+  }, [searchTerm]);
 
   // Assign Confirmation State
   const [chatToAssign, setChatToAssign] = useState<Chat | null>(null);
@@ -1547,11 +1557,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             placeholder="Pesquisar por nome, telefone ou mensagem..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            onEnter={() => {
-              if (searchTerm.trim()) {
-                setIsSearchDialogOpen(true);
-              }
-            }}
+            onEnter={handleSubmitSearch}
             renderFilterTrigger={(filterTriggerClassName) => (
               <Popover>
                 <PopoverTrigger asChild>
@@ -1762,7 +1768,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       <SearchDetailsDialog
         isOpen={isSearchDialogOpen}
         onOpenChange={setIsSearchDialogOpen}
-        searchQuery={searchTerm}
+        searchQuery={submittedSearchQuery}
         chats={chats}
         workspaceId={currentUser.activeWorkspaceId}
         onSelectChat={setSelectedChat}

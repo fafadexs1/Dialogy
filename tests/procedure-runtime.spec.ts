@@ -33,6 +33,13 @@ function tool(name: AgentToolCatalogItem['name']): AgentToolCatalogItem {
   };
 }
 
+function closeTool(): AgentToolCatalogItem {
+  return {
+    ...tool('close_chat'),
+    allowedIntents: ['unknown', 'support_request'],
+  };
+}
+
 function contextFor(graph: ProcedureGraph): ProcedureExecutionContext {
   return {
     id: 'exec-1',
@@ -245,5 +252,67 @@ describe('procedure runtime engine', () => {
     expect(result.response).toBe('Vou seguir pelo financeiro.');
     expect(context.decisions.decide).toBe('financeiro');
     expect(result.executedSteps).toEqual(['decide', 'billing']);
+  });
+
+  it('does not match unknown close procedures just because the customer intent is unknown', () => {
+    const document: KnowledgeBaseDocument = {
+      id: 'kb-close-procedure',
+      name: 'Encerrar atendimento',
+      content: 'Quando o cliente pedir para encerrar o atendimento, utilize a ferramenta @close_chat.',
+    };
+
+    const result = compileProcedureFromDocument({
+      document,
+      tools: [closeTool()],
+      enabledToolNames: ['close_chat'],
+    });
+
+    expect(result.success).toBe(true);
+
+    const match = matchProcedure({
+      intent: 'unknown',
+      customerMessage: 'Nao entendi kkk',
+      compiledProcedures: [result.graph!],
+    });
+
+    expect(match).toBeNull();
+  });
+
+  it('blocks close_chat procedure execution unless the current message explicitly asks to close', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-close',
+      documentId: 'doc-close',
+      documentName: 'Encerrar atendimento',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['unknown'],
+      triggerKeywords: ['encerrar'],
+      metadata: {},
+      steps: [
+        {
+          id: 'close',
+          order: 1,
+          type: 'tool_call',
+          label: 'Quando o cliente pedir para encerrar o atendimento, utilize a ferramenta @close_chat.',
+          toolName: 'close_chat',
+          toolPayloadTemplate: {},
+          nextStepId: null,
+        },
+      ],
+    };
+    const context = contextFor(graph);
+
+    const result = await advanceProcedure({
+      graph,
+      context,
+      customerMessage: 'Nao entendi kkk',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.actions).toHaveLength(0);
+    expect(result.response).toBeNull();
+    expect(context.stepHistory[0].output).toMatchObject({
+      skipped: true,
+    });
   });
 });

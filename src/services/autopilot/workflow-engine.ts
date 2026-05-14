@@ -1,5 +1,5 @@
 import type { Contact } from '@/lib/types';
-import type { AgentToolAction, AgentToolName } from '@/services/agent-tools/types';
+import type { AgentToolAction, AgentToolExecutionResult, AgentToolName } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } from './intent-types';
 import { getAutopilotWorkflow } from './workflows';
@@ -151,19 +151,30 @@ function hasCustomerIdentifier(slotExtraction: SlotExtractionResult): boolean {
   return Boolean(slotExtraction.slots.customer_identifier);
 }
 
+function hasRecentSuccessfulCustomerLookup(results?: AgentToolExecutionResult[] | null): boolean {
+  return Boolean((results || []).some((result) => (
+    result.status === 'success' &&
+    (
+      result.toolName === 'sgp_fetch_contact_panel_data' ||
+      result.toolName === 'sgp_fetch_contracts'
+    ) &&
+    Boolean(result.output)
+  )));
+}
+
 function hasInvalidCustomerIdentifier(invalidSlots: InvalidSlotDetail[]): boolean {
   return invalidSlots.some((slot) => slot.name === 'customer_identifier');
 }
 
 function hasOperationalLookupIntent(message: string): boolean {
   const normalized = normalizeText(message);
-  return /\b(consult|verific|checar|status|sinal|conexao|conexao|fatura|boleto|pagamento|cadastro|contrato|pedido|protocolo|funciona|erro|falha|sem acesso|sem sinal)\b/.test(normalized);
+  return /\b(consult|verific|checar|status|sinal|conexao|conexao|fatura|boleto|pagamento|cadastro|contratos?|pedido|protocolo|funciona|erro|falha|sem acesso|sem sinal)\b/.test(normalized);
 }
 
 function hasOperationalDocumentLookupIntent(message: string): boolean {
   const normalized = normalizeText(message);
-  const mentionsContractOrRegistration = /\b(contrato|cadastro|dados cadastrais|assinatura)\b/.test(normalized);
-  const asksForOperationalInfo = /\b(informac|dados|status|situacao|consult|verific|checar|sobre|detalhes?)\b/.test(normalized);
+  const mentionsContractOrRegistration = /\b(contratos?|cadastro|dados cadastrais|assinatura)\b/.test(normalized);
+  const asksForOperationalInfo = /\b(informac|dados|status|situacao|consult|verific|checar|sobre|detalhes?|quais|quantos?|lista|listar|mostra|mostrar|tenho)\b/.test(normalized);
   const asksForDocumentCopy = /\b(enviar|manda|mandar|emitir|baixar|download|copia|segunda via|2a via|pdf|documento)\b/.test(normalized);
 
   return mentionsContractOrRegistration && asksForOperationalInfo && !asksForDocumentCopy;
@@ -223,8 +234,10 @@ function shouldAskCustomerIdentifierForOperationalWorkflow(input: {
   customerMessage: string;
   enabledToolNames: string[];
   slotExtraction: SlotExtractionResult;
+  recentToolResults?: AgentToolExecutionResult[] | null;
 }) {
   if (hasCustomerIdentifier(input.slotExtraction)) return false;
+  if (hasRecentSuccessfulCustomerLookup(input.recentToolResults)) return false;
   if (!isToolEnabled(input.enabledToolNames, 'sgp_fetch_contact_panel_data')) return false;
   if (input.intent === 'billing_or_payment') return true;
   if (input.intent === 'order_or_request_status') return !input.slotExtraction.slots.order_or_request_id;
@@ -263,6 +276,7 @@ export function resolveAutopilotWorkflowPlan(input: {
   knowledgeCoverage: KnowledgeCoverage;
   slotMappings?: WorkflowSlotMappings;
   closeIntentGate?: CloseIntentGateDecision;
+  recentToolResults?: AgentToolExecutionResult[] | null;
   now?: Date;
 }): AutopilotWorkflowPlan {
   const workflow = getAutopilotWorkflow(input.intentResolution.intent);
@@ -279,6 +293,7 @@ export function resolveAutopilotWorkflowPlan(input: {
     extractedSlots: slotExtraction.slots,
     invalidSlots: slotExtraction.invalidSlots,
     knowledgeCoverage: input.knowledgeCoverage,
+    recentToolMemory: hasRecentSuccessfulCustomerLookup(input.recentToolResults),
   };
 
   if (hasInvalidCustomerIdentifier(slotExtraction.invalidSlots)) {
@@ -402,6 +417,7 @@ export function resolveAutopilotWorkflowPlan(input: {
     customerMessage: input.customerMessage,
     enabledToolNames: input.enabledToolNames,
     slotExtraction,
+    recentToolResults: input.recentToolResults,
   })) {
     return {
       executionMode: 'direct_response',

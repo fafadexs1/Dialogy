@@ -140,4 +140,32 @@ describe('hybrid RAG deterministic reranker', () => {
     expect(result.knowledgeBaseDocuments[0].content).toContain('500 MEGA');
     expect(result.knowledgeBaseDocuments[0].content).toContain('1000 MEGA');
   });
+
+  it('filters customer conversation artifacts from general RAG selection', () => {
+    const transcriptDocument: KnowledgeBaseDocument = {
+      id: 'transcript',
+      name: 'Conversa - Cliente antigo - 13/05/2026',
+      category: 'product_or_service_catalog',
+      priority: 100,
+      content: [
+        'Cliente: Ola',
+        'Atendente: Ola, sou o assistente virtual.',
+        'Cliente: Quanto custa?',
+        'Atendente: O plano Pro custa R$129,90.',
+      ].join('\n'),
+    };
+    const intent = resolveAutopilotIntent({
+      customerMessage: 'Quanto custa o plano Pro?',
+      knowledgeDocuments: docs,
+    });
+
+    const result = mergeAndRerankKnowledgeDocuments({
+      vectorDocuments: [transcriptDocument],
+      staticDocuments: [transcriptDocument, ...docs],
+      query: 'Quanto custa o plano Pro?',
+      intent,
+    });
+
+    expect(result.knowledgeBaseDocuments.map((document) => document.id)).not.toContain('transcript');
+  });
 });
