@@ -101,6 +101,9 @@ describe('autopilot universal intent resolver', () => {
   it('routes billing, scheduling and human requests deterministically', () => {
     expect(resolveAutopilotIntent({ customerMessage: 'Preciso da segunda via do boleto' }).intent).toBe('billing_or_payment');
     expect(resolveAutopilotIntent({ customerMessage: 'Quero agendar uma consulta amanha' }).intent).toBe('scheduling_request');
+    expect(resolveAutopilotIntent({ customerMessage: 'Qual o valor da consulta e do retorno?' }).intent).toBe('pricing_request');
+    expect(resolveAutopilotIntent({ customerMessage: 'Tem alguma promocao ou cupom hoje?' }).intent).toBe('promotion_request');
+    expect(resolveAutopilotIntent({ customerMessage: 'Tem disponibilidade para amanha?' }).intent).toBe('availability_request');
 
     const handoff = resolveAutopilotIntent({ customerMessage: 'Quero falar com um atendente humano' });
     expect(handoff.intent).toBe('human_handoff');
@@ -118,6 +121,16 @@ describe('autopilot universal intent resolver', () => {
 
     expect(resolution.intent).toBe('catalog_request');
     expect(resolution.confidence).toBeGreaterThan(0.8);
+  });
+
+  it('keeps short unresolved follow-ups in the active troubleshooting context', () => {
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Nao resolveu',
+      chatHistory: 'Cliente: Problemas de conexao',
+    });
+
+    expect(resolution.intent).toBe('troubleshooting');
+    expect(resolution.reason).toContain('follow-up curto');
   });
 
   it('does not let catalog history override explicit billing requests', () => {
@@ -228,7 +241,7 @@ describe('autopilot universal intent resolver', () => {
     expect(resolution.reason).toContain('localizacao');
   });
 
-  it('treats a CPF-only follow-up after commercial collection as purchase intent', () => {
+  it('continues the active workflow when the customer replies with CPF only', () => {
     const history = [
       'Cliente: Quero conhecer os planos',
       'Atendente: Temos planos de internet. Para continuar a contratacao, me informe seu CPF.',
@@ -241,7 +254,100 @@ describe('autopilot universal intent resolver', () => {
     });
 
     expect(resolution.intent).toBe('purchase_inquiry');
+    expect(resolution.reason).toContain('mantendo o contexto ativo');
     expect(resolution.extractedSlots.customer_identifier).toBe('06620056199');
+  });
+
+  it('continues technical support context when the customer replies with CPF only', () => {
+    const history = [
+      'Cliente: Problemas de conexao',
+      'Atendente: Verifique o cabo da fibra e reinicie o modem.',
+      'Cliente: Nao resolveu',
+      'Atendente: Para verificar o que esta acontecendo, preciso do seu CPF para acessar o sistema.',
+    ].join('\n');
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: '70280417195',
+      chatHistory: history,
+      knowledgeDocuments: [catalogDocument],
+    });
+
+    expect(resolution.intent).toBe('troubleshooting');
+    expect(resolution.reason).toContain('mantendo o contexto ativo');
+    expect(resolution.extractedSlots.customer_identifier).toBe('70280417195');
+    expect(resolution.officialResponse).toBeUndefined();
+  });
+
+  it('recognizes common technical complaints without team routing keywords', () => {
+    expect(resolveAutopilotIntent({ customerMessage: 'Minha internet tá ruim' }).intent).toBe('troubleshooting');
+    expect(resolveAutopilotIntent({ customerMessage: 'Minha internet caiu e nao voltou' }).intent).toBe('troubleshooting');
+    expect(resolveAutopilotIntent({ customerMessage: 'Meu wifi conecta e cai a cada cinco minutos' }).intent).toBe('troubleshooting');
+    expect(resolveAutopilotIntent({ customerMessage: 'Minha fibra rompeu depois da chuva' }).intent).toBe('troubleshooting');
+    expect(resolveAutopilotIntent({ customerMessage: 'Meu wifi fica caindo toda hora' }).intent).toBe('troubleshooting');
+    expect(resolveAutopilotIntent({ customerMessage: 'A conexao esta muito lenta' }).intent).toBe('troubleshooting');
+    expect(resolveAutopilotIntent({ customerMessage: 'O roteador esta com LOS vermelho' }).intent).toBe('troubleshooting');
+  });
+
+  it('recognizes explicit handoff requests to named business areas', () => {
+    expect(resolveAutopilotIntent({ customerMessage: 'Quero falar com um tecnico do suporte agora' }).intent).toBe('human_handoff');
+    expect(resolveAutopilotIntent({ customerMessage: 'Me transfere para o comercial, quero contratar outro ponto' }).intent).toBe('human_handoff');
+  });
+
+  it('recognizes complex dissatisfaction as complaint', () => {
+    expect(resolveAutopilotIntent({
+      customerMessage: 'Estou irritado, a conexao cai todo dia, ja paguei e ninguem resolve',
+    }).intent).toBe('complaint');
+  });
+
+  it('does not confuse internet purchase intent with troubleshooting', () => {
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Quero contratar internet fibra',
+      knowledgeDocuments: [catalogDocument],
+    });
+
+    expect(resolution.intent).toBe('purchase_inquiry');
+  });
+
+  it('continues billing context when the customer replies with CPF only', () => {
+    const resolution = resolveAutopilotIntent({
+      customerMessage: '52998224725',
+      chatHistory: [
+        'Cliente: Preciso da segunda via do boleto',
+        'Atendente: Para consultar com seguranca, me informe o CPF/CNPJ.',
+      ].join('\n'),
+    });
+
+    expect(resolution.intent).toBe('billing_or_payment');
+    expect(resolution.reason).toContain('mantendo o contexto ativo');
+    expect(resolution.extractedSlots.customer_identifier).toBe('52998224725');
+  });
+
+  it('does not turn support continuity into a commercial intent just because the history mentions internet', () => {
+    const history = [
+      'Cliente: Estou sem conexao na fibra',
+      'Atendente: Me informe seu CPF para consultar o cadastro no sistema.',
+    ].join('\n');
+
+    const resolution = resolveAutopilotIntent({
+      customerMessage: '06620056199',
+      chatHistory: history,
+    });
+
+    expect(resolution.intent).toBe('troubleshooting');
+    expect(resolution.intent).not.toBe('purchase_inquiry');
+  });
+
+  it('falls back safely when a CPF-only follow-up has ambiguous context', () => {
+    const resolution = resolveAutopilotIntent({
+      customerMessage: '06620056199',
+      chatHistory: [
+        'Cliente: Quero contratar, mas tambem estou com problema de conexao',
+        'Atendente: Me informe seu CPF para verificar o cadastro.',
+      ].join('\n'),
+    });
+
+    expect(resolution.intent).toBe('unknown');
+    expect(resolution.reason).toContain('ambiguo');
   });
 
   it('does not use expired official documents', () => {

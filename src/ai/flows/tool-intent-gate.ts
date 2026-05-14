@@ -60,6 +60,8 @@ export async function classifyToolIntent(input: ToolIntentGateInput): Promise<To
   const toolSpecificRules = parsedInput.toolName === 'close_chat'
     ? [
         'Regra para close_chat:',
+        '- execute=false: cliente negou encerramento, por exemplo "nao encerra", "nao fecha o atendimento", "nao finaliza".',
+        '- execute=false: "fechar" significa fechar negocio, contratar, fechar plano, fechar pedido, decidir depois ou contexto comercial.',
         '- execute=true, confidence=high: cliente pediu claramente para encerrar, finalizar, fechar, desligar ou parar a CONVERSA/CHAT/ATENDIMENTO atual.',
         '- execute=true, confidence=medium: mensagem curta e contextual indica que o cliente quer terminar o atendimento atual, mesmo com linguagem informal ou gíria.',
         '- execute=false: cliente quer cancelar/encerrar contrato, plano, assinatura, serviço, internet, instalação ou produto. Isso é solicitação comercial/suporte, não fechamento do chat.',

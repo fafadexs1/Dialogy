@@ -64,7 +64,7 @@ const INTENT_KEYWORDS: Record<UniversalAutopilotIntent, RegExp[]> = {
   greeting: [/\b(ola|oi|oie|oii|bom dia|boa tarde|boa noite|hey)\b/],
   human_handoff: [
     /\b(atendente|humano|pessoa|consultor|vendedor|suporte humano)\b/,
-    /\b(falar|conversar|chamar|transferir|me passa|me coloca).{0,40}\b(atendente|humano|pessoa|equipe)\b/,
+    /\b(falar|conversar|chamar|transferir|transfere|transfira|me transfere|passar|me passa|me passar|me coloca).{0,60}\b(atendente|humano|pessoa|equipe|comercial|vendas|financeiro|suporte|tecnico)\b/,
   ],
   purchase_inquiry: [/\b(comprar|contratar|assinar|adquirir|fechar|quero esse|vou querer|tenho interesse)\b/],
   catalog_request: [
@@ -76,17 +76,21 @@ const INTENT_KEYWORDS: Record<UniversalAutopilotIntent, RegExp[]> = {
     /\br\$\s*\d+/,
   ],
   promotion_request: [/\b(promocao|promocoes|promocional|promo|desconto|oferta|cupom|campanha|condicao especial)\b/],
-  availability_request: [/\b(disponivel|disponibilidade|tem vaga|tem estoque|em estoque|atende minha regiao|area de entrega|tem horario)\b/],
+  availability_request: [/\b(disponivel|disponibilidade|tem vaga|tem estoque|em estoque|atende minha regiao|atende|atendem|atendimento no bairro|bairro|area de entrega|tem horario)\b/],
   billing_or_payment: [/\b(boletos?|faturas?|pix|pagamento|pagar|cobranca|segunda via|2a via|vencimento|debito|mensalidade atrasada)\b/],
   scheduling_request: [/\b(agendar|marcar|remarcar|desmarcar|horario|agenda|consulta|reserva|visita|reuniao)\b/],
   order_or_request_status: [/\b(status|andamento|rastreio|rastreamento|pedido|solicitacao|protocolo|entrega|chegou|atrasado)\b/],
   support_request: [/\b(suporte|ajuda|duvida|orientacao|como faco|como fazer|nao sei)\b/],
-  troubleshooting: [/\b(problema|erro|falha|nao funciona|nao esta funcionando|parou|travando|lento|instabilidade|sem acesso|sem sinal|sem conexao)\b/],
-  change_request: [/\b(alterar|mudar|trocar|atualizar|corrigir).{0,40}\b(cadastro|dados|endereco|plano|pedido|horario|produto|servico)\b/],
+  troubleshooting: [
+    /\b(problema|erro|falha|nao funciona|nao esta funcionando|parou|travando|lento|lenta|lentidao|instabilidade|oscilando|cai|caiu|caindo|quedas?|rompeu|rompida|rompido|sem acesso|sem sinal|sem conexao|sem internet|los|loss)\b/,
+    /\b(internet|conexao|wifi|wi fi|fibra|sinal|roteador|modem)\b.{0,50}\b(ruim|lenta?|lento|cai|caiu|caindo|falhando|oscilando|instavel|instabilidade|nao funciona|sem sinal|sem acesso|rompeu|rompida|rompido|loss|los)\b/,
+    /\b(ruim|lenta?|lento|cai|caiu|caindo|falhando|oscilando|instavel|instabilidade|nao funciona|sem sinal|sem acesso|rompeu|rompida|rompido|loss|los)\b.{0,50}\b(internet|conexao|wifi|wi fi|fibra|sinal|roteador|modem)\b/,
+  ],
+  change_request: [/\b(alterar|mudar|trocar|atualizar|corrigir).{0,40}\b(cadastro|dados|endereco|plano|pedido|horario|produto|servico|senha|wifi|wi fi|rede)\b/],
   return_or_refund: [/\b(devolver|devolucao|troca|estorno|reembolso|garantia|arrependimento)\b/],
   cancellation_request: [/\b(cancelar|cancelamento|encerrar|desistir|suspender|rescindir)\b/],
   document_request: [/\b(documento|contratos?|nota fiscal|nf|comprovante|recibo|termo|declaracao|laudo|resultado)\b/],
-  complaint: [/\b(reclamacao|reclamar|insatisfeito|absurdo|pessimo|horrivel|raiva|procon|processo)\b/],
+  complaint: [/\b(reclamacao|reclamar|insatisfeito|absurdo|pessimo|horrivel|raiva|procon|processo|irritado|indignado|cansado de|ninguem resolve|ja reclamei)\b/],
   thanks: [/\b(obrigado|obrigada|valeu|agradeco|grato|grata|perfeito|beleza|ok obrigado)\b/],
   unknown: [],
 };
@@ -529,13 +533,6 @@ function hasCatalogOfferContext(normalizedHistory: string): boolean {
   return /\b(catalogo|cardapio|menu|opcoes|produtos|servicos|planos|pacotes|precos|valores|oferta|promocao|promocional|conhecer|interesse|internet|fibra|mega|megas)\b/.test(normalizedHistory);
 }
 
-function hasCommercialCollectionContext(normalizedHistory: string): boolean {
-  return (
-    hasCatalogOfferContext(normalizedHistory) ||
-    /\b(contratar|assinar|adesao|instalacao|cadastro|comercial|disponibilidade|atende|regiao|bairro|endereco|cpf|cnpj|documento)\b/.test(normalizedHistory)
-  );
-}
-
 function isCustomerIdentifierOnly(normalizedMessage: string): boolean {
   const digits = normalizedMessage.replace(/\D/g, '');
   return (
@@ -588,12 +585,165 @@ function hasPurchaseCommitment(normalizedMessage: string): boolean {
   );
 }
 
-function detectIntent(customerMessage: string, chatHistory = ''): { intent: UniversalAutopilotIntent; confidence: number; reason: string } {
+function hasIdentifierRequestContext(normalizedHistory: string): boolean {
+  return (
+    /\b(?:cpf|cnpj|documento|identificador|cadastro)\b/.test(normalizedHistory) &&
+    /\b(?:me informe|informe|envie|manda|mandar|preciso|necessario|necessario|para seguir|para continuar|para consultar|para verificar|validar|acessar)\b/.test(normalizedHistory)
+  );
+}
+
+const CONTEXT_CONTINUATION_PATTERNS: Array<{
+  intent: UniversalAutopilotIntent;
+  patterns: RegExp[];
+}> = [
+  {
+    intent: 'billing_or_payment',
+    patterns: [
+      /\b(boletos?|faturas?|pix|pagamento|pagar|cobranca|segunda via|2a via|vencimento|debito|mensalidade atrasada|financeiro)\b/,
+    ],
+  },
+  {
+    intent: 'troubleshooting',
+    patterns: [
+      /\b(problema|erro|falha|nao funciona|nao esta funcionando|parou|travando|lento|instabilidade|sem acesso|sem sinal|sem conexao|conexao|sinal|fibra|modem|roteador|cabo|reinicie|tomada|los|caiu|caindo|queda|quedas)\b/,
+    ],
+  },
+  {
+    intent: 'order_or_request_status',
+    patterns: [
+      /\b(status|andamento|rastreio|rastreamento|pedido|solicitacao|protocolo|entrega|chegou|atrasado)\b/,
+    ],
+  },
+  {
+    intent: 'document_request',
+    patterns: [
+      /\b(documento|contratos?|nota fiscal|nf|comprovante|recibo|termo|declaracao|laudo|resultado|titularidade)\b/,
+    ],
+  },
+  {
+    intent: 'availability_request',
+    patterns: [
+      /\b(disponivel|disponibilidade|tem vaga|tem estoque|em estoque|atende minha regiao|area de entrega|tem horario|regiao|bairro|endereco|cep)\b/,
+    ],
+  },
+  {
+    intent: 'purchase_inquiry',
+    patterns: [
+      /\b(comprar|contratar|contratacao|assinar|adesao|adquirir|fechar|quero esse|vou querer|tenho interesse|comercial|proposta)\b/,
+      /\b(continuar|seguir|prosseguir).{0,80}\b(contratacao|contratar|assinar|adesao|cadastro)\b/,
+    ],
+  },
+  {
+    intent: 'support_request',
+    patterns: [
+      /\b(suporte|ajuda|duvida|orientacao|como faco|como fazer|nao sei|atendimento)\b/,
+    ],
+  },
+  {
+    intent: 'change_request',
+    patterns: [
+      /\b(alterar|mudar|trocar|atualizar|corrigir).{0,60}\b(cadastro|dados|endereco|plano|pedido|horario|produto|servico)\b/,
+    ],
+  },
+  {
+    intent: 'cancellation_request',
+    patterns: [
+      /\b(cancelar|cancelamento|encerrar|desistir|suspender|rescindir)\b/,
+    ],
+  },
+];
+
+function scoreContinuationPatterns(normalizedHistory: string, patterns: RegExp[]): number {
+  const recent = normalizedHistory.slice(-700);
+  return patterns.reduce((score, pattern) => {
+    let nextScore = score;
+    if (pattern.test(normalizedHistory)) nextScore += 1;
+    if (pattern.test(recent)) nextScore += 2;
+    return nextScore;
+  }, 0);
+}
+
+function inferContextContinuationIntent(
+  normalizedHistory: string,
+  minimumScore = 1
+): { intent: UniversalAutopilotIntent; score: number } | null {
+  const scored = CONTEXT_CONTINUATION_PATTERNS
+    .map(({ intent, patterns }) => ({
+      intent,
+      score: scoreContinuationPatterns(normalizedHistory, patterns),
+    }))
+    .filter((item) => item.score >= minimumScore)
+    .sort((left, right) => right.score - left.score);
+
+  const best = scored[0];
+  if (!best) return null;
+
+  const second = scored[1];
+  if (second && second.score === best.score) {
+    return { intent: 'unknown', score: best.score };
+  }
+
+  return best;
+}
+
+function inferIdentifierContinuationIntent(
+  normalizedHistory: string
+): { intent: UniversalAutopilotIntent; confidence: number; reason: string } | null {
+  if (!normalizedHistory || !hasIdentifierRequestContext(normalizedHistory)) return null;
+
+  const best = inferContextContinuationIntent(normalizedHistory);
+  if (!best) return null;
+
+  if (best.intent === 'unknown') {
+    return {
+      intent: 'unknown',
+      confidence: 0.42,
+      reason: 'Cliente informou CPF/CNPJ como follow-up, mas o historico recente ficou ambiguo.',
+    };
+  }
+
+  return {
+    intent: best.intent,
+    confidence: Math.min(0.92, 0.72 + best.score * 0.04),
+    reason: `Cliente informou CPF/CNPJ como follow-up; mantendo o contexto ativo inferido do historico recente: ${best.intent}.`,
+  };
+}
+
+function isContextOnlyFollowUp(normalizedMessage: string): boolean {
+  return (
+    isShortMessage(normalizedMessage) &&
+    /^(nao resolveu|nao funcionou|continua|continua igual|ainda nao|mesma coisa|deu erro|sim|ok|pode|isso|certo|beleza)\b/.test(normalizedMessage)
+  );
+}
+
+function inferShortFollowUpIntent(
+  normalizedMessage: string,
+  normalizedHistory: string
+): { intent: UniversalAutopilotIntent; confidence: number; reason: string } | null {
+  if (!isContextOnlyFollowUp(normalizedMessage) || !normalizedHistory) return null;
+
+  const continuation = inferContextContinuationIntent(normalizedHistory, 2);
+  if (!continuation || continuation.intent === 'unknown') return null;
+
+  return {
+    intent: continuation.intent,
+    confidence: Math.min(0.88, 0.7 + continuation.score * 0.04),
+    reason: `Cliente respondeu com follow-up curto; mantendo o contexto ativo inferido do historico recente: ${continuation.intent}.`,
+  };
+}
+
+type DetectedIntent = { intent: UniversalAutopilotIntent; confidence: number; reason: string };
+
+function detectIntent(customerMessage: string, chatHistory = ''): DetectedIntent {
   const normalized = normalizeForIntent(customerMessage);
   const normalizedHistory = normalizeForIntent(chatHistory).slice(-1600);
 
   if (!normalized) {
     return { intent: 'unknown', confidence: 0, reason: 'Mensagem vazia.' };
+  }
+
+  if (matchesAny(normalized, 'cancellation_request')) {
+    return { intent: 'cancellation_request', confidence: 0.88, reason: 'Cliente pediu cancelamento/encerramento de contrato, plano ou servico.' };
   }
 
   if (hasPurchaseCommitment(normalized)) {
@@ -604,12 +754,42 @@ function detectIntent(customerMessage: string, chatHistory = ''): { intent: Univ
     return { intent: 'purchase_inquiry', confidence: 0.88, reason: 'Cliente selecionou uma opcao especifica apos catalogo/oferta no historico recente.' };
   }
 
-  if (isLocationFollowUp(normalized) && hasCommercialCollectionContext(normalizedHistory)) {
-    return { intent: 'availability_request', confidence: 0.88, reason: 'Cliente informou localizacao em contexto comercial/disponibilidade.' };
+  if (
+    isLocationFollowUp(normalized) &&
+    /\b(disponibilidade|disponivel|atende|regiao|bairro|endereco|cep|localizacao|onde voce mora|onde fica)\b/.test(normalizedHistory)
+  ) {
+    return { intent: 'availability_request', confidence: 0.88, reason: 'Cliente informou localizacao como follow-up de disponibilidade.' };
   }
 
-  if (isCustomerIdentifierOnly(normalized) && hasCommercialCollectionContext(normalizedHistory)) {
-    return { intent: 'purchase_inquiry', confidence: 0.88, reason: 'Cliente informou CPF/CNPJ como follow-up de atendimento comercial.' };
+  if (isCustomerIdentifierOnly(normalized)) {
+    const continuationIntent = inferIdentifierContinuationIntent(normalizedHistory);
+    if (continuationIntent) return continuationIntent;
+  }
+
+  const shortFollowUpIntent = inferShortFollowUpIntent(normalized, normalizedHistory);
+  if (shortFollowUpIntent) return shortFollowUpIntent;
+
+  if (
+    matchesAny(normalized, 'catalog_request') &&
+    matchesAny(normalized, 'pricing_request') &&
+    /\b(mostra|mostrar|manda|mandar|envia|enviar|quais|todos|todas|lista|catalogo|cardapio|menu)\b/.test(normalized)
+  ) {
+    return { intent: 'catalog_request', confidence: 0.88, reason: 'Cliente pediu lista/catalogo com valores.' };
+  }
+
+  if (
+    matchesAny(normalized, 'pricing_request') &&
+    !/\b(agendar|marcar|remarcar|desmarcar|agenda|horario|reserva|visita|reuniao)\b/.test(normalized)
+  ) {
+    return { intent: 'pricing_request', confidence: 0.87, reason: 'Cliente perguntou valores, preco ou custo.' };
+  }
+
+  if (matchesAny(normalized, 'promotion_request')) {
+    return { intent: 'promotion_request', confidence: 0.87, reason: 'Cliente perguntou por promocao, oferta ou cupom.' };
+  }
+
+  if (matchesAny(normalized, 'availability_request')) {
+    return { intent: 'availability_request', confidence: 0.86, reason: 'Cliente perguntou por disponibilidade.' };
   }
 
   const explicitNonCatalogIntents: UniversalAutopilotIntent[] = [
@@ -641,21 +821,6 @@ function detectIntent(customerMessage: string, chatHistory = ''): { intent: Univ
     hasCatalogOfferContext(normalizedHistory)
   ) {
     return { intent: 'catalog_request', confidence: 0.82, reason: 'Confirmacao curta apos oferta/catalogo no historico recente.' };
-  }
-
-  if (
-    matchesAny(normalized, 'catalog_request') &&
-    matchesAny(normalized, 'pricing_request') &&
-    /\b(mostra|mostrar|manda|mandar|envia|enviar|quais|todos|todas|lista|catalogo|cardapio|menu)\b/.test(normalized)
-  ) {
-    return { intent: 'catalog_request', confidence: 0.88, reason: 'Cliente pediu lista/catalogo com valores.' };
-  }
-
-  if (
-    matchesAny(normalized, 'pricing_request') &&
-    !/\b(agendar|marcar|remarcar|desmarcar|agenda|horario|reserva|visita|reuniao)\b/.test(normalized)
-  ) {
-    return { intent: 'pricing_request', confidence: 0.87, reason: 'Cliente perguntou valores, preco ou custo.' };
   }
 
   if (hasQuestionOrCatalogVerb(normalized) && getRequestScope(normalized).hasExplicitScope) {
@@ -721,6 +886,22 @@ export function resolveAutopilotIntent(input: {
   knowledgeDocuments?: KnowledgeBaseDocument[] | null;
 }): AutopilotIntentResolution {
   const detected = detectIntent(input.customerMessage, input.chatHistory || '');
+  return buildAutopilotIntentResolution(input, detected);
+}
+
+export function resolveAutopilotIntentWithOverride(input: {
+  customerMessage: string;
+  chatHistory?: string;
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+}, override: DetectedIntent): AutopilotIntentResolution {
+  return buildAutopilotIntentResolution(input, override);
+}
+
+function buildAutopilotIntentResolution(input: {
+  customerMessage: string;
+  chatHistory?: string;
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+}, detected: DetectedIntent): AutopilotIntentResolution {
   const workflow = getAutopilotWorkflow(detected.intent);
   const official = findOfficialKnowledgeAnswer({
     documents: input.knowledgeDocuments,

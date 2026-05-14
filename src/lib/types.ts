@@ -198,7 +198,7 @@ export type MessageMetadata = {
   tool?: string;
   agentToolRunId?: string;
   agentToolName?: string;
-  agentToolStatus?: 'running' | 'success' | 'error' | 'rejected' | string;
+  agentToolStatus?: 'prearmed' | 'running' | 'success' | 'error' | 'rejected' | string;
   agentToolInput?: unknown;
   agentToolOutput?: unknown;
   agentToolError?: string | null;

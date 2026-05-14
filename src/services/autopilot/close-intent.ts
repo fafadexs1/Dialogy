@@ -32,7 +32,17 @@ export function isConversationCloseRequest(message: string): boolean {
   if (!normalized) return false;
 
   if (/\b(cancelar|cancelamento|rescindir|suspender)\b/.test(normalized)) return false;
+  if (/\bnao\s+(?:encerra|encerrar|finaliza|finalizar|fecha|fechar|desliga|desligar)\b/.test(normalized)) return false;
   if (businessClosePattern.test(normalized)) return false;
+  if (
+    !explicitConversationClosePattern.test(normalized) &&
+    (
+      /\bfech\w*\b.*\b(hoje|depois|negocio|venda|comercial|contratar|contratacao|assinar|plano|pedido)\b/.test(normalized) ||
+      /\b(comparar|planos?|contratar|comercial|loja|ponto)\b.*\bfech\w*\b/.test(normalized)
+    )
+  ) {
+    return false;
+  }
 
   return (
     explicitConversationClosePattern.test(normalized) ||

@@ -1,4 +1,5 @@
 import type { Contact } from '@/lib/types';
+import type { AiWorkflowDecision } from '@/ai/flows/workflow-classifier';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolName } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } from './intent-types';
@@ -58,7 +59,32 @@ function findTeamByHints(teams: ToolRouterTeam[], hints: RegExp[]): ToolRouterTe
 function findHandoffTeam(input: {
   teams: ToolRouterTeam[];
   intent: AutopilotIntentResolution['intent'];
+  customerMessage?: string;
 }): ToolRouterTeam | null {
+  const normalizedMessage = normalizeText(input.customerMessage || '');
+  if (normalizedMessage) {
+    const explicitTeam = input.teams.find((team) => {
+      const normalizedName = normalizeText(team.name);
+      return normalizedName.length >= 3 && normalizedMessage.includes(normalizedName);
+    });
+    if (explicitTeam) return explicitTeam;
+
+    if (/\b(comercial|vendas|contratar|contratacao|assinar|adesao|proposta|orcamento)\b/.test(normalizedMessage)) {
+      const commercialTeam = findTeamByHints(input.teams, [/\b(comercial|vendas|sales)\b/i]);
+      if (commercialTeam) return commercialTeam;
+    }
+
+    if (/\b(financeiro|boleto|fatura|pix|pagamento|cobranca|mensalidade)\b/.test(normalizedMessage)) {
+      const billingTeam = findTeamByHints(input.teams, [/\b(financeiro|cobranca|cobrança|billing)\b/i]);
+      if (billingTeam) return billingTeam;
+    }
+
+    if (/\b(suporte|tecnico|internet|conexao|sinal|roteador|modem|wifi|wi fi|los|lentidao|lento|caiu|caindo)\b/.test(normalizedMessage)) {
+      const supportTeam = findTeamByHints(input.teams, [/\b(suporte|tecnico|técnico|noc|atendimento)\b/i]);
+      if (supportTeam) return supportTeam;
+    }
+  }
+
   const domainHints: Partial<Record<AutopilotIntentResolution['intent'], RegExp[]>> = {
     billing_or_payment: [/\b(financeiro|cobranca|cobrança|billing)\b/i],
     cancellation_request: [/\b(cancelamento|retencao|retenção|sucesso|atendimento)\b/i],
@@ -168,7 +194,11 @@ function hasInvalidCustomerIdentifier(invalidSlots: InvalidSlotDetail[]): boolea
 
 function hasOperationalLookupIntent(message: string): boolean {
   const normalized = normalizeText(message);
-  return /\b(consult|verific|checar|status|sinal|conexao|conexao|fatura|boleto|pagamento|cadastro|contratos?|pedido|protocolo|funciona|erro|falha|sem acesso|sem sinal)\b/.test(normalized);
+  return /\b(consult|verific|checar|status|internet|wifi|wi fi|fibra|sinal|conexao|conexao|fatura|boleto|pagamento|cadastro|contratos?|pedido|protocolo|funciona|erro|falha|ruim|lento|lentidao|cai|caiu|caindo|rompeu|rompida|rompido|suporte|los|loss|sem acesso|sem sinal)\b/.test(normalized);
+}
+
+function hasOperationalLookupContext(message: string, chatHistory?: string): boolean {
+  return hasOperationalLookupIntent(`${chatHistory || ''}\n${message}`);
 }
 
 function hasOperationalDocumentLookupIntent(message: string): boolean {
@@ -177,7 +207,7 @@ function hasOperationalDocumentLookupIntent(message: string): boolean {
   const asksForOperationalInfo = /\b(informac|dados|status|situacao|consult|verific|checar|sobre|detalhes?|quais|quantos?|lista|listar|mostra|mostrar|tenho)\b/.test(normalized);
   const asksForDocumentCopy = /\b(enviar|manda|mandar|emitir|baixar|download|copia|segunda via|2a via|pdf|documento)\b/.test(normalized);
 
-  return mentionsContractOrRegistration && asksForOperationalInfo && !asksForDocumentCopy;
+  return mentionsContractOrRegistration && (asksForOperationalInfo || asksForDocumentCopy);
 }
 
 function buildCustomerIdentifierFields(input: {
@@ -251,11 +281,23 @@ function shouldCloseFromHybridSignal(input: {
   customerMessage: string;
   closeIntentGate?: CloseIntentGateDecision;
 }) {
+  const gate = input.closeIntentGate;
+  const gateUnavailable = !gate?.reason || ['missing_api_key', 'invalid_gate_response'].includes(gate.reason);
+  if (gate && !gateUnavailable) {
+    if (gate.execute && gate.confidence !== 'low') {
+      return {
+        shouldClose: true,
+        reason: `Classificador de encerramento aprovou close_chat (${gate.confidence}): ${gate.reason || 'sem motivo'}.`,
+      };
+    }
+
+    return { shouldClose: false, reason: null };
+  }
+
   if (isConversationCloseRequest(input.customerMessage)) {
     return { shouldClose: true, reason: 'Cliente pediu explicitamente para encerrar o atendimento.' };
   }
 
-  const gate = input.closeIntentGate;
   if (gate?.execute && gate.confidence !== 'low') {
     return {
       shouldClose: true,
@@ -264,6 +306,13 @@ function shouldCloseFromHybridSignal(input: {
   }
 
   return { shouldClose: false, reason: null };
+}
+
+function getAiSuggestedLookupTool(decision?: AiWorkflowDecision | null): 'sgp_fetch_contact_panel_data' | 'sgp_fetch_contracts' | null {
+  if (!decision?.shouldUseTools || decision.confidence < 0.55) return null;
+  if (decision.suggestedTools.includes('sgp_fetch_contact_panel_data')) return 'sgp_fetch_contact_panel_data';
+  if (decision.suggestedTools.includes('sgp_fetch_contracts')) return 'sgp_fetch_contracts';
+  return null;
 }
 
 export function resolveAutopilotWorkflowPlan(input: {
@@ -276,6 +325,7 @@ export function resolveAutopilotWorkflowPlan(input: {
   knowledgeCoverage: KnowledgeCoverage;
   slotMappings?: WorkflowSlotMappings;
   closeIntentGate?: CloseIntentGateDecision;
+  aiWorkflowDecision?: AiWorkflowDecision | null;
   recentToolResults?: AgentToolExecutionResult[] | null;
   now?: Date;
 }): AutopilotWorkflowPlan {
@@ -365,6 +415,7 @@ export function resolveAutopilotWorkflowPlan(input: {
       const team = findHandoffTeam({
         teams: input.availableTeams,
         intent: input.intentResolution.intent,
+        customerMessage: input.customerMessage,
       });
 
       if (team) {
@@ -412,6 +463,58 @@ export function resolveAutopilotWorkflowPlan(input: {
     };
   }
 
+  const aiSuggestedLookupTool = getAiSuggestedLookupTool(input.aiWorkflowDecision);
+  if (
+    aiSuggestedLookupTool &&
+    input.aiWorkflowDecision?.needsCustomerIdentifier &&
+    !hasCustomerIdentifier(slotExtraction) &&
+    !hasRecentSuccessfulCustomerLookup(input.recentToolResults)
+  ) {
+    return {
+      executionMode: 'direct_response',
+      response: askForMissingSlots(['customer_identifier'], input.intentResolution.intent),
+      actions: [],
+      reason: `Classificador IA de workflow pediu identificador antes de consultar ferramenta: ${input.aiWorkflowDecision.reason || 'sem motivo'}.`,
+      missingSlots: ['customer_identifier'],
+      slotExtraction,
+      handledByWorkflow: true,
+      metadata: {
+        ...baseMetadata,
+        aiWorkflowDecision: input.aiWorkflowDecision,
+      },
+    };
+  }
+
+  if (
+    aiSuggestedLookupTool &&
+    hasCustomerIdentifier(slotExtraction) &&
+    isToolEnabled(input.enabledToolNames, aiSuggestedLookupTool)
+  ) {
+    const actions = buildSgpLookupActions({
+      slotExtraction,
+      enabledToolNames: input.enabledToolNames,
+      mappings: input.slotMappings,
+      reason: `Classificador IA de workflow recomendou consulta operacional: ${input.aiWorkflowDecision?.reason || 'sem motivo'}.`,
+    });
+
+    if (actions.length > 0) {
+      return {
+        executionMode: 'pre_response_tools',
+        response: null,
+        actions,
+        reason: 'Workflow IA recomendou consulta operacional antes de responder.',
+        missingSlots: [],
+        slotExtraction,
+        handledByWorkflow: true,
+        metadata: {
+          ...baseMetadata,
+          plannedTools: actions.map((action) => action.type),
+          aiWorkflowDecision: input.aiWorkflowDecision,
+        },
+      };
+    }
+  }
+
   if (shouldAskCustomerIdentifierForOperationalWorkflow({
     intent: input.intentResolution.intent,
     customerMessage: input.customerMessage,
@@ -457,13 +560,14 @@ export function resolveAutopilotWorkflowPlan(input: {
     (
       input.intentResolution.intent === 'troubleshooting' ||
       input.intentResolution.intent === 'support_request' ||
+      input.intentResolution.intent === 'unknown' ||
       (
         input.intentResolution.intent === 'document_request' &&
         hasOperationalDocumentLookupIntent(input.customerMessage)
       )
     ) &&
     hasCustomerIdentifier(slotExtraction) &&
-    hasOperationalLookupIntent(input.customerMessage)
+    hasOperationalLookupContext(input.customerMessage, input.chatHistory)
   ) {
     const actions = buildSgpLookupActions({
       slotExtraction,

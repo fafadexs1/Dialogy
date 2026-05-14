@@ -86,7 +86,7 @@ export function ensureProcedureSgpLookupAction(input: {
   enabledToolNames: string[];
   knowledgeToolProcedures: string;
 }): AgentToolAction[] {
-  if (!input.knowledgeToolProcedures.includes('reboot_router')) {
+  if (!/(?:reboot|restart|reinici)/i.test(input.knowledgeToolProcedures)) {
     return input.actions;
   }
 
@@ -601,7 +601,7 @@ export function buildSgpResponseFromToolResults(
 }
 
 function extractMcpRebootToolName(knowledgeToolProcedures: string): string | null {
-  const match = knowledgeToolProcedures.match(/Tool resolvida:\s*(mcp:[^\s]+:reboot_router)\b/);
+  const match = knowledgeToolProcedures.match(/Tool resolvida:\s*(mcp:[^\s]*(?:reboot|restart|reinici)[^\s]*)\b/i);
   return match?.[1] || null;
 }
 
@@ -657,7 +657,7 @@ export function buildRouterRebootActionFromSgpResults(input: {
 
 export function buildMcpCustomerResponseFromToolResults(results: AgentToolExecutionResult[]): string | null {
   const rebootResult = results.find((result) => (
-    result.toolName.endsWith(':reboot_router') && result.status === 'success'
+    /(?:reboot|restart|reinici)/i.test(result.toolName) && result.status === 'success'
   ));
   if (!rebootResult) return null;
 

@@ -27,8 +27,9 @@ function runPlanner(input: {
   enabledToolNames?: string[];
   toolCatalog?: AgentToolCatalogItem[];
   contactOverride?: Contact;
+  intentOverride?: ReturnType<typeof resolveAutopilotIntent>;
 }) {
-  const intentResolution = resolveAutopilotIntent({ customerMessage: input.message });
+  const intentResolution = input.intentOverride || resolveAutopilotIntent({ customerMessage: input.message });
   const resolvedContact = input.contactOverride || contact;
   return planAutopilotTools({
     response: input.response ?? null,
@@ -49,6 +50,7 @@ function runPlanner(input: {
 describe('autopilot tool planner', () => {
   it('detects external lookup promises', () => {
     expect(hasExternalLookupPromise('Vou verificar seu cadastro no sistema.')).toBe(true);
+    expect(hasExternalLookupPromise('Para verificar, vou precisar do seu CPF para acessar o sistema e verificar o que esta acontecendo.')).toBe(true);
     expect(hasExternalLookupPromise('Para consultar, me envie seu CPF.')).toBe(false);
   });
 
@@ -119,6 +121,56 @@ describe('autopilot tool planner', () => {
       'sgp_fetch_contact_panel_data',
     ]);
     expect(result.promiseValidation.hasExecutableLookupTool).toBe(true);
+  });
+
+  it('allows read-only SGP lookup for unknown intent when CPF/CNPJ is already known', () => {
+    const result = runPlanner({
+      message: '01298570174',
+      response: 'Vou consultar seu cadastro no sistema.',
+      contactOverride: {
+        ...contact,
+        custom_fields: { CPF: '01298570174' },
+      },
+      enabledToolNames: ['sgp_fetch_contact_panel_data'],
+      actions: [
+        {
+          type: 'sgp_fetch_contact_panel_data',
+          reason: 'Consultar dados operacionais com identificador conhecido.',
+          payload: {},
+        },
+      ],
+    });
+
+    expect(result.rejectedActions).toHaveLength(0);
+    expect(result.actions.map((action) => action.type)).toEqual(['sgp_fetch_contact_panel_data']);
+    expect(result.promiseValidation.hasExecutableLookupTool).toBe(true);
+  });
+
+  it('allows CRM CPF/CNPJ capture for unknown intent before operational lookup', () => {
+    const result = runPlanner({
+      message: '01298570174',
+      response: null,
+      enabledToolNames: ['crm_update_contact_custom_fields', 'sgp_fetch_contact_panel_data'],
+      intentOverride: { intent: 'unknown', confidence: 0.42, reason: 'Contexto ambiguo.' } as any,
+      actions: [
+        {
+          type: 'crm_update_contact_custom_fields',
+          reason: 'Salvar CPF/CNPJ informado pelo cliente.',
+          payload: { fields: { CPF: '01298570174' } },
+        },
+        {
+          type: 'sgp_fetch_contact_panel_data',
+          reason: 'Consultar dados operacionais com identificador informado.',
+          payload: {},
+        },
+      ],
+    });
+
+    expect(result.rejectedActions).toHaveLength(0);
+    expect(result.actions.map((action) => action.type)).toEqual([
+      'crm_update_contact_custom_fields',
+      'sgp_fetch_contact_panel_data',
+    ]);
   });
 
   it('allows close_chat with configurable close options', () => {

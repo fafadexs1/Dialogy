@@ -142,6 +142,10 @@ export function hasExternalLookupPromise(response: string | null | undefined): b
   return (
     /\b(vou|irei|vamos|posso|consigo|deixa eu|deixe me|estou|to)\s+(verificar|consultar|checar|conferir|validar|buscar|olhar|acessar)\b/.test(normalized) &&
     /\b(sistema|cadastro|contrato|fatura|boleto|pagamento|pedido|protocolo|status|conexao|sinal|agenda|estoque|disponibilidade|dados)\b/.test(normalized)
+  ) || (
+    /\b(?:para|pra)\s+(?:verificar|consultar|checar|conferir|validar|buscar|olhar|acessar)\b/.test(normalized) &&
+    /\b(?:vou|vamos|preciso|vou precisar|precisamos|me informe|envie|manda|mandar)\b/.test(normalized) &&
+    /\b(sistema|cadastro|contrato|fatura|boleto|pagamento|pedido|protocolo|status|conexao|sinal|agenda|estoque|disponibilidade|dados)\b/.test(normalized)
   );
 }
 

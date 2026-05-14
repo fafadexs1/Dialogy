@@ -23,6 +23,8 @@ import {
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 import { formatCustomerFacingAiResponse, splitIntoMessageBlocks } from '@/lib/ai-response-format';
 import { classifyToolIntent } from '@/ai/flows/tool-intent-gate';
+import { classifyAutopilotIntentWithAi, shouldUseAiIntentClassifier } from '@/ai/flows/intent-classifier';
+import { classifyAutopilotWorkflowWithAi, shouldUseAiWorkflowClassifier, type AiWorkflowDecision } from '@/ai/flows/workflow-classifier';
 import {
     finishOrchestratorRun,
     recordOrchestratorEvent,
@@ -40,14 +42,14 @@ import {
     ensurePromisedSgpLookupAction,
     ensureProcedureSgpLookupAction,
 } from '@/services/autopilot-sgp-response';
-import { findOfficialKnowledgeAnswer, resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { findOfficialKnowledgeAnswer, resolveAutopilotIntent, resolveAutopilotIntentWithOverride } from '@/services/autopilot-intent';
 import type { KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
+import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
 import { selectAutopilotConfigForRuntime } from '@/services/autopilot/config-selection';
-import { isConversationCloseRequest } from '@/services/autopilot/close-intent';
 import { getActiveProcedureExecution, createProcedureExecution } from '@/services/autopilot/procedure-store';
 import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
 import { matchProcedure } from '@/services/autopilot/procedure-matcher';
@@ -320,22 +322,6 @@ function filterImplicitTransferActions(input: {
         return input.actions;
     }
 
-    // Pre-compute: check if any transfer_chat targets a team that the deterministic
-    // router already identified as a routing candidate (domain keyword match).
-    const candidateTeamIds = new Set(
-        (input.candidates || []).map((c) => c.team.id)
-    );
-    const transferBackedByCandidate = candidateTeamIds.size > 0 && input.actions.some((action) => {
-        if (action.type !== 'transfer_chat') return false;
-        const p = action.payload && typeof action.payload === 'object' ? action.payload as Record<string, any> : {};
-        const resolved = typeof p.teamId === 'string'
-            ? input.availableTeams.find((team) => team.id === p.teamId)
-            : null;
-        if (resolved && candidateTeamIds.has(resolved.id)) return true;
-        const name = String(p.teamName || '').toLowerCase().trim();
-        return name.length > 0 && (input.candidates || []).some((c) => c.team.name.toLowerCase().trim() === name);
-    });
-
     return input.actions.filter((action) => {
         if (action.type !== 'transfer_chat' && action.type !== 'add_internal_note') {
             return true;
@@ -356,20 +342,26 @@ function filterImplicitTransferActions(input: {
             const explicitByName = teamName ? hasExplicitTeamHandoff(input.customerMessage, { name: teamName }) : false;
             if (explicitByTarget || explicitByName) return true;
 
-            // Allow transfer when the deterministic router already identified
-            // this team as a candidate (e.g. "internet ruim" matched domain "suporte")
-            if (targetTeam && candidateTeamIds.has(targetTeam.id)) return true;
-            if (teamName && (input.candidates || []).some((c) =>
-                c.team.name.toLowerCase().trim() === teamName.toLowerCase().trim()
-            )) return true;
+            // Domain/keyword matches are only hints. Without an explicit human
+            // request, transfer is allowed only when the agent cannot continue
+            // safely because an operational lookup/action is unavailable.
+            if (isOperationallyUnresolvableTransferReason(reason)) return true;
 
             return false;
         }
 
-        // Allow accompanying internal notes when a candidate-backed transfer exists
-        if (transferBackedByCandidate) return true;
+        const hasAllowedImplicitTransfer = input.actions.some((candidateAction) => {
+            if (candidateAction.type !== 'transfer_chat') return false;
+            const candidateReason = String(candidateAction.reason || '');
+            return isOperationallyUnresolvableTransferReason(candidateReason);
+        });
+        if (hasAllowedImplicitTransfer) return true;
         return !/\b(transfer|encaminh|roteamento)\b/i.test(text);
     });
+}
+
+function isOperationallyUnresolvableTransferReason(reason: string) {
+    return /\b(lookup_promise_without_executable_tool|lookup_promise_without_tool_or_handoff|promise_handoff|promise_without_tool|tool_failure|tool_error|timeout|indisponivel|indisponível|sem ferramenta|nao ha ferramenta executavel|não há ferramenta executável|nao tenho uma ferramenta|não tenho uma ferramenta|nao consigo consultar|não consigo consultar|consulta.*seguranca|consulta.*segurança)\b/i.test(reason);
 }
 
 function isPreResponseDataAction(action: AgentToolAction) {
@@ -640,8 +632,7 @@ function shouldRunCloseIntentGate(input: {
 }) {
     const message = input.customerMessage.trim();
     if (!input.enabledToolNames.includes('close_chat')) return false;
-    if (!message || message.length > 180) return false;
-    if (isConversationCloseRequest(message)) return false;
+    if (!message || message.length > 320) return false;
     return true;
 }
 
@@ -705,6 +696,22 @@ async function loadContactCustomFieldsForAutopilot(input: {
         console.error('[AUTOPILOT_WORKFLOW] Failed to load contact custom fields:', error);
         return {};
     }
+}
+
+function buildIntentClassifierContactSignals(contact: Contact) {
+    const customFields = contact.custom_fields || {};
+    const customFieldLabels = Object.keys(customFields)
+        .map((key) => key.trim())
+        .filter(Boolean)
+        .slice(0, 20);
+    const hasCustomerIdentifier = Object.values(customFields)
+        .flatMap((value) => Array.isArray(value) ? value : [value])
+        .some((value) => /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/.test(String(value ?? '')));
+
+    return {
+        hasCustomerIdentifier,
+        customFieldLabels,
+    };
 }
 
 function buildEnabledAgentToolsDescription(config: AutopilotConfig, toolCatalog: AgentToolCatalogItem[]): string {
@@ -890,9 +897,10 @@ async function insertAgentToolStatusMessage(input: {
     systemAgentId: string;
     content: string;
     toolName: string;
-    status: 'running' | 'success' | 'error' | 'rejected';
+    status: 'prearmed' | 'running' | 'success' | 'error' | 'rejected';
     runId?: string;
     toolResult?: AgentToolExecutionResult | null;
+    prearm?: ToolPrearmSignal | null;
 }) {
     try {
         const compactOutput = input.toolResult?.output
@@ -924,6 +932,7 @@ async function insertAgentToolStatusMessage(input: {
                     ...(input.runId ? { agentToolRunId: input.runId } : {}),
                     agentToolName: input.toolName,
                     agentToolStatus: input.status,
+                    ...(input.prearm ? { agentToolPrearm: input.prearm } : {}),
                     ...(input.toolResult ? { agentToolInput: input.toolResult.input } : {}),
                     ...(compactOutput ? { agentToolOutput: compactOutput } : {}),
                     ...(input.toolResult?.error ? { agentToolError: input.toolResult.error } : {}),
@@ -945,6 +954,7 @@ async function insertAgentToolStatusMessage(input: {
                     status: input.status,
                     content: input.content,
                     ...(input.runId ? { runId: input.runId } : {}),
+                    ...(input.prearm ? { prearm: input.prearm } : {}),
                     ...(compactOutput ? { output: compactOutput } : {}),
                     ...(input.toolResult?.error ? { error: input.toolResult.error } : {}),
                 },
@@ -1395,11 +1405,112 @@ export async function processAutopilotForChat(
         mediaAnalysisContext,
     ].filter((part) => part.trim().length > 0).join('\n\n');
     const staticKnowledgeDocuments = autopilotConfig.knowledge_base_documents || [];
-    const intentResolution = resolveAutopilotIntent({
+    const enabledToolNames = resolveEnabledToolNames(autopilotConfig);
+    const crmCustomFields = await loadContactCustomFieldsForAutopilot({
+        workspaceId,
+        contactId: chat.contact?.id || (chat as { contact_id?: string | null }).contact_id,
+    });
+    const sanitizedContact: Contact = {
+        ...(chat.contact as Contact),
+        email: chat.contact?.email || '',
+        custom_fields: {
+            ...(chat.contact?.custom_fields || {}),
+            ...crmCustomFields,
+        },
+    };
+    const availableTeams = await loadToolRouterTeams(workspaceId);
+
+    let workspaceGeminiApiKey: string | undefined;
+    try {
+        const configRes = await db.query(
+            `SELECT config->>'apiKey' as api_key
+             FROM workspace_integrations
+             WHERE workspace_id = $1
+               AND provider = 'gemini'
+               AND is_active = true
+               AND COALESCE(config->>'apiKey', '') <> ''
+             ORDER BY updated_at DESC
+             LIMIT 1`,
+            [workspaceId]
+        );
+        if (configRes.rows.length > 0) {
+            workspaceGeminiApiKey = configRes.rows[0].api_key;
+        }
+    } catch (error) {
+        console.error('[AUTOPILOT_SERVICE] Failed to fetch integration key:', error);
+    }
+
+    let intentResolution = resolveAutopilotIntent({
         customerMessage: enrichedLastMessageContent || '',
         chatHistory: chatHistoryForAI,
         knowledgeDocuments: staticKnowledgeDocuments,
     });
+    const deterministicIntentResolution = intentResolution;
+
+    if (shouldUseAiIntentClassifier({
+        intent: deterministicIntentResolution.intent,
+        confidence: deterministicIntentResolution.confidence,
+        officialResponse: deterministicIntentResolution.officialResponse,
+    })) {
+        try {
+            const classifierStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'intent_classifier_ai',
+                () => withTimeout(
+                    classifyAutopilotIntentWithAi({
+                        customerMessage: enrichedLastMessageContent || '',
+                        chatHistory: chatHistoryForAI,
+                        deterministicIntent: deterministicIntentResolution.intent,
+                        deterministicConfidence: deterministicIntentResolution.confidence,
+                        deterministicReason: deterministicIntentResolution.reason,
+                        agentName: autopilotConfig.name,
+                        agentKnowledgeBase: autopilotConfig.knowledge_base || '',
+                        knowledgeDocuments: staticKnowledgeDocuments,
+                        enabledToolNames,
+                        contactSignals: buildIntentClassifierContactSignals(sanitizedContact),
+                        model: process.env.AI_INTENT_CLASSIFIER_MODEL || resolvedAiModel.model,
+                        apiKey: workspaceGeminiApiKey,
+                        timeoutMs: Number(process.env.AI_INTENT_CLASSIFIER_TIMEOUT_MS || 1800),
+                    }),
+                    Number(process.env.AI_INTENT_CLASSIFIER_TIMEOUT_MS || 1800) + 500,
+                    'intent classifier'
+                ),
+                {
+                    deterministicIntent: deterministicIntentResolution.intent,
+                    deterministicConfidence: deterministicIntentResolution.confidence,
+                    model: process.env.AI_INTENT_CLASSIFIER_MODEL || resolvedAiModel.model,
+                }
+            );
+            orchestratorTimings.intent_classifier_ms = classifierStage.durationMs;
+            const aiClassification = classifierStage.value;
+            if (
+                aiClassification.intent !== deterministicIntentResolution.intent &&
+                aiClassification.confidence >= 0.55
+            ) {
+                intentResolution = resolveAutopilotIntentWithOverride({
+                    customerMessage: enrichedLastMessageContent || '',
+                    chatHistory: chatHistoryForAI,
+                    knowledgeDocuments: staticKnowledgeDocuments,
+                }, {
+                    intent: aiClassification.intent,
+                    confidence: aiClassification.confidence,
+                    reason: `Classificador IA: ${aiClassification.reason || 'sem motivo'}. Deterministico anterior: ${deterministicIntentResolution.intent}.`,
+                });
+            }
+        } catch (error) {
+            console.warn('[AUTOPILOT_INTENT_CLASSIFIER] Failed, keeping deterministic intent:', error);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'intent_classifier_ai',
+                status: 'fallback',
+                payload: {
+                    deterministicIntent: deterministicIntentResolution.intent,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+        }
+    }
+
     let ragStrategy: KnowledgeRetrievalStrategy = staticKnowledgeDocuments.length > 0 ? 'static_documents' : 'none';
     let knowledgeCoverage: KnowledgeCoverage = intentResolution.officialResponse
         ? 'high'
@@ -1425,50 +1536,23 @@ export async function processAutopilotForChat(
             sourceDocumentName: intentResolution.sourceDocumentName ?? null,
             hasOfficialResponse: Boolean(intentResolution.officialResponse),
             reason: intentResolution.reason,
+            deterministicIntent: deterministicIntentResolution.intent,
+            deterministicConfidence: deterministicIntentResolution.confidence,
         },
     });
 
     const activeRules = (autopilotRules || []).filter(rule => rule.enabled);
-    const crmCustomFields = await loadContactCustomFieldsForAutopilot({
-        workspaceId,
-        contactId: chat.contact?.id || (chat as { contact_id?: string | null }).contact_id,
-    });
-    const sanitizedContact: Contact = {
-        ...(chat.contact as Contact),
-        email: chat.contact?.email || '',
-        custom_fields: {
-            ...(chat.contact?.custom_fields || {}),
-            ...crmCustomFields,
-        },
-    };
-    const availableTeams = await loadToolRouterTeams(workspaceId);
     let deterministicRouting = routeDeterministicAgentTools({
         customerMessage: enrichedLastMessageContent || '',
         contactName: sanitizedContact.name,
         availableTeams,
     });
 
-    let workspaceGeminiApiKey: string | undefined;
-    try {
-        const configRes = await db.query(
-            `SELECT config->>'apiKey' as api_key
-             FROM workspace_integrations
-             WHERE workspace_id = $1
-               AND provider = 'gemini'
-               AND is_active = true
-               AND COALESCE(config->>'apiKey', '') <> ''
-             ORDER BY updated_at DESC
-             LIMIT 1`,
-            [workspaceId]
-        );
-        if (configRes.rows.length > 0) {
-            workspaceGeminiApiKey = configRes.rows[0].api_key;
-        }
-    } catch (error) {
-        console.error('[AUTOPILOT_SERVICE] Failed to fetch integration key:', error);
-    }
-
-    if (deterministicRouting.actions.length === 0 && deterministicRouting.candidates.length > 0) {
+    if (
+        deterministicRouting.actions.length === 0 &&
+        deterministicRouting.candidates.length > 0 &&
+        shouldHandoffToHuman(enrichedLastMessageContent || '')
+    ) {
         const candidate = deterministicRouting.candidates[0];
         try {
             const gateStage = await timeOrchestratorStage(
@@ -1542,6 +1626,16 @@ export async function processAutopilotForChat(
                 },
             });
         }
+    } else if (deterministicRouting.actions.length === 0 && deterministicRouting.candidates.length > 0) {
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'tool_intent_gate',
+            status: 'skipped',
+            payload: {
+                candidates: deterministicRouting.candidates,
+                reason: 'domain_or_keyword_hint_without_explicit_human_request',
+            },
+        });
     }
 
     if (deterministicRouting.actions.length > 0) {
@@ -1787,7 +1881,6 @@ export async function processAutopilotForChat(
         });
     }
 
-    const enabledToolNames = resolveEnabledToolNames(autopilotConfig);
     const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId, enabledToolNames);
     const recentToolResults = await loadRecentToolResultsForAutopilot({
         workspaceId,
@@ -1882,7 +1975,7 @@ export async function processAutopilotForChat(
             });
         }
     }
-    const workflowPlan = resolveAutopilotWorkflowPlan({
+    let workflowPlan = resolveAutopilotWorkflowPlan({
         intentResolution,
         customerMessage: enrichedLastMessageContent || '',
         chatHistory: chatHistoryForAI,
@@ -1893,6 +1986,103 @@ export async function processAutopilotForChat(
         slotMappings: workflowSlotMappings,
         closeIntentGate,
         recentToolResults,
+    });
+    let aiWorkflowDecision: AiWorkflowDecision | null = null;
+    if (shouldUseAiWorkflowClassifier({
+        intent: intentResolution.intent,
+        confidence: intentResolution.confidence,
+        executionMode: workflowPlan.executionMode,
+        plannedActions: workflowPlan.actions.map((action) => action.type),
+        missingSlots: workflowPlan.missingSlots,
+        enabledToolNames,
+        hasCustomerIdentifier: Boolean(workflowPlan.slotExtraction.slots.customer_identifier),
+        officialResponse: deterministicOfficialResponse,
+    })) {
+        try {
+            const workflowClassifierStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'workflow_classifier_ai',
+                () => withTimeout(
+                    classifyAutopilotWorkflowWithAi({
+                        customerMessage: enrichedLastMessageContent || '',
+                        chatHistory: chatHistoryForAI,
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                        intentReason: intentResolution.reason,
+                        deterministicExecutionMode: workflowPlan.executionMode,
+                        deterministicMissingSlots: workflowPlan.missingSlots,
+                        deterministicPlannedTools: workflowPlan.actions.map((action) => action.type),
+                        agentName: autopilotConfig.name,
+                        agentKnowledgeBase: autopilotConfig.knowledge_base || '',
+                        knowledgeDocuments: staticKnowledgeDocuments,
+                        enabledToolNames,
+                        contactSignals: buildIntentClassifierContactSignals(sanitizedContact),
+                        model: process.env.AI_WORKFLOW_CLASSIFIER_MODEL || resolvedAiModel.model,
+                        apiKey: workspaceGeminiApiKey,
+                        timeoutMs: Number(process.env.AI_WORKFLOW_CLASSIFIER_TIMEOUT_MS || 1800),
+                    }),
+                    Number(process.env.AI_WORKFLOW_CLASSIFIER_TIMEOUT_MS || 1800) + 500,
+                    'workflow classifier'
+                ),
+                {
+                    intent: intentResolution.intent,
+                    deterministicExecutionMode: workflowPlan.executionMode,
+                    deterministicPlannedTools: workflowPlan.actions.map((action) => action.type),
+                    model: process.env.AI_WORKFLOW_CLASSIFIER_MODEL || resolvedAiModel.model,
+                }
+            );
+            orchestratorTimings.workflow_classifier_ms = workflowClassifierStage.durationMs;
+            aiWorkflowDecision = workflowClassifierStage.value;
+            const aiWorkflowPlan = resolveAutopilotWorkflowPlan({
+                intentResolution,
+                customerMessage: enrichedLastMessageContent || '',
+                chatHistory: chatHistoryForAI,
+                contact: sanitizedContact,
+                enabledToolNames,
+                availableTeams,
+                knowledgeCoverage,
+                slotMappings: workflowSlotMappings,
+                closeIntentGate,
+                aiWorkflowDecision,
+                recentToolResults,
+            });
+            if (
+                aiWorkflowPlan.executionMode !== workflowPlan.executionMode ||
+                aiWorkflowPlan.actions.length > workflowPlan.actions.length ||
+                aiWorkflowPlan.missingSlots.length > workflowPlan.missingSlots.length
+            ) {
+                workflowPlan = aiWorkflowPlan;
+            }
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'workflow_classifier_ai',
+                status: aiWorkflowDecision.shouldUseTools || aiWorkflowDecision.needsCustomerIdentifier ? 'success' : 'skipped',
+                durationMs: workflowClassifierStage.durationMs,
+                payload: {
+                    decision: aiWorkflowDecision,
+                    appliedExecutionMode: workflowPlan.executionMode,
+                    appliedActions: workflowPlan.actions.map((action) => action.type),
+                },
+            });
+        } catch (error) {
+            console.warn('[AUTOPILOT_WORKFLOW_CLASSIFIER] Failed, keeping deterministic workflow:', error);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'workflow_classifier_ai',
+                status: 'fallback',
+                payload: {
+                    intent: intentResolution.intent,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+        }
+    }
+    const workflowPrearmSignal = deriveToolPrearmSignal({
+        intentResolution,
+        missingSlots: workflowPlan.missingSlots,
+        enabledToolNames,
+        plannedActions: workflowPlan.actions,
+        reason: workflowPlan.reason,
     });
     await recordOrchestratorEvent({
         run: orchestratorRun,
@@ -1905,6 +2095,7 @@ export async function processAutopilotForChat(
             handledByWorkflow: workflowPlan.handledByWorkflow,
             missingSlots: workflowPlan.missingSlots,
             plannedActions: workflowPlan.actions.map((action) => action.type),
+            prearmedTool: workflowPrearmSignal?.toolName ?? null,
             knowledgeCoverage,
             reason: workflowPlan.reason,
         },
@@ -2243,6 +2434,19 @@ export async function processAutopilotForChat(
         const validatedWorkflowActions = responseValidator.actions.length > 0
             ? mergeAgentActions(responseValidator.actions, workflowPlan.actions)
             : workflowPlan.actions;
+
+        if (workflowPrearmSignal) {
+            await insertAgentToolStatusMessage({
+                workspaceId,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                content: buildToolPrearmContent(workflowPrearmSignal),
+                toolName: workflowPrearmSignal.toolName,
+                status: 'prearmed',
+                runId: `prearm:${orchestratorRun.id}:${workflowPrearmSignal.toolName}`,
+                prearm: workflowPrearmSignal,
+            });
+        }
 
         const sendStage = await timeOrchestratorStage(
             orchestratorRun,
@@ -3225,6 +3429,28 @@ export async function processAutopilotForChat(
                         ...toolPlanner.metadata,
                     },
                 });
+                const plannerMissingSlots = Array.from(new Set(
+                    toolPlanner.rejectedActions.flatMap((item) => item.missingSlots || [])
+                ));
+                const plannerPrearmSignal = deriveToolPrearmSignal({
+                    intentResolution,
+                    missingSlots: plannerMissingSlots,
+                    enabledToolNames,
+                    plannedActions: toolPlanner.rejectedActions.map((item) => item.action),
+                    reason: 'Tool planner identificou ferramenta pretendida aguardando dados obrigatorios.',
+                });
+                if (plannerPrearmSignal) {
+                    await insertAgentToolStatusMessage({
+                        workspaceId,
+                        chatId: chat.id,
+                        systemAgentId: assignedSystemAgentId,
+                        content: buildToolPrearmContent(plannerPrearmSignal),
+                        toolName: plannerPrearmSignal.toolName,
+                        status: 'prearmed',
+                        runId: `prearm:${orchestratorRun.id}:${plannerPrearmSignal.toolName}`,
+                        prearm: plannerPrearmSignal,
+                    });
+                }
                 if (toolPlanner.responseOverride) {
                     finalResponse = toolPlanner.responseOverride;
                     aiMessageBlocks = null;

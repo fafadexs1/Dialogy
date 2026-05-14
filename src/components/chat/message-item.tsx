@@ -511,6 +511,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
     const isInternalNote = message.metadata?.isInternalNote;
     const isAiAnalysis = message.metadata?.isAiAnalysis;
     const isToolExecution = message.metadata?.isToolExecution;
+    const isPrearmedTool = isToolExecution && message.metadata?.agentToolStatus === 'prearmed';
     const failureDetails = normalizeFailureDetails(message);
     const replyPreview = resolveReplyPreview(message, quotedMessage);
     const statusTitle = isFailed
@@ -622,6 +623,8 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                         "break-words rounded-[22px] md:rounded-2xl p-3 md:p-3 max-w-[85%] md:max-w-lg shadow-sm md:shadow-lg relative",
                                         isDeleted
                                             ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'
+                                            : isPrearmedTool
+                                                ? 'border border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-200'
                                             : isToolExecution
                                                 ? 'border border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-200'
                                             : isAiAnalysis
@@ -636,7 +639,9 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                     {(isInternalNote || isAiAnalysis || isToolExecution) && (
                                         <div className={cn(
                                             "flex items-center gap-1 text-xs mb-1 font-medium uppercase tracking-wider",
-                                            isToolExecution
+                                            isPrearmedTool
+                                                ? "text-violet-500/80"
+                                            : isToolExecution
                                                 ? "text-sky-500/80"
                                                 : isAiAnalysis
                                                     ? "text-emerald-500/80"

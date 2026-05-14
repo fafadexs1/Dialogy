@@ -159,7 +159,7 @@ type TextSendJob = {
 
 const TOOL_EXECUTION_STALE_MS = 5 * 60 * 1000;
 
-type ToolExecutionStatus = 'running' | 'success' | 'error' | 'rejected' | 'stale' | string;
+type ToolExecutionStatus = 'prearmed' | 'running' | 'success' | 'error' | 'rejected' | 'stale' | string;
 
 type ToolExecutionItem = {
     id: string;
@@ -178,6 +178,7 @@ function isToolExecutionMessage(message: Message): boolean {
 }
 
 function resolveToolStatusLabel(status?: ToolExecutionStatus): string {
+    if (status === 'prearmed') return 'Pre-engatilhada';
     if (status === 'running') return 'Executando';
     if (status === 'success') return 'Concluido';
     if (status === 'error') return 'Falhou';
@@ -187,6 +188,7 @@ function resolveToolStatusLabel(status?: ToolExecutionStatus): string {
 }
 
 function resolveToolStatusClass(status?: ToolExecutionStatus): string {
+    if (status === 'prearmed') return 'border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-200';
     if (status === 'success') return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200';
     if (status === 'error') return 'border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-200';
     if (status === 'rejected' || status === 'stale') return 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200';
@@ -195,6 +197,7 @@ function resolveToolStatusClass(status?: ToolExecutionStatus): string {
 }
 
 function resolveToolStatusIcon(status?: ToolExecutionStatus) {
+    if (status === 'prearmed') return Brain;
     if (status === 'success') return CheckCircle2;
     if (status === 'error' || status === 'rejected' || status === 'stale') return AlertTriangle;
     if (status === 'running') return Loader2;
@@ -292,6 +295,9 @@ function resolveToolOutputText(execution: ToolExecutionItem): string {
     if (execution.status === 'running') {
         return 'Aguardando retorno da API.';
     }
+    if (execution.status === 'prearmed') {
+        return 'A ferramenta esta pronta para executar assim que os dados obrigatorios forem informados.';
+    }
     if (execution.status === 'stale') {
         return 'A ferramenta foi iniciada, mas nenhum retorno final foi registrado. Ela nao esta mais em execucao agora.';
     }
@@ -310,6 +316,7 @@ function ToolExecutionsSheet({
     workspaceTimezone: string;
 }) {
     const latestStatus = executions[0]?.status;
+    const prearmedCount = executions.filter((execution) => execution.status === 'prearmed').length;
     const runningCount = executions.filter((execution) => execution.status === 'running').length;
     const successCount = executions.filter((execution) => execution.status === 'success').length;
     const failedCount = executions.filter((execution) => ['error', 'rejected', 'stale'].includes(String(execution.status || ''))).length;
@@ -336,7 +343,11 @@ function ToolExecutionsSheet({
                             </SheetDescription>
                         </div>
                     </div>
-                    <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="mt-4 grid grid-cols-4 gap-2">
+                        <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Prontas</div>
+                            <div className="mt-1 text-lg font-semibold text-violet-600 dark:text-violet-300">{prearmedCount}</div>
+                        </div>
                         <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
                             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Sucesso</div>
                             <div className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-300">{successCount}</div>
@@ -379,6 +390,7 @@ function ToolExecutionsSheet({
                                 const outputText = resolveToolOutputText(execution);
                                 const canCopy = outputText
                                     && !outputText.startsWith('Aguardando retorno')
+                                    && !outputText.startsWith('A ferramenta esta pronta')
                                     && !outputText.startsWith('A ferramenta foi iniciada')
                                     && !outputText.startsWith('Resultado detalhado');
 
@@ -394,11 +406,11 @@ function ToolExecutionsSheet({
                                             <StatusIcon className={cn("h-4 w-4", status === 'running' && "animate-spin")} />
                                         </div>
                                         <div className="overflow-hidden rounded-lg border border-border/80 bg-background/80 shadow-sm dark:border-white/10 dark:bg-white/[0.03]">
-                                            {status === 'running' && (
+                                            {(status === 'running' || status === 'prearmed') && (
                                                 <motion.div
-                                                    className="h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
+                                                    className={cn("h-0.5 bg-gradient-to-r from-transparent to-transparent", status === 'prearmed' ? 'via-violet-400' : 'via-cyan-400')}
                                                     animate={{ x: ['-100%', '100%'] }}
-                                                    transition={{ duration: 1.3, repeat: Infinity, ease: 'easeInOut' }}
+                                                    transition={{ duration: status === 'prearmed' ? 2.2 : 1.3, repeat: Infinity, ease: 'easeInOut' }}
                                                 />
                                             )}
                                             <div className="p-3">
@@ -1095,7 +1107,9 @@ export default function ChatPanel({
     }, [toolExecutionEntries]);
 
     const messagesToRender = useMemo(() => {
-        return timelineMessages.filter((message) => !isToolExecutionMessage(message));
+        return timelineMessages.filter((message) => (
+            !isToolExecutionMessage(message) || message.metadata?.agentToolStatus === 'prearmed'
+        ));
     }, [timelineMessages]);
 
     const pendingStatusIds = useMemo(() => {
