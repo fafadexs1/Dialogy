@@ -18,6 +18,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   const { resolvedTheme } = useTheme();
   const isInboxRoute = pathname === '/inbox' || pathname.startsWith('/inbox/');
   const isSettingsRoute = pathname === '/settings' || pathname.startsWith('/settings/');
+  const isAutopilotEditorRoute = /^\/autopilot\/[^/]+\/?$/.test(pathname);
   const [mounted, setMounted] = React.useState(false);
 
   const noSidebarPrefixes = [
@@ -71,7 +72,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
   }, [shellThemeClass]);
 
   React.useEffect(() => {
-    if (!isSettingsRoute) {
+    if (!isSettingsRoute && !isAutopilotEditorRoute) {
       return;
     }
 
@@ -93,7 +94,7 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       html.style.overscrollBehavior = previousHtmlOverscroll;
       body.style.overscrollBehavior = previousBodyOverscroll;
     };
-  }, [isSettingsRoute]);
+  }, [isAutopilotEditorRoute, isSettingsRoute]);
 
   return (
     <div
@@ -130,13 +131,13 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       <main
         className={cn(
           'min-h-0 min-w-0 flex flex-1 flex-col',
-          isSettingsRoute ? 'overflow-hidden overscroll-none' : 'overflow-y-auto'
+          isSettingsRoute || isAutopilotEditorRoute ? 'overflow-hidden overscroll-none' : 'overflow-y-auto'
         )}
       >
         <div
           className={cn(
             'flex min-h-0 flex-1 flex-col',
-            isSettingsRoute && 'overflow-hidden overscroll-none'
+            (isSettingsRoute || isAutopilotEditorRoute) && 'overflow-hidden overscroll-none'
           )}
         >
           {children}

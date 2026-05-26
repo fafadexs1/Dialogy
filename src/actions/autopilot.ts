@@ -9,6 +9,7 @@ import type {
     AutopilotConfigDraft,
     AutopilotConfigDraftSnapshot,
     AutopilotConfigVersionSummary,
+    AutopilotFlowGraph,
     NexusFlowInstance,
     Action,
     AutopilotUsageLog,
@@ -33,7 +34,8 @@ async function ensureAutopilotToolColumns(): Promise<void> {
     await db.query(`
         ALTER TABLE IF EXISTS autopilot_configs
         ADD COLUMN IF NOT EXISTS enabled_tool_names jsonb,
-        ADD COLUMN IF NOT EXISTS transcription_model text
+        ADD COLUMN IF NOT EXISTS transcription_model text,
+        ADD COLUMN IF NOT EXISTS flow_graph jsonb
     `);
 }
 
@@ -108,6 +110,23 @@ function normalizeEnabledToolNames(raw: unknown): string[] {
         : [];
 }
 
+function parseFlowGraph(raw: unknown): AutopilotFlowGraph | null {
+    const parsed = typeof raw === 'string'
+        ? (() => {
+            try {
+                return JSON.parse(raw);
+            } catch {
+                return null;
+            }
+        })()
+        : raw;
+
+    if (!parsed || typeof parsed !== 'object') return null;
+    const graph = parsed as Partial<AutopilotFlowGraph>;
+    if (graph.version !== 1 || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return null;
+    return graph as AutopilotFlowGraph;
+}
+
 function readFormBoolean(formData: FormData, field: string, fallback = false): boolean {
     if (!formData.has(field)) return fallback;
     const value = formData.get(field);
@@ -129,6 +148,7 @@ function buildSnapshotFromConfigRow(row: any): AutopilotConfigDraftSnapshot {
         escalation_policy: row.escalation_policy || null,
         closing_policy: row.closing_policy || null,
         enabled_tool_names: normalizeEnabledToolNames(row.enabled_tool_names),
+        flow_graph: parseFlowGraph(row.flow_graph),
     };
 }
 
@@ -173,6 +193,9 @@ function normalizeDraftSnapshot(
         enabled_tool_names: Array.isArray(snapshot.enabled_tool_names)
             ? normalizeEnabledToolNames(snapshot.enabled_tool_names)
             : fallback.enabled_tool_names,
+        flow_graph: hasOwn('flow_graph')
+            ? parseFlowGraph(snapshot.flow_graph)
+            : fallback.flow_graph || null,
     };
 }
 
@@ -218,6 +241,9 @@ async function buildSnapshotFromFormData(
         enabled_tool_names: formData.has('enabledToolNames')
             ? normalizeEnabledToolNames(formData.get('enabledToolNames')?.toString() || '[]')
             : fallback.enabled_tool_names,
+        flow_graph: formData.has('flowGraph')
+            ? parseFlowGraph(formData.get('flowGraph')?.toString() || '')
+            : fallback.flow_graph || null,
     };
 }
 
@@ -444,6 +470,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
                 is_primary: Boolean(row.is_primary),
                 is_private: Boolean(row.is_private),
                 default_fallback_reply: row.default_fallback_reply || null,
+                flow_graph: parseFlowGraph(row.flow_graph),
             } as AutopilotConfig;
         }).filter(agent => !agent.is_private || agent.user_id === userId); // Show only own private agents or shared ones
 
@@ -648,6 +675,11 @@ export async function saveAutopilotConfig(
                 console.error('[SAVE_AUTOPILOT_CONFIG] Erro ao parsear ferramentas habilitadas:', error);
                 return { success: false, error: 'Lista de ferramentas habilitadas invÃ¡lida.' };
             }
+        }
+        if (formData.has('flowGraph')) {
+            const flowGraph = parseFlowGraph(formData.get('flowGraph')?.toString() || '');
+            setClauses.push(`flow_graph = $${valueIndex++}`);
+            values.push(flowGraph ? JSON.stringify(flowGraph) : null);
         }
 
         const isPrivate = formData.get('isPrivate');
@@ -917,6 +949,7 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 escalation_policy = $12,
                 closing_policy = $13,
                 enabled_tool_names = $14,
+                flow_graph = $15,
                 updated_at = NOW()
              WHERE workspace_id = $1 AND id = $2`,
             [
@@ -934,6 +967,7 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 snapshot.escalation_policy,
                 snapshot.closing_policy,
                 JSON.stringify(snapshot.enabled_tool_names),
+                snapshot.flow_graph ? JSON.stringify(snapshot.flow_graph) : null,
             ]
         );
 
@@ -1053,6 +1087,7 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
                 escalation_policy = $12,
                 closing_policy = $13,
                 enabled_tool_names = $14,
+                flow_graph = $15,
                 updated_at = NOW()
              WHERE workspace_id = $1 AND id = $2`,
             [
@@ -1070,6 +1105,7 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
                 snapshot.escalation_policy,
                 snapshot.closing_policy,
                 JSON.stringify(snapshot.enabled_tool_names),
+                snapshot.flow_graph ? JSON.stringify(snapshot.flow_graph) : null,
             ]
         );
 

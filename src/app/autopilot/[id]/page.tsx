@@ -22,6 +22,7 @@ import type {
   AutopilotConfig,
   AutopilotConfigDraftSnapshot,
   AutopilotConfigVersionSummary,
+  AutopilotFlowGraph,
   AutopilotUsageLog,
   KnowledgeBaseDocument,
   NexusFlowInstance,
@@ -61,6 +62,7 @@ import { AutopilotSettings } from '@/components/autopilot/autopilot-settings';
 import { AutopilotPlayground } from '@/components/autopilot/autopilot-playground';
 import { AutopilotReadiness } from '@/components/autopilot/autopilot-readiness';
 import { AutomationForm } from '@/components/autopilot/automation-form';
+import { AutopilotFlowBuilder, type AgentEditorPanel } from '@/components/autopilot/autopilot-flow-builder';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
 
@@ -121,6 +123,7 @@ function buildSnapshotFromConfig(
     enabled_tool_names: Array.isArray(config.enabled_tool_names)
       ? config.enabled_tool_names
       : defaultEnabledToolNames,
+    flow_graph: config.flow_graph || null,
   };
 }
 
@@ -145,6 +148,7 @@ function normalizeLoadedSnapshot(
     enabled_tool_names: Array.isArray(snapshot.enabled_tool_names)
       ? snapshot.enabled_tool_names
       : fallback.enabled_tool_names,
+    flow_graph: snapshot.flow_graph || fallback.flow_graph || null,
   };
 }
 
@@ -265,6 +269,7 @@ export default function AutopilotDetailPage() {
   const [closingPolicy, setClosingPolicy] = useState('');
   const [enabledToolNames, setEnabledToolNames] = useState<string[]>([]);
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
+  const [flowGraph, setFlowGraph] = useState<AutopilotFlowGraph | null>(null);
   const [loadedEditorSnapshot, setLoadedEditorSnapshot] = useState<AutopilotConfigDraftSnapshot | null>(null);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
   const [versions, setVersions] = useState<AutopilotConfigVersionSummary[]>([]);
@@ -277,6 +282,7 @@ export default function AutopilotDetailPage() {
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<NexusFlowInstance | null>(null);
   const [lastPlaygroundTrace, setLastPlaygroundTrace] = useState<AutopilotPlaygroundTrace | null>(null);
+  const [editorPanel, setEditorPanel] = useState<AgentEditorPanel | null>(null);
 
   const estimateTokens = useCallback((content: string) => {
     const normalized = content?.trim() || '';
@@ -355,6 +361,7 @@ export default function AutopilotDetailPage() {
       setClosingPolicy(editorSnapshot.closing_policy || '');
       setEnabledToolNames(editorSnapshot.enabled_tool_names || []);
       setKnowledgeDocuments(editorSnapshot.knowledge_base_documents || []);
+      setFlowGraph(editorSnapshot.flow_graph || null);
 
       const logsData = await getAutopilotUsageLogs(autopilotData.config.id);
       setUsageLogs(logsData.logs || []);
@@ -382,6 +389,7 @@ export default function AutopilotDetailPage() {
     escalation_policy: escalationPolicy || null,
     closing_policy: closingPolicy || null,
     enabled_tool_names: enabledToolNames,
+    flow_graph: flowGraph,
   }), [
     agentName,
     aiModel,
@@ -395,6 +403,7 @@ export default function AutopilotDetailPage() {
     isPrivate,
     knowledgeBase,
     knowledgeDocuments,
+    flowGraph,
   ]);
 
   const currentSnapshotSignature = useMemo(
@@ -432,6 +441,7 @@ export default function AutopilotDetailPage() {
     formData.append('closingPolicy', closingPolicy);
     formData.append('enabledToolNames', JSON.stringify(enabledToolNames));
     formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
+    formData.append('flowGraph', JSON.stringify(flowGraph));
     return formData;
   }, [
     agentName,
@@ -446,6 +456,7 @@ export default function AutopilotDetailPage() {
     isPrivate,
     knowledgeBase,
     knowledgeDocuments,
+    flowGraph,
     user?.activeWorkspaceId,
   ]);
 
@@ -659,6 +670,205 @@ export default function AutopilotDetailPage() {
 
   if (!config) return null;
 
+  if (process.env.NEXT_PUBLIC_AUTOPILOT_VISUAL_BUILDER !== 'false') return (
+    <>
+      <AutopilotFlowBuilder
+        agentId={agentId}
+        agentName={agentName || config.name}
+        modelName={getAiModelLabel(aiModel, modelCatalog)}
+        isActive={isActive}
+        isPrivate={isPrivate}
+        isPrimary={isPrimary}
+        hasDraft={hasDraft}
+        isDirty={isDirty}
+        isSaving={isSaving}
+        isPublishing={isPublishing}
+        isDiscarding={isDiscardingDraft}
+        enabledToolNames={enabledToolNames}
+        tools={toolCatalog}
+        rules={instances}
+        flowGraph={flowGraph}
+        onFlowGraphChange={setFlowGraph}
+        onBack={() => router.push('/autopilot')}
+        onOpenPanel={setEditorPanel}
+        onSave={handleSaveConfig}
+        onPublish={handlePublishConfig}
+        onDiscard={handleDiscardDraft}
+        onAddRule={() => {
+          setEditingRule(null);
+          setIsRuleModalOpen(true);
+        }}
+      />
+
+      <Dialog open={editorPanel !== null} onOpenChange={(open) => !open && setEditorPanel(null)}>
+        <DialogContent className="flex h-[92vh] max-h-[92vh] w-[min(1160px,94vw)] max-w-none flex-col overflow-hidden rounded-[26px] border-white/10 bg-[#111316] p-0 text-slate-100 shadow-2xl">
+          {editorPanel === 'settings' && (
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
+              <AutopilotSettings
+                agentName={agentName}
+                setAgentName={setAgentName}
+                aiModel={aiModel}
+                setAiModel={setAiModel}
+                knowledgeBase={knowledgeBase}
+                setKnowledgeBase={setKnowledgeBase}
+                defaultFallbackReply={defaultFallbackReply}
+                setDefaultFallbackReply={setDefaultFallbackReply}
+                escalationPolicy={escalationPolicy}
+                setEscalationPolicy={setEscalationPolicy}
+                closingPolicy={closingPolicy}
+                setClosingPolicy={setClosingPolicy}
+                isActive={isActive}
+                setIsActive={setIsActive}
+                isPrivate={isPrivate}
+                setIsPrivate={setIsPrivate}
+                isPrimary={isPrimary}
+                onSetPrimary={handleSetPrimary}
+                geminiApiKey={geminiApiKey}
+                setGeminiApiKey={setGeminiApiKey}
+                hasGlobalKey={hasGlobalKey}
+                workspaceHasGeminiConfig={workspaceHasGeminiConfig}
+                workspaceDefaultAiModel={workspaceDefaultAiModel}
+                modelOptions={selectableModels}
+                onSave={handleSaveConfig}
+                isSaving={isSaving}
+                onDelete={handleDeleteAgent}
+                workspace={workspace}
+              />
+            </div>
+          )}
+
+          {editorPanel === 'knowledge' && (
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
+              <AutopilotKnowledge
+                documents={knowledgeDocuments}
+                toolCatalog={toolCatalog}
+                onUpload={handleKnowledgeUpload}
+                onRemove={handleRemoveDoc}
+                onUpdateContent={handleUpdateDoc}
+                onUpdateName={handleUpdateDocName}
+                onUpdateCategory={handleUpdateDocCategory}
+                onAddManual={handleAddManualDoc}
+                isUploading={isUploading}
+              />
+            </div>
+          )}
+
+          {editorPanel === 'capabilities' && (
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
+              <AutopilotRules
+                rules={instances}
+                toolCatalog={toolCatalog}
+                enabledToolNames={enabledToolNames}
+                setEnabledToolNames={setEnabledToolNames}
+                onSaveTools={handleSaveConfig}
+                isSavingTools={isSaving}
+                onAdd={() => {
+                  setEditingRule(null);
+                  setIsRuleModalOpen(true);
+                }}
+                onEdit={(rule) => {
+                  setEditingRule(rule);
+                  setIsRuleModalOpen(true);
+                }}
+                onDelete={handleDeleteRule}
+                onToggle={handleToggleRule}
+              />
+            </div>
+          )}
+
+          {editorPanel === 'analytics' && (
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
+              <AutopilotStats usageLogs={usageLogs} loading={loading} />
+            </div>
+          )}
+
+          {editorPanel === 'playground' && (
+            <div className="flex-1 overflow-y-auto p-5 sm:p-7">
+              <AutopilotPlayground
+                workspaceId={user?.activeWorkspaceId}
+                agentId={agentId}
+                disabled={isSaving || isPublishing}
+                stale={hasUnpublishedChanges}
+                draftSnapshot={previewDraftSnapshot}
+                onTrace={setLastPlaygroundTrace}
+              />
+            </div>
+          )}
+
+          {editorPanel === 'versions' && (
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-semibold text-foreground">Historico publicado</h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Restaure configuracoes anteriores do atendente inteligente.
+                  </p>
+                </div>
+                <Badge variant="outline" className="rounded-full">
+                  {versions[0] ? `Atual: v${versions[0].version_number}` : 'Sem versao'}
+                </Badge>
+              </div>
+              <div className="grid gap-3">
+                {versions.map((version, index) => {
+                  const current = index === 0;
+                  const restoring = restoringVersionId === version.id;
+                  return (
+                    <Card key={version.id} className="border-border bg-card">
+                      <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-start">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold">Versao v{version.version_number}</h3>
+                            {current && <Badge className="bg-emerald-500/15 text-emerald-300">Atual</Badge>}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {new Date(version.created_at).toLocaleString('pt-BR')}
+                          </p>
+                          <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
+                            {summarizeVersionChanges(version, versions[index + 1] || null, modelCatalog)
+                              .slice(0, 3)
+                              .map((change) => <li key={change}>{change}</li>)}
+                          </ul>
+                        </div>
+                        <Button
+                          variant={current ? 'outline' : 'default'}
+                          disabled={current || Boolean(restoringVersionId)}
+                          onClick={() => handleRestoreVersion(version.id, version.version_number)}
+                        >
+                          {restoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                          {current ? 'Em uso' : 'Restaurar'}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+                {versions.length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
+                    Publique o agente para criar o primeiro ponto de restauracao.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isRuleModalOpen} onOpenChange={setIsRuleModalOpen}>
+        <DialogContent className="flex h-[90vh] max-h-[90vh] max-w-3xl flex-col overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl">
+          <AutomationForm
+            configId={config.id}
+            instance={editingRule}
+            onClose={() => setIsRuleModalOpen(false)}
+            onSuccess={() => {
+              setIsRuleModalOpen(false);
+              void fetchData();
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+
+  // Rollback path while the visual workflow editor is introduced in production.
   return (
     <div className="flex h-full min-w-0 flex-col gap-6 bg-background px-4 py-4 sm:px-6 lg:px-8">
       <header className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-4 rounded-[28px] border border-border bg-card p-5 shadow-sm">

@@ -20,6 +20,7 @@ import {
   getActiveProcedureExecution,
 } from '@/services/autopilot/procedure-store';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { buildIntentScopedKnowledgeBase, resolveActiveFlowIntentScope } from '@/services/autopilot/flow-routing';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 
 type PreviewPayload = {
@@ -343,6 +344,7 @@ function applyDraftSnapshot(config: AutopilotConfig, snapshot?: AutopilotConfigD
     escalation_policy: typeof snapshot.escalation_policy === 'string' && snapshot.escalation_policy.length > 0 ? snapshot.escalation_policy : null,
     closing_policy: typeof snapshot.closing_policy === 'string' && snapshot.closing_policy.length > 0 ? snapshot.closing_policy : null,
     enabled_tool_names: normalizeToolNames(snapshot.enabled_tool_names),
+    flow_graph: snapshot.flow_graph || config.flow_graph || null,
   };
 }
 
@@ -450,6 +452,8 @@ export async function POST(request: Request) {
       chatHistory: chatHistory || '',
       knowledgeDocuments: config.knowledge_base_documents || [],
     });
+    const activeFlowIntentScope = resolveActiveFlowIntentScope(config, previewIntent.intent);
+    const scopedKnowledgeBase = buildIntentScopedKnowledgeBase(config.knowledge_base || '', activeFlowIntentScope);
     const ragContext = await retrieveHybridSupportContext({
       workspaceId,
       autopilotConfigId: config.id,
@@ -616,7 +620,7 @@ export async function POST(request: Request) {
         customerMessage: message,
         chatHistory: chatHistory ?? '',
         rules: rules.filter((rule) => rule.enabled),
-        knowledgeBase: config.knowledge_base || '',
+        knowledgeBase: scopedKnowledgeBase,
         knowledgeBaseDocuments: ragContext?.knowledgeBaseDocuments || config.knowledge_base_documents || [],
         fallbackReply: config.default_fallback_reply || '',
         escalationPolicy: config.escalation_policy || '',

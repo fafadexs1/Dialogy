@@ -45,6 +45,7 @@ import {
 import { findOfficialKnowledgeAnswer, resolveAutopilotIntent, resolveAutopilotIntentWithOverride } from '@/services/autopilot-intent';
 import type { KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
+import { buildIntentScopedKnowledgeBase, resolveActiveFlowIntentScope } from '@/services/autopilot/flow-routing';
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
@@ -2103,6 +2104,11 @@ export async function processAutopilotForChat(
     let workflowPlannedActions: AgentToolAction[] = workflowPlan.executionMode === 'continue_llm'
         ? []
         : workflowPlan.actions;
+    const activeFlowIntentScope = resolveActiveFlowIntentScope(autopilotConfig, intentResolution.intent);
+    const scopedKnowledgeBase = buildIntentScopedKnowledgeBase(
+        autopilotConfig.knowledge_base || '',
+        activeFlowIntentScope
+    );
     const intentContextForAI = [
         `intent=${intentResolution.intent}`,
         `confidence=${intentResolution.confidence.toFixed(2)}`,
@@ -2120,6 +2126,7 @@ export async function processAutopilotForChat(
         `knowledgeCoverage=${knowledgeCoverage}`,
         `knowledgeCategories=${intentResolution.knowledgeCategories.join(',') || 'none'}`,
         `reason=${intentResolution.reason}`,
+        `flowSubAgent=${activeFlowIntentScope?.title || 'main_agent'}`,
     ].join('\n');
 
     const recentToolMemoryResponse = shouldAnswerFromRecentToolMemory({
@@ -2744,7 +2751,7 @@ export async function processAutopilotForChat(
         let procedureContext: ProcedureExecutionContext | null = null;
         const procedureSlimChatHistory = buildProcedureSlimChatHistory(chatHistoryForAI);
         const procedureSlimPersona = compactProcedureText(
-            autopilotConfig.knowledge_base || '',
+            scopedKnowledgeBase,
             PROCEDURE_SLIM_LIMITS.personaChars
         );
 
@@ -3242,7 +3249,7 @@ export async function processAutopilotForChat(
             chatHistory: chatHistoryForAI,
             relevantHistory,
             rules: activeRules,
-            knowledgeBase: autopilotConfig.knowledge_base || '',
+            knowledgeBase: scopedKnowledgeBase,
             knowledgeBaseDocuments: promptKnowledgeDocuments,
             resolvedCases,
             fallbackReply: autopilotConfig.default_fallback_reply || '',
@@ -3561,7 +3568,7 @@ export async function processAutopilotForChat(
                                         continuationContext,
                                     ].filter(Boolean).join('\n\n'),
                                     rules: activeRules,
-                                    knowledgeBase: autopilotConfig.knowledge_base || '',
+                                    knowledgeBase: scopedKnowledgeBase,
                                     knowledgeBaseDocuments: promptKnowledgeDocuments,
                                     resolvedCases,
                                     fallbackReply: autopilotConfig.default_fallback_reply || '',
@@ -3685,7 +3692,7 @@ export async function processAutopilotForChat(
                                         finalToolContext,
                                     ].filter(Boolean).join('\n\n'),
                                     rules: activeRules,
-                                    knowledgeBase: autopilotConfig.knowledge_base || '',
+                                    knowledgeBase: scopedKnowledgeBase,
                                     knowledgeBaseDocuments: promptKnowledgeDocuments,
                                     resolvedCases,
                                     fallbackReply: '',

@@ -569,6 +569,62 @@ export interface NexusFlowInstance {
   model?: string;
 }
 
+export type AutopilotFlowNodeKind =
+  | 'trigger'
+  | 'understand'
+  | 'intent'
+  | 'assistant'
+  | 'knowledge'
+  | 'reply'
+  | 'handoff'
+  | 'close'
+  | 'tool'
+  | 'rule';
+
+export interface AutopilotFlowNode {
+  id: string;
+  kind: AutopilotFlowNodeKind;
+  title: string;
+  subtitle: string;
+  position: { x: number; y: number };
+  status?: string;
+  risk?: 'low' | 'medium' | 'high';
+  toolName?: string;
+  config?: {
+    instructions?: string;
+    message?: string;
+    variableName?: string;
+    destination?: string;
+    useAi?: boolean;
+    intent?: string;
+    customIntentLabel?: string;
+    returnToMainPrompt?: boolean;
+  };
+}
+
+export interface AutopilotFlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
+export interface AutopilotFlowVariable {
+  id: string;
+  name: string;
+  label?: string;
+  defaultValue?: string;
+  scope: 'system';
+}
+
+export interface AutopilotFlowGraph {
+  version: 1;
+  nodes: AutopilotFlowNode[];
+  edges: AutopilotFlowEdge[];
+  variables?: AutopilotFlowVariable[];
+}
+
 export interface AutopilotConfig {
   id: string;
   workspace_id: string;
@@ -586,6 +642,7 @@ export interface AutopilotConfig {
   escalation_policy: string | null;
   closing_policy: string | null;
   enabled_tool_names?: string[] | null;
+  flow_graph?: AutopilotFlowGraph | null;
   created_at: string;
   updated_at: string;
 }
@@ -603,6 +660,7 @@ export interface AutopilotConfigDraftSnapshot {
   escalation_policy: string | null;
   closing_policy: string | null;
   enabled_tool_names: string[];
+  flow_graph?: AutopilotFlowGraph | null;
 }
 
 export interface AutopilotConfigDraft {
