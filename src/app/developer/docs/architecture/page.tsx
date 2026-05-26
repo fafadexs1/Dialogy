@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Code2, ArrowLeft, Layers, Database, Zap, Globe, Cpu, Lock } from "lucide-react";
+import { ArrowLeft, Layers, Database, Zap, Globe, Cpu, Lock } from "lucide-react";
 
+import { DeveloperBrand } from '@/components/developer/developer-brand';
 import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
 import { buildPageMetadata } from '@/lib/seo/metadata';
 
@@ -16,12 +17,7 @@ export default function ArchitectureDocs() {
             <nav className="border-b border-white/10 bg-[#030712]/50 backdrop-blur-xl sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
                     <div className="flex items-center gap-8">
-                        <Link href="/developer" className="font-bold text-xl tracking-tight flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-                                <Code2 className="w-5 h-5 text-white" />
-                            </div>
-                            Dialogy <span className="text-white/40 font-normal">Docs</span>
-                        </Link>
+                        <DeveloperBrand />
                     </div>
                     <div className="flex items-center gap-4">
                         <Link href="/developer/docs" className="text-sm font-medium text-white/60 hover:text-white flex items-center gap-2">

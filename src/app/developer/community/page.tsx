@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import { Github, Heart, MessageCircle, Twitter } from "lucide-react";
 
+import { DeveloperBrand } from '@/components/developer/developer-brand';
 import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
 import { buildPageMetadata } from '@/lib/seo/metadata';
 
@@ -36,10 +36,7 @@ export default function CommunityPage() {
             <nav className="border-b border-white/10 bg-[#030712]/50 backdrop-blur-xl sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
                     <div className="flex items-center gap-8">
-                        <Link href="/developer" className="font-bold text-xl tracking-tight flex items-center gap-2">
-                            <Image src="/logo.png" alt="Dialogy" width={170} height={48} className="h-12 w-auto" />
-                            <span className="text-white/40 font-normal ml-2">Community</span>
-                        </Link>
+                        <DeveloperBrand />
                     </div>
                     <div className="flex items-center gap-4">
                         <Link href="/developer" className="text-sm font-medium text-white/60 hover:text-white">Voltar para Developer Hub</Link>

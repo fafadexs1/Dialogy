@@ -152,7 +152,7 @@ export async function POST(request: Request) {
 
         // --- TEMPLATE FLOW ---
         if (type === 'template') {
-            if (!body.template) {
+            if (!payload.template) {
                 return NextResponse.json({ error: 'Template object is required for type "template".' }, { status: 400 });
             }
             if (!phoneNumber) {
@@ -167,9 +167,10 @@ export async function POST(request: Request) {
                 workspaceId: agent.workspace_id,
                 numberid: phoneNumber,
                 instanceName: instance,
-                name: body.template.name,
-                language: body.template.language,
-                components: body.template.components,
+                name: payload.template.name,
+                language: payload.template.language,
+                components: payload.template.components,
+                renderedContent: payload.template.renderedContent,
                 metadata
             });
 

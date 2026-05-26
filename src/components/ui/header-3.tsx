@@ -85,7 +85,7 @@ export function Header() {
 									<div className="p-4 border-t border-white/5 bg-white/5">
 										<p className="text-white/50 text-sm">
 											Precisa de algo sob medida?{' '}
-											<a href="#" className="text-brand-green font-medium hover:underline">
+											<a href="https://wa.me/551151994714" target="_blank" rel="noopener noreferrer" className="text-brand-green font-medium hover:underline">
 												Fale com um especialista
 											</a>
 										</p>
@@ -249,25 +249,25 @@ function ListItem({
 const productLinks: LinkItem[] = [
 	{
 		title: 'Omnichannel',
-		href: '#omnichannel',
+		href: '/#crm-whatsapp',
 		description: 'Centralize WhatsApp, Instagram e mais.',
 		icon: GlobeIcon,
 	},
 	{
 		title: 'Automações Inteligentes',
-		href: '#features',
+		href: '/#journey',
 		description: 'Crie fluxos poderosos com IA.',
 		icon: LayersIcon,
 	},
 	{
 		title: 'Gestão de Equipe',
-		href: '#',
+		href: '/pricing',
 		description: 'Multi-atendentes e departamentos.',
 		icon: UserPlusIcon,
 	},
 	{
 		title: 'Analytics & Dashboards',
-		href: '#',
+		href: '/developer/docs/google-ads-whatsapp',
 		description: 'Métricas em tempo real da operação.',
 		icon: BarChart,
 	},
@@ -288,19 +288,19 @@ const productLinks: LinkItem[] = [
 const companyLinks: LinkItem[] = [
 	{
 		title: 'Sobre a Dialogy',
-		href: '#',
+		href: '/about',
 		description: 'Nossa missão e visão de futuro.',
 		icon: Users,
 	},
 	{
 		title: 'Cases de Sucesso',
-		href: '#',
+		href: '/creators',
 		description: 'Como transformamos negócios.',
 		icon: Star,
 	},
 	{
 		title: 'Parcerias',
-		href: '#',
+		href: '/developer/community',
 		icon: Handshake,
 		description: 'Cresça junto com a Dialogy.',
 	},
@@ -309,22 +309,22 @@ const companyLinks: LinkItem[] = [
 const companyLinks2: LinkItem[] = [
 	{
 		title: 'Termos de Uso',
-		href: '#',
+		href: '/terms',
 		icon: FileText,
 	},
 	{
 		title: 'Privacidade',
-		href: '#',
+		href: '/privacy',
 		icon: Shield,
 	},
 	{
 		title: 'Blog',
-		href: '#',
+		href: '/developer/community',
 		icon: Leaf,
 	},
 	{
 		title: 'Central de Ajuda',
-		href: '#',
+		href: '/support',
 		icon: HelpCircle,
 	},
 ];

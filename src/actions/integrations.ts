@@ -254,6 +254,18 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
         is_active: activeProviders.has('mcp'),
       },
       {
+        id: 'gads',
+        name: 'GADS',
+        description: 'Rastreie campanhas do Google Ads ate a conversa real no WhatsApp.',
+        icon_url: '/icons/google-ads.svg',
+        tag: 'Ads',
+        tag_type: 'primary',
+        href: '/integrations/gads',
+        status: 'active',
+        provider: 'gads',
+        is_active: activeProviders.has('gads'),
+      },
+      {
         id: 'delivery-hub',
         name: 'Delivery Hub',
         description: 'Monte uma vitrine com varios negocios, cardapios e link publico compartilhavel.',

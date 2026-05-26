@@ -223,6 +223,32 @@ export type MessageMetadata = {
   authored_by_system_agent_id?: string;
   isMarketing?: boolean;
   is_bulk_action?: boolean;
+  campaignId?: string;
+  campaignRecipientId?: string;
+  isTemplate?: boolean;
+  templateName?: string;
+  templateComponents?: Array<{
+    type?: string;
+    sub_type?: string;
+    index?: number | string;
+    parameters?: Array<{
+      type?: string;
+      action?: {
+        order_details?: {
+          currency?: string;
+          total_amount?: { value?: number; offset?: number };
+          order?: {
+            items?: Array<{
+              name?: string;
+              amount?: { value?: number; offset?: number };
+              quantity?: number;
+            }>;
+          };
+          payment_settings?: Array<{ type?: string }>;
+        };
+      };
+    }>;
+  }>;
   optimisticId?: string;
   send_error?: string;
   send_error_details?: {
@@ -848,6 +874,13 @@ export interface Shortcut {
 
 export type CampaignStatus = 'draft' | 'sending' | 'completed' | 'paused' | 'failed';
 export type CampaignRecipientStatus = 'pending' | 'sent' | 'failed';
+export type CampaignChannel = 'whatsapp_baileys' | 'whatsapp_cloud' | 'telegram' | 'messenger' | 'instagram';
+
+export interface CampaignTemplate {
+  name: string;
+  language: string;
+  components: any[];
+}
 
 export interface Campaign {
   id: string;
@@ -856,7 +889,9 @@ export interface Campaign {
   message: string;
   instance_name: string;
   status: CampaignStatus;
-  channel: 'parallel' | 'api';
+  channel: CampaignChannel;
+  destination_id?: string | null;
+  template_payload?: CampaignTemplate | null;
   created_at: string;
   started_at?: string;
   completed_at?: string;
@@ -875,6 +910,28 @@ export interface CampaignRecipient {
   status: CampaignRecipientStatus;
   sent_at?: string;
   error_message?: string;
+}
+
+export interface CampaignRecipientDetail extends CampaignRecipient {
+  contact_name: string;
+  phone_number_jid?: string | null;
+  message_id?: string | null;
+  api_message_status?: string | null;
+}
+
+export interface CampaignDetails extends Campaign {
+  metrics: {
+    total: number;
+    sent: number;
+    delivered: number;
+    read: number;
+    failed: number;
+    pending: number;
+    linkedMessages: number;
+    deliveryRate: number;
+    readRate: number;
+  };
+  recipientDetails: CampaignRecipientDetail[];
 }
 
 export interface InstanceCost {

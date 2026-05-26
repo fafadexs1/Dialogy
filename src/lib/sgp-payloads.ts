@@ -50,6 +50,7 @@ export interface AgentSendPayload {
         name: string;
         language: string;
         components: any[];
+        renderedContent?: string;
     };
     list?: AgentSendListPayload;
     title?: string;

@@ -88,7 +88,7 @@ export default function SupportPage() {
     };
 
     return (
-        <div className="relative flex min-h-screen flex-col overflow-hidden bg-background selection:bg-emerald-500/30">
+        <div className="relative flex h-full min-h-screen flex-col overflow-y-auto overflow-x-hidden bg-background selection:bg-emerald-500/30">
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 <div className="absolute -top-[20%] left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 rounded-full bg-emerald-500/5 blur-[120px]" />
                 <div className="absolute left-[10%] top-[10%] h-[500px] w-[500px] rounded-full bg-blue-500/5 blur-[100px]" />

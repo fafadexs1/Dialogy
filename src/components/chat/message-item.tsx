@@ -476,6 +476,77 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
     )
 }
 
+type TemplateOrderDetails = {
+    currency?: string;
+    total_amount?: { value?: number; offset?: number };
+    order?: {
+        items?: Array<{
+            name?: string;
+            amount?: { value?: number; offset?: number };
+            quantity?: number;
+        }>;
+    };
+    payment_settings?: Array<{ type?: string }>;
+};
+
+function getTemplateOrderDetails(message: Message): TemplateOrderDetails | undefined {
+    const orderDetailsComponent = message.metadata?.templateComponents?.find((component) =>
+        component.type?.toLowerCase() === 'button' &&
+        component.sub_type?.toLowerCase() === 'order_details'
+    );
+
+    return orderDetailsComponent?.parameters?.find((parameter) => parameter.action?.order_details)?.action?.order_details;
+}
+
+function formatTemplateAmount(amount: { value?: number; offset?: number } | undefined, currency = 'BRL'): string | undefined {
+    const value = Number(amount?.value);
+    const offset = Number(amount?.offset) || 100;
+    if (!Number.isFinite(value) || !Number.isFinite(offset) || offset === 0) return undefined;
+
+    return new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency,
+    }).format(value / offset);
+}
+
+function TemplateOrderDetailsPreview({ details, isFromMe }: { details: TemplateOrderDetails; isFromMe: boolean }) {
+    const firstItem = details.order?.items?.[0];
+    const amount = formatTemplateAmount(details.total_amount || firstItem?.amount, details.currency || 'BRL');
+    const isPix = details.payment_settings?.some((setting) => setting.type === 'pix_dynamic_code');
+
+    return (
+        <div className={cn(
+            'mt-3 overflow-hidden rounded-xl border text-xs',
+            isFromMe ? 'border-white/20 bg-white/10' : 'border-border bg-background/60 dark:border-white/10 dark:bg-black/20'
+        )}>
+            <div className="space-y-2 p-3">
+                <div className="flex items-center gap-2 font-medium">
+                    <FileIcon className="h-4 w-4" />
+                    <span>{isPix ? 'Pagamento via PIX' : 'Detalhes do pedido'}</span>
+                </div>
+                {firstItem?.name && (
+                    <p className={cn('truncate', isFromMe ? 'text-white/80' : 'text-muted-foreground')}>
+                        {firstItem.name}
+                    </p>
+                )}
+                {amount && (
+                    <div className="flex items-center justify-between gap-4 font-semibold">
+                        <span>Total</span>
+                        <span>{amount}</span>
+                    </div>
+                )}
+            </div>
+            <div className={cn(
+                'flex items-center justify-center gap-2 border-t px-3 py-2 font-medium',
+                isFromMe ? 'border-white/20 text-white' : 'border-border text-primary dark:border-white/10'
+            )}>
+                <Copy className="h-3.5 w-3.5" />
+                <span>{isPix ? 'Copiar codigo PIX' : 'Ver detalhes do pedido'}</span>
+            </div>
+        </div>
+    );
+}
+
 interface MessageItemProps {
     message: Message;
     quotedMessage?: Message;
@@ -545,6 +616,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
     })();
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
+        const orderDetails = getTemplateOrderDetails(message);
         const hasSharedContacts =
             (Array.isArray(message.metadata?.sharedContacts) && message.metadata.sharedContacts.length > 0) ||
             !!message.metadata?.sharedContactName ||
@@ -574,15 +646,20 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
             return <MediaMessage message={message} workspaceId={message.workspace_id} />;
         }
 
-        if (!message.content?.trim()) {
+        if (!message.content?.trim() && !orderDetails) {
             return <span className="text-xs italic text-muted-foreground">Mensagem sem conteúdo</span>;
         }
 
         return (
-            <p
-                className="text-sm whitespace-pre-wrap"
-                dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content, { isOutgoing: isFromMe }) }}
-            />
+            <div className="min-w-0">
+                {message.content?.trim() && (
+                    <p
+                        className="text-sm whitespace-pre-wrap"
+                        dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content, { isOutgoing: isFromMe }) }}
+                    />
+                )}
+                {orderDetails && <TemplateOrderDetailsPreview details={orderDetails} isFromMe={isFromMe} />}
+            </div>
         );
     };
 

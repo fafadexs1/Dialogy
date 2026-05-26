@@ -31,6 +31,8 @@ import {
     resolveEvolutionInboundMessageType,
     shouldAppendInboundToClosedWhatsappChat,
 } from '@/lib/whatsapp/evolution-inbound-message';
+import { extractAttributionToken } from '@/lib/marketing-attribution';
+import { attributeInboundWhatsappMessageByToken } from '@/lib/marketing-attribution-server';
 import {
     findOrCreateWhatsappContact,
     findWhatsappChatByIdentity,
@@ -958,16 +960,24 @@ async function processEvolutionEvent(payload: any) {
 }
 
 
+function resolveMessageUpdateStatus(data: any): string | null {
+    const rawStatus = data?.status ?? data?.update?.status;
+    if (typeof rawStatus === 'number') {
+        return ({ 0: 'ERROR', 1: 'PENDING', 2: 'SENT', 3: 'DELIVERED', 4: 'READ', 5: 'PLAYED' } as Record<number, string>)[rawStatus] ?? null;
+    }
+    return typeof rawStatus === 'string' && rawStatus.trim() ? rawStatus.trim().toUpperCase() : null;
+}
+
 async function handleMessagesUpdate(payload: any) {
     const { instance: instanceName, data } = payload;
+    const keyId = pickFirstNonEmptyString(data?.keyId, data?.key?.id, data?.update?.key?.id);
+    const normalizedStatus = resolveMessageUpdateStatus(data);
 
-    if (!data || !data.keyId || !data.status) {
+    if (!keyId || !normalizedStatus) {
         console.log('[WEBHOOK_MSG_UPDATE] Payload invalido, keyId ou status ausente.');
         return;
     }
 
-    const { keyId, status } = data;
-    const normalizedStatus = status.toUpperCase();
     const isFailureStatus = FAILED_DELIVERY_STATUSES.has(normalizedStatus);
 
     console.log(`[WEBHOOK_MSG_UPDATE] Atualizando status da mensagem ${keyId} para ${normalizedStatus} na instancia ${instanceName}`);
@@ -1009,6 +1019,21 @@ async function handleMessagesUpdate(payload: any) {
                  SET api_message_status = $1,
                      metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
                  WHERE message_id_from_api = $2
+                   AND CASE UPPER(COALESCE(api_message_status, ''))
+                         WHEN 'PLAYED' THEN 5
+                         WHEN 'READ' THEN 4
+                         WHEN 'DELIVERED' THEN 3
+                         WHEN 'SENT' THEN 2
+                         WHEN 'PENDING' THEN 1
+                         ELSE 0
+                       END <= CASE $1
+                         WHEN 'PLAYED' THEN 5
+                         WHEN 'READ' THEN 4
+                         WHEN 'DELIVERED' THEN 3
+                         WHEN 'SENT' THEN 2
+                         WHEN 'PENDING' THEN 1
+                         ELSE 0
+                       END
                  RETURNING chat_id, created_at, from_me`,
                 [normalizedStatus, keyId]
             );
@@ -1508,6 +1533,33 @@ async function handleMessagesUpsert(payload: any) {
                 data.status?.toUpperCase() || 'SENT', JSON.stringify(payload ?? {}), messageCreatedAt
             ]
         );
+
+        const attributionToken = !key.fromMe ? extractAttributionToken(content) : null;
+        if (attributionToken) {
+            await client.query('SAVEPOINT ad_attribution');
+            try {
+                const attribution = await attributeInboundWhatsappMessageByToken({
+                    client,
+                    workspaceId,
+                    instanceName,
+                    token: attributionToken,
+                    contactId: contactData.id,
+                    chatId: chat.id,
+                    messageId: messageResult.rows[0].id,
+                });
+                await client.query('RELEASE SAVEPOINT ad_attribution');
+                if (attribution) {
+                    messageResult.rows[0].metadata = {
+                        ...(messageResult.rows[0].metadata || {}),
+                        attribution,
+                    };
+                }
+            } catch (attributionError) {
+                await client.query('ROLLBACK TO SAVEPOINT ad_attribution');
+                await client.query('RELEASE SAVEPOINT ad_attribution');
+                console.error('[AD_ATTRIBUTION] Falha ao vincular clique a mensagem inbound:', attributionError);
+            }
+        }
 
         await client.query('COMMIT');
 

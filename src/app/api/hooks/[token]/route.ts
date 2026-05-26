@@ -150,6 +150,7 @@ async function processAgentRequest(token: string, body: any) {
                 name: payload.template.name,
                 language: payload.template.language,
                 components: payload.template.components,
+                renderedContent: payload.template.renderedContent,
                 metadata
             });
 

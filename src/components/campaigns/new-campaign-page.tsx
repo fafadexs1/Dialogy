@@ -4,15 +4,35 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { getContacts } from '@/actions/crm';
-import { getEvolutionApiInstances } from '@/actions/evolution-api';
+import { findWhatsappTemplates, getEvolutionApiInstances } from '@/actions/evolution-api';
+import { getTelegramInstances } from '@/actions/telegram';
+import { listMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
-import type { Contact as ContactType, EvolutionInstance, User } from '@/lib/types';
+import type { CampaignChannel, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // ---------------------------------------------------------
 // Constantes e utilitários
 // ---------------------------------------------------------
 const PLACEHOLDER = "{{nome}}";
+const CHANNEL_OPTIONS: Array<{ value: CampaignChannel; label: string; shortLabel: string }> = [
+  { value: 'whatsapp_baileys', label: 'WhatsApp conectado', shortLabel: 'WA' },
+  { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', shortLabel: 'WA' },
+  { value: 'telegram', label: 'Telegram', shortLabel: 'TG' },
+  { value: 'messenger', label: 'Messenger (Facebook)', shortLabel: 'FB' },
+  { value: 'instagram', label: 'Instagram Direct', shortLabel: 'IG' },
+];
+
+type WhatsappTemplateOption = CampaignTemplate & {
+  id?: string;
+  status?: string;
+  category?: string;
+};
+
+function templatePreview(template: WhatsappTemplateOption | null) {
+  const body = template?.components?.find((component: any) => component.type?.toUpperCase() === 'BODY');
+  return (body?.text || (template ? `[Template: ${template.name}]` : '')).replace(/\{\{\d+\}\}/g, PLACEHOLDER);
+}
 
 function applyPlaceholder(msg: string, value: string) {
   if (!msg) return "";
@@ -176,15 +196,21 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
 
   const [tab, setTab] = useState("crm");
   const [message, setMessage] = useState("");
-  const [instanceName, setInstanceName] = useState<string | null>(null);
+  const [deliveryChannel, setDeliveryChannel] = useState<CampaignChannel>('whatsapp_baileys');
+  const [destinationId, setDestinationId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const maxChars = 1000;
 
   // Data states
   const [crmContacts, setCrmContacts] = useState<ContactType[]>([]);
+  const [visibleCrmContacts, setVisibleCrmContacts] = useState<ContactType[]>([]);
   const [csvContacts, setCsvContacts] = useState<ContactType[]>([]);
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
+  const [telegramInstances, setTelegramInstances] = useState<Omit<TelegramBotInstance, 'status'>[]>([]);
+  const [metaChannels, setMetaChannels] = useState<MetaChannel[]>([]);
+  const [whatsappTemplates, setWhatsappTemplates] = useState<WhatsappTemplateOption[]>([]);
+  const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
 
   // Loading states
   const [loadingCrm, setLoadingCrm] = useState(true);
@@ -197,47 +223,122 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   useEffect(() => {
     if (!user?.activeWorkspaceId) return;
 
-    setLoadingCrm(true);
-    getContacts(user.activeWorkspaceId)
-      .then(res => {
-        setCrmContacts(res.contacts || []);
-        if (res.error) {
-          toast({ title: 'Erro ao carregar contatos', description: res.error, variant: 'destructive' });
-        }
-      })
-      .catch((error) => {
-        console.error('[NEW_CAMPAIGN] Falha ao buscar contatos', error);
-        toast({ title: 'Erro ao carregar contatos', description: 'N\u00e3o foi poss\u00edvel buscar os contatos do workspace.', variant: 'destructive' });
-      })
-      .finally(() => setLoadingCrm(false));
-
     setLoadingInstances(true);
-    getEvolutionApiInstances(user.activeWorkspaceId)
-      .then(res => {
-        if (res.error) {
-          toast({ title: 'Erro ao carregar inst\u00e2ncias', description: res.error, variant: 'destructive' });
-          setInstances([]);
-          return;
+    Promise.all([
+      getEvolutionApiInstances(user.activeWorkspaceId),
+      getTelegramInstances(user.activeWorkspaceId),
+      listMetaChannels(user.activeWorkspaceId, 'messenger'),
+      listMetaChannels(user.activeWorkspaceId, 'instagram'),
+    ])
+      .then(([whatsappRes, telegramRes, messengerChannels, instagramChannels]) => {
+        if (whatsappRes.error) {
+          toast({ title: 'Erro ao carregar inst\u00e2ncias', description: whatsappRes.error, variant: 'destructive' });
         }
-        setInstances((res.instances || []).filter(instance => instance.type !== 'telegram'));
+        if (telegramRes.error) {
+          toast({ title: 'Erro ao carregar Telegram', description: telegramRes.error, variant: 'destructive' });
+        }
+        setInstances(whatsappRes.instances || []);
+        setTelegramInstances(telegramRes.instances || []);
+        setMetaChannels([...messengerChannels, ...instagramChannels].filter(channel => channel.status === 'active'));
       })
       .catch((error) => {
-        console.error('[NEW_CAMPAIGN] Falha ao buscar inst\u00e2ncias', error);
-        toast({ title: 'Erro ao carregar inst\u00e2ncias', description: 'N\u00e3o foi poss\u00edvel buscar as inst\u00e2ncias de WhatsApp.', variant: 'destructive' });
+        console.error('[NEW_CAMPAIGN] Falha ao buscar canais', error);
+        toast({ title: 'Erro ao carregar canais', description: 'N\u00e3o foi poss\u00edvel buscar os canais conectados.', variant: 'destructive' });
       })
       .finally(() => setLoadingInstances(false));
 
-  }, [user?.activeWorkspaceId]);
+  }, [user?.activeWorkspaceId, toast]);
+
+  useEffect(() => {
+    if (!user?.activeWorkspaceId) return;
+
+    let ignored = false;
+    const timeoutId = window.setTimeout(() => {
+      setLoadingCrm(true);
+      getContacts(user.activeWorkspaceId!, { search: query.trim() || undefined, limit: 50 })
+        .then(res => {
+          if (ignored) return;
+          const results = res.contacts || [];
+          setVisibleCrmContacts(results);
+          setCrmContacts(prev => {
+            const contactsById = new Map(prev.map(contact => [contact.id, contact]));
+            results.forEach(contact => contactsById.set(contact.id, contact));
+            return [...contactsById.values()];
+          });
+          if (res.error) {
+            toast({ title: 'Erro ao buscar contatos', description: res.error, variant: 'destructive' });
+          }
+        })
+        .catch((error) => {
+          if (ignored) return;
+          console.error('[NEW_CAMPAIGN] Falha ao pesquisar contatos', error);
+          toast({ title: 'Erro ao buscar contatos', description: 'Não foi possível pesquisar os contatos.', variant: 'destructive' });
+        })
+        .finally(() => {
+          if (!ignored) setLoadingCrm(false);
+        });
+    }, 250);
+
+    return () => {
+      ignored = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [query, toast, user?.activeWorkspaceId]);
+
+  const channelDestinations = useMemo(() => {
+    if (deliveryChannel === 'whatsapp_baileys') {
+      return instances.filter(instance => instance.type === 'baileys').map(instance => ({ id: instance.instance_name, label: instance.display_name || instance.instance_name }));
+    }
+    if (deliveryChannel === 'whatsapp_cloud') {
+      return instances.filter(instance => instance.type === 'wa_cloud').map(instance => ({ id: instance.instance_name, label: instance.display_name || instance.instance_name }));
+    }
+    if (deliveryChannel === 'telegram') {
+      return telegramInstances.map(instance => ({ id: instance.instance_name, label: instance.display_name || instance.instance_name }));
+    }
+    return metaChannels
+      .filter(channel => channel.type === deliveryChannel)
+      .map(channel => ({ id: channel.id, label: channel.name || channel.external_page_id || channel.id }));
+  }, [deliveryChannel, instances, metaChannels, telegramInstances]);
+
+  const selectedTemplate = whatsappTemplates.find(template => template.name === selectedTemplateName) || null;
+  const campaignMessage = deliveryChannel === 'whatsapp_cloud' ? templatePreview(selectedTemplate) : message;
+  const selectedChannel = CHANNEL_OPTIONS.find(channel => channel.value === deliveryChannel)!;
+  const selectedDestinationLabel = channelDestinations.find(destination => destination.id === destinationId)?.label || selectedChannel.label;
+
+  useEffect(() => {
+    setDestinationId(null);
+    setSelectedTemplateName(null);
+    setWhatsappTemplates([]);
+    if (deliveryChannel !== 'whatsapp_baileys' && deliveryChannel !== 'whatsapp_cloud') {
+      setTab('crm');
+      setCsvContacts([]);
+    }
+  }, [deliveryChannel]);
+
+  useEffect(() => {
+    if (deliveryChannel !== 'whatsapp_cloud' || !destinationId) {
+      setWhatsappTemplates([]);
+      setSelectedTemplateName(null);
+      return;
+    }
+
+    findWhatsappTemplates(destinationId).then(result => {
+      if (result.error) {
+        toast({ title: 'Erro ao carregar templates', description: result.error, variant: 'destructive' });
+        setWhatsappTemplates([]);
+        return;
+      }
+      setWhatsappTemplates(
+        (result.templates || []).filter((template: WhatsappTemplateOption) => template.status === 'APPROVED')
+      );
+    });
+  }, [deliveryChannel, destinationId, toast]);
 
 
-  const filteredCrmContacts = useMemo(() => {
-    if (!query) return crmContacts;
-    const q = query.toLowerCase();
-    return crmContacts.filter((c) => c.name.toLowerCase().includes(q) || c.phone_number_jid?.toLowerCase().includes(q));
-  }, [crmContacts, query]);
+  const filteredCrmContacts = visibleCrmContacts;
 
   const selectedCount = selectedCrmIds.size + csvContacts.length;
-  const canProceed = Boolean(message.trim() && instanceName && selectedCount > 0);
+  const canProceed = Boolean(campaignMessage.trim() && destinationId && selectedCount > 0 && (deliveryChannel !== 'whatsapp_cloud' || selectedTemplate));
 
   function toggleSelect(id: string) {
     setSelectedCrmIds((prev) => {
@@ -248,11 +349,18 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }
 
   function toggleSelectAll() {
-    if (selectedCrmIds.size === filteredCrmContacts.length) {
-      setSelectedCrmIds(new Set());
-    } else {
-      setSelectedCrmIds(new Set(filteredCrmContacts.map((c) => c.id)));
-    }
+    setSelectedCrmIds((prev) => {
+      const next = new Set(prev);
+      const allVisibleSelected = filteredCrmContacts.length > 0 && filteredCrmContacts.every(contact => next.has(contact.id));
+      filteredCrmContacts.forEach(contact => {
+        if (allVisibleSelected) {
+          next.delete(contact.id);
+        } else {
+          next.add(contact.id);
+        }
+      });
+      return next;
+    });
   }
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -269,8 +377,8 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }
 
   async function handleSendCampaign() {
-    if (!user?.activeWorkspaceId || !instanceName || !message || selectedCount === 0) {
-      toast({ title: 'Dados Incompletos', description: 'Preencha a mensagem, selecione uma instância e pelo menos um contato.', variant: 'destructive' });
+    if (!user?.activeWorkspaceId || !destinationId || !campaignMessage || selectedCount === 0) {
+      toast({ title: 'Dados Incompletos', description: 'Selecione o canal, a conta de envio e pelo menos um contato.', variant: 'destructive' });
       return;
     };
     setIsSubmitting(true);
@@ -281,7 +389,12 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
 
     const allContactsToSend = [...selectedFromCrm, ...csvContacts.map(c => ({ ...c, id: `csv-${c.id}` }))];
 
-    const result = await createCampaign(user.activeWorkspaceId, instanceName, message, allContactsToSend);
+    const result = await createCampaign(user.activeWorkspaceId, {
+      channel: deliveryChannel,
+      instanceName: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? undefined : destinationId,
+      metaChannelId: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? destinationId : undefined,
+      template: selectedTemplate,
+    }, campaignMessage, allContactsToSend);
 
     if (result.error) {
       toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
@@ -308,7 +421,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }
 
   return (
-    <div className="flex flex-col min-h-dvh bg-gradient-to-b from-background to-muted/50">
+    <div className="flex min-h-dvh shrink-0 flex-col bg-muted/50">
       {/* Header com gradiente e stepper */}
       <header className="border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-5 flex items-center justify-between">
@@ -331,13 +444,27 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
         <div className="mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Coluna esquerda (form) */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Seção 1: Mensagem e Instância */}
+            {/* Seção 1: Mensagem e canal */}
             <Card>
               <CardHeader>
-                <h3 className="text-2xl font-semibold leading-none tracking-tight">1. Mensagem e Instância</h3>
-                <p className="text-sm text-muted-foreground">Escreva a mensagem que será enviada e selecione a instância do WhatsApp.</p>
+                <h3 className="text-2xl font-semibold leading-none tracking-tight">1. Mensagem e Canal</h3>
+                <p className="text-sm text-muted-foreground">Escolha o canal conectado e defina o conteúdo da campanha.</p>
               </CardHeader>
               <CardContent>
+                <div className="space-y-2 mb-6">
+                  <label htmlFor="channel" className="text-sm font-medium leading-none">Canal de envio</label>
+                  <Select onValueChange={(value) => setDeliveryChannel(value as CampaignChannel)} value={deliveryChannel}>
+                    <SelectTrigger id="channel">
+                      <SelectValue placeholder="Selecione o canal" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHANNEL_OPTIONS.map((channel) => (
+                        <SelectItem key={channel.value} value={channel.value}>{channel.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {deliveryChannel !== 'whatsapp_cloud' && (
                 <div className="space-y-2">
                   <label htmlFor="message" className="text-sm font-medium leading-none">Mensagem da Campanha</label>
                   <Textarea
@@ -358,20 +485,41 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                     ))}
                   </div>
                 </div>
+                )}
                 <div className="space-y-2 mt-6">
-                  <label htmlFor="instance" className="text-sm font-medium leading-none">Instância de Envio</label>
-                  <Select onValueChange={setInstanceName} value={instanceName || undefined}>
+                  <label htmlFor="instance" className="text-sm font-medium leading-none">Conta de envio</label>
+                  <Select onValueChange={setDestinationId} value={destinationId || undefined}>
                     <SelectTrigger id="instance">
-                      <SelectValue placeholder="Selecione a instância do WhatsApp" />
+                      <SelectValue placeholder="Selecione uma conta conectada" />
                     </SelectTrigger>
                     <SelectContent>
                       {loadingInstances ? <div className="p-4 text-center text-sm">Carregando...</div> :
-                        instances.map((opt) => (
-                          <SelectItem key={opt.id} value={opt.instance_name}>{opt.display_name || opt.instance_name}</SelectItem>
+                        channelDestinations.map((destination) => (
+                          <SelectItem key={destination.id} value={destination.id}>{destination.label}</SelectItem>
                         ))}
                     </SelectContent>
                   </Select>
                 </div>
+                {deliveryChannel === 'whatsapp_cloud' && destinationId && (
+                  <div className="space-y-2 mt-6">
+                    <label htmlFor="template" className="text-sm font-medium leading-none">Template aprovado da Meta</label>
+                    <Select onValueChange={setSelectedTemplateName} value={selectedTemplateName || undefined}>
+                      <SelectTrigger id="template">
+                        <SelectValue placeholder="Selecione o template para o disparo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {whatsappTemplates.length === 0 ? (
+                          <div className="p-4 text-center text-sm text-muted-foreground">Nenhum template aprovado encontrado.</div>
+                        ) : whatsappTemplates.map((template) => (
+                          <SelectItem key={template.name} value={template.name}>
+                            {template.name} ({template.language})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">No WhatsApp Cloud, campanhas usam o template aprovado selecionado acima.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -382,6 +530,16 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                 <p className="text-sm text-muted-foreground">Selecione os contatos que receberão esta campanha.</p>
               </CardHeader>
               <CardContent>
+                {(deliveryChannel === 'messenger' || deliveryChannel === 'instagram') && (
+                  <p className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                    Apenas contatos que já possuem conversa neste canal Meta poderão receber a campanha.
+                  </p>
+                )}
+                {deliveryChannel === 'telegram' && (
+                  <p className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                    Apenas contatos que já iniciaram conversa com o bot Telegram poderão receber a campanha.
+                  </p>
+                )}
                 <div className="w-full">
                   <div role="tablist" aria-orientation="horizontal" className="grid w-full grid-cols-2 h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
                     <button
@@ -398,11 +556,12 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                     <button
                       role="tab"
                       aria-selected={tab === "csv"}
+                      disabled={!deliveryChannel.startsWith('whatsapp')}
                       className={cx(
-                        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all",
+                        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50",
                         tab === "csv" ? "bg-background text-foreground shadow-sm" : ""
                       )}
-                      onClick={() => setTab("csv")}
+                      onClick={() => deliveryChannel.startsWith('whatsapp') && setTab("csv")}
                     >
                       <Icon.FileUp className="mr-2 h-4 w-4" /> Importar Arquivo ({csvContacts.length})
                     </button>
@@ -424,7 +583,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                         <input
                           id="select-all"
                           type="checkbox"
-                          checked={selectedCrmIds.size === filteredCrmContacts.length && filteredCrmContacts.length > 0}
+                          checked={filteredCrmContacts.length > 0 && filteredCrmContacts.every(contact => selectedCrmIds.has(contact.id))}
                           onChange={toggleSelectAll}
                           className="h-4 w-4 rounded border-primary"
                         />
@@ -463,7 +622,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                     </div>
                   )}
 
-                  {tab === "csv" && (
+                  {tab === "csv" && deliveryChannel.startsWith('whatsapp') && (
                     <div className="mt-4">
                       <div
                         onDragOver={(e) => {
@@ -473,7 +632,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                         onDragLeave={() => setDragActive(false)}
                         onDrop={handleDrop}
                         className={cx(
-                          "flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-8 text-center",
+                          "relative overflow-hidden flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl p-8 text-center",
                           dragActive ? "border-primary bg-primary/5" : "border-border"
                         )}
                         role="region"
@@ -482,7 +641,12 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                         <Icon.Upload className="h-6 w-6" />
                         <p className="text-sm">Arraste e solte seu arquivo CSV aqui</p>
                         <p className="text-xs text-muted-foreground">Ou clique para selecionar</p>
-                        <input type="file" accept=".csv" className="absolute opacity-0 inset-0 cursor-pointer" />
+                        <input
+                          type="file"
+                          accept=".csv"
+                          aria-label="Selecionar arquivo CSV"
+                          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        />
                       </div>
                       <p className="mt-2 text-xs text-muted-foreground">Após importar, detectaremos as colunas <code>nome</code> e <code>telefone</code>.</p>
                       {csvContacts.length > 0 &&
@@ -500,20 +664,20 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
             <Card className="sticky top-6">
               <CardHeader>
                 <h3 className="text-xl font-semibold">Pré-visualização</h3>
-                <p className="text-sm text-muted-foreground">Veja como a mensagem aparece no WhatsApp.</p>
+                <p className="text-sm text-muted-foreground">Veja o conteúdo que será enviado no canal selecionado.</p>
               </CardHeader>
               <CardContent>
                 <div className="mx-auto w-full max-w-sm rounded-2xl border bg-background p-4">
                   <div className="flex items-center gap-3 pb-3 border-b">
-                    <div className="h-9 w-9 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-700 text-xs font-bold">WA</div>
+                    <div className="h-9 w-9 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-700 text-xs font-bold">{selectedChannel.shortLabel}</div>
                     <div>
-                      <p className="text-sm font-semibold">{instanceName || "Instância"}</p>
+                      <p className="text-sm font-semibold">{selectedDestinationLabel}</p>
                       <p className="text-xs text-muted-foreground">online agora</p>
                     </div>
                   </div>
                   <div className="mt-3 space-y-2">
                     <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-emerald-600 text-white px-3 py-2 text-sm shadow">
-                      {message ? applyPlaceholder(message, "Maria") : "Sua mensagem aparecerá aqui..."}
+                      {campaignMessage ? applyPlaceholder(campaignMessage, "Maria") : "Sua mensagem aparecerá aqui..."}
                     </div>
                     <p className="text-[10px] text-muted-foreground">Prévia com {PLACEHOLDER} → "Maria"</p>
                   </div>

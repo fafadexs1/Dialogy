@@ -16,6 +16,7 @@ import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
 import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
 import { sendListMessage } from '@/services/whatsapp/send-list-message';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
+import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
 import { MessengerMessagingService } from '@/services/meta/messenger-messaging-service';
 import {
@@ -1857,6 +1858,174 @@ export async function sendAutomatedMediaAction(
     return internalSendMedia(chatId, caption, mediaFiles, agentId, null, baseMetadata, instanceName);
 }
 
+function parseCurrencyStringToCents(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+        return value;
+    }
+
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const raw = value.trim();
+    if (!raw || /^\{[^}]+\}$/.test(raw)) {
+        return null;
+    }
+
+    let normalized = raw
+        .replace(/[^\d,.-]/g, '')
+        .replace(/(?!^)-/g, '');
+
+    if (!normalized || normalized === '-' || normalized === ',' || normalized === '.') {
+        return null;
+    }
+
+    const commaIndex = normalized.lastIndexOf(',');
+    const dotIndex = normalized.lastIndexOf('.');
+    const decimalSeparator = commaIndex > dotIndex ? ',' : dotIndex >= 0 ? '.' : '';
+
+    if (decimalSeparator) {
+        const separatorIndex = normalized.lastIndexOf(decimalSeparator);
+        const integerPart = normalized.slice(0, separatorIndex).replace(/[,.]/g, '') || '0';
+        const decimalPart = normalized.slice(separatorIndex + 1).replace(/\D/g, '');
+
+        if (decimalPart.length === 0) {
+            normalized = integerPart;
+        } else if (decimalPart.length <= 2) {
+            normalized = `${integerPart}.${decimalPart.padEnd(2, '0')}`;
+        } else {
+            normalized = `${integerPart}${decimalPart}`;
+        }
+    }
+
+    const amount = Number(normalized);
+    if (!Number.isFinite(amount) || amount < 0) {
+        return null;
+    }
+
+    return Math.round(amount * 100);
+}
+
+function normalizeTemplateOrderDetailsAmounts(components: any[]): any[] {
+    if (!Array.isArray(components)) {
+        return components;
+    }
+
+    const clonedComponents = structuredClone(components);
+    const bodyComponent = clonedComponents.find((component: any) => String(component?.type || '').toLowerCase() === 'body');
+    const bodyParameters = Array.isArray(bodyComponent?.parameters) ? bodyComponent.parameters : [];
+    const bodyValueCandidates = [
+        bodyParameters[3]?.text,
+        ...bodyParameters.map((parameter: any) => parameter?.text),
+    ];
+    const inferredCents = bodyValueCandidates
+        .map(parseCurrencyStringToCents)
+        .find((value): value is number => typeof value === 'number');
+
+    const normalizeAmountValue = (amount: any, options: { useInferredFallback?: boolean } = {}) => {
+        if (!amount || typeof amount !== 'object') {
+            return;
+        }
+
+        if (options.useInferredFallback && inferredCents !== undefined) {
+            amount.value = inferredCents;
+            return;
+        }
+
+        const parsedCents = parseCurrencyStringToCents(amount.value);
+        if (parsedCents !== null) {
+            amount.value = parsedCents;
+            return;
+        }
+    };
+
+    for (const component of clonedComponents) {
+        if (String(component?.type || '').toLowerCase() !== 'button') {
+            continue;
+        }
+
+        for (const parameter of component.parameters || []) {
+            const orderDetails = parameter?.action?.order_details;
+            if (!orderDetails || typeof orderDetails !== 'object') {
+                continue;
+            }
+
+            normalizeAmountValue(orderDetails.total_amount);
+            normalizeAmountValue(orderDetails.order?.subtotal);
+            normalizeAmountValue(orderDetails.order?.tax);
+            normalizeAmountValue(orderDetails.order?.shipping);
+            normalizeAmountValue(orderDetails.order?.discount);
+
+            if (Array.isArray(orderDetails.order?.items)) {
+                for (const item of orderDetails.order.items) {
+                    normalizeAmountValue(item?.amount, { useInferredFallback: true });
+                }
+            }
+
+            normalizeAmountValue(orderDetails.total_amount, { useInferredFallback: true });
+            normalizeAmountValue(orderDetails.order?.subtotal, { useInferredFallback: true });
+        }
+    }
+
+    return clonedComponents;
+}
+
+function renderApprovedTemplateContent(template: any, components: any[]): string | null {
+    const bodyText = template?.components?.find(
+        (component: any) => String(component?.type || '').toUpperCase() === 'BODY'
+    )?.text;
+
+    if (typeof bodyText !== 'string' || !bodyText.trim()) {
+        return null;
+    }
+
+    const parameters = components.find(
+        (component: any) => String(component?.type || '').toUpperCase() === 'BODY'
+    )?.parameters || [];
+
+    return bodyText.replace(/\{\{(\d+)\}\}/g, (placeholder: string, position: string) => {
+        const parameter = parameters[Number(position) - 1];
+        const replacement = parameter?.text ?? parameter?.payload;
+        return replacement === undefined || replacement === null ? placeholder : String(replacement);
+    });
+}
+
+const TEMPLATE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const approvedTemplateCache = new Map<string, { template: any; expiresAt: number }>();
+
+async function resolveTemplateRenderedContent(
+    apiConfig: { api_url: string; api_key: string },
+    instanceName: string,
+    name: string,
+    language: string,
+    components: any[]
+): Promise<string | null> {
+    try {
+        const cacheKey = `${apiConfig.api_url}|${instanceName}|${name}|${language}`;
+        const cached = approvedTemplateCache.get(cacheKey);
+        let template = cached && cached.expiresAt > Date.now() ? cached.template : null;
+
+        if (!template) {
+            const templates = await fetchEvolutionAPI(`/template/find/${instanceName}`, apiConfig);
+            template = templates?.find((item: any) =>
+                item?.name === name && (!language || !item?.language || item.language === language)
+            );
+
+            if (template) {
+                approvedTemplateCache.set(cacheKey, {
+                    template,
+                    expiresAt: Date.now() + TEMPLATE_CONTENT_CACHE_TTL_MS,
+                });
+            }
+        }
+
+        return renderApprovedTemplateContent(template, components);
+    } catch (error) {
+        console.error('[SEND_AGENT_TEMPLATE_ACTION] Falha ao resolver conteudo aprovado do template:', error);
+        return null;
+    }
+}
+
 export const sendAgentTemplateAction = withDebug(
     'send_agent_template',
     async function sendAgentTemplateAction(
@@ -1868,18 +2037,31 @@ export const sendAgentTemplateAction = withDebug(
             name: string;
             language: string;
             components: any[];
+            renderedContent?: string;
             metadata?: MessageMetadata;
+            senderUserId?: string;
         }
     ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
-        const { agentId, workspaceId, numberid, instanceName, name, language, components, metadata } = input;
+        const { agentId, workspaceId, numberid, instanceName, name, language, components, renderedContent, metadata, senderUserId } = input;
 
         if (!numberid || !instanceName || !name || !language) {
             return { success: false, error: 'Campos obrigatórios faltando.' };
         }
 
+        const normalizedComponents = normalizeTemplateOrderDetailsAmounts(components);
+        const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
+        if (!apiConfig) {
+            return { success: false, error: `Configuracao da Evolution API nao encontrada para a instancia ${instanceName}.` };
+        }
+        const resolvedRenderedContent = renderedContent?.trim()
+            || await resolveTemplateRenderedContent(apiConfig, instanceName, name, language, normalizedComponents);
         const client = await db.connect();
+        let messageId: string | null = null;
+        let transactionOpen = false;
+        let providerAccepted = false;
         try {
             await client.query('BEGIN');
+            transactionOpen = true;
             await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: numberid });
 
             const whatsappContact = await findOrCreateWhatsappContact(client, {
@@ -1928,52 +2110,62 @@ export const sendAgentTemplateAction = withDebug(
                 }
             }
 
-            // 3. Get API Config
-            const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
-            if (!apiConfig) {
-                throw new Error(`Configuração da Evolution API não encontrada para a instância ${instanceName}.`);
-            }
-
-            // 4. Send Template
-            const apiResponse = await sendTemplateMessage(apiConfig, instanceName, {
-                number: fullJid,
-                name,
-                language,
-                components
-            });
-
-            // 5. Persist Message
             // Build human-readable content preview from components, fallback to template name.
-            let content = `[Template: ${name}]`;
-            const bodyComponent = components.find((c: any) => c.type === 'body');
+            let content = resolvedRenderedContent || `[Template: ${name}]`;
+            const bodyComponent = normalizedComponents.find((c: any) => c.type === 'body');
             const bodyText = bodyComponent?.parameters
                 ?.map((p: any) => p.text || p.payload || p.example || '')
                 .filter(Boolean)
                 .join(' ')
                 .trim();
-            if (bodyText) {
+            if (!resolvedRenderedContent && bodyText) {
                 content = bodyText;
             }
 
+            messageId = randomUUID();
             await client.query(
                 `INSERT INTO messages (
-                    workspace_id, chat_id, type, content, from_me, 
+                    id, workspace_id, chat_id, type, content, from_me,
                     message_id_from_api, api_message_status, instance_name, 
-                    metadata, is_read, sender_system_agent_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                    metadata, is_read, sender_system_agent_id, sender_user_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
                 [
-                    workspaceId, chatId, 'text', content, true,
-                    apiResponse?.key?.id, 'SENT', instanceName,
+                    messageId, workspaceId, chatId, 'text', content, true,
+                    null, 'PENDING', instanceName,
                     {
                         isTemplate: true,
                         templateName: name,
-                        templateComponents: components,
+                        templateComponents: normalizedComponents,
                         ...(metadata ?? {}),
-                    }, true, agentId
+                    }, true, senderUserId ? null : agentId, senderUserId || null
                 ]
             );
 
             await client.query('COMMIT');
+            transactionOpen = false;
+
+            const apiResponse = await sendTemplateMessage(apiConfig, instanceName, {
+                number: fullJid,
+                name,
+                language,
+                components: normalizedComponents
+            });
+            providerAccepted = true;
+
+            try {
+                await db.query(
+                    `UPDATE messages
+                     SET message_id_from_api = $1,
+                         api_message_status = CASE
+                             WHEN api_message_status IN ('DELIVERED', 'READ', 'PLAYED') THEN api_message_status
+                             ELSE 'SENT'
+                         END
+                     WHERE id = $2`,
+                    [apiResponse?.key?.id, messageId]
+                );
+            } catch (trackingError) {
+                console.error('[SEND_AGENT_TEMPLATE_ACTION] Envio aceito, mas falhou ao persistir o status externo:', trackingError);
+            }
 
             if (metadata?.isMarketing) {
                 try {
@@ -1987,7 +2179,14 @@ export const sendAgentTemplateAction = withDebug(
             return { success: true, apiResponse };
 
         } catch (error) {
-            await client.query('ROLLBACK');
+            if (transactionOpen) {
+                await client.query('ROLLBACK');
+            } else if (messageId && !providerAccepted) {
+                await db.query(
+                    `UPDATE messages SET api_message_status = 'FAILED' WHERE id = $1 AND api_message_status IN ('PENDING', 'SENT')`,
+                    [messageId]
+                );
+            }
             console.error('[SEND_AGENT_TEMPLATE_ACTION] Erro:', error);
             const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
             return { success: false, error: `Falha ao enviar template: ${errorMessage}` };

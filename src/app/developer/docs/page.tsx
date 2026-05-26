@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import { ChevronRight, Key, Shield, Terminal, Zap } from "lucide-react";
 
+import { DeveloperBrand } from '@/components/developer/developer-brand';
 import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
 import { buildPageMetadata } from '@/lib/seo/metadata';
 
@@ -17,10 +17,7 @@ export default function DocsPage() {
             <nav className="border-b border-white/10 bg-[#030712]/50 backdrop-blur-xl sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
                     <div className="flex items-center gap-8">
-                        <Link href="/developer" className="font-bold text-xl tracking-tight flex items-center gap-2">
-                            <Image src="/logo.png" alt="Dialogy" width={170} height={48} className="h-12 w-auto" />
-                            <span className="text-white/40 font-normal ml-2">Docs</span>
-                        </Link>
+                        <DeveloperBrand />
                     </div>
                     <div className="flex items-center gap-4">
                         <Link href="/developer" className="text-sm font-medium text-white/60 hover:text-white">Voltar para Developer Hub</Link>
@@ -45,6 +42,7 @@ export default function DocsPage() {
                             <Link href="#" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Mensagens</Link>
                             <Link href="#" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Webhooks</Link>
                             <Link href="#" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Contatos</Link>
+                            <Link href="/developer/docs/google-ads-whatsapp" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Google Ads + WhatsApp</Link>
                         </div>
                     </div>
                     <div>
@@ -80,6 +78,14 @@ export default function DocsPage() {
                             <p className="text-sm text-white/60 mb-4">Entenda como gerar e usar suas chaves de API com segurança.</p>
                             <Link href="#" className="text-blue-400 text-sm font-medium flex items-center gap-1 hover:gap-2 transition-all">
                                 Ler guia <ChevronRight className="w-4 h-4" />
+                            </Link>
+                        </div>
+                        <div className="p-6 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors md:col-span-2">
+                            <Zap className="w-8 h-8 text-amber-400 mb-4" />
+                            <h3 className="text-lg font-semibold mb-2">Google Ads + WhatsApp</h3>
+                            <p className="text-sm text-white/60 mb-4">Configure o GADS para rastrear cliques do Google Ads ate conversas reais no WhatsApp e exportar conversoes offline.</p>
+                            <Link href="/developer/docs/google-ads-whatsapp" className="text-blue-400 text-sm font-medium flex items-center gap-1 hover:gap-2 transition-all">
+                                Configurar GADS <ChevronRight className="w-4 h-4" />
                             </Link>
                         </div>
                     </div>

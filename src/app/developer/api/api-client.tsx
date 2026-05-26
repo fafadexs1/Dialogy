@@ -1,9 +1,10 @@
 'use client';
 
-import Image from "next/image";
 import Link from "next/link";
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+
+import { DeveloperBrand } from '@/components/developer/developer-brand';
 
 function CodeBlock({ code, language = "json" }: { code: string, language?: string }) {
     const [copied, setCopied] = useState(false);
@@ -55,15 +56,129 @@ function Endpoint({ method, path, description }: { method: string, path: string,
 }
 
 export default function ApiClient() {
+    const templateSendExample = `curl --location 'https://dialogy.klyraai.com.br/api/agent/templates/send' \\
+  --header 'Content-Type: application/json' \\
+  --header 'Authorization: Bearer TOKEN_DO_SYSTEM_AGENT' \\
+  --data '{
+    "numberid": "5561995215930",
+    "instanceName": "zap7",
+    "name": "fatura_velpro_clientes_2026_maio",
+    "language": "pt_BR",
+    "components": [
+      {
+        "type": "header",
+        "parameters": [
+          {
+            "type": "image",
+            "image": {
+              "link": "https://velpro.net.br/uploads/site-assets/public/company-logo.png?t=1770142936029"
+            }
+          }
+        ]
+      },
+      {
+        "type": "body",
+        "parameters": [
+          { "type": "text", "text": "Nome do Cliente" },
+          { "type": "text", "text": "123456" },
+          { "type": "text", "text": "31/05/2026" },
+          { "type": "text", "text": "99,90" },
+          { "type": "text", "text": "78910" }
+        ]
+      },
+      {
+        "type": "button",
+        "sub_type": "order_details",
+        "index": 0,
+        "parameters": [
+          {
+            "type": "action",
+            "action": {
+              "order_details": {
+                "reference_id": "fatura_123456_78910",
+                "type": "digital-goods",
+                "payment_type": "br",
+                "payment_settings": [
+                  {
+                    "type": "pix_dynamic_code",
+                    "pix_dynamic_code": {
+                      "code": "00020101021226860014br.gov.bcb.pix...",
+                      "merchant_name": "VELPRO TELECOM",
+                      "key": "00000000000000",
+                      "key_type": "CNPJ"
+                    }
+                  }
+                ],
+                "currency": "BRL",
+                "total_amount": {
+                  "value": 9990,
+                  "offset": 100
+                },
+                "order": {
+                  "status": "pending",
+                  "items": [
+                    {
+                      "retailer_id": "fatura_123456",
+                      "name": "Fatura 123456",
+                      "amount": {
+                        "value": 9990,
+                        "offset": 100
+                      },
+                      "quantity": 1
+                    }
+                  ],
+                  "subtotal": {
+                    "value": 9990,
+                    "offset": 100
+                  },
+                  "tax": {
+                    "value": 0,
+                    "offset": 100
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }'`;
+
+    const templateSimpleExample = `{
+  "numberid": "5561995215930",
+  "instanceName": "zap7",
+  "name": "nome_do_template_aprovado",
+  "language": "pt_BR",
+  "components": [
+    {
+      "type": "body",
+      "parameters": [
+        { "type": "text", "text": "Primeira variavel" },
+        { "type": "text", "text": "Segunda variavel" }
+      ]
+    }
+  ]
+}`;
+
+    const templateResponseExample = `{
+  "success": true,
+  "message": "Template sent successfully.",
+  "apiResponse": {
+    "key": {
+      "fromMe": true,
+      "id": "wamid...",
+      "remoteJid": "5561995215930@s.whatsapp.net"
+    },
+    "status": "PENDING"
+  }
+}`;
+
     return (
         <div className="min-h-screen bg-[#030712] text-white selection:bg-blue-500/30">
             <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#030712]/50 backdrop-blur-xl">
                 <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
                     <div className="flex items-center gap-8">
-                        <Link href="/developer" className="flex items-center gap-2 text-xl font-bold tracking-tight">
-                            <Image src="/logo.png" alt="Dialogy" width={170} height={48} className="h-12 w-auto" />
-                            <span className="ml-2 font-normal text-white/40">API</span>
-                        </Link>
+                        <DeveloperBrand />
                     </div>
                     <div className="flex items-center gap-4">
                         <Link href="/developer" className="text-sm font-medium text-white/60 hover:text-white">Voltar para Developer Hub</Link>
@@ -77,6 +192,7 @@ export default function ApiClient() {
                         <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white/40">Recursos</h3>
                         <div className="space-y-1">
                             <Link href="#messages" className="block rounded-lg bg-blue-600/10 px-3 py-2 text-sm font-medium text-blue-400">Mensagens</Link>
+                            <Link href="#agent-templates" className="block rounded-lg px-3 py-2 text-sm text-white/60 transition-colors hover:bg-white/5 hover:text-white">Templates por Agente</Link>
                             <Link href="#contacts" className="block rounded-lg px-3 py-2 text-sm text-white/60 transition-colors hover:bg-white/5 hover:text-white">Contatos</Link>
                             <Link href="#webhooks" className="block rounded-lg px-3 py-2 text-sm text-white/60 transition-colors hover:bg-white/5 hover:text-white">Webhooks</Link>
                         </div>
@@ -91,7 +207,7 @@ export default function ApiClient() {
                         </p>
 
                         <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-4 text-sm text-blue-200">
-                            <strong>Base URL:</strong> <code className="text-white">https://api.dialogy.com/v1</code>
+                            <strong>Base URL:</strong> <code className="text-white">https://dialogy.klyraai.com.br</code>
                         </div>
                     </div>
 
@@ -130,6 +246,112 @@ export default function ApiClient() {
   "status": "queued",
   "created_at": "2023-10-27T10:00:00Z"
 }`} />
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="agent-templates" className="mb-16">
+                        <h2 className="mb-6 flex items-center gap-2 text-2xl font-bold">
+                            Templates por Agente <span className="rounded-full bg-white/5 px-2 py-0.5 text-sm font-normal text-white/40">WhatsApp</span>
+                        </h2>
+                        <p className="mb-6 text-white/60">
+                            Use este endpoint para enviar templates aprovados da Meta pelo WhatsApp Cloud API conectado na Dialogy. A Dialogy valida o token do agente, resolve o workspace do agente, localiza ou cria o contato/chat e repassa os componentes para a Evolution API.
+                        </p>
+
+                        <div className="space-y-8">
+                            <div>
+                                <h3 className="mb-4 text-lg font-semibold">Endpoint</h3>
+                                <Endpoint method="POST" path="/api/agent/templates/send" description="Envia um template aprovado pelo WhatsApp usando uma instancia conectada ao workspace do agente." />
+                            </div>
+
+                            <div>
+                                <h3 className="mb-4 text-lg font-semibold">Autenticacao</h3>
+                                <p className="mb-4 text-sm leading-relaxed text-white/60">
+                                    Envie o token de um system agent ativo no header <code className="rounded bg-white/10 px-1.5 py-0.5 text-white">Authorization</code>. O token precisa pertencer ao mesmo workspace da instancia informada.
+                                </p>
+                                <CodeBlock language="bash" code={`Authorization: Bearer TOKEN_DO_SYSTEM_AGENT`} />
+                            </div>
+
+                            <div>
+                                <h3 className="mb-4 text-lg font-semibold">Corpo da Requisicao</h3>
+                                <div className="overflow-hidden rounded-xl border border-white/10">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-white/5 text-white/70">
+                                            <tr>
+                                                <th className="px-4 py-3 font-semibold">Campo</th>
+                                                <th className="px-4 py-3 font-semibold">Tipo</th>
+                                                <th className="px-4 py-3 font-semibold">Obrigatorio</th>
+                                                <th className="px-4 py-3 font-semibold">Descricao</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/10 text-white/60">
+                                            <tr>
+                                                <td className="px-4 py-3 font-mono text-white">numberid</td>
+                                                <td className="px-4 py-3">string</td>
+                                                <td className="px-4 py-3">Sim</td>
+                                                <td className="px-4 py-3">Numero do destinatario com DDI e DDD. Exemplo: 5561995215930.</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="px-4 py-3 font-mono text-white">instanceName</td>
+                                                <td className="px-4 py-3">string</td>
+                                                <td className="px-4 py-3">Sim</td>
+                                                <td className="px-4 py-3">Nome da instancia WhatsApp na Dialogy/Evolution. Exemplo: zap7.</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="px-4 py-3 font-mono text-white">name</td>
+                                                <td className="px-4 py-3">string</td>
+                                                <td className="px-4 py-3">Sim</td>
+                                                <td className="px-4 py-3">Nome exato do template aprovado na Meta.</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="px-4 py-3 font-mono text-white">language</td>
+                                                <td className="px-4 py-3">string</td>
+                                                <td className="px-4 py-3">Sim</td>
+                                                <td className="px-4 py-3">Codigo do idioma do template. Exemplo: pt_BR.</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="px-4 py-3 font-mono text-white">components</td>
+                                                <td className="px-4 py-3">array</td>
+                                                <td className="px-4 py-3">Sim</td>
+                                                <td className="px-4 py-3">Componentes do template no mesmo formato aceito pela Evolution API: header, body e button.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 className="mb-4 text-lg font-semibold">Template simples com variaveis no BODY</h3>
+                                <p className="mb-4 text-sm leading-relaxed text-white/60">
+                                    Para templates com variaveis posicionais, envie os parametros na mesma ordem dos marcadores do template: <code className="rounded bg-white/10 px-1.5 py-0.5 text-white">{'{{1}}'}</code>, <code className="rounded bg-white/10 px-1.5 py-0.5 text-white">{'{{2}}'}</code> e assim por diante.
+                                </p>
+                                <CodeBlock code={templateSimpleExample} />
+                            </div>
+
+                            <div>
+                                <h3 className="mb-4 text-lg font-semibold">Template ORDER_DETAILS com Pix</h3>
+                                <p className="mb-4 text-sm leading-relaxed text-white/60">
+                                    Templates com header de imagem precisam receber o componente <code className="rounded bg-white/10 px-1.5 py-0.5 text-white">header</code> com uma URL publica HTTPS. Para botao de detalhes do pedido, use <code className="rounded bg-white/10 px-1.5 py-0.5 text-white">sub_type: order_details</code> e parametro <code className="rounded bg-white/10 px-1.5 py-0.5 text-white">type: action</code>.
+                                </p>
+                                <CodeBlock language="bash" code={templateSendExample} />
+                            </div>
+
+                            <div>
+                                <h3 className="mb-4 text-lg font-semibold">Resposta</h3>
+                                <p className="mb-4 text-sm leading-relaxed text-white/60">
+                                    Uma resposta de sucesso indica que a requisicao foi aceita pela Evolution/WhatsApp. O status inicial pode vir como PENDING; a entrega final depende dos eventos de status do provedor.
+                                </p>
+                                <CodeBlock code={templateResponseExample} />
+                            </div>
+
+                            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4">
+                                <h3 className="mb-2 text-sm font-semibold text-amber-200">Cuidados importantes</h3>
+                                <ul className="space-y-2 text-sm leading-relaxed text-amber-100/80">
+                                    <li>O template precisa estar aprovado na Meta e disponivel na instancia informada.</li>
+                                    <li>Se o template tiver HEADER IMAGE, o envio deve incluir um header com imagem valida; caso contrario a Meta retorna erro de formato.</li>
+                                    <li>Valores monetarios em order_details usam centavos com offset 100. Exemplo: R$ 99,90 deve ser enviado como value 9990 e offset 100.</li>
+                                    <li>A chave Pix e o codigo Pix devem ser reais no ambiente de producao. Placeholders podem gerar falhas ou botoes sem acao util.</li>
+                                </ul>
                             </div>
                         </div>
                     </section>

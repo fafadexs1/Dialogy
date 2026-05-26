@@ -8,6 +8,7 @@ interface TemplatePayload {
     name: string;
     language: string;
     components: any[];
+    renderedContent?: string;
 }
 
 export async function POST(request: Request) {
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
         }
 
         const body: TemplatePayload = await request.json();
-        const { numberid, instanceName, name, language, components } = body;
+        const { numberid, instanceName, name, language, components, renderedContent } = body;
 
         if (!numberid || !instanceName || !name || !language || !components) {
             return NextResponse.json({ error: 'Missing required fields: numberid, instanceName, name, language, components.' }, { status: 400 });
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
             name,
             language,
             components,
+            renderedContent,
             metadata
         });
 

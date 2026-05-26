@@ -18,6 +18,10 @@ import {
   Loader2,
   XCircle,
   PauseCircle,
+  Eye,
+  MailCheck,
+  AlertTriangle,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,10 +42,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import Link from 'next/link';
-import { getCampaigns, deleteCampaign, deleteCampaigns } from "@/actions/campaigns";
-import type { Campaign, User } from "@/lib/types";
+import { getCampaignDetails, getCampaigns, deleteCampaign, deleteCampaigns } from "@/actions/campaigns";
+import type { Campaign, CampaignDetails } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -82,11 +88,13 @@ function StateBadge({ status }: { status: Campaign['status'] }) {
 
 function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
   const channelInfo = {
-    parallel: { name: "WhatsApp Paralelo", className: "bg-sky-500" },
-    api: { name: "WhatsApp API Oficial", className: "bg-purple-500" },
+    whatsapp_baileys: { name: "WhatsApp conectado", className: "bg-emerald-500" },
+    whatsapp_cloud: { name: "WhatsApp Cloud", className: "bg-green-600" },
+    telegram: { name: "Telegram", className: "bg-sky-500" },
+    messenger: { name: "Messenger (Facebook)", className: "bg-blue-600" },
+    instagram: { name: "Instagram Direct", className: "bg-pink-500" },
   }
-  // Fallback to parallel if channel is not defined
-  const current = channelInfo[channel || 'parallel'];
+  const current = channelInfo[channel || 'whatsapp_baileys'];
 
   return (
     <div className="inline-flex items-center gap-2 text-xs rounded-full border px-2.5 py-1 bg-background">
@@ -107,17 +115,20 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [channel, setChannel] = useState<Campaign['channel'] | "all">("all");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [campaignDetails, setCampaignDetails] = useState<CampaignDetails | null>(null);
 
-  const fetchCampaigns = useCallback(async () => {
+  const fetchCampaigns = useCallback(async (silent = false) => {
     if (!user?.activeWorkspaceId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     const result = await getCampaigns(user.activeWorkspaceId);
     if (result.error) {
       toast({ title: 'Erro ao buscar campanhas', description: result.error, variant: 'destructive' });
     } else {
       setCampaigns(result.campaigns || []);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [user?.activeWorkspaceId, toast]);
 
   useEffect(() => {
@@ -125,6 +136,29 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
       fetchCampaigns();
     }
   }, [user, fetchCampaigns]);
+
+  useEffect(() => {
+    if (!campaigns.some(campaign => campaign.status === 'sending')) return;
+
+    const intervalId = window.setInterval(() => {
+      fetchCampaigns(true);
+    }, 2000);
+
+    return () => window.clearInterval(intervalId);
+  }, [campaigns, fetchCampaigns]);
+
+  useEffect(() => {
+    if (!detailsOpen || !campaignDetails?.id || !user?.activeWorkspaceId) return;
+
+    const intervalId = window.setInterval(async () => {
+      const result = await getCampaignDetails(user.activeWorkspaceId!, campaignDetails.id);
+      if (result.campaign) {
+        setCampaignDetails(result.campaign);
+      }
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [detailsOpen, campaignDetails?.id, user?.activeWorkspaceId]);
 
   const filtered = useMemo(() => {
     return campaigns.filter((c) =>
@@ -163,6 +197,22 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
     }
   };
 
+  const openCampaignDetails = async (campaign: Campaign) => {
+    if (!user?.activeWorkspaceId) return;
+    setDetailsOpen(true);
+    setDetailsLoading(true);
+    setCampaignDetails(null);
+
+    const result = await getCampaignDetails(user.activeWorkspaceId, campaign.id);
+    if (result.error || !result.campaign) {
+      toast({ title: "Erro ao buscar detalhes", description: result.error || "Campanha nao encontrada.", variant: "destructive" });
+      setDetailsOpen(false);
+    } else {
+      setCampaignDetails(result.campaign);
+    }
+    setDetailsLoading(false);
+  };
+
 
   if (!user) {
     return (
@@ -183,11 +233,11 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
             </div>
             <div>
               <h1 className="text-xl font-semibold leading-tight">Campanhas</h1>
-              <p className="text-xs text-muted-foreground">Gerencie e acompanhe seus envios de WhatsApp</p>
+              <p className="text-xs text-muted-foreground">Gerencie e acompanhe seus envios em massa por canal</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="gap-2" onClick={fetchCampaigns} disabled={loading}>
+            <Button variant="outline" className="gap-2" onClick={() => fetchCampaigns()} disabled={loading}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Atualizar
             </Button>
@@ -210,10 +260,13 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
               </CardHeader>
               <CardContent className="space-y-3">
                 <Tabs value={channel} onValueChange={(v) => setChannel(v as any)} className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
+                  <TabsList className="grid h-auto w-full grid-cols-2 gap-1">
                     <TabsTrigger value="all">Todos</TabsTrigger>
-                    <TabsTrigger value="parallel">Paralelo</TabsTrigger>
-                    <TabsTrigger value="api" disabled>API</TabsTrigger>
+                    <TabsTrigger value="whatsapp_baileys">WhatsApp</TabsTrigger>
+                    <TabsTrigger value="whatsapp_cloud">Cloud</TabsTrigger>
+                    <TabsTrigger value="telegram">Telegram</TabsTrigger>
+                    <TabsTrigger value="messenger">Messenger</TabsTrigger>
+                    <TabsTrigger value="instagram">Instagram</TabsTrigger>
                   </TabsList>
                 </Tabs>
 
@@ -307,8 +360,20 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
                 ) : (
                   <ul className="divide-y">
                     {filtered.map((c) => (
-                      <li key={c.id} className="grid grid-cols-12 items-center gap-4 py-3 hover:bg-muted/40 rounded-lg -mx-2 px-2">
-                        <div className="col-span-1 flex items-center">
+                      <li
+                        key={c.id}
+                        className="grid cursor-pointer grid-cols-12 items-center gap-4 rounded-lg -mx-2 px-2 py-3 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => openCampaignDetails(c)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            openCampaignDetails(c);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div className="col-span-1 flex items-center" onClick={(event) => event.stopPropagation()}>
                           <Checkbox
                             checked={selected.includes(c.id)}
                             onCheckedChange={(v) => toggleRow(c.id, Boolean(v))}
@@ -339,7 +404,11 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
                           </div>
                         </div>
 
-                        <div className="col-span-2">
+                        <div
+                          className="col-span-2"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
                           <div className="flex items-center justify-end gap-2">
                             <AlertDialog>
                               <DropdownMenu>
@@ -389,6 +458,127 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
           </section>
         </div>
       </main>
+
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+          {detailsLoading || !campaignDetails ? (
+            <div className="flex min-h-72 items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <>
+              <DialogHeader className="border-b p-6 pb-5">
+                <div className="flex flex-wrap items-center gap-3 pr-8">
+                  <DialogTitle className="text-xl">{campaignDetails.name}</DialogTitle>
+                  <StateBadge status={campaignDetails.status} />
+                  <ChannelPill channel={campaignDetails.channel} />
+                </div>
+                <DialogDescription>
+                  ID {campaignDetails.id.split('-')[0]} | Criada em {format(new Date(campaignDetails.created_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
+                </DialogDescription>
+              </DialogHeader>
+
+              <ScrollArea className="max-h-[calc(90vh-112px)]">
+                <div className="space-y-6 p-6">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    {[
+                      { label: "Destinatarios", value: campaignDetails.metrics.total, icon: Users },
+                      { label: "Enviadas", value: campaignDetails.metrics.sent, icon: Send },
+                      { label: "Entregues confirmadas", value: campaignDetails.metrics.delivered, icon: MailCheck },
+                      { label: "Lidas", value: campaignDetails.metrics.read, icon: Eye },
+                      { label: "Falhas", value: campaignDetails.metrics.failed, icon: AlertTriangle },
+                    ].map((metric) => (
+                      <div key={metric.label} className="rounded-lg border bg-muted/20 p-4">
+                        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                          <metric.icon className="h-4 w-4" />
+                          {metric.label}
+                        </div>
+                        <div className="text-2xl font-semibold tabular-nums">{metric.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-lg border p-4">
+                      <div className="mb-2 flex items-center justify-between text-sm">
+                        <span>Taxa de entrega confirmada</span>
+                        <span className="font-semibold tabular-nums">{campaignDetails.metrics.deliveryRate.toFixed(0)}%</span>
+                      </div>
+                      <Progress value={campaignDetails.metrics.deliveryRate} />
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <div className="mb-2 flex items-center justify-between text-sm">
+                        <span>Taxa de leitura</span>
+                        <span className="font-semibold tabular-nums">{campaignDetails.metrics.readRate.toFixed(0)}%</span>
+                      </div>
+                      <Progress value={campaignDetails.metrics.readRate} />
+                    </div>
+                  </div>
+
+                  {campaignDetails.metrics.linkedMessages < campaignDetails.metrics.sent && (
+                    <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-muted-foreground">
+                      Parte deste envio foi criada antes do rastreamento detalhado. Entregas e leituras aparecem somente quando o provedor possui uma mensagem vinculada a campanha.
+                    </div>
+                  )}
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-lg border p-4">
+                      <h3 className="mb-3 text-sm font-semibold">Informacoes do envio</h3>
+                      <div className="space-y-2 text-sm text-muted-foreground">
+                        <p>Conta: <span className="text-foreground">{campaignDetails.destination_id || campaignDetails.instance_name}</span></p>
+                        <p>Inicio: <span className="text-foreground">{campaignDetails.started_at ? format(new Date(campaignDetails.started_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "-"}</span></p>
+                        <p>Conclusao: <span className="text-foreground">{campaignDetails.completed_at ? format(new Date(campaignDetails.completed_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "-"}</span></p>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <h3 className="mb-3 text-sm font-semibold">Conteudo enviado</h3>
+                      <p className="max-h-24 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground">
+                        {campaignDetails.message || "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border">
+                    <div className="border-b px-4 py-3">
+                      <h3 className="text-sm font-semibold">Destinatarios</h3>
+                    </div>
+                    <div className="max-h-72 divide-y overflow-y-auto">
+                      {campaignDetails.recipientDetails.map((recipient) => {
+                        const messageStatus = String(recipient.api_message_status || '').toUpperCase();
+                        const read = messageStatus === 'READ' || messageStatus === 'PLAYED';
+                        const receiptLabel = read
+                          ? "Lida"
+                          : ['DELIVERED', 'DELIVERY', 'DELIVERY_ACK'].includes(messageStatus)
+                            ? "Entregue"
+                            : messageStatus === 'SENT'
+                              ? "Enviada"
+                              : messageStatus || "Sem recibo";
+                        return (
+                          <div key={recipient.id} className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
+                            <div>
+                              <p className="font-medium">{recipient.contact_name || "Contato sem nome"}</p>
+                              <p className="text-xs text-muted-foreground">{recipient.phone_number_jid || "-"}</p>
+                            </div>
+                            <Badge variant="secondary">
+                              {recipient.status === 'failed' ? "Falhou" : recipient.status === 'sent' ? "Enviada" : "Pendente"}
+                            </Badge>
+                            <span className="min-w-24 text-right text-xs text-muted-foreground">
+                              {receiptLabel}
+                            </span>
+                            {recipient.error_message && (
+                              <p className="text-xs text-red-500 sm:col-span-3">{recipient.error_message}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </ScrollArea>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
