@@ -80,6 +80,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       documentId: payload.documentId,
       documentName: payload.documentName,
       content: payload.content,
+      document: payload.document,
     });
   },
   ai_autopilot_process: async (job) => {

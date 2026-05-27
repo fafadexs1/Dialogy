@@ -1,4 +1,5 @@
 import { db } from './db';
+import { DOCUMENT_EMBEDDING_DIMENSIONS, DOCUMENT_EMBEDDING_MODEL } from './embeddings';
 
 export interface DocumentEmbeddingMatch {
     id: string;
@@ -43,6 +44,7 @@ type SearchSimilarDocumentsInput = {
     limit?: number;
     minSimilarity?: number;
     excludeIds?: string[];
+    allowedDocumentIds?: string[];
 };
 
 type KeywordDocumentMatch = DocumentEmbeddingMatch & {
@@ -80,12 +82,21 @@ function toVectorString(vector: number[]) {
     return `[${vector.join(',')}]`;
 }
 
+function assertDocumentVectorDimensions(vector: number[]) {
+    if (vector.length !== DOCUMENT_EMBEDDING_DIMENSIONS) {
+        throw new Error(
+            `Embedding dimension mismatch for ${DOCUMENT_EMBEDDING_MODEL}: expected ${DOCUMENT_EMBEDDING_DIMENSIONS}, received ${vector.length}.`,
+        );
+    }
+}
+
 export const VectorStore = {
     async deleteDocumentEmbeddings(documentId: string) {
         await db.query(`DELETE FROM embeddings_documents WHERE document_id = $1`, [documentId]);
     },
 
     async addDocumentEmbedding(input: AddDocumentEmbeddingInput) {
+        assertDocumentVectorDimensions(input.vector);
         const vectorStr = toVectorString(input.vector);
 
         await db.query(
@@ -137,7 +148,7 @@ export const VectorStore = {
                 MAX(created_at) AS last_indexed_at,
                 MIN(vector_dims(vector))::int AS min_dims,
                 MAX(vector_dims(vector))::int AS max_dims,
-                COUNT(*) FILTER (WHERE vector_dims(vector) <> 768)::int AS wrong_dims,
+                COUNT(*) FILTER (WHERE vector_dims(vector) <> ${DOCUMENT_EMBEDDING_DIMENSIONS})::int AS wrong_dims,
                 jsonb_agg(DISTINCT metadata->>'contentHash') FILTER (WHERE metadata ? 'contentHash') AS content_hashes,
                 jsonb_agg(DISTINCT metadata->>'indexingStatus') FILTER (WHERE metadata ? 'indexingStatus') AS statuses
              FROM embeddings_documents
@@ -156,6 +167,7 @@ export const VectorStore = {
         autopilotConfigId?: string | null;
         limit?: number;
         excludeIds?: string[];
+        allowedDocumentIds?: string[];
     }): Promise<KeywordDocumentMatch[]> {
         const tokens = Array.from(new Set(
             input.query
@@ -169,7 +181,12 @@ export const VectorStore = {
         if (tokens.length === 0) return [];
 
         const params: any[] = [input.workspaceId];
-        const filters = ['workspace_id = $1'];
+        const filters = [
+            'workspace_id = $1',
+            `COALESCE(metadata->>'status', 'active') NOT IN ('draft', 'archived', 'expired', 'inactive')`,
+            `(NULLIF(metadata->>'validFromTimestamp', '') IS NULL OR (metadata->>'validFromTimestamp')::timestamptz <= NOW())`,
+            `(NULLIF(metadata->>'validUntilTimestamp', '') IS NULL OR (metadata->>'validUntilTimestamp')::timestamptz >= NOW())`,
+        ];
         const scoreParts: string[] = [];
         const keywordConditions: string[] = [];
 
@@ -181,6 +198,11 @@ export const VectorStore = {
         if ((input.excludeIds ?? []).length > 0) {
             params.push(input.excludeIds);
             filters.push(`id <> ALL($${params.length}::uuid[])`);
+        }
+        if (input.allowedDocumentIds) {
+            if (input.allowedDocumentIds.length === 0) return [];
+            params.push(input.allowedDocumentIds);
+            filters.push(`document_id = ANY($${params.length}::uuid[])`);
         }
 
         for (const token of tokens) {
@@ -246,6 +268,7 @@ export const VectorStore = {
     },
 
     async searchSimilarDocuments(input: SearchSimilarDocumentsInput): Promise<DocumentEmbeddingMatch[]> {
+        assertDocumentVectorDimensions(input.vector);
         const vectorStr = toVectorString(input.vector);
         const limit = input.limit ?? 5;
         const minSimilarity = input.minSimilarity ?? 0;
@@ -264,6 +287,11 @@ export const VectorStore = {
             params.push(excludeIds);
             excludeFilter = `AND id <> ALL($${params.length}::uuid[])`;
         }
+        if (input.allowedDocumentIds) {
+            if (input.allowedDocumentIds.length === 0) return [];
+            params.push(input.allowedDocumentIds);
+            excludeFilter += ` AND document_id = ANY($${params.length}::uuid[])`;
+        }
 
         const { rows } = await db.query(
             `SELECT
@@ -279,6 +307,9 @@ export const VectorStore = {
              WHERE workspace_id = $2
                ${autopilotFilter}
                ${excludeFilter}
+               AND COALESCE(metadata->>'status', 'active') NOT IN ('draft', 'archived', 'expired', 'inactive')
+               AND (NULLIF(metadata->>'validFromTimestamp', '') IS NULL OR (metadata->>'validFromTimestamp')::timestamptz <= NOW())
+               AND (NULLIF(metadata->>'validUntilTimestamp', '') IS NULL OR (metadata->>'validUntilTimestamp')::timestamptz >= NOW())
                AND 1 - (vector <=> $1) >= $4
              ORDER BY vector <=> $1 ASC
              LIMIT $3`,
@@ -289,6 +320,7 @@ export const VectorStore = {
     },
 
     async upsertCaseMemory(input: UpsertCaseMemoryInput) {
+        assertDocumentVectorDimensions(input.vector);
         const vectorStr = toVectorString(input.vector);
 
         await db.query(
@@ -349,6 +381,7 @@ export const VectorStore = {
     },
 
     async searchSimilarCaseMemories(input: SearchSimilarCaseMemoriesInput): Promise<CaseMemoryMatch[]> {
+        assertDocumentVectorDimensions(input.vector);
         const vectorStr = toVectorString(input.vector);
         const limit = input.limit ?? 5;
         const minSimilarity = input.minSimilarity ?? 0;

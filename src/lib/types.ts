@@ -558,6 +558,36 @@ export interface KnowledgeBaseDocument {
   workflowHints?: string[] | null;
   requiredTools?: string[] | null;
   canonicalAnswer?: string | null;
+  collectionIds?: string[];
+  contextRole?: 'fact' | 'procedure' | 'policy' | 'persona' | string | null;
+  chunkIndex?: number | null;
+  chunkCount?: number | null;
+}
+
+export interface KnowledgeCollection {
+  id: string;
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  isDefault?: boolean;
+}
+
+export interface AutopilotRagHealth {
+  configuredDocuments: number;
+  indexedDocuments: number;
+  indexedChunks: number;
+  missingDocuments: number;
+  quarantinedDocuments: number;
+  staleDocuments: number;
+  wrongDimensionChunks: number;
+  recentRetrievals: number;
+  lastRetrievalAt: string | null;
+  collections: Array<{
+    id: string;
+    name: string;
+    documents: number;
+    indexedDocuments: number;
+  }>;
 }
 
 export interface NexusFlowInstance {
@@ -576,6 +606,7 @@ export type AutopilotFlowNodeKind =
   | 'assistant'
   | 'knowledge'
   | 'reply'
+  | 'send_message'
   | 'handoff'
   | 'close'
   | 'tool'
@@ -599,6 +630,7 @@ export interface AutopilotFlowNode {
     intent?: string;
     customIntentLabel?: string;
     returnToMainPrompt?: boolean;
+    knowledgeCollectionIds?: string[];
   };
 }
 
@@ -635,6 +667,7 @@ export interface AutopilotConfig {
   transcription_model: string | null;
   knowledge_base: string | null;
   knowledge_base_documents: KnowledgeBaseDocument[] | null;
+  knowledge_collections?: KnowledgeCollection[] | null;
   is_primary: boolean;
   is_active: boolean;
   is_private: boolean;
@@ -654,6 +687,7 @@ export interface AutopilotConfigDraftSnapshot {
   transcription_model?: string | null;
   knowledge_base: string | null;
   knowledge_base_documents: KnowledgeBaseDocument[];
+  knowledge_collections?: KnowledgeCollection[];
   is_active: boolean;
   is_private: boolean;
   default_fallback_reply: string | null;

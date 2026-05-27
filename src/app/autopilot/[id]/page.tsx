@@ -16,6 +16,10 @@ import {
   LineChart,
   RotateCcw,
   TestTube2,
+  BookOpen,
+  X,
+  Wrench,
+  GitBranch,
 } from 'lucide-react';
 
 import type {
@@ -24,6 +28,8 @@ import type {
   AutopilotConfigVersionSummary,
   AutopilotFlowGraph,
   AutopilotUsageLog,
+  AutopilotRagHealth,
+  KnowledgeCollection,
   KnowledgeBaseDocument,
   NexusFlowInstance,
   Workspace,
@@ -42,6 +48,9 @@ import {
   deleteAutopilotAgent,
   setPrimaryAutopilotAgent,
   getAgentToolCatalogAction,
+  getAutopilotRagHealth,
+  reindexAutopilotKnowledgeBase,
+  runAutopilotRagLab,
 } from '@/actions/autopilot';
 import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
@@ -65,6 +74,7 @@ import { AutomationForm } from '@/components/autopilot/automation-form';
 import { AutopilotFlowBuilder, type AgentEditorPanel } from '@/components/autopilot/autopilot-flow-builder';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
+import type { RagLabReport } from '@/services/rag/evaluation';
 
 type AgentToolCatalogItem = {
   name: string;
@@ -79,6 +89,30 @@ type AgentToolCatalogItem = {
   serverName?: string;
 };
 
+const DEFAULT_KNOWLEDGE_COLLECTION: KnowledgeCollection = {
+  id: 'general',
+  name: 'Geral',
+  description: 'Conteudo compartilhado entre os sub-agentes.',
+  isDefault: true,
+};
+
+function normalizeKnowledgeCollections(collections?: KnowledgeCollection[] | null): KnowledgeCollection[] {
+  const parsed = Array.isArray(collections) ? collections : [];
+  return parsed.some((collection) => collection.id === DEFAULT_KNOWLEDGE_COLLECTION.id)
+    ? parsed
+    : [DEFAULT_KNOWLEDGE_COLLECTION, ...parsed];
+}
+
+function normalizeFlowVariableName(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/^[0-9]+/, '');
+}
+
 function normalizeSnapshotForSignature(snapshot: AutopilotConfigDraftSnapshot) {
   return {
     ...snapshot,
@@ -87,12 +121,8 @@ function normalizeSnapshotForSignature(snapshot: AutopilotConfigDraftSnapshot) {
     ai_model: snapshot.ai_model || null,
     transcription_model: snapshot.transcription_model || null,
     knowledge_base: snapshot.knowledge_base || null,
-    knowledge_base_documents: (snapshot.knowledge_base_documents || []).map((doc) => ({
-      id: doc.id,
-      name: doc.name,
-      content: doc.content,
-      tokens: doc.tokens || 0,
-    })),
+    knowledge_base_documents: snapshot.knowledge_base_documents || [],
+    knowledge_collections: normalizeKnowledgeCollections(snapshot.knowledge_collections),
     default_fallback_reply: snapshot.default_fallback_reply || null,
     escalation_policy: snapshot.escalation_policy || null,
     closing_policy: snapshot.closing_policy || null,
@@ -115,6 +145,7 @@ function buildSnapshotFromConfig(
     transcription_model: config.transcription_model || null,
     knowledge_base: config.knowledge_base || null,
     knowledge_base_documents: config.knowledge_base_documents || [],
+    knowledge_collections: normalizeKnowledgeCollections(config.knowledge_collections),
     is_active: Boolean(config.is_active),
     is_private: Boolean(config.is_private),
     default_fallback_reply: config.default_fallback_reply || null,
@@ -140,6 +171,9 @@ function normalizeLoadedSnapshot(
     knowledge_base_documents: Array.isArray(snapshot.knowledge_base_documents)
       ? snapshot.knowledge_base_documents
       : fallback.knowledge_base_documents,
+    knowledge_collections: normalizeKnowledgeCollections(
+      Array.isArray(snapshot.knowledge_collections) ? snapshot.knowledge_collections : fallback.knowledge_collections
+    ),
     is_active: Boolean(snapshot.is_active),
     is_private: Boolean(snapshot.is_private),
     default_fallback_reply: snapshot.default_fallback_reply || null,
@@ -269,6 +303,7 @@ export default function AutopilotDetailPage() {
   const [closingPolicy, setClosingPolicy] = useState('');
   const [enabledToolNames, setEnabledToolNames] = useState<string[]>([]);
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
+  const [knowledgeCollections, setKnowledgeCollections] = useState<KnowledgeCollection[]>([DEFAULT_KNOWLEDGE_COLLECTION]);
   const [flowGraph, setFlowGraph] = useState<AutopilotFlowGraph | null>(null);
   const [loadedEditorSnapshot, setLoadedEditorSnapshot] = useState<AutopilotConfigDraftSnapshot | null>(null);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
@@ -283,6 +318,10 @@ export default function AutopilotDetailPage() {
   const [editingRule, setEditingRule] = useState<NexusFlowInstance | null>(null);
   const [lastPlaygroundTrace, setLastPlaygroundTrace] = useState<AutopilotPlaygroundTrace | null>(null);
   const [editorPanel, setEditorPanel] = useState<AgentEditorPanel | null>(null);
+  const [ragHealth, setRagHealth] = useState<AutopilotRagHealth | null>(null);
+  const [isReindexingKnowledge, setIsReindexingKnowledge] = useState(false);
+  const [ragLabReport, setRagLabReport] = useState<RagLabReport | null>(null);
+  const [isRunningRagLab, setIsRunningRagLab] = useState(false);
 
   const estimateTokens = useCallback((content: string) => {
     const normalized = content?.trim() || '';
@@ -295,15 +334,17 @@ export default function AutopilotDetailPage() {
     [modelCatalog]
   );
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (options?: { showLoading?: boolean }) => {
     if (!user?.activeWorkspaceId || !agentId) return;
 
-    setLoading(true);
+    const showLoading = options?.showLoading ?? true;
+    if (showLoading) setLoading(true);
     try {
-      const [autopilotData, catalogData, toolCatalogData] = await Promise.all([
+      const [autopilotData, catalogData, toolCatalogData, ragHealthData] = await Promise.all([
         getAutopilotConfig(user.activeWorkspaceId, agentId),
         getAiModelCatalogAction(),
         getAgentToolCatalogAction(user.activeWorkspaceId),
+        getAutopilotRagHealth(agentId),
       ]);
 
       if (autopilotData.error) {
@@ -361,12 +402,14 @@ export default function AutopilotDetailPage() {
       setClosingPolicy(editorSnapshot.closing_policy || '');
       setEnabledToolNames(editorSnapshot.enabled_tool_names || []);
       setKnowledgeDocuments(editorSnapshot.knowledge_base_documents || []);
+      setKnowledgeCollections(normalizeKnowledgeCollections(editorSnapshot.knowledge_collections));
       setFlowGraph(editorSnapshot.flow_graph || null);
+      setRagHealth(ragHealthData.health || null);
 
       const logsData = await getAutopilotUsageLogs(autopilotData.config.id);
       setUsageLogs(logsData.logs || []);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [agentId, router, toast, user?.activeWorkspaceId]);
 
@@ -383,6 +426,7 @@ export default function AutopilotDetailPage() {
     transcription_model: config?.transcription_model || null,
     knowledge_base: knowledgeBase || null,
     knowledge_base_documents: knowledgeDocuments,
+    knowledge_collections: knowledgeCollections,
     is_active: isActive,
     is_private: isPrivate,
     default_fallback_reply: defaultFallbackReply || null,
@@ -403,6 +447,7 @@ export default function AutopilotDetailPage() {
     isPrivate,
     knowledgeBase,
     knowledgeDocuments,
+    knowledgeCollections,
     flowGraph,
   ]);
 
@@ -441,6 +486,7 @@ export default function AutopilotDetailPage() {
     formData.append('closingPolicy', closingPolicy);
     formData.append('enabledToolNames', JSON.stringify(enabledToolNames));
     formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
+    formData.append('knowledgeCollections', JSON.stringify(knowledgeCollections));
     formData.append('flowGraph', JSON.stringify(flowGraph));
     return formData;
   }, [
@@ -456,6 +502,7 @@ export default function AutopilotDetailPage() {
     isPrivate,
     knowledgeBase,
     knowledgeDocuments,
+    knowledgeCollections,
     flowGraph,
     user?.activeWorkspaceId,
   ]);
@@ -471,7 +518,8 @@ export default function AutopilotDetailPage() {
       if (result.success) {
         toast({ title: 'Rascunho salvo', description: 'Teste e compare antes de publicar para os clientes.' });
         setLastPlaygroundTrace(null);
-        await fetchData();
+        setLoadedEditorSnapshot(currentEditorSnapshot);
+        setDraftUpdatedAt(result.updatedAt || new Date().toISOString());
       } else {
         toast({ title: 'Erro ao salvar rascunho', description: result.error, variant: 'destructive' });
       }
@@ -505,7 +553,7 @@ export default function AutopilotDetailPage() {
           description: result.versionNumber ? `Versao v${result.versionNumber} publicada.` : 'Rascunho promovido para producao.',
         });
         setLastPlaygroundTrace(null);
-        await fetchData();
+        await fetchData({ showLoading: false });
       } else {
         toast({ title: 'Erro ao publicar', description: result.error, variant: 'destructive' });
       }
@@ -530,7 +578,7 @@ export default function AutopilotDetailPage() {
         }
       }
       setLastPlaygroundTrace(null);
-      await fetchData();
+      await fetchData({ showLoading: false });
       toast({ title: 'Rascunho descartado', description: 'A tela voltou para a versao publicada.' });
     } catch (error: any) {
       toast({ title: 'Erro inesperado', description: error.message, variant: 'destructive' });
@@ -554,7 +602,7 @@ export default function AutopilotDetailPage() {
             : `A versao v${versionNumber} foi restaurada.`,
         });
         setLastPlaygroundTrace(null);
-        await fetchData();
+        await fetchData({ showLoading: false });
       } else {
         toast({ title: 'Erro ao restaurar versao', description: result.error, variant: 'destructive' });
       }
@@ -616,14 +664,144 @@ export default function AutopilotDetailPage() {
     );
   };
 
+  const handleUpdateDocCollections = (id: string, collectionIds: string[]) => {
+    setKnowledgeDocuments((prev) =>
+      prev.map((doc) => (doc.id === id ? { ...doc, collectionIds } : doc))
+    );
+  };
+
+  const handleAddKnowledgeCollection = (name: string) => {
+    const normalized = name.trim();
+    if (!normalized) return false;
+    if (knowledgeCollections.some((collection) => collection.name.toLowerCase() === normalized.toLowerCase())) return false;
+    setKnowledgeCollections((prev) => prev.concat({
+      id: globalThis.crypto?.randomUUID?.() || `collection-${Date.now()}`,
+      name: normalized,
+    }));
+    return true;
+  };
+
+  const handleRemoveKnowledgeCollection = (id: string) => {
+    if (id === DEFAULT_KNOWLEDGE_COLLECTION.id) return;
+    setKnowledgeCollections((prev) => prev.filter((collection) => collection.id !== id));
+    setKnowledgeDocuments((prev) => prev.map((doc) => ({
+      ...doc,
+      collectionIds: (doc.collectionIds || []).filter((collectionId) => collectionId !== id),
+    })));
+    setFlowGraph((previous) => previous ? {
+      ...previous,
+      nodes: previous.nodes.map((node) => node.kind !== 'intent' ? node : ({
+        ...node,
+        config: {
+          ...node.config,
+          knowledgeCollectionIds: node.config?.knowledgeCollectionIds?.includes(id)
+            ? node.config.knowledgeCollectionIds.filter((collectionId) => collectionId !== id).length > 0
+              ? node.config.knowledgeCollectionIds.filter((collectionId) => collectionId !== id)
+              : ['general']
+            : node.config?.knowledgeCollectionIds,
+        },
+      })),
+    } : previous);
+  };
+
   const handleRemoveDoc = (id: string) => {
     setKnowledgeDocuments((prev) => prev.filter((doc) => doc.id !== id));
+  };
+
+  const handleReindexKnowledgeBase = async () => {
+    if (!config) return;
+    setIsReindexingKnowledge(true);
+    try {
+      const result = await reindexAutopilotKnowledgeBase(config.id);
+      if (!result.success) {
+        toast({ title: 'Erro ao reindexar', description: result.error, variant: 'destructive' });
+        return;
+      }
+      toast({
+        title: 'Reindexacao iniciada',
+        description: `${result.queued || 0} documento(s) enviados para indexacao.`,
+      });
+      const healthResult = await getAutopilotRagHealth(config.id);
+      setRagHealth(healthResult.health || null);
+    } finally {
+      setIsReindexingKnowledge(false);
+    }
+  };
+
+  const handleRunRagLab = async () => {
+    if (!config) return;
+    setIsRunningRagLab(true);
+    try {
+      const result = await runAutopilotRagLab(config.id);
+      if (!result.report) {
+        toast({ title: 'Erro no laboratorio', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setRagLabReport(result.report);
+      const healthResult = await getAutopilotRagHealth(config.id);
+      setRagHealth(healthResult.health || null);
+      toast({
+        title: 'Laboratorio concluido',
+        description: `${result.report.passed}/${result.report.total} casos aprovados.`,
+      });
+    } finally {
+      setIsRunningRagLab(false);
+    }
+  };
+
+  const upsertRuleFlowNode = (rule: NexusFlowInstance) => {
+    const nodeId = `rule-${rule.id}`;
+    setFlowGraph((previous) => {
+      if (!previous) return previous;
+      const existingIndex = previous.nodes.findIndex((node) => node.id === nodeId);
+      const nextNode = {
+        id: nodeId,
+        kind: 'rule' as const,
+        title: rule.name,
+        subtitle: rule.enabled ? 'Habilidade ativa' : 'Habilidade pausada',
+        position: existingIndex >= 0
+          ? previous.nodes[existingIndex].position
+          : { x: 720, y: 350 + previous.nodes.filter((node) => node.kind === 'rule').length * 150 },
+        config: {
+          instructions: rule.trigger,
+          variableName: `regra_${normalizeFlowVariableName(rule.name) || 'ativa'}`,
+        },
+      };
+
+      return {
+        ...previous,
+        nodes: existingIndex >= 0
+          ? previous.nodes.map((node) => (node.id === nodeId ? { ...node, ...nextNode } : node))
+          : [...previous.nodes, nextNode],
+      };
+    });
+  };
+
+  const handleRuleSaved = (rule?: NexusFlowInstance) => {
+    if (!rule) {
+      setIsRuleModalOpen(false);
+      return;
+    }
+    setInstances((prev) => {
+      const exists = prev.some((item) => item.id === rule.id);
+      return exists
+        ? prev.map((item) => (item.id === rule.id ? rule : item))
+        : [...prev, rule].sort((a, b) => a.name.localeCompare(b.name));
+    });
+    upsertRuleFlowNode(rule);
+    setEditingRule(null);
+    setIsRuleModalOpen(false);
   };
 
   const handleToggleRule = async (id: string, enabled: boolean) => {
     const result = await toggleAutopilotRule(id, enabled);
     if (result.success) {
-      setInstances((prev) => prev.map((rule) => (rule.id === id ? { ...rule, enabled } : rule)));
+      setInstances((prev) => prev.map((rule) => {
+        if (rule.id !== id) return rule;
+        const nextRule = { ...rule, enabled };
+        upsertRuleFlowNode(nextRule);
+        return nextRule;
+      }));
       toast({ title: enabled ? 'Regra ativada' : 'Regra desativada' });
     }
   };
@@ -633,6 +811,11 @@ export default function AutopilotDetailPage() {
     const result = await deleteAutopilotRule(id);
     if (result.success) {
       setInstances((prev) => prev.filter((rule) => rule.id !== id));
+      setFlowGraph((previous) => previous ? {
+        ...previous,
+        nodes: previous.nodes.filter((node) => node.id !== `rule-${id}`),
+        edges: previous.edges.filter((edge) => edge.source !== `rule-${id}` && edge.target !== `rule-${id}`),
+      } : previous);
       toast({ title: 'Regra removida' });
     }
   };
@@ -654,7 +837,7 @@ export default function AutopilotDetailPage() {
     const result = await setPrimaryAutopilotAgent(config.id);
     if (result.success) {
       toast({ title: 'Agente definido como principal' });
-      await fetchData();
+      await fetchData({ showLoading: false });
     } else {
       toast({ title: 'Erro ao definir principal', description: result.error, variant: 'destructive' });
     }
@@ -669,6 +852,177 @@ export default function AutopilotDetailPage() {
   }
 
   if (!config) return null;
+
+  const handleOpenEditorPanel = (panel: AgentEditorPanel) => {
+    const inlinePanels: AgentEditorPanel[] = ['knowledge', 'capabilities', 'analytics', 'settings'];
+    setEditorPanel((current) => (current === panel && inlinePanels.includes(panel) ? null : panel));
+  };
+
+  const renderInlinePanelFrame = (input: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    icon: React.ReactNode;
+    accentClassName: string;
+    children: React.ReactNode;
+  }) => (
+    <div className="mx-auto flex w-full max-w-[1380px] flex-col gap-5 text-slate-100">
+      <div className="flex flex-col gap-4 rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 px-6 py-5 shadow-2xl backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]', input.accentClassName)}>
+            {input.icon}
+            {input.eyebrow}
+          </div>
+          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">{input.title}</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">
+            {input.description}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setEditorPanel(null)}
+          className="rounded-xl border-white/10 bg-[#111316] text-slate-200 hover:bg-white/5 hover:text-white"
+        >
+          <X className="mr-2 h-4 w-4" />
+          Voltar ao fluxo
+        </Button>
+      </div>
+      {input.children}
+    </div>
+  );
+
+  const inlineEditorPanel = (() => {
+    if (editorPanel === 'knowledge') {
+      return renderInlinePanelFrame({
+        eyebrow: 'Base do agente',
+        title: 'Base de conhecimento',
+        description: 'Organize documentos, colecoes e saude do indice sem sair do fluxo visual do atendente.',
+        icon: <BookOpen className="h-3.5 w-3.5" />,
+        accentClassName: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
+        children: (
+      <AutopilotKnowledge
+        documents={knowledgeDocuments}
+        collections={knowledgeCollections}
+        toolCatalog={toolCatalog}
+        onUpload={handleKnowledgeUpload}
+        onRemove={handleRemoveDoc}
+        onUpdateContent={handleUpdateDoc}
+        onUpdateName={handleUpdateDocName}
+        onUpdateCategory={handleUpdateDocCategory}
+        onUpdateCollections={handleUpdateDocCollections}
+        onAddCollection={handleAddKnowledgeCollection}
+        onRemoveCollection={handleRemoveKnowledgeCollection}
+        onAddManual={handleAddManualDoc}
+        isUploading={isUploading}
+        ragHealth={ragHealth}
+        onReindex={handleReindexKnowledgeBase}
+        isReindexing={isReindexingKnowledge}
+        ragLabReport={ragLabReport}
+        onRunRagLab={handleRunRagLab}
+        isRunningRagLab={isRunningRagLab}
+      />
+        ),
+      });
+    }
+
+    if (editorPanel === 'capabilities') {
+      return renderInlinePanelFrame({
+        eyebrow: 'Ferramentas do atendimento',
+        title: 'Ferramentas e habilidades',
+        description: 'Configure tools, automacoes e habilidades que o agente pode acionar durante o atendimento.',
+        icon: <Wrench className="h-3.5 w-3.5" />,
+        accentClassName: 'border-sky-500/25 bg-sky-500/10 text-sky-300',
+        children: (
+          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
+            <AutopilotRules
+              rules={instances}
+              toolCatalog={toolCatalog}
+              enabledToolNames={enabledToolNames}
+              setEnabledToolNames={setEnabledToolNames}
+              onSaveTools={handleSaveConfig}
+              isSavingTools={isSaving}
+              onAdd={() => {
+                setEditingRule(null);
+                setIsRuleModalOpen(true);
+              }}
+              onEdit={(rule) => {
+                setEditingRule(rule);
+                setIsRuleModalOpen(true);
+              }}
+              onDelete={handleDeleteRule}
+              onToggle={handleToggleRule}
+            />
+          </div>
+        ),
+      });
+    }
+
+    if (editorPanel === 'analytics') {
+      return renderInlinePanelFrame({
+        eyebrow: 'Fluxo e desempenho',
+        title: 'Analise do agente',
+        description: 'Acompanhe uso, sinais de execucao e historico operacional sem sair do construtor visual.',
+        icon: <GitBranch className="h-3.5 w-3.5" />,
+        accentClassName: 'border-violet-500/25 bg-violet-500/10 text-violet-300',
+        children: (
+          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
+            <AutopilotStats usageLogs={usageLogs} loading={loading} />
+          </div>
+        ),
+      });
+    }
+
+    if (editorPanel === 'settings') {
+      return renderInlinePanelFrame({
+        eyebrow: 'Controle do agente',
+        title: 'Configuracoes gerais',
+        description: 'Ajuste identidade, modelo, status, privacidade e politicas principais sem sair do construtor visual.',
+        icon: <Settings2 className="h-3.5 w-3.5" />,
+        accentClassName: 'border-slate-500/25 bg-slate-500/10 text-slate-300',
+        children: (
+          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
+            <AutopilotSettings
+              agentName={agentName}
+              setAgentName={setAgentName}
+              aiModel={aiModel}
+              setAiModel={setAiModel}
+              knowledgeBase={knowledgeBase}
+              setKnowledgeBase={setKnowledgeBase}
+              defaultFallbackReply={defaultFallbackReply}
+              setDefaultFallbackReply={setDefaultFallbackReply}
+              escalationPolicy={escalationPolicy}
+              setEscalationPolicy={setEscalationPolicy}
+              closingPolicy={closingPolicy}
+              setClosingPolicy={setClosingPolicy}
+              isActive={isActive}
+              setIsActive={setIsActive}
+              isPrivate={isPrivate}
+              setIsPrivate={setIsPrivate}
+              isPrimary={isPrimary}
+              onSetPrimary={handleSetPrimary}
+              geminiApiKey={geminiApiKey}
+              setGeminiApiKey={setGeminiApiKey}
+              hasGlobalKey={hasGlobalKey}
+              workspaceHasGeminiConfig={workspaceHasGeminiConfig}
+              workspaceDefaultAiModel={workspaceDefaultAiModel}
+              modelOptions={selectableModels}
+              onSave={handleSaveConfig}
+              isSaving={isSaving}
+              onDelete={handleDeleteAgent}
+              workspace={workspace}
+            />
+          </div>
+        ),
+      });
+    }
+
+    return null;
+  })();
+  const inlineEditorPanelName: AgentEditorPanel | null =
+    editorPanel === 'knowledge' || editorPanel === 'capabilities' || editorPanel === 'analytics' || editorPanel === 'settings'
+      ? editorPanel
+      : null;
 
   if (process.env.NEXT_PUBLIC_AUTOPILOT_VISUAL_BUILDER !== 'false') return (
     <>
@@ -687,10 +1041,16 @@ export default function AutopilotDetailPage() {
         enabledToolNames={enabledToolNames}
         tools={toolCatalog}
         rules={instances}
+        knowledgeDocuments={knowledgeDocuments}
+        knowledgeCollections={knowledgeCollections}
+        mainSystemPrompt={knowledgeBase}
         flowGraph={flowGraph}
+        onMainSystemPromptChange={setKnowledgeBase}
         onFlowGraphChange={setFlowGraph}
         onBack={() => router.push('/autopilot')}
-        onOpenPanel={setEditorPanel}
+        onOpenPanel={handleOpenEditorPanel}
+        inlinePanel={inlineEditorPanel}
+        inlinePanelName={inlineEditorPanelName}
         onSave={handleSaveConfig}
         onPublish={handlePublishConfig}
         onDiscard={handleDiscardDraft}
@@ -700,88 +1060,8 @@ export default function AutopilotDetailPage() {
         }}
       />
 
-      <Dialog open={editorPanel !== null} onOpenChange={(open) => !open && setEditorPanel(null)}>
+      <Dialog open={editorPanel !== null && !inlineEditorPanelName} onOpenChange={(open) => !open && setEditorPanel(null)}>
         <DialogContent className="flex h-[92vh] max-h-[92vh] w-[min(1160px,94vw)] max-w-none flex-col overflow-hidden rounded-[26px] border-white/10 bg-[#111316] p-0 text-slate-100 shadow-2xl">
-          {editorPanel === 'settings' && (
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
-              <AutopilotSettings
-                agentName={agentName}
-                setAgentName={setAgentName}
-                aiModel={aiModel}
-                setAiModel={setAiModel}
-                knowledgeBase={knowledgeBase}
-                setKnowledgeBase={setKnowledgeBase}
-                defaultFallbackReply={defaultFallbackReply}
-                setDefaultFallbackReply={setDefaultFallbackReply}
-                escalationPolicy={escalationPolicy}
-                setEscalationPolicy={setEscalationPolicy}
-                closingPolicy={closingPolicy}
-                setClosingPolicy={setClosingPolicy}
-                isActive={isActive}
-                setIsActive={setIsActive}
-                isPrivate={isPrivate}
-                setIsPrivate={setIsPrivate}
-                isPrimary={isPrimary}
-                onSetPrimary={handleSetPrimary}
-                geminiApiKey={geminiApiKey}
-                setGeminiApiKey={setGeminiApiKey}
-                hasGlobalKey={hasGlobalKey}
-                workspaceHasGeminiConfig={workspaceHasGeminiConfig}
-                workspaceDefaultAiModel={workspaceDefaultAiModel}
-                modelOptions={selectableModels}
-                onSave={handleSaveConfig}
-                isSaving={isSaving}
-                onDelete={handleDeleteAgent}
-                workspace={workspace}
-              />
-            </div>
-          )}
-
-          {editorPanel === 'knowledge' && (
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
-              <AutopilotKnowledge
-                documents={knowledgeDocuments}
-                toolCatalog={toolCatalog}
-                onUpload={handleKnowledgeUpload}
-                onRemove={handleRemoveDoc}
-                onUpdateContent={handleUpdateDoc}
-                onUpdateName={handleUpdateDocName}
-                onUpdateCategory={handleUpdateDocCategory}
-                onAddManual={handleAddManualDoc}
-                isUploading={isUploading}
-              />
-            </div>
-          )}
-
-          {editorPanel === 'capabilities' && (
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
-              <AutopilotRules
-                rules={instances}
-                toolCatalog={toolCatalog}
-                enabledToolNames={enabledToolNames}
-                setEnabledToolNames={setEnabledToolNames}
-                onSaveTools={handleSaveConfig}
-                isSavingTools={isSaving}
-                onAdd={() => {
-                  setEditingRule(null);
-                  setIsRuleModalOpen(true);
-                }}
-                onEdit={(rule) => {
-                  setEditingRule(rule);
-                  setIsRuleModalOpen(true);
-                }}
-                onDelete={handleDeleteRule}
-                onToggle={handleToggleRule}
-              />
-            </div>
-          )}
-
-          {editorPanel === 'analytics' && (
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
-              <AutopilotStats usageLogs={usageLogs} loading={loading} />
-            </div>
-          )}
-
           {editorPanel === 'playground' && (
             <div className="flex-1 overflow-y-auto p-5 sm:p-7">
               <AutopilotPlayground
@@ -858,10 +1138,7 @@ export default function AutopilotDetailPage() {
             configId={config.id}
             instance={editingRule}
             onClose={() => setIsRuleModalOpen(false)}
-            onSuccess={() => {
-              setIsRuleModalOpen(false);
-              void fetchData();
-            }}
+            onSuccess={handleRuleSaved}
           />
         </DialogContent>
       </Dialog>
@@ -1109,14 +1386,24 @@ export default function AutopilotDetailPage() {
             <TabsContent value="knowledge" className="mt-0 min-w-0 pb-10">
               <AutopilotKnowledge
                 documents={knowledgeDocuments}
+                collections={knowledgeCollections}
                 toolCatalog={toolCatalog}
                 onUpload={handleKnowledgeUpload}
                 onRemove={handleRemoveDoc}
                 onUpdateContent={handleUpdateDoc}
                 onUpdateName={handleUpdateDocName}
                 onUpdateCategory={handleUpdateDocCategory}
+                onUpdateCollections={handleUpdateDocCollections}
+                onAddCollection={handleAddKnowledgeCollection}
+                onRemoveCollection={handleRemoveKnowledgeCollection}
                 onAddManual={handleAddManualDoc}
                 isUploading={isUploading}
+                ragHealth={ragHealth}
+                onReindex={handleReindexKnowledgeBase}
+                isReindexing={isReindexingKnowledge}
+                ragLabReport={ragLabReport}
+                onRunRagLab={handleRunRagLab}
+                isRunningRagLab={isRunningRagLab}
               />
             </TabsContent>
 
@@ -1317,10 +1604,7 @@ export default function AutopilotDetailPage() {
               configId={config.id}
               instance={editingRule}
               onClose={() => setIsRuleModalOpen(false)}
-              onSuccess={() => {
-                setIsRuleModalOpen(false);
-                void fetchData();
-              }}
+              onSuccess={handleRuleSaved}
             />
           )}
         </DialogContent>

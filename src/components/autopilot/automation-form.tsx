@@ -49,7 +49,7 @@ function KeyValueEditor({ rows, onChange }: { rows: KeyValueRow[]; onChange: (ro
 
 interface AutomationFormProps {
   configId: string;
-  onSuccess: () => void;
+  onSuccess: (rule?: NexusFlowInstance) => void;
   onClose: () => void;
   instance?: NexusFlowInstance | null;
 }
@@ -151,7 +151,7 @@ export function AutomationForm({
 
     if (result.success) {
       toast({ title: 'Regra salva', description: 'Sua automação foi salva com sucesso.' });
-      onSuccess();
+      onSuccess(result.rule);
     } else {
       toast({ title: 'Erro ao salvar regra', description: result.error, variant: 'destructive' });
     }

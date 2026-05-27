@@ -5,7 +5,7 @@ import { extractAutopilotSlots } from '@/services/autopilot/slots';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
-import type { Contact } from '@/lib/types';
+import type { Contact, KnowledgeBaseDocument } from '@/lib/types';
 
 const team: ToolRouterTeam = {
   id: 'team-support',
@@ -26,6 +26,7 @@ function validate(input: {
   toolResults?: AgentToolExecutionResult[];
   enabledToolNames?: string[];
   contactOverride?: Contact;
+  knowledgeDocuments?: KnowledgeBaseDocument[];
 }) {
   const resolvedContact = input.contactOverride || contact;
   const intentResolution = resolveAutopilotIntent({ customerMessage: input.message });
@@ -44,6 +45,7 @@ function validate(input: {
     availableTeams: [team],
     contact: resolvedContact,
     knowledgeCoverage: 'medium',
+    knowledgeDocuments: input.knowledgeDocuments,
     source: 'llm',
   });
 }
@@ -57,6 +59,38 @@ describe('autopilot response validator', () => {
 
     expect(result.decision).toBe('approve');
     expect(result.response).toContain('opcoes');
+  });
+
+  it('rejects prices invented outside the factual retrieved documents', () => {
+    const result = validate({
+      message: 'Quais planos voces possuem?',
+      response: 'Temos o plano 500 MEGA por R$79,90.',
+      knowledgeDocuments: [{
+        id: 'plans',
+        name: 'Catalogo de planos',
+        content: '500 MEGA por R$99,90.',
+        contextRole: 'fact',
+      }],
+    });
+
+    expect(result.decision).toBe('replace_with_fallback');
+    expect(result.reasons).toContain('unsupported_knowledge_facts');
+    expect(result.metadata.unsupportedFacts).toContain('R$79,90');
+  });
+
+  it('approves factual values present in retrieved documents', () => {
+    const result = validate({
+      message: 'Quais planos voces possuem?',
+      response: 'Temos o plano 500 MEGA por R$99,90.',
+      knowledgeDocuments: [{
+        id: 'plans',
+        name: 'Catalogo de planos',
+        content: '500 MEGA por R$99,90.',
+        contextRole: 'fact',
+      }],
+    });
+
+    expect(result.decision).toBe('approve');
   });
 
   it('replaces empty responses with configured fallback', () => {

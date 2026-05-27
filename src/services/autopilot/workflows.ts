@@ -13,7 +13,7 @@ export type AutopilotWorkflowDefinition = {
   allowedTools: AgentToolName[];
   fallbackPolicy: 'answer_from_knowledge' | 'ask_clarifying_question' | 'handoff' | 'configured_fallback';
   handoffPolicy: 'never' | 'on_low_confidence' | 'on_tool_failure' | 'immediate';
-  responsePolicy: 'deterministic_when_official' | 'llm_with_facts' | 'short_ack' | 'handoff_message';
+  responsePolicy: 'llm_with_facts' | 'short_ack' | 'handoff_message';
 };
 
 const BILLING_TOOLS: AgentToolName[] = [
@@ -61,7 +61,7 @@ export const UNIVERSAL_AUTOPILOT_WORKFLOWS: Record<UniversalAutopilotIntent, Aut
     allowedTools: ['mcp_call_tool', 'transfer_chat', 'add_internal_note'],
     fallbackPolicy: 'ask_clarifying_question',
     handoffPolicy: 'on_low_confidence',
-    responsePolicy: 'deterministic_when_official',
+    responsePolicy: 'llm_with_facts',
   },
   catalog_request: {
     id: 'universal.catalog_request',
@@ -71,7 +71,7 @@ export const UNIVERSAL_AUTOPILOT_WORKFLOWS: Record<UniversalAutopilotIntent, Aut
     allowedTools: ['mcp_call_tool'],
     fallbackPolicy: 'answer_from_knowledge',
     handoffPolicy: 'on_low_confidence',
-    responsePolicy: 'deterministic_when_official',
+    responsePolicy: 'llm_with_facts',
   },
   pricing_request: {
     id: 'universal.pricing_request',
@@ -81,7 +81,7 @@ export const UNIVERSAL_AUTOPILOT_WORKFLOWS: Record<UniversalAutopilotIntent, Aut
     allowedTools: ['mcp_call_tool'],
     fallbackPolicy: 'answer_from_knowledge',
     handoffPolicy: 'on_low_confidence',
-    responsePolicy: 'deterministic_when_official',
+    responsePolicy: 'llm_with_facts',
   },
   promotion_request: {
     id: 'universal.promotion_request',
@@ -91,7 +91,7 @@ export const UNIVERSAL_AUTOPILOT_WORKFLOWS: Record<UniversalAutopilotIntent, Aut
     allowedTools: ['mcp_call_tool'],
     fallbackPolicy: 'answer_from_knowledge',
     handoffPolicy: 'on_low_confidence',
-    responsePolicy: 'deterministic_when_official',
+    responsePolicy: 'llm_with_facts',
   },
   availability_request: {
     id: 'universal.availability_request',
@@ -171,7 +171,7 @@ export const UNIVERSAL_AUTOPILOT_WORKFLOWS: Record<UniversalAutopilotIntent, Aut
     allowedTools: ['mcp_call_tool', 'transfer_chat', 'add_internal_note'],
     fallbackPolicy: 'handoff',
     handoffPolicy: 'on_low_confidence',
-    responsePolicy: 'deterministic_when_official',
+    responsePolicy: 'llm_with_facts',
   },
   cancellation_request: {
     id: 'universal.cancellation_request',
@@ -181,7 +181,7 @@ export const UNIVERSAL_AUTOPILOT_WORKFLOWS: Record<UniversalAutopilotIntent, Aut
     allowedTools: ['transfer_chat', 'add_internal_note', 'mcp_call_tool'],
     fallbackPolicy: 'handoff',
     handoffPolicy: 'on_low_confidence',
-    responsePolicy: 'deterministic_when_official',
+    responsePolicy: 'llm_with_facts',
   },
   document_request: {
     id: 'universal.document_request',

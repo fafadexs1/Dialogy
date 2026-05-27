@@ -7,6 +7,7 @@ import { sendAutomatedMessageAction } from '@/actions/messages';
 import { logToDebugFile } from '@/lib/debug-file';
 import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact-identity';
 import { retrieveHybridSupportContext, type KnowledgeRetrievalStrategy } from '@/services/rag/hybrid-retrieval';
+import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 import { runAgentTools } from '@/services/agent-tools/runtime';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 import { listAgentToolCatalogItems, listDefaultEnabledAgentToolNames } from '@/services/agent-tools/catalog';
@@ -42,10 +43,16 @@ import {
     ensurePromisedSgpLookupAction,
     ensureProcedureSgpLookupAction,
 } from '@/services/autopilot-sgp-response';
-import { findOfficialKnowledgeAnswer, resolveAutopilotIntent, resolveAutopilotIntentWithOverride } from '@/services/autopilot-intent';
+import { resolveAutopilotIntent, resolveAutopilotIntentWithOverride } from '@/services/autopilot-intent';
 import type { KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
-import { buildIntentScopedKnowledgeBase, resolveActiveFlowIntentScope } from '@/services/autopilot/flow-routing';
+import {
+    buildIntentScopedKnowledgeBase,
+    filterKnowledgeDocumentsForScope,
+    renderDeterministicFlowMessage,
+    resolveActiveFlowIntentScope,
+    resolveDeterministicFlowMessage,
+} from '@/services/autopilot/flow-routing';
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
@@ -72,7 +79,7 @@ import {
  *
  * When `aiMessageBlocks` is provided (the AI explicitly decided to split),
  * each block is sent as its own message. Otherwise, the heuristic
- * `splitIntoMessageBlocks` is used as a fallback for deterministic responses.
+ * `splitIntoMessageBlocks` is applied to generated responses as a fallback.
  */
 async function sendMultiBlockResponse(
     chatId: string,
@@ -1220,6 +1227,11 @@ export async function getAutopilotConfigService(workspaceId: string, agentId?: s
             return {
                 ...row,
                 knowledge_base_documents: normalizedDocs,
+                knowledge_collections: Array.isArray(row.knowledge_collections)
+                    ? row.knowledge_collections
+                    : typeof row.knowledge_collections === 'string'
+                        ? JSON.parse(row.knowledge_collections || '[]')
+                        : [],
                 is_active: Boolean(row.is_active),
                 is_primary: Boolean(row.is_primary),
                 is_private: Boolean(row.is_private),
@@ -1451,7 +1463,6 @@ export async function processAutopilotForChat(
     if (shouldUseAiIntentClassifier({
         intent: deterministicIntentResolution.intent,
         confidence: deterministicIntentResolution.confidence,
-        officialResponse: deterministicIntentResolution.officialResponse,
     })) {
         try {
             const classifierStage = await timeOrchestratorStage(
@@ -1512,12 +1523,13 @@ export async function processAutopilotForChat(
         }
     }
 
-    let ragStrategy: KnowledgeRetrievalStrategy = staticKnowledgeDocuments.length > 0 ? 'static_documents' : 'none';
-    let knowledgeCoverage: KnowledgeCoverage = intentResolution.officialResponse
-        ? 'high'
-        : staticKnowledgeDocuments.length > 0
-            ? 'low'
-            : 'none';
+    const activeFlowIntentScope = resolveActiveFlowIntentScope(autopilotConfig, intentResolution.intent);
+    const scopedStaticKnowledgeDocuments = filterKnowledgeDocumentsForScope(autopilotConfig, staticKnowledgeDocuments, activeFlowIntentScope);
+    const allowedDocumentIds = activeFlowIntentScope?.knowledgeCollectionIds?.length
+        ? scopedStaticKnowledgeDocuments.map((document) => document.id)
+        : undefined;
+    let ragStrategy: KnowledgeRetrievalStrategy = scopedStaticKnowledgeDocuments.length > 0 ? 'static_documents' : 'none';
+    let knowledgeCoverage: KnowledgeCoverage = scopedStaticKnowledgeDocuments.length > 0 ? 'low' : 'none';
     await recordOrchestratorEvent({
         run: orchestratorRun,
         kind: 'intent_resolution',
@@ -1533,9 +1545,9 @@ export async function processAutopilotForChat(
             requiredSlots: intentResolution.requiredSlots,
             extractedSlots: intentResolution.extractedSlots,
             knowledgeCategories: intentResolution.knowledgeCategories,
-            sourceDocumentId: intentResolution.sourceDocumentId ?? null,
-            sourceDocumentName: intentResolution.sourceDocumentName ?? null,
-            hasOfficialResponse: Boolean(intentResolution.officialResponse),
+            sourceDocumentId: null,
+            sourceDocumentName: null,
+            hasOfficialResponse: false,
             reason: intentResolution.reason,
             deterministicIntent: deterministicIntentResolution.intent,
             deterministicConfidence: deterministicIntentResolution.confidence,
@@ -1781,7 +1793,7 @@ export async function processAutopilotForChat(
         return;
     }
 
-    let ragDocuments: KnowledgeBaseDocument[] = staticKnowledgeDocuments;
+    let ragDocuments: KnowledgeBaseDocument[] = scopedStaticKnowledgeDocuments;
     let relevantHistory = '';
     let resolvedCases: Array<{
         summary: string;
@@ -1805,8 +1817,9 @@ export async function processAutopilotForChat(
                         autopilotConfigId: autopilotConfig.id,
                         query: enrichedLastMessageContent,
                         excludeChatId: chat.id,
-                        staticDocuments: staticKnowledgeDocuments,
+                        staticDocuments: scopedStaticKnowledgeDocuments,
                         intent: intentResolution,
+                        allowedDocumentIds,
                     }),
                     orchestratorRun.budget.maxRagMs,
                     'rag retrieval'
@@ -1815,7 +1828,8 @@ export async function processAutopilotForChat(
                     queryLength: enrichedLastMessageContent.length,
                     intent: intentResolution.intent,
                     workflowId: intentResolution.workflowId,
-                    initialStaticDocuments: staticKnowledgeDocuments.length,
+                    initialStaticDocuments: scopedStaticKnowledgeDocuments.length,
+                    allowedKnowledgeCollections: activeFlowIntentScope?.knowledgeCollectionIds || null,
                 }
             );
             orchestratorTimings.rag_ms = ragStage.durationMs;
@@ -1862,10 +1876,10 @@ export async function processAutopilotForChat(
     } catch (ragError) {
         console.error('[AUTOPILOT_RAG] Error during retrieval:', ragError);
         const errorMessage = ragError instanceof Error ? ragError.message : String(ragError);
-        const hasStaticFallback = staticKnowledgeDocuments.length > 0;
+        const hasStaticFallback = scopedStaticKnowledgeDocuments.length > 0;
         ragStrategy = hasStaticFallback ? 'static_documents' : 'none';
         knowledgeCoverage = hasStaticFallback ? 'low' : 'none';
-        ragDocuments = hasStaticFallback ? staticKnowledgeDocuments : [];
+        ragDocuments = hasStaticFallback ? scopedStaticKnowledgeDocuments : [];
         await recordOrchestratorEvent({
             run: orchestratorRun,
             kind: hasStaticFallback ? 'rag_fallback_static_documents' : 'rag_retrieval',
@@ -1875,7 +1889,7 @@ export async function processAutopilotForChat(
                 fallbackReason: errorMessage.includes('timed out') ? 'rag_timeout' : 'rag_error',
                 strategy: ragStrategy,
                 knowledgeCoverage,
-                staticDocuments: staticKnowledgeDocuments.length,
+                staticDocuments: scopedStaticKnowledgeDocuments.length,
                 intent: intentResolution.intent,
                 workflowId: intentResolution.workflowId,
             },
@@ -1906,27 +1920,18 @@ export async function processAutopilotForChat(
             },
         });
     }
+    const knowledgePartitions = partitionKnowledgeDocuments(ragDocuments);
+    const factKnowledgeDocuments = knowledgePartitions.facts;
+    const procedureKnowledgeDocuments = knowledgePartitions.procedures;
     const knowledgeToolProcedures = formatKnowledgeToolProcedures(
         extractKnowledgeToolProcedures({
-            documents: ragDocuments,
+            documents: procedureKnowledgeDocuments,
             tools: runtimeToolCatalog,
             enabledToolNames,
         })
     );
-    const promptKnowledgeDocuments = compactKnowledgeDocumentsForPrompt(ragDocuments);
-    const retrievedOfficialResponse = intentResolution.officialResponse
-        ? null
-        : findOfficialKnowledgeAnswer({
-            documents: ragDocuments,
-            intent: intentResolution.intent,
-            customerMessage: enrichedLastMessageContent || '',
-        });
-    const deterministicOfficialResponse = intentResolution.officialResponse || retrievedOfficialResponse?.content || null;
-    const deterministicOfficialResponsePreserveFormatting = intentResolution.officialResponse
-        ? intentResolution.officialResponsePreserveFormatting
-        : retrievedOfficialResponse?.preserveFormatting;
-    const deterministicOfficialSourceDocumentId = intentResolution.sourceDocumentId || retrievedOfficialResponse?.document.id;
-    const deterministicOfficialSourceDocumentName = intentResolution.sourceDocumentName || retrievedOfficialResponse?.document.name;
+    const promptKnowledgeDocuments = compactKnowledgeDocumentsForPrompt(factKnowledgeDocuments);
+    const promptWorkflowKnowledgeDocuments = compactKnowledgeDocumentsForPrompt(procedureKnowledgeDocuments);
     const workflowSlotMappings = await loadWorkflowSlotMappings(workspaceId);
     let closeIntentGate: CloseIntentGateDecision = null;
     if (shouldRunCloseIntentGate({
@@ -1997,7 +2002,6 @@ export async function processAutopilotForChat(
         missingSlots: workflowPlan.missingSlots,
         enabledToolNames,
         hasCustomerIdentifier: Boolean(workflowPlan.slotExtraction.slots.customer_identifier),
-        officialResponse: deterministicOfficialResponse,
     })) {
         try {
             const workflowClassifierStage = await timeOrchestratorStage(
@@ -2015,7 +2019,7 @@ export async function processAutopilotForChat(
                         deterministicPlannedTools: workflowPlan.actions.map((action) => action.type),
                         agentName: autopilotConfig.name,
                         agentKnowledgeBase: autopilotConfig.knowledge_base || '',
-                        knowledgeDocuments: staticKnowledgeDocuments,
+                        knowledgeDocuments: scopedStaticKnowledgeDocuments,
                         enabledToolNames,
                         contactSignals: buildIntentClassifierContactSignals(sanitizedContact),
                         model: process.env.AI_WORKFLOW_CLASSIFIER_MODEL || resolvedAiModel.model,
@@ -2104,7 +2108,13 @@ export async function processAutopilotForChat(
     let workflowPlannedActions: AgentToolAction[] = workflowPlan.executionMode === 'continue_llm'
         ? []
         : workflowPlan.actions;
-    const activeFlowIntentScope = resolveActiveFlowIntentScope(autopilotConfig, intentResolution.intent);
+    const deterministicFlowMessageNode = resolveDeterministicFlowMessage(autopilotConfig, activeFlowIntentScope);
+    const deterministicFlowMessage = deterministicFlowMessageNode
+        ? renderDeterministicFlowMessage(autopilotConfig, deterministicFlowMessageNode.message, {
+            customerMessage: enrichedLastMessageContent || '',
+            contactName: sanitizedContact.name,
+        })
+        : null;
     const scopedKnowledgeBase = buildIntentScopedKnowledgeBase(
         autopilotConfig.knowledge_base || '',
         activeFlowIntentScope
@@ -2128,6 +2138,124 @@ export async function processAutopilotForChat(
         `reason=${intentResolution.reason}`,
         `flowSubAgent=${activeFlowIntentScope?.title || 'main_agent'}`,
     ].join('\n');
+
+    if (deterministicFlowMessage) {
+        if (currentCopilotMode === 'suggest') {
+            const { getSupabaseAdmin } = await import('@/lib/supabase');
+            const supabase = getSupabaseAdmin();
+            await supabase.channel(`chat:${chat.id}`).send({
+                type: 'broadcast',
+                event: 'ai_suggestion',
+                payload: {
+                    suggestion: deterministicFlowMessage,
+                    chatId: chat.id,
+                    configName: autopilotConfig.name,
+                },
+            });
+            await logIntelligentAttendantResponse({
+                configId: autopilotConfig.id,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                modelName: 'flow-message',
+                customerMessage: enrichedLastMessageContent || '',
+                response: deterministicFlowMessage,
+                status: 'suggested',
+                triggeredRule: null,
+                metadata: {
+                    deterministicFlowMessage: true,
+                    flowNodeId: deterministicFlowMessageNode?.nodeId,
+                    flowSubAgent: activeFlowIntentScope?.title,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                    workflowId: intentResolution.workflowId,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'success',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceLevel: 'deterministic',
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    suggestionOnly: true,
+                    responseSent: false,
+                    deterministicFlowMessage: true,
+                    flowNodeId: deterministicFlowMessageNode?.nodeId,
+                    flowSubAgent: activeFlowIntentScope?.title,
+                },
+            });
+            return;
+        }
+
+        const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+            chatId: chat.id,
+            sourceMessageId: sourceMessageId ?? null,
+        });
+        if (!sourceMessageStillCurrent) {
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'skipped',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    responseSent: false,
+                    staleSourceMessage: true,
+                    deterministicFlowMessage: true,
+                    flowNodeId: deterministicFlowMessageNode?.nodeId,
+                },
+            });
+            return;
+        }
+
+        const sendStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'message_send',
+            () => sendMultiBlockResponse(
+                chat.id,
+                deterministicFlowMessage,
+                assignedSystemAgentId,
+                true,
+                instanceName
+            ),
+            { responseLength: deterministicFlowMessage.length, deterministicFlowMessage: true }
+        );
+        orchestratorTimings.send_ms = sendStage.durationMs;
+        await logIntelligentAttendantResponse({
+            configId: autopilotConfig.id,
+            chatId: chat.id,
+            systemAgentId: assignedSystemAgentId,
+            modelName: 'flow-message',
+            customerMessage: enrichedLastMessageContent || '',
+            response: deterministicFlowMessage,
+            status: 'sent',
+            triggeredRule: null,
+            metadata: {
+                deterministicFlowMessage: true,
+                flowNodeId: deterministicFlowMessageNode?.nodeId,
+                flowSubAgent: activeFlowIntentScope?.title,
+                intent: intentResolution.intent,
+                confidence: intentResolution.confidence,
+                workflowId: intentResolution.workflowId,
+            },
+        });
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: 'success',
+            timings: orchestratorTimings,
+            intent: intentResolution.intent,
+            confidenceLevel: 'deterministic',
+            confidenceScore: intentResolution.confidence,
+            metadata: {
+                responseSent: true,
+                deterministicFlowMessage: true,
+                flowNodeId: deterministicFlowMessageNode?.nodeId,
+                flowSubAgent: activeFlowIntentScope?.title,
+            },
+        });
+        return;
+    }
 
     const recentToolMemoryResponse = shouldAnswerFromRecentToolMemory({
         customerMessage: enrichedLastMessageContent || '',
@@ -2836,7 +2964,7 @@ export async function processAutopilotForChat(
         if (activePEC) {
             // Resume the active procedure
             const compiledProcedures = compileAllProcedures({
-                documents: staticKnowledgeDocuments,
+                documents: scopedStaticKnowledgeDocuments,
                 tools: runtimeToolCatalog,
                 enabledToolNames: resolveEnabledToolNames(autopilotConfig),
             });
@@ -2862,7 +2990,7 @@ export async function processAutopilotForChat(
         if (!procedureResult) {
             // 2. Try to match a new procedure
             const compiledProcedures = compileAllProcedures({
-                documents: staticKnowledgeDocuments,
+                documents: scopedStaticKnowledgeDocuments,
                 tools: runtimeToolCatalog,
                 enabledToolNames: resolveEnabledToolNames(autopilotConfig),
             });
@@ -3084,160 +3212,6 @@ export async function processAutopilotForChat(
     // END PRE GATE — if we reach here, no procedure handled the message
     // ═══════════════════════════════════════════════════════════════════════
 
-    if (deterministicOfficialResponse) {
-        const finalResponse = deterministicOfficialResponsePreserveFormatting
-            ? deterministicOfficialResponse.replace(/\r\n?/g, '\n').trim()
-            : formatCustomerFacingAiResponse(deterministicOfficialResponse);
-        if (currentCopilotMode === 'suggest') {
-            console.log(`[AUTOPILOT_SERVICE] Modo sugestao - resposta oficial deterministica: ${finalResponse.substring(0, 50)}...`);
-            const { getSupabaseAdmin } = await import('@/lib/supabase');
-            const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).send({
-                type: 'broadcast',
-                event: 'ai_suggestion',
-                payload: {
-                    suggestion: finalResponse,
-                    chatId: chat.id,
-                    configName: autopilotConfig.name,
-                },
-            });
-            await logIntelligentAttendantResponse({
-                configId: autopilotConfig.id,
-                chatId: chat.id,
-                systemAgentId: assignedSystemAgentId,
-                modelName: 'deterministic_official_response',
-                customerMessage: enrichedLastMessageContent || '',
-                response: finalResponse,
-                status: 'suggested',
-                triggeredRule: null,
-                metadata: {
-                    deterministicOfficialResponse: true,
-                    intent: intentResolution.intent,
-                    confidence: intentResolution.confidence,
-                    reason: intentResolution.reason,
-                    workflowId: intentResolution.workflowId,
-                    sourceDocumentId: deterministicOfficialSourceDocumentId,
-                    sourceDocumentName: deterministicOfficialSourceDocumentName,
-                    ragStrategy,
-                    knowledgeCoverage,
-                },
-            });
-            await finishOrchestratorRun({
-                run: orchestratorRun,
-                status: 'success',
-                timings: orchestratorTimings,
-                intent: intentResolution.intent,
-                confidenceLevel: 'deterministic',
-                confidenceScore: intentResolution.confidence,
-                metadata: {
-                    suggestionOnly: true,
-                    deterministicOfficialResponse: true,
-                    intent: intentResolution.intent,
-                    confidence: intentResolution.confidence,
-                    reason: intentResolution.reason,
-                    workflowId: intentResolution.workflowId,
-                    sourceDocumentId: deterministicOfficialSourceDocumentId,
-                    sourceDocumentName: deterministicOfficialSourceDocumentName,
-                    ragStrategy,
-                    knowledgeCoverage,
-                    responseLength: finalResponse.length,
-                },
-            });
-            return;
-        }
-
-        const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
-            chatId: chat.id,
-            sourceMessageId: sourceMessageId ?? null,
-        });
-        if (!sourceMessageStillCurrent) {
-            console.warn(`[AUTOPILOT_STALE_GUARD] Skipping stale deterministic plan catalog for chat ${chat.id}, sourceMessageId=${sourceMessageId || 'none'}.`);
-            await recordOrchestratorEvent({
-                run: orchestratorRun,
-                kind: 'stale_source_message_guard',
-                status: 'skipped',
-                payload: {
-                    sourceMessageId: sourceMessageId ?? null,
-                    reason: 'newer_customer_message_exists',
-                    deterministicOfficialResponse: true,
-                    intent: intentResolution.intent,
-                    confidence: intentResolution.confidence,
-                },
-            });
-            await finishOrchestratorRun({
-                run: orchestratorRun,
-                status: 'skipped',
-                timings: orchestratorTimings,
-                metadata: {
-                    responseSent: false,
-                    toolCount: 0,
-                    staleSourceMessage: true,
-                    deterministicOfficialResponse: true,
-                    intent: intentResolution.intent,
-                    confidence: intentResolution.confidence,
-                    workflowId: intentResolution.workflowId,
-                    ragStrategy,
-                    knowledgeCoverage,
-                    sourceMessageId: sourceMessageId ?? null,
-                },
-            });
-            return;
-        }
-
-        console.log(`[AUTOPILOT_SERVICE] Enviando resposta oficial deterministica: ${finalResponse}`);
-        const sendStage = await timeOrchestratorStage(
-            orchestratorRun,
-            'message_send',
-            () => sendAutomatedMessageAction(chat.id, finalResponse, assignedSystemAgentId, true, instanceName),
-            { responseLength: finalResponse.length, deterministicOfficialResponse: true }
-        );
-        orchestratorTimings.send_ms = sendStage.durationMs;
-        await logIntelligentAttendantResponse({
-            configId: autopilotConfig.id,
-            chatId: chat.id,
-            systemAgentId: assignedSystemAgentId,
-            modelName: 'deterministic_official_response',
-            customerMessage: enrichedLastMessageContent || '',
-            response: finalResponse,
-            status: 'sent',
-            triggeredRule: null,
-            metadata: {
-                deterministicOfficialResponse: true,
-                intent: intentResolution.intent,
-                confidence: intentResolution.confidence,
-                reason: intentResolution.reason,
-                workflowId: intentResolution.workflowId,
-                sourceDocumentId: deterministicOfficialSourceDocumentId,
-                sourceDocumentName: deterministicOfficialSourceDocumentName,
-                ragStrategy,
-                knowledgeCoverage,
-            },
-        });
-        await finishOrchestratorRun({
-            run: orchestratorRun,
-            status: 'success',
-            timings: orchestratorTimings,
-            intent: intentResolution.intent,
-            confidenceLevel: 'deterministic',
-            confidenceScore: intentResolution.confidence,
-            metadata: {
-                responseSent: true,
-                toolCount: 0,
-                deterministicOfficialResponse: true,
-                intent: intentResolution.intent,
-                confidence: intentResolution.confidence,
-                reason: intentResolution.reason,
-                workflowId: intentResolution.workflowId,
-                sourceDocumentId: deterministicOfficialSourceDocumentId,
-                sourceDocumentName: deterministicOfficialSourceDocumentName,
-                ragStrategy,
-                knowledgeCoverage,
-                responseLength: finalResponse.length,
-            },
-        });
-        return;
-    }
-
     try {
         const llmStage = await timeOrchestratorStage(
             orchestratorRun,
@@ -3251,6 +3225,7 @@ export async function processAutopilotForChat(
             rules: activeRules,
             knowledgeBase: scopedKnowledgeBase,
             knowledgeBaseDocuments: promptKnowledgeDocuments,
+            workflowKnowledgeDocuments: promptWorkflowKnowledgeDocuments,
             resolvedCases,
             fallbackReply: autopilotConfig.default_fallback_reply || '',
             escalationPolicy: [
@@ -3570,6 +3545,7 @@ export async function processAutopilotForChat(
                                     rules: activeRules,
                                     knowledgeBase: scopedKnowledgeBase,
                                     knowledgeBaseDocuments: promptKnowledgeDocuments,
+                                    workflowKnowledgeDocuments: promptWorkflowKnowledgeDocuments,
                                     resolvedCases,
                                     fallbackReply: autopilotConfig.default_fallback_reply || '',
                                     escalationPolicy: autopilotConfig.escalation_policy || '',
@@ -3694,6 +3670,7 @@ export async function processAutopilotForChat(
                                     rules: activeRules,
                                     knowledgeBase: scopedKnowledgeBase,
                                     knowledgeBaseDocuments: promptKnowledgeDocuments,
+                                    workflowKnowledgeDocuments: promptWorkflowKnowledgeDocuments,
                                     resolvedCases,
                                     fallbackReply: '',
                                     escalationPolicy: autopilotConfig.escalation_policy || '',
@@ -3751,6 +3728,7 @@ export async function processAutopilotForChat(
                     availableTeams,
                     contact: sanitizedContact,
                     knowledgeCoverage,
+                    knowledgeDocuments: promptKnowledgeDocuments,
                     source: 'llm',
                 });
                 await recordOrchestratorEvent({

@@ -67,6 +67,8 @@ export type AiDocumentIngestPayload = {
   documentId: string;
   documentName: string;
   content: string;
+  document?: import('@/lib/types').KnowledgeBaseDocument;
+  jobKey?: string;
 };
 
 export type AiAutopilotProcessPayload = {

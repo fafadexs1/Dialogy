@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { randomUUID } from 'crypto';
-import { generateDocumentPassageEmbedding, generateDocumentQueryEmbedding } from '@/lib/embeddings';
+import { DOCUMENT_EMBEDDING_DIMENSIONS, generateDocumentPassageEmbedding, generateDocumentQueryEmbedding } from '@/lib/embeddings';
 import { VectorStore } from '@/lib/vector-store';
 import { db } from '@/lib/db';
 
@@ -47,7 +47,7 @@ describe('RAG Integration Tests', () => {
 
         const vector = await generateDocumentPassageEmbedding(testContent);
         expect(vector).toBeDefined();
-        expect(vector.length).toBe(768);
+        expect(vector.length).toBe(DOCUMENT_EMBEDDING_DIMENSIONS);
 
         await expect(VectorStore.addDocumentEmbedding({
             documentId: testDocId,
@@ -70,7 +70,7 @@ describe('RAG Integration Tests', () => {
         if (match) {
             expect(match.content).toContain(testContent);
         }
-    }, 20000);
+    }, 120000);
 
     it('should upsert and retrieve a resolved case memory scoped by workspace', async () => {
         const workspaceId = randomUUID();
@@ -85,7 +85,7 @@ describe('RAG Integration Tests', () => {
 
         const vector = await generateDocumentPassageEmbedding(searchableContent);
         expect(vector).toBeDefined();
-        expect(vector.length).toBe(768);
+        expect(vector.length).toBe(DOCUMENT_EMBEDDING_DIMENSIONS);
 
         await expect(VectorStore.upsertCaseMemory({
             chatId,
@@ -113,5 +113,5 @@ describe('RAG Integration Tests', () => {
         if (match) {
             expect(match.summary).toContain('boleto');
         }
-    }, 20000);
+    }, 120000);
 });

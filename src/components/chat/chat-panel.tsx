@@ -2962,7 +2962,7 @@ export default function ChatPanel({
                                         )}
                                         {showTextInput ? (
                                             <ContentEditable
-                                                innerRef={contentEditableRef}
+                                                innerRef={contentEditableRef as any}
                                                 html={newMessage}
                                                 disabled={isAiTyping}
                                                 onChange={handleMessageChange}

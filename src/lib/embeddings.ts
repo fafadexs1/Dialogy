@@ -1,9 +1,33 @@
-import { pipeline } from '@huggingface/transformers';
+import { env, pipeline } from '@huggingface/transformers';
 
-// Configuration for models
-const MODELS = {
-    chat: 'Xenova/all-MiniLM-L6-v2',       // 384 dimensions, fast
-    doc: 'Xenova/multilingual-e5-base'     // 768 dimensions, high accuracy
+export type DocumentEmbeddingModel = 'bge-m3';
+
+type EmbeddingProfile = {
+    modelId: string;
+    dimensions: number;
+    pooling: 'mean' | 'cls';
+    dtype?: 'q8';
+    prefixes: boolean;
+};
+
+export const DOCUMENT_EMBEDDING_MODEL: DocumentEmbeddingModel = 'bge-m3';
+export const DOCUMENT_EMBEDDING_PROFILE: EmbeddingProfile = {
+    modelId: 'onnx-community/bge-m3-ONNX',
+    dimensions: 1024,
+    pooling: 'cls',
+    dtype: 'q8',
+    prefixes: false,
+};
+export const DOCUMENT_EMBEDDING_DIMENSIONS = DOCUMENT_EMBEDDING_PROFILE.dimensions;
+
+const MODELS: Record<'chat' | 'doc', EmbeddingProfile> = {
+    chat: {
+        modelId: 'Xenova/all-MiniLM-L6-v2',
+        dimensions: 384,
+        pooling: 'mean',
+        prefixes: false,
+    },
+    doc: DOCUMENT_EMBEDDING_PROFILE,
 };
 
 type EmbeddingType = keyof typeof MODELS;
@@ -12,7 +36,11 @@ type EmbeddingGenerateOptions = {
     mode?: DocumentEmbeddingMode;
 };
 
-// Global cache to persist models across hot-reloads in development
+const configuredCacheDir = process.env.TRANSFORMERS_CACHE_DIR?.trim();
+if (configuredCacheDir) {
+    env.cacheDir = configuredCacheDir;
+}
+
 const globalForEmbeddings = global as unknown as {
     embeddingPipelines: Record<string, any> | undefined;
 };
@@ -27,66 +55,54 @@ function hasDocumentPrefix(text: string) {
 
 function prepareEmbeddingInput(text: string, type: EmbeddingType, options?: EmbeddingGenerateOptions) {
     const cleanText = normalizeWhitespace(text);
-    if (!cleanText) {
-        return '';
-    }
+    if (!cleanText) return '';
 
-    if (type !== 'doc') {
-        return cleanText;
-    }
+    const profile = MODELS[type];
+    if (type !== 'doc' || !profile.prefixes) return cleanText;
 
     const mode = options?.mode || 'default';
-    if (mode === 'default' || hasDocumentPrefix(cleanText)) {
-        return cleanText;
-    }
+    if (mode === 'default' || hasDocumentPrefix(cleanText)) return cleanText;
 
-    if (mode === 'query') {
-        return `query: ${cleanText}`;
-    }
-
-    return `passage: ${cleanText}`;
+    return `${mode}: ${cleanText}`;
 }
 
 class EmbeddingService {
     private static instances: Record<string, any> = globalForEmbeddings.embeddingPipelines || {};
 
-    /**
-     * Get or load the pipeline for a specific model type.
-     */
     private static async getPipeline(type: EmbeddingType) {
-        if (!this.instances[type]) {
-            console.log(`[EmbeddingService] Loading model: ${MODELS[type]}...`);
+        const profile = MODELS[type];
+        const cacheKey = `${type}:${profile.modelId}:${profile.dtype || 'default'}`;
+        if (!this.instances[cacheKey]) {
+            console.log(`[EmbeddingService] Loading model: ${profile.modelId} (${profile.dtype || 'default'})...`);
+            this.instances[cacheKey] = await pipeline(
+                'feature-extraction',
+                profile.modelId,
+                profile.dtype ? { dtype: profile.dtype } : undefined,
+            );
+            console.log(`[EmbeddingService] Model loaded: ${profile.modelId}`);
 
-            // Use 'feature-extraction' task
-            this.instances[type] = await pipeline('feature-extraction', MODELS[type]);
-            console.log(`[EmbeddingService] Model loaded: ${MODELS[type]}`);
-
-            // Update global cache (for dev environment)
             if (process.env.NODE_ENV !== 'production') {
                 globalForEmbeddings.embeddingPipelines = this.instances;
             }
         }
-        return this.instances[type];
+        return this.instances[cacheKey];
     }
 
-    /**
-     * Generate embedding vector for a given text.
-     * @param text The text to embed.
-     * @param type 'chat' for short texts/messages, 'doc' for knowledge base documents.
-     * @returns Array of numbers representing the vector.
-     */
     static async generate(text: string, type: EmbeddingType, options?: EmbeddingGenerateOptions): Promise<number[]> {
         try {
             const cleanText = prepareEmbeddingInput(text, type, options);
             if (!cleanText) return [];
 
+            const profile = MODELS[type];
             const extractor = await this.getPipeline(type);
-
-            // 'mean' pooling and normalization are standard for these models to get a single sentence vector
-            const output = await extractor(cleanText, { pooling: 'mean', normalize: true });
-
-            // Convert Tensor to standard array
-            return Array.from(output.data);
+            const output = await extractor(cleanText, { pooling: profile.pooling, normalize: true });
+            const vector = Array.from(output.data) as number[];
+            if (vector.length !== profile.dimensions) {
+                throw new Error(
+                    `Model ${profile.modelId} returned ${vector.length} dimensions; expected ${profile.dimensions}.`,
+                );
+            }
+            return vector;
         } catch (error) {
             console.error(`[EmbeddingService] Error generating embedding for type '${type}':`, error);
             throw error;
@@ -98,7 +114,6 @@ class EmbeddingService {
     }
 }
 
-// Export a robust singleton function
 export const generateEmbedding = EmbeddingService.generate.bind(EmbeddingService);
 export const prewarmEmbeddingModels = EmbeddingService.prewarm.bind(EmbeddingService);
 

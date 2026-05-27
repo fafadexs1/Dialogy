@@ -83,9 +83,7 @@ export function shouldUseAiWorkflowClassifier(input: {
   missingSlots: string[];
   enabledToolNames: string[];
   hasCustomerIdentifier: boolean;
-  officialResponse?: string | null;
 }) {
-  if (input.officialResponse) return false;
   if (!input.enabledToolNames.includes('sgp_fetch_contact_panel_data')) return false;
   if (input.intent === 'human_handoff' || input.intent === 'greeting' || input.intent === 'thanks') return false;
   if (input.executionMode === 'pre_response_tools' && input.plannedActions.length > 0) return false;

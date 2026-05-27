@@ -1,7 +1,9 @@
-import { defaultSplitter } from '@/lib/text-splitter';
-import { generateDocumentPassageEmbedding } from '@/lib/embeddings';
+import { DOCUMENT_EMBEDDING_DIMENSIONS, DOCUMENT_EMBEDDING_MODEL, generateDocumentPassageEmbedding } from '@/lib/embeddings';
+import type { KnowledgeBaseDocument } from '@/lib/types';
 import { VectorStore } from '@/lib/vector-store';
 import { createHash } from 'crypto';
+import { isUnsafeAsCustomerFacingKnowledge } from './document-safety';
+import { buildKnowledgeChunkMetadata, splitKnowledgeDocument } from './knowledge-document';
 
 type IngestKnowledgeBaseDocumentInput = {
     workspaceId: string;
@@ -9,12 +11,27 @@ type IngestKnowledgeBaseDocumentInput = {
     documentId: string;
     documentName: string;
     content: string;
+    document?: KnowledgeBaseDocument;
 };
 
 export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocumentInput) {
-    console.log(`[RAG] Processing document ${input.documentId} (${input.documentName})`);
+    console.log(`[RAG] Processing document ${input.documentId}.`);
+    const document: KnowledgeBaseDocument = input.document
+        ? { ...input.document, id: input.documentId, name: input.documentName, content: input.content }
+        : { id: input.documentId, name: input.documentName, content: input.content };
 
-    const contentHash = createHash('sha256').update(input.content).digest('hex');
+    if (isUnsafeAsCustomerFacingKnowledge(document)) {
+        await VectorStore.deleteDocumentEmbeddings(input.documentId);
+        console.warn(`[RAG] Skipping unsafe conversation artifact ${input.documentId}.`);
+        return {
+            status: 'skipped_unsafe' as const,
+            chunks: 0,
+        };
+    }
+
+    const documentMetadata = buildKnowledgeChunkMetadata(document);
+    const metadataHash = createHash('sha256').update(JSON.stringify(documentMetadata)).digest('hex');
+    const contentHash = createHash('sha256').update(`${input.content}\n${metadataHash}`).digest('hex');
     const existingStats = await VectorStore.getDocumentEmbeddingStats({
         workspaceId: input.workspaceId,
         autopilotConfigId: input.autopilotConfigId ?? null,
@@ -37,7 +54,7 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
         };
     }
 
-    const chunks = await defaultSplitter.splitText(input.content);
+    const chunks = await splitKnowledgeDocument(document);
     await VectorStore.deleteDocumentEmbeddings(input.documentId);
 
     let embeddedChunks = 0;
@@ -57,12 +74,16 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
             vector,
             metadata: {
                 contentHash,
+                metadataHash,
                 chunkIndex: index,
                 chunkCount: chunks.length,
                 chunkLength: chunk.length,
                 sourceType: 'knowledge_base_document',
+                embeddingModel: DOCUMENT_EMBEDDING_MODEL,
+                embeddingDimensions: DOCUMENT_EMBEDDING_DIMENSIONS,
                 indexingStatus: 'indexed',
                 indexedAt: new Date().toISOString(),
+                ...documentMetadata,
             },
         });
         embeddedChunks += 1;

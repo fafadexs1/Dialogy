@@ -3,9 +3,21 @@ import { db } from '@/lib/db';
 import type { AutopilotIntentResolution, KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import type { ResolvedCasePromptItem } from './retrieval';
 import { getCanonicalKnowledgeAnswer, isUnsafeAsCustomerFacingKnowledge } from './document-safety';
+import { rerankKnowledgeCandidates } from './cross-encoder-reranker';
+import { inferKnowledgeContextRole } from './knowledge-document';
 
 const DEFAULT_SELECTED_DOCUMENT_LIMIT = 5;
 const MAX_DOCUMENTS_PER_CATEGORY = 2;
+const CRITICAL_RERANK_INTENTS = new Set([
+  'catalog_request',
+  'pricing_request',
+  'promotion_request',
+  'billing_or_payment',
+  'cancellation_request',
+  'troubleshooting',
+  'purchase_inquiry',
+]);
+const FACT_FIRST_INTENTS = new Set(['catalog_request', 'pricing_request', 'promotion_request', 'availability_request']);
 
 export type KnowledgeRetrievalStrategy =
   | 'vector'
@@ -53,6 +65,7 @@ type BaseRetrievalInput = {
   autopilotConfigId?: string | null;
   query: string;
   excludeChatId?: string | null;
+  allowedDocumentIds?: string[];
 };
 
 function normalize(value: string): string {
@@ -136,17 +149,34 @@ function isDocumentUsable(document: KnowledgeBaseDocument): boolean {
 }
 
 function tokenize(value: string): string[] {
-  return Array.from(new Set(
-    normalize(value)
+  const normalizedValue = normalize(value).replace(/\bwi[\s-]?fi\b/g, 'wifi');
+  const tokens = normalizedValue
       .split(/[^a-z0-9_]+/g)
-      .filter((token) => token.length >= 3)
-  ));
+      .filter((token) => token.length >= 3);
+
+  if (/\blent(?:a|o|idao)\b/.test(normalizedValue)) tokens.push('lentidao');
+  if (/\b(?:reiniciar|reinicie|reinicio|reboot)\b/.test(normalizedValue)) tokens.push('reiniciar', 'reboot');
+
+  return Array.from(new Set(tokens));
 }
 
-function countKeywordOverlap(queryTokens: string[], document: KnowledgeBaseDocument): number {
+function countTokenOverlap(queryTokens: string[], value: string): number {
   if (queryTokens.length === 0) return 0;
-  const haystack = normalize(`${document.name || ''}\n${document.summary || ''}\n${document.content || ''}\n${getCanonicalAnswer(document)}`);
+  const haystack = normalize(value).replace(/\bwi[\s-]?fi\b/g, 'wifi');
   return queryTokens.filter((token) => haystack.includes(token)).length;
+}
+
+function getLexicalRankingSignals(query: string, queryTokens: string[], document: KnowledgeBaseDocument) {
+  const canonicalAnswer = getCanonicalAnswer(document);
+  const normalizedQuery = normalize(query).replace(/\bwi[\s-]?fi\b/g, 'wifi');
+  const normalizedTitle = normalize(document.name || '').replace(/\bwi[\s-]?fi\b/g, 'wifi');
+  return {
+    canonicalAnswer,
+    titlePhraseMatch: normalizedTitle.length >= 4 && normalizedQuery.includes(normalizedTitle),
+    titleOverlap: countTokenOverlap(queryTokens, `${document.name || ''}\n${document.summary || ''}`),
+    canonicalOverlap: countTokenOverlap(queryTokens, canonicalAnswer),
+    bodyOverlap: countTokenOverlap(queryTokens, String(document.content || '')),
+  };
 }
 
 function matchesIntentCategory(document: KnowledgeBaseDocument, intent?: AutopilotIntentResolution | null): boolean {
@@ -156,6 +186,34 @@ function matchesIntentCategory(document: KnowledgeBaseDocument, intent?: Autopil
   return documentCategories.some((category) => (
     intentCategories.some((target) => category === target || category.includes(target) || target.includes(category))
   ));
+}
+
+function exactlyMatchesIntentCategory(document: KnowledgeBaseDocument, intent?: AutopilotIntentResolution | null): boolean {
+  if (!intent) return false;
+  const documentCategories = getDocumentCategories(document);
+  const intentCategories = intent.knowledgeCategories.map((category) => normalizeCategory(String(category)));
+  return documentCategories.some((category) => intentCategories.includes(category));
+}
+
+function factualIntentScoreAdjustment(document: KnowledgeBaseDocument, intent?: AutopilotIntentResolution | null) {
+  if (!intent || !FACT_FIRST_INTENTS.has(intent.intent)) return 0;
+  return inferKnowledgeContextRole(document) === 'fact' ? 70 : -25;
+}
+
+function shouldUseCrossEncoderReranker(
+  result: Pick<HybridKnowledgeRetrievalResult, 'knowledgeBaseDocuments' | 'selected'>,
+  intent?: AutopilotIntentResolution | null,
+) {
+  const topDocument = result.knowledgeBaseDocuments[0];
+  const topScore = result.selected[0]?.score;
+  const secondScore = result.selected[1]?.score;
+  if (!topDocument || topScore == null || secondScore == null) return false;
+  if (!intent || !CRITICAL_RERANK_INTENTS.has(intent.intent)) return false;
+  if (exactlyMatchesIntentCategory(topDocument, intent)) return false;
+
+  const configuredMargin = Number.parseInt(process.env.RAG_CROSS_ENCODER_MAX_SCORE_MARGIN || '', 10);
+  const maximumMargin = Number.isFinite(configuredMargin) && configuredMargin >= 0 ? configuredMargin : 10;
+  return topScore - secondScore <= maximumMargin;
 }
 
 function stableDocumentKey(document: KnowledgeBaseDocument): string {
@@ -172,6 +230,8 @@ function hydrateVectorDocumentFromStatic(
 
   return {
     ...fullDocument,
+    ...vectorDocument,
+    content: vectorDocument.content,
     source: vectorDocument.source || 'vector',
     priority: vectorDocument.priority ?? fullDocument.priority,
   };
@@ -179,21 +239,30 @@ function hydrateVectorDocumentFromStatic(
 
 function scoreStaticDocument(input: {
   document: KnowledgeBaseDocument;
+  query: string;
   queryTokens: string[];
   intent?: AutopilotIntentResolution | null;
 }): ScoredDocument | null {
   if (!isDocumentUsable(input.document)) return null;
 
   const categoryMatch = matchesIntentCategory(input.document, input.intent);
-  const keywordOverlap = countKeywordOverlap(input.queryTokens, input.document);
-  const canonicalAnswer = getCanonicalAnswer(input.document);
+  const { canonicalAnswer, titlePhraseMatch, titleOverlap, canonicalOverlap, bodyOverlap } = getLexicalRankingSignals(
+    input.query,
+    input.queryTokens,
+    input.document,
+  );
   const category = getDocumentCategory(input.document);
   let score = 20;
 
   if (categoryMatch) score += 90;
-  score += Math.min(8, keywordOverlap) * 12;
+  // A title or canonical answer is deliberate curation; body matches often occur in broad manuals.
+  if (titlePhraseMatch) score += 90;
+  score += Math.min(4, titleOverlap) * 38;
+  score += Math.min(6, canonicalOverlap) * 18;
+  score += Math.min(8, bodyOverlap) * 6;
   score += Math.max(0, Math.min(20, getDocumentPriority(input.document))) * 3;
-  if (canonicalAnswer) score += 35;
+  if (canonicalAnswer) score += 65;
+  score += factualIntentScoreAdjustment(input.document, input.intent);
   if (category === 'persona' || category === 'brand_voice') score -= 35;
   if (category === 'internal_only') score -= 120;
 
@@ -207,20 +276,30 @@ function scoreStaticDocument(input: {
 
 function scoreVectorDocument(input: {
   document: KnowledgeBaseDocument;
+  query: string;
   queryTokens: string[];
   intent?: AutopilotIntentResolution | null;
 }): ScoredDocument | null {
-  if (!String(input.document.content || '').trim()) return null;
-  if (isUnsafeAsCustomerFacingKnowledge(input.document)) return null;
+  if (!isDocumentUsable(input.document)) return null;
 
   const category = getDocumentCategory(input.document);
-  let score = 75;
+  const { canonicalAnswer, titlePhraseMatch, titleOverlap, canonicalOverlap, bodyOverlap } = getLexicalRankingSignals(
+    input.query,
+    input.queryTokens,
+    input.document,
+  );
+  let score = 55;
   const source = String(getDocumentValue(input.document, ['source']) || '');
   const priority = Number(getDocumentValue(input.document, ['priority']));
   if (source === 'keyword') score += 18;
-  if (Number.isFinite(priority)) score += Math.min(40, Math.max(0, priority));
+  if (Number.isFinite(priority)) score += Math.min(35, Math.max(0, priority));
   if (matchesIntentCategory(input.document, input.intent)) score += 45;
-  score += Math.min(6, countKeywordOverlap(input.queryTokens, input.document)) * 8;
+  if (titlePhraseMatch) score += 90;
+  score += Math.min(4, titleOverlap) * 38;
+  score += Math.min(6, canonicalOverlap) * 18;
+  score += Math.min(8, bodyOverlap) * 6;
+  if (canonicalAnswer) score += 65;
+  score += factualIntentScoreAdjustment(input.document, input.intent);
 
   return {
     document: input.document,
@@ -308,13 +387,20 @@ export function mergeAndRerankKnowledgeDocuments(input: {
   limit?: number;
 }): Pick<HybridKnowledgeRetrievalResult, 'knowledgeBaseDocuments' | 'strategy' | 'knowledgeCoverage' | 'selected' | 'discarded'> {
   const queryTokens = tokenize(input.query);
+  const vectorDocumentIds = new Set((input.vectorDocuments || []).map((document) => document.id));
   const scored: ScoredDocument[] = [
     ...(input.vectorDocuments || []).map((document) => scoreVectorDocument({
       document: hydrateVectorDocumentFromStatic(document, input.staticDocuments),
+      query: input.query,
       queryTokens,
       intent: input.intent,
     })),
-    ...(input.staticDocuments || []).map((document) => scoreStaticDocument({ document, queryTokens, intent: input.intent })),
+    ...(input.staticDocuments || []).filter((document) => !vectorDocumentIds.has(document.id)).map((document) => scoreStaticDocument({
+      document,
+      query: input.query,
+      queryTokens,
+      intent: input.intent,
+    })),
   ].filter((item): item is ScoredDocument => Boolean(item));
 
   const seen = new Set<string>();
@@ -355,7 +441,7 @@ export function mergeAndRerankKnowledgeDocuments(input: {
   const topScore = selected[0]?.score || 0;
   const knowledgeCoverage: KnowledgeCoverage = selected.length === 0
     ? 'none'
-    : topScore >= 120 || Boolean(input.intent?.officialResponse)
+    : topScore >= 120
       ? 'high'
       : topScore >= 75
         ? 'medium'
@@ -388,6 +474,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       query: input.query,
       excludeChatId: input.excludeChatId ?? null,
       intent: input.intent ?? null,
+      allowedDocumentIds: input.allowedDocumentIds,
     });
     const merged = mergeAndRerankKnowledgeDocuments({
       vectorDocuments: vectorRetrieval.knowledgeBaseDocuments,
@@ -395,17 +482,82 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       query: input.query,
       intent: input.intent,
     });
+    let finalMerged = merged;
+    let neuralRerankerDiagnostics: Record<string, unknown> | null = null;
+    try {
+      const reranked = shouldUseCrossEncoderReranker(merged, input.intent)
+        ? await rerankKnowledgeCandidates(
+            input.query,
+            merged.knowledgeBaseDocuments.map((document, index) => ({
+              document,
+              originalScore: merged.selected[index]?.score || 0,
+            })),
+          )
+        : null;
+      if (reranked) {
+        const originalSelection = new Map(merged.selected.map((document) => [document.id, document]));
+        const originalTop = merged.knowledgeBaseDocuments[0];
+        const neuralTop = reranked.documents[0]?.document;
+        if (
+          originalTop &&
+          neuralTop &&
+          exactlyMatchesIntentCategory(originalTop, input.intent) &&
+          !exactlyMatchesIntentCategory(neuralTop, input.intent)
+        ) {
+          const protectedTop = reranked.documents.find(({ document }) => document.id === originalTop.id);
+          if (protectedTop) {
+            reranked.documents = [
+              protectedTop,
+              ...reranked.documents.filter(({ document }) => document.id !== originalTop.id),
+            ];
+          }
+        }
+        const rerankedIds = new Set(reranked.documents.map(({ document }) => document.id));
+        const orderedDocuments = [
+          ...reranked.documents.map(({ document }) => document),
+          ...merged.knowledgeBaseDocuments.filter((document) => !rerankedIds.has(document.id)),
+        ];
+        const neuralScores = new Map(
+          reranked.documents.map(({ document, rerankerScore }) => [document.id, rerankerScore]),
+        );
+        finalMerged = {
+          ...merged,
+          knowledgeBaseDocuments: orderedDocuments,
+          selected: orderedDocuments.map((document) => ({
+            ...(originalSelection.get(document.id)!),
+            score: neuralScores.has(document.id)
+              ? Math.round(neuralScores.get(document.id)! * 10000) / 10000
+              : originalSelection.get(document.id)!.score,
+          })),
+        };
+        neuralRerankerDiagnostics = reranked.diagnostics;
+      } else {
+        neuralRerankerDiagnostics = {
+          skipped: true,
+          reason: 'deterministic_ranking_not_ambiguous',
+        };
+      }
+    } catch (rerankerError) {
+      neuralRerankerDiagnostics = {
+        fallback: true,
+        error: rerankerError instanceof Error ? rerankerError.message : String(rerankerError),
+      };
+      console.warn('[RAG] Cross-encoder reranker failed; using deterministic ranking:', rerankerError);
+    }
 
     const result: HybridKnowledgeRetrievalResult = {
-      ...merged,
+      ...finalMerged,
       resolvedCases: vectorRetrieval.resolvedCases,
       retrieved: {
         vectorDocuments: vectorRetrieval.knowledgeBaseDocuments.length,
         staticDocuments: input.staticDocuments?.length || 0,
         resolvedCases: vectorRetrieval.resolvedCases.length,
       },
-      diagnostics: (vectorRetrieval as any).diagnostics || null,
-      fallbackReason: merged.strategy === 'static_documents' ? 'vector_returned_no_selected_documents' : null,
+      diagnostics: {
+        ...((vectorRetrieval as any).diagnostics || {}),
+        crossEncoderReranker: neuralRerankerDiagnostics,
+      },
+      fallbackReason: finalMerged.strategy === 'static_documents' ? 'vector_returned_no_selected_documents' : null,
     };
     await logRagRetrieval({ ...input, result });
     return result;

@@ -57,12 +57,17 @@ function getDocumentMinSimilarity(intent?: AutopilotIntentResolution | null) {
     return DOCUMENT_MIN_SIMILARITY_BY_INTENT[intent.intent] ?? DOCUMENT_MIN_SIMILARITY;
 }
 
+function metadataValue<T>(metadata: Record<string, unknown> | null, key: string): T | undefined {
+    return metadata?.[key] as T | undefined;
+}
+
 export async function retrieveSupportContext(input: {
     workspaceId: string;
     autopilotConfigId?: string | null;
     query: string;
     excludeChatId?: string | null;
     intent?: AutopilotIntentResolution | null;
+    allowedDocumentIds?: string[];
 }) {
     const queryText = input.query.trim();
     if (queryText.length < 4) {
@@ -87,19 +92,10 @@ export async function retrieveSupportContext(input: {
         autopilotConfigId: input.autopilotConfigId ?? null,
         limit: DOCUMENT_LIMIT,
         minSimilarity,
+        allowedDocumentIds: input.allowedDocumentIds,
     });
 
     let finalDocMatches = docMatches;
-    if (finalDocMatches.length < DOCUMENT_LIMIT && input.autopilotConfigId) {
-        const fallbackMatches = await VectorStore.searchSimilarDocuments({
-            vector: queryVector,
-            workspaceId: input.workspaceId,
-            limit: DOCUMENT_LIMIT - finalDocMatches.length,
-            minSimilarity,
-            excludeIds: finalDocMatches.map((match) => match.id),
-        });
-        finalDocMatches = [...finalDocMatches, ...fallbackMatches];
-    }
 
     const keywordMatches = await VectorStore.searchKeywordDocuments({
         query: queryText,
@@ -107,6 +103,7 @@ export async function retrieveSupportContext(input: {
         autopilotConfigId: input.autopilotConfigId ?? null,
         limit: DOCUMENT_LIMIT,
         excludeIds: finalDocMatches.map((match) => match.id),
+        allowedDocumentIds: input.allowedDocumentIds,
     }).catch((error) => {
         console.warn('[RAG] Keyword retrieval failed:', error);
         return [];
@@ -122,18 +119,7 @@ export async function retrieveSupportContext(input: {
         minSimilarity: CASE_MIN_SIMILARITY,
     });
 
-    let finalCaseMatches = caseMatches;
-    if (finalCaseMatches.length < CASE_LIMIT && input.autopilotConfigId) {
-        const fallbackMatches = await VectorStore.searchSimilarCaseMemories({
-            vector: queryVector,
-            workspaceId: input.workspaceId,
-            excludeChatId: input.excludeChatId ?? null,
-            limit: CASE_LIMIT - finalCaseMatches.length,
-            minSimilarity: CASE_MIN_SIMILARITY,
-            excludeIds: finalCaseMatches.map((match) => match.id),
-        });
-        finalCaseMatches = [...finalCaseMatches, ...fallbackMatches];
-    }
+    const finalCaseMatches = caseMatches;
 
     const knowledgeBaseDocuments = dedupeDocumentsByContent(
         finalDocMatches.map((match) => ({
@@ -142,6 +128,19 @@ export async function retrieveSupportContext(input: {
             content: match.content,
             source: Number(match.similarity || 0) > 0 ? 'vector' : 'keyword',
             priority: Math.round(Number((match as any).keyword_score || match.similarity || 0) * 100),
+            category: metadataValue<string | null>(match.metadata, 'category') ?? null,
+            tags: metadataValue<string[] | null>(match.metadata, 'tags') ?? null,
+            status: metadataValue<string | null>(match.metadata, 'status') ?? 'active',
+            validFrom: metadataValue<string | null>(match.metadata, 'validFromTimestamp') ?? null,
+            validUntil: metadataValue<string | null>(match.metadata, 'validUntilTimestamp') ?? null,
+            audience: metadataValue<string | string[] | null>(match.metadata, 'audience') ?? null,
+            workflowHints: metadataValue<string[] | null>(match.metadata, 'workflowHints') ?? null,
+            requiredTools: metadataValue<string[] | null>(match.metadata, 'requiredTools') ?? null,
+            canonicalAnswer: metadataValue<string | null>(match.metadata, 'canonicalAnswer') ?? null,
+            collectionIds: metadataValue<string[] | null>(match.metadata, 'collectionIds') ?? undefined,
+            contextRole: metadataValue<string | null>(match.metadata, 'contextRole') ?? null,
+            chunkIndex: metadataValue<number | null>(match.metadata, 'chunkIndex') ?? null,
+            chunkCount: metadataValue<number | null>(match.metadata, 'chunkCount') ?? null,
         }))
     );
 
@@ -162,6 +161,7 @@ export async function retrieveSupportContext(input: {
                 keywordScore: Number((match as any).keyword_score || 0),
                 source: Number(match.similarity || 0) > 0 ? 'vector' : 'keyword',
             })),
+            allowedDocumentIds: input.allowedDocumentIds || null,
         },
     };
 }

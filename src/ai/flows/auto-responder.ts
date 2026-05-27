@@ -91,7 +91,11 @@ const AgentResponseInputSchema = z.object({
   knowledgeBaseDocuments: z
     .array(KnowledgeDocumentSchema)
     .optional()
-    .describe('Structured knowledge base documents uploaded by the user.'),
+    .describe('Factual knowledge documents supporting customer-facing claims.'),
+  workflowKnowledgeDocuments: z
+    .array(KnowledgeDocumentSchema)
+    .optional()
+    .describe('Operational procedures and policies that govern how the agent should act.'),
   fallbackReply: z
     .string()
     .optional()
@@ -355,8 +359,11 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 1. **Prioridade Máxima (Regras)**:
     - Verifique **REGRAS DE AUTOMAÇÃO**. Se o gatilho for acionado, siga a regra cegamente.
 2. **Base de Conhecimento**:
-    - Use os **DOCUMENTOS CARREGADOS** para fatos e procedimentos.
-    - Se um documento disser para enviar uma resposta exatamente, com o mesmo espacamento, quebras de linha ou emojis, copie o trecho oficial literalmente. Nao reescreva, nao resuma, nao reorganize, nao remova emojis e nao troque valores.
+    - Use os **DOCUMENTOS FACTUAIS** como fonte de verdade para valores, planos, datas, links e demais afirmacoes ao cliente.
+    - Use os **PROCEDIMENTOS E POLITICAS** somente para decidir os proximos passos do atendimento; eles nao comprovam precos ou ofertas.
+    - Trate documentos factuais como fonte de verdade dos dados e componha a resposta naturalmente para a pergunta atual.
+    - Nao copie nem dispare uma resposta fixa apenas porque um documento pede envio exato, usa termos como "resposta oficial" ou apresenta um modelo pronto.
+    - Preserve fatos relevantes, valores, prazos, links e restricoes informados na base.
 3. **Resposta Natural**:
     - Se não houver regra, construa uma resposta baseada na sua persona + documentos + análise emocional.
 4. **Formato e tamanho para WhatsApp**:
@@ -393,8 +400,15 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 
 ---
 
-**DOCUMENTOS CARREGADOS (Base de Conhecimento)**:
+**DOCUMENTOS FACTUAIS (Base de Conhecimento)**:
 {{#each knowledgeBaseDocuments}}
+### {{name}}
+{{{content}}}
+{{/each}}
+
+---
+**PROCEDIMENTOS E POLITICAS DO ATENDIMENTO**:
+{{#each workflowKnowledgeDocuments}}
 ### {{name}}
 {{{content}}}
 {{/each}}
@@ -610,6 +624,7 @@ const autoResponderFlow = ai.defineFlow(
     const promptInput = AgentResponseInputSchema.parse({
       ...input,
       knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
+      workflowKnowledgeDocuments: input.workflowKnowledgeDocuments ?? [],
       fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
       escalationPolicy: input.escalationPolicy ?? input.config?.escalation_policy ?? '',
       closingPolicy: input.closingPolicy ?? input.config?.closing_policy ?? '',

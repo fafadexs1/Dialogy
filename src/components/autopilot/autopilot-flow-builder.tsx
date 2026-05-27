@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
   addEdge,
   Background,
@@ -61,6 +61,8 @@ import type {
   AutopilotFlowGraph,
   AutopilotFlowNodeKind,
   AutopilotFlowVariable,
+  KnowledgeBaseDocument,
+  KnowledgeCollection,
   NexusFlowInstance,
 } from '@/lib/types';
 import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
@@ -100,6 +102,7 @@ type AttendantNodeData = {
     intent?: string;
     customIntentLabel?: string;
     returnToMainPrompt?: boolean;
+    knowledgeCollectionIds?: string[];
   };
 };
 
@@ -120,10 +123,16 @@ interface AutopilotFlowBuilderProps {
   enabledToolNames: string[];
   tools: ToolCatalogItem[];
   rules: NexusFlowInstance[];
+  knowledgeDocuments: KnowledgeBaseDocument[];
+  knowledgeCollections: KnowledgeCollection[];
+  mainSystemPrompt: string;
   flowGraph: AutopilotFlowGraph | null;
+  onMainSystemPromptChange: (prompt: string) => void;
   onFlowGraphChange: (graph: AutopilotFlowGraph) => void;
   onBack: () => void;
   onOpenPanel: (panel: AgentEditorPanel) => void;
+  inlinePanel?: ReactNode;
+  inlinePanelName?: AgentEditorPanel | null;
   onSave: () => void;
   onPublish: () => void;
   onDiscard: () => void;
@@ -173,13 +182,24 @@ const NODE_SURFACES: Record<NodeKind, string> = {
   understand: 'border-cyan-500/30 bg-[#15191d]',
   intent: 'border-fuchsia-500/30 bg-[#1b1520]',
   assistant: 'border-cyan-400/30 bg-[#181a1d] shadow-[0_0_28px_rgba(42,150,220,0.1)]',
-  knowledge: 'border-slate-600/60 bg-[#17191c]',
+  knowledge: 'border-orange-400/65 bg-orange-950/35 shadow-[0_0_26px_rgba(251,146,60,0.16)]',
   reply: 'border-cyan-500/35 bg-blue-950/25',
+  send_message: 'border-sky-500/35 bg-blue-950/25',
   handoff: 'border-violet-500/30 bg-[#181820]',
   close: 'border-emerald-500/30 bg-[#171c1b]',
   tool: 'border-sky-500/35 bg-[#141b22]',
-  rule: 'border-amber-500/30 bg-[#1d1a14]',
+  rule: 'border-red-400/65 bg-red-950/35 shadow-[0_0_26px_rgba(248,113,113,0.16)]',
 };
+
+const HANDLE_CLASS_NAMES = {
+  vertical: '!h-2.5 !w-2.5 !border-[#16191d] !bg-sky-400',
+  knowledge: '!h-3 !w-3 !border-[#16191d] !bg-orange-400',
+  skill: '!h-3 !w-3 !border-[#16191d] !bg-red-400',
+};
+
+function isAgentNodeKind(kind: NodeKind): boolean {
+  return kind === 'assistant' || kind === 'intent';
+}
 
 function NodeIcon({ kind }: { kind: NodeKind }) {
   const className = 'h-5 w-5';
@@ -189,6 +209,7 @@ function NodeIcon({ kind }: { kind: NodeKind }) {
   if (kind === 'assistant') return <Bot className={className} />;
   if (kind === 'knowledge') return <Database className={className} />;
   if (kind === 'reply') return <MessageSquareText className={className} />;
+  if (kind === 'send_message') return <MessageSquareText className={className} />;
   if (kind === 'handoff') return <UserRound className={className} />;
   if (kind === 'close') return <CheckCircle2 className={className} />;
   if (kind === 'rule') return <GitBranch className={className} />;
@@ -196,56 +217,151 @@ function NodeIcon({ kind }: { kind: NodeKind }) {
 }
 
 function AttendantNodeCard({ data, selected }: NodeProps<AttendantNode>) {
+  const isAttachmentNode = data.kind === 'knowledge' || data.kind === 'rule';
+  const isKnowledgeNode = data.kind === 'knowledge';
+  const isSkillNode = data.kind === 'rule';
+  const acceptsKnowledge = isAgentNodeKind(data.kind);
+  const exposesSkill = isAgentNodeKind(data.kind);
+
   return (
     <div
       className={cn(
-        'group relative flex min-h-[112px] w-[188px] flex-col items-center justify-center rounded-[20px] border px-4 py-4 text-center text-[#e8edf3] transition-shadow',
+        'group relative flex flex-col items-center justify-center border text-center text-[#e8edf3] transition-shadow',
+        isAttachmentNode
+          ? 'min-h-[124px] w-[124px] rounded-full px-4 py-4'
+          : 'min-h-[112px] w-[188px] rounded-[20px] px-4 py-4',
         NODE_SURFACES[data.kind],
         selected && 'border-sky-400/70 shadow-[0_0_0_1px_rgba(56,189,248,0.3),0_0_30px_rgba(14,165,233,0.2)]'
       )}
     >
-      <Handle id="target-top" type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-[#16191d] !bg-sky-400" />
-      <Handle id="target-left" type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-[#16191d] !bg-sky-400" />
+      {!isAttachmentNode && (
+        <Handle id="target-top" type="target" position={Position.Top} className={HANDLE_CLASS_NAMES.vertical} />
+      )}
+      {acceptsKnowledge && (
+        <Handle id="target-left-knowledge" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.knowledge} />
+      )}
+      {isSkillNode && (
+        <Handle id="target-left-skill" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.skill} />
+      )}
       <span
-        className="nodrag absolute -top-3 right-3 flex h-7 w-7 items-center justify-center rounded-md border border-sky-500/40 bg-sky-600 text-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
+        className={cn(
+          'nodrag absolute flex h-7 w-7 items-center justify-center rounded-md border text-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100',
+          isAttachmentNode ? 'right-1 top-1' : '-top-3 right-3',
+          isKnowledgeNode
+            ? 'border-orange-400/40 bg-orange-500'
+            : isSkillNode
+              ? 'border-red-400/40 bg-red-500'
+              : 'border-sky-500/40 bg-sky-600'
+        )}
       >
         <Plus className="h-4 w-4" />
       </span>
-      <div className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/15 text-sky-400">
+      <div className={cn(
+        'mb-2.5 flex items-center justify-center rounded-xl',
+        isAttachmentNode ? 'h-9 w-9' : 'h-10 w-10',
+        isKnowledgeNode
+          ? 'bg-orange-500/15 text-orange-300'
+          : isSkillNode
+            ? 'bg-red-500/15 text-red-300'
+            : 'bg-sky-500/15 text-sky-400'
+      )}>
         <NodeIcon kind={data.kind} />
       </div>
-      <div className="text-[15px] font-medium leading-5">{data.title}</div>
-      <div className="mt-0.5 text-xs leading-4 text-slate-400">{data.subtitle}</div>
+      <div className={cn('font-medium leading-5', isAttachmentNode ? 'text-[13px]' : 'text-[15px]')}>{data.title}</div>
+      <div className={cn('mt-0.5 leading-4 text-slate-400', isAttachmentNode ? 'text-[11px]' : 'text-xs')}>{data.subtitle}</div>
       {data.risk === 'high' && (
         <span className="mt-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">
           Confirmacao necessaria
         </span>
       )}
-      <Handle id="source-bottom" type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-[#16191d] !bg-sky-400" />
-      <Handle id="source-right" type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-[#16191d] !bg-sky-400" />
+      {!isAttachmentNode && (
+        <Handle id="source-bottom" type="source" position={Position.Bottom} className={HANDLE_CLASS_NAMES.vertical} />
+      )}
+      {isKnowledgeNode && (
+        <Handle id="source-right-knowledge" type="source" position={Position.Right} className={HANDLE_CLASS_NAMES.knowledge} />
+      )}
+      {exposesSkill && (
+        <Handle id="source-right-skill" type="source" position={Position.Right} className={HANDLE_CLASS_NAMES.skill} />
+      )}
     </div>
   );
 }
 
 const nodeTypes = { attendant: AttendantNodeCard };
 
+const VERTICAL_SOURCE_HANDLE = 'source-bottom';
+const VERTICAL_TARGET_HANDLE = 'target-top';
+const KNOWLEDGE_SOURCE_HANDLE = 'source-right-knowledge';
+const KNOWLEDGE_TARGET_HANDLE = 'target-left-knowledge';
+const SKILL_SOURCE_HANDLE = 'source-right-skill';
+const SKILL_TARGET_HANDLE = 'target-left-skill';
+const DEFAULT_EDGE_COLOR = '#4485a5';
+const KNOWLEDGE_EDGE_COLOR = '#fb923c';
+const SKILL_EDGE_COLOR = '#f87171';
+
+function connectionVisual(sourceKind: NodeKind, targetKind: NodeKind) {
+  if (sourceKind === 'knowledge' && isAgentNodeKind(targetKind)) {
+    return {
+      sourceHandle: KNOWLEDGE_SOURCE_HANDLE,
+      targetHandle: KNOWLEDGE_TARGET_HANDLE,
+      color: KNOWLEDGE_EDGE_COLOR,
+    };
+  }
+  if (isAgentNodeKind(sourceKind) && targetKind === 'rule') {
+    return {
+      sourceHandle: SKILL_SOURCE_HANDLE,
+      targetHandle: SKILL_TARGET_HANDLE,
+      color: SKILL_EDGE_COLOR,
+    };
+  }
+  return {
+    sourceHandle: VERTICAL_SOURCE_HANDLE,
+    targetHandle: VERTICAL_TARGET_HANDLE,
+    color: DEFAULT_EDGE_COLOR,
+  };
+}
+
+function canConnectNodeKinds(sourceKind: NodeKind, targetKind: NodeKind): boolean {
+  if (sourceKind === 'knowledge' || targetKind === 'knowledge') {
+    return sourceKind === 'knowledge' && isAgentNodeKind(targetKind);
+  }
+  if (sourceKind === 'rule' || targetKind === 'rule') {
+    return isAgentNodeKind(sourceKind) && targetKind === 'rule';
+  }
+  return true;
+}
+
+function keepValidGraphEdges(nodes: AttendantNode[], edges: Edge[]): Edge[] {
+  return edges.filter((flowEdge) => {
+    const source = nodes.find((node) => node.id === flowEdge.source);
+    const target = nodes.find((node) => node.id === flowEdge.target);
+    if (!source || !target) return false;
+    return canConnectNodeKinds(source.data.kind, target.data.kind);
+  });
+}
+
 function edge(
   id: string,
   source: string,
   target: string,
-  handles?: { sourceHandle?: string; targetHandle?: string },
+  options?: { sourceHandle?: string; targetHandle?: string; color?: string },
 ): Edge {
+  const color = options?.color || DEFAULT_EDGE_COLOR;
   return {
     id,
     source,
     target,
-    sourceHandle: handles?.sourceHandle,
-    targetHandle: handles?.targetHandle,
+    sourceHandle: options?.sourceHandle || VERTICAL_SOURCE_HANDLE,
+    targetHandle: options?.targetHandle || VERTICAL_TARGET_HANDLE,
     type: 'smoothstep',
     animated: false,
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#4485a5', width: 16, height: 16 },
-    style: { stroke: '#4485a5', strokeWidth: 1.6 },
+    markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
+    style: { stroke: color, strokeWidth: 1.6 },
   };
+}
+
+function edgeForNodes(id: string, source: AttendantNode, target: AttendantNode): Edge {
+  return edge(id, source.id, target.id, connectionVisual(source.data.kind, target.data.kind));
 }
 
 function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
@@ -329,55 +445,63 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
     },
   ];
 
-  const activeRule = rules.find((rule) => rule.enabled);
-  if (activeRule) {
+  const activeRules = rules.filter((rule) => rule.enabled);
+  activeRules.forEach((activeRule, index) => {
     nodes.push({
       id: `rule-${activeRule.id}`,
       type: 'attendant',
-      position: { x: 650, y: 350 },
-      data: {
-        kind: 'rule',
-        title: activeRule.name,
-        subtitle: 'Habilidade ativa',
-        config: { instructions: activeRule.trigger, variableName: `regra_${normalizeVariableName(activeRule.name) || 'ativa'}` },
-      },
+      position: { x: 650, y: 300 + index * 150 },
+      data: ruleNodeData(activeRule),
     });
-  }
+  });
 
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const buildEdge = (id: string, source: string, target: string) => {
+    const sourceNode = nodeById.get(source);
+    const targetNode = nodeById.get(target);
+    return sourceNode && targetNode ? edgeForNodes(id, sourceNode, targetNode) : edge(id, source, target);
+  };
   const edges = [
-    edge('incoming-intent', 'incoming', 'intent', { sourceHandle: 'source-right', targetHandle: 'target-left' }),
-    edge('intent-knowledge', 'intent', 'knowledge', { sourceHandle: 'source-bottom', targetHandle: 'target-top' }),
-    edge('intent-assistant', 'intent', 'assistant', { sourceHandle: 'source-bottom', targetHandle: 'target-top' }),
-    edge('knowledge-assistant', 'knowledge', 'assistant', { sourceHandle: 'source-right', targetHandle: 'target-left' }),
-    edge('assistant-reply', 'assistant', 'reply', { sourceHandle: 'source-bottom', targetHandle: 'target-top' }),
-    edge('assistant-handoff', 'assistant', 'handoff', { sourceHandle: 'source-bottom', targetHandle: 'target-top' }),
-    edge('assistant-resolved', 'assistant', 'resolved', { sourceHandle: 'source-bottom', targetHandle: 'target-top' }),
+    buildEdge('incoming-intent', 'incoming', 'intent'),
+    buildEdge('intent-assistant', 'intent', 'assistant'),
+    buildEdge('knowledge-assistant', 'knowledge', 'assistant'),
+    buildEdge('assistant-reply', 'assistant', 'reply'),
+    buildEdge('assistant-handoff', 'assistant', 'handoff'),
+    buildEdge('assistant-resolved', 'assistant', 'resolved'),
   ];
-  if (activeRule) edges.push(edge('assistant-rule', 'assistant', `rule-${activeRule.id}`, { sourceHandle: 'source-right', targetHandle: 'target-left' }));
+  activeRules.forEach((activeRule) => {
+    edges.push(buildEdge(`assistant-rule-${activeRule.id}`, 'assistant', `rule-${activeRule.id}`));
+  });
 
   return { nodes, edges, variables: [] as AutopilotFlowVariable[] };
 }
 
 function restoreFlowGraph(graph: AutopilotFlowGraph) {
+  const nodes = graph.nodes.map((node): AttendantNode => ({
+    id: node.id,
+    type: 'attendant',
+    position: node.position,
+    data: {
+      kind: node.kind,
+      title: node.title,
+      subtitle: node.subtitle,
+      status: node.status,
+      risk: node.risk,
+      toolName: node.toolName,
+      config: node.config,
+    },
+  }));
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const edges = graph.edges.map((savedEdge) => {
+    const source = nodeById.get(savedEdge.source);
+    const target = nodeById.get(savedEdge.target);
+    return source && target
+      ? edgeForNodes(savedEdge.id, source, target)
+      : edge(savedEdge.id, savedEdge.source, savedEdge.target);
+  });
   return {
-    nodes: graph.nodes.map((node): AttendantNode => ({
-      id: node.id,
-      type: 'attendant',
-      position: node.position,
-      data: {
-        kind: node.kind,
-        title: node.title,
-        subtitle: node.subtitle,
-        status: node.status,
-        risk: node.risk,
-        toolName: node.toolName,
-        config: node.config,
-      },
-    })),
-    edges: graph.edges.map((savedEdge) => edge(savedEdge.id, savedEdge.source, savedEdge.target, {
-      sourceHandle: savedEdge.sourceHandle || undefined,
-      targetHandle: savedEdge.targetHandle || undefined,
-    })),
+    nodes,
+    edges: keepValidGraphEdges(nodes, edges),
     variables: graph.variables || [],
   };
 }
@@ -451,6 +575,44 @@ function ToolButton({
   );
 }
 
+function ruleNodeData(rule: NexusFlowInstance): AttendantNodeData {
+  return {
+    kind: 'rule',
+    title: rule.name,
+    subtitle: rule.enabled ? 'Habilidade ativa' : 'Habilidade pausada',
+    config: {
+      instructions: rule.trigger,
+      variableName: `regra_${normalizeVariableName(rule.name) || 'ativa'}`,
+    },
+  };
+}
+
+function RuleBlockButton({ rule }: { rule: NexusFlowInstance }) {
+  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.setData('application/dialogy-attendant-rule', JSON.stringify(rule));
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={handleDragStart}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
+      title={rule.trigger}
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-300">
+        <GitBranch className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{rule.name}</span>
+        <span className="block text-[11px] text-slate-500">{rule.enabled ? 'Arrastar habilidade' : 'Pausada'}</span>
+      </span>
+      <span className={cn('h-2 w-2 rounded-full', rule.enabled ? 'bg-emerald-400' : 'bg-slate-600')} />
+    </button>
+  );
+}
+
 function SubAgentBlockButton() {
   const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
     event.dataTransfer.setData('application/dialogy-attendant-block', 'intent');
@@ -476,11 +638,65 @@ function SubAgentBlockButton() {
   );
 }
 
+function MainAgentBlockButton() {
+  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.setData('application/dialogy-attendant-block', 'assistant');
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={handleDragStart}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
+      title="Representa o agente principal e o prompt system padrao do atendimento."
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-300">
+        <Bot className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block">Agente principal</span>
+        <span className="block text-[11px] text-slate-500">Persona / system prompt</span>
+      </span>
+    </button>
+  );
+}
+
+function DeterministicMessageBlockButton() {
+  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.setData('application/dialogy-attendant-block', 'send_message');
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={handleDragStart}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
+      title="Envia uma mensagem configurada sem chamar a IA."
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/15 text-sky-300">
+        <MessageSquareText className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block">Enviar mensagem</span>
+        <span className="block text-[11px] text-slate-500">Texto fixo / sem IA</span>
+      </span>
+    </button>
+  );
+}
+
 function NodeInspector({
   node,
   availableNodeVariables,
   systemVariables,
+  knowledgeCollections,
+  knowledgeAttachment,
+  mainSystemPrompt,
   variableNameConflict,
+  onMainSystemPromptChange,
   onClose,
   onUpdate,
   onDelete,
@@ -488,7 +704,16 @@ function NodeInspector({
   node: AttendantNode;
   availableNodeVariables: string[];
   systemVariables: AutopilotFlowVariable[];
+  knowledgeCollections: KnowledgeCollection[];
+  knowledgeAttachment?: {
+    targetTitle: string;
+    targetKind: 'assistant' | 'intent';
+    collectionNames: string[];
+    documents: KnowledgeBaseDocument[];
+  } | null;
+  mainSystemPrompt: string;
   variableNameConflict: boolean;
+  onMainSystemPromptChange: (prompt: string) => void;
   onClose: () => void;
   onUpdate: (patch: Partial<AttendantNodeData>) => void;
   onDelete: () => void;
@@ -502,7 +727,7 @@ function NodeInspector({
     ...systemVariables.map((variable) => `{{system.${variable.name}}}`),
     ...availableNodeVariables.map((variable) => `{{${variable}}}`),
   ];
-  const mainField = node.data.kind === 'reply' || node.data.kind === 'handoff' || node.data.kind === 'close'
+  const mainField = node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'handoff' || node.data.kind === 'close'
     ? 'message'
     : 'instructions';
   const insertVariable = (variable: string) => {
@@ -577,6 +802,92 @@ function NodeInspector({
           </div>
         )}
 
+        {node.data.kind === 'knowledge' && (
+          <div className="space-y-4 rounded-xl border border-orange-500/25 bg-orange-500/[0.05] p-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-300">Conhecimento vinculado</p>
+              {knowledgeAttachment ? (
+                <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  Este bloco libera consulta de base para {knowledgeAttachment.targetKind === 'assistant' ? 'o agente principal' : 'o sub-agente'} <span className="text-slate-300">{knowledgeAttachment.targetTitle}</span>.
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] leading-4 text-amber-200">
+                  Conecte este bloco na lateral esquerda de um agente principal ou sub-agente para liberar consulta RAG.
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-xl border border-white/10 bg-[#17191c] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Colecoes</p>
+                <p className="mt-1 text-lg font-semibold text-orange-200">{knowledgeAttachment?.collectionNames.length || 0}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-[#17191c] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Documentos</p>
+                <p className="mt-1 text-lg font-semibold text-orange-200">{knowledgeAttachment?.documents.length || 0}</p>
+              </div>
+            </div>
+
+            {knowledgeAttachment && (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Colecoes autorizadas</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {knowledgeAttachment.collectionNames.map((name) => (
+                      <Badge key={name} className="border border-orange-500/25 bg-orange-500/10 text-orange-200">{name}</Badge>
+                    ))}
+                    {knowledgeAttachment.collectionNames.length === 0 && (
+                      <span className="text-xs text-slate-500">Nenhuma colecao autorizada.</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Documentos disponiveis</p>
+                  <div className="mt-2 max-h-44 space-y-2 overflow-y-auto pr-1">
+                    {knowledgeAttachment.documents.slice(0, 8).map((document) => (
+                      <div key={document.id} className="rounded-lg border border-white/10 bg-[#17191c] px-3 py-2">
+                        <p className="truncate text-xs font-medium text-slate-200">{document.name}</p>
+                        <p className="mt-0.5 text-[10px] text-slate-500">
+                          {document.tokens || 0} tokens{document.category ? ` · ${document.category}` : ''}
+                        </p>
+                      </div>
+                    ))}
+                    {knowledgeAttachment.documents.length > 8 && (
+                      <p className="text-[11px] text-slate-500">+{knowledgeAttachment.documents.length - 8} documento(s) adicionais.</p>
+                    )}
+                    {knowledgeAttachment.documents.length === 0 && (
+                      <p className="text-xs text-slate-500">Nenhum documento atende este escopo.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {node.data.kind === 'assistant' && (
+          <div className="space-y-4 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] p-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Agente principal</p>
+              <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                Este bloco representa o prompt system padrao. Sub-agentes podem assumir assuntos especificos e retornar para esta persona principal.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-300">Prompt system / persona</Label>
+              <Textarea
+                value={mainSystemPrompt}
+                onChange={(event) => onMainSystemPromptChange(event.target.value)}
+                placeholder="Descreva quem e o agente, como deve falar, limites, objetivo operacional e quando deve escalar."
+                className="min-h-[180px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-cyan-500/30"
+              />
+              <p className="text-[11px] leading-4 text-slate-500">
+                Este e o mesmo prompt base configurado nos ajustes gerais do agente.
+              </p>
+            </div>
+          </div>
+        )}
+
         {node.data.kind === 'intent' && (
           <div className="space-y-4 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/[0.04] p-4">
             <div className="space-y-2">
@@ -608,6 +919,35 @@ function NodeInspector({
             <p className="text-[11px] leading-4 text-slate-500">
               Quando esta intencao for identificada, este sub-agente assume a resposta com as instrucoes abaixo.
             </p>
+            <div className="space-y-2 border-t border-fuchsia-500/15 pt-4">
+              <Label className="text-xs text-slate-300">Conhecimento permitido</Label>
+              <p className="text-[11px] leading-4 text-slate-500">
+                Selecione as colecoes da base que este sub-agente pode consultar.
+              </p>
+              <div className="space-y-2 pt-1">
+                {knowledgeCollections.map((collection) => {
+                  const selectedIds = config.knowledgeCollectionIds || [];
+                  const checked = selectedIds.includes(collection.id);
+                  return (
+                    <label key={collection.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#17191c] px-3 py-2 text-xs text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          const nextIds = event.target.checked
+                            ? Array.from(new Set([...selectedIds, collection.id]))
+                            : selectedIds.filter((id) => id !== collection.id);
+                          updateConfig({
+                            knowledgeCollectionIds: nextIds.length > 0 ? nextIds : ['general'],
+                          });
+                        }}
+                      />
+                      {collection.name}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
             <div className="flex items-center justify-between gap-3">
               <span>
                 <span className="block text-sm text-slate-200">Retorno ao agente principal</span>
@@ -618,7 +958,7 @@ function NodeInspector({
           </div>
         )}
 
-        {(node.data.kind === 'understand' || node.data.kind === 'intent' || node.data.kind === 'knowledge' || node.data.kind === 'assistant' || node.data.kind === 'rule' || node.data.kind === 'tool' || node.data.kind === 'trigger') && (
+        {(node.data.kind === 'understand' || node.data.kind === 'intent' || node.data.kind === 'knowledge' || node.data.kind === 'rule' || node.data.kind === 'tool' || node.data.kind === 'trigger') && (
           <div className="space-y-2">
             <Label className="text-xs text-slate-400">
               {node.data.kind === 'tool'
@@ -636,15 +976,22 @@ function NodeInspector({
           </div>
         )}
 
-        {(node.data.kind === 'reply' || node.data.kind === 'handoff' || node.data.kind === 'close') && (
+        {(node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'handoff' || node.data.kind === 'close') && (
           <div className="space-y-2">
-            <Label className="text-xs text-slate-400">Mensagem ao cliente</Label>
+            <Label className="text-xs text-slate-400">
+              {node.data.kind === 'send_message' ? 'Mensagem fixa ao cliente' : 'Mensagem ao cliente'}
+            </Label>
             <Textarea
               value={config.message || ''}
               onChange={(event) => updateConfig({ message: event.target.value })}
               placeholder="Digite a mensagem ou insira variaveis..."
               className="min-h-[126px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-sky-500/30"
             />
+            {node.data.kind === 'send_message' && (
+              <p className="text-[11px] leading-4 text-slate-500">
+                Este texto sera enviado diretamente, sem gerar resposta com IA.
+              </p>
+            )}
           </div>
         )}
 
@@ -883,10 +1230,16 @@ export function AutopilotFlowBuilder({
   enabledToolNames,
   tools,
   rules,
+  knowledgeDocuments,
+  knowledgeCollections,
+  mainSystemPrompt,
   flowGraph,
+  onMainSystemPromptChange,
   onFlowGraphChange,
   onBack,
   onOpenPanel,
+  inlinePanel,
+  inlinePanelName,
   onSave,
   onPublish,
   onDiscard,
@@ -948,20 +1301,61 @@ export function AutopilotFlowBuilder({
     onFlowGraphChange(nextGraph);
   }, [edges, nodes, onFlowGraphChange, systemVariables]);
 
+  const isValidConnection = useCallback((connection: Connection | Edge) => {
+    if (!connection.source || !connection.target || connection.source === connection.target) return false;
+    const source = nodes.find((node) => node.id === connection.source);
+    const target = nodes.find((node) => node.id === connection.target);
+    if (!source || !target) return false;
+    return canConnectNodeKinds(source.data.kind, target.data.kind);
+  }, [nodes]);
+
   const onConnect = useCallback(
     (connection: Connection) => {
+      if (!isValidConnection(connection)) return;
+      const source = nodes.find((node) => node.id === connection.source);
+      const target = nodes.find((node) => node.id === connection.target);
+      if (!source || !target) return;
+      const visual = connectionVisual(source.data.kind, target.data.kind);
       setEdges((current) => addEdge({
         ...connection,
+        sourceHandle: visual.sourceHandle,
+        targetHandle: visual.targetHandle,
         type: 'smoothstep',
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#4485a5', width: 16, height: 16 },
-        style: { stroke: '#4485a5', strokeWidth: 1.6 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: visual.color, width: 16, height: 16 },
+        style: { stroke: visual.color, strokeWidth: 1.6 },
       }, current));
     },
-    [setEdges]
+    [isValidConnection, nodes, setEdges]
   );
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
   const selectedEdge = edges.find((selectedFlowEdge) => selectedFlowEdge.id === selectedEdgeId) || null;
+  const selectedKnowledgeAttachment = useMemo(() => {
+    if (!selectedNode || selectedNode.data.kind !== 'knowledge') return null;
+    const targetId = edges.find((flowEdge) => flowEdge.source === selectedNode.id)?.target;
+    const targetNode = targetId ? nodes.find((node) => node.id === targetId) : null;
+    if (!targetNode || !isAgentNodeKind(targetNode.data.kind)) return null;
+
+    const allowedCollectionIds = targetNode.data.kind === 'intent'
+      ? targetNode.data.config?.knowledgeCollectionIds?.filter(Boolean) || ['general']
+      : knowledgeCollections.map((collection) => collection.id);
+    const allowedSet = new Set(allowedCollectionIds);
+    const collectionNames = knowledgeCollections
+      .filter((collection) => allowedSet.has(collection.id))
+      .map((collection) => collection.name);
+    const scopedDocuments = knowledgeDocuments.filter((document) => {
+      if (targetNode.data.kind === 'assistant') return true;
+      const documentCollectionIds = document.collectionIds?.length ? document.collectionIds : ['general'];
+      return documentCollectionIds.some((collectionId) => allowedSet.has(collectionId));
+    });
+
+    return {
+      targetTitle: targetNode.data.title,
+      targetKind: targetNode.data.kind as 'assistant' | 'intent',
+      collectionNames,
+      documents: scopedDocuments,
+    };
+  }, [edges, knowledgeCollections, knowledgeDocuments, nodes, selectedNode]);
   const availableNodeVariables = useMemo(() => {
     if (!selectedNodeId) return [];
     const upstreamIds = new Set<string>();
@@ -1052,11 +1446,100 @@ export function AutopilotFlowBuilder({
             instructions: 'Atenda este assunto com instrucoes especificas, sem fugir do escopo definido.',
             variableName: `intencao_suporte_${Date.now()}`,
             returnToMainPrompt: true,
+            knowledgeCollectionIds: ['general'],
           },
         },
       }));
       setSelectedNodeId(id);
       return;
+    }
+    if (blockKind === 'assistant') {
+      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      let selectedAssistantId = 'assistant';
+      setNodes((current) => {
+        const existingAssistant = current.find((node) => node.id === 'assistant' || node.data.kind === 'assistant');
+        if (existingAssistant) {
+          selectedAssistantId = existingAssistant.id;
+          return current.map((node) => (
+            node.id === existingAssistant.id
+              ? {
+                  ...node,
+                  position,
+                  data: {
+                    ...node.data,
+                    title: agentName || node.data.title || 'Agente IA',
+                    subtitle: 'Responder com IA',
+                  },
+                }
+              : node
+          ));
+        }
+        return current.concat({
+          id: 'assistant',
+          type: 'attendant',
+          position,
+          data: {
+            kind: 'assistant',
+            title: agentName || 'Agente IA',
+            subtitle: 'Responder com IA',
+            config: {
+              instructions: 'Use o prompt system principal para responder ao cliente.',
+              variableName: 'resposta_ia',
+              useAi: true,
+            },
+          },
+        });
+      });
+      setSelectedNodeId(selectedAssistantId);
+      return;
+    }
+    if (blockKind === 'send_message') {
+      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const id = `message-${Date.now()}`;
+      setNodes((current) => current.concat({
+        id,
+        type: 'attendant',
+        position,
+        data: {
+          kind: 'send_message',
+          title: 'Enviar mensagem',
+          subtitle: 'Sem IA',
+          config: {
+            message: 'Digite a mensagem que sera enviada ao cliente.',
+            variableName: `mensagem_enviada_${Date.now()}`,
+          },
+        },
+      }));
+      setSelectedNodeId(id);
+      return;
+    }
+    const rawRule = event.dataTransfer.getData('application/dialogy-attendant-rule');
+    if (rawRule) {
+      try {
+        const rule = JSON.parse(rawRule) as NexusFlowInstance;
+        const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const id = `rule-${rule.id}`;
+        setNodes((current) => {
+          const existing = current.some((node) => node.id === id);
+          if (existing) {
+            return current.map((node) => (
+              node.id === id
+                ? { ...node, position, data: ruleNodeData(rule) }
+                : node
+            ));
+          }
+          return current.concat({
+            id,
+            type: 'attendant',
+            position,
+            data: ruleNodeData(rule),
+          });
+        });
+        setSelectedNodeId(id);
+        return;
+      } catch {
+        return;
+      }
     }
     const raw = event.dataTransfer.getData('application/dialogy-attendant-tool');
     if (!raw) return;
@@ -1085,7 +1568,7 @@ export function AutopilotFlowBuilder({
     } catch {
       return;
     }
-  }, [flowInstance, setNodes]);
+  }, [agentName, flowInstance, setNodes]);
 
   const filteredTools = tools.filter((tool) => {
     const query = toolQuery.trim().toLowerCase();
@@ -1098,60 +1581,67 @@ export function AutopilotFlowBuilder({
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden bg-[#101214] text-slate-100">
       <section className="relative min-w-0 flex-1 overflow-hidden border-r border-white/[0.08]">
-        <ReactFlow<AttendantNode, Edge>
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onInit={setFlowInstance}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onNodeClick={(_event, node) => {
-            setSelectedNodeId(node.id);
-            setSelectedEdgeId(null);
-            setIsSystemVariablesOpen(false);
-          }}
-          onEdgeClick={(_event, selectedFlowEdge) => {
-            setSelectedEdgeId(selectedFlowEdge.id);
-            setSelectedNodeId(null);
-            setIsSystemVariablesOpen(false);
-          }}
-          onNodesDelete={(deletedNodes) => {
-            if (deletedNodes.some((node) => node.id === selectedNodeId)) setSelectedNodeId(null);
-          }}
-          onEdgesDelete={(deletedEdges) => {
-            if (deletedEdges.some((deletedEdge) => deletedEdge.id === selectedEdgeId)) setSelectedEdgeId(null);
-          }}
-          onPaneClick={() => {
-            setSelectedNodeId(null);
-            setSelectedEdgeId(null);
-            setIsSystemVariablesOpen(false);
-          }}
-          deleteKeyCode={['Backspace', 'Delete']}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-          fitView
-          fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
-          minZoom={0.35}
-          maxZoom={1.55}
-          defaultEdgeOptions={{ type: 'smoothstep' }}
-          className="attendant-flow-canvas"
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background variant={BackgroundVariant.Dots} color="#30343a" gap={33} size={1.4} />
-          <MiniMap
-            className="!bottom-20 !left-5 !right-auto !h-[104px] !w-[168px] !rounded-xl !border !border-white/10 !bg-[#121519]/90"
-            nodeColor="#1e668f"
-            maskColor="rgba(5, 7, 9, 0.52)"
-            pannable
-          />
-          <Controls
-            position="bottom-right"
-            orientation="horizontal"
-            showInteractive={false}
-            className="!bottom-7 !right-7 !overflow-hidden !rounded-xl !border !border-white/10 !bg-[#15181b] !shadow-xl [&>button]:!h-11 [&>button]:!w-11 [&>button]:!border-white/10 [&>button]:!bg-transparent [&>button]:!fill-slate-300 [&>button]:!text-slate-300 [&>button:hover]:!bg-white/5"
-          />
-        </ReactFlow>
+        {inlinePanel ? (
+          <div className="h-full overflow-y-auto bg-[#101214] px-7 pb-[96px] pt-[108px]">
+            {inlinePanel}
+          </div>
+        ) : (
+          <ReactFlow<AttendantNode, Edge>
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            onInit={setFlowInstance}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            isValidConnection={isValidConnection}
+            onNodeClick={(_event, node) => {
+              setSelectedNodeId(node.id);
+              setSelectedEdgeId(null);
+              setIsSystemVariablesOpen(false);
+            }}
+            onEdgeClick={(_event, selectedFlowEdge) => {
+              setSelectedEdgeId(selectedFlowEdge.id);
+              setSelectedNodeId(null);
+              setIsSystemVariablesOpen(false);
+            }}
+            onNodesDelete={(deletedNodes) => {
+              if (deletedNodes.some((node) => node.id === selectedNodeId)) setSelectedNodeId(null);
+            }}
+            onEdgesDelete={(deletedEdges) => {
+              if (deletedEdges.some((deletedEdge) => deletedEdge.id === selectedEdgeId)) setSelectedEdgeId(null);
+            }}
+            onPaneClick={() => {
+              setSelectedNodeId(null);
+              setSelectedEdgeId(null);
+              setIsSystemVariablesOpen(false);
+            }}
+            deleteKeyCode={['Backspace', 'Delete']}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+            fitView
+            fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+            minZoom={0.35}
+            maxZoom={1.55}
+            defaultEdgeOptions={{ type: 'smoothstep' }}
+            className="attendant-flow-canvas"
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background variant={BackgroundVariant.Dots} color="#30343a" gap={33} size={1.4} />
+            <MiniMap
+              className="!bottom-20 !left-5 !right-auto !h-[104px] !w-[168px] !rounded-xl !border !border-white/10 !bg-[#121519]/90"
+              nodeColor="#1e668f"
+              maskColor="rgba(5, 7, 9, 0.52)"
+              pannable
+            />
+            <Controls
+              position="bottom-right"
+              orientation="horizontal"
+              showInteractive={false}
+              className="!bottom-7 !right-7 !overflow-hidden !rounded-xl !border !border-white/10 !bg-[#15181b] !shadow-xl [&>button]:!h-11 [&>button]:!w-11 [&>button]:!border-white/10 [&>button]:!bg-transparent [&>button]:!fill-slate-300 [&>button]:!text-slate-300 [&>button:hover]:!bg-white/5"
+            />
+          </ReactFlow>
+        )}
 
         <header className="pointer-events-none absolute left-7 right-7 top-6 z-10 flex items-start justify-between gap-5">
           <div className="pointer-events-auto flex items-center gap-3">
@@ -1164,20 +1654,20 @@ export function AutopilotFlowBuilder({
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <nav className="flex h-[62px] items-center gap-1 rounded-[20px] border border-white/10 bg-[#17191b]/95 px-2 shadow-xl">
-              <button type="button" className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/15 text-sky-400">
+              <button type="button" onClick={() => inlinePanelName && onOpenPanel(inlinePanelName)} className={cn('flex h-11 w-11 items-center justify-center rounded-xl', inlinePanelName ? 'text-slate-400 hover:bg-white/5 hover:text-white' : 'bg-sky-500/15 text-sky-400')}>
                 <Bot className="h-5 w-5" />
               </button>
-              <button type="button" onClick={() => onOpenPanel('knowledge')} className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 hover:bg-white/5 hover:text-white">
+              <button type="button" onClick={() => onOpenPanel('knowledge')} className={cn('flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/5 hover:text-white', inlinePanelName === 'knowledge' ? 'bg-sky-500/15 text-sky-400' : 'text-slate-400')}>
                 <BookOpen className="h-5 w-5" />
               </button>
-              <button type="button" onClick={() => onOpenPanel('capabilities')} className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 hover:bg-white/5 hover:text-white">
+              <button type="button" onClick={() => onOpenPanel('capabilities')} className={cn('flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/5 hover:text-white', inlinePanelName === 'capabilities' ? 'bg-sky-500/15 text-sky-400' : 'text-slate-400')}>
                 <Wrench className="h-5 w-5" />
               </button>
-              <button type="button" onClick={() => onOpenPanel('analytics')} className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 hover:bg-white/5 hover:text-white">
+              <button type="button" onClick={() => onOpenPanel('analytics')} className={cn('flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/5 hover:text-white', inlinePanelName === 'analytics' ? 'bg-sky-500/15 text-sky-400' : 'text-slate-400')}>
                 <GitBranch className="h-5 w-5" />
               </button>
               <span className="mx-2 h-8 w-px bg-white/10" />
-              <button type="button" onClick={() => onOpenPanel('settings')} className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 hover:bg-white/5 hover:text-white">
+              <button type="button" onClick={() => onOpenPanel('settings')} className={cn('flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/5 hover:text-white', inlinePanelName === 'settings' ? 'bg-sky-500/15 text-sky-400' : 'text-slate-400')}>
                 <Settings2 className="h-5 w-5" />
               </button>
             </nav>
@@ -1268,7 +1758,7 @@ export function AutopilotFlowBuilder({
               Publicar
             </button>
             <span className="mx-1 h-7 w-px bg-white/10" />
-            <button type="button" onClick={() => onOpenPanel('settings')} className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-white/5">
+            <button type="button" onClick={() => onOpenPanel('settings')} className={cn('flex h-10 w-10 items-center justify-center rounded-lg hover:bg-white/5', inlinePanelName === 'settings' ? 'bg-sky-500/15 text-sky-400' : 'text-slate-400')}>
               <Settings2 className="h-4 w-4" />
             </button>
             <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-white/5">
@@ -1284,7 +1774,11 @@ export function AutopilotFlowBuilder({
             node={selectedNode}
             availableNodeVariables={availableNodeVariables}
             systemVariables={systemVariables}
+            knowledgeCollections={knowledgeCollections}
+            knowledgeAttachment={selectedKnowledgeAttachment}
+            mainSystemPrompt={mainSystemPrompt}
             variableNameConflict={variableNameConflict}
+            onMainSystemPromptChange={onMainSystemPromptChange}
             onClose={() => setSelectedNodeId(null)}
             onUpdate={updateSelectedNode}
             onDelete={deleteSelectedNode}
@@ -1311,12 +1805,13 @@ export function AutopilotFlowBuilder({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <Accordion type="multiple" defaultValue={['tools']} className="space-y-3">
+          <Accordion type="multiple" defaultValue={['control', 'tools', 'messages']} className="space-y-3">
             <AccordionItem value="control" className="rounded-xl border border-white/[0.08] bg-[#15171a] px-4">
               <AccordionTrigger className="py-4 text-sm font-medium text-slate-300 hover:no-underline">
                 <span className="flex items-center gap-3"><Settings2 className="h-4 w-4" /> Controle do agente</span>
               </AccordionTrigger>
-              <AccordionContent>
+              <AccordionContent className="border-t border-white/[0.08] pt-3">
+                <MainAgentBlockButton />
                 <button type="button" onClick={() => onOpenPanel('settings')} className="w-full rounded-lg px-2 py-2 text-left text-sm text-slate-400 hover:bg-white/5">
                   Configuracoes gerais
                 </button>
@@ -1337,6 +1832,15 @@ export function AutopilotFlowBuilder({
                 {dialogyTools.length === 0 && (
                   <p className="px-3 py-3 text-xs text-slate-500">Nenhuma ferramenta encontrada.</p>
                 )}
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value="messages" className="rounded-xl border border-white/[0.08] bg-[#15171a] px-4">
+              <AccordionTrigger className="py-4 text-sm font-medium text-slate-300 hover:no-underline">
+                <span className="flex items-center gap-3"><MessageSquareText className="h-4 w-4" /> Mensagens</span>
+              </AccordionTrigger>
+              <AccordionContent className="border-t border-white/[0.08] pt-3">
+                <DeterministicMessageBlockButton />
               </AccordionContent>
             </AccordionItem>
 
@@ -1366,7 +1870,13 @@ export function AutopilotFlowBuilder({
               <AccordionTrigger className="py-4 text-sm font-medium text-slate-300 hover:no-underline">
                 <span className="flex items-center gap-3"><GitBranch className="h-4 w-4" /> Habilidades</span>
               </AccordionTrigger>
-              <AccordionContent>
+              <AccordionContent className="border-t border-white/[0.08] pt-3">
+                {rules.map((rule) => (
+                  <RuleBlockButton key={rule.id} rule={rule} />
+                ))}
+                {rules.length === 0 && (
+                  <p className="px-3 py-3 text-xs text-slate-500">Nenhuma habilidade criada.</p>
+                )}
                 <button type="button" onClick={onAddRule} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-300 hover:bg-white/5">
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/15 text-sky-400"><Plus className="h-4 w-4" /></span>
                   Nova habilidade

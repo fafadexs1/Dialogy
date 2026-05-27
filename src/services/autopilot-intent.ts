@@ -7,58 +7,8 @@ import type {
 } from '@/services/autopilot/intent-types';
 import { extractAutopilotSlots } from '@/services/autopilot/slots';
 import { getAutopilotWorkflow } from '@/services/autopilot/workflows';
-import { getCanonicalKnowledgeAnswer, isUnsafeAsCustomerFacingKnowledge } from '@/services/rag/document-safety';
 
 export type AutopilotIntentName = UniversalAutopilotIntent;
-
-const OFFICIAL_ANSWER_MAX_CHARS = 3200;
-const DETERMINISTIC_OFFICIAL_INTENTS = new Set<UniversalAutopilotIntent>([
-  'catalog_request',
-  'pricing_request',
-  'promotion_request',
-  'return_or_refund',
-  'cancellation_request',
-]);
-
-const VERTICAL_CATEGORY_EQUIVALENTS: Partial<Record<UniversalAutopilotIntent, string[]>> = {
-  purchase_inquiry: [
-    'isp_plan_catalog',
-    'menu',
-    'course_catalog',
-    'property_catalog',
-    'ecommerce_product',
-    'clinic_service',
-    'delivery_menu',
-  ],
-  catalog_request: [
-    'isp_plan_catalog',
-    'menu',
-    'course_catalog',
-    'property_catalog',
-    'ecommerce_product',
-    'clinic_service',
-    'delivery_menu',
-  ],
-  pricing_request: [
-    'isp_plan_catalog',
-    'menu',
-    'course_catalog',
-    'property_catalog',
-    'ecommerce_product',
-    'delivery_menu',
-  ],
-  billing_or_payment: ['isp_invoice', 'invoice', 'payment', 'subscription_billing'],
-  scheduling_request: ['clinic_appointment', 'reservation', 'visit_scheduling', 'class_schedule'],
-  order_or_request_status: ['ecommerce_tracking', 'order_tracking', 'delivery_order_status', 'request_tracking'],
-  troubleshooting: ['isp_no_connection', 'isp_router', 'technical_support'],
-  support_request: ['customer_support', 'student_support', 'technical_support'],
-  return_or_refund: ['ecommerce_return', 'ecommerce_exchange', 'ecommerce_warranty'],
-  cancellation_request: ['cancelamento', 'cancellation_policy', 'subscription_cancellation'],
-};
-
-const LLM_COMPOSED_INTENTS = new Set<UniversalAutopilotIntent>([
-  'purchase_inquiry',
-]);
 
 const INTENT_KEYWORDS: Record<UniversalAutopilotIntent, RegExp[]> = {
   greeting: [/\b(ola|oi|oie|oii|bom dia|boa tarde|boa noite|hey)\b/],
@@ -102,143 +52,6 @@ function normalizeForIntent(value: string): string {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function normalizeCategory(value: string): string {
-  return normalizeForIntent(value).replace(/[\s-]+/g, '_');
-}
-
-function getDocumentValue(document: KnowledgeBaseDocument, keys: string[]): unknown {
-  const raw = document as KnowledgeBaseDocument & Record<string, unknown>;
-  for (const key of keys) {
-    const value = raw[key];
-    if (value !== undefined && value !== null && value !== '') return value;
-  }
-  return null;
-}
-
-function getDocumentCategories(document: KnowledgeBaseDocument): string[] {
-  const rawCategory = getDocumentValue(document, ['category', 'type', 'kind']);
-  const rawTags = getDocumentValue(document, ['tags']);
-  const rawHints = getDocumentValue(document, ['workflowHints', 'workflow_hints']);
-  const values = [
-    typeof rawCategory === 'string' ? rawCategory : null,
-    ...(Array.isArray(rawTags) ? rawTags : []),
-    ...(Array.isArray(rawHints) ? rawHints : []),
-  ]
-    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .flatMap((item) => item.split(/[;,]/g))
-    .map((item) => normalizeCategory(item))
-    .filter(Boolean);
-
-  return values.length > 0 ? Array.from(new Set(values)) : ['uncategorized'];
-}
-
-function getCanonicalAnswer(document: KnowledgeBaseDocument): string {
-  return getCanonicalKnowledgeAnswer(document);
-}
-
-function hasExactResponseDirective(document: KnowledgeBaseDocument): boolean {
-  const content = normalizeForIntent(`${document.name || ''}\n${getCanonicalAnswer(document)}\n${document.content || ''}`).slice(0, 1200);
-  return (
-    /\b(?:voce\s+deve\s+mandar|deve\s+mandar|envie|mande|responda|usar)\b.{0,100}\b(?:exatamente|mesmo\s+espacamento|mesmos?\s+emojis?|sem\s+alterar|nao\s+mude)\b/.test(content) ||
-    /\b(?:exatamente|mesmo\s+espacamento)\b.{0,100}\b(?:emojis?|quebras?\s+de\s+linha|espacamento)\b/.test(content)
-  );
-}
-
-function getDocumentPriority(document: KnowledgeBaseDocument): number {
-  const value = Number(getDocumentValue(document, ['priority']));
-  return Number.isFinite(value) ? value : 0;
-}
-
-function parseDate(value: unknown): number | null {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function isDocumentActive(document: KnowledgeBaseDocument): boolean {
-  const status = normalizeCategory(String(getDocumentValue(document, ['status']) || 'active'));
-  if (status === 'draft' || status === 'archived' || status === 'expired' || status === 'inactive') return false;
-
-  const now = Date.now();
-  const validFrom = parseDate(getDocumentValue(document, ['validFrom', 'valid_from']));
-  const validUntil = parseDate(getDocumentValue(document, ['validUntil', 'valid_until']));
-  if (validFrom && validFrom > now) return false;
-  if (validUntil && validUntil < now) return false;
-
-  return true;
-}
-
-function getIntentCategoryTargets(intent: UniversalAutopilotIntent): string[] {
-  const workflow = getAutopilotWorkflow(intent);
-  return Array.from(new Set([
-    ...workflow.knowledgeCategories.map((category) => normalizeCategory(String(category))),
-    ...(VERTICAL_CATEGORY_EQUIVALENTS[intent] || []).map(normalizeCategory),
-  ]));
-}
-
-function documentMatchesIntentCategory(document: KnowledgeBaseDocument, intent: UniversalAutopilotIntent): boolean {
-  const categories = getDocumentCategories(document);
-  const targets = getIntentCategoryTargets(intent);
-  return categories.some((category) => targets.some((target) => category === target || category.includes(target) || target.includes(category)));
-}
-
-function countRegexMatches(haystack: string, patterns: RegExp[]): number {
-  return patterns.reduce((score, pattern) => score + (pattern.test(haystack) ? 1 : 0), 0);
-}
-
-function getOfficialDocumentScore(document: KnowledgeBaseDocument, intent: UniversalAutopilotIntent): number {
-  if (!isDocumentActive(document)) return -500;
-  if (isUnsafeAsCustomerFacingKnowledge(document)) return -500;
-
-  const content = String(document.content || '');
-  const canonicalAnswer = getCanonicalAnswer(document);
-  const haystack = normalizeForIntent(`${document.name || ''}\n${content}\n${canonicalAnswer}`);
-  const categories = getDocumentCategories(document);
-  const hasCategoryMatch = documentMatchesIntentCategory(document, intent);
-  let score = 0;
-
-  if (hasCategoryMatch) score += 120;
-  if (canonicalAnswer) score += 90;
-  if (
-    hasExactResponseDirective(document) &&
-    /\br\$\s*\d+/i.test(content) &&
-    /\b\d{2,4}\s*(?:mega|megas|mb|gb)\b/.test(haystack)
-  ) {
-    score += 150;
-  }
-  score += Math.max(0, Math.min(20, getDocumentPriority(document))) * 4;
-  score += countRegexMatches(haystack, INTENT_KEYWORDS[intent] || []) * 30;
-
-  if (/\br\$\s*\d+/i.test(content) && (intent === 'pricing_request' || intent === 'catalog_request' || intent === 'purchase_inquiry')) {
-    score += 35;
-  }
-  if (categories.includes('internal_only')) score -= 180;
-  if (
-    intent !== 'cancellation_request' &&
-    categories.some((category) => category.includes('cancellation') && category !== 'returns_or_cancellation')
-  ) score -= 140;
-  if (!['human_handoff', 'complaint', 'cancellation_request'].includes(intent) && categories.includes('handoff_policy')) score -= 80;
-  if (!['return_or_refund', 'cancellation_request'].includes(intent) && categories.includes('returns_or_cancellation')) score -= 90;
-  if (normalizeForIntent(content).length < 40 && !canonicalAnswer) score -= 30;
-  if (!DETERMINISTIC_OFFICIAL_INTENTS.has(intent) && !canonicalAnswer) score -= 160;
-
-  return score;
-}
-
-function extractPromotionSection(content: string): string {
-  const lines = content.split('\n');
-  const startIndex = lines.findIndex((line) => /\b(promocao|promocoes|promocional|promo|oferta)\b/.test(normalizeForIntent(line)));
-  if (startIndex < 0) return content;
-
-  const section = lines.slice(startIndex);
-  const validUntilIndex = section.findIndex((line) => /\b(oferta\s+valida|valido\s+ate|valida\s+ate)\b/.test(normalizeForIntent(line)));
-  if (validUntilIndex >= 0) {
-    return section.slice(0, validUntilIndex + 1).join('\n').trim();
-  }
-
-  return section.join('\n').trim();
 }
 
 const REQUEST_SCOPE_STOP_WORDS = new Set([
@@ -318,20 +131,6 @@ function wordsFromScopeText(value: string): string[] {
   );
 }
 
-function hasScopeTerm(haystack: string, term: string): boolean {
-  const variants = [term];
-  if (term.length > 3 && term.endsWith('s') && !term.endsWith('ais') && !term.endsWith('eis') && !term.endsWith('ois')) {
-    variants.push(term.slice(0, -1));
-  }
-  if (term.length > 4 && term.endsWith('a')) variants.push(`${term.slice(0, -1)}o`);
-  if (term.length > 4 && term.endsWith('o')) variants.push(`${term.slice(0, -1)}a`);
-  return uniqueValues(variants).some((variant) => new RegExp(`\\b${variant}\\b`).test(haystack));
-}
-
-function hasScopeNumber(haystack: string, number: string): boolean {
-  return new RegExp(`\\b${number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[,.]0+)?\\b`).test(haystack);
-}
-
 function getRequestScope(customerMessage?: string | null): {
   includeTerms: string[];
   excludeTerms: string[];
@@ -362,159 +161,6 @@ function getRequestScope(customerMessage?: string | null): {
     numbers,
     hasExplicitScope: includeTerms.length > 0 || excludeTerms.length > 0 || numbers.length > 0,
   };
-}
-
-function splitCatalogBlocks(content: string): { header: string[]; blocks: string[] } {
-  const normalized = content.replace(/\r\n?/g, '\n').trim();
-  if (!normalized) return { header: [], blocks: [] };
-
-  const blocks = normalized
-    .split(/\n{2,}/g)
-    .map((block) => block.trim())
-    .filter(Boolean);
-
-  const firstPlanIndex = blocks.findIndex((block) => {
-    const normalizedBlock = normalizeForIntent(block);
-    return /\b\d+(?:[,.]\d+)?\b/.test(normalizedBlock) || /\br\$\s*\d+/i.test(block);
-  });
-
-  if (firstPlanIndex <= 0) return { header: firstPlanIndex === 0 ? [] : [], blocks };
-  return {
-    header: blocks.slice(0, firstPlanIndex),
-    blocks: blocks.slice(firstPlanIndex),
-  };
-}
-
-function blockMatchesCatalogFilters(
-  block: string,
-  scope: ReturnType<typeof getRequestScope>
-): boolean {
-  const normalized = normalizeForIntent(block);
-  const isCatalogItem = (
-    /\b\d+(?:[,.]\d+)?\b/.test(normalized) ||
-    /\br\$\s*\d+/i.test(block) ||
-    /\b(?:plano|pacote|servico|produto|combo|item|curso|aula|imovel|casa|apartamento|consulta|procedimento|opcao|menu|prato)\b/.test(normalized)
-  );
-  if (!isCatalogItem) return false;
-  if (scope.excludeTerms.some((term) => hasScopeTerm(normalized, term))) return false;
-  if (scope.includeTerms.length > 0 && !scope.includeTerms.every((term) => hasScopeTerm(normalized, term))) return false;
-  if (scope.numbers.length > 0 && !scope.numbers.some((number) => hasScopeNumber(normalized, number))) return false;
-  return true;
-}
-
-function scopeCatalogContentToRequest(
-  content: string,
-  customerMessage: string | null | undefined,
-  intent?: UniversalAutopilotIntent
-): string {
-  if (!['catalog_request', 'pricing_request', 'promotion_request'].includes(intent || 'unknown')) return content;
-
-  const scope = getRequestScope(customerMessage);
-  if (!scope.hasExplicitScope) {
-    return content;
-  }
-
-  const { header, blocks } = splitCatalogBlocks(content);
-  const selected = blocks.filter((block) => blockMatchesCatalogFilters(block, scope));
-  if (selected.length === 0) return content;
-
-  return [...header, ...selected].join('\n\n').trim();
-}
-
-export function cleanKnowledgeCatalogContent(
-  content: string,
-  preserveSpacing = false,
-  intent?: UniversalAutopilotIntent,
-  customerMessage?: string | null
-): string {
-  let normalized = content.replace(/\r\n?/g, '\n');
-
-  if (preserveSpacing) {
-    normalized = normalized
-      .split('\n')
-      .map((line) => line.replace(/[ \t]+$/g, ''))
-      .join('\n')
-      .trim();
-  } else {
-    normalized = normalized
-      .split('\n')
-      .map((line) => line.replace(/[ \t]+$/g, '').trimStart())
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-
-  const lines = normalized.split('\n');
-  while (lines.length > 0) {
-    const first = normalizeForIntent(lines[0] || '');
-    if (!first || /^(voce deve mandar|deve mandar|nao mude|nao altere|envie exatamente|mande dessa forma|mande exatamente|responda exatamente|resposta oficial|use esta resposta|instrucoes?|observacao interna)/.test(first)) {
-      lines.shift();
-      continue;
-    }
-    break;
-  }
-
-  normalized = lines.join('\n').replace(/^\s*(resposta oficial|resposta canonica|catalogo|cardapio)\s*:\s*/i, '').trim();
-  if (intent === 'promotion_request') {
-    normalized = extractPromotionSection(normalized);
-  }
-  normalized = scopeCatalogContentToRequest(normalized, customerMessage, intent);
-  return normalized;
-}
-
-export function findOfficialKnowledgeAnswer(input: {
-  documents: KnowledgeBaseDocument[] | null | undefined;
-  intent: UniversalAutopilotIntent;
-  customerMessage?: string | null;
-}): { content: string; document: KnowledgeBaseDocument; score: number; preserveFormatting: boolean } | null {
-  if (
-    input.intent === 'unknown' ||
-    input.intent === 'greeting' ||
-    input.intent === 'thanks' ||
-    input.intent === 'human_handoff' ||
-    LLM_COMPOSED_INTENTS.has(input.intent)
-  ) {
-    return null;
-  }
-
-  const candidates = (input.documents || [])
-    .map((document) => {
-      const canonicalAnswer = getCanonicalAnswer(document);
-      const preserveFormatting = hasExactResponseDirective(document);
-      const content = cleanKnowledgeCatalogContent(
-        canonicalAnswer || String(document.content || ''),
-        preserveFormatting,
-        input.intent,
-        input.customerMessage
-      );
-      return {
-        document,
-        content,
-        preserveFormatting,
-        score: getOfficialDocumentScore(document, input.intent),
-      };
-    })
-    .filter(({ content, score }) => content.trim().length > 0 && score >= 100)
-    .sort((left, right) => right.score - left.score || right.content.length - left.content.length);
-
-  const best = candidates[0];
-  if (!best) return null;
-
-  return {
-    ...best,
-    content: best.content.length > OFFICIAL_ANSWER_MAX_CHARS
-      ? best.content.slice(0, OFFICIAL_ANSWER_MAX_CHARS).trim()
-      : best.content,
-  };
-}
-
-export function findOfficialPlanCatalog(
-  documents: KnowledgeBaseDocument[] | null | undefined
-): { content: string; document: KnowledgeBaseDocument; score: number; preserveFormatting: boolean } | null {
-  return (
-    findOfficialKnowledgeAnswer({ documents, intent: 'catalog_request' }) ||
-    findOfficialKnowledgeAnswer({ documents, intent: 'pricing_request' })
-  );
 }
 
 function matchesAny(normalizedText: string, intent: UniversalAutopilotIntent): boolean {
@@ -903,32 +549,21 @@ function buildAutopilotIntentResolution(input: {
   knowledgeDocuments?: KnowledgeBaseDocument[] | null;
 }, detected: DetectedIntent): AutopilotIntentResolution {
   const workflow = getAutopilotWorkflow(detected.intent);
-  const official = findOfficialKnowledgeAnswer({
-    documents: input.knowledgeDocuments,
-    intent: detected.intent,
-    customerMessage: input.customerMessage,
-  });
   const extractedSlots = extractSlots(input.customerMessage);
   const shouldRetrieveKnowledge = !['greeting', 'thanks', 'human_handoff'].includes(detected.intent);
 
   return {
     intent: detected.intent,
     subIntent: null,
-    confidence: official ? Math.max(detected.confidence, 0.94) : detected.confidence,
-    reason: official
-      ? `${detected.reason} Documento oficial elegivel encontrado.`
-      : detected.reason,
+    confidence: detected.confidence,
+    reason: detected.reason,
     requiredSlots: workflow.requiredSlots,
     extractedSlots,
     workflowId: workflow.id,
-    shouldUseLlm: !official && detected.intent !== 'human_handoff',
+    shouldUseLlm: detected.intent !== 'human_handoff',
     shouldRetrieveKnowledge,
     shouldUseTool: workflow.allowedTools.some((tool) => tool !== 'transfer_chat' && tool !== 'add_internal_note'),
     shouldTransfer: detected.intent === 'human_handoff' || workflow.handoffPolicy === 'immediate',
     knowledgeCategories: workflow.knowledgeCategories as KnowledgeDocumentCategory[],
-    sourceDocumentId: official?.document.id,
-    sourceDocumentName: official?.document.name,
-    officialResponse: official?.content,
-    officialResponsePreserveFormatting: official?.preserveFormatting,
   };
 }

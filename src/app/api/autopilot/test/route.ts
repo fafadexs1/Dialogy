@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
-import type { AutopilotConfig, AutopilotConfigDraftSnapshot, KnowledgeBaseDocument, NexusFlowInstance } from '@/lib/types';
+import type { AutopilotConfig, AutopilotConfigDraftSnapshot, KnowledgeBaseDocument, KnowledgeCollection, NexusFlowInstance } from '@/lib/types';
 import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
@@ -20,8 +20,15 @@ import {
   getActiveProcedureExecution,
 } from '@/services/autopilot/procedure-store';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
-import { buildIntentScopedKnowledgeBase, resolveActiveFlowIntentScope } from '@/services/autopilot/flow-routing';
+import {
+  buildIntentScopedKnowledgeBase,
+  filterKnowledgeDocumentsForScope,
+  renderDeterministicFlowMessage,
+  resolveActiveFlowIntentScope,
+  resolveDeterministicFlowMessage,
+} from '@/services/autopilot/flow-routing';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
+import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 
 type PreviewPayload = {
   workspaceId: string;
@@ -309,6 +316,16 @@ function parseKnowledgeDocuments(raw: unknown): KnowledgeBaseDocument[] {
   }
 }
 
+function parseKnowledgeCollections(raw: unknown): KnowledgeCollection[] {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function normalizeToolNames(raw: unknown): string[] {
   if (!raw) return [];
   const parsed = typeof raw === 'string'
@@ -338,6 +355,9 @@ function applyDraftSnapshot(config: AutopilotConfig, snapshot?: AutopilotConfigD
     knowledge_base_documents: Array.isArray(snapshot.knowledge_base_documents)
       ? snapshot.knowledge_base_documents
       : config.knowledge_base_documents,
+    knowledge_collections: Array.isArray(snapshot.knowledge_collections)
+      ? snapshot.knowledge_collections
+      : config.knowledge_collections,
     is_active: Boolean(snapshot.is_active),
     is_private: Boolean(snapshot.is_private),
     default_fallback_reply: typeof snapshot.default_fallback_reply === 'string' && snapshot.default_fallback_reply.length > 0 ? snapshot.default_fallback_reply : null,
@@ -400,6 +420,7 @@ export async function POST(request: Request) {
       return {
         ...row,
         knowledge_base_documents: parseKnowledgeDocuments(row.knowledge_base_documents),
+        knowledge_collections: parseKnowledgeCollections(row.knowledge_collections),
         enabled_tool_names: normalizeToolNames(row.enabled_tool_names),
         is_active: Boolean(row.is_active),
         is_primary: Boolean(row.is_primary),
@@ -447,30 +468,42 @@ export async function POST(request: Request) {
       contactName,
       contactEmail,
     });
-    const previewIntent = resolveAutopilotIntent({
+    let previewIntent = resolveAutopilotIntent({
       customerMessage: message,
       chatHistory: chatHistory || '',
       knowledgeDocuments: config.knowledge_base_documents || [],
     });
     const activeFlowIntentScope = resolveActiveFlowIntentScope(config, previewIntent.intent);
+    const scopedKnowledgeDocuments = filterKnowledgeDocumentsForScope(config, config.knowledge_base_documents, activeFlowIntentScope);
+    const allowedDocumentIds = activeFlowIntentScope?.knowledgeCollectionIds?.length
+      ? scopedKnowledgeDocuments.map((document) => document.id)
+      : undefined;
+    const deterministicFlowMessageNode = resolveDeterministicFlowMessage(config, activeFlowIntentScope);
+    const deterministicFlowMessage = deterministicFlowMessageNode
+      ? renderDeterministicFlowMessage(config, deterministicFlowMessageNode.message, {
+        customerMessage: message,
+        contactName: contact.name,
+      })
+      : null;
     const scopedKnowledgeBase = buildIntentScopedKnowledgeBase(config.knowledge_base || '', activeFlowIntentScope);
     const ragContext = await retrieveHybridSupportContext({
       workspaceId,
       autopilotConfigId: config.id,
       query: message,
-      staticDocuments: config.knowledge_base_documents || [],
+      staticDocuments: scopedKnowledgeDocuments,
       intent: previewIntent,
+      allowedDocumentIds,
     }).catch((error) => {
       console.warn('[AUTOPILOT_TEST_API] RAG diagnostics failed; using static documents:', error);
       return null;
     });
     const vectorKnowledgeDocuments = ragContext?.knowledgeBaseDocuments.filter((doc) => doc.source === 'vector' || doc.source === 'keyword') || [];
-    const staticKnowledgeDocuments = config.knowledge_base_documents || [];
+    const staticKnowledgeDocuments = scopedKnowledgeDocuments;
 
     const baseTrace = buildAutopilotPlaygroundTrace({
       customerMessage: message,
       chatHistory: chatHistory ?? '',
-      knowledgeDocuments: config.knowledge_base_documents || [],
+      knowledgeDocuments: scopedKnowledgeDocuments,
       vectorKnowledgeDocuments,
       staticKnowledgeDocuments,
       fallbackReply: config.default_fallback_reply || '',
@@ -492,8 +525,17 @@ export async function POST(request: Request) {
       actions: [] as AgentToolAction[],
     };
 
+    if (deterministicFlowMessage) {
+      result = {
+        response: deterministicFlowMessage,
+        messageBlocks: null,
+        triggeredRule: `Fluxo: ${deterministicFlowMessageNode?.title || 'Enviar mensagem'}`,
+        actions: [],
+      };
+    }
+
     const compiledProcedures = compileAllProcedures({
-      documents: config.knowledge_base_documents || [],
+      documents: scopedKnowledgeDocuments,
       tools: toolCatalog,
       enabledToolNames,
     });
@@ -503,7 +545,7 @@ export async function POST(request: Request) {
         ? procedureChatId
         : null;
 
-    if (validProcedureChatId && compiledProcedures.length > 0) {
+    if (!deterministicFlowMessage && validProcedureChatId && compiledProcedures.length > 0) {
       try {
         let activeProcedure = await getActiveProcedureExecution(validProcedureChatId);
         let activeGraph = activeProcedure
@@ -554,7 +596,7 @@ export async function POST(request: Request) {
             const procedureTrace = buildAutopilotPlaygroundTrace({
               customerMessage: message,
               chatHistory: chatHistory ?? '',
-              knowledgeDocuments: config.knowledge_base_documents || [],
+              knowledgeDocuments: scopedKnowledgeDocuments,
               vectorKnowledgeDocuments,
               staticKnowledgeDocuments,
               fallbackReply: config.default_fallback_reply || '',
@@ -604,7 +646,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (baseTrace.workflow.executionMode === 'continue_llm') {
+    if (!deterministicFlowMessage && baseTrace.workflow.executionMode === 'continue_llm') {
       if (!hasRuntimeGeminiKey(config, workspaceGeminiRuntime)) {
         return NextResponse.json(
           {
@@ -615,13 +657,16 @@ export async function POST(request: Request) {
         );
       }
 
+      const promptDocuments = ragContext?.knowledgeBaseDocuments || scopedKnowledgeDocuments;
+      const promptPartitions = partitionKnowledgeDocuments(promptDocuments);
       const generated = await generateAgentResponse({
         chatId: `preview-${Date.now()}`,
         customerMessage: message,
         chatHistory: chatHistory ?? '',
         rules: rules.filter((rule) => rule.enabled),
         knowledgeBase: scopedKnowledgeBase,
-        knowledgeBaseDocuments: ragContext?.knowledgeBaseDocuments || config.knowledge_base_documents || [],
+        knowledgeBaseDocuments: promptPartitions.facts,
+        workflowKnowledgeDocuments: promptPartitions.procedures,
         fallbackReply: config.default_fallback_reply || '',
         escalationPolicy: config.escalation_policy || '',
         closingPolicy: config.closing_policy || '',
@@ -668,7 +713,7 @@ export async function POST(request: Request) {
     const trace = buildAutopilotPlaygroundTrace({
       customerMessage: message,
       chatHistory: chatHistory ?? '',
-      knowledgeDocuments: config.knowledge_base_documents || [],
+      knowledgeDocuments: scopedKnowledgeDocuments,
       vectorKnowledgeDocuments,
       staticKnowledgeDocuments,
       fallbackReply: config.default_fallback_reply || '',

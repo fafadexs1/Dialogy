@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import type { AutopilotConfig, KnowledgeBaseDocument } from '@/lib/types';
+import type { AutopilotConfig, KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 
 function normalizeKnowledgeBaseDocuments(raw: unknown): KnowledgeBaseDocument[] {
@@ -14,10 +14,23 @@ function normalizeKnowledgeBaseDocuments(raw: unknown): KnowledgeBaseDocument[] 
     return Array.isArray(raw) ? (raw as KnowledgeBaseDocument[]) : [];
 }
 
+function normalizeKnowledgeCollections(raw: unknown): KnowledgeCollection[] {
+    if (typeof raw === 'string') {
+        try {
+            return JSON.parse(raw) as KnowledgeCollection[];
+        } catch {
+            return [];
+        }
+    }
+
+    return Array.isArray(raw) ? (raw as KnowledgeCollection[]) : [];
+}
+
 function mapAutopilotConfig(row: any): AutopilotConfig {
     return {
         ...row,
         knowledge_base_documents: normalizeKnowledgeBaseDocuments(row.knowledge_base_documents),
+        knowledge_collections: normalizeKnowledgeCollections(row.knowledge_collections),
         is_active: Boolean(row.is_active),
         is_primary: Boolean(row.is_primary),
         is_private: Boolean(row.is_private),

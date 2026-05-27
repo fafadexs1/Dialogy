@@ -13,13 +13,21 @@ import type {
     NexusFlowInstance,
     Action,
     AutopilotUsageLog,
+    AutopilotRagHealth,
+    KnowledgeCollection,
     KnowledgeBaseDocument,
     Workspace,
 } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
+import { DOCUMENT_EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 import { VectorStore } from '@/lib/vector-store';
+import { isUnsafeAsCustomerFacingKnowledge } from '@/services/rag/document-safety';
+import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
+import { buildRagLabCases, summarizeRagLabResults, type RagLabCaseResult, type RagLabReport } from '@/services/rag/evaluation';
+import { resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { filterKnowledgeDocumentsForScope, resolveActiveFlowIntentScope } from '@/services/autopilot/flow-routing';
 import { isAllowedAutopilotModel } from '@/services/ai/model-selection';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
@@ -35,7 +43,8 @@ async function ensureAutopilotToolColumns(): Promise<void> {
         ALTER TABLE IF EXISTS autopilot_configs
         ADD COLUMN IF NOT EXISTS enabled_tool_names jsonb,
         ADD COLUMN IF NOT EXISTS transcription_model text,
-        ADD COLUMN IF NOT EXISTS flow_graph jsonb
+        ADD COLUMN IF NOT EXISTS flow_graph jsonb,
+        ADD COLUMN IF NOT EXISTS knowledge_collections jsonb
     `);
 }
 
@@ -110,6 +119,16 @@ function normalizeEnabledToolNames(raw: unknown): string[] {
         : [];
 }
 
+function parseKnowledgeCollections(raw: unknown): KnowledgeCollection[] {
+    if (!raw) return [];
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
 function parseFlowGraph(raw: unknown): AutopilotFlowGraph | null {
     const parsed = typeof raw === 'string'
         ? (() => {
@@ -142,6 +161,7 @@ function buildSnapshotFromConfigRow(row: any): AutopilotConfigDraftSnapshot {
         transcription_model: row.transcription_model || null,
         knowledge_base: row.knowledge_base || null,
         knowledge_base_documents: parseKnowledgeBaseDocuments(row.knowledge_base_documents),
+        knowledge_collections: parseKnowledgeCollections(row.knowledge_collections),
         is_active: Boolean(row.is_active),
         is_private: Boolean(row.is_private),
         default_fallback_reply: row.default_fallback_reply || null,
@@ -179,6 +199,9 @@ function normalizeDraftSnapshot(
         knowledge_base_documents: Array.isArray(snapshot.knowledge_base_documents)
             ? snapshot.knowledge_base_documents
             : fallback.knowledge_base_documents,
+        knowledge_collections: Array.isArray(snapshot.knowledge_collections)
+            ? snapshot.knowledge_collections
+            : fallback.knowledge_collections || [],
         is_active: hasOwn('is_active') ? Boolean(snapshot.is_active) : fallback.is_active,
         is_private: hasOwn('is_private') ? Boolean(snapshot.is_private) : fallback.is_private,
         default_fallback_reply: hasOwn('default_fallback_reply')
@@ -213,6 +236,9 @@ async function buildSnapshotFromFormData(
         const parsedDocs = parseKnowledgeBaseDocuments(formData.get('knowledgeBaseDocuments')?.toString() || '[]');
         documents = parsedDocs;
     }
+    const collections = formData.has('knowledgeCollections')
+        ? parseKnowledgeCollections(formData.get('knowledgeCollections')?.toString() || '[]')
+        : fallback.knowledge_collections || [];
 
     return {
         name: formData.get('agentName')?.toString() || fallback.name || 'Meu agente de IA',
@@ -227,6 +253,7 @@ async function buildSnapshotFromFormData(
             ? (formData.get('knowledgeBase')?.toString() || null)
             : fallback.knowledge_base,
         knowledge_base_documents: documents,
+        knowledge_collections: collections,
         is_active: readFormBoolean(formData, 'isActive', fallback.is_active),
         is_private: readFormBoolean(formData, 'isPrivate', fallback.is_private),
         default_fallback_reply: formData.has('defaultFallbackReply')
@@ -293,6 +320,7 @@ async function reindexChangedKnowledgeDocuments({
                     documentId: doc.id,
                     documentName: doc.name || 'Documento',
                     content,
+                    document: doc,
                 });
             } else {
                 await ingestKnowledgeBaseDocument({
@@ -301,11 +329,280 @@ async function reindexChangedKnowledgeDocuments({
                     documentId: doc.id,
                     documentName: doc.name || 'Documento',
                     content,
+                    document: doc,
                 });
             }
         } catch (ragError) {
             console.error('[RAG] Failed to reindex knowledge document:', ragError);
         }
+    }
+}
+
+export async function getAutopilotRagHealth(configId: string): Promise<{
+    health: AutopilotRagHealth | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { health: null, error: 'Usuario nao autenticado.' };
+
+    try {
+        const configRes = await db.query(
+            `SELECT id, workspace_id, knowledge_base_documents, knowledge_collections
+             FROM autopilot_configs
+             WHERE id = $1
+             LIMIT 1`,
+            [configId]
+        );
+        if (configRes.rowCount === 0) return { health: null, error: 'Agente nao encontrado.' };
+
+        const config = configRes.rows[0];
+        const workspaceId = String(config.workspace_id);
+        if (!await isWorkspaceMember(user.id, workspaceId)) {
+            return { health: null, error: 'Acesso nao autorizado.' };
+        }
+
+        const publishedDocuments = parseKnowledgeBaseDocuments(config.knowledge_base_documents)
+            .filter((document) => Boolean(document.id && document.content?.trim()));
+        const quarantinedDocuments = publishedDocuments.filter((document) => isUnsafeAsCustomerFacingKnowledge(document));
+        const documents = publishedDocuments.filter((document) => !isUnsafeAsCustomerFacingKnowledge(document));
+        const documentIds = documents.map((document) => document.id);
+        const statsRes = documentIds.length > 0
+            ? await db.query(
+                `SELECT
+                    document_id::text AS document_id,
+                    COUNT(*)::int AS chunks,
+                    COUNT(*) FILTER (WHERE vector_dims(vector) <> ${DOCUMENT_EMBEDDING_DIMENSIONS})::int AS wrong_dims
+                 FROM embeddings_documents
+                 WHERE workspace_id = $1
+                   AND autopilot_config_id = $2
+                   AND document_id::text = ANY($3::text[])
+                 GROUP BY document_id`,
+                [workspaceId, configId, documentIds]
+            )
+            : { rows: [] };
+        const indexedIds = new Set(
+            statsRes.rows
+                .filter((row) => Number(row.chunks) > 0 && Number(row.wrong_dims) === 0)
+                .map((row) => String(row.document_id))
+        );
+        const indexedChunks = statsRes.rows.reduce((total, row) => total + Number(row.chunks || 0), 0);
+        const wrongDimensionChunks = statsRes.rows.reduce((total, row) => total + Number(row.wrong_dims || 0), 0);
+        const staleRes = await db.query(
+            `SELECT COUNT(DISTINCT document_id)::int AS documents
+             FROM embeddings_documents
+             WHERE workspace_id = $1
+               AND autopilot_config_id = $2
+               AND ($3::text[] = '{}'::text[] OR NOT (document_id::text = ANY($3::text[])))`,
+            [workspaceId, configId, documentIds]
+        );
+        const logRes = await db.query(
+            `SELECT COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')::int AS recent,
+                    MAX(created_at) AS last_retrieval_at
+             FROM rag_retrieval_logs
+             WHERE workspace_id = $1 AND autopilot_config_id = $2`,
+            [workspaceId, configId]
+        ).catch(() => ({ rows: [{ recent: 0, last_retrieval_at: null }] }));
+        const collections = parseKnowledgeCollections(config.knowledge_collections);
+        const normalizedCollections = collections.some((collection) => collection.id === 'general')
+            ? collections
+            : [{ id: 'general', name: 'Geral', isDefault: true }, ...collections];
+
+        return {
+            health: {
+                configuredDocuments: documents.length,
+                indexedDocuments: indexedIds.size,
+                indexedChunks,
+                missingDocuments: documents.filter((document) => !indexedIds.has(document.id)).length,
+                quarantinedDocuments: quarantinedDocuments.length,
+                staleDocuments: Number(staleRes.rows[0]?.documents || 0),
+                wrongDimensionChunks,
+                recentRetrievals: Number(logRes.rows[0]?.recent || 0),
+                lastRetrievalAt: logRes.rows[0]?.last_retrieval_at
+                    ? new Date(logRes.rows[0].last_retrieval_at).toISOString()
+                    : null,
+                collections: normalizedCollections.map((collection) => {
+                    const collectionDocuments = documents.filter((document) => (
+                        (document.collectionIds?.length ? document.collectionIds : ['general']).includes(collection.id)
+                    ));
+                    return {
+                        id: collection.id,
+                        name: collection.name,
+                        documents: collectionDocuments.length,
+                        indexedDocuments: collectionDocuments.filter((document) => indexedIds.has(document.id)).length,
+                    };
+                }),
+            },
+        };
+    } catch (error) {
+        console.error('[GET_AUTOPILOT_RAG_HEALTH] Erro ao carregar saude do indice:', error);
+        return { health: null, error: 'Falha ao carregar saude do indice RAG.' };
+    }
+}
+
+export async function reindexAutopilotKnowledgeBase(configId: string): Promise<{
+    success: boolean;
+    queued?: number;
+    removedStaleDocuments?: number;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const configRes = await db.query(
+            `SELECT id, workspace_id, knowledge_base_documents
+             FROM autopilot_configs
+             WHERE id = $1
+             LIMIT 1`,
+            [configId]
+        );
+        if (configRes.rowCount === 0) return { success: false, error: 'Agente nao encontrado.' };
+
+        const config = configRes.rows[0];
+        const workspaceId = String(config.workspace_id);
+        if (!await isWorkspaceMember(user.id, workspaceId)) {
+            return { success: false, error: 'Acesso nao autorizado.' };
+        }
+
+        const publishedDocuments = parseKnowledgeBaseDocuments(config.knowledge_base_documents)
+            .filter((document) => Boolean(document.id && document.content?.trim()));
+        const quarantinedDocuments = publishedDocuments.filter((document) => isUnsafeAsCustomerFacingKnowledge(document));
+        const documents = publishedDocuments.filter((document) => !isUnsafeAsCustomerFacingKnowledge(document));
+        const documentIds = documents.map((document) => document.id);
+        await Promise.all(quarantinedDocuments.map((document) => VectorStore.deleteDocumentEmbeddings(document.id)));
+        const staleDeleteRes = await db.query(
+            `DELETE FROM embeddings_documents
+             WHERE workspace_id = $1
+               AND autopilot_config_id = $2
+               AND ($3::text[] = '{}'::text[] OR NOT (document_id::text = ANY($3::text[])))
+             RETURNING document_id`,
+            [workspaceId, configId, documentIds]
+        );
+        const runKey = `repair_${Date.now()}`;
+
+        for (const document of documents) {
+            if (shouldEnqueueJob('ai_document_ingest')) {
+                await enqueueAiDocumentIngest({
+                    workspaceId,
+                    autopilotConfigId: configId,
+                    documentId: document.id,
+                    documentName: document.name || 'Documento',
+                    content: document.content,
+                    document,
+                    jobKey: runKey,
+                });
+            } else {
+                await ingestKnowledgeBaseDocument({
+                    workspaceId,
+                    autopilotConfigId: configId,
+                    documentId: document.id,
+                    documentName: document.name || 'Documento',
+                    content: document.content,
+                    document,
+                });
+            }
+        }
+
+        revalidatePath(`/autopilot/${configId}`);
+        return {
+            success: true,
+            queued: documents.length,
+            removedStaleDocuments: new Set(staleDeleteRes.rows.map((row) => String(row.document_id))).size,
+        };
+    } catch (error) {
+        console.error('[REINDEX_AUTOPILOT_KNOWLEDGE] Erro ao reparar indice:', error);
+        return { success: false, error: 'Falha ao reindexar a base de conhecimento.' };
+    }
+}
+
+export async function runAutopilotRagLab(configId: string): Promise<{
+    report: RagLabReport | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { report: null, error: 'Usuario nao autenticado.' };
+
+    try {
+        const configRes = await db.query(
+            `SELECT *
+             FROM autopilot_configs
+             WHERE id = $1
+             LIMIT 1`,
+            [configId]
+        );
+        if (configRes.rowCount === 0) return { report: null, error: 'Agente nao encontrado.' };
+
+        const row = configRes.rows[0];
+        const workspaceId = String(row.workspace_id);
+        if (!await isWorkspaceMember(user.id, workspaceId)) {
+            return { report: null, error: 'Acesso nao autorizado.' };
+        }
+
+        const safeDocuments = parseKnowledgeBaseDocuments(row.knowledge_base_documents)
+            .filter((document) => document.content?.trim() && !isUnsafeAsCustomerFacingKnowledge(document));
+        const config = {
+            ...row,
+            knowledge_base_documents: safeDocuments,
+            knowledge_collections: parseKnowledgeCollections(row.knowledge_collections),
+            flow_graph: parseFlowGraph(row.flow_graph),
+        } as AutopilotConfig;
+        const cases = buildRagLabCases(safeDocuments);
+        const results: RagLabCaseResult[] = [];
+
+        for (const evalCase of cases) {
+            const intent = resolveAutopilotIntent({
+                customerMessage: evalCase.customerMessage,
+                knowledgeDocuments: safeDocuments,
+            });
+            const scope = resolveActiveFlowIntentScope(config, intent.intent);
+            const scopedDocuments = filterKnowledgeDocumentsForScope(config, safeDocuments, scope);
+            const allowedDocumentIds = scope?.knowledgeCollectionIds?.length
+                ? scopedDocuments.map((document) => document.id)
+                : undefined;
+            const retrieval = await retrieveHybridSupportContext({
+                workspaceId,
+                autopilotConfigId: configId,
+                query: evalCase.customerMessage,
+                staticDocuments: scopedDocuments,
+                intent,
+                allowedDocumentIds,
+            });
+            const selectedDocuments = retrieval.selected.map((document) => ({
+                id: document.id,
+                name: document.name,
+                score: document.score,
+                source: document.source,
+            }));
+            const selectedIds = selectedDocuments.map((document) => document.id);
+            const collectionLeakDetected = Boolean(
+                allowedDocumentIds && selectedIds.some((documentId) => !allowedDocumentIds.includes(documentId))
+            );
+            const top1Passed = selectedIds[0] === evalCase.expectedDocumentId;
+            const top3Passed = selectedIds.slice(0, 3).includes(evalCase.expectedDocumentId);
+            const intentPassed = intent.intent === evalCase.expectedIntent;
+
+            results.push({
+                ...evalCase,
+                actualIntent: intent.intent,
+                activeSubAgent: scope?.title || null,
+                allowedCollectionIds: scope?.knowledgeCollectionIds || null,
+                knowledgeCoverage: retrieval.knowledgeCoverage,
+                selectedDocuments,
+                top1Passed,
+                top3Passed,
+                intentPassed,
+                collectionLeakDetected,
+                passed: top3Passed && intentPassed && !collectionLeakDetected,
+            });
+        }
+
+        return { report: summarizeRagLabResults(results) };
+    } catch (error) {
+        console.error('[RUN_AUTOPILOT_RAG_LAB] Erro ao avaliar RAG:', error);
+        return { report: null, error: 'Falha ao executar laboratorio RAG.' };
     }
 }
 
@@ -465,6 +762,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             return {
                 ...row,
                 knowledge_base_documents: parseKnowledgeBaseDocuments(row.knowledge_base_documents),
+                knowledge_collections: parseKnowledgeCollections(row.knowledge_collections),
                 enabled_tool_names: normalizeEnabledToolNames(row.enabled_tool_names),
                 is_active: Boolean(row.is_active),
                 is_primary: Boolean(row.is_primary),
@@ -572,7 +870,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
 export async function saveAutopilotConfig(
     prevState: any,
     formData: FormData
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; rule?: NexusFlowInstance }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -676,6 +974,11 @@ export async function saveAutopilotConfig(
                 return { success: false, error: 'Lista de ferramentas habilitadas invÃ¡lida.' };
             }
         }
+        if (formData.has('knowledgeCollections')) {
+            const parsedCollections = parseKnowledgeCollections(formData.get('knowledgeCollections')?.toString() || '[]');
+            setClauses.push(`knowledge_collections = $${valueIndex++}`);
+            values.push(JSON.stringify(parsedCollections));
+        }
         if (formData.has('flowGraph')) {
             const flowGraph = parseFlowGraph(formData.get('flowGraph')?.toString() || '');
             setClauses.push(`flow_graph = $${valueIndex++}`);
@@ -754,6 +1057,7 @@ export async function saveAutopilotConfig(
                             documentId: doc.id,
                             documentName: doc.name || 'Documento',
                             content,
+                            document: doc,
                         });
                     } else {
                         await ingestKnowledgeBaseDocument({
@@ -762,6 +1066,7 @@ export async function saveAutopilotConfig(
                             documentId: doc.id,
                             documentName: doc.name || 'Documento',
                             content,
+                            document: doc,
                         });
                     }
                 } catch (ragError) {
@@ -943,13 +1248,14 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 transcription_model = $6,
                 knowledge_base = $7,
                 knowledge_base_documents = $8,
-                is_active = $9,
-                is_private = $10,
-                default_fallback_reply = $11,
-                escalation_policy = $12,
-                closing_policy = $13,
-                enabled_tool_names = $14,
-                flow_graph = $15,
+                knowledge_collections = $9,
+                is_active = $10,
+                is_private = $11,
+                default_fallback_reply = $12,
+                escalation_policy = $13,
+                closing_policy = $14,
+                enabled_tool_names = $15,
+                flow_graph = $16,
                 updated_at = NOW()
              WHERE workspace_id = $1 AND id = $2`,
             [
@@ -961,6 +1267,7 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 snapshot.transcription_model || null,
                 snapshot.knowledge_base,
                 JSON.stringify(snapshot.knowledge_base_documents),
+                JSON.stringify(snapshot.knowledge_collections || []),
                 snapshot.is_active,
                 snapshot.is_private,
                 snapshot.default_fallback_reply,
@@ -1081,13 +1388,14 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
                 transcription_model = $6,
                 knowledge_base = $7,
                 knowledge_base_documents = $8,
-                is_active = $9,
-                is_private = $10,
-                default_fallback_reply = $11,
-                escalation_policy = $12,
-                closing_policy = $13,
-                enabled_tool_names = $14,
-                flow_graph = $15,
+                knowledge_collections = $9,
+                is_active = $10,
+                is_private = $11,
+                default_fallback_reply = $12,
+                escalation_policy = $13,
+                closing_policy = $14,
+                enabled_tool_names = $15,
+                flow_graph = $16,
                 updated_at = NOW()
              WHERE workspace_id = $1 AND id = $2`,
             [
@@ -1099,6 +1407,7 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
                 snapshot.transcription_model || null,
                 snapshot.knowledge_base,
                 JSON.stringify(snapshot.knowledge_base_documents),
+                JSON.stringify(snapshot.knowledge_collections || []),
                 snapshot.is_active,
                 snapshot.is_private,
                 snapshot.default_fallback_reply,
@@ -1237,7 +1546,7 @@ export async function deleteAutopilotAgent(agentId: string) {
 export async function saveAutopilotRule(
     configId: string,
     rule: Omit<NexusFlowInstance, 'enabled'>
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; rule?: NexusFlowInstance }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Não autenticado' };
@@ -1249,24 +1558,33 @@ export async function saveAutopilotRule(
 
         const actionJson = JSON.stringify(rule.action);
 
+        let savedRuleRes;
         if (rule.id) {
             // Update existing rule
             console.log(`[SAVE_AUTOPILOT_RULE] Atualizando regra ID: ${rule.id}`);
-            await db.query(
-                `UPDATE autopilot_rules SET name = $1, trigger = $2, action = $3 WHERE id = $4 AND config_id = $5`,
+            savedRuleRes = await db.query(
+                `UPDATE autopilot_rules SET name = $1, trigger = $2, action = $3 WHERE id = $4 AND config_id = $5 RETURNING id, name, trigger, action, enabled`,
                 [rule.name, rule.trigger, actionJson, rule.id, configId]
             );
         } else {
             // Create new rule - o ID será gerado pelo banco de dados (gen_random_uuid())
             console.log(`[SAVE_AUTOPILOT_RULE] Criando nova regra para config ID: ${configId}`);
-            await db.query(
-                `INSERT INTO autopilot_rules (config_id, name, trigger, action) VALUES ($1, $2, $3, $4)`,
+            savedRuleRes = await db.query(
+                `INSERT INTO autopilot_rules (config_id, name, trigger, action) VALUES ($1, $2, $3, $4) RETURNING id, name, trigger, action, enabled`,
                 [configId, rule.name, rule.trigger, actionJson]
             );
         }
 
+        const savedRuleRow = savedRuleRes.rows[0];
+
         revalidatePath('/autopilot');
-        return { success: true };
+        return {
+            success: true,
+            rule: savedRuleRow ? {
+                ...savedRuleRow,
+                action: typeof savedRuleRow.action === 'string' ? JSON.parse(savedRuleRow.action) : savedRuleRow.action,
+            } : undefined,
+        };
 
     } catch (error) {
         console.error('[SAVE_AUTOPILOT_RULE] Erro detalhado:', error);
@@ -1439,6 +1757,7 @@ export async function addDocumentToKnowledgeBase(
                     documentId: docId,
                     documentName: title,
                     content,
+                    document: newDoc,
                 });
             } else {
                 await ingestKnowledgeBaseDocument({
@@ -1447,6 +1766,7 @@ export async function addDocumentToKnowledgeBase(
                     documentId: docId,
                     documentName: title,
                     content,
+                    document: newDoc,
                 });
             }
         } catch (ragError) {

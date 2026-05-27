@@ -1,4 +1,5 @@
 import { Queue } from 'bullmq';
+import { createHash } from 'crypto';
 import { getQueueProducerConnection } from './connection';
 import {
   DIALOGY_AI_QUEUE_NAME,
@@ -93,7 +94,8 @@ function getJobId(type: QueueJobType, payload: QueueJobPayload) {
     }
     case 'ai_document_ingest': {
       const typedPayload = payload as AiDocumentIngestPayload;
-      return `ai_document_ingest__${toSafeJobIdPart(typedPayload.documentId)}`;
+      const revision = typedPayload.jobKey || createHash('sha256').update(typedPayload.content || '').digest('hex').slice(0, 16);
+      return `ai_document_ingest__${toSafeJobIdPart(typedPayload.documentId)}__${toSafeJobIdPart(revision)}`;
     }
     case 'ai_autopilot_process': {
       const typedPayload = payload as AiAutopilotProcessPayload;

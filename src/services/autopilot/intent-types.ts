@@ -76,8 +76,4 @@ export type AutopilotIntentResolution = {
   shouldUseTool: boolean;
   shouldTransfer: boolean;
   knowledgeCategories: KnowledgeDocumentCategory[];
-  sourceDocumentId?: string;
-  sourceDocumentName?: string;
-  officialResponse?: string;
-  officialResponsePreserveFormatting?: boolean;
 };

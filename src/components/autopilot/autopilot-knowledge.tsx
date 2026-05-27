@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { FileText, Files, Loader2, PencilLine, Plus, Server, Trash2, UploadCloud, Wrench } from 'lucide-react';
+import { Activity, CheckCircle2, FileText, Files, FlaskConical, FolderOpen, Loader2, PencilLine, Plus, RefreshCw, Server, Trash2, UploadCloud, Wrench, XCircle } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
-import type { KnowledgeBaseDocument } from '@/lib/types';
+import type { AutopilotRagHealth, KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
+import type { RagLabReport } from '@/services/rag/evaluation';
 import { cn } from '@/lib/utils';
 
 type AgentToolCatalogItem = {
@@ -21,26 +22,46 @@ type AgentToolCatalogItem = {
 
 interface AutopilotKnowledgeProps {
   documents: KnowledgeBaseDocument[];
+  collections: KnowledgeCollection[];
   toolCatalog: AgentToolCatalogItem[];
   onUpload: (files: FileList | null) => Promise<void>;
   onRemove: (id: string) => void;
   onUpdateContent: (id: string, content: string) => void;
   onUpdateName: (id: string, name: string) => void;
   onUpdateCategory: (id: string, category: string) => void;
+  onUpdateCollections: (id: string, collectionIds: string[]) => void;
+  onAddCollection: (name: string) => boolean;
+  onRemoveCollection: (id: string) => void;
   onAddManual: () => void;
   isUploading: boolean;
+  ragHealth: AutopilotRagHealth | null;
+  onReindex: () => Promise<void>;
+  isReindexing: boolean;
+  ragLabReport: RagLabReport | null;
+  onRunRagLab: () => Promise<void>;
+  isRunningRagLab: boolean;
 }
 
 export function AutopilotKnowledge({
   documents,
+  collections,
   toolCatalog,
   onUpload,
   onRemove,
   onUpdateContent,
   onUpdateName,
   onUpdateCategory,
+  onUpdateCollections,
+  onAddCollection,
+  onRemoveCollection,
   onAddManual,
   isUploading,
+  ragHealth,
+  onReindex,
+  isReindexing,
+  ragLabReport,
+  onRunRagLab,
+  isRunningRagLab,
 }: AutopilotKnowledgeProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -49,6 +70,8 @@ export function AutopilotKnowledge({
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [toolQuery, setToolQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [collectionError, setCollectionError] = useState('');
 
   useEffect(() => {
     if (documents.length === 0) {
@@ -219,6 +242,183 @@ export function AutopilotKnowledge({
         </CardHeader>
 
         <CardContent className="flex min-w-0 flex-col gap-4 p-4 sm:p-5">
+          <div className="rounded-[20px] border border-border bg-muted/20 p-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Activity className="h-4 w-4" />
+                Saude do indice
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-xl text-xs"
+                onClick={() => void onReindex()}
+                disabled={isReindexing}
+              >
+                {isReindexing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Reindexar
+              </Button>
+            </div>
+            {ragHealth ? (
+              <>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="rounded-xl border border-border bg-background p-2">
+                    <div className="font-semibold text-foreground">{ragHealth.indexedDocuments}/{ragHealth.configuredDocuments}</div>
+                    <div className="text-muted-foreground">indexados</div>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-2">
+                    <div className="font-semibold text-foreground">{ragHealth.indexedChunks}</div>
+                    <div className="text-muted-foreground">chunks</div>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-2">
+                    <div className={cn('font-semibold', ragHealth.missingDocuments > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
+                      {ragHealth.missingDocuments}
+                    </div>
+                    <div className="text-muted-foreground">pendentes</div>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {ragHealth.collections.map((collection) => (
+                    <Badge key={collection.id} variant="outline" className="rounded-full text-[10px]">
+                      {collection.name}: {collection.indexedDocuments}/{collection.documents}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] leading-4 text-muted-foreground">
+                  Consultas RAG nos ultimos 7 dias: {ragHealth.recentRetrievals}.
+                  {ragHealth.lastRetrievalAt
+                    ? ` Ultima em ${new Date(ragHealth.lastRetrievalAt).toLocaleDateString('pt-BR')}.`
+                    : ' Nenhuma consulta registrada.'}
+                </p>
+                {(ragHealth.staleDocuments > 0 || ragHealth.wrongDimensionChunks > 0) && (
+                  <p className="mt-3 text-[11px] leading-4 text-amber-600 dark:text-amber-300">
+                    {ragHealth.staleDocuments} documento(s) antigo(s) ou {ragHealth.wrongDimensionChunks} chunk(s) invalido(s) aguardam reparo.
+                  </p>
+                )}
+                {ragHealth.quarantinedDocuments > 0 && (
+                  <p className="mt-3 text-[11px] leading-4 text-amber-600 dark:text-amber-300">
+                    {ragHealth.quarantinedDocuments} transcricao(oes) de conversa bloqueada(s) do indice para proteger a resposta do agente.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">A saude do indice estara disponivel apos carregar o agente publicado.</p>
+            )}
+          </div>
+
+          <div className="rounded-[20px] border border-border bg-muted/20 p-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <FlaskConical className="h-4 w-4" />
+                Laboratorio RAG
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-xl text-xs"
+                onClick={() => void onRunRagLab()}
+                disabled={isRunningRagLab}
+              >
+                {isRunningRagLab ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />}
+                Executar
+              </Button>
+            </div>
+            {ragLabReport ? (
+              <>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="rounded-xl border border-border bg-background p-2">
+                    <div className="font-semibold text-foreground">{Math.round(ragLabReport.top1Accuracy * 100)}%</div>
+                    <div className="text-muted-foreground">Top-1</div>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-2">
+                    <div className="font-semibold text-foreground">{Math.round(ragLabReport.top3Accuracy * 100)}%</div>
+                    <div className="text-muted-foreground">Top-3</div>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-2">
+                    <div className={cn('font-semibold', ragLabReport.collectionLeaks > 0 ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-300')}>
+                      {ragLabReport.collectionLeaks}
+                    </div>
+                    <div className="text-muted-foreground">vazamentos</div>
+                  </div>
+                </div>
+                <p className="mt-3 text-[11px] text-muted-foreground">
+                  {ragLabReport.passed}/{ragLabReport.total} casos aprovados. Intencao: {Math.round(ragLabReport.intentAccuracy * 100)}%.
+                </p>
+                <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto">
+                  {ragLabReport.cases.map((evalCase) => (
+                    <div key={evalCase.id} className="rounded-xl border border-border bg-background px-3 py-2 text-[11px]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-foreground">{evalCase.title}</span>
+                        {evalCase.passed
+                          ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                          : <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />}
+                      </div>
+                      <p className="mt-1 truncate text-muted-foreground">{evalCase.customerMessage}</p>
+                      <p className="mt-1 truncate text-muted-foreground">
+                        Esperado: {evalCase.expectedDocumentName} | Top-1: {evalCase.selectedDocuments[0]?.name || 'nenhum'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="text-xs leading-5 text-muted-foreground">
+                Executa perguntas aplicaveis a esta base e mede Top-1, Top-3, intencao e isolamento por colecao.
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-[20px] border border-border bg-muted/20 p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <FolderOpen className="h-4 w-4" />
+                Colecoes
+              </p>
+              <Badge variant="outline" className="rounded-full text-[10px]">{collections.length}</Badge>
+            </div>
+            <div className="mb-3 flex gap-2">
+              <Input
+                value={newCollectionName}
+                onChange={(event) => {
+                  setNewCollectionName(event.target.value);
+                  setCollectionError('');
+                }}
+                placeholder="Financeiro"
+                className="h-9 rounded-xl bg-background text-sm"
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className="h-9 w-9 shrink-0 rounded-xl"
+                onClick={() => {
+                  if (!onAddCollection(newCollectionName)) {
+                    setCollectionError('Nome vazio ou ja utilizado.');
+                    return;
+                  }
+                  setNewCollectionName('');
+                }}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            {collectionError && <p className="mb-3 text-[11px] text-destructive">{collectionError}</p>}
+            <div className="flex flex-wrap gap-2">
+              {collections.map((collection) => (
+                <span key={collection.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs">
+                  {collection.name}
+                  {!collection.isDefault && collection.id !== 'general' && (
+                    <button type="button" onClick={() => onRemoveCollection(collection.id)} className="text-muted-foreground hover:text-destructive">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+
           <div
             className={cn(
               'rounded-[24px] border-2 border-dashed px-5 py-6 text-center transition-colors',
@@ -300,6 +500,12 @@ export function AutopilotKnowledge({
                           <p className="text-xs text-muted-foreground">
                             {(doc.tokens || 0).toLocaleString()} tokens estimados
                           </p>
+                          <p className="truncate text-[11px] text-primary/80">
+                            {(doc.collectionIds?.length ? doc.collectionIds : ['general'])
+                              .map((id) => collections.find((collection) => collection.id === id)?.name)
+                              .filter(Boolean)
+                              .join(', ') || 'Geral'}
+                          </p>
                         </div>
                       </div>
 
@@ -365,6 +571,30 @@ export function AutopilotKnowledge({
                         placeholder="Ex: commercial_sales_flow"
                         className="h-12 rounded-2xl border-border bg-background font-mono text-sm"
                       />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Colecoes autorizadas</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {collections.map((collection) => {
+                        const activeCollectionIds = selectedDoc.collectionIds?.length ? selectedDoc.collectionIds : ['general'];
+                        const checked = activeCollectionIds.includes(collection.id);
+                        return (
+                          <label key={collection.id} className="flex cursor-pointer items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                const nextIds = event.target.checked
+                                  ? Array.from(new Set([...activeCollectionIds, collection.id]))
+                                  : activeCollectionIds.filter((id) => id !== collection.id);
+                                onUpdateCollections(selectedDoc.id, nextIds.length > 0 ? nextIds : ['general']);
+                              }}
+                            />
+                            {collection.name}
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

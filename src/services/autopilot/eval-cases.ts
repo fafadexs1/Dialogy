@@ -186,7 +186,7 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
     title: 'Cliente pede cardapio com opcoes',
     vertical: 'restaurante',
     customerMessage: 'Me manda o cardapio com as opcoes, por favor',
-    simulatedResponse: null,
+    simulatedResponse: 'Temos Executivo por R$ 29,90, Vegetariano por R$ 27,90 e Combo familia por R$ 89,90.',
     expected: {
       intent: 'catalog_request',
       ragCoverageAtLeast: 'high',
@@ -201,7 +201,7 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
     title: 'Cliente pergunta preco de consulta',
     vertical: 'clinica',
     customerMessage: 'Qual o valor da consulta e do retorno?',
-    simulatedResponse: null,
+    simulatedResponse: 'A consulta inicial custa R$ 180 e o retorno em ate 30 dias custa R$ 90.',
     expected: {
       intent: 'pricing_request',
       ragCoverageAtLeast: 'high',
@@ -215,7 +215,7 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
     title: 'Cliente pede promocao ativa',
     vertical: 'ecommerce',
     customerMessage: 'Tem alguma promocao ou cupom hoje?',
-    simulatedResponse: null,
+    simulatedResponse: 'Temos 10% de desconto no primeiro pedido acima de R$ 100 usando o cupom BEMVINDO10.',
     expected: {
       intent: 'promotion_request',
       ragCoverageAtLeast: 'high',
@@ -368,10 +368,10 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
   },
   {
     id: 'return_policy_official',
-    title: 'Politica de troca vem da base oficial',
+    title: 'Agente responde politica de troca usando a base',
     vertical: 'ecommerce',
     customerMessage: 'Quero fazer uma troca de produto',
-    simulatedResponse: null,
+    simulatedResponse: 'A troca pode ser solicitada em ate 7 dias corridos, com o numero do pedido e o produto em bom estado.',
     expected: {
       intent: 'return_or_refund',
       ragCoverageAtLeast: 'high',
@@ -382,10 +382,10 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
   },
   {
     id: 'cancellation_policy_official',
-    title: 'Cancelamento usa politica oficial sem acoplar nicho',
+    title: 'Agente responde cancelamento usando a base',
     vertical: 'assinatura',
     customerMessage: 'Quero cancelar minha assinatura',
-    simulatedResponse: null,
+    simulatedResponse: 'Para cancelar, preciso validar a titularidade e confirmar as condicoes aplicaveis antes de executar qualquer mudanca.',
     expected: {
       intent: 'cancellation_request',
       ragCoverageAtLeast: 'high',

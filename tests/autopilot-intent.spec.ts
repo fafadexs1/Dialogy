@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  findOfficialKnowledgeAnswer,
-  findOfficialPlanCatalog,
   isInternetPlanInquiry,
   resolveAutopilotIntent,
 } from '@/services/autopilot-intent';
@@ -33,7 +31,7 @@ describe('autopilot universal intent resolver', () => {
     expect(isInternetPlanInquiry('Me mostra os planos de internet')).toBe(true);
     expect(resolution.intent).toBe('catalog_request');
     expect(resolution.workflowId).toBe('universal.catalog_request');
-    expect(resolution.officialResponse).toContain('Servico Pro');
+    expect(resolution.shouldUseLlm).toBe(true);
   });
 
   it('detects catalog requests for non-telecom niches', () => {
@@ -51,11 +49,10 @@ describe('autopilot universal intent resolver', () => {
     });
 
     expect(resolution.intent).toBe('catalog_request');
-    expect(resolution.officialResponse).toContain('Pizza media');
-    expect(resolution.shouldUseLlm).toBe(false);
+    expect(resolution.shouldUseLlm).toBe(true);
   });
 
-  it('scopes official catalog answers by requested terms in non-telecom niches', () => {
+  it('lets the agent compose scoped catalog answers in non-telecom niches', () => {
     const menuDocument: KnowledgeBaseDocument = {
       id: 'menu-filtered',
       name: 'Cardapio oficial',
@@ -85,17 +82,14 @@ describe('autopilot universal intent resolver', () => {
     });
 
     expect(comboResolution.intent).toBe('catalog_request');
-    expect(comboResolution.officialResponse).toContain('Combo familia');
-    expect(comboResolution.officialResponse).not.toContain('Pizza media');
-    expect(comboResolution.officialResponse).not.toContain('Prato vegetariano');
+    expect(comboResolution.shouldUseLlm).toBe(true);
 
     const vegetarianResolution = resolveAutopilotIntent({
       customerMessage: 'Tem opção vegetariana?',
       knowledgeDocuments: [menuDocument],
     });
 
-    expect(vegetarianResolution.officialResponse).toContain('Prato vegetariano');
-    expect(vegetarianResolution.officialResponse).not.toContain('Combo familia');
+    expect(vegetarianResolution.shouldUseLlm).toBe(true);
   });
 
   it('routes billing, scheduling and human requests deterministically', () => {
@@ -147,29 +141,6 @@ describe('autopilot universal intent resolver', () => {
     });
 
     expect(resolution.intent).toBe('billing_or_payment');
-    expect(resolution.officialResponse).toBeUndefined();
-  });
-
-  it('does not use exported conversation transcripts as official answers', () => {
-    const transcriptDocument: KnowledgeBaseDocument = {
-      id: 'conversation-1',
-      name: 'Conversa - Eric Trindade - 13/05/2026',
-      category: 'product_or_service_catalog',
-      content: [
-        'Cliente: Ola',
-        'Atendente: Ola, sou o assistente virtual.',
-        'Cliente: Quanto ta os plano?',
-        'Atendente: Temos planos de internet.',
-        'Cliente: Tem pro jardim inga?',
-      ].join('\n'),
-    };
-
-    const official = findOfficialKnowledgeAnswer({
-      documents: [transcriptDocument],
-      intent: 'catalog_request',
-    });
-
-    expect(official).toBeNull();
   });
 
   it('treats short specific option selections after a catalog as purchase intent', () => {
@@ -275,7 +246,6 @@ describe('autopilot universal intent resolver', () => {
     expect(resolution.intent).toBe('troubleshooting');
     expect(resolution.reason).toContain('mantendo o contexto ativo');
     expect(resolution.extractedSlots.customer_identifier).toBe('70280417195');
-    expect(resolution.officialResponse).toBeUndefined();
   });
 
   it('recognizes common technical complaints without team routing keywords', () => {
@@ -350,33 +320,7 @@ describe('autopilot universal intent resolver', () => {
     expect(resolution.reason).toContain('ambiguo');
   });
 
-  it('does not use expired official documents', () => {
-    const expiredDocument: KnowledgeBaseDocument = {
-      id: 'expired-1',
-      name: 'Promocao antiga',
-      category: 'offers',
-      validUntil: '2020-01-01',
-      canonicalAnswer: 'Oferta antiga por R$1,00',
-      content: 'Oferta expirada.',
-    };
-
-    const official = findOfficialKnowledgeAnswer({
-      documents: [expiredDocument],
-      intent: 'promotion_request',
-    });
-
-    expect(official).toBeNull();
-  });
-
-  it('keeps compatibility helper for official plan catalogs', () => {
-    const catalog = findOfficialPlanCatalog([catalogDocument]);
-
-    expect(catalog?.document.id).toBe('catalog-1');
-    expect(catalog?.content).toContain('*Catalogo oficial*');
-    expect(catalog?.content).not.toContain('Nao mude nada');
-  });
-
-  it('uses literal plan documents that require exact spacing and emojis', () => {
+  it('uses plan documents as agent context instead of sending a literal catalog', () => {
     const exactPlanDocument: KnowledgeBaseDocument = {
       id: 'plans-exact',
       name: 'Planos Velpro',
@@ -403,15 +347,11 @@ describe('autopilot universal intent resolver', () => {
       knowledgeDocuments: [exactPlanDocument],
     });
 
-    expect(resolution.shouldUseLlm).toBe(false);
-    expect(resolution.officialResponsePreserveFormatting).toBe(true);
-    expect(resolution.officialResponse).toContain('\u{1F310} NOSSOS PLANOS DE INTERNET:');
-    expect(resolution.officialResponse).toContain('\u{1F911}  R$109,90/mes valor do plano');
-    expect(resolution.officialResponse).toContain('valor do plano\n\n\n\u{1F4F6} 1000 MEGA');
-    expect(resolution.officialResponse).not.toContain('Voce deve mandar');
+    expect(resolution.shouldUseLlm).toBe(true);
+    expect(resolution.shouldUseLlm).toBe(true);
   });
 
-  it('scopes official catalog answers to the requested TV packages only', () => {
+  it('lets the agent compose a scoped response for requested TV packages', () => {
     const exactPlanDocument: KnowledgeBaseDocument = {
       id: 'plans-tv',
       name: 'Planos de Internet',
@@ -447,16 +387,10 @@ describe('autopilot universal intent resolver', () => {
     });
 
     expect(resolution.intent).toBe('catalog_request');
-    expect(resolution.officialResponsePreserveFormatting).toBe(true);
-    expect(resolution.officialResponse).toContain('\u{1F310} NOSSOS PLANOS DE INTERNET:');
-    expect(resolution.officialResponse).toContain('600 MEGA (+ 60 canais de TV)');
-    expect(resolution.officialResponse).toContain('1000 MEGA (+ 100 canais de TV)');
-    expect(resolution.officialResponse).not.toContain('500 MEGA (somente internet)');
-    expect(resolution.officialResponse).not.toContain('Quer conhecer os canais de TV?');
-    expect(resolution.officialResponse).not.toContain('https://velpro.net.br/tv');
+    expect(resolution.shouldUseLlm).toBe(true);
   });
 
-  it('answers only the promotional block when the customer asks for the promo plan', () => {
+  it('lets the agent compose promotion answers from the matching plan document', () => {
     const exactPlanDocument: KnowledgeBaseDocument = {
       id: 'plans-with-promo',
       name: 'Planos Velpro',
@@ -495,13 +429,7 @@ describe('autopilot universal intent resolver', () => {
     });
 
     expect(promoResolution.intent).toBe('promotion_request');
-    expect(promoResolution.shouldUseLlm).toBe(false);
-    expect(promoResolution.officialResponsePreserveFormatting).toBe(true);
-    expect(promoResolution.officialResponse).toContain('\u{1F381} PROMOCAO DE ABRIL');
-    expect(promoResolution.officialResponse).toContain('\u{1F4F6} 1000 MEGAS + 60 CANAIS!');
-    expect(promoResolution.officialResponse).toContain('Oferta valida ate 06/05/2026.');
-    expect(promoResolution.officialResponse).not.toContain('\u{1F310} NOSSOS PLANOS DE INTERNET');
-    expect(promoResolution.officialResponse).not.toContain('500 MEGA');
+    expect(promoResolution.shouldUseLlm).toBe(true);
 
     const purchaseResolution = resolveAutopilotIntent({
       customerMessage: 'Esse plano promocional, acho que quero ele',

@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { generateDocumentPassageEmbedding } from '@/lib/embeddings';
+import { DOCUMENT_EMBEDDING_DIMENSIONS, DOCUMENT_EMBEDDING_MODEL, generateDocumentPassageEmbedding } from '@/lib/embeddings';
 import { VectorStore } from '@/lib/vector-store';
 import { summarizeCaseMemory } from '@/ai/flows/case-memory-summarization';
 import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
@@ -183,6 +183,8 @@ export async function refreshCaseMemoryForChat(input: RefreshCaseMemoryInput) {
             source: chat.source,
             closedAt: chat.closed_at,
             closeReasonLabel: chat.close_reason_label,
+            embeddingModel: DOCUMENT_EMBEDDING_MODEL,
+            embeddingDimensions: DOCUMENT_EMBEDDING_DIMENSIONS,
         },
     });
 

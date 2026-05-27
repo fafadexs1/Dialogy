@@ -2,7 +2,7 @@ import type { Contact, KnowledgeBaseDocument } from '@/lib/types';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
-import { findOfficialKnowledgeAnswer, resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { mergeAndRerankKnowledgeDocuments } from '@/services/rag/hybrid-retrieval';
 import { planAutopilotTools } from './tool-planner';
 import { validateAutopilotResponse } from './response-validator';
@@ -120,16 +120,8 @@ export function buildAutopilotPlaygroundTrace(input: {
     availableTeams: input.availableTeams,
     knowledgeCoverage: rag.knowledgeCoverage,
   });
-  const retrievedOfficialResponse = intentResolution.officialResponse
-    ? null
-    : findOfficialKnowledgeAnswer({
-        documents: rag.knowledgeBaseDocuments,
-        intent: intentResolution.intent,
-      });
   const responseBeforePlanner = compactResponse(
     workflowPlan.response ||
-      intentResolution.officialResponse ||
-      retrievedOfficialResponse?.content ||
       input.modelResponse,
     input.fallbackReply
   );
@@ -161,6 +153,7 @@ export function buildAutopilotPlaygroundTrace(input: {
     availableTeams: input.availableTeams,
     contact: input.contact,
     knowledgeCoverage: rag.knowledgeCoverage,
+    knowledgeDocuments: rag.knowledgeBaseDocuments,
     source: workflowPlan.handledByWorkflow ? 'workflow_direct' : 'llm',
   });
 

@@ -90,9 +90,7 @@ function summarizeDocuments(documents: KnowledgeBaseDocument[] | undefined) {
 export function shouldUseAiIntentClassifier(input: {
   intent: UniversalAutopilotIntent;
   confidence: number;
-  officialResponse?: string;
 }) {
-  if (input.officialResponse) return false;
   if (input.intent === 'human_handoff' && input.confidence >= 0.9) return false;
   if (input.intent === 'greeting' && input.confidence >= 0.9) return false;
   if (input.intent === 'thanks' && input.confidence >= 0.9) return false;

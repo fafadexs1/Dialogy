@@ -1,4 +1,4 @@
-import type { Contact } from '@/lib/types';
+import type { Contact, KnowledgeBaseDocument } from '@/lib/types';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } from './intent-types';
@@ -172,6 +172,21 @@ function removeTechnicalFragments(response: string): string {
     .trim();
 }
 
+function extractSupportedFactTokens(value: string): string[] {
+  const patterns = [
+    /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?/gi,
+    /\b\d{1,2}\/\d{1,2}\/\d{4}\b/g,
+    /https?:\/\/[^\s),]+/gi,
+    /\b\d{2,4}\s*(?:mega|megas|mb|gb)\b/gi,
+  ];
+  return Array.from(new Set(patterns.flatMap((pattern) => value.match(pattern) || [])));
+}
+
+function unsupportedKnowledgeFacts(response: string, documents: KnowledgeBaseDocument[]): string[] {
+  const evidence = normalizeText(documents.map((document) => document.content || '').join('\n'));
+  return extractSupportedFactTokens(response).filter((token) => !evidence.includes(normalizeText(token)));
+}
+
 function findMissingLookupSlots(input: {
   intentResolution: AutopilotIntentResolution;
   slotExtraction: SlotExtractionResult;
@@ -250,7 +265,8 @@ export function validateAutopilotResponse(input: {
   availableTeams: ToolRouterTeam[];
   contact?: Contact | null;
   knowledgeCoverage: KnowledgeCoverage;
-  source: 'workflow_direct' | 'workflow_tools' | 'deterministic_official' | 'llm' | 'fallback';
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  source: 'workflow_direct' | 'workflow_tools' | 'llm' | 'fallback';
 }): ResponseValidationResult {
   const originalResponse = compact(input.response || '');
   const reasons: string[] = [];
@@ -286,6 +302,20 @@ export function validateAutopilotResponse(input: {
       reasons,
       metadata: { decision: 'replace_with_fallback', reasons, source: input.source },
     };
+  }
+
+  if (input.source === 'llm' && !hasSuccessfulLookup(input.toolResults) && (input.knowledgeDocuments?.length || 0) > 0) {
+    const unsupportedFacts = unsupportedKnowledgeFacts(originalResponse, input.knowledgeDocuments || []);
+    if (unsupportedFacts.length > 0) {
+      reasons.push('unsupported_knowledge_facts');
+      return {
+        decision: 'replace_with_fallback',
+        response: 'Nao encontrei confirmacao suficiente na base para informar esses dados com seguranca. Posso verificar outra informacao ou encaminhar para confirmacao.',
+        actions: [],
+        reasons,
+        metadata: { decision: 'replace_with_fallback', reasons, unsupportedFacts, source: input.source },
+      };
+    }
   }
 
   const plannedLookup = hasPlannedLookup(input.plannedActions);

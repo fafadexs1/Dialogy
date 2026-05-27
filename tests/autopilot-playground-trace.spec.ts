@@ -35,11 +35,12 @@ const docs: KnowledgeBaseDocument[] = [
 ];
 
 describe('autopilot playground trace', () => {
-  it('returns a deterministic trace for frontend preview', () => {
+  it('validates a model response composed from retrieved pricing knowledge', () => {
     const trace = buildAutopilotPlaygroundTrace({
       customerMessage: 'Qual o valor da consulta?',
       knowledgeDocuments: docs,
       fallbackReply: 'Fallback configurado.',
+      modelResponse: 'A consulta inicial custa R$ 180 e o retorno custa R$ 90.',
       contact,
       enabledToolNames: ['transfer_chat', 'add_internal_note'],
       toolCatalog: listAgentToolCatalogItems(),

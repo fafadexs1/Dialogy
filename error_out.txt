@@ -1,0 +1,809 @@
+INVALID_ARGUMENT: Schema validation failed. Parse Errors:
+
+- rules.1.action: must have required property 'value'
+- rules.1.action.url: must match format "uri"
+- rules.1.action: must match a schema in anyOf
+
+Provided data:
+
+{
+  "config": {
+    "id": "2801fd91-f14f-46d0-bc45-45e1d8d9f6da",
+    "workspace_id": "e3b476a1-5de8-4744-80b5-a5d23fe15fab",
+    "user_id": "8fe1f4da-9305-475c-95d1-83bda9f29b22",
+    "name": "Raquel",
+    "gemini_api_key": "AIzaSyAFJKuMxSC4KhsqskWW1_534_Oe702RWJk",
+    "ai_model": "googleai/gemini-3.1-flash-lite",
+    "knowledge_base": "Você é Raquel, assistente comercial virtual da empresa.\r\n\r\nVocê sempre deve começar apresentando os planos. Seu objetivo é atender novos clientes interessados em contratar, apresentar informações comerciais, coletar os dados necessários para pré-cadastro.\r\n\r\nRegras obrigatórias:\r\n- Atue como Raquel.\r\n- Nunca transfira o atendimento comercial após coletar os dados.\r\n- O setor comercial atende somente até 18h00.\r\n- Após concluir o pré-cadastro, envie uma mensagem informando que a equipe comercial entrará em contato no próximo dia útil.\r\n- Depois dessa mensagem, encerre o atendimento.\r\n- Nunca encerre antes de coletar os dados mínimos do pré-cadastro.\r\n- Nunca encerre enquanto o cliente estiver demonstrando interesse ou enviando dados.\r\n- Se o cliente ainda não é cadastrado, trate como novo lead.\r\n- Não consulte contrato/cadastro existente se o cliente está claramente tentando contratar pela primeira vez.\r\n- Não diga SGP, sistema interno, contrato ou fatura em atendimento de novo cliente.\r\n- Não invente disponibilidade, aprovação, instalação ou cobertura.\r\n- Peça apenas o próximo dado necessário.\r\n- Se o cliente mandar uma informação solta, interprete como resposta ao último dado solicitado.\r\n- Só transfira se o cliente pedir explicitamente atendimento humano antes da finalização.\r\n- Só encerre antes do fim se o cliente pedir explicitamente para parar, desistir ou encerrar.",
+    "knowledge_base_documents": [
+      {
+        "id": "89c4d447-6dde-452a-9d1d-44705f96c456",
+        "name": "Numero da Central",
+        "tokens": 16,
+        "content": "O número para entrar em contato com a Central é 0800 381 0404. a",
+        "category": "contact_info"
+      },
+      {
+        "id": "5f9f1e40-136d-49dd-831c-7e6efec2cfa4",
+        "name": "Fluxo comercial para novos clientes",
+        "status": "active",
+        "content": "Use este fluxo quando o cliente demonstrar interesse em planos, contratacao, instalacao, disponibilidade, valores ou internet.\n\nObjetivo:\nColetar os dados minimos para pre-cadastro comercial. Apos concluir a coleta, avisar que a equipe comercial retornara no proximo dia util e encerrar o atendimento.\n\nFluxo obrigatorio:\n\n1. Apresentar planos\nSe o cliente pedir planos ou valores, consulte o Catalogo oficial de planos de internet e apresente somente os valores encontrados nele. Depois pergunte qual plano interessou.\n\n2. Verificar regiao\nPeca bairro, cidade ou endereco de referencia. Se o cliente ja informou, nao peca novamente.\n\n3. Coletar dados do pre-cadastro\nColete um dado por vez: nome completo, CPF ou CNPJ, telefone/WhatsApp, endereco completo com numero, complemento ou referencia se houver, bairro, cidade e plano escolhido.\n\n4. Confirmar dados\nApos coletar os dados minimos, confirme em uma mensagem curta.\n\n5. Avisar retorno\nDepois da confirmacao, informe que a equipe analisara o pre-cadastro e entrara em contato no proximo dia util para dar sequencia.\n\n6. Encerrar\nApos enviar o aviso de retorno, encerre o atendimento. Nao transfira para o setor comercial ao final do fluxo.",
+        "category": "commercial_sales_flow",
+        "priority": 80,
+        "updatedAt": "2026-05-27T00:00:00.000Z",
+        "contextRole": "procedure"
+      },
+      {
+        "id": "e2e0c8f7-145c-4a22-b406-de3cc8866778",
+        "name": "Mensagem final após pré-cadastro comercial",
+        "tokens": 109,
+        "content": "Quando todos os dados do pré-cadastro forem coletados, Raquel deve responder:\n\n\"Perfeito, já registrei as informações do seu pré-cadastro.\n\nComo nosso setor comercial funciona até as 18h00, a equipe vai analisar seus dados e entrar em contato no próximo dia útil para dar sequência na contratação.\n\nObrigado pelo contato. Vou encerrar o atendimento por aqui.\"\n\nApós essa mensagem, encerre o atendimento.\n\nNão transfira para o comercial.",
+        "category": "commercial_completion_message"
+      },
+      {
+        "id": "c815a5e8-012c-464c-8d31-1c7e7d0462a7",
+        "name": "Dados obrigatórios para novo cliente",
+        "tokens": 148,
+        "content": "Para novo cliente interessado em contratação, colete os seguintes dados:\n\n- Nome completo\n- CPF ou CNPJ\n- Telefone/WhatsApp\n- Endereço completo com número\n- Complemento ou ponto de referência, se houver\n- Bairro\n- Cidade\n- Plano escolhido\n\nRegras:\n- Colete somente o dado que estiver faltando.\n- Não repita perguntas já respondidas.\n- Se o cliente enviar CPF, salve como CPF/CNPJ.\n- Se o cliente enviar bairro ou cidade, salve como localização.\n- Se o cliente enviar rua, quadra, lote, número ou complemento, salve como endereço.\n- Se o cliente escolher um plano, salve como plano escolhido.\n",
+        "category": "commercial_required_fields"
+      },
+      {
+        "id": "b4986e84-3db1-4afb-9725-b03cb681322f",
+        "name": "Interpretação de respostas curtas no comercial",
+        "tokens": 138,
+        "content": "Durante o fluxo comercial, interprete mensagens curtas conforme a última pergunta feita.\n\nExemplos:\n- \"Ocidental Park\" = bairro/região, se a última pergunta foi sobre localização.\n- \"06620056199\" = CPF, se a última pergunta foi sobre CPF/CNPJ.\n- \"Fábio Soares\" = nome completo, se a última pergunta foi sobre nome.\n- \"Rua 10 quadra 5 lote 2\" = endereço.\n- \"O de 500 mega\" = plano escolhido.\n- \"Sim\", \"isso\", \"pode ser\", \"quero\" = confirmação ou continuidade.\n\nNão trate essas mensagens como erro.\nNão transfira.\nNão encerre.\nContinue o pré-cadastro.\n",
+        "category": "commercial_context_rules"
+      },
+      {
+        "id": "8d697a60-df14-4130-8632-a6fcfe54db39",
+        "name": "Encerramento no atendimento comercial",
+        "tokens": 153,
+        "content": "A IA comercial só deve encerrar em dois casos:\n\n1. Pré-cadastro concluído\nQuando todos os dados obrigatórios forem coletados, Raquel deve avisar que a equipe comercial entrará em contato no próximo dia útil e então encerrar.\n\n2. Cliente pediu para encerrar\nSe o cliente disser claramente que quer parar, desistir ou encerrar.\n\nExemplos que permitem encerrar:\n- \"Pode encerrar\"\n- \"Finaliza aí\"\n- \"Desisti\"\n- \"Não quero mais\"\n- \"Era só isso\"\n\nExemplos que NÃO permitem encerrar:\n- \"Opa\"\n- \"Não entendi\"\n- \"Kkk\"\n- \"Moro no Ocidental Park\"\n- \"Meu CPF é...\"\n- \"Quero contratar\"\n- \"Pode continuar\"\n- \"Esse plano mesmo\"\n",
+        "category": "commercial_close_policy"
+      },
+      {
+        "id": "d5e55092-0eca-49fd-bd2f-d8b5ef79e245",
+        "name": "Transferência no atendimento comercial",
+        "tokens": 150,
+        "content": "No fluxo de novo cliente, Raquel não deve transferir automaticamente para o setor comercial.\n\nNão transfira quando:\n- O cliente pedir planos\n- O cliente informar bairro\n- O cliente informar CPF\n- O cliente informar endereço\n- O cliente escolher plano\n- O pré-cadastro for concluído\n\nAo concluir o pré-cadastro:\n- Envie a mensagem de retorno no próximo dia útil.\n- Encerre o atendimento.\n\nSó transfira se:\n- O cliente pedir explicitamente para falar com humano antes da conclusão;\n- houver erro técnico que impeça continuar;\n- houver uma regra administrativa explícita exigindo transferência imediata.",
+        "category": "commercial_handoff_policy"
+      },
+      {
+        "id": "f6340a27-57b6-4c5b-9128-0084ec30fc6d",
+        "name": "Resumo Da Regra Principal",
+        "tokens": 66,
+        "content": "Raquel deve conduzir o novo cliente até concluir o pré-cadastro.\n\nDepois de concluir:\n1. avisar que o setor comercial funciona até as 18h00;\n2. informar que entrarão em contato no próximo dia útil;\n3. encerrar o atendimento;\n4. nunca transferir automaticamente.",
+        "category": "resumed_geral"
+      },
+      {
+        "id": "70dac1c1-d159-46ef-83c1-d67498bcc560",
+        "name": "Wi-Fi 6",
+        "tokens": 583,
+        "content": "O Wi-Fi 6 é a sexta geração da tecnologia Wi-Fi, também conhecido pelo padrão IEEE 802.11ax. Ele foi desenvolvido para oferecer uma conexão mais rápida, estável e eficiente, principalmente em ambientes onde muitos dispositivos utilizam a internet ao mesmo tempo.\n\nDiferente das gerações anteriores, o Wi-Fi 6 não melhora apenas a velocidade da internet. Ele também melhora a capacidade da rede, permitindo que vários aparelhos permaneçam conectados simultaneamente sem causar lentidão ou instabilidade. Isso é muito importante atualmente, já que uma residência pode ter diversos dispositivos conectados ao mesmo tempo, como celulares, Smart TVs, notebooks, videogames, câmeras, Alexa, Chromecast e outros equipamentos inteligentes.\n\nEntre as principais vantagens do Wi-Fi 6 estão:\n\n• Maior velocidade de conexão;\n• Melhor estabilidade da rede;\n• Menor tempo de resposta (latência);\n• Melhor desempenho para jogos online e chamadas de vídeo;\n• Streaming mais fluido em alta qualidade;\n• Melhor gerenciamento de múltiplos dispositivos conectados;\n• Maior eficiência do sinal Wi-Fi;\n• Menor consumo de bateria em aparelhos compatíveis.\n\nO Wi-Fi 6 funciona nas frequências 2.4 GHz e 5 GHz:\n\n• 2.4 GHz → maior alcance de sinal;\n• 5 GHz → maior velocidade e desempenho.\n\nPara utilizar todos os benefícios do Wi-Fi 6, é necessário que:\n\nO roteador seja compatível com Wi-Fi 6;\nO dispositivo conectado também tenha suporte à tecnologia.\n\nCaso o aparelho não seja compatível com Wi-Fi 6, ele continuará funcionando normalmente, porém utilizando o padrão Wi-Fi tradicional anterior.\n\nHoje, muitos aparelhos já possuem suporte ao Wi-Fi 6, como:\n\nCelulares:\n• iPhone 11 ou superior;\n• Samsung Galaxy S10 ou superior;\n• Diversos modelos atuais da Xiaomi, Motorola e outras marcas.\n\nNotebooks e computadores:\n• Modelos recentes com placa de rede Wi-Fi AX;\n• Notebooks gamers e ultrafinos modernos;\n• PCs com adaptadores Wi-Fi 6.\n\nVideogames:\n• PlayStation 5;\n• Xbox Series X e Series S.\n\nOutros dispositivos:\n• Smart TVs mais recentes;\n• Tablets modernos;\n• Equipamentos inteligentes compatíveis.\n\nMesmo com uma internet de alta velocidade, roteadores antigos podem limitar o desempenho da conexão sem fio. Por isso, o Wi-Fi 6 oferece uma experiência muito superior em estabilidade, velocidade e qualidade de conexão para residências e empresas.",
+        "category": "info_wifi6"
+      },
+      {
+        "id": "a3265c8d-3d39-445d-a424-49b254a365f5",
+        "name": "Catalogo oficial de planos de internet",
+        "status": "active",
+        "content": "Planos de internet vigentes\n\n500 MEGA (somente internet)\nWi-Fi 5\nR$99,90/mes com desconto de pontualidade\nR$109,90/mes valor do plano\n\n600 MEGA (+ 60 canais de TV)\nWi-Fi 5\nR$109,90/mes com desconto de pontualidade\nR$119,90/mes valor do plano\n\n800 MEGA (+ 75 canais de TV)\nWi-Fi 5\nR$125,90/mes com desconto de pontualidade\nR$135,90/mes valor do plano\n\n1000 MEGA (+ 100 canais de TV)\nWi-Fi 6 (ultima geracao)\nR$149,90/mes com desconto de pontualidade\nR$159,90/mes valor do plano\n\nCanais de TV: https://velpro.net.br/tv",
+        "category": "commercial_plan_catalog",
+        "priority": 100,
+        "updatedAt": "2026-05-27T00:00:00.000Z",
+        "contextRole": "fact"
+      }
+    ],
+    "is_primary": false,
+    "is_active": true,
+    "default_fallback_reply": null,
+    "created_at": "2026-04-28T18:44:32.679Z",
+    "updated_at": "2026-05-27T21:26:59.318Z",
+    "is_private": true,
+    "transcription_model": null,
+    "escalation_policy": null,
+    "closing_policy": null,
+    "enabled_tool_names": [
+      "transfer_chat",
+      "add_internal_note",
+      "crm_update_contact_custom_fields",
+      "sgp_fetch_contracts",
+      "sgp_fetch_contact_panel_data",
+      "sgp_generate_invoice_pix",
+      "sgp_create_payment_promise",
+      "close_chat"
+    ],
+    "flow_graph": {
+      "edges": [
+        {
+          "id": "knowledge-assistant",
+          "source": "knowledge",
+          "target": "assistant",
+          "sourceHandle": "source-right-knowledge",
+          "targetHandle": "target-left-knowledge"
+        },
+        {
+          "id": "xy-edge__assistantsource-bottom-intent-1779897066411target-top",
+          "source": "assistant",
+          "target": "intent-1779897066411",
+          "sourceHandle": "source-bottom",
+          "targetHandle": "target-top"
+        },
+        {
+          "id": "xy-edge__assistantsource-bottom-tool-close_chat-1779911980123target-top",
+          "source": "assistant",
+          "target": "tool-close_chat-1779911980123",
+          "sourceHandle": "source-bottom",
+          "targetHandle": "target-top"
+        },
+        {
+          "id": "xy-edge__intent-1779897066411source-bottom-tool-close_chat-1779897173659target-top",
+          "source": "intent-1779897066411",
+          "target": "tool-close_chat-1779897173659",
+          "sourceHandle": "source-bottom",
+          "targetHandle": "target-top"
+        },
+        {
+          "id": "xy-edge__incomingsource-bottom-assistanttarget-top",
+          "source": "incoming",
+          "target": "assistant",
+          "sourceHandle": "source-bottom",
+          "targetHandle": "target-top"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "incoming",
+          "kind": "trigger",
+          "title": "Mensagem recebida",
+          "config": {
+            "instructions": "Iniciar quando chegar uma nova mensagem do cliente.",
+            "variableName": "mensagem_recebida"
+          },
+          "position": {
+            "x": 368.26640306145316,
+            "y": -72.26570210134001
+          },
+          "subtitle": "Inicio do atendimento"
+        },
+        {
+          "id": "intent",
+          "kind": "understand",
+          "title": "Entender cliente",
+          "config": {
+            "instructions": "Identifique a necessidade do cliente e os dados ja informados.",
+            "variableName": "entender_cliente"
+          },
+          "position": {
+            "x": 385.02695760295717,
+            "y": 122.3652574392759
+          },
+          "subtitle": "Intencao e dados"
+        },
+        {
+          "id": "assistant",
+          "kind": "assistant",
+          "title": "Raquel",
+          "config": {
+            "useAi": true,
+            "instructions": "Responda usando apenas informacoes seguras do atendimento.",
+            "variableName": "resposta_ia"
+          },
+          "position": {
+            "x": 381.0339361576425,
+            "y": 340.7770399623898
+          },
+          "subtitle": "Responder com IA"
+        },
+        {
+          "id": "knowledge",
+          "kind": "knowledge",
+          "title": "Conhecimento",
+          "config": {
+            "instructions": "Buscar documentos relevantes para a solicitacao atual.",
+            "variableName": "conhecimento_encontrado"
+          },
+          "position": {
+            "x": 137.41140855733022,
+            "y": 161.7615947275101
+          },
+          "subtitle": "Consultar base"
+        },
+        {
+          "id": "intent-1779897066411",
+          "kind": "intent",
+          "title": "Sub-agente: Suporte",
+          "config": {
+            "intent": "purchase_inquiry",
+            "instructions": "Atenda este assunto com instrucoes especificas, sem fugir do escopo definido.",
+            "variableName": "intencao_suporte_1779897066411",
+            "customIntentLabel": "",
+            "returnToMainPrompt": true,
+            "knowledgeCollectionIds": [
+              "general"
+            ]
+          },
+          "position": {
+            "x": 85.5,
+            "y": 594.5
+          },
+          "subtitle": "Ativado por intencao"
+        },
+        {
+          "id": "tool-close_chat-1779897173659",
+          "kind": "tool",
+          "risk": "medium",
+          "title": "Encerrar conversa",
+          "config": {
+            "instructions": "Use os valores dos blocos anteriores para montar os parametros desta ferramenta.",
+            "variableName": "resultado_encerrar_conversa"
+          },
+          "position": {
+            "x": 82.7044327725888,
+            "y": 806.3429325392796
+          },
+          "subtitle": "Ferramenta Dialogy",
+          "toolName": "close_chat"
+        },
+        {
+          "id": "tool-close_chat-1779911980123",
+          "kind": "tool",
+          "risk": "medium",
+          "title": "Encerrar conversa",
+          "config": {
+            "instructions": "Use os valores dos blocos anteriores para montar os parametros desta ferramenta.",
+            "variableName": "resultado_encerrar_conversa1"
+          },
+          "position": {
+            "x": 608.4104535593591,
+            "y": 563.7258421347072
+          },
+          "subtitle": "Ferramenta Dialogy",
+          "toolName": "close_chat"
+        }
+      ],
+      "version": 1,
+      "variables": []
+    },
+    "knowledge_collections": [
+      {
+        "id": "general",
+        "name": "Geral",
+        "isDefault": true,
+        "description": "Conteudo compartilhado entre os sub-agentes."
+      }
+    ]
+  },
+  "chatId": "bfa81f51-6488-4a81-a047-6fc9185041a8",
+  "customerMessage": "Oi",
+  "chatHistory": "Cliente: Oii, queria conhecer os planos de internet.\nAtendente: Olá, sou o assistente virtual da *Velpro Telecom.* Seja bem-vindo!\nAtendente: Digite a opção desejada: ✨\n\n1. 🚀 Assinar Internet\n2. 🔄Transferência de Endereço\n3. 🛠 Suporte Técnico\n4. 💰 Financeiro\n5. ❌ Encerrar Atendimento\nAtendente: Atendimento transferido para Raquel.\nAtendente: Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.\nCliente: Os planos de internet\nAtendente: Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.\nCliente: Os planos de internet\nAtendente: Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.\nCliente: Os planos de internet\nAtendente: Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.\nCliente: oi\nAtendente: Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.\nCliente: Oi\nAtendente: Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.\nCliente: Oi",
+  "relevantHistory": "",
+  "rules": [
+    {
+      "id": "e3bda835-05a5-4caa-a87e-32ebe349b726",
+      "config_id": "2801fd91-f14f-46d0-bc45-45e1d8d9f6da",
+      "name": "Enviar Dados de Ativação",
+      "trigger": "Cliente finalizou o envio dos dados de instalação do setor comercial, a IA deverá executar essa chamada enviando as informações.",
+      "action": {
+        "url": "https://discord-bot.klyraai.com.br/send-message",
+        "body": {
+          "message": "{{resposta_agente}}",
+          "channel_id": "1420958123576791100"
+        },
+        "type": "webhook",
+        "query": {},
+        "method": "POST",
+        "headers": {},
+        "bodyType": "form-data",
+        "description": "📌 Instrução para Envio de Dados Pós-Atendimento (Velpro Telecom)\n🧠 Contexto da ferramenta\n\nEsta ferramenta deve ser utilizada somente após a finalização do atendimento, quando todas as informações necessárias para a contratação já foram coletadas.\n\nO conteúdo enviado será um texto em formato livre, usado internamente pelo time comercial para dar continuidade ao contato com o cliente.\n\n⚠️ Regra principal\n\nO envio deve ser feito apenas como TEXTO (string)\n\nNÃO é JSON\n\nNÃO precisa escapar quebra de linha\n\nPode usar enter normalmente para espaçamento\n\n🧾 Formatação obrigatória\n\nTexto bem organizado e fácil de ler no Discord\n\nUsar Markdown (**negrito**)\n\nManter espaçamentos claros entre blocos\n\nSempre incluir Observações sobre o comportamento do cliente\n\n✅ MODELO CORRETO DE ENVIO\n**Informações do Cliente para Atendimento Velpro Telecom**\n\n**Nome:** Fabrício de Sousa Soares  \n**Telefone:** 61995215930  \n**CEP:** 72883772  \n**Plano de Interesse:** 1000 MEGA  \n\n**Observações:**  \nCliente demonstrou bastante interesse no plano, fez perguntas sobre velocidade e estabilidade da conexão. Pareceu seguro na decisão, apenas confirmando detalhes antes de contratar.\n\n❌ Exemplo errado (não fazer)\n\nTexto todo junto\n\nSem espaçamento\n\nSem observações\n\nNome Fabrício Telefone 61995215930 Plano 1000\n\n🧠 Observações (obrigatórias)\n\nA IA deve sempre comentar brevemente sobre:\n\nNível de interesse do cliente\n\nSe estava indeciso ou decidido\n\nSe fez muitas perguntas\n\nSe pediu tempo para pensar\n\nSe aparenta ser um lead quente ou morno\n\nEssas informações são extremamente importantes para o setor comercial humano."
+      },
+      "enabled": true
+    },
+    {
+      "id": "1463766b-badb-42b2-9a79-c4129d715040",
+      "config_id": "2801fd91-f14f-46d0-bc45-45e1d8d9f6da",
+      "name": "financeiro",
+      "trigger": "asdsad",
+      "action": {
+        "url": "",
+        "type": "webhook",
+        "query": {},
+        "method": "POST",
+        "headers": {},
+        "bodyType": "json"
+      },
+      "enabled": true
+    }
+  ],
+  "knowledgeBase": "Você é Raquel, assistente comercial virtual da empresa.\r\n\r\nVocê sempre deve começar apresentando os planos. Seu objetivo é atender novos clientes interessados em contratar, apresentar informações comerciais, coletar os dados necessários para pré-cadastro.\r\n\r\nRegras obrigatórias:\r\n- Atue como Raquel.\r\n- Nunca transfira o atendimento comercial após coletar os dados.\r\n- O setor comercial atende somente até 18h00.\r\n- Após concluir o pré-cadastro, envie uma mensagem informando que a equipe comercial entrará em contato no próximo dia útil.\r\n- Depois dessa mensagem, encerre o atendimento.\r\n- Nunca encerre antes de coletar os dados mínimos do pré-cadastro.\r\n- Nunca encerre enquanto o cliente estiver demonstrando interesse ou enviando dados.\r\n- Se o cliente ainda não é cadastrado, trate como novo lead.\r\n- Não consulte contrato/cadastro existente se o cliente está claramente tentando contratar pela primeira vez.\r\n- Não diga SGP, sistema interno, contrato ou fatura em atendimento de novo cliente.\r\n- Não invente disponibilidade, aprovação, instalação ou cobertura.\r\n- Peça apenas o próximo dado necessário.\r\n- Se o cliente mandar uma informação solta, interprete como resposta ao último dado solicitado.\r\n- Só transfira se o cliente pedir explicitamente atendimento humano antes da finalização.\r\n- Só encerre antes do fim se o cliente pedir explicitamente para parar, desistir ou encerrar.",
+  "knowledgeBaseDocuments": [
+    {
+      "id": "89c4d447-6dde-452a-9d1d-44705f96c456",
+      "name": "Numero da Central",
+      "tokens": 16,
+      "content": "O número para entrar em contato com a Central é 0800 381 0404. a",
+      "category": "contact_info"
+    },
+    {
+      "id": "f6340a27-57b6-4c5b-9128-0084ec30fc6d",
+      "name": "Resumo Da Regra Principal",
+      "tokens": 66,
+      "content": "Raquel deve conduzir o novo cliente até concluir o pré-cadastro.\n\nDepois de concluir:\n1. avisar que o setor comercial funciona até as 18h00;\n2. informar que entrarão em contato no próximo dia útil;\n3. encerrar o atendimento;\n4. nunca transferir automaticamente.",
+      "category": "resumed_geral"
+    },
+    {
+      "id": "70dac1c1-d159-46ef-83c1-d67498bcc560",
+      "name": "Wi-Fi 6",
+      "tokens": 583,
+      "content": "O Wi-Fi 6 é a sexta geração da tecnologia Wi-Fi, também conhecido pelo padrão IEEE 802.11ax. Ele foi desenvolvido para oferecer uma conexão mais rápida, estável e eficiente, principalmente em ambientes onde muitos dispositivos utilizam a internet ao mesmo tempo.\n\nDiferente das gerações anteriores, o Wi-Fi 6 não melhora apenas a velocidade da internet. Ele também melhora a capacidade da rede, permitindo que vários aparelhos permaneçam conectados simultaneamente sem causar lentidão ou instabilidade. Isso é muito importante atualmente, já que uma residência pode ter diversos dispositivos conectados ao mesmo tempo, como celulares, Smart TVs, notebooks, videogames, câmeras, Alexa, Chromecast e outros equipamentos inteligentes.\n\nEntre as principais vantagens do Wi-Fi 6 estão:\n\n• Maior velocidade de conexão;\n• Melhor estabilidade da rede;\n• Menor tempo de resposta (latência);\n• Melhor desempenho para jogos online e chamadas de vídeo;\n• Streaming mais fluido em alta qualidade;\n• Melhor gerenciamento de múltiplos dispositivos conectados;\n• Maior eficiência do sinal Wi-Fi;\n• Menor consumo de bateria em aparelhos compatíveis.\n\nO Wi-Fi 6 funciona nas frequências 2.4 GHz e 5 GHz:\n\n• 2.4 GHz →…",
+      "category": "info_wifi6"
+    },
+    {
+      "id": "a3265c8d-3d39-445d-a424-49b254a365f5",
+      "name": "Catalogo oficial de planos de internet",
+      "status": "active",
+      "content": "Planos de internet vigentes\n\n500 MEGA (somente internet)\nWi-Fi 5\nR$99,90/mes com desconto de pontualidade\nR$109,90/mes valor do plano\n\n600 MEGA (+ 60 canais de TV)\nWi-Fi 5\nR$109,90/mes com desconto de pontualidade\nR$119,90/mes valor do plano\n\n800 MEGA (+ 75 canais de TV)\nWi-Fi 5\nR$125,90/mes com desconto de pontualidade\nR$135,90/mes valor do plano\n\n1000 MEGA (+ 100 canais de TV)\nWi-Fi 6 (ultima geracao)\nR$149,90/mes com desconto de pontualidade\nR$159,90/mes valor do plano\n\nCanais de TV: https://velpro.net.br/tv",
+      "category": "commercial_plan_catalog",
+      "priority": 100,
+      "updatedAt": "2026-05-27T00:00:00.000Z",
+      "contextRole": "fact"
+    }
+  ],
+  "workflowKnowledgeDocuments": [
+    {
+      "id": "5f9f1e40-136d-49dd-831c-7e6efec2cfa4",
+      "name": "Fluxo comercial para novos clientes",
+      "status": "active",
+      "content": "Use este fluxo quando o cliente demonstrar interesse em planos, contratacao, instalacao, disponibilidade, valores ou internet.\n\nObjetivo:\nColetar os dados minimos para pre-cadastro comercial. Apos concluir a coleta, avisar que a equipe comercial retornara no proximo dia util e encerrar o atendimento.\n\nFluxo obrigatorio:\n\n1. Apresentar planos\nSe o cliente pedir planos ou valores, consulte o Catalogo oficial de planos de internet e apresente somente os valores encontrados nele. Depois pergunte qual plano interessou.\n\n2. Verificar regiao\nPeca bairro, cidade ou endereco de referencia. Se o cliente ja informou, nao peca novamente.\n\n3. Coletar dados do pre-cadastro\nColete um dado por vez: nome completo, CPF ou CNPJ, telefone/WhatsApp, endereco completo com numero, complemento ou referencia se houver, bairro, cidade e plano escolhido.\n\n4. Confirmar dados\nApos coletar os dados minimos, confirme em uma mensagem curta.\n\n5. Avisar retorno\nDepois da confirmacao, informe que a equipe analisara o pre-cadastro e entrara em contato no proximo dia util para dar sequencia.\n\n6. Encerrar\nApos enviar o aviso de retorno, encerre o atendimento. Nao transfira para o setor comercial ao final do fluxo.",
+      "category": "commercial_sales_flow",
+      "priority": 80,
+      "updatedAt": "2026-05-27T00:00:00.000Z",
+      "contextRole": "procedure"
+    },
+    {
+      "id": "e2e0c8f7-145c-4a22-b406-de3cc8866778",
+      "name": "Mensagem final após pré-cadastro comercial",
+      "tokens": 109,
+      "content": "Quando todos os dados do pré-cadastro forem coletados, Raquel deve responder:\n\n\"Perfeito, já registrei as informações do seu pré-cadastro.\n\nComo nosso setor comercial funciona até as 18h00, a equipe vai analisar seus dados e entrar em contato no próximo dia útil para dar sequência na contratação.\n\nObrigado pelo contato. Vou encerrar o atendimento por aqui.\"\n\nApós essa mensagem, encerre o atendimento.\n\nNão transfira para o comercial.",
+      "category": "commercial_completion_message"
+    },
+    {
+      "id": "c815a5e8-012c-464c-8d31-1c7e7d0462a7",
+      "name": "Dados obrigatórios para novo cliente",
+      "tokens": 148,
+      "content": "Para novo cliente interessado em contratação, colete os seguintes dados:\n\n- Nome completo\n- CPF ou CNPJ\n- Telefone/WhatsApp\n- Endereço completo com número\n- Complemento ou ponto de referência, se houver\n- Bairro\n- Cidade\n- Plano escolhido\n\nRegras:\n- Colete somente o dado que estiver faltando.\n- Não repita perguntas já respondidas.\n- Se o cliente enviar CPF, salve como CPF/CNPJ.\n- Se o cliente enviar bairro ou cidade, salve como localização.\n- Se o cliente enviar rua, quadra, lote, número ou complemento, salve como endereço.\n- Se o cliente escolher um plano, salve como plano escolhido.",
+      "category": "commercial_required_fields"
+    },
+    {
+      "id": "b4986e84-3db1-4afb-9725-b03cb681322f",
+      "name": "Interpretação de respostas curtas no comercial",
+      "tokens": 138,
+      "content": "Durante o fluxo comercial, interprete mensagens curtas conforme a última pergunta feita.\n\nExemplos:\n- \"Ocidental Park\" = bairro/região, se a última pergunta foi sobre localização.\n- \"06620056199\" = CPF, se a última pergunta foi sobre CPF/CNPJ.\n- \"Fábio Soares\" = nome completo, se a última pergunta foi sobre nome.\n- \"Rua 10 quadra 5 lote 2\" = endereço.\n- \"O de 500 mega\" = plano escolhido.\n- \"Sim\", \"isso\", \"pode ser\", \"quero\" = confirmação ou continuidade.\n\nNão trate essas mensagens como erro.\nNão transfira.\nNão encerre.\nContinue o pré-cadastro.",
+      "category": "commercial_context_rules"
+    },
+    {
+      "id": "8d697a60-df14-4130-8632-a6fcfe54db39",
+      "name": "Encerramento no atendimento comercial",
+      "tokens": 153,
+      "content": "A IA comercial só deve encerrar em dois casos:\n\n1. Pré-cadastro concluído\nQuando todos os dados obrigatórios forem coletados, Raquel deve avisar que a equipe comercial entrará em contato no próximo dia útil e então encerrar.\n\n2. Cliente pediu para encerrar\nSe o cliente disser claramente que quer parar, desistir ou encerrar.\n\nExemplos que permitem encerrar:\n- \"Pode encerrar\"\n- \"Finaliza aí\"\n- \"Desisti\"\n- \"Não quero mais\"\n- \"Era só isso\"\n\nExemplos que NÃO permitem encerrar:\n- \"Opa\"\n- \"Não entendi\"\n- \"Kkk\"\n- \"Moro no Ocidental Park\"\n- \"Meu CPF é...\"\n- \"Quero contratar\"\n- \"Pode continuar\"\n- \"Esse plano mesmo\"",
+      "category": "commercial_close_policy"
+    },
+    {
+      "id": "d5e55092-0eca-49fd-bd2f-d8b5ef79e245",
+      "name": "Transferência no atendimento comercial",
+      "tokens": 150,
+      "content": "No fluxo de novo cliente, Raquel não deve transferir automaticamente para o setor comercial.\n\nNão transfira quando:\n- O cliente pedir planos\n- O cliente informar bairro\n- O cliente informar CPF\n- O cliente informar endereço\n- O cliente escolher plano\n- O pré-cadastro for concluído\n\nAo concluir o pré-cadastro:\n- Envie a mensagem de retorno no próximo dia útil.\n- Encerre o atendimento.\n\nSó transfira se:\n- O cliente pedir explicitamente para falar com humano antes da conclusão;\n- houver erro técnico que impeça continuar;\n- houver uma regra administrativa explícita exigindo transferência imediata.",
+      "category": "commercial_handoff_policy"
+    }
+  ],
+  "resolvedCases": [],
+  "fallbackReply": "",
+  "escalationPolicy": "",
+  "closingPolicy": "",
+  "model": "googleai/gemini-3.1-flash-lite",
+  "contact": {
+    "id": "0a13a140-294a-4cb4-aba1-f11bda394ecf",
+    "name": "Fabricio",
+    "email": "",
+    "phone_number_jid": "5561995215930@s.whatsapp.net",
+    "avatar_url": null,
+    "address": null,
+    "custom_fields": {
+      "9fd152ea-225a-493b-80fe-82a07727b50c": "[]",
+      "Anexos": "[]",
+      "53d4dc37-fa88-4749-be3a-194953864e80": "06620072127",
+      "CPF": "06620072127"
+    }
+  },
+  "workspaceGeminiApiKey": "AIzaSyAl6foiItSjyNzaLVTPHT_rPWZBbPGhqRc",
+  "enabledAgentToolsDescription": "- transfer_chat: Transfere o atendimento para um agente humano ou equipe do workspace.\n- close_chat: Encerra o atendimento atual quando o cliente pede explicitamente para finalizar a conversa. Entrada JSON: {\"type\":\"object\",\"properties\":{\"reasonTagId\":{\"type\":[\"string\",\"null\"],\"description\":\"ID opcional da tag de motivo de encerramento.\"},\"notes\":{\"type\":[\"string\",\"null\"],\"description\":\"Observacao opcional para close_notes.\"},\"sendCloseMessage\":{\"type\":[\"boolean\",\"null\"],\"description\":\"Quando true, envia o template de encerramento do workspace apos fechar.\"}}}\n- add_internal_note: Adiciona nota interna ao atendimento para preservar contexto operacional.\n- crm_update_contact_custom_fields: Atualiza campos customizados do CRM apenas no contato do chat atual.\n- sgp_fetch_contracts: Consulta contratos do cliente no SGP usando o CPF/CNPJ salvo no CRM.\n- sgp_fetch_contact_panel_data: Consulta resumo do cliente, contratos, conexao e faturas no SGP usando o CPF/CNPJ salvo no CRM.\n- sgp_generate_invoice_pix: Gera codigo PIX de uma fatura SGP existente.\n- sgp_create_payment_promise: Registra promessa de pagamento no SGP para contrato informado.",
+  "knowledgeToolProcedures": "",
+  "intentContext": "intent=greeting\nconfidence=0.90\nworkflowId=universal.greeting\nworkflowExecutionMode=continue_llm\nworkflowReason=Workflow nao precisou intervir antes do LLM.\nworkflowMissingSlots=none\nworkflowPlannedTools=none\nshouldRetrieveKnowledge=false\nshouldUseTool=false\nshouldTransfer=false\nrequiredSlots=none\nextractedSlots={}\nragStrategy=static_documents\nknowledgeCoverage=low\nknowledgeCategories=persona,brand_voice,faq\nreason=Saudacao curta reconhecida.\nflowSubAgent=main_agent"
+}
+
+Required JSON schema:
+
+{
+  "type": "object",
+  "properties": {
+    "chatId": {
+      "type": "string",
+      "description": "The unique identifier for the current chat."
+    },
+    "customerMessage": {
+      "type": "string",
+      "description": "The latest message from the customer in the chat."
+    },
+    "chatHistory": {
+      "type": "string",
+      "description": "The history of the chat between the agent and customer."
+    },
+    "relevantHistory": {
+      "type": "string",
+      "description": "Relevant past messages retrieved from vector search (RAG)."
+    },
+    "resolvedCases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "problem": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "closeReasonLabel": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "not": {}
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "similarity": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "summary",
+          "problem",
+          "resolution",
+          "outcome"
+        ],
+        "additionalProperties": true
+      },
+      "description": "Resolved support cases retrieved from operational memory."
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the automation rule."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "The condition that triggers the automation."
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "reply"
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The text response to send to the user."
+                  }
+                },
+                "required": [
+                  "type",
+                  "value"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "webhook"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "The URL to send the HTTP request to."
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "PATCH",
+                      "DELETE"
+                    ],
+                    "default": "POST"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "auth": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "query": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "bodyType": {
+                    "type": "string",
+                    "enum": [
+                      "json",
+                      "form-data"
+                    ]
+                  },
+                  "body": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "The JSON body for the request. You can use Handlebars variables like {{contact.id}}."
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "trigger",
+          "action"
+        ],
+        "additionalProperties": true
+      },
+      "description": "A list of active automation rules to evaluate against."
+    },
+    "knowledgeBase": {
+      "type": "string",
+      "description": "A collection of texts, examples, and instructions that the AI should use as a knowledge base to formulate its answers."
+    },
+    "knowledgeBaseDocuments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "content"
+        ],
+        "additionalProperties": true
+      },
+      "description": "Factual knowledge documents supporting customer-facing claims."
+    },
+    "workflowKnowledgeDocuments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "content"
+        ],
+        "additionalProperties": true
+      },
+      "description": "Operational procedures and policies that govern how the agent should act."
+    },
+    "fallbackReply": {
+      "type": "string",
+      "description": "Mensagem de contingência para quando nenhuma resposta segura puder ser gerada."
+    },
+    "escalationPolicy": {
+      "type": "string",
+      "description": "Politica operacional para quando escalar ou transferir para um humano."
+    },
+    "closingPolicy": {
+      "type": "string",
+      "description": "Politica operacional para quando o atendimento pode ser considerado resolvido ou encerrado."
+    },
+    "enabledAgentToolsDescription": {
+      "type": "string",
+      "description": "Lista textual das ferramentas habilitadas para este agente."
+    },
+    "knowledgeToolProcedures": {
+      "type": "string",
+      "description": "Procedimentos da base de conhecimento que mencionam tools com @nome_da_tool."
+    },
+    "intentContext": {
+      "type": "string",
+      "description": "Contexto deterministico de intencao, workflow e cobertura de conhecimento resolvido pelo servidor."
+    },
+    "model": {
+      "type": "string",
+      "description": "The AI model to use for the response."
+    },
+    "contact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phone_number_jid": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "address": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tags": {
+          "type": "array"
+        },
+        "custom_fields": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "lead_score": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner": {},
+        "crm": {}
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": true,
+      "description": "The contact details of the customer."
+    },
+    "config": {
+      "description": "The autopilot config object from the database."
+    },
+    "workspaceGeminiApiKey": {
+      "type": "string",
+      "description": "Workspace-level Gemini key (Integrações > Gemini) used when the agent has no key."
+    }
+  },
+  "required": [
+    "chatId",
+    "customerMessage",
+    "rules",
+    "contact"
+  ],
+  "additionalProperties": true,
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

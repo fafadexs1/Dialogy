@@ -1,6 +1,6 @@
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import type { AgentToolName } from '@/services/agent-tools/types';
-import { findOfficialKnowledgeAnswer, resolveAutopilotIntent } from '@/services/autopilot-intent';
+import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { mergeAndRerankKnowledgeDocuments } from '@/services/rag/hybrid-retrieval';
 import { extractAutopilotSlots } from './slots';
 import { planAutopilotTools } from './tool-planner';
@@ -118,12 +118,10 @@ function checkPassRate(results: AutopilotEvalCaseResult[], dimension: EvalDimens
 
 function defaultResponseForCase(input: {
   evalCase: AutopilotEvalCase;
-  officialResponse?: string | null;
   workflowResponse?: string | null;
 }) {
   if (input.evalCase.simulatedResponse != null) return input.evalCase.simulatedResponse;
   return input.workflowResponse ||
-    input.officialResponse ||
     'Entendi. Para responder com seguranca, preciso de mais detalhes sobre o que voce precisa.';
 }
 
@@ -160,12 +158,6 @@ function runOfflineAutopilotEvalCase(evalCase: AutopilotEvalCase): AutopilotEval
     slotMappings: { customerIdentifierFieldKeys: ['CPF'] },
     now: new Date(2026, 4, 5),
   });
-  const retrievedOfficialResponse = intentResolution.officialResponse
-    ? null
-    : findOfficialKnowledgeAnswer({
-        documents: rag.knowledgeBaseDocuments,
-        intent: intentResolution.intent,
-      });
   const slotExtraction = extractAutopilotSlots({
     customerMessage: evalCase.customerMessage,
     chatHistory: evalCase.chatHistory || '',
@@ -174,7 +166,6 @@ function runOfflineAutopilotEvalCase(evalCase: AutopilotEvalCase): AutopilotEval
   });
   const responseBeforePlanner = defaultResponseForCase({
     evalCase,
-    officialResponse: intentResolution.officialResponse || retrievedOfficialResponse?.content,
     workflowResponse: workflowPlan.response,
   });
   const initialActions = evalCase.simulatedActions !== undefined
@@ -206,6 +197,7 @@ function runOfflineAutopilotEvalCase(evalCase: AutopilotEvalCase): AutopilotEval
     availableTeams,
     contact,
     knowledgeCoverage: rag.knowledgeCoverage,
+    knowledgeDocuments: rag.knowledgeBaseDocuments,
     source: workflowPlan.handledByWorkflow ? 'workflow_direct' : 'llm',
   });
   const finalResponse = responseValidator.response;

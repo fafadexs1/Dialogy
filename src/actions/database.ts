@@ -779,6 +779,7 @@ create table if not exists public.autopilot_configs (
   ai_model text,
   knowledge_base text,
   knowledge_base_documents jsonb,
+  knowledge_collections jsonb,
   is_primary boolean not null default false,
   is_active boolean not null default false,
   default_fallback_reply text,
@@ -800,6 +801,7 @@ alter table if exists public.autopilot_configs add column if not exists closing_
 alter table if exists public.autopilot_configs add column if not exists enabled_tool_names jsonb;
 alter table if exists public.autopilot_configs add column if not exists transcription_model text;
 alter table if exists public.autopilot_configs add column if not exists flow_graph jsonb;
+alter table if exists public.autopilot_configs add column if not exists knowledge_collections jsonb;
 
 -- Autopilot: rascunhos e versoes
 create table if not exists public.autopilot_config_drafts (
