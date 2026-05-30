@@ -375,7 +375,7 @@ describe('autopilot SGP response guard', () => {
     const dueDateResponse = buildSgpResponseFromToolResults(results, 'Qual o vencimento da fatura em aberto?');
     const amountResponse = buildSgpResponseFromToolResults(results, 'Qual o valor da fatura em aberto?');
 
-    expect(dueDateResponse).toContain('2026-06-10');
+    expect(dueDateResponse).toContain('10/06/2026');
     expect(amountResponse).toContain('55.25');
   });
 

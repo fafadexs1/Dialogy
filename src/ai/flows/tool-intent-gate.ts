@@ -25,7 +25,9 @@ export type ToolIntentGateInput = z.input<typeof ToolIntentGateInputSchema>;
 export type ToolIntentGateOutput = z.infer<typeof ToolIntentGateOutputSchema>;
 
 function cleanModelName(model: string | undefined): string {
-  return (model || DEFAULT_AUTOPILOT_MODEL).replace(/^googleai\//, '');
+  const configured = model || DEFAULT_AUTOPILOT_MODEL;
+  const geminiModel = configured.startsWith('googleai/') ? configured : DEFAULT_AUTOPILOT_MODEL;
+  return geminiModel.replace(/^googleai\//, '');
 }
 
 function extractJson(text: string): unknown {

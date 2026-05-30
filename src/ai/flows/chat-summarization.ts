@@ -17,6 +17,8 @@ import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import type { AutopilotConfig } from '@/lib/types';
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
+import { generateSummary } from '@/lib/genkit';
+import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
 
 const SummarizeChatInputSchema = z.object({
   chatHistory: z.string().describe('The complete chat history to summarize.'),
@@ -44,6 +46,20 @@ export async function summarizeChat(input: SummarizeChatInput): Promise<Summariz
     throw new Error("User not authenticated.");
   }
   const userId = user.id;
+  const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
+  if (runtimeConfig.error) {
+    throw new Error(runtimeConfig.error);
+  }
+
+  if (runtimeConfig.apiKey || runtimeConfig.hasGlobalKey || runtimeConfig.aiModel) {
+    return {
+      summary: await generateSummary(
+        input.chatHistory,
+        runtimeConfig.apiKey || undefined,
+        runtimeConfig.aiModel || undefined,
+      ),
+    };
+  }
 
   const configRes = await db.query(
     'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2',

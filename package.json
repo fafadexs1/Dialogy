@@ -28,6 +28,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.997.0",
     "@ducanh2912/next-pwa": "^10.2.6",
+    "@genkit-ai/compat-oai": "^1.16.0",
     "@genkit-ai/firebase": "1.16.0",
     "@genkit-ai/google-cloud": "1.16.0",
     "@genkit-ai/googleai": "1.16.0",

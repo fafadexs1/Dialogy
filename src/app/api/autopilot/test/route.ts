@@ -671,6 +671,7 @@ export async function POST(request: Request) {
         escalationPolicy: config.escalation_policy || '',
         closingPolicy: config.closing_policy || '',
         enabledAgentToolsDescription: enabledToolNames.join(', '),
+        enabledAgentToolNames: enabledToolNames,
         intentContext: buildIntentContext(baseTrace),
         model: resolvedModel.model,
         workspaceGeminiApiKey: workspaceGeminiRuntime.apiKey,

@@ -664,6 +664,12 @@ export default function AutopilotDetailPage() {
     );
   };
 
+  const handleUpdateDocMaxPromptChars = (id: string, maxPromptChars: number | null) => {
+    setKnowledgeDocuments((prev) =>
+      prev.map((doc) => (doc.id === id ? { ...doc, maxPromptChars } : doc))
+    );
+  };
+
   const handleUpdateDocCollections = (id: string, collectionIds: string[]) => {
     setKnowledgeDocuments((prev) =>
       prev.map((doc) => (doc.id === id ? { ...doc, collectionIds } : doc))
@@ -910,6 +916,7 @@ export default function AutopilotDetailPage() {
         onUpdateContent={handleUpdateDoc}
         onUpdateName={handleUpdateDocName}
         onUpdateCategory={handleUpdateDocCategory}
+        onUpdateMaxPromptChars={handleUpdateDocMaxPromptChars}
         onUpdateCollections={handleUpdateDocCollections}
         onAddCollection={handleAddKnowledgeCollection}
         onRemoveCollection={handleRemoveKnowledgeCollection}
@@ -1393,6 +1400,7 @@ export default function AutopilotDetailPage() {
                 onUpdateContent={handleUpdateDoc}
                 onUpdateName={handleUpdateDocName}
                 onUpdateCategory={handleUpdateDocCategory}
+                onUpdateMaxPromptChars={handleUpdateDocMaxPromptChars}
                 onUpdateCollections={handleUpdateDocCollections}
                 onAddCollection={handleAddKnowledgeCollection}
                 onRemoveCollection={handleRemoveKnowledgeCollection}

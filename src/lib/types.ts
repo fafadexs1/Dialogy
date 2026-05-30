@@ -543,6 +543,7 @@ export interface KnowledgeBaseDocument {
   name: string;
   content: string;
   tokens?: number;
+  maxPromptChars?: number | null;
   uploaded_at?: string;
   summary?: string | null;
   category?: string | null;
@@ -607,10 +608,19 @@ export type AutopilotFlowNodeKind =
   | 'knowledge'
   | 'reply'
   | 'send_message'
+  | 'form'
   | 'handoff'
   | 'close'
   | 'tool'
   | 'rule';
+
+export interface AutopilotFlowFormField {
+  id: string;
+  label: string;
+  fieldKey?: string;
+  required?: boolean;
+  placeholder?: string;
+}
 
 export interface AutopilotFlowNode {
   id: string;
@@ -624,6 +634,9 @@ export interface AutopilotFlowNode {
   config?: {
     instructions?: string;
     message?: string;
+    formFields?: AutopilotFlowFormField[];
+    formMode?: 'static' | 'ai';
+    referenceId?: string;
     variableName?: string;
     destination?: string;
     useAi?: boolean;

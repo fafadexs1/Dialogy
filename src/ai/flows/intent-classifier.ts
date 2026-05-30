@@ -60,7 +60,8 @@ export type AiIntentClassifierOutput = z.infer<typeof AiIntentClassifierOutputSc
 
 function cleanModelName(model: string | undefined): string {
   const configured = process.env.AI_INTENT_CLASSIFIER_MODEL || model || DEFAULT_AUTOPILOT_MODEL;
-  return configured.replace(/^googleai\//, '');
+  const geminiModel = configured.startsWith('googleai/') ? configured : DEFAULT_AUTOPILOT_MODEL;
+  return geminiModel.replace(/^googleai\//, '');
 }
 
 function extractJson(text: string): unknown {

@@ -18,6 +18,12 @@ import {
   runAiModelWithFallback,
   type AiModelKeyCandidate,
 } from '@/services/ai/model-client';
+import {
+  coerceLmStudioPromptOutput,
+  defineLmStudioPrompt,
+  getGlobalLmStudioConfig,
+  isLmStudioModel,
+} from '@/services/ai/lm-studio';
 
 const BranchOptionSchema = z.object({
   condition: z.string(),
@@ -138,7 +144,11 @@ function getDefaultGeminiEnvKey(): string {
 }
 
 function getModelCandidates(model?: string): string[] {
-  return [process.env.AI_PROCEDURE_RUNTIME_MODEL, ...PROCEDURE_MODEL_FALLBACKS, model]
+  if (isLmStudioModel(model)) {
+    return [model!];
+  }
+
+  return [process.env.AI_PROCEDURE_RUNTIME_MODEL, model, ...PROCEDURE_MODEL_FALLBACKS]
     .filter((candidate, index, all): candidate is string => (
       Boolean(candidate?.trim()) && all.indexOf(candidate) === index
     ));
@@ -147,7 +157,12 @@ function getModelCandidates(model?: string): string[] {
 function definePromptForCandidate(input: {
   apiKey: string;
   model: string;
+  lmStudioConfig?: Awaited<ReturnType<typeof getGlobalLmStudioConfig>>;
 }) {
+  if (isLmStudioModel(input.model)) {
+    return defineLmStudioPrompt(promptConfig, input.model, input.lmStudioConfig || { baseUrl: '', apiToken: '' }, 'procedure');
+  }
+
   const defaultEnvKey = getDefaultGeminiEnvKey();
   if (defaultEnvKey && defaultEnvKey === input.apiKey) {
     return globalPrompt;
@@ -171,14 +186,18 @@ const procedureRuntimeFlow = ai.defineFlow(
     outputSchema: ProcedureRuntimeOutputSchema,
   },
   async (input) => {
+    const model = input.model || DEFAULT_AUTOPILOT_MODEL;
     const configKey = input.config?.gemini_api_key?.trim();
     const workspaceKey = input.workspaceGeminiApiKey?.trim();
     const envKey = getDefaultGeminiEnvKey();
-    const apiKeyCandidates: AiModelKeyCandidate[] = [
-      { source: 'agent', key: configKey },
-      { source: 'workspace', key: workspaceKey },
-      { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
-    ].filter((candidate): candidate is AiModelKeyCandidate => Boolean(candidate.key));
+    const lmStudioConfig = isLmStudioModel(model) ? await getGlobalLmStudioConfig() : null;
+    const apiKeyCandidates: AiModelKeyCandidate[] = isLmStudioModel(model)
+      ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio' }]
+      : [
+          { source: 'agent', key: configKey },
+          { source: 'workspace', key: workspaceKey },
+          { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
+        ].filter((candidate): candidate is AiModelKeyCandidate => Boolean(candidate.key));
 
     if (apiKeyCandidates.length === 0) {
       console.error('[PROCEDURE_RUNTIME_SLIM] Nenhuma chave de API encontrada.');
@@ -197,8 +216,16 @@ const procedureRuntimeFlow = ai.defineFlow(
           const effectivePrompt = definePromptForCandidate({
             apiKey: context.apiKey,
             model: context.model,
+            lmStudioConfig: lmStudioConfig || undefined,
           });
           const result = await effectivePrompt(input, { model: context.model });
+          if (isLmStudioModel(context.model)) {
+            const parsedOutput = coerceLmStudioPromptOutput<ProcedureRuntimeOutput & Record<string, unknown>>(
+              result?.output,
+              result?.text
+            );
+            if (parsedOutput) result.output = parsedOutput;
+          }
           assertAiModelOutput(result?.output, 'Procedure runtime slim returned no structured output.');
           return result;
         },

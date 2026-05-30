@@ -294,6 +294,28 @@ function formatFieldValue(value: unknown): string {
   return '';
 }
 
+function formatCustomerFacingDate(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  const dateTime = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?$/);
+  if (dateTime) {
+    return `${dateTime[3]}/${dateTime[2]}/${dateTime[1]} ${dateTime[4]}:${dateTime[5]}`;
+  }
+
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`;
+  }
+
+  return raw;
+}
+
+function formatOperationalFieldValue(request: OperationalFieldRequest, value: unknown): string {
+  const isDateField = request.keys.some((key) => /date|data|vencimento|createdat/i.test(key));
+  return isDateField ? formatCustomerFacingDate(value) : formatFieldValue(value);
+}
+
 function findNestedFieldValue(source: unknown, keys: string[], depth = 0): unknown {
   if (!source || typeof source !== 'object' || depth > 4) return null;
   const wantedKeys = new Set(keys.map(normalizeFieldName));
@@ -373,7 +395,7 @@ function formatOperationalFieldResponse(input: {
     const invoices = findPayableInvoices(input.output, input.requestedContractId);
     if (invoices.length === 0) return 'Consultei seu cadastro no sistema, mas nao encontrei faturas em aberto para responder essa informacao.';
     const lines = invoices.slice(0, 5).map((invoice, index) => {
-      const value = formatFieldValue(findNestedFieldValue(invoice, request.keys));
+      const value = formatOperationalFieldValue(request, findNestedFieldValue(invoice, request.keys));
       return value ? `${formatInvoiceLabel(invoice, index)}: ${request.label} ${value}.` : '';
     }).filter(Boolean);
     return lines.length > 0
@@ -384,7 +406,7 @@ function formatOperationalFieldResponse(input: {
   const contract = findRequestedOrPrimaryContract(input.contracts, input.requestedContractId);
   if (!contract) return 'Consultei seu cadastro no sistema, mas nao encontrei contrato para responder essa informacao.';
 
-  const value = formatFieldValue(findNestedFieldValue(contract, request.keys));
+  const value = formatOperationalFieldValue(request, findNestedFieldValue(contract, request.keys));
   const contractLabel = contract.id ? `contrato ${contract.id}` : 'contrato';
   if (!value) return `Consultei o ${contractLabel}, mas o campo ${request.label} nao veio informado.`;
 
@@ -469,7 +491,7 @@ function formatMoney(value: unknown): string {
 
 function formatInvoiceLabel(invoice: any, index: number): string {
   const parts = [
-    invoice.dueDate ? `vencimento ${invoice.dueDate}` : '',
+    invoice.dueDate ? `vencimento ${formatCustomerFacingDate(invoice.dueDate)}` : '',
     formatMoney(invoice.correctedAmount ?? invoice.amount),
   ].filter(Boolean);
   return `Fatura ${invoice.id || index + 1}${parts.length ? ` (${parts.join(', ')})` : ''}`;

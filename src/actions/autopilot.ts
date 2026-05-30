@@ -31,6 +31,7 @@ import { filterKnowledgeDocumentsForScope, resolveActiveFlowIntentScope } from '
 import { isAllowedAutopilotModel } from '@/services/ai/model-selection';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
+import { normalizeGoogleAiModelId } from '@/lib/ai-models';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -246,9 +247,7 @@ async function buildSnapshotFromFormData(
             ? (formData.get('geminiApiKey')?.toString() || null)
             : fallback.gemini_api_key,
         ai_model: requestedModel || null,
-        transcription_model: formData.has('transcriptionModel')
-            ? (formData.get('transcriptionModel')?.toString() || null)
-            : fallback.transcription_model || null,
+        transcription_model: fallback.transcription_model || null,
         knowledge_base: formData.has('knowledgeBase')
             ? (formData.get('knowledgeBase')?.toString() || null)
             : fallback.knowledge_base,
@@ -609,7 +608,6 @@ export async function runAutopilotRagLab(configId: string): Promise<{
 export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<{
     apiKey: string | null,
     aiModel: string | null,
-    transcriptionModel: string | null,
     hasGlobalKey: boolean,
     error?: string,
 }> {
@@ -621,7 +619,6 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
         return {
             apiKey: null,
             aiModel: null,
-            transcriptionModel: null,
             hasGlobalKey,
             error: 'Usuário não autenticado.',
         };
@@ -631,7 +628,6 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
         return {
             apiKey: null,
             aiModel: null,
-            transcriptionModel: null,
             hasGlobalKey,
             error: 'Acesso não autorizado.',
         };
@@ -651,21 +647,16 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
                 ? integrationConfig.apiKey.trim()
                 : null;
             const aiModel = typeof integrationConfig.aiModel === 'string' && integrationConfig.aiModel.trim().length > 0
-                ? integrationConfig.aiModel.trim()
+                ? normalizeGoogleAiModelId(integrationConfig.aiModel)
                 : null;
-            const transcriptionModel = typeof integrationConfig.transcriptionModel === 'string' && integrationConfig.transcriptionModel.trim().length > 0
-                ? integrationConfig.transcriptionModel.trim()
-                : null;
-
-            if (apiKey || aiModel || transcriptionModel) {
-                return { apiKey, aiModel, transcriptionModel, hasGlobalKey };
+            if (apiKey || aiModel) {
+                return { apiKey, aiModel, hasGlobalKey };
             }
         }
 
         return {
             apiKey: null,
             aiModel: null,
-            transcriptionModel: null,
             hasGlobalKey,
         };
     } catch (error) {
@@ -673,7 +664,6 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
         return {
             apiKey: null,
             aiModel: null,
-            transcriptionModel: null,
             hasGlobalKey,
             error: 'Falha ao buscar configuração de IA do workspace.',
         };
@@ -727,7 +717,6 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
     versions?: AutopilotConfigVersionSummary[],
     workspace: Workspace | null,
     workspaceDefaultAiModel?: string | null,
-    workspaceDefaultTranscriptionModel?: string | null,
     workspaceHasGeminiConfig?: boolean,
     error?: string,
     hasGlobalKey?: boolean
@@ -828,13 +817,11 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
 
         let geminiKeyFromIntegration = null;
         let aiModelFromIntegration = null;
-        let transcriptionModelFromIntegration = null;
 
         if (integrationRes.rows.length > 0 && integrationRes.rows[0].is_active) {
             const intConfig = integrationRes.rows[0].config;
             geminiKeyFromIntegration = intConfig.apiKey;
-            aiModelFromIntegration = intConfig.aiModel;
-            transcriptionModelFromIntegration = intConfig.transcriptionModel;
+            aiModelFromIntegration = normalizeGoogleAiModelId(intConfig.aiModel);
         }
 
         return {
@@ -845,8 +832,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             versions,
             workspace,
             workspaceDefaultAiModel: aiModelFromIntegration,
-            workspaceDefaultTranscriptionModel: transcriptionModelFromIntegration,
-            workspaceHasGeminiConfig: Boolean(geminiKeyFromIntegration || aiModelFromIntegration || transcriptionModelFromIntegration),
+            workspaceHasGeminiConfig: Boolean(geminiKeyFromIntegration || aiModelFromIntegration),
             hasGlobalKey: !!(process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY)
         };
 
@@ -858,7 +844,6 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             agents: null,
             workspace: null,
             workspaceDefaultAiModel: null,
-            workspaceDefaultTranscriptionModel: null,
             workspaceHasGeminiConfig: false,
             error: 'Falha ao buscar configurações do banco de dados.',
             hasGlobalKey: false
@@ -917,10 +902,6 @@ export async function saveAutopilotConfig(
             }
             setClauses.push(`ai_model = $${valueIndex++}`);
             values.push(requestedModel);
-        }
-        if (formData.has('transcriptionModel')) {
-            setClauses.push(`transcription_model = $${valueIndex++}`);
-            values.push(formData.get('transcriptionModel'));
         }
         if (formData.has('knowledgeBase')) {
             setClauses.push(`knowledge_base = $${valueIndex++}`);

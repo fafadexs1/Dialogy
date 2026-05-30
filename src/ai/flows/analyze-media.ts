@@ -1,8 +1,9 @@
 'use server';
 
 import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { DEFAULT_AUTOPILOT_MODEL, getGoogleAiSdkModelName } from '@/lib/ai-models';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { transcribeAudio } from '@/ai/flows/transcribe-audio';
 
 export type AnalyzeMediaInput = {
   mediaUrl: string;
@@ -21,10 +22,6 @@ function buildPrompt(input: AnalyzeMediaInput): string {
     ? `\nLegenda/texto enviado pelo cliente: "${input.caption.trim()}".`
     : '';
 
-  if (input.mediaType === 'audio') {
-    return `Transcreva este audio para Portugues do Brasil e resuma o que o cliente precisa em ate 4 frases curtas.${caption}`;
-  }
-
   if (input.mediaType === 'image') {
     return `Analise esta imagem no contexto de atendimento ao cliente. Descreva objetivamente o que aparece, possiveis problemas visiveis e informacoes uteis para o atendente em ate 4 frases curtas.${caption}`;
   }
@@ -37,6 +34,15 @@ function buildPrompt(input: AnalyzeMediaInput): string {
 }
 
 export async function analyzeMediaForAutopilot(input: AnalyzeMediaInput): Promise<AnalyzeMediaOutput> {
+  if (input.mediaType === 'audio') {
+    const result = await transcribeAudio({
+      audioUrl: input.mediaUrl,
+      workspaceId: input.workspaceId,
+    });
+    const caption = input.caption?.trim() ? ` Legenda/texto enviado pelo cliente: ${input.caption.trim()}` : '';
+    return { analysis: `${result.transcription}${caption}`.trim() };
+  }
+
   const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
   if (runtimeConfig.error) {
     throw new Error(runtimeConfig.error);
@@ -55,7 +61,7 @@ export async function analyzeMediaForAutopilot(input: AnalyzeMediaInput): Promis
   const arrayBuffer = await response.arrayBuffer();
   const base64Media = Buffer.from(arrayBuffer).toString('base64');
   const mimeType = input.mimetype || response.headers.get('content-type') || 'application/octet-stream';
-  const modelName = runtimeConfig.transcriptionModel || runtimeConfig.aiModel || DEFAULT_AUTOPILOT_MODEL.replace(/^googleai\//, '');
+  const modelName = getGoogleAiSdkModelName(runtimeConfig.aiModel) || getGoogleAiSdkModelName(DEFAULT_AUTOPILOT_MODEL)!;
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: modelName });
 

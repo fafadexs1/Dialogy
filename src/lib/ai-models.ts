@@ -1,4 +1,4 @@
-export type AiModelProvider = 'googleai' | 'openai' | 'anthropic' | 'other';
+export type AiModelProvider = 'googleai' | 'lmstudio' | 'openai' | 'anthropic' | 'other';
 
 export type AiModelCatalogEntry = {
   id: string;
@@ -44,13 +44,14 @@ export const DEFAULT_AI_MODEL_CATALOG: AiModelCatalogEntry[] = [
 
 const PROVIDER_LABELS: Record<AiModelProvider, string> = {
   googleai: 'Gemini',
+  lmstudio: 'LM Studio',
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   other: 'Outro',
 };
 
 function normalizeProvider(value: unknown): AiModelProvider {
-  if (value === 'googleai' || value === 'openai' || value === 'anthropic' || value === 'other') {
+  if (value === 'googleai' || value === 'lmstudio' || value === 'openai' || value === 'anthropic' || value === 'other') {
     return value;
   }
   return 'other';
@@ -60,8 +61,12 @@ function normalizeEntry(entry: unknown): AiModelCatalogEntry | null {
   if (!entry || typeof entry !== 'object') return null;
 
   const raw = entry as Partial<AiModelCatalogEntry>;
-  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
-  if (!id) return null;
+  const rawId = typeof raw.id === 'string' ? raw.id.trim() : '';
+  if (!rawId) return null;
+  const provider = normalizeProvider(raw.provider);
+  const id = provider === 'lmstudio' && !rawId.startsWith('lmstudio/')
+    ? `lmstudio/${rawId}`
+    : rawId;
 
   const label = typeof raw.label === 'string' && raw.label.trim().length > 0
     ? raw.label.trim()
@@ -70,7 +75,7 @@ function normalizeEntry(entry: unknown): AiModelCatalogEntry | null {
   return {
     id,
     label,
-    provider: normalizeProvider(raw.provider),
+    provider,
     description: typeof raw.description === 'string' ? raw.description.trim() : undefined,
     enabled: raw.enabled !== false,
   };
@@ -116,7 +121,11 @@ export function isPreviewAiModel(id: string): boolean {
 }
 
 export function isAutopilotRuntimeSupportedModel(entry: AiModelCatalogEntry): boolean {
-  return entry.provider === 'googleai' && entry.id.startsWith('googleai/') && !isPreviewAiModel(entry.id);
+  const hasSupportedProviderPrefix = (
+    (entry.provider === 'googleai' && entry.id.startsWith('googleai/')) ||
+    (entry.provider === 'lmstudio' && entry.id.startsWith('lmstudio/'))
+  );
+  return hasSupportedProviderPrefix && !isPreviewAiModel(entry.id);
 }
 
 export function getEnabledAiModels(catalog: AiModelCatalogEntry[]): AiModelCatalogEntry[] {
@@ -128,6 +137,29 @@ export function getAutopilotSelectableModels(catalog: AiModelCatalogEntry[]): Ai
   return supported.length > 0
     ? supported
     : DEFAULT_AI_MODEL_CATALOG.filter((entry) => entry.enabled && isAutopilotRuntimeSupportedModel(entry));
+}
+
+export function normalizeGoogleAiModelId(model?: string | null): string | null {
+  const normalized = model?.trim() || '';
+  if (!normalized) return null;
+  if (normalized.startsWith('googleai/')) return normalized;
+  if (normalized.startsWith('models/')) return `googleai/${normalized.replace(/^models\//, '')}`;
+  if (normalized.includes('/')) return null;
+  return `googleai/${normalized}`;
+}
+
+export function getGoogleAiSdkModelName(model?: string | null): string | null {
+  return normalizeGoogleAiModelId(model)?.replace(/^googleai\//, '') || null;
+}
+
+export function getWorkspaceGeminiSelectableModels(catalog: AiModelCatalogEntry[]): AiModelCatalogEntry[] {
+  const selectable = getEnabledAiModels(catalog).filter((entry) => (
+    entry.provider === 'googleai' && entry.id.startsWith('googleai/')
+  ));
+
+  return selectable.length > 0
+    ? selectable
+    : DEFAULT_AI_MODEL_CATALOG.filter((entry) => entry.enabled && entry.provider === 'googleai');
 }
 
 export function getAiModelById(

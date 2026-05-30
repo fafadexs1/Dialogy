@@ -13,9 +13,10 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { DEFAULT_AUTOPILOT_MODEL, getGoogleAiSdkModelName, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
+import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
 
 
 const SmartRepliesInputSchema = z.object({
@@ -60,13 +61,16 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
   const config = configRes.rows.length > 0
     ? configRes.rows[0]
     : { id: 'default', ai_model: DEFAULT_AUTOPILOT_MODEL };
+  const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
+  const apiKey = config.gemini_api_key || runtimeConfig.apiKey;
+  const configuredModel = normalizeGoogleAiModelId(config.ai_model || runtimeConfig.aiModel) || DEFAULT_AUTOPILOT_MODEL;
 
   // Check if we have a custom Gemini API Key
-  if (config.gemini_api_key) {
+  if (apiKey) {
     try {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(config.gemini_api_key);
-      const model = genAI.getGenerativeModel({ model: config.ai_model || DEFAULT_AUTOPILOT_MODEL.replace(/^googleai\//, '') });
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: getGoogleAiSdkModelName(configuredModel)! });
 
       const prompt = `You are an AI assistant helping support agents by suggesting quick replies to customer messages.
       
@@ -102,7 +106,7 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
           await logAutopilotUsage({
             configId: config.id,
             flowName: 'generateSmartRepliesFlow (Custom Key)',
-            modelName: config.ai_model || DEFAULT_AUTOPILOT_MODEL,
+            modelName: configuredModel,
             inputTokens: usageMetadata.promptTokenCount,
             outputTokens: usageMetadata.candidatesTokenCount,
             totalTokens: usageMetadata.totalTokenCount,
@@ -122,7 +126,7 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
   }
 
   // Pass the full input including config to the flow
-  const flowInput = { ...input, config };
+  const flowInput = { ...input, config: { ...config, ai_model: configuredModel } };
   return generateSmartRepliesFlow(flowInput);
 }
 

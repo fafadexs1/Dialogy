@@ -96,6 +96,20 @@ describe('autopilot tool planner', () => {
     expect(result.rejectedActions[0]).toMatchObject({ code: 'intent_not_allowed' });
   });
 
+  it('does not create handoff actions for informational catalog lookup promises', () => {
+    const result = runPlanner({
+      message: 'Quais planos de internet voces tem?',
+      response: 'Vou consultar os planos no sistema.',
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+      actions: [],
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.responseOverride).toBeNull();
+    expect(result.promiseValidation.promisedExternalLookup).toBe(true);
+    expect(result.promiseValidation.repairReason).toBeNull();
+  });
+
   it('allows billing lookup when slots and enabled tools are valid', () => {
     const result = runPlanner({
       message: 'Preciso da segunda via do boleto. CPF 529.982.247-25',

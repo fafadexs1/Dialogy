@@ -29,6 +29,7 @@ interface AutopilotKnowledgeProps {
   onUpdateContent: (id: string, content: string) => void;
   onUpdateName: (id: string, name: string) => void;
   onUpdateCategory: (id: string, category: string) => void;
+  onUpdateMaxPromptChars: (id: string, maxPromptChars: number | null) => void;
   onUpdateCollections: (id: string, collectionIds: string[]) => void;
   onAddCollection: (name: string) => boolean;
   onRemoveCollection: (id: string) => void;
@@ -51,6 +52,7 @@ export function AutopilotKnowledge({
   onUpdateContent,
   onUpdateName,
   onUpdateCategory,
+  onUpdateMaxPromptChars,
   onUpdateCollections,
   onAddCollection,
   onRemoveCollection,
@@ -548,7 +550,7 @@ export function AutopilotKnowledge({
                     <PencilLine className="h-3.5 w-3.5 text-primary" />
                     Editor de documento
                   </div>
-                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(220px,0.7fr)]">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.55fr)_minmax(180px,0.55fr)]">
                     <div className="space-y-1.5">
                       <Label htmlFor="autopilot-doc-name" className="text-xs uppercase tracking-wide text-muted-foreground">
                         Título do documento
@@ -569,6 +571,28 @@ export function AutopilotKnowledge({
                         value={selectedDoc.category || ''}
                         onChange={(event) => onUpdateCategory(selectedDoc.id, event.target.value)}
                         placeholder="Ex: commercial_sales_flow"
+                        className="h-12 rounded-2xl border-border bg-background font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="autopilot-doc-max-prompt-chars" className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Limite no prompt
+                      </Label>
+                      <Input
+                        id="autopilot-doc-max-prompt-chars"
+                        type="number"
+                        min={1}
+                        step={100}
+                        value={selectedDoc.maxPromptChars ?? ''}
+                        onChange={(event) => {
+                          const rawValue = event.target.value.trim();
+                          const parsedValue = Number.parseInt(rawValue, 10);
+                          onUpdateMaxPromptChars(
+                            selectedDoc.id,
+                            rawValue && Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : null
+                          );
+                        }}
+                        placeholder="Padrao: 1200"
                         className="h-12 rounded-2xl border-border bg-background font-mono text-sm"
                       />
                     </div>

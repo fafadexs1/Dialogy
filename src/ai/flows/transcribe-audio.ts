@@ -1,7 +1,7 @@
 'use server';
 
 /**
- * @fileOverview This file implements the audio transcription flow.
+ * @fileOverview Audio transcription flow backed by the hosted Whisper API.
  *
  * - transcribeAudio - A function that transcribes an audio file URL.
  * - TranscribeAudioInput - The input type for the transcribeAudio function.
@@ -9,14 +9,12 @@
  */
 
 import { ai } from '@/ai/genkit';
+import { transcribeAudioUrlWithWhisper } from '@/services/audio/transcription-service';
 import { z } from 'genkit';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
 
 const TranscribeAudioInputSchema = z.object({
   audioUrl: z.string().url().describe('The public URL of the audio file to transcribe.'),
-  workspaceId: z.string().describe('The workspace ID used to resolve Gemini configuration.'),
+  workspaceId: z.string().describe('The workspace ID associated with the audio transcription request.'),
 });
 
 export type TranscribeAudioInput = z.infer<typeof TranscribeAudioInputSchema>;
@@ -38,47 +36,9 @@ const transcribeAudioFlow = ai.defineFlow(
     outputSchema: TranscribeAudioOutputSchema,
   },
   async (input) => {
-    // Resolve AI runtime config without depending on a visible Autopilot agent.
-    const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
-
-    if (runtimeConfig.error) {
-      throw new Error(runtimeConfig.error);
-    }
-
-    const apiKey = runtimeConfig.apiKey;
-
-    if (!apiKey) {
-      throw new Error('Integracao Gemini do workspace nao configurada ou inativa. Acesse Integracoes > Gemini.');
-    }
-
-    const modelName = runtimeConfig.transcriptionModel || runtimeConfig.aiModel || DEFAULT_AUTOPILOT_MODEL.replace(/^googleai\//, '');
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: modelName });
-
     try {
-      const response = await fetch(input.audioUrl);
-      if (!response.ok) {
-        throw new Error(`Falha ao baixar audio: ${response.statusText}`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const base64Audio = Buffer.from(arrayBuffer).toString('base64');
-      const mimeType = response.headers.get('content-type') || 'audio/mp3';
-
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            mimeType,
-            data: base64Audio,
-          },
-        },
-        {
-          text: 'Transcreva este audio para Portugues do Brasil (PT-BR). Retorne somente o texto da transcricao. Se o audio estiver em outro idioma, traduza para o Portugues.',
-        },
-      ]);
-
-      return { transcription: result.response.text() };
+      const transcription = await transcribeAudioUrlWithWhisper(input.audioUrl);
+      return { transcription };
     } catch (err: any) {
       console.error('[TRANSCRIBE_AUDIO] Error:', err);
       throw new Error(`Erro na transcricao: ${err.message}`);

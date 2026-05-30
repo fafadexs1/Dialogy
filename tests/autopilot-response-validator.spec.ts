@@ -63,8 +63,25 @@ describe('autopilot response validator', () => {
 
   it('rejects prices invented outside the factual retrieved documents', () => {
     const result = validate({
+      message: 'Preciso do documento do contrato',
+      response: 'A taxa do documento e R$79,90.',
+      knowledgeDocuments: [{
+        id: 'contract-policy',
+        name: 'Politica de documentos',
+        content: 'A taxa do documento e R$99,90.',
+        contextRole: 'fact',
+      }],
+    });
+
+    expect(result.decision).toBe('replace_with_fallback');
+    expect(result.reasons).toContain('unsupported_knowledge_facts');
+    expect(result.metadata.unsupportedFacts).toContain('R$79,90');
+  });
+
+  it('does not fact-check commercial catalog responses against truncated prompt documents', () => {
+    const result = validate({
       message: 'Quais planos voces possuem?',
-      response: 'Temos o plano 500 MEGA por R$79,90.',
+      response: 'Temos 500 MEGA por R$99,90 e 1000 MEGA por R$149,90.',
       knowledgeDocuments: [{
         id: 'plans',
         name: 'Catalogo de planos',
@@ -73,9 +90,7 @@ describe('autopilot response validator', () => {
       }],
     });
 
-    expect(result.decision).toBe('replace_with_fallback');
-    expect(result.reasons).toContain('unsupported_knowledge_facts');
-    expect(result.metadata.unsupportedFacts).toContain('R$79,90');
+    expect(result.decision).toBe('approve');
   });
 
   it('approves factual values present in retrieved documents', () => {

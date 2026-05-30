@@ -123,4 +123,14 @@ describe('AI customer response formatting', () => {
     expect(formatted).toContain('💰 R$149,90/mes pagando em dia\n💰 R$159,90/mes');
     expect(formatted).not.toContain('...');
   });
+
+  it('formats ISO dates and timestamps before sending them to the customer', () => {
+    const formatted = formatCustomerFacingAiResponse(
+      'Ultima atividade: 2026-05-30T09:42:00-03:00. Vencimento: 2026-06-28.'
+    );
+
+    expect(formatted).toContain('30/05/2026 09:42');
+    expect(formatted).toContain('28/06/2026');
+    expect(formatted).not.toContain('2026-05-30T09:42:00-03:00');
+  });
 });

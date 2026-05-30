@@ -38,6 +38,15 @@ const LOOKUP_TOOL_TYPES = new Set<AgentToolAction['type']>([
   'mcp_call_tool',
 ]);
 
+const INFORMATIONAL_INTENTS = new Set<AutopilotIntentResolution['intent']>([
+  'catalog_request',
+  'pricing_request',
+  'promotion_request',
+  'availability_request',
+  'greeting',
+  'thanks',
+]);
+
 function normalizeText(value: string): string {
   return value
     .normalize('NFD')
@@ -241,8 +250,18 @@ export function planAutopilotTools(input: {
 }): ToolPlannerResult {
   const rejectedActions: ToolPlannerRejectedAction[] = [];
   const acceptedActions: AgentToolAction[] = [];
+  const isInformationalIntent = INFORMATIONAL_INTENTS.has(input.intentResolution.intent);
 
   for (const action of input.actions) {
+    if (isInformationalIntent && action.type !== 'crm_update_contact_custom_fields') {
+      rejectedActions.push({
+        action,
+        code: 'intent_not_allowed',
+        reason: `Intencao informacional (${input.intentResolution.intent}): ferramenta ${resolveRequestedToolName(action) || action.type} bloqueada.`,
+      });
+      continue;
+    }
+
     const definition = findRuntimeDefinition(action, input.toolCatalog);
     if (!definition) {
       rejectedActions.push({
@@ -310,7 +329,7 @@ export function planAutopilotTools(input: {
   let repairReason: string | null = null;
 
   const missingSlotRejection = rejectedActions.find((item) => item.code === 'missing_slots' && item.missingSlots?.length);
-  if (promisedExternalLookup && !hasExecutableLookupTool) {
+  if (promisedExternalLookup && !hasExecutableLookupTool && !isInformationalIntent) {
     if (missingSlotRejection?.missingSlots?.length) {
       responseOverride = missingSlotResponse(missingSlotRejection.missingSlots);
       repairReason = 'promise_missing_slots';

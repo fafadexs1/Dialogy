@@ -1,9 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Save, Sparkles, Trash2 } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 
-import { getAiModelCatalogAction, saveAiModelCatalogAction } from '@/actions/ai-models';
+import {
+  getAiModelCatalogAction,
+  getLmStudioConfigAction,
+  saveAiModelCatalogAction,
+  saveLmStudioConfigAction,
+  syncLmStudioModelsAction,
+} from '@/actions/ai-models';
 import {
   AiModelCatalogEntry,
   AiModelProvider,
@@ -20,7 +26,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-const PROVIDERS: AiModelProvider[] = ['googleai', 'openai', 'anthropic', 'other'];
+const PROVIDERS: AiModelProvider[] = ['googleai', 'lmstudio', 'openai', 'anthropic', 'other'];
 
 function buildEmptyModel(index: number): AiModelCatalogEntry {
   return {
@@ -35,23 +41,36 @@ function buildEmptyModel(index: number): AiModelCatalogEntry {
 export default function AiModelsSuperadminPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingLmStudio, setSavingLmStudio] = useState(false);
+  const [syncingLmStudio, setSyncingLmStudio] = useState(false);
   const [models, setModels] = useState<AiModelCatalogEntry[]>([]);
   const [initialSignature, setInitialSignature] = useState('');
+  const [lmStudioBaseUrl, setLmStudioBaseUrl] = useState('');
+  const [lmStudioApiToken, setLmStudioApiToken] = useState('');
+  const [initialLmStudioSignature, setInitialLmStudioSignature] = useState('');
 
   useEffect(() => {
-    getAiModelCatalogAction()
-      .then((result) => {
-        if (result.error) {
-          toast({ title: 'Erro ao carregar', description: result.error, variant: 'destructive' });
+    Promise.all([getAiModelCatalogAction(), getLmStudioConfigAction()])
+      .then(([catalogResult, lmStudioResult]) => {
+        if (catalogResult.error) {
+          toast({ title: 'Erro ao carregar', description: catalogResult.error, variant: 'destructive' });
           return;
         }
-        setModels(result.models);
-        setInitialSignature(JSON.stringify(result.models));
+        setModels(catalogResult.models);
+        setInitialSignature(JSON.stringify(catalogResult.models));
+
+        if (!lmStudioResult.error) {
+          setLmStudioBaseUrl(lmStudioResult.config.baseUrl);
+          setLmStudioApiToken(lmStudioResult.config.apiToken);
+          setInitialLmStudioSignature(JSON.stringify(lmStudioResult.config));
+        }
       })
       .finally(() => setLoading(false));
   }, []);
 
   const isDirty = useMemo(() => JSON.stringify(models) !== initialSignature, [initialSignature, models]);
+  const lmStudioSignature = JSON.stringify({ baseUrl: lmStudioBaseUrl.trim(), apiToken: lmStudioApiToken.trim() });
+  const isLmStudioDirty = lmStudioSignature !== initialLmStudioSignature;
 
   const summary = useMemo(() => {
     const enabled = models.filter((entry) => entry.enabled).length;
@@ -104,6 +123,45 @@ export default function AiModelsSuperadminPage() {
     }
   };
 
+  const handleSaveLmStudio = async () => {
+    setSavingLmStudio(true);
+    try {
+      const result = await saveLmStudioConfigAction({ baseUrl: lmStudioBaseUrl, apiToken: lmStudioApiToken });
+      if (!result.success) {
+        toast({ title: 'Erro ao salvar LM Studio', description: result.error, variant: 'destructive' });
+        return;
+      }
+
+      const normalized = { baseUrl: lmStudioBaseUrl.trim().replace(/\/+$/, ''), apiToken: lmStudioApiToken.trim() };
+      setLmStudioBaseUrl(normalized.baseUrl);
+      setLmStudioApiToken(normalized.apiToken);
+      setInitialLmStudioSignature(JSON.stringify(normalized));
+      toast({ title: 'LM Studio salvo', description: 'Endpoint global atualizado.' });
+    } finally {
+      setSavingLmStudio(false);
+    }
+  };
+
+  const handleSyncLmStudio = async () => {
+    setSyncingLmStudio(true);
+    try {
+      const result = await syncLmStudioModelsAction();
+      if (!result.success || !result.models) {
+        toast({ title: 'Erro ao sincronizar LM Studio', description: result.error, variant: 'destructive' });
+        return;
+      }
+
+      setModels(result.models);
+      setInitialSignature(JSON.stringify(result.models));
+      toast({
+        title: 'LM Studio sincronizado',
+        description: `${result.discoveredCount || 0} modelo(s) local(is) encontrados. O catalogo global foi atualizado.`,
+      });
+    } finally {
+      setSyncingLmStudio(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -124,8 +182,8 @@ export default function AiModelsSuperadminPage() {
             <div className="space-y-1">
               <h1 className="text-3xl font-bold tracking-tight text-foreground">Catálogo de Modelos</h1>
               <p className="max-w-3xl text-sm text-muted-foreground">
-                Gerencie quais modelos aparecem no Autopilot. O runtime atual suporta diretamente apenas entradas compatíveis com
-                `googleai/...`; outros providers podem ser cadastrados agora e ativados quando o backend correspondente existir.
+                Gerencie quais modelos aparecem no Autopilot. O runtime suporta entradas `googleai/...` e `lmstudio/...`.
+                O endpoint do LM Studio é configurado somente nesta área e não fica disponível para workspaces.
               </p>
             </div>
           </div>
@@ -148,6 +206,48 @@ export default function AiModelsSuperadminPage() {
           </Button>
         </div>
       </header>
+
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader>
+          <CardTitle>LM Studio Global</CardTitle>
+          <CardDescription>
+            Configure o servidor OpenAI-compatible usado pelos modelos `lmstudio/...`. Somente superadmins acessam estes dados.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-12">
+          <div className="space-y-2 lg:col-span-7">
+            <Label htmlFor="lm-studio-base-url">Endpoint</Label>
+            <Input
+              id="lm-studio-base-url"
+              value={lmStudioBaseUrl}
+              onChange={(event) => setLmStudioBaseUrl(event.target.value)}
+              placeholder="Ex: http://host.docker.internal:1234/v1"
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="space-y-2 lg:col-span-5">
+            <Label htmlFor="lm-studio-api-token">Token</Label>
+            <Input
+              id="lm-studio-api-token"
+              type="password"
+              value={lmStudioApiToken}
+              onChange={(event) => setLmStudioApiToken(event.target.value)}
+              placeholder="Opcional quando a autenticacao estiver desativada"
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="flex flex-wrap gap-3 lg:col-span-12">
+            <Button onClick={handleSaveLmStudio} disabled={savingLmStudio || !isLmStudioDirty}>
+              {savingLmStudio ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              Salvar LM Studio
+            </Button>
+            <Button type="button" variant="outline" onClick={handleSyncLmStudio} disabled={syncingLmStudio || isLmStudioDirty}>
+              {syncingLmStudio ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Sincronizar modelos
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4">
         {models.map((model, index) => {
@@ -203,7 +303,7 @@ export default function AiModelsSuperadminPage() {
                   <Input
                     value={model.id}
                     onChange={(event) => updateModel(index, { id: event.target.value })}
-                    placeholder="Ex: googleai/gemini-2.0-flash-lite"
+                    placeholder={model.provider === 'lmstudio' ? 'Ex: google/gemma-4-e4b' : 'Ex: googleai/gemini-2.0-flash-lite'}
                     className="font-mono text-xs"
                   />
                 </div>

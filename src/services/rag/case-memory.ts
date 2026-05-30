@@ -135,7 +135,7 @@ export async function refreshCaseMemoryForChat(input: RefreshCaseMemoryInput) {
         closeNotes: chat.close_notes || undefined,
         contactName: chat.contact_name || undefined,
         channel: chat.source || undefined,
-        model: aiContext.model,
+        model: aiContext.workspaceGeminiModel,
         apiKey: aiContext.workspaceGeminiApiKey || aiContext.autopilotConfig?.gemini_api_key || undefined,
         autopilotConfigId: aiContext.autopilotConfig?.id || undefined,
     });

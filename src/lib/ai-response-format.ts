@@ -36,6 +36,15 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
+function formatIsoDatesForCustomer(value: string): string {
+  return value
+    .replace(
+      /\b(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?\b/g,
+      '$3/$2/$1 $4:$5'
+    )
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1');
+}
+
 function splitSentences(value: string): string[] {
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (!normalized) return [];
@@ -215,7 +224,7 @@ export function formatCustomerFacingAiResponse(
   response: string,
   maxChars = DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
 ): string {
-  const normalized = normalizeWhitespace(expandCompactPlanCatalog(response));
+  const normalized = normalizeWhitespace(formatIsoDatesForCustomer(expandCompactPlanCatalog(response)));
   if (!normalized) return '';
 
   const isCatalog = isStructuredCatalogResponse(normalized) || isPlanOfferResponse(normalized);

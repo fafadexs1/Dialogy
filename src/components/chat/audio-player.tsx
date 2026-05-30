@@ -4,10 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, Loader2, Languages } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
-import { transcribeAudio } from '@/ai/flows/transcribe-audio';
 import { useToast } from '@/hooks/use-toast';
-import { saveTranscriptionAction } from '@/actions/messages';
-import type { Message } from '@/lib/types';
 import { toAbsoluteAppUrl } from '@/lib/storage-url';
 
 interface AudioPlayerProps {
@@ -114,16 +111,28 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
         }
         setIsTranscribing(true);
         try {
-            const result = await transcribeAudio({ audioUrl, workspaceId });
+            const response = await fetch('/api/audio/transcribe', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    audioUrl,
+                    workspaceId,
+                    messageId,
+                    chatId,
+                }),
+            });
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Nao foi possivel transcrever o audio.');
+            }
+
             if (result.transcription) {
                 setTranscription(result.transcription);
-                // Save to DB in the background if messageId exists
-                if (messageId) {
-                    await saveTranscriptionAction(messageId, result.transcription);
-                    // Update local store to persist across navigation
-                    if (chatId) {
-                        updateMessage(chatId, messageId, { transcription: result.transcription });
-                    }
+                if (chatId && messageId) {
+                    updateMessage(chatId, messageId, { transcription: result.transcription });
                 }
             }
         } catch (error: any) {

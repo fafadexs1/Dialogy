@@ -148,6 +148,7 @@ function hasInternalLeak(response: string): boolean {
 
   return (
     /\b(TypeError|ReferenceError|SyntaxError|stack trace|Unhandled|ECONNRESET|ETIMEDOUT)\b/i.test(response) ||
+    /\b(INVALID_ARGUMENT|Schema validation|Parse Errors?:|Provided data:|Required JSON schema)\b/.test(response) ||
     /\b(api[_-]?key|authorization|bearer\s+[a-z0-9._-]+|token|command_id|cpfFieldId)\b/i.test(response) ||
     /\b(sgp_fetch_|mcp_call_tool|crm_update_contact_custom_fields|transfer_chat|close_chat|add_internal_note)\b/i.test(response)
   );
@@ -165,11 +166,16 @@ function hasConversationTranscriptLeak(response: string): boolean {
 }
 
 function removeTechnicalFragments(response: string): string {
-  return response
-    .replace(/```(?:json)?[\s\S]*?```/gi, '')
+  const cleaned = response
+    .replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, (match, p1) => {
+      // If the markdown block is the ONLY thing in the response, keep its contents
+      if (response.trim() === match.trim()) return p1;
+      return '';
+    })
     .replace(/\b(command_id|trace_id|request_id)\s*[:=]\s*[a-z0-9._-]+/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+  return cleaned || response.trim();
 }
 
 function extractSupportedFactTokens(value: string): string[] {

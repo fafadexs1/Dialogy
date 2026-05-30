@@ -40,6 +40,9 @@
   GOOGLE_ADS_EXPORT_SECRET: ${GOOGLE_ADS_EXPORT_SECRET:-}
   GOOGLE_GENAI_API_KEY: ${GOOGLE_GENAI_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  # Whisper Transcription API
+  WHISPER_API_KEY: ${WHISPER_API_KEY:-}
+  WHISPER_BASE_URL: ${WHISPER_BASE_URL:-${BASE_URL:-}}
   AI_DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-}
   AI_ORCHESTRATOR_TOTAL_TIMEOUT_MS: ${AI_ORCHESTRATOR_TOTAL_TIMEOUT_MS:-30000}
   AI_ORCHESTRATOR_LLM_TIMEOUT_MS: ${AI_ORCHESTRATOR_LLM_TIMEOUT_MS:-20000}
@@ -103,7 +106,7 @@ x-worker-ai-environment: &worker-ai-environment
 
 services:
   dialogy:
-    image: fafadexs/dialogy:PBE-5.95
+    image: fafadexs/dialogy:PBE-5.105
     restart: unless-stopped
     init: true
     environment:
@@ -125,7 +128,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PBE-5.95
+    image: fafadexs/dialogy-worker:PBE-5.105
     restart: unless-stopped
     init: true
     depends_on:
@@ -136,7 +139,7 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PBE-5.95
+    image: fafadexs/dialogy-worker-ai:PBE-5.105
     restart: unless-stopped
     init: true
     depends_on:

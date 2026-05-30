@@ -22,6 +22,12 @@ import {
   runAiModelWithFallback,
   type AiModelKeyCandidate,
 } from '@/services/ai/model-client';
+import {
+  tryParseJsonResponse,
+  isLmStudioModel,
+  getGlobalLmStudioConfig,
+  defineLmStudioPrompt,
+} from '@/services/ai/lm-studio';
 
 // Define a schema for a single automation rule
 const ActionSchema = z.union([
@@ -592,10 +598,16 @@ function getModelCandidates(model: string): string[] {
   ));
 }
 
-function definePromptForCandidate(input: {
+
+async function definePromptForCandidate(input: {
   apiKey: string;
   model: string;
 }) {
+  if (isLmStudioModel(input.model)) {
+    const lmStudioConfig = await getGlobalLmStudioConfig();
+    return defineLmStudioPrompt(promptConfig, input.model, lmStudioConfig);
+  }
+
   const defaultEnvKey = getDefaultGeminiEnvKey();
   if (defaultEnvKey && defaultEnvKey === input.apiKey) {
     return globalPrompt;
@@ -660,11 +672,47 @@ const autoResponderFlow = ai.defineFlow(
           retryBaseDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_BASE_DELAY_MS || '', 10) || 250,
           retryMaxDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_MAX_DELAY_MS || '', 10) || 1500,
           execute: async (context) => {
-            const effectivePrompt = definePromptForCandidate({
+            const effectivePrompt = await definePromptForCandidate({
               apiKey: context.apiKey,
               model: context.model,
             });
-            const result = await effectivePrompt(promptInput, { model: context.model });
+            let result: any;
+            try {
+              result = await effectivePrompt(promptInput, { model: context.model });
+            } catch (promptError: any) {
+              // Genkit throws INVALID_ARGUMENT when the model returns JSON-as-string
+              // instead of structured output (common with LM Studio / local models).
+              // Try to recover the raw model text from the error's response object.
+              let recoveredText: string | null = null;
+              try {
+                recoveredText = typeof promptError.response?.text === 'function'
+                  ? promptError.response.text()
+                  : typeof promptError.response?.text === 'string'
+                    ? promptError.response.text
+                    : null;
+              } catch (_) {}
+
+              if (recoveredText && recoveredText.trim()) {
+                const parsed = tryParseJsonResponse(recoveredText);
+                if (parsed?.response) {
+                  console.warn('[AUTORESPONDER_FLOW] Recovered structured response from raw text after Genkit schema error.');
+                  result = { output: parsed, text: recoveredText };
+                }
+              }
+
+              if (!result) throw promptError;
+            }
+
+            // If Genkit returned a result but couldn't parse output (output is null/undefined),
+            // try to manually parse the raw text which may contain valid JSON.
+            if (!result?.output && result?.text) {
+              const parsed = tryParseJsonResponse(result.text);
+              if (parsed?.response) {
+                console.warn('[AUTORESPONDER_FLOW] Parsed structured response from raw model text.');
+                result.output = parsed;
+              }
+            }
+
             assertAiModelOutput(result?.output, 'Auto responder returned no structured output.');
             return result;
           },

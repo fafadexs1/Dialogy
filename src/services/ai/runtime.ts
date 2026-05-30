@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { DEFAULT_AUTOPILOT_MODEL, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import type { AutopilotConfig, KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 
@@ -42,6 +43,7 @@ function mapAutopilotConfig(row: any): AutopilotConfig {
 export type WorkspaceAiExecutionContext = {
     autopilotConfig: AutopilotConfig | null;
     workspaceGeminiApiKey?: string;
+    workspaceGeminiModel: string;
     model: string;
 };
 
@@ -106,7 +108,7 @@ export async function resolveWorkspaceAiExecutionContext(
                     : undefined;
             workspaceModel =
                 typeof config.aiModel === 'string' && config.aiModel.trim().length > 0
-                    ? config.aiModel.trim()
+                    ? normalizeGoogleAiModelId(config.aiModel) || undefined
                     : undefined;
         }
     } catch (error) {
@@ -129,6 +131,7 @@ export async function resolveWorkspaceAiExecutionContext(
     return {
         autopilotConfig,
         workspaceGeminiApiKey,
+        workspaceGeminiModel: workspaceModel || DEFAULT_AUTOPILOT_MODEL,
         model: resolvedModel.model,
     };
 }

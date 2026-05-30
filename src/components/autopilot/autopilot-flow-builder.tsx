@@ -26,6 +26,7 @@ import {
   BrainCircuit,
   CheckCircle2,
   CircleHelp,
+  ClipboardList,
   Database,
   FlaskConical,
   GitBranch,
@@ -59,6 +60,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type {
   AutopilotFlowGraph,
+  AutopilotFlowFormField,
   AutopilotFlowNodeKind,
   AutopilotFlowVariable,
   KnowledgeBaseDocument,
@@ -96,6 +98,9 @@ type AttendantNodeData = {
   config?: {
     instructions?: string;
     message?: string;
+    formFields?: AutopilotFlowFormField[];
+    formMode?: 'static' | 'ai';
+    referenceId?: string;
     variableName?: string;
     destination?: string;
     useAi?: boolean;
@@ -185,6 +190,7 @@ const NODE_SURFACES: Record<NodeKind, string> = {
   knowledge: 'border-orange-400/65 bg-orange-950/35 shadow-[0_0_26px_rgba(251,146,60,0.16)]',
   reply: 'border-cyan-500/35 bg-blue-950/25',
   send_message: 'border-sky-500/35 bg-blue-950/25',
+  form: 'border-emerald-500/35 bg-emerald-950/25',
   handoff: 'border-violet-500/30 bg-[#181820]',
   close: 'border-emerald-500/30 bg-[#171c1b]',
   tool: 'border-sky-500/35 bg-[#141b22]',
@@ -210,6 +216,7 @@ function NodeIcon({ kind }: { kind: NodeKind }) {
   if (kind === 'knowledge') return <Database className={className} />;
   if (kind === 'reply') return <MessageSquareText className={className} />;
   if (kind === 'send_message') return <MessageSquareText className={className} />;
+  if (kind === 'form') return <ClipboardList className={className} />;
   if (kind === 'handoff') return <UserRound className={className} />;
   if (kind === 'close') return <CheckCircle2 className={className} />;
   if (kind === 'rule') return <GitBranch className={className} />;
@@ -374,7 +381,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
         kind: 'trigger',
         title: 'Mensagem recebida',
         subtitle: 'Inicio do atendimento',
-        config: { instructions: 'Iniciar quando chegar uma nova mensagem do cliente.', variableName: 'mensagem_recebida' },
+        config: { instructions: 'Iniciar quando chegar uma nova mensagem do cliente.', referenceId: 'entrada', variableName: 'mensagem_recebida' },
       },
     },
     {
@@ -385,7 +392,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
         kind: 'understand',
         title: 'Entender cliente',
         subtitle: 'Intencao e dados',
-        config: { instructions: 'Identifique a necessidade do cliente e os dados ja informados.', variableName: 'entender_cliente' },
+        config: { instructions: 'Identifique a necessidade do cliente e os dados ja informados.', referenceId: 'entender', variableName: 'entender_cliente' },
       },
     },
     {
@@ -396,7 +403,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
         kind: 'assistant',
         title: agentName || 'Agente IA',
         subtitle: 'Responder com IA',
-        config: { instructions: 'Responda usando apenas informacoes seguras do atendimento.', variableName: 'resposta_ia', useAi: true },
+        config: { instructions: 'Responda usando apenas informacoes seguras do atendimento.', referenceId: 'agente', variableName: 'resposta_ia', useAi: true },
       },
     },
     {
@@ -407,7 +414,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
         kind: 'knowledge',
         title: 'Conhecimento',
         subtitle: 'Consultar base',
-        config: { instructions: 'Buscar documentos relevantes para a solicitacao atual.', variableName: 'conhecimento_encontrado' },
+        config: { instructions: 'Buscar documentos relevantes para a solicitacao atual.', referenceId: 'conhecimento', variableName: 'conhecimento_encontrado' },
       },
     },
     {
@@ -418,7 +425,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
         kind: 'reply',
         title: 'Enviar resposta',
         subtitle: 'Mensagem ao cliente',
-        config: { message: 'Olá {{system.contact.name}}, vou ajudar com sua solicitacao.', variableName: 'resposta_enviada' },
+        config: { message: 'Olá {{system.contact.name}}, vou ajudar com sua solicitacao.', referenceId: 'resposta', variableName: 'resposta_enviada' },
       },
     },
     {
@@ -429,7 +436,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
         kind: 'handoff',
         title: 'Transferir humano',
         subtitle: 'Se necessario',
-        config: { destination: 'Equipe de atendimento', message: 'Vou encaminhar voce para um atendente.', variableName: 'transferencia_humana' },
+        config: { destination: 'Equipe de atendimento', message: 'Vou encaminhar voce para um atendente.', referenceId: 'transferir', variableName: 'transferencia_humana' },
       },
     },
     {
@@ -440,7 +447,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
         kind: 'close',
         title: 'Finalizar conversa',
         subtitle: 'Problema resolvido',
-        config: { message: 'Seu atendimento foi finalizado. Precisa de mais alguma coisa?', variableName: 'conversa_finalizada' },
+        config: { message: 'Seu atendimento foi finalizado. Precisa de mais alguma coisa?', referenceId: 'finalizar', variableName: 'conversa_finalizada' },
       },
     },
   ];
@@ -576,13 +583,15 @@ function ToolButton({
 }
 
 function ruleNodeData(rule: NexusFlowInstance): AttendantNodeData {
+  const normalizedRuleName = normalizeVariableName(rule.name) || 'ativa';
   return {
     kind: 'rule',
     title: rule.name,
     subtitle: rule.enabled ? 'Habilidade ativa' : 'Habilidade pausada',
     config: {
       instructions: rule.trigger,
-      variableName: `regra_${normalizeVariableName(rule.name) || 'ativa'}`,
+      referenceId: `habilidade_${normalizedRuleName}`,
+      variableName: `regra_${normalizedRuleName}`,
     },
   };
 }
@@ -688,14 +697,112 @@ function DeterministicMessageBlockButton() {
   );
 }
 
+function HighlightedReferenceTextarea({
+  value,
+  onChange,
+  placeholder,
+  knownReferenceIds,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  knownReferenceIds: Set<string>;
+  className?: string;
+}) {
+  const highlightRef = useRef<HTMLPreElement>(null);
+  const chunks: ReactNode[] = [];
+  const referencePattern = /@([a-zA-Z0-9_:-]+)/g;
+  let lastIndex = 0;
+
+  for (const match of value.matchAll(referencePattern)) {
+    const index = match.index ?? 0;
+    const referenceId = match[1] || '';
+    if (index > lastIndex) chunks.push(value.slice(lastIndex, index));
+    chunks.push(
+      <span
+        key={`${index}-${referenceId}`}
+        className={cn(
+          'rounded-sm ring-1 ring-inset',
+          knownReferenceIds.has(referenceId)
+            ? 'bg-sky-500/15 text-sky-300 ring-sky-500/35'
+            : 'bg-red-500/15 text-red-300 ring-red-500/35'
+        )}
+      >
+        @{referenceId}
+      </span>
+    );
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < value.length) chunks.push(value.slice(lastIndex));
+  if (value.endsWith('\n')) chunks.push('\n');
+
+  return (
+    <div
+      className={cn(
+        'relative min-h-[118px] overflow-hidden rounded-md border border-white/10 bg-[#17191c] font-sans text-sm leading-6 focus-within:ring-2 focus-within:ring-sky-500/30',
+        className
+      )}
+    >
+      <pre
+        ref={highlightRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-inherit text-sm leading-6 text-slate-100 [font:inherit] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {value ? chunks : <span className="text-slate-600">{placeholder}</span>}
+      </pre>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onScroll={(event) => {
+          if (!highlightRef.current) return;
+          highlightRef.current.scrollTop = event.currentTarget.scrollTop;
+          highlightRef.current.scrollLeft = event.currentTarget.scrollLeft;
+        }}
+        placeholder={placeholder}
+        className="relative z-10 h-full min-h-[inherit] w-full resize-none overflow-auto rounded-md border-0 bg-transparent px-3 py-2 text-sm leading-6 text-transparent caret-slate-100 outline-none placeholder:text-transparent selection:bg-sky-500/25 [font:inherit] [-webkit-text-fill-color:transparent]"
+        spellCheck={false}
+      />
+    </div>
+  );
+}
+
+function FormBlockButton() {
+  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.setData('application/dialogy-attendant-block', 'form');
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={handleDragStart}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
+      title="Envia uma lista fixa de dados que devem ser coletados do cliente."
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+        <ClipboardList className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block">Formulario</span>
+        <span className="block text-[11px] text-slate-500">Coleta de dados / sem IA</span>
+      </span>
+    </button>
+  );
+}
+
 function NodeInspector({
   node,
   availableNodeVariables,
   systemVariables,
   knowledgeCollections,
   knowledgeAttachment,
+  knownReferenceIds,
   mainSystemPrompt,
   variableNameConflict,
+  referenceIdConflict,
   onMainSystemPromptChange,
   onClose,
   onUpdate,
@@ -711,8 +818,10 @@ function NodeInspector({
     collectionNames: string[];
     documents: KnowledgeBaseDocument[];
   } | null;
+  knownReferenceIds: Set<string>;
   mainSystemPrompt: string;
   variableNameConflict: boolean;
+  referenceIdConflict: boolean;
   onMainSystemPromptChange: (prompt: string) => void;
   onClose: () => void;
   onUpdate: (patch: Partial<AttendantNodeData>) => void;
@@ -727,7 +836,7 @@ function NodeInspector({
     ...systemVariables.map((variable) => `{{system.${variable.name}}}`),
     ...availableNodeVariables.map((variable) => `{{${variable}}}`),
   ];
-  const mainField = node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'handoff' || node.data.kind === 'close'
+  const mainField = node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'form' || node.data.kind === 'handoff' || node.data.kind === 'close'
     ? 'message'
     : 'instructions';
   const insertVariable = (variable: string) => {
@@ -775,6 +884,24 @@ function NodeInspector({
             onChange={(event) => onUpdate({ subtitle: event.target.value })}
             className="h-11 border-white/10 bg-[#17191c] text-slate-100 focus-visible:ring-sky-500/30"
           />
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-sky-500/20 bg-sky-500/[0.04] p-4">
+          <Label className="text-xs text-slate-300">ID de referencia para IA</Label>
+          <div className="flex items-center rounded-lg border border-white/10 bg-[#17191c] font-mono text-sm text-slate-300">
+            <span className="pl-3 text-slate-500">@</span>
+            <Input
+              value={config.referenceId || ''}
+              onChange={(event) => updateConfig({ referenceId: normalizeVariableName(event.target.value) })}
+              placeholder="coletar_dados"
+              className="h-11 border-0 bg-transparent px-1 font-mono text-sky-300 focus-visible:ring-0"
+            />
+          </div>
+          {referenceIdConflict ? (
+            <p className="text-[11px] text-red-300">Este ID ja esta sendo usado por outro bloco.</p>
+          ) : (
+            <p className="text-[11px] leading-4 text-slate-500">Use este ID em prompts e instrucoes como @{config.referenceId || 'id_do_bloco'}.</p>
+          )}
         </div>
 
         <div className="space-y-2 rounded-xl border border-sky-500/20 bg-sky-500/[0.04] p-4">
@@ -875,10 +1002,11 @@ function NodeInspector({
             </div>
             <div className="space-y-2">
               <Label className="text-xs text-slate-300">Prompt system / persona</Label>
-              <Textarea
+              <HighlightedReferenceTextarea
                 value={mainSystemPrompt}
-                onChange={(event) => onMainSystemPromptChange(event.target.value)}
+                onChange={onMainSystemPromptChange}
                 placeholder="Descreva quem e o agente, como deve falar, limites, objetivo operacional e quando deve escalar."
+                knownReferenceIds={knownReferenceIds}
                 className="min-h-[180px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-cyan-500/30"
               />
               <p className="text-[11px] leading-4 text-slate-500">
@@ -967,24 +1095,30 @@ function NodeInspector({
                   ? 'System prompt do sub-agente'
                   : 'Instrucao'}
             </Label>
-            <Textarea
+            <HighlightedReferenceTextarea
               value={config.instructions || ''}
-              onChange={(event) => updateConfig({ instructions: event.target.value })}
+              onChange={(value) => updateConfig({ instructions: value })}
               placeholder="Defina o comportamento deste passo..."
+              knownReferenceIds={knownReferenceIds}
               className="min-h-[118px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-sky-500/30"
             />
           </div>
         )}
 
-        {(node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'handoff' || node.data.kind === 'close') && (
+        {(node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'form' || node.data.kind === 'handoff' || node.data.kind === 'close') && (
           <div className="space-y-2">
             <Label className="text-xs text-slate-400">
-              {node.data.kind === 'send_message' ? 'Mensagem fixa ao cliente' : 'Mensagem ao cliente'}
+              {node.data.kind === 'send_message'
+                ? 'Mensagem fixa ao cliente'
+                : node.data.kind === 'form'
+                  ? 'Introducao do formulario'
+                  : 'Mensagem ao cliente'}
             </Label>
-            <Textarea
+            <HighlightedReferenceTextarea
               value={config.message || ''}
-              onChange={(event) => updateConfig({ message: event.target.value })}
+              onChange={(value) => updateConfig({ message: value })}
               placeholder="Digite a mensagem ou insira variaveis..."
+              knownReferenceIds={knownReferenceIds}
               className="min-h-[126px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-sky-500/30"
             />
             {node.data.kind === 'send_message' && (
@@ -992,6 +1126,108 @@ function NodeInspector({
                 Este texto sera enviado diretamente, sem gerar resposta com IA.
               </p>
             )}
+            {node.data.kind === 'form' && (
+              <p className="text-[11px] leading-4 text-slate-500">
+                Este formulario sera enviado como mensagem fixa de WhatsApp, sem gerar resposta com IA.
+              </p>
+            )}
+          </div>
+        )}
+
+        {node.data.kind === 'form' && (
+          <div className="space-y-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">Campos para coletar</p>
+              <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                Escolha se o formulario sera enviado como mensagem fixa ou conduzido pela IA durante a conversa.
+              </p>
+            </div>
+            <label className="flex items-center justify-between rounded-xl border border-white/10 bg-[#17191c] px-3 py-3">
+              <span>
+                <span className="block text-sm text-slate-200">Conduzir com IA</span>
+                <span className="block text-[11px] text-slate-500">Pergunta os campos aos poucos, tira duvidas e retoma a coleta.</span>
+              </span>
+              <Switch
+                checked={config.formMode === 'ai'}
+                onCheckedChange={(checked) => {
+                  updateConfig({ formMode: checked ? 'ai' : 'static' });
+                  onUpdate({ subtitle: checked ? 'Formulario com IA' : 'Formulario sem IA' });
+                }}
+              />
+            </label>
+            {(config.formFields || []).map((field, index) => (
+              <div key={field.id} className="space-y-2 rounded-xl border border-white/10 bg-[#17191c] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Campo {index + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateConfig({ formFields: (config.formFields || []).filter((item) => item.id !== field.id) })}
+                    className="text-slate-500 hover:text-red-300"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <Input
+                  value={field.label}
+                  onChange={(event) => updateConfig({
+                    formFields: (config.formFields || []).map((item) => (
+                      item.id === field.id
+                        ? {
+                            ...item,
+                            label: event.target.value,
+                            fieldKey: item.fieldKey || normalizeVariableName(event.target.value),
+                          }
+                        : item
+                    )),
+                  })}
+                  placeholder="Nome completo"
+                  className="h-10 border-white/10 bg-[#111316] text-slate-100 focus-visible:ring-emerald-500/30"
+                />
+                <Input
+                  value={field.placeholder || ''}
+                  onChange={(event) => updateConfig({
+                    formFields: (config.formFields || []).map((item) => (
+                      item.id === field.id ? { ...item, placeholder: event.target.value } : item
+                    )),
+                  })}
+                  placeholder="Exemplo opcional"
+                  className="h-10 border-white/10 bg-[#111316] text-slate-100 focus-visible:ring-emerald-500/30"
+                />
+                <label className="flex items-center justify-between rounded-lg border border-white/10 bg-[#111316] px-3 py-2 text-xs text-slate-300">
+                  Obrigatorio
+                  <Switch
+                    checked={field.required !== false}
+                    onCheckedChange={(checked) => updateConfig({
+                      formFields: (config.formFields || []).map((item) => (
+                        item.id === field.id ? { ...item, required: checked } : item
+                      )),
+                    })}
+                  />
+                </label>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                const id = `field-${Date.now()}`;
+                updateConfig({
+                  formFields: [
+                    ...(config.formFields || []),
+                    {
+                      id,
+                      label: 'Novo dado',
+                      fieldKey: `dado_${(config.formFields || []).length + 1}`,
+                      required: true,
+                    },
+                  ],
+                });
+              }}
+              className="h-10 w-full border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Adicionar campo
+            </Button>
           </div>
         )}
 
@@ -1379,12 +1615,33 @@ export function AutopilotFlowBuilder({
     selectedNode?.data.config?.variableName &&
     nodes.some((node) => node.id !== selectedNode.id && node.data.config?.variableName === selectedNode.data.config?.variableName)
   );
+  const referenceIdConflict = Boolean(
+    selectedNode?.data.config?.referenceId &&
+    nodes.some((node) => node.id !== selectedNode.id && node.data.config?.referenceId === selectedNode.data.config?.referenceId)
+  );
   const hasVariableConflicts = nodes.some((node, index) => (
     Boolean(node.data.config?.variableName) &&
     nodes.some((otherNode, otherIndex) => (
       index !== otherIndex && otherNode.data.config?.variableName === node.data.config?.variableName
     ))
   ));
+  const hasReferenceConflicts = nodes.some((node, index) => (
+    Boolean(node.data.config?.referenceId) &&
+    nodes.some((otherNode, otherIndex) => (
+      index !== otherIndex && otherNode.data.config?.referenceId === node.data.config?.referenceId
+    ))
+  ));
+  const knownReferenceIds = useMemo(() => new Set(
+    nodes
+      .flatMap((node) => [
+        node.id,
+        normalizeVariableName(node.id),
+        normalizeVariableName(node.data.title),
+        node.data.config?.referenceId,
+        node.data.config?.variableName,
+      ])
+      .filter((value): value is string => Boolean(value))
+  ), [nodes]);
   const updateSelectedNode = useCallback((patch: Partial<AttendantNodeData>) => {
     if (!selectedNodeId) return;
     setNodes((current) => current.map((node) => (
@@ -1444,6 +1701,7 @@ export function AutopilotFlowBuilder({
           config: {
             intent: 'support_request',
             instructions: 'Atenda este assunto com instrucoes especificas, sem fugir do escopo definido.',
+            referenceId: `sub_agente_suporte_${Date.now()}`,
             variableName: `intencao_suporte_${Date.now()}`,
             returnToMainPrompt: true,
             knowledgeCollectionIds: ['general'],
@@ -1484,6 +1742,7 @@ export function AutopilotFlowBuilder({
             subtitle: 'Responder com IA',
             config: {
               instructions: 'Use o prompt system principal para responder ao cliente.',
+              referenceId: 'agente',
               variableName: 'resposta_ia',
               useAi: true,
             },
@@ -1506,7 +1765,35 @@ export function AutopilotFlowBuilder({
           subtitle: 'Sem IA',
           config: {
             message: 'Digite a mensagem que sera enviada ao cliente.',
+            referenceId: `mensagem_${Date.now()}`,
             variableName: `mensagem_enviada_${Date.now()}`,
+          },
+        },
+      }));
+      setSelectedNodeId(id);
+      return;
+    }
+    if (blockKind === 'form') {
+      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const id = `form-${Date.now()}`;
+      setNodes((current) => current.concat({
+        id,
+        type: 'attendant',
+        position,
+        data: {
+          kind: 'form',
+          title: 'Coletar dados',
+          subtitle: 'Formulario com IA',
+          config: {
+            message: 'Para continuar, me envie os dados abaixo:',
+            formMode: 'ai',
+            referenceId: `coletar_dados_${Date.now()}`,
+            formFields: [
+              { id: `field-name-${Date.now()}`, label: 'Nome completo', fieldKey: 'nome_completo', required: true },
+              { id: `field-address-${Date.now()}`, label: 'Endereco de instalacao', fieldKey: 'endereco_instalacao', required: true },
+              { id: `field-plan-${Date.now()}`, label: 'Plano escolhido', fieldKey: 'plano_escolhido', required: true },
+            ],
+            variableName: `formulario_enviado_${Date.now()}`,
           },
         },
       }));
@@ -1560,6 +1847,7 @@ export function AutopilotFlowBuilder({
           toolName: tool.name,
           config: {
             instructions: 'Use os valores dos blocos anteriores para montar os parametros desta ferramenta.',
+            referenceId: `ferramenta_${normalizeVariableName(toolDisplayName(tool)) || 'acao'}`,
             variableName: `resultado_${normalizeVariableName(toolDisplayName(tool)) || 'ferramenta'}`,
           },
         },
@@ -1740,7 +2028,7 @@ export function AutopilotFlowBuilder({
             )}
             <button
               type="button"
-              disabled={!isDirty || isSaving || hasVariableConflicts}
+              disabled={!isDirty || isSaving || hasVariableConflicts || hasReferenceConflicts}
               onClick={onSave}
               className="flex h-10 items-center gap-2 rounded-lg px-3 text-sm text-slate-300 hover:bg-white/5 disabled:opacity-40"
             >
@@ -1750,7 +2038,7 @@ export function AutopilotFlowBuilder({
             <span className="mx-1 h-7 w-px bg-white/10" />
             <button
               type="button"
-              disabled={isPublishing || hasVariableConflicts || (!hasDraft && !isDirty)}
+              disabled={isPublishing || hasVariableConflicts || hasReferenceConflicts || (!hasDraft && !isDirty)}
               onClick={onPublish}
               className="flex h-10 items-center gap-2 rounded-lg px-3 text-sm text-slate-300 hover:bg-white/5 disabled:opacity-40"
             >
@@ -1776,8 +2064,10 @@ export function AutopilotFlowBuilder({
             systemVariables={systemVariables}
             knowledgeCollections={knowledgeCollections}
             knowledgeAttachment={selectedKnowledgeAttachment}
+            knownReferenceIds={knownReferenceIds}
             mainSystemPrompt={mainSystemPrompt}
             variableNameConflict={variableNameConflict}
+            referenceIdConflict={referenceIdConflict}
             onMainSystemPromptChange={onMainSystemPromptChange}
             onClose={() => setSelectedNodeId(null)}
             onUpdate={updateSelectedNode}
@@ -1841,6 +2131,7 @@ export function AutopilotFlowBuilder({
               </AccordionTrigger>
               <AccordionContent className="border-t border-white/[0.08] pt-3">
                 <DeterministicMessageBlockButton />
+                <FormBlockButton />
               </AccordionContent>
             </AccordionItem>
 
