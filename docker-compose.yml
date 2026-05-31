@@ -106,7 +106,7 @@ x-worker-ai-environment: &worker-ai-environment
 
 services:
   dialogy:
-    image: fafadexs/dialogy:PBE-5.105
+    image: fafadexs/dialogy:PBE-5.111
     restart: unless-stopped
     init: true
     environment:
@@ -128,7 +128,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PBE-5.105
+    image: fafadexs/dialogy-worker:PBE-5.111
     restart: unless-stopped
     init: true
     depends_on:
@@ -139,7 +139,7 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PBE-5.105
+    image: fafadexs/dialogy-worker-ai:PBE-5.111
     restart: unless-stopped
     init: true
     depends_on:

@@ -110,7 +110,7 @@ describe('LM Studio runtime config', () => {
             type: 'object',
             properties: {
               actions: {
-                type: ['array', 'null'],
+                type: 'array',
                 items: {
                   type: 'object',
                   required: ['type', 'reason', 'payload'],
@@ -139,6 +139,20 @@ describe('LM Studio runtime config', () => {
     expect(result?.response).toContain("nome completo?");
     expect(result?.response).toContain("😊");
     expect(result?.messageBlocks).toBeNull();
+    expect(result?.actions).toEqual([]);
+  });
+
+  it('strips <think>...</think> reasoning blocks from thinking models and parses JSON cleanly', () => {
+    const rawContent = `<think>
+Para responder ao cliente, preciso saudar e perguntar o CPF.
+Vou usar o formato JSON exigido pelo orquestrador.
+</think>
+{"response": "Olá! Qual o seu CPF para prosseguirmos?", "messageBlocks": null, "triggeredRule": null, "actions": []}`;
+    
+    const result = tryParseJsonResponse(rawContent);
+
+    expect(result).not.toBeNull();
+    expect(result?.response).toBe("Olá! Qual o seu CPF para prosseguirmos?");
     expect(result?.actions).toEqual([]);
   });
 });

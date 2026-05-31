@@ -237,6 +237,57 @@ async function resolveTransferTarget(context: AgentToolRuntimeContext, action: E
   throw new Error('Informe teamId, teamName ou agentId para transferir o atendimento.');
 }
 
+export async function formatTeamBusinessHours(teamId: string): Promise<string> {
+  const { rows } = await db.query(
+    `SELECT day_of_week, is_enabled, start_time, end_time 
+     FROM business_hours 
+     WHERE team_id = $1`,
+    [teamId]
+  );
+  
+  if (rows.length === 0) {
+    return 'horário comercial';
+  }
+
+  const enabledHours = rows.filter((r: any) => r.is_enabled && r.start_time && r.end_time);
+  if (enabledHours.length === 0) {
+    return 'horário comercial';
+  }
+
+  const dayOrder = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
+  enabledHours.sort((a: any, b: any) => dayOrder.indexOf(a.day_of_week) - dayOrder.indexOf(b.day_of_week));
+
+  const scheduleGroups: Record<string, string[]> = {};
+  for (const bh of enabledHours) {
+    const timeKey = `${bh.start_time} às ${bh.end_time}`;
+    if (!scheduleGroups[timeKey]) {
+      scheduleGroups[timeKey] = [];
+    }
+    scheduleGroups[timeKey].push(bh.day_of_week);
+  }
+
+  const parts: string[] = [];
+  for (const [timeRange, days] of Object.entries(scheduleGroups)) {
+    const shortDays = days.map(d => d.replace('-feira', ''));
+    if (shortDays.length === 1) {
+      parts.push(`${shortDays[0]} das ${timeRange}`);
+    } else if (shortDays.length === 2) {
+      parts.push(`${shortDays[0]} e ${shortDays[1]} das ${timeRange}`);
+    } else {
+      const indices = days.map(d => dayOrder.indexOf(d)).sort((a, b) => a - b);
+      const isConsecutive = indices.every((val, i) => i === 0 || val === indices[i - 1] + 1);
+      if (isConsecutive) {
+        parts.push(`${shortDays[0]} a ${shortDays[shortDays.length - 1]} das ${timeRange}`);
+      } else {
+        const lastDay = shortDays.pop();
+        parts.push(`${shortDays.join(', ')} e ${lastDay} das ${timeRange}`);
+      }
+    }
+  }
+
+  return parts.join(', ');
+}
+
 async function runTransferChatTool(
   context: AgentToolRuntimeContext,
   action: Extract<AgentToolAction, { type: 'transfer_chat' }>
@@ -258,6 +309,69 @@ async function runTransferChatTool(
     );
 
     if (!result.success) {
+      if (result.error === 'Nenhum agente disponível nesta equipe no momento.' && target.teamId) {
+        try {
+          const { rows: teamRows } = await db.query(
+            'SELECT name, color, tag_id FROM teams WHERE id = $1', 
+            [target.teamId]
+          );
+          const teamName = teamRows[0]?.name || 'Comercial';
+          const teamColor = teamRows[0]?.color || '#cccccc';
+          const teamTagId = teamRows[0]?.tag_id;
+
+          let chatTag = teamName;
+          let chatColor = teamColor;
+
+          if (teamTagId) {
+            const { rows: tagRows } = await db.query('SELECT label, color FROM tags WHERE id = $1', [teamTagId]);
+            if (tagRows[0]) {
+              chatTag = tagRows[0].label;
+              chatColor = tagRows[0].color;
+            }
+          }
+
+          const businessHoursText = await formatTeamBusinessHours(target.teamId);
+
+          const messageText = `Agradeço o seu contato! No momento, a nossa equipe do setor ${teamName} está fora do expediente (${businessHoursText}). Vou transferir seu atendimento para este setor assim que o expediente iniciar. Seu chat já foi colocado na fila de espera para que nossa equipe te atenda logo no início das atividades!`;
+
+          await sendAutomatedMessageAction(
+            context.chat.id,
+            messageText,
+            context.systemAgentId,
+            true
+          );
+
+          await db.query(
+            `UPDATE chats
+             SET agent_id = NULL,
+                 assigned_system_agent_id = NULL,
+                 is_autopilot_active = FALSE,
+                 copilot_mode = 'off',
+                 status = 'gerais',
+                 tag = $1,
+                 color = $2,
+                 assigned_at = NULL,
+                 updated_at = clock_timestamp()
+             WHERE id = $3`,
+            [chatTag, chatColor, context.chat.id]
+          );
+
+          return {
+            toolName: 'transfer_chat',
+            status: 'success',
+            input: action,
+            output: {
+              transferred: false,
+              fallbackExecuted: true,
+              target,
+              reason: 'Nenhum agente disponível no momento. Fila com horário de expediente ativada.',
+            },
+          };
+        } catch (fallbackError) {
+          console.error('[TRANSFER_CHAT_FALLBACK] Error running fallback:', fallbackError);
+        }
+      }
+
       return {
         toolName: 'transfer_chat',
         status: 'error',

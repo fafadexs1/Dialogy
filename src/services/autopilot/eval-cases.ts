@@ -485,7 +485,7 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
     simulatedResponse: 'Vou verificar a disponibilidade no sistema.',
     expected: {
       intent: 'availability_request',
-      validatorDecision: 'approve',
+      validatorDecision: 'handoff',
       expectedHandoff: true,
       responseIncludes: ['encaminhar'],
       allowFallback: true,

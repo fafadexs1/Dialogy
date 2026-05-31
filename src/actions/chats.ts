@@ -225,6 +225,76 @@ export const transferChatAction = withDebug(
 
             // Load balancing logic for team transfer
             if (teamId) {
+                // --- Active Business Hours & Exceptions Validation ---
+                const teamStatusRes = await client.query(
+                    `SELECT t.id, t.name, w.timezone,
+                            COALESCE(json_agg(bh.*) FILTER (WHERE bh.id IS NOT NULL), '[]') as "businessHours",
+                            COALESCE(json_agg(se.*) FILTER (WHERE se.id IS NOT NULL), '[]') as "scheduleExceptions"
+                     FROM teams t
+                     JOIN workspaces w ON t.workspace_id = w.id
+                     LEFT JOIN business_hours bh ON t.id = bh.team_id
+                     LEFT JOIN schedule_exceptions se ON t.id = se.team_id AND se.date = CURRENT_DATE
+                     WHERE t.id = $1 AND t.workspace_id = $2
+                     GROUP BY t.id, w.timezone`,
+                    [teamId, workspaceId]
+                );
+
+                if (teamStatusRes.rowCount > 0) {
+                    const team = teamStatusRes.rows[0];
+                    const timezone = team.timezone || 'America/Sao_Paulo';
+                    const now = toZonedTime(new Date(), timezone);
+
+                    const currentDate = formatInTimeZone(now, 'yyyy-MM-dd', { timeZone: timezone });
+                    const currentTime = formatInTimeZone(now, 'HH:mm', { timeZone: timezone });
+                    const currentDayOfWeek = formatInTimeZone(now, 'EEEE', { locale: ptBR, timeZone: timezone }); // 'Segunda-feira', 'Terça-feira', etc.
+
+                    let isOpen = false;
+
+                    const timeToMinutes = (timeStr: string | null): number | null => {
+                        if (!timeStr) return null;
+                        const [hoursPart, minutesPart] = timeStr.split(':');
+                        const hours = Number(hoursPart);
+                        const minutes = Number(minutesPart);
+                        if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+                        return hours * 60 + minutes;
+                    };
+
+                    const isTimeInRange = (timeStr: string, startStr: string | null, endStr: string | null): boolean => {
+                        const time = timeToMinutes(timeStr);
+                        const start = timeToMinutes(startStr);
+                        const end = timeToMinutes(endStr);
+                        if (time === null || start === null || end === null) return false;
+                        return time >= start && time < end;
+                    };
+
+                    const todayException = team.scheduleExceptions.find((ex: any) => {
+                        const exDate = ex.date instanceof Date ? ex.date.toISOString().split('T')[0] : String(ex.date).split('T')[0];
+                        return exDate === currentDate;
+                    });
+
+                    if (todayException) {
+                        if (todayException.is_closed) {
+                            isOpen = false;
+                        } else {
+                            isOpen = isTimeInRange(currentTime, todayException.start_time, todayException.end_time);
+                        }
+                    } else {
+                        const todayBusinessHour = team.businessHours.find((bh: any) =>
+                            bh.day_of_week.toLowerCase() === currentDayOfWeek.toLowerCase()
+                        );
+
+                        if (todayBusinessHour && todayBusinessHour.is_enabled) {
+                            isOpen = isTimeInRange(currentTime, todayBusinessHour.start_time, todayBusinessHour.end_time);
+                        }
+                    }
+
+                    if (!isOpen) {
+                        console.log(`[TRANSFER_CHAT] Setor ${team.name} está fora do expediente comercial no momento.`);
+                        await client.query('ROLLBACK');
+                        return { success: false, error: "Nenhum agente disponível nesta equipe no momento." };
+                    }
+                }
+
                 console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a última atribuição...`);
                 console.log('[TRANSFER_CHAT] Params:', teamId, currentAgentId);
                 const presenceTtlSeconds = getPresenceTtlSeconds();

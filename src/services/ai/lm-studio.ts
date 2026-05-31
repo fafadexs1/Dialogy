@@ -1,4 +1,5 @@
 import type { Genkit } from 'genkit';
+import { z } from 'zod';
 import { db } from '@/lib/db';
 
 export const LM_STUDIO_MODEL_PREFIX = 'lmstudio/';
@@ -29,8 +30,8 @@ const actionSchema = {
         'mcp_call_tool',
       ],
     },
-    reason: { type: ['string', 'null'] },
-    payload: { type: ['object', 'null'], additionalProperties: true },
+    reason: { type: 'string' },
+    payload: { type: 'object', additionalProperties: true },
   },
   required: ['type', 'reason', 'payload'],
   additionalProperties: false,
@@ -41,8 +42,8 @@ function getLmStudioResponseSchema(outputKind: LmStudioOutputKind) {
     return {
       type: 'object',
       properties: {
-        decision: { type: ['string', 'null'] },
-        response: { type: ['string', 'null'] },
+        decision: { type: 'string' },
+        response: { type: 'string' },
       },
       required: ['decision', 'response'],
       additionalProperties: false,
@@ -52,20 +53,42 @@ function getLmStudioResponseSchema(outputKind: LmStudioOutputKind) {
   return {
     type: 'object',
     properties: {
-      response: { type: ['string', 'null'] },
+      response: { type: 'string' },
       messageBlocks: {
-        type: ['array', 'null'],
+        type: 'array',
         items: { type: 'string' },
       },
-      triggeredRule: { type: ['string', 'null'] },
+      triggeredRule: { type: 'string' },
       actions: {
-        type: ['array', 'null'],
+        type: 'array',
         items: actionSchema,
       },
     },
     required: ['response', 'messageBlocks', 'triggeredRule', 'actions'],
     additionalProperties: false,
   };
+}
+
+const lmStudioActionZodSchema = z.object({
+  type: z.string(),
+  reason: z.string().optional().nullable(),
+  payload: z.record(z.any()).optional().nullable(),
+});
+
+export function getLmStudioZodSchema(outputKind: LmStudioOutputKind) {
+  if (outputKind === 'procedure') {
+    return z.object({
+      decision: z.string().optional().nullable(),
+      response: z.string().optional().nullable(),
+    });
+  }
+
+  return z.object({
+    response: z.string().optional().nullable(),
+    messageBlocks: z.array(z.string()).optional().nullable(),
+    triggeredRule: z.string().optional().nullable(),
+    actions: z.array(lmStudioActionZodSchema).optional().nullable(),
+  });
 }
 
 export function isLmStudioModel(model?: string | null): boolean {
@@ -108,7 +131,13 @@ export async function getGlobalLmStudioConfig(): Promise<LmStudioConfig> {
 export function parseLmStudioStructuredText(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'string' || !value.trim()) return null;
 
-  const trimmed = value.trim();
+  // Remove <think>...</think> reasoning blocks if present (common in thinking/reasoning models)
+  let cleaned = value;
+  if (value.includes('<think>')) {
+    cleaned = value.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  }
+
+  const trimmed = cleaned.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
   const candidates = [fenced, trimmed, trimmed.match(/\{[\s\S]*\}/)?.[0]].filter(
     (candidate): candidate is string => Boolean(candidate)
@@ -135,7 +164,14 @@ export function tryParseJsonResponse(text: string): {
   actions?: any[] | null;
 } | null {
   if (!text || typeof text !== 'string') return null;
-  const trimmed = text.trim();
+  
+  // Remove <think>...</think> reasoning blocks if present (common in thinking/reasoning models)
+  let cleaned = text;
+  if (text.includes('<think>')) {
+    cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  }
+  
+  const trimmed = cleaned.trim();
 
   // Guard: never parse error messages as valid responses
   if (/\b(INVALID_ARGUMENT|Schema validation|Parse Error|stack trace|TypeError|SyntaxError)\b/i.test(trimmed)) {
@@ -204,6 +240,21 @@ export function defineLmStudioPrompt(
   } = require('@genkit-ai/compat-oai') as typeof import('@genkit-ai/compat-oai');
 
   const defineModel = (ai: Genkit, client: InstanceType<typeof import('openai').OpenAI>) => {
+    // Workaround for @genkit-ai/compat-oai bug: when tool_calls is [] (empty array),
+    // compat-oai evaluates it as truthy and discards the choice's text content.
+    const originalCreate = client.chat.completions.create.bind(client.chat.completions);
+    client.chat.completions.create = async function (body, options) {
+      const response = await originalCreate(body, options);
+      if (response && Array.isArray(response.choices)) {
+        for (const choice of response.choices) {
+          if (choice.message && Array.isArray(choice.message.tool_calls) && choice.message.tool_calls.length === 0) {
+            delete choice.message.tool_calls;
+          }
+        }
+      }
+      return response;
+    } as any;
+
     const modelRef = compatOaiModelRef({ name: model });
     defineCompatOpenAIModel({
       ai,
@@ -237,5 +288,59 @@ export function defineLmStudioPrompt(
     model,
   });
 
-  return dynamicAi.definePrompt(promptConfig as Parameters<typeof dynamicAi.definePrompt>[0]);
+  const originalSchema = (promptConfig as any)?.output?.schema;
+  const isTest = (promptConfig as any)?.name === 'lmStudioTestPrompt';
+
+  const originalPrompt = (promptConfig as any)?.prompt;
+  let customPrompt = originalPrompt;
+  if (typeof originalPrompt === 'string' && !isTest) {
+    if (outputKind === 'procedure') {
+      customPrompt = `[MODO DE RACIOCÍNIO / THINKING MODE ATIVO]
+Você deve SEMPRE pensar passo a passo antes de decidir os próximos passos deste procedimento operacional.
+Para isso, você DEVE escrever todo o seu processo de raciocínio detalhadamente dentro de blocos <think> e </think> na sua saída.
+Depois de fechar a tag </think>, você deve fornecer a decisão e resposta estruturadas exatamente no formato JSON especificado.
+
+Exemplo de estrutura de saída obrigatória:
+<think>
+1. Li as instruções do procedimento: "..."
+2. Avaliei o histórico do chat: "..."
+3. Analisei as condições e slots coletados.
+4. Tomei a decisão operacional.
+</think>
+{"decision": "...", "response": "..."}
+
+Comece agora a pensar e responder:
+
+
+` + originalPrompt;
+    } else {
+      customPrompt = `[MODO DE RACIOCÍNIO / THINKING MODE ATIVO]
+Você deve SEMPRE pensar passo a passo e planejar a sua resposta e ações de forma ultra-precisa antes de responder.
+Para isso, você DEVE escrever todo o seu processo de raciocínio, análise de regras operacionais, checagem de CPF/CNPJ, validações e decisões técnicas detalhadamente dentro de blocos <think> e </think> na sua saída.
+Depois de fechar a tag </think>, você deve fornecer a resposta final estruturada exatamente no formato JSON especificado.
+
+Exemplo de estrutura de saída obrigatória:
+<think>
+1. Analisei a mensagem do cliente: "..."
+2. Identifiquei a intenção: "..."
+3. Validei regras operacionais: [Detalhe das regras]
+4. Decidi as ações técnicas necessárias: [Detalhe das ações]
+5. Formatei a resposta para o WhatsApp.
+</think>
+{"response": "...", "messageBlocks": ..., "triggeredRule": ..., "actions": [...]}
+
+Comece agora a pensar e responder:
+
+
+` + originalPrompt;
+    }
+  }
+
+  const clonedConfig = {
+    ...(promptConfig as Record<string, any>),
+    prompt: customPrompt,
+    output: isTest && originalSchema ? { schema: originalSchema } : undefined,
+  };
+
+  return dynamicAi.definePrompt(clonedConfig as Parameters<typeof dynamicAi.definePrompt>[0]);
 }

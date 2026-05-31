@@ -310,7 +310,12 @@ export function validateAutopilotResponse(input: {
     };
   }
 
-  if (input.source === 'llm' && !hasSuccessfulLookup(input.toolResults) && (input.knowledgeDocuments?.length || 0) > 0) {
+  if (
+    input.source === 'llm' &&
+    !hasSuccessfulLookup(input.toolResults) &&
+    (input.knowledgeDocuments?.length || 0) > 0 &&
+    !isCommercialSelfServiceIntent(input.intentResolution.intent)
+  ) {
     const unsupportedFacts = unsupportedKnowledgeFacts(originalResponse, input.knowledgeDocuments || []);
     if (unsupportedFacts.length > 0) {
       reasons.push('unsupported_knowledge_facts');
@@ -419,9 +424,31 @@ export function validateAutopilotResponse(input: {
     !hasExplicitHandoffRequest(input.customerMessage)
   ) {
     reasons.push('commercial_transfer_promise_suppressed');
+    
+    // Determine dynamically which commercial field is missing to ask a context-aware question
+    const slots = input.slotExtraction.slots || {};
+    let dynamicRepairMsg = 'Posso seguir com seu atendimento por aqui! ';
+    
+    const hasName = Boolean(slots.name || input.contact?.name);
+    const hasCpf = Boolean(slots.customer_identifier);
+    const hasPhone = Boolean(slots.phone || input.contact?.phone);
+    const hasEmail = Boolean(slots.email || input.contact?.email);
+    
+    if (!hasCpf) {
+      dynamicRepairMsg += 'Para darmos andamento à análise de viabilidade técnica e ao seu pré-cadastro, poderia me informar o seu CPF, por favor?';
+    } else if (!hasPhone) {
+      dynamicRepairMsg += 'Perfeito, CPF recebido! Para darmos continuidade ao pré-cadastro, me informe qual o seu melhor telefone de contato com DDD?';
+    } else if (!hasEmail) {
+      dynamicRepairMsg += 'Maravilha! Já tenho o seu CPF anotado. Agora, para finalizarmos, me informe qual o seu e-mail de contato?';
+    } else if (!hasName) {
+      dynamicRepairMsg += 'Entendido! Para concluirmos o pré-cadastro comercial, me confirme o seu nome completo, por favor?';
+    } else {
+      dynamicRepairMsg += 'Como estamos criando o seu cadastro, qual a próxima informação que deseja preencher?';
+    }
+
     return {
       decision: 'repair',
-      response: 'Posso seguir com seu atendimento por aqui. Para continuar, me informe os dados solicitados ou a informacao que falta para a contratacao.',
+      response: dynamicRepairMsg,
       actions: [],
       reasons,
       metadata: { decision: 'repair', reasons, source: input.source },

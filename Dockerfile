@@ -15,6 +15,10 @@ RUN \
   else echo "Lockfile not found." && exit 1; \
   fi
 
+RUN if [ -d node_modules/onnxruntime-node/bin/napi-v6 ]; then \
+      find node_modules/onnxruntime-node/bin/napi-v6/ -mindepth 1 -maxdepth 1 ! -name 'linux' -exec rm -rf {} +; \
+    fi
+
 FROM base AS worker-deps
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -34,6 +38,10 @@ COPY package.json package-lock.json ./
 RUN node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const names=['bullmq','ioredis','pg','@huggingface/transformers','genkit','@genkit-ai/compat-oai','@genkit-ai/googleai','@google/generative-ai','@modelcontextprotocol/sdk','zod','next','react','react-dom','postcss','@supabase/ssr','@supabase/supabase-js','clsx','tailwind-merge','date-fns','date-fns-tz','uuid']; const deps=Object.fromEntries(names.map((name)=>{ const version=lock.packages?.['node_modules/'+name]?.version ?? pkg.dependencies?.[name] ?? pkg.devDependencies?.[name]; if(!version){ throw new Error('Missing worker-ai dependency: '+name); } return [name, version]; })); fs.writeFileSync('package.json', JSON.stringify({ name: 'dialogy-worker-ai-runtime', private: true, dependencies: deps, overrides: pkg.overrides || {} }, null, 2)); fs.unlinkSync('package-lock.json');"
 RUN npm install --package-lock-only --legacy-peer-deps
 RUN npm ci --omit=dev --legacy-peer-deps
+
+RUN if [ -d node_modules/onnxruntime-node/bin/napi-v6 ]; then \
+      find node_modules/onnxruntime-node/bin/napi-v6/ -mindepth 1 -maxdepth 1 ! -name 'linux' -exec rm -rf {} +; \
+    fi
 
 FROM base AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
