@@ -1,6 +1,6 @@
 import { createAiQueueWorker } from '@/lib/queue/ai-worker';
 import { prewarmEmbeddingModels } from '@/lib/embeddings';
-import { prewarmCrossEncoderReranker } from '@/services/rag/cross-encoder-reranker';
+import { prewarmBgeRerankerV2M3 } from '@/services/rag/bge-reranker-v2-m3';
 
 async function loadEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -22,8 +22,8 @@ async function maybePrewarmModels() {
 
   console.log('[AI_QUEUE_WORKER] Prewarming embedding models...');
   await prewarmEmbeddingModels(['doc']);
-  await prewarmCrossEncoderReranker();
-  console.log('[AI_QUEUE_WORKER] Embedding models ready.');
+  await prewarmBgeRerankerV2M3();
+  console.log('[AI_QUEUE_WORKER] Embedding and BGE Reranker v2 M3 models ready.');
 }
 
 async function main() {

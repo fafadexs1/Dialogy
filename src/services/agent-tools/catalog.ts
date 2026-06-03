@@ -190,7 +190,7 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   sgp_fetch_contact_panel_data: {
     name: 'sgp_fetch_contact_panel_data',
     version: '2026-04-28',
-    description: 'Consulta resumo do cliente, contratos, conexao e faturas no SGP usando o CPF/CNPJ salvo no CRM.',
+    description: 'Consulta resumo do cliente, contratos, conexao e faturas no SGP usando o CPF/CNPJ salvo no CRM. Aceita contractId opcional para restringir a consulta de suporte a um contrato especifico.',
     class: 'read_only',
     riskLevel: 'low',
     sideEffect: 'none',
@@ -211,6 +211,15 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
     ],
     requiredSlots: ['customer_identifier'],
     fallbackAction: 'ask_missing_slot',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        contractId: {
+          type: ['string', 'null'],
+          description: 'ID opcional de um contrato SGP especifico. Quando informado, deve ser real e conter somente digitos.',
+        },
+      },
+    },
   },
   sgp_generate_invoice_pix: {
     name: 'sgp_generate_invoice_pix',
@@ -308,12 +317,6 @@ export function listAgentToolCatalogItems(): AgentToolCatalogItem[] {
     .map((definition) => ({
     ...definition,
     source: 'dialogy',
-    enabledByDefault: definition.name !== 'sgp_open_support_ticket',
+    enabledByDefault: false,
   }));
-}
-
-export function listDefaultEnabledAgentToolNames(): AgentToolName[] {
-  return listAgentToolCatalogItems()
-    .filter((definition) => definition.enabledByDefault)
-    .map((definition) => definition.name);
 }

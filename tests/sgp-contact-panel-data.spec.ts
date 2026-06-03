@@ -186,4 +186,48 @@ describe('buildSGPContactPanelData', () => {
     expect(contract?.addressLabel).toBe('QUADRA 02 CHACARA 07 BLOCO 22 APT 101 - CHACARAS BRASIL - VALPARAISO DE GOIAS - GO - COND GRAN PARIS');
     expect(contract?.connectedAt).toBe('2026-04-07T09:26:23');
   });
+
+  it('keeps the online Radius session when support API returns multiple services for one contract', () => {
+    const data = buildSGPContactPanelData(
+      [{
+        nome: 'Fabio Silva Soares',
+        cpfcnpj: '866.752.731-91',
+        contratos: [{
+          id: '16317',
+          status: 'Ativo',
+          servicos: [{
+            tipo: 'Fibra',
+            plano: { descricao: 'PLANO_1000MEGA_WIFI6_60CANAIS' },
+            login: 'testesuporte.fibra',
+            ip: '',
+          }],
+        }],
+        titulos: [],
+      }],
+      [
+        {
+          contrato_id: '16317',
+          servico_online: true,
+          rad_ip: '100.65.14.124',
+          rad_framedipv6prefix: '2804:3cd0:80::/64',
+          rad_delegatedipv6prefix: '2804:3cd0:cd:a334::/62',
+          rad_dataconexao: '2026-06-01T16:17:17',
+          servico_login: 'testesuporte.fibra',
+        },
+        {
+          contrato_id: '16317',
+          servico_login: 'testesuporte2026',
+        },
+      ]
+    );
+
+    expect(data?.contracts[0]).toMatchObject({
+      id: '16317',
+      connectionStatus: 'online',
+      ip: '100.65.14.124',
+      ipv6: '2804:3cd0:80::/64',
+      delegatedIpv6: '2804:3cd0:cd:a334::/62',
+      connectedAt: '2026-06-01T16:17:17',
+    });
+  });
 });

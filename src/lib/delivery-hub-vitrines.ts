@@ -2,44 +2,8 @@ import 'server-only';
 
 import { db } from '@/lib/db';
 
-let vitrinesSchemaEnsured = false;
-
 export async function ensureDeliveryHubVitrinesTable(): Promise<void> {
-  if (vitrinesSchemaEnsured) {
-    return;
-  }
-
-  await db.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS public.delivery_hub_vitrines (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-      title TEXT NOT NULL DEFAULT 'Vitrine Delivery',
-      subtitle TEXT NOT NULL DEFAULT '',
-      slug TEXT NOT NULL DEFAULT '',
-      is_published BOOLEAN NOT NULL DEFAULT FALSE,
-      config JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  await db.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_hub_vitrines_slug
-    ON public.delivery_hub_vitrines(slug) WHERE slug <> ''
-  `);
-
-  await db.query(`
-    CREATE INDEX IF NOT EXISTS idx_delivery_hub_vitrines_workspace
-    ON public.delivery_hub_vitrines(workspace_id)
-  `);
-
-  await db.query(`
-    CREATE INDEX IF NOT EXISTS idx_delivery_hub_vitrines_published
-    ON public.delivery_hub_vitrines(is_published, slug) WHERE is_published = TRUE
-  `);
-
-  vitrinesSchemaEnsured = true;
+  // Applied by Prisma migration before runtime.
 }
 
 export async function migrateExistingDeliveryHub(workspaceId: string): Promise<void> {

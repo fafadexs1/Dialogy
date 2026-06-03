@@ -8,6 +8,7 @@ import {
   coerceLmStudioPromptOutput,
   defineLmStudioPrompt,
   getLmStudioModelId,
+  getLmStudioMessageText,
   isLmStudioModel,
   normalizeLmStudioConfig,
   parseLmStudioConfig,
@@ -53,6 +54,24 @@ describe('LM Studio runtime config', () => {
       response: 'Resposta para o cliente',
       actions: [],
     });
+  });
+
+  it('uses reasoning_content when a reasoning model leaves content empty', () => {
+    const structuredOutput = JSON.stringify({
+      response: 'Resposta gerada pelo modelo',
+      messageBlocks: [],
+      triggeredRule: '',
+      actions: [],
+    });
+
+    expect(getLmStudioMessageText({
+      content: '',
+      reasoning_content: structuredOutput,
+    })).toBe(structuredOutput);
+    expect(getLmStudioMessageText({
+      content: 'Resposta final',
+      reasoning_content: 'Raciocinio interno',
+    })).toBe('Resposta final');
   });
 
   it('sends structured prompts to the OpenAI-compatible endpoint with the complete model id', async () => {
@@ -129,6 +148,51 @@ describe('LM Studio runtime config', () => {
     }
   });
 
+  it('recovers structured prompt output returned by LM Studio as reasoning_content', async () => {
+    const server = createServer((_request, response) => {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({
+        id: 'chatcmpl-reasoning-output',
+        object: 'chat.completion',
+        created: 0,
+        model: 'nvidia/nemotron-3-nano-4b',
+        choices: [{
+          index: 0,
+          finish_reason: 'stop',
+          message: {
+            role: 'assistant',
+            content: '',
+            reasoning_content: JSON.stringify({ answer: 'ok' }),
+            tool_calls: [],
+          },
+        }],
+        usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 },
+      }));
+    });
+
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address() as AddressInfo;
+    try {
+      const prompt = defineLmStudioPrompt({
+        name: 'lmStudioTestPrompt',
+        input: { schema: z.object({ question: z.string() }) },
+        output: { schema: z.object({ answer: z.string() }) },
+        prompt: '{{question}}',
+      }, 'lmstudio/nvidia/nemotron-3-nano-4b', {
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        apiToken: '',
+      });
+
+      const result = await prompt({ question: 'ping' });
+
+      expect(result.output).toEqual({ answer: 'ok' });
+    } finally {
+      server.close();
+      await once(server, 'close');
+    }
+  });
+
   it('successfully parses the stringified JSON payload from Gemma-4 in the real environment', () => {
     const rawContent = "{\"response\": \"Olá! Vi que você demonstrou interesse no plano de 1000 MEGA, que é a última geração com Wi-Fi 6 e mais canais de TV. 😊\\n\\nPara darmos início ao seu pré-cadastro e verificar se há disponibilidade na sua região, preciso de algumas informações. Podemos começar pelo seu nome completo?\", \"messageBlocks\": null, \"triggeredRule\": null, \"actions\": []}";
     
@@ -197,6 +261,23 @@ describe('LM Studio native tools', () => {
         type: 'sgp_fetch_contact_panel_data',
         reason: 'LM Studio native tool call: sgp_fetch_contact_panel_data',
         payload: {},
+      },
+    ]);
+  });
+
+  it('preserves a numeric contractId for a scoped SGP contact panel lookup', () => {
+    expect(convertLmStudioNativeToolCalls([
+      {
+        function: {
+          name: 'sgp_fetch_contact_panel_data',
+          arguments: JSON.stringify({ contractId: '27398', cpfCnpj: '12345678901' }),
+        },
+      },
+    ])).toEqual([
+      {
+        type: 'sgp_fetch_contact_panel_data',
+        reason: 'LM Studio native tool call: sgp_fetch_contact_panel_data',
+        payload: { contractId: '27398' },
       },
     ]);
   });

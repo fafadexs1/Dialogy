@@ -40,6 +40,20 @@ function parseAbsoluteUrl(url: string): URL | null {
   }
 }
 
+export function normalizeImageThumbnailSource(url?: string | null): string {
+  if (!url) return '';
+
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) return '';
+
+  if (trimmedUrl.startsWith('/9j/')) return `data:image/jpeg;base64,${trimmedUrl}`;
+  if (trimmedUrl.startsWith('iVBORw0KGgo')) return `data:image/png;base64,${trimmedUrl}`;
+  if (trimmedUrl.startsWith('R0lGOD')) return `data:image/gif;base64,${trimmedUrl}`;
+  if (trimmedUrl.startsWith('UklGR')) return `data:image/webp;base64,${trimmedUrl}`;
+
+  return trimmedUrl;
+}
+
 /**
  * Normalizes Supabase Storage URLs to the current environment host.
  * Also rewrites signed object URLs to public object URLs to avoid stale tokens.
@@ -114,7 +128,9 @@ export function resolveClientMediaUrl(
   url?: string | null,
   options: { kind?: 'image' | 'media'; proxy?: boolean } = {}
 ): string {
-  const normalizedUrl = normalizeSupabaseStorageUrl(url);
+  const normalizedUrl = normalizeSupabaseStorageUrl(
+    options.kind === 'image' ? normalizeImageThumbnailSource(url) : url
+  );
   if (!normalizedUrl) return '';
 
   if (

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { filterKnowledgeDocumentsForScope } from '@/services/autopilot/flow-routing';
 import { mergeAndRerankKnowledgeDocuments } from '@/services/rag/hybrid-retrieval';
+import { fuseDocumentMatchesWithRrf } from '@/services/rag/retrieval';
 import type { KnowledgeBaseDocument } from '@/lib/types';
 
 const docs: KnowledgeBaseDocument[] = [
@@ -43,6 +44,32 @@ const docs: KnowledgeBaseDocument[] = [
 ];
 
 describe('hybrid RAG deterministic reranker', () => {
+  it('uses RRF to reward documents found by both semantic and textual retrieval', () => {
+    const base = {
+      id: 'chunk',
+      content: 'conteudo',
+      similarity: 0.8,
+      document_name: 'Documento',
+      workspace_id: 'workspace',
+      autopilot_config_id: 'agent',
+      metadata: {},
+    };
+    const results = fuseDocumentMatchesWithRrf({
+      vectorMatches: [
+        { ...base, document_id: 'semantic-only' },
+        { ...base, id: 'both-vector', document_id: 'both' },
+      ],
+      keywordMatches: [
+        { ...base, id: 'both-keyword', document_id: 'both', keyword_score: 5 },
+        { ...base, id: 'keyword-only', document_id: 'keyword-only', keyword_score: 4 },
+      ],
+    });
+
+    expect(results[0].document_id).toBe('both');
+    expect(results[0].retrieval_sources).toEqual(['vector', 'keyword']);
+    expect(results[0].rrf_score).toBeGreaterThan(results[1].rrf_score || 0);
+  });
+
   it('limits sub-agent knowledge to authorized collections', () => {
     const scopedDocs: KnowledgeBaseDocument[] = [
       { id: 'legacy', name: 'Geral', content: 'Conteudo legado sem colecao.' },
@@ -289,6 +316,66 @@ describe('hybrid RAG deterministic reranker', () => {
     expect(result.knowledgeBaseDocuments[0].content).toContain('1000 MEGA');
     expect(result.knowledgeBaseDocuments[0].content).not.toContain('500 MEGA');
     expect(result.knowledgeBaseDocuments[0].category).toBe('product_or_service_catalog');
+  });
+
+  it('keeps only the strongest chunk from each document', () => {
+    const result = mergeAndRerankKnowledgeDocuments({
+      vectorDocuments: [
+        {
+          id: 'wifi',
+          name: 'Roteador e Wi-Fi',
+          category: 'troubleshooting',
+          content: 'Troca de senha do Wi-Fi.',
+          source: 'vector',
+          priority: 90,
+        },
+        {
+          id: 'wifi',
+          name: 'Roteador e Wi-Fi',
+          category: 'troubleshooting',
+          content: 'Reinicie o roteador se necessario.',
+          source: 'vector',
+          priority: 80,
+        },
+        {
+          id: 'fiber',
+          name: 'Fibra optica',
+          category: 'troubleshooting',
+          content: 'Verifique a luz LOS vermelha.',
+          source: 'vector',
+          priority: 70,
+        },
+      ],
+      query: 'Quero trocar a senha do Wi-Fi',
+    });
+
+    expect(result.knowledgeBaseDocuments.map((document) => document.id)).toEqual(['wifi', 'fiber']);
+    expect(result.discarded).toContainEqual(expect.objectContaining({
+      id: 'wifi',
+      reason: 'duplicate_document',
+    }));
+  });
+
+  it('reports keyword fallback separately from semantic vector retrieval', () => {
+    const result = mergeAndRerankKnowledgeDocuments({
+      vectorDocuments: [{
+        id: 'wifi-keyword',
+        name: 'Roteador e Wi-Fi',
+        category: 'troubleshooting',
+        content: 'Troca de senha do Wi-Fi.',
+        source: 'keyword',
+      }],
+      staticDocuments: [{
+        id: 'handoff',
+        name: 'Transferencia',
+        category: 'handoff_policy',
+        content: 'Encaminhe para suporte humano quando necessario.',
+      }],
+      query: 'Quero trocar a senha do Wi-Fi',
+    });
+
+    expect(result.strategy).toBe('keyword_static');
+    expect(result.selected[0].source).toBe('keyword');
   });
 
   it('filters customer conversation artifacts from general RAG selection', () => {

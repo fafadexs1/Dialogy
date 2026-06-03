@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import { sendAutomatedMessageAction } from '@/actions/messages';
 import { auditAgentToolExecution } from './audit';
-import { getAgentToolDefinition, listDefaultEnabledAgentToolNames } from './catalog';
+import { getAgentToolDefinition } from './catalog';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
 import { recordAgentToolMetrics } from '@/lib/observability/metrics';
 import { runCrmUpdateContactCustomFieldsTool } from './crm-tools';
@@ -19,8 +19,13 @@ import {
 import { getWorkspaceTemplates } from '@/lib/workspace-config';
 import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
+import { evaluateAgentToolPolicy } from './policy';
+import { abortActiveProcedures } from '@/services/autopilot/procedure-store';
+import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
+import { clearPendingToolConfirmation, setPendingToolConfirmation } from '@/services/autopilot/flow-state-store';
+import { redactSensitiveLogValue } from '@/lib/observability/redaction';
 
-const MAX_ACTIONS_PER_MESSAGE = 4;
+const MAX_ACTIONS_PER_MESSAGE = 2;
 const MAX_INTERNAL_NOTE_CHARS = 500;
 const ALLOWED_TOOLS = new Set([
   'transfer_chat',
@@ -33,8 +38,6 @@ const ALLOWED_TOOLS = new Set([
   'sgp_create_payment_promise',
   'mcp_call_tool',
 ]);
-
-const DEFAULT_ENABLED_TOOLS = new Set(listDefaultEnabledAgentToolNames());
 
 function normalizeSearchText(value: string): string {
   return value
@@ -67,11 +70,7 @@ function contextRun(context: AgentToolRuntimeContext): OrchestratorRunHandle | n
 }
 
 function isToolEnabledForAgent(context: AgentToolRuntimeContext, toolName: string): boolean {
-  const configuredToolNames = context.autopilotConfig.enabled_tool_names;
-  if (!Array.isArray(configuredToolNames)) {
-    return DEFAULT_ENABLED_TOOLS.has(toolName as any);
-  }
-  return configuredToolNames.includes(toolName);
+  return context.turnPolicy.allowedToolNames.includes(toolName);
 }
 
 function resolveRequestedToolName(action: AgentToolAction): string {
@@ -79,6 +78,32 @@ function resolveRequestedToolName(action: AgentToolAction): string {
     return action.payload?.toolName || '';
   }
   return action.type;
+}
+
+async function loadRecentCustomerVisibleMessages(
+  context: AgentToolRuntimeContext
+): Promise<NonNullable<AgentToolRuntimeContext['recentCustomerVisibleMessages']>> {
+  try {
+    const { rows } = await db.query(
+      `SELECT content, from_me
+       FROM messages
+       WHERE workspace_id = $1
+         AND chat_id = $2
+         AND COALESCE(api_message_status, '') <> 'internal'
+         AND COALESCE(content, '') <> ''
+       ORDER BY created_at DESC
+       LIMIT 12`,
+      [context.workspaceId, context.chat.id]
+    );
+
+    return rows.reverse().map((row: any) => ({
+      fromMe: row.from_me === true,
+      content: String(row.content || ''),
+    }));
+  } catch (error) {
+    console.warn('[AGENT_TOOL_POLICY] Failed to load recent customer-visible messages:', error);
+    return [];
+  }
 }
 
 async function auditToolResult(
@@ -108,8 +133,8 @@ async function auditToolResult(
     class: definition?.class ?? actionDefinition?.class ?? null,
     riskLevel: definition?.riskLevel ?? actionDefinition?.riskLevel ?? null,
     status: result.status,
-    input: (inputOverride || result.input) as unknown as Record<string, unknown>,
-    output: result.output ?? null,
+    input: redactSensitiveLogValue(inputOverride || result.input) as Record<string, unknown>,
+    output: redactSensitiveLogValue(result.output ?? null) as Record<string, unknown> | null,
     error: result.error ?? null,
     durationMs,
     requiresHumanApproval: definition?.requiresHumanApproval ?? actionDefinition?.requiresHumanApproval ?? false,
@@ -356,6 +381,18 @@ async function runTransferChatTool(
             [chatTag, chatColor, context.chat.id]
           );
 
+          await broadcastChatUpdate(context.workspaceId, context.chat.id, {
+            agent_id: null,
+            assigned_system_agent_id: null,
+            is_autopilot_active: false,
+            copilot_mode: 'off',
+            status: 'gerais',
+            tag: chatTag,
+            color: chatColor,
+            assigned_at: null,
+          });
+          await abortActiveProcedures(context.chat.id);
+
           return {
             toolName: 'transfer_chat',
             status: 'success',
@@ -380,6 +417,7 @@ async function runTransferChatTool(
       };
     }
 
+    await abortActiveProcedures(context.chat.id);
     return {
       toolName: 'transfer_chat',
       status: 'success',
@@ -530,6 +568,16 @@ async function runCloseChatTool(
     );
 
     await client.query('COMMIT');
+
+    const closedAtStr = new Date().toISOString();
+    await broadcastChatUpdate(workspaceId, context.chat.id, {
+      status: 'encerrados',
+      closed_at: closedAtStr,
+      close_reason_tag_id: reasonTagId,
+      close_notes: notes,
+      tag: tagInfo.label ?? chatRow.current_tag ?? '',
+      color: tagInfo.color ?? chatRow.current_color ?? '',
+    });
 
     try {
       const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [context.chat.id]);
@@ -751,12 +799,19 @@ export async function runAgentTools(
     return results;
   }
 
-  const allowedToRun = await ensureChatStillAssignedToAgent(context);
+  const runtimeContext = context.recentCustomerVisibleMessages
+    ? context
+    : {
+        ...context,
+        recentCustomerVisibleMessages: await loadRecentCustomerVisibleMessages(context),
+      };
+
+  const allowedToRun = await ensureChatStillAssignedToAgent(runtimeContext);
   if (!allowedToRun) {
     for (const action of normalizedActions) {
       const startedAt = Date.now();
       const result = reject(action, 'Chat nao esta atribuido a este Atendente Inteligente ou autopilot esta desligado.');
-      await auditToolResult(context, result, Date.now() - startedAt);
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
       results.push(result);
     }
     return results;
@@ -767,15 +822,15 @@ export async function runAgentTools(
     const startedAt = Date.now();
     if (!ALLOWED_TOOLS.has(action.type)) {
       const result = reject(action, 'Ferramenta nao permitida para Atendente Inteligente.');
-      await auditToolResult(context, result, Date.now() - startedAt);
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
       results.push(result);
       continue;
     }
 
     const requestedToolName = resolveRequestedToolName(action);
-    if (!isToolEnabledForAgent(context, requestedToolName)) {
+    if (!isToolEnabledForAgent(runtimeContext, requestedToolName)) {
       const result = reject(action, 'Ferramenta desabilitada nas configuracoes deste agente.');
-      await auditToolResult(context, result, Date.now() - startedAt);
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
       results.push(result);
       continue;
     }
@@ -783,14 +838,44 @@ export async function runAgentTools(
     const definition = getAgentToolDefinition(action.type);
     if (!definition) {
       const result = reject(action, 'Ferramenta sem contrato registrado no catalogo.');
-      await auditToolResult(context, result, Date.now() - startedAt);
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
       results.push(result);
       continue;
     }
 
     if (action.type === 'transfer_chat' && transferExecuted) {
       const result = reject(action, 'Apenas uma transferencia pode ser executada por mensagem.');
-      await auditToolResult(context, result, Date.now() - startedAt);
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
+      results.push(result);
+      continue;
+    }
+
+    let policyDecision;
+    try {
+      policyDecision = await evaluateAgentToolPolicy({
+        context: runtimeContext,
+        action,
+        previousResults: results,
+      });
+    } catch (error) {
+      policyDecision = {
+        allowed: false,
+        riskLevel: 'medium' as const,
+        reason: `[tool_policy:metadata_unavailable] Nao consegui validar a seguranca da ferramenta: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (!policyDecision.allowed) {
+      const result = reject(action, policyDecision.reason || 'Ferramenta bloqueada pela politica de execucao.');
+      if (policyDecision.reason?.includes('[tool_policy:confirmation_required]')) {
+        await setPendingToolConfirmation({
+          chatId: runtimeContext.chat.id,
+          workspaceId: runtimeContext.workspaceId,
+          autopilotConfigId: runtimeContext.autopilotConfig.id,
+          activeNodeId: runtimeContext.turnPolicy.activeNodeId,
+          action,
+        });
+      }
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
       results.push(result);
       continue;
     }
@@ -798,14 +883,14 @@ export async function runAgentTools(
     let result: AgentToolExecutionResult;
     try {
       result = await withTimeout((async () => {
-        if (action.type === 'transfer_chat') return runTransferChatTool(context, action);
-        if (action.type === 'close_chat') return runCloseChatTool(context, action);
-        if (action.type === 'add_internal_note') return runAddInternalNoteTool(context, action);
-        if (action.type === 'mcp_call_tool') return runMcpCallTool(context, action);
+        if (action.type === 'transfer_chat') return runTransferChatTool(runtimeContext, action);
+        if (action.type === 'close_chat') return runCloseChatTool(runtimeContext, action);
+        if (action.type === 'add_internal_note') return runAddInternalNoteTool(runtimeContext, action);
+        if (action.type === 'mcp_call_tool') return runMcpCallTool(runtimeContext, action);
         if (action.type === 'crm_update_contact_custom_fields') {
-          return runCrmUpdateContactCustomFieldsTool(context, action);
+          return runCrmUpdateContactCustomFieldsTool(runtimeContext, action);
         }
-        return runSgpTool(context, action as any);
+        return runSgpTool(runtimeContext, action as any);
       })(), definition.timeoutMs, `agent tool ${definition.name}`);
     } catch (error) {
       result = {
@@ -819,8 +904,11 @@ export async function runAgentTools(
     if (action.type === 'transfer_chat' && result.status === 'success') {
       transferExecuted = true;
     }
+    if (result.status === 'success') {
+      await clearPendingToolConfirmation(runtimeContext.chat.id, action);
+    }
 
-    await auditToolResult(context, result, Date.now() - startedAt);
+    await auditToolResult(runtimeContext, result, Date.now() - startedAt);
     results.push(result);
   }
 

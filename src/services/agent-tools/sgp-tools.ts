@@ -118,14 +118,18 @@ async function fetchSgpClients(sgp: SgpToolContext) {
   return data.clientes;
 }
 
-async function fetchSupportContracts(sgp: SgpToolContext) {
+async function fetchSupportContracts(sgp: SgpToolContext, contractId?: string | null) {
+  const normalizedContractId = onlyDigits(contractId);
   const response = await fetch(
     `${sgp.global.baseUrl}/api/suporte/contrato/list/`,
     createRequestInit(
       sgp.user.token!,
-      withApplicationCredentials(sgp.global, {
-        cliente_cpfcnpj: onlyDigits(sgp.cpf),
-      })
+      withApplicationCredentials(
+        sgp.global,
+        normalizedContractId
+          ? { contrato_id: normalizedContractId }
+          : { cliente_cpfcnpj: onlyDigits(sgp.cpf) }
+      )
     )
   );
 
@@ -196,9 +200,13 @@ export async function runSgpTool(
     }
 
     if (action.type === 'sgp_fetch_contact_panel_data') {
+      const contractId = String(action.payload?.contractId ?? '').trim();
+      if (contractId && !/^\d+$/.test(contractId)) {
+        throw new Error('contractId deve conter somente digitos.');
+      }
       const [clients, supportContracts] = await Promise.all([
         fetchSgpClients(sgp),
-        fetchSupportContracts(sgp),
+        fetchSupportContracts(sgp, contractId),
       ]);
       const data = buildSGPContactPanelData(clients, supportContracts);
       if (!data) throw new Error('Nenhum dado SGP encontrado para este cliente.');

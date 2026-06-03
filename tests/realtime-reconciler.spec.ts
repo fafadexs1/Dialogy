@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   parseVisibleIdSet,
+  reconcileRealtimeChatAssignment,
   shouldDeliverChatPayload,
   shouldDeliverMessagePayload,
   toPostgresChangesPayload,
   type RealtimeBroadcastChangesPayload,
 } from '@/lib/realtime/realtime-reconciler';
+import type { Chat } from '@/lib/types';
 
 const broadcastPayload = (record: Record<string, unknown>, oldRecord: Record<string, unknown> = {}): RealtimeBroadcastChangesPayload => ({
   id: 'evt-1',
@@ -51,5 +53,38 @@ describe('realtime reconciler', () => {
 
     expect(shouldDeliverMessagePayload(visiblePayload, visible)).toBe(true);
     expect(shouldDeliverMessagePayload(hiddenPayload, visible)).toBe(false);
+  });
+
+  it('replaces a stale human agent with the hydrated transfer target', () => {
+    const existing = {
+      agentId: 'agent-old',
+      agent: { id: 'agent-old', name: 'Agente Antigo' },
+    } as Chat;
+
+    const assignment = reconcileRealtimeChatAssignment(existing, {
+      agent_id: 'agent-new',
+      agent_name: 'Agente Novo',
+      agent_avatar_url: '/novo.png',
+      assigned_system_agent_id: null,
+    });
+
+    expect(assignment.agent).toMatchObject({ id: 'agent-new', name: 'Agente Novo' });
+    expect(assignment.assignedSystemAgent).toBeUndefined();
+  });
+
+  it('drops an incompatible cached human agent when a partial AI transfer arrives', () => {
+    const existing = {
+      agentId: 'agent-old',
+      agent: { id: 'agent-old', name: 'Agente Antigo' },
+    } as Chat;
+
+    const assignment = reconcileRealtimeChatAssignment(existing, {
+      assigned_system_agent_id: 'system-1',
+      assigned_system_agent_name: 'Suporte IA',
+      assigned_system_agent_type: 'intelligent_attendant',
+    });
+
+    expect(assignment.agent).toBeUndefined();
+    expect(assignment.assignedSystemAgent).toMatchObject({ id: 'system-1', name: 'Suporte IA' });
   });
 });

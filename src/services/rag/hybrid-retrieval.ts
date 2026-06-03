@@ -1,29 +1,27 @@
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import { db } from '@/lib/db';
+import { redactSensitiveLogText, redactSensitiveLogValue } from '@/lib/observability/redaction';
 import type { AutopilotIntentResolution, KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import type { ResolvedCasePromptItem } from './retrieval';
 import { getCanonicalKnowledgeAnswer, isUnsafeAsCustomerFacingKnowledge } from './document-safety';
-import { rerankKnowledgeCandidates } from './cross-encoder-reranker';
+import { rerankKnowledgeCandidatesWithBgeV2M3 } from './bge-reranker-v2-m3';
 import { inferKnowledgeContextRole } from './knowledge-document';
 
 const DEFAULT_SELECTED_DOCUMENT_LIMIT = 5;
 const MAX_DOCUMENTS_PER_CATEGORY = 2;
-const CRITICAL_RERANK_INTENTS = new Set([
-  'catalog_request',
-  'pricing_request',
-  'promotion_request',
-  'billing_or_payment',
-  'cancellation_request',
-  'troubleshooting',
-  'purchase_inquiry',
-]);
 const FACT_FIRST_INTENTS = new Set(['catalog_request', 'pricing_request', 'promotion_request', 'availability_request']);
 
 export type KnowledgeRetrievalStrategy =
   | 'vector'
   | 'vector_static'
+  | 'vector_keyword'
+  | 'vector_keyword_static'
+  | 'keyword'
+  | 'keyword_static'
   | 'static_documents'
   | 'none';
+
+export type KnowledgeDocumentSelectionSource = 'vector' | 'keyword' | 'static';
 
 export type HybridKnowledgeRetrievalResult = {
   knowledgeBaseDocuments: KnowledgeBaseDocument[];
@@ -40,13 +38,13 @@ export type HybridKnowledgeRetrievalResult = {
     name: string;
     category: string;
     score: number;
-    source: 'vector' | 'static';
+    source: KnowledgeDocumentSelectionSource;
   }>;
   discarded: Array<{
     id: string;
     name: string;
     reason: string;
-    source: 'vector' | 'static';
+    source: KnowledgeDocumentSelectionSource;
   }>;
   fallbackReason?: string | null;
   error?: string | null;
@@ -56,7 +54,7 @@ export type HybridKnowledgeRetrievalResult = {
 type ScoredDocument = {
   document: KnowledgeBaseDocument;
   score: number;
-  source: 'vector' | 'static';
+  source: KnowledgeDocumentSelectionSource;
   category: string;
 };
 
@@ -67,6 +65,44 @@ type BaseRetrievalInput = {
   excludeChatId?: string | null;
   allowedDocumentIds?: string[];
 };
+
+function buildCorrectiveRetrievalQuery(query: string, intent?: AutopilotIntentResolution | null): string {
+  const normalizedQuery = query.trim();
+  const intentTerms = (intent?.knowledgeCategories || [])
+    .map((category) => String(category).replace(/_/g, ' '))
+    .filter(Boolean)
+    .slice(0, 4);
+  const operationalTerms = intent?.intent === 'troubleshooting'
+    ? ['procedimento suporte diagnostico solucao']
+    : intent?.intent === 'billing_or_payment'
+      ? ['financeiro pagamento fatura segunda via']
+      : intent?.intent === 'pricing_request' || intent?.intent === 'catalog_request'
+        ? ['catalogo oficial planos precos']
+        : [];
+  return Array.from(new Set([normalizedQuery, ...intentTerms, ...operationalTerms])).join(' ');
+}
+
+function shouldRetryRetrieval(
+  retrieval: { knowledgeBaseDocuments: KnowledgeBaseDocument[] },
+  merged: Pick<HybridKnowledgeRetrievalResult, 'knowledgeCoverage' | 'selected'>,
+) {
+  const hasRetrievedDocument = retrieval.knowledgeBaseDocuments.length > 0;
+  const hasSearchSelectedDocument = merged.selected.some((document) => document.source === 'vector' || document.source === 'keyword');
+  return merged.knowledgeCoverage === 'none' || merged.knowledgeCoverage === 'low' || !hasRetrievedDocument || !hasSearchSelectedDocument;
+}
+
+function buildInternalKnowledgeSources(documents: KnowledgeBaseDocument[]) {
+  return documents.map((document) => ({
+    documentId: document.id,
+    name: document.name,
+    source: document.source || 'static',
+    retrievalSources: document.retrievalSources || [document.source || 'static'],
+    chunkIndex: document.chunkIndex ?? null,
+    chunkCount: document.chunkCount ?? null,
+    parentHeading: document.parentHeading ?? null,
+    rrfScore: document.rrfScore ?? null,
+  }));
+}
 
 function normalize(value: string): string {
   return value
@@ -200,22 +236,6 @@ function factualIntentScoreAdjustment(document: KnowledgeBaseDocument, intent?: 
   return inferKnowledgeContextRole(document) === 'fact' ? 70 : -25;
 }
 
-function shouldUseCrossEncoderReranker(
-  result: Pick<HybridKnowledgeRetrievalResult, 'knowledgeBaseDocuments' | 'selected'>,
-  intent?: AutopilotIntentResolution | null,
-) {
-  const topDocument = result.knowledgeBaseDocuments[0];
-  const topScore = result.selected[0]?.score;
-  const secondScore = result.selected[1]?.score;
-  if (!topDocument || topScore == null || secondScore == null) return false;
-  if (!intent || !CRITICAL_RERANK_INTENTS.has(intent.intent)) return false;
-  if (exactlyMatchesIntentCategory(topDocument, intent)) return false;
-
-  const configuredMargin = Number.parseInt(process.env.RAG_CROSS_ENCODER_MAX_SCORE_MARGIN || '', 10);
-  const maximumMargin = Number.isFinite(configuredMargin) && configuredMargin >= 0 ? configuredMargin : 10;
-  return topScore - secondScore <= maximumMargin;
-}
-
 function stableDocumentKey(document: KnowledgeBaseDocument): string {
   const contentKey = normalize(String(document.content || getCanonicalAnswer(document))).slice(0, 700);
   return contentKey || normalize(document.name || document.id || 'doc');
@@ -289,9 +309,9 @@ function scoreVectorDocument(input: {
     input.document,
   );
   let score = 55;
-  const source = String(getDocumentValue(input.document, ['source']) || '');
+  const documentSource = String(getDocumentValue(input.document, ['source']) || '');
   const priority = Number(getDocumentValue(input.document, ['priority']));
-  if (source === 'keyword') score += 18;
+  if (documentSource === 'keyword') score += 18;
   if (Number.isFinite(priority)) score += Math.min(35, Math.max(0, priority));
   if (matchesIntentCategory(input.document, input.intent)) score += 45;
   if (titlePhraseMatch) score += 90;
@@ -304,42 +324,13 @@ function scoreVectorDocument(input: {
   return {
     document: input.document,
     score,
-    source: 'vector',
+    source: documentSource === 'keyword' ? 'keyword' : 'vector',
     category,
   };
 }
 
-let ragLogTableReady = false;
-
 async function ensureRagLogTable() {
-  if (ragLogTableReady) return true;
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS rag_retrieval_logs (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        workspace_id uuid NOT NULL,
-        autopilot_config_id uuid,
-        query text NOT NULL,
-        intent text,
-        strategy text,
-        knowledge_coverage text,
-        selected jsonb NOT NULL DEFAULT '[]'::jsonb,
-        discarded jsonb NOT NULL DEFAULT '[]'::jsonb,
-        diagnostics jsonb NOT NULL DEFAULT '{}'::jsonb,
-        error text,
-        created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
-      );
-      CREATE INDEX IF NOT EXISTS idx_rag_retrieval_logs_workspace_created
-        ON rag_retrieval_logs(workspace_id, created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_rag_retrieval_logs_config_created
-        ON rag_retrieval_logs(autopilot_config_id, created_at DESC);
-    `);
-    ragLogTableReady = true;
-    return true;
-  } catch (error) {
-    console.warn('[RAG] Could not ensure rag_retrieval_logs table:', error);
-    return false;
-  }
+  return true;
 }
 
 async function logRagRetrieval(input: BaseRetrievalInput & {
@@ -364,13 +355,13 @@ async function logRagRetrieval(input: BaseRetrievalInput & {
       [
         input.workspaceId,
         input.autopilotConfigId || null,
-        input.query,
+        redactSensitiveLogText(input.query),
         input.intent?.intent || null,
         input.result.strategy,
         input.result.knowledgeCoverage,
         JSON.stringify(input.result.selected),
         JSON.stringify(input.result.discarded),
-        JSON.stringify(input.result.diagnostics || {}),
+        JSON.stringify(redactSensitiveLogValue(input.result.diagnostics || {})),
         input.result.error || null,
       ],
     );
@@ -404,6 +395,7 @@ export function mergeAndRerankKnowledgeDocuments(input: {
   ].filter((item): item is ScoredDocument => Boolean(item));
 
   const seen = new Set<string>();
+  const seenDocumentIds = new Set<string>();
   const categoryCounts = new Map<string, number>();
   const selected: ScoredDocument[] = [];
   const discarded: HybridKnowledgeRetrievalResult['discarded'] = [];
@@ -415,6 +407,10 @@ export function mergeAndRerankKnowledgeDocuments(input: {
       discarded.push({ id: item.document.id, name: item.document.name, reason: 'duplicate_content', source: item.source });
       continue;
     }
+    if (seenDocumentIds.has(item.document.id)) {
+      discarded.push({ id: item.document.id, name: item.document.name, reason: 'duplicate_document', source: item.source });
+      continue;
+    }
 
     const countForCategory = categoryCounts.get(item.category) || 0;
     if (countForCategory >= MAX_DOCUMENTS_PER_CATEGORY && selected.some((selectedItem) => selectedItem.source === item.source)) {
@@ -424,17 +420,27 @@ export function mergeAndRerankKnowledgeDocuments(input: {
 
     selected.push(item);
     seen.add(key);
+    seenDocumentIds.add(item.document.id);
     categoryCounts.set(item.category, countForCategory + 1);
 
     if (selected.length >= limit) break;
   }
 
   const hasVector = selected.some((item) => item.source === 'vector');
+  const hasKeyword = selected.some((item) => item.source === 'keyword');
   const hasStatic = selected.some((item) => item.source === 'static');
-  const strategy: KnowledgeRetrievalStrategy = hasVector && hasStatic
-    ? 'vector_static'
+  const strategy: KnowledgeRetrievalStrategy = hasVector && hasKeyword && hasStatic
+    ? 'vector_keyword_static'
+    : hasVector && hasKeyword
+      ? 'vector_keyword'
+      : hasVector && hasStatic
+        ? 'vector_static'
+        : hasKeyword && hasStatic
+          ? 'keyword_static'
     : hasVector
       ? 'vector'
+      : hasKeyword
+        ? 'keyword'
       : hasStatic
         ? 'static_documents'
         : 'none';
@@ -468,7 +474,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
 }): Promise<HybridKnowledgeRetrievalResult> {
   try {
     const { retrieveSupportContext } = await import('./retrieval');
-    const vectorRetrieval = await retrieveSupportContext({
+    let vectorRetrieval = await retrieveSupportContext({
       workspaceId: input.workspaceId,
       autopilotConfigId: input.autopilotConfigId ?? null,
       query: input.query,
@@ -476,17 +482,57 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       intent: input.intent ?? null,
       allowedDocumentIds: input.allowedDocumentIds,
     });
-    const merged = mergeAndRerankKnowledgeDocuments({
+    let merged = mergeAndRerankKnowledgeDocuments({
       vectorDocuments: vectorRetrieval.knowledgeBaseDocuments,
       staticDocuments: input.staticDocuments,
       query: input.query,
       intent: input.intent,
     });
+    const correctiveQuery = buildCorrectiveRetrievalQuery(input.query, input.intent);
+    let correctiveDiagnostics: Record<string, unknown> = {
+      attempted: false,
+      reason: 'initial_retrieval_sufficient',
+    };
+    if (shouldRetryRetrieval(vectorRetrieval, merged) && correctiveQuery !== input.query.trim()) {
+      const correctiveRetrieval = await retrieveSupportContext({
+        workspaceId: input.workspaceId,
+        autopilotConfigId: input.autopilotConfigId ?? null,
+        query: correctiveQuery,
+        excludeChatId: input.excludeChatId ?? null,
+        intent: input.intent ?? null,
+        allowedDocumentIds: input.allowedDocumentIds,
+      });
+      vectorRetrieval = {
+        ...correctiveRetrieval,
+        knowledgeBaseDocuments: [
+          ...correctiveRetrieval.knowledgeBaseDocuments,
+          ...vectorRetrieval.knowledgeBaseDocuments.filter((document) => (
+            !correctiveRetrieval.knowledgeBaseDocuments.some((candidate) => candidate.id === document.id)
+          )),
+        ],
+        resolvedCases: correctiveRetrieval.resolvedCases.length > 0
+          ? correctiveRetrieval.resolvedCases
+          : vectorRetrieval.resolvedCases,
+      };
+      merged = mergeAndRerankKnowledgeDocuments({
+        vectorDocuments: vectorRetrieval.knowledgeBaseDocuments,
+        staticDocuments: input.staticDocuments,
+        query: input.query,
+        intent: input.intent,
+      });
+      correctiveDiagnostics = {
+        attempted: true,
+        originalQuery: input.query,
+        correctiveQuery,
+        recoveredDocuments: correctiveRetrieval.knowledgeBaseDocuments.length,
+        finalCoverage: merged.knowledgeCoverage,
+      };
+    }
     let finalMerged = merged;
     let neuralRerankerDiagnostics: Record<string, unknown> | null = null;
     try {
-      const reranked = shouldUseCrossEncoderReranker(merged, input.intent)
-        ? await rerankKnowledgeCandidates(
+      const reranked = merged.knowledgeBaseDocuments.length >= 2
+        ? await rerankKnowledgeCandidatesWithBgeV2M3(
             input.query,
             merged.knowledgeBaseDocuments.map((document, index) => ({
               document,
@@ -534,7 +580,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       } else {
         neuralRerankerDiagnostics = {
           skipped: true,
-          reason: 'deterministic_ranking_not_ambiguous',
+          reason: 'fewer_than_two_candidates',
         };
       }
     } catch (rerankerError) {
@@ -542,7 +588,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
         fallback: true,
         error: rerankerError instanceof Error ? rerankerError.message : String(rerankerError),
       };
-      console.warn('[RAG] Cross-encoder reranker failed; using deterministic ranking:', rerankerError);
+      console.warn('[RAG] BGE Reranker v2 M3 failed; using deterministic fallback ranking:', rerankerError);
     }
 
     const result: HybridKnowledgeRetrievalResult = {
@@ -555,9 +601,13 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       },
       diagnostics: {
         ...((vectorRetrieval as any).diagnostics || {}),
-        crossEncoderReranker: neuralRerankerDiagnostics,
+        correctiveRetrieval: correctiveDiagnostics,
+        bgeRerankerV2M3: neuralRerankerDiagnostics,
+        internalKnowledgeSources: buildInternalKnowledgeSources(finalMerged.knowledgeBaseDocuments),
       },
-      fallbackReason: finalMerged.strategy === 'static_documents' ? 'vector_returned_no_selected_documents' : null,
+      fallbackReason: finalMerged.selected.some((document) => document.source === 'vector')
+        ? null
+        : 'vector_returned_no_selected_documents',
     };
     await logRagRetrieval({ ...input, result });
     return result;

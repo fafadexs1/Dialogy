@@ -10,6 +10,7 @@ import type {
     AutopilotConfigDraftSnapshot,
     AutopilotConfigVersionSummary,
     AutopilotFlowGraph,
+    AutopilotFlowAiProposal,
     NexusFlowInstance,
     Action,
     AutopilotUsageLog,
@@ -20,8 +21,9 @@ import type {
 } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { enqueueAiDocumentIngest, shouldEnqueueJob } from '@/lib/queue';
-import { DOCUMENT_EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
+import { DOCUMENT_EMBEDDING_DIMENSIONS, DOCUMENT_EMBEDDING_MODEL } from '@/lib/embeddings';
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
+import { hasKnowledgeDocumentIndexChanged } from '@/services/rag/knowledge-document';
 import { VectorStore } from '@/lib/vector-store';
 import { isUnsafeAsCustomerFacingKnowledge } from '@/services/rag/document-safety';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
@@ -32,6 +34,10 @@ import { isAllowedAutopilotModel } from '@/services/ai/model-selection';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
 import { normalizeGoogleAiModelId } from '@/lib/ai-models';
+import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-rewrite';
+import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
+import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
+import { resolveAllowedKnowledgeDocumentIds } from '@/services/autopilot/turn-policy';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -40,58 +46,11 @@ async function isWorkspaceMember(userId: string, workspaceId: string): Promise<b
 }
 
 async function ensureAutopilotToolColumns(): Promise<void> {
-    await db.query(`
-        ALTER TABLE IF EXISTS autopilot_configs
-        ADD COLUMN IF NOT EXISTS enabled_tool_names jsonb,
-        ADD COLUMN IF NOT EXISTS transcription_model text,
-        ADD COLUMN IF NOT EXISTS flow_graph jsonb,
-        ADD COLUMN IF NOT EXISTS knowledge_collections jsonb
-    `);
+    // Schema changes are applied by Prisma migrations before requests are served.
 }
 
 async function ensureAutopilotVersioningTables(): Promise<void> {
-    await ensureAutopilotToolColumns();
-    await db.query(`
-        CREATE TABLE IF NOT EXISTS autopilot_config_drafts (
-            config_id uuid PRIMARY KEY,
-            workspace_id uuid NOT NULL,
-            user_id uuid NOT NULL,
-            snapshot jsonb NOT NULL,
-            created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
-            updated_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
-            CONSTRAINT autopilot_config_drafts_config_id_fkey
-                FOREIGN KEY (config_id) REFERENCES autopilot_configs(id) ON DELETE CASCADE,
-            CONSTRAINT autopilot_config_drafts_workspace_id_fkey
-                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-            CONSTRAINT autopilot_config_drafts_user_id_fkey
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_autopilot_config_drafts_workspace
-            ON autopilot_config_drafts(workspace_id);
-
-        CREATE TABLE IF NOT EXISTS autopilot_config_versions (
-            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-            config_id uuid NOT NULL,
-            workspace_id uuid NOT NULL,
-            user_id uuid,
-            version_number int NOT NULL,
-            label text,
-            snapshot jsonb NOT NULL,
-            created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
-            CONSTRAINT autopilot_config_versions_config_id_fkey
-                FOREIGN KEY (config_id) REFERENCES autopilot_configs(id) ON DELETE CASCADE,
-            CONSTRAINT autopilot_config_versions_workspace_id_fkey
-                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-            CONSTRAINT autopilot_config_versions_user_id_fkey
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-            CONSTRAINT autopilot_config_versions_config_number_key
-                UNIQUE (config_id, version_number)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_autopilot_config_versions_config_created
-            ON autopilot_config_versions(config_id, version_number DESC);
-    `);
+    // Schema changes are applied by Prisma migrations before requests are served.
 }
 
 function parseKnowledgeBaseDocuments(raw: unknown): KnowledgeBaseDocument[] {
@@ -290,7 +249,7 @@ async function reindexChangedKnowledgeDocuments({
     const removedDocs = previousDocs.filter((doc) => !nextById.has(doc.id));
     const changedDocs = nextDocs.filter((doc) => {
         const previous = previousById.get(doc.id);
-        return !previous || previous.name !== doc.name || previous.content !== doc.content;
+        return hasKnowledgeDocumentIndexChanged(previous, doc);
     });
 
     await Promise.all(
@@ -371,13 +330,17 @@ export async function getAutopilotRagHealth(configId: string): Promise<{
                 `SELECT
                     document_id::text AS document_id,
                     COUNT(*)::int AS chunks,
-                    COUNT(*) FILTER (WHERE vector_dims(vector) <> ${DOCUMENT_EMBEDDING_DIMENSIONS})::int AS wrong_dims
+                    COUNT(*) FILTER (
+                        WHERE vector_dims(vector) <> ${DOCUMENT_EMBEDDING_DIMENSIONS}
+                           OR COALESCE(metadata->>'embeddingModel', '') <> $4
+                           OR COALESCE(metadata->>'contentFormat', '') <> 'markdown'
+                    )::int AS wrong_dims
                  FROM embeddings_documents
                  WHERE workspace_id = $1
                    AND autopilot_config_id = $2
                    AND document_id::text = ANY($3::text[])
                  GROUP BY document_id`,
-                [workspaceId, configId, documentIds]
+                [workspaceId, configId, documentIds, DOCUMENT_EMBEDDING_MODEL]
             )
             : { rows: [] };
         const indexedIds = new Set(
@@ -558,9 +521,11 @@ export async function runAutopilotRagLab(configId: string): Promise<{
             });
             const scope = resolveActiveFlowIntentScope(config, intent.intent);
             const scopedDocuments = filterKnowledgeDocumentsForScope(config, safeDocuments, scope);
-            const allowedDocumentIds = scope?.knowledgeCollectionIds?.length
-                ? scopedDocuments.map((document) => document.id)
-                : undefined;
+            const allowedDocumentIds = resolveAllowedKnowledgeDocumentIds({
+                config,
+                documents: safeDocuments,
+                intentScope: scope,
+            });
             const retrieval = await retrieveHybridSupportContext({
                 workspaceId,
                 autopilotConfigId: configId,
@@ -602,6 +567,69 @@ export async function runAutopilotRagLab(configId: string): Promise<{
     } catch (error) {
         console.error('[RUN_AUTOPILOT_RAG_LAB] Erro ao avaliar RAG:', error);
         return { report: null, error: 'Falha ao executar laboratorio RAG.' };
+    }
+}
+
+export async function improveAutopilotKnowledgeDocument(
+    configId: string,
+    document: KnowledgeBaseDocument,
+): Promise<{ document: KnowledgeBaseDocument | null; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { document: null, error: 'Usuario nao autenticado.' };
+
+    try {
+        const configRes = await db.query(
+            `SELECT id, workspace_id, gemini_api_key
+             FROM autopilot_configs
+             WHERE id = $1
+             LIMIT 1`,
+            [configId],
+        );
+        if (configRes.rowCount === 0) return { document: null, error: 'Agente nao encontrado.' };
+        const config = configRes.rows[0];
+        const workspaceId = String(config.workspace_id);
+        if (!await isWorkspaceMember(user.id, workspaceId)) {
+            return { document: null, error: 'Acesso nao autorizado.' };
+        }
+        if (!document.content?.trim()) {
+            return { document: null, error: 'Adicione conteudo antes de solicitar a melhoria.' };
+        }
+
+        const runtime = await resolveWorkspaceAiExecutionContext(workspaceId, configId);
+        const improved = await improveKnowledgeDocumentForRag({
+            document,
+            model: runtime.model,
+            apiKey: config.gemini_api_key || runtime.workspaceGeminiApiKey,
+        });
+        const requiredTools = Array.from(new Set([
+            ...(document.requiredTools || []),
+            ...improved.requiredTools,
+            ...Array.from(improved.content.matchAll(/@([a-zA-Z0-9_.:-]+)/g)).map((match) => match[1]),
+        ]));
+
+        return {
+            document: {
+                ...document,
+                name: improved.name,
+                content: improved.content,
+                summary: improved.summary,
+                category: improved.category,
+                tags: improved.tags,
+                contextRole: improved.contextRole,
+                canonicalAnswer: improved.canonicalAnswer || null,
+                workflowHints: improved.workflowHints,
+                requiredTools,
+                sourceFormat: 'markdown',
+                updatedAt: new Date().toISOString(),
+            },
+        };
+    } catch (error) {
+        console.error('[IMPROVE_AUTOPILOT_KNOWLEDGE] Falha ao melhorar documento:', error);
+        return {
+            document: null,
+            error: error instanceof Error ? error.message : 'Falha ao melhorar documento com IA.',
+        };
     }
 }
 
@@ -706,6 +734,63 @@ export async function getAgentToolCatalogAction(workspaceId: string) {
     }));
 
     return { tools: [...listAgentToolCatalogItems(), ...mcpCatalogItems] };
+}
+
+export async function generateAutopilotFlowWithAi(input: {
+    configId: string;
+    conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+    currentGraph?: AutopilotFlowGraph | null;
+    currentSystemPrompt?: string | null;
+}): Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { proposal: null, error: 'Usuario nao autenticado.' };
+
+    try {
+        const configRes = await db.query(
+            `SELECT id, workspace_id, gemini_api_key
+             FROM autopilot_configs
+             WHERE id = $1
+             LIMIT 1`,
+            [input.configId],
+        );
+        if (configRes.rowCount === 0) return { proposal: null, error: 'Agente nao encontrado.' };
+        const config = configRes.rows[0];
+        const workspaceId = String(config.workspace_id);
+        if (!await isWorkspaceMember(user.id, workspaceId)) {
+            return { proposal: null, error: 'Acesso nao autorizado.' };
+        }
+
+        const conversation = input.conversation
+            .filter((message) => (message.role === 'user' || message.role === 'assistant') && message.content?.trim())
+            .slice(-12)
+            .map((message) => ({ role: message.role, content: message.content.trim().slice(0, 12000) }));
+        if (!conversation.some((message) => message.role === 'user')) {
+            return { proposal: null, error: 'Descreva o fluxo que deseja construir.' };
+        }
+
+        const [runtime, catalog] = await Promise.all([
+            resolveWorkspaceAiExecutionContext(workspaceId, input.configId),
+            getAgentToolCatalogAction(workspaceId),
+        ]);
+        if (catalog.error) return { proposal: null, error: catalog.error };
+
+        const proposal = await generateAutopilotFlowProposal({
+            conversation,
+            currentGraph: input.currentGraph || null,
+            currentSystemPrompt: input.currentSystemPrompt || '',
+            tools: catalog.tools,
+            model: runtime.model,
+            apiKey: config.gemini_api_key || runtime.workspaceGeminiApiKey,
+        });
+        return { proposal };
+    } catch (error) {
+        console.error('[AUTOPILOT_FLOW_BUILDER_AI] Falha ao gerar proposta:', error);
+        return {
+            proposal: null,
+            error: error instanceof Error ? error.message : 'Falha ao construir flow com IA.',
+        };
+    }
 }
 
 
@@ -1009,7 +1094,7 @@ export async function saveAutopilotConfig(
             const removedDocs = previousDocsForIndex.filter((doc) => !nextById.has(doc.id));
             const changedDocs = parsedDocsForIndex.filter((doc) => {
                 const previous = previousById.get(doc.id);
-                return !previous || previous.name !== doc.name || previous.content !== doc.content;
+                return hasKnowledgeDocumentIndexChanged(previous, doc);
             });
 
             await Promise.all(
@@ -1719,6 +1804,7 @@ export async function addDocumentToKnowledgeBase(
             id: docId,
             name: title,
             content: content,
+            sourceFormat: 'markdown',
             uploaded_at: new Date().toISOString(),
             tokens: 0 // We could estimate tokens here if needed
         };

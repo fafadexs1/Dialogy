@@ -150,10 +150,14 @@ async function fetchSGPSupportContractsByLookupContext({
     global,
     sgpUser,
     cpf,
-}: SGPClientLookupContext): Promise<SGPSupportContractLookupResult> {
-    const payload = withSGPApplicationCredentials(global, {
-        cliente_cpfcnpj: normalizeCpfCnpjDigits(cpf),
-    });
+}: SGPClientLookupContext, contractId?: string | null): Promise<SGPSupportContractLookupResult> {
+    const normalizedContractId = normalizeCpfCnpjDigits(contractId ?? '');
+    const payload = withSGPApplicationCredentials(
+        global,
+        normalizedContractId
+            ? { contrato_id: normalizedContractId }
+            : { cliente_cpfcnpj: normalizeCpfCnpjDigits(cpf) }
+    );
     const requestCandidates: RequestInit[] = [
         {
             method: 'POST',
@@ -244,11 +248,16 @@ export async function fetchSGPContractsImpl(chatId: string): Promise<{
     };
 }
 
-export async function fetchSGPContactPanelDataImpl(chatId: string): Promise<{
+export async function fetchSGPContactPanelDataImpl(chatId: string, contractId?: string | null): Promise<{
     success: boolean;
     error?: string;
     data?: SGPContactPanelData;
 }> {
+    const normalizedContractId = String(contractId ?? '').trim();
+    if (normalizedContractId && !/^\d+$/.test(normalizedContractId)) {
+        return { success: false, error: 'contractId deve conter somente digitos.' };
+    }
+
     const lookup = await resolveSGPClientLookupContext(chatId);
     if (!lookup.success) {
         return { success: false, error: lookup.error };
@@ -256,7 +265,7 @@ export async function fetchSGPContactPanelDataImpl(chatId: string): Promise<{
 
     const [clientRes, supportRes] = await Promise.all([
         fetchSGPClientsByLookupContext(lookup.data),
-        fetchSGPSupportContractsByLookupContext(lookup.data),
+        fetchSGPSupportContractsByLookupContext(lookup.data, normalizedContractId),
     ]);
     if (!clientRes.success) {
         return { success: false, error: clientRes.error };

@@ -44,7 +44,7 @@ export async function POST(
 
     try {
         const payload = await request.json();
-        console.log('[WEBHOOK] Payload completo:', JSON.stringify(payload, null, 2));
+        console.log('[WEBHOOK] Payload recebido.', { hasEvent: Boolean(payload?.event), hasData: Boolean(payload?.data) });
 
         const { event, instance: instanceNameFromPayload } = payload;
 

@@ -1,4 +1,5 @@
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import type { Chat, User } from '@/lib/types';
 
 export type RealtimeRow = { [key: string]: any };
 
@@ -80,4 +81,68 @@ export function shouldDeliverMessagePayload(
   if (!visibleChatIds) return true;
   const payloadChatId = getPayloadChatId(payload);
   return !payloadChatId || visibleChatIds.has(payloadChatId);
+}
+
+const hasOwn = (record: RealtimeRow, key: string) =>
+  Object.prototype.hasOwnProperty.call(record, key);
+
+export function reconcileRealtimeChatAssignment(
+  existingChat: Chat | undefined,
+  record: RealtimeRow,
+  currentUser?: User | null,
+): Pick<Partial<Chat>, 'agentId' | 'agent' | 'assigned_system_agent_id' | 'assignedSystemAgent'> {
+  const hasAgentId = hasOwn(record, 'agent_id');
+  const hasSystemAgentId = hasOwn(record, 'assigned_system_agent_id');
+  const incomingAgentId = hasAgentId ? record.agent_id || undefined : existingChat?.agentId;
+  const incomingSystemAgentId = hasSystemAgentId
+    ? record.assigned_system_agent_id || null
+    : existingChat?.assigned_system_agent_id;
+
+  let agent = existingChat?.agent;
+  let assignedSystemAgent = existingChat?.assignedSystemAgent;
+
+  if (hasAgentId) {
+    if (!incomingAgentId) {
+      agent = undefined;
+    } else if (currentUser?.id === incomingAgentId) {
+      agent = currentUser ?? undefined;
+    } else if (existingChat?.agent?.id !== incomingAgentId) {
+      agent = record.agent_name
+        ? {
+            id: incomingAgentId,
+            name: record.agent_name,
+            avatar_url: record.agent_avatar_url || undefined,
+          } as User
+        : undefined;
+    }
+  }
+
+  if (hasSystemAgentId) {
+    if (!incomingSystemAgentId) {
+      assignedSystemAgent = undefined;
+    } else if (existingChat?.assignedSystemAgent?.id !== incomingSystemAgentId) {
+      assignedSystemAgent = record.assigned_system_agent_name
+        ? {
+            id: incomingSystemAgentId,
+            name: record.assigned_system_agent_name,
+            avatar_url: record.assigned_system_agent_avatar_url || undefined,
+            type: record.assigned_system_agent_type || undefined,
+          }
+        : undefined;
+    }
+  }
+
+  if (hasAgentId && incomingAgentId) {
+    assignedSystemAgent = undefined;
+  }
+  if (hasSystemAgentId && incomingSystemAgentId) {
+    agent = undefined;
+  }
+
+  return {
+    agentId: incomingAgentId,
+    agent,
+    assigned_system_agent_id: incomingSystemAgentId,
+    assignedSystemAgent,
+  };
 }

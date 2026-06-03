@@ -5,6 +5,7 @@ import { fetchEvolutionAPI } from '@/actions/evolution-api';
 import { createClient } from '@/lib/supabase/server';
 import type { Message } from '@/lib/types';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
+import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 interface MarkAsReadPayload {
     chatId: string;
@@ -47,28 +48,29 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
             }
 
-            // 1. Find all unread messages for this chat, skipping any that are currently locked (e.g. by webhook updates)
+            // Wait for concurrent webhook writes instead of skipping locked rows. A skipped row
+            // could otherwise remain unread after the client optimistically clears its badge.
             const unreadMessagesRes = await client.query(
-                `SELECT id, message_id_from_api, from_me 
-                 FROM messages 
-                 WHERE chat_id = $1 AND from_me = FALSE AND is_read = FALSE
-                 FOR UPDATE SKIP LOCKED`,
+                `UPDATE messages
+                 SET is_read = TRUE
+                 WHERE chat_id = $1
+                   AND from_me = FALSE
+                   AND COALESCE(is_read, FALSE) = FALSE
+                 RETURNING id, message_id_from_api, from_me`,
                 [chatId]
             );
             const unreadMessages: Pick<Message, 'id' | 'message_id_from_api' | 'from_me'>[] = unreadMessagesRes.rows;
 
             if (unreadMessages.length === 0) {
-                await client.query('ROLLBACK');
+                await client.query('COMMIT');
+                await broadcastChatUpdate(chatAccessRes.rows[0].workspace_id, chatId, {
+                    unread_count: 0,
+                });
                 return NextResponse.json({ success: true, message: 'No unread messages.' });
             }
 
             const messageIdsToUpdate = unreadMessages.map(m => m.id);
 
-            // 2. Primary Action: Update our database
-            await client.query(
-                'UPDATE messages SET is_read = TRUE WHERE id = ANY($1::uuid[])',
-                [messageIdsToUpdate]
-            );
             console.log(`[MARK_AS_READ_API] ${messageIdsToUpdate.length} messages marked as read in the database for chat ${chatId}.`);
 
             // 3. Secondary Action (Fire and Forget): Send read receipt to WhatsApp API
@@ -99,6 +101,9 @@ export async function POST(request: Request) {
             }
 
             await client.query('COMMIT');
+            await broadcastChatUpdate(chatAccessRes.rows[0].workspace_id, chatId, {
+                unread_count: 0,
+            });
 
             // Revalidation removed to prevent performance issues.
             // Client updates optimistic state via store and Realtime handles sync.

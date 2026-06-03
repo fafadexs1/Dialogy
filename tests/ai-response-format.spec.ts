@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
+import { formatCustomerFacingAiResponse, splitIntoMessageBlocks } from '@/lib/ai-response-format';
 
 describe('AI customer response formatting', () => {
   it('splits long single-block responses into short WhatsApp paragraphs', () => {
@@ -132,5 +132,64 @@ describe('AI customer response formatting', () => {
     expect(formatted).toContain('30/05/2026 09:42');
     expect(formatted).toContain('28/06/2026');
     expect(formatted).not.toContain('2026-05-30T09:42:00-03:00');
+  });
+
+  it('preserves complete URLs without inserting spaces at dots', () => {
+    const url = 'https://velpro.sgp.tsmx.com.br/boleto/928213-G4L8OY0UBT/';
+    const formatted = formatCustomerFacingAiResponse([
+      '*Fatura atual*',
+      'Numero: 886081',
+      'Vencimento: 2026-06-10',
+      'Valor: R$ 54,95',
+      'Link para pagamento:',
+      url,
+    ].join('\n'));
+
+    expect(formatted).toContain(url);
+    expect(formatted).not.toContain('velpro. sgp');
+    expect(formatted).not.toContain('tsmx. com');
+  });
+
+  it('keeps generic structured operational details readable', () => {
+    const formatted = formatCustomerFacingAiResponse([
+      '*Contrato principal*',
+      'Status: Online',
+      'Plano: 500 MEGA',
+      'Endereco: Quadra 20',
+    ].join('\n'));
+
+    expect(formatted).toBe([
+      '*Contrato principal*',
+      'Status: Online',
+      'Plano: 500 MEGA',
+      'Endereco: Quadra 20',
+    ].join('\n'));
+  });
+
+  it('splits long structured cards only between sections', () => {
+    const firstUrl = 'https://velpro.sgp.tsmx.com.br/boleto/928213-G4L8OY0UBT/';
+    const secondUrl = 'https://velpro.sgp.tsmx.com.br/boleto/928214-022IAX78IE/';
+    const formatted = formatCustomerFacingAiResponse([
+      'Encontrei 2 faturas em aberto para pagamento.',
+      '',
+      '*Fatura atual*',
+      'Numero: 886081',
+      'Vencimento: 10/06/2026',
+      'Valor: R$ 54,95',
+      'Link para pagamento:',
+      firstUrl,
+      '',
+      '*Proxima fatura*',
+      'Numero: 886082',
+      'Vencimento: 10/07/2026',
+      'Valor: R$ 54,95',
+      'Link para pagamento:',
+      secondUrl,
+    ].join('\n'));
+    const blocks = splitIntoMessageBlocks(formatted);
+
+    expect(blocks.join('\n\n')).toContain(firstUrl);
+    expect(blocks.join('\n\n')).toContain(secondUrl);
+    expect(blocks.some((block) => block.includes(firstUrl) && block.includes('928214'))).toBe(false);
   });
 });

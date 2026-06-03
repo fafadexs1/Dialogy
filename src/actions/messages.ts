@@ -45,6 +45,8 @@ import {
     resolveCanonicalWhatsappChatId,
 } from '@/lib/whatsapp/contact-identity';
 import { hasRecentWhatsappCustomerReply } from '@/lib/whatsapp/customer-window';
+import { prependIntelligentAttendantSignature } from '@/lib/message-signature';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -54,6 +56,31 @@ function mapDbMessageToFrontend(row: any): Message {
         timestamp: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
         updatedAt: row.updated_at ? (row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at) : undefined,
     } as Message;
+}
+
+async function withIntelligentAttendantSignature(
+    content: string,
+    agentId: string,
+    isSystemAgent: boolean
+): Promise<string> {
+    if (!isSystemAgent) return content;
+
+    try {
+        const { rows } = await db.query(
+            `SELECT name, type
+             FROM system_agents
+             WHERE id = $1
+             LIMIT 1`,
+            [agentId]
+        );
+        const agent = rows[0];
+        return agent?.type === 'intelligent_attendant'
+            ? prependIntelligentAttendantSignature(content, agent.name)
+            : content;
+    } catch (error) {
+        console.error('[SEND_AUTOMATED_MESSAGE] Falha ao montar assinatura do agente virtual:', error);
+        return content;
+    }
 }
 
 type MediaFilePayload = {
@@ -150,7 +177,9 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
 
             const closeRes = await client.query(
                 `UPDATE chats 
-                 SET status = 'encerrados', closed_at = NOW()
+                 SET status = 'encerrados',
+                     closed_at = NOW(),
+                     updated_at = clock_timestamp()
                  WHERE id = $1
                  RETURNING closed_at`,
                 [chatId]
@@ -176,6 +205,7 @@ async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, m
             );
 
             await client.query('COMMIT');
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
 
             const closedAt = closeRes.rows[0]?.closed_at
                 ? new Date(closeRes.rows[0].closed_at).toISOString()
@@ -421,7 +451,11 @@ async function reopenClosedWhatsappChat(
          SET status = 'atendimentos',
              closed_at = NULL,
              agent_id = $1,
-             assigned_at = clock_timestamp()
+             assigned_system_agent_id = NULL,
+             is_autopilot_active = FALSE,
+             copilot_mode = 'off',
+             assigned_at = clock_timestamp(),
+             updated_at = clock_timestamp()
          WHERE id = $2
            AND workspace_id = $3
          RETURNING id`,
@@ -649,6 +683,7 @@ async function internalSendMessage(
     // Variáveis capturadas para uso no bloco assíncrono (background)
     let persistedMessage: Message | null = null;
     let backgroundTaskData: any = {};
+    let assignmentWorkspaceId: string | null = null;
 
     try {
         await client.query('BEGIN');
@@ -740,10 +775,12 @@ async function internalSendMessage(
                      is_autopilot_active = FALSE,
                      copilot_mode = 'off',
                      status = 'atendimentos',
-                     assigned_at = NOW()
+                     assigned_at = NOW(),
+                     updated_at = clock_timestamp()
                  WHERE id = $2`,
                 [senderId, chatId]
             );
+            assignmentWorkspaceId = workspaceId;
 
             const agentRes = await client.query('SELECT full_name, email FROM users WHERE id = $1', [senderId]);
             const agentName = agentRes.rows[0]?.full_name || agentRes.rows[0]?.email || 'Agente';
@@ -807,6 +844,9 @@ async function internalSendMessage(
         };
 
         await client.query('COMMIT');
+        if (assignmentWorkspaceId) {
+            await broadcastHydratedChatUpdate(assignmentWorkspaceId, chatId);
+        }
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -1598,6 +1638,7 @@ export async function sendAutomatedMessageAction(
     metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
     chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
+    content = await withIntelligentAttendantSignature(content, agentId, isSystemAgent);
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
     const shouldAutoCloseMarketing = !!metadata?.isMarketing;
     const marketingSentAt = shouldAutoCloseMarketing ? new Date() : null;
@@ -1712,10 +1753,12 @@ export const sendMediaAction = withDebug(
                                          is_autopilot_active = FALSE,
                                          copilot_mode = 'off',
                                          status = 'atendimentos',
-                                         assigned_at = NOW()
+                                         assigned_at = NOW(),
+                                         updated_at = clock_timestamp()
                                      WHERE id = $2`,
                                     [user.id, chatId]
                                 );
+                                await broadcastHydratedChatUpdate(workspaceId, chatId);
 
                                 const agentRes = await client.query(
                                     'SELECT full_name, email FROM users WHERE id = $1',
@@ -2609,6 +2652,7 @@ export const startNewConversation = withDebug(
             if (!chatId) {
                 return { success: false, error: 'Nao foi possivel determinar o chat para reabrir a conversa.' };
             }
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
 
             if (!template && !trimmedMessage) {
                 return { success: true };

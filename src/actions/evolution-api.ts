@@ -375,13 +375,16 @@ export async function createEvolutionApiInstance(
 
         console.log("═══════════════════════════════════════════════════════════════");
         console.log("[EVO_ACTION] 1. PAYLOAD RECEBIDO DO FRONTEND:");
-        console.log(JSON.stringify({ ...payload, telegramBotToken: payload.telegramBotToken ? '[redacted]' : undefined }, null, 2));
+        console.log('[EVO_ACTION] Payload prepared.', {
+            instanceName: payload.instanceName,
+            integration: payload.integration,
+            hasTelegramBotToken: Boolean(payload.telegramBotToken),
+        });
         console.log("───────────────────────────────────────────────────────────────");
         console.log("[EVO_ACTION] 2. INSTANCE NAME GERADO:", payload.instanceName);
         console.log("[EVO_ACTION] 3. DISPLAY NAME (interno Dialogy):", displayName);
         console.log("───────────────────────────────────────────────────────────────");
-        console.log("[EVO_ACTION] 4. PAYLOAD FINAL PARA EVOLUTION API:");
-        console.log(JSON.stringify(evolutionPayload, null, 2));
+        console.log("[EVO_ACTION] 4. Payload final preparado para Evolution API.");
         console.log("[EVO_ACTION] 5. URL DA CHAMADA:", `${apiConfig.api_url}/instance/create`);
         console.log("═══════════════════════════════════════════════════════════════");
 

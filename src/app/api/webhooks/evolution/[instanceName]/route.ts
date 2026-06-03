@@ -19,6 +19,7 @@ import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
 import { processAutopilotForChat } from '@/services/autopilot-service';
 import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
+import { normalizeImageThumbnailSource } from '@/lib/storage-url';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import {
     AmbiguousEvolutionInstanceError,
@@ -43,6 +44,28 @@ const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
 const STALE_REPLAY_TOLERANCE_MS = 2_000;
 const NON_INBOUND_UPSERT_STATUSES = new Set(['READ', 'PLAYED']);
+
+function normalizeInboundThumbnail(value: unknown): string | undefined {
+    if (!value) return undefined;
+
+    try {
+        if (typeof value === 'string') {
+            return normalizeImageThumbnailSource(value) || undefined;
+        }
+
+        if (Array.isArray(value)) {
+            return `data:image/jpeg;base64,${Buffer.from(value).toString('base64')}`;
+        }
+
+        if (typeof value === 'object') {
+            return `data:image/jpeg;base64,${Buffer.from(Object.values(value) as any[]).toString('base64')}`;
+        }
+    } catch (thumbErr) {
+        console.error('[WEBHOOK_MSG_UPSERT] Erro ao converter thumbnail:', thumbErr);
+    }
+
+    return undefined;
+}
 
 const parsedLiveEventMaxAgeSeconds = Number(process.env.EVOLUTION_LIVE_EVENT_MAX_AGE_SECONDS ?? 1800);
 const LIVE_EVENT_MAX_AGE_MS =
@@ -1140,7 +1163,11 @@ async function handleMessagesUpsert(payload: any) {
     const isLiveInbound = isRecentInboundEvent(messageCreatedAt);
 
     // Log payload for incoming messages as requested
-    console.log('[WEBHOOK_MSG_UPSERT] Incoming Message Payload:', JSON.stringify(payload, null, 2));
+    console.log('[WEBHOOK_MSG_UPSERT] Incoming message received.', {
+        instanceName,
+        event: payload?.event || null,
+        hasData: Boolean(payload?.data),
+    });
 
     let content = '';
     let dbMessageType: Message['type'] = 'text';
@@ -1247,21 +1274,7 @@ async function handleMessagesUpsert(payload: any) {
         dbMessageType = resolvedType;
     }
 
-    let locationThumbnail: string | undefined;
-    const rawLocationThumb = locationDetails?.jpegThumbnail;
-    if (rawLocationThumb) {
-        try {
-            if (typeof rawLocationThumb === 'string') {
-                locationThumbnail = rawLocationThumb.startsWith('data:') ? rawLocationThumb : `data:image/jpeg;base64,${rawLocationThumb}`;
-            } else if (Array.isArray(rawLocationThumb)) {
-                locationThumbnail = `data:image/jpeg;base64,${Buffer.from(rawLocationThumb).toString('base64')}`;
-            } else {
-                locationThumbnail = `data:image/jpeg;base64,${Buffer.from(Object.values(rawLocationThumb) as any[]).toString('base64')}`;
-            }
-        } catch (thumbErr) {
-            console.error('[WEBHOOK_MSG_UPSERT] Erro ao converter thumbnail de localizacao:', thumbErr);
-        }
-    }
+    const locationThumbnail = normalizeInboundThumbnail(locationDetails?.jpegThumbnail);
 
     const safeLatitude = hasNumericCoords ? latitude : undefined;
     const safeLongitude = hasNumericCoords ? longitude : undefined;
@@ -1274,7 +1287,7 @@ async function handleMessagesUpsert(payload: any) {
         mimetype: normalizedMime || mimetype,
         fileName,
         duration: mediaDetails?.seconds,
-        thumbnail: (mediaDetails as any)?.thumbnail || (mediaDetails as any)?.jpegThumbnail,
+        thumbnail: normalizeInboundThumbnail((mediaDetails as any)?.thumbnail || (mediaDetails as any)?.jpegThumbnail),
     };
 
     if (locationDetails) {

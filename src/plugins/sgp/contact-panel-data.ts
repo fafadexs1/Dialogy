@@ -415,6 +415,46 @@ function buildSupportContractSnapshot(rawContract: any): SGPSupportContractSnaps
     };
 }
 
+function getSupportContractSnapshotScore(snapshot: SGPSupportContractSnapshot): number {
+    return [
+        snapshot.connectionStatus === 'online' ? 1000 : snapshot.connectionStatus === 'unknown' ? 0 : -100,
+        snapshot.ip ? 500 : 0,
+        snapshot.ipv6 ? 100 : 0,
+        snapshot.delegatedIpv6 ? 100 : 0,
+        snapshot.connectedAt ? 50 : 0,
+        snapshot.mac ? 25 : 0,
+        snapshot.login ? 10 : 0,
+    ].reduce((total, score) => total + score, 0);
+}
+
+function mergeSupportContractSnapshots(
+    left: SGPSupportContractSnapshot,
+    right: SGPSupportContractSnapshot
+): SGPSupportContractSnapshot {
+    const [preferred, fallback] = getSupportContractSnapshotScore(right) > getSupportContractSnapshotScore(left)
+        ? [right, left]
+        : [left, right];
+
+    return {
+        ...fallback,
+        ...preferred,
+        connectionStatus:
+            preferred.connectionStatus !== 'unknown' ? preferred.connectionStatus : fallback.connectionStatus,
+        planDescription: preferred.planDescription || fallback.planDescription,
+        addressLabel: preferred.addressLabel || fallback.addressLabel,
+        rawStatus: preferred.rawStatus || fallback.rawStatus,
+        ip: preferred.ip || fallback.ip,
+        ipv6: preferred.ipv6 || fallback.ipv6,
+        delegatedIpv6: preferred.delegatedIpv6 || fallback.delegatedIpv6,
+        cto: preferred.cto || fallback.cto,
+        geoLocation: preferred.geoLocation || fallback.geoLocation,
+        login: preferred.login || fallback.login,
+        mac: preferred.mac || fallback.mac,
+        connectedAt: preferred.connectedAt || fallback.connectedAt,
+        contractDate: preferred.contractDate || fallback.contractDate,
+    };
+}
+
 function buildSupportContractLookup(rawContracts: any[]): {
     exactLookup: Map<string, SGPSupportContractSnapshot>;
     normalizedLookup: Map<string, SGPSupportContractSnapshot>;
@@ -427,11 +467,19 @@ function buildSupportContractLookup(rawContracts: any[]): {
             continue;
         }
 
-        exactLookup.set(snapshot.id, snapshot);
+        const exactSnapshot = exactLookup.get(snapshot.id);
+        exactLookup.set(
+            snapshot.id,
+            exactSnapshot ? mergeSupportContractSnapshots(exactSnapshot, snapshot) : snapshot
+        );
 
         const normalizedKey = normalizeContractLookupKey(snapshot.id);
-        if (normalizedKey && !normalizedLookup.has(normalizedKey)) {
-            normalizedLookup.set(normalizedKey, snapshot);
+        if (normalizedKey) {
+            const normalizedSnapshot = normalizedLookup.get(normalizedKey);
+            normalizedLookup.set(
+                normalizedKey,
+                normalizedSnapshot ? mergeSupportContractSnapshots(normalizedSnapshot, snapshot) : snapshot
+            );
         }
     }
 

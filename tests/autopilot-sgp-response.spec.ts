@@ -7,7 +7,13 @@ import {
   buildToolFailureResponse,
   ensurePromisedSgpLookupAction,
   ensureProcedureSgpLookupAction,
+  extractFocusedContractId,
   extractRequestedContractId,
+  getScopedContractIdFromToolResults,
+  hydrateFindRouterByIpActionsFromSgpResults,
+  resolveContractIdFromAddress,
+  scopeSgpLookupActionsToAddressedContract,
+  scopeSgpLookupActionsToFocusedContract,
 } from '@/services/autopilot-sgp-response';
 import type { AgentToolExecutionResult } from '@/services/agent-tools/types';
 
@@ -15,6 +21,133 @@ describe('autopilot SGP response guard', () => {
   it('extracts the contract explicitly cited by the customer', () => {
     expect(extractRequestedContractId('No contrato 24123 nao tem pendencia financeira.')).toBe('24123');
     expect(extractRequestedContractId('O contrato em questao seria o 24123, preciso reiniciar o mesmo.')).toBe('24123');
+  });
+
+  it('keeps the latest explicitly cited contract focused across unrelated messages', () => {
+    const conversation = [
+      'Cliente: Estou com problema no contrato 16317.',
+      'Atendente: Vou verificar.',
+      'Cliente: Antes disso, qual e o horario de atendimento?',
+      'Atendente: Atendemos normalmente.',
+      'Cliente: Certo, pode continuar.',
+    ].join('\n');
+
+    expect(extractFocusedContractId(conversation)).toBe('16317');
+    expect(scopeSgpLookupActionsToFocusedContract(
+      [{ type: 'sgp_fetch_contact_panel_data', payload: {} }],
+      conversation
+    )).toEqual([
+      { type: 'sgp_fetch_contact_panel_data', payload: { contractId: '16317' } },
+    ]);
+  });
+
+  it('changes the focused contract when the customer explicitly cites another one', () => {
+    const conversation = [
+      'Cliente: Primeiro verifique o contrato 16317.',
+      'Cliente: Agora quero tratar do contrato 18848.',
+      'Cliente: Pode continuar.',
+    ].join('\n');
+
+    expect(extractFocusedContractId(conversation)).toBe('18848');
+  });
+
+  it('does not focus a negated contract or a distant unrelated protocol', () => {
+    expect(extractFocusedContractId('Nao e o contrato 16317, e outro mas nao sei qual.')).toBeNull();
+    expect(extractFocusedContractId('Contrato cancelado. Meu protocolo foi 45678.')).toBeNull();
+  });
+
+  it('supports short SGP contract ids when explicitly cited', () => {
+    expect(extractFocusedContractId('Quero tratar do contrato 1.')).toBe('1');
+  });
+
+  it('extracts the focused contract when the customer puts the id before the word contrato', () => {
+    expect(extractFocusedContractId('16317 e este contrato')).toBe('16317');
+    expect(extractFocusedContractId('16317 seria o contrato')).toBe('16317');
+  });
+
+  it('resolves a unique SGP contract from an address cited by the customer', () => {
+    const contracts = [
+      { id: '3459', addressLabel: 'QUADRA 15 LOTE,61/62 - DOM BOSCO - CIDADE OCIDENTAL - GO' },
+      { id: '13899', addressLabel: 'RUA 72 QUADRA 119 LOTE 2 CASA - 1 - ESTRELA DALVA IX - LUZIANIA - GO' },
+      { id: '23832', addressLabel: 'RUA 210 QUADRA 527 LOTE 18 CASA 01 - ESTRELA DALVA IX - LUZIANIA - GO' },
+    ];
+
+    expect(resolveContractIdFromAddress(contracts, 'O problema e no endereco Rua 210 quadra 527 lote 18.')).toBe('23832');
+    expect(resolveContractIdFromAddress(contracts, 'Quero tratar do endereco Rua 72 quadra 119 lote 2.')).toBe('13899');
+    expect(resolveContractIdFromAddress(contracts, 'Sem internet na R210 Q527 L18.')).toBe('23832');
+    expect(resolveContractIdFromAddress(contracts, 'E na r 72 qd 119 lt 2.')).toBe('13899');
+    expect(resolveContractIdFromAddress(contracts, 'Q15 lt 61/62 dom bosco.')).toBe('3459');
+  });
+
+  it('does not resolve an address when multiple contracts remain tied', () => {
+    const contracts = [
+      { id: '13899', addressLabel: 'RUA 72 QUADRA 119 LOTE 2 CASA - 1 - ESTRELA DALVA IX - LUZIANIA - GO' },
+      { id: '23832', addressLabel: 'RUA 210 QUADRA 527 LOTE 18 CASA 01 - ESTRELA DALVA IX - LUZIANIA - GO' },
+    ];
+
+    expect(resolveContractIdFromAddress(contracts, 'O endereco e em Estrela Dalva IX, Luziania.')).toBeNull();
+  });
+
+  it('does not resolve a contract when an informed structural address component conflicts', () => {
+    const contracts = [
+      { id: '3459', addressLabel: 'QUADRA 15 LOTE,61/62 - DOM BOSCO - CIDADE OCIDENTAL - GO' },
+      { id: '13899', addressLabel: 'RUA 72 QUADRA 119 LOTE 2 CASA - 1 - ESTRELA DALVA IX - LUZIANIA - GO' },
+      { id: '23832', addressLabel: 'RUA 210 QUADRA 527 LOTE 18 CASA 01 - ESTRELA DALVA IX - LUZIANIA - GO' },
+    ];
+
+    expect(resolveContractIdFromAddress(contracts, 'R 210 qd 527 lt 19.')).toBeNull();
+    expect(resolveContractIdFromAddress(contracts, 'R 201 qd 527 lt 18.')).toBeNull();
+    expect(resolveContractIdFromAddress(contracts, 'R 210 qd 572 lt 18.')).toBeNull();
+    expect(resolveContractIdFromAddress(contracts, 'R 72 qd 119 lt 3.')).toBeNull();
+    expect(resolveContractIdFromAddress(contracts, 'Q 15 lt 61/26 dom bosco.')).toBeNull();
+  });
+
+  it('scopes an SGP lookup to a uniquely addressed contract and remembers audited scope', () => {
+    const toolResults: AgentToolExecutionResult[] = [
+      {
+        toolName: 'sgp_fetch_contact_panel_data',
+        status: 'success',
+        input: { type: 'sgp_fetch_contact_panel_data', payload: {} },
+        output: {
+          contracts: [
+            { id: '13899', addressLabel: 'RUA 72 QUADRA 119 LOTE 2 CASA - 1 - ESTRELA DALVA IX - LUZIANIA - GO' },
+            { id: '23832', addressLabel: 'RUA 210 QUADRA 527 LOTE 18 CASA 01 - ESTRELA DALVA IX - LUZIANIA - GO' },
+          ],
+        },
+      },
+    ];
+
+    expect(scopeSgpLookupActionsToAddressedContract(
+      [{ type: 'sgp_fetch_contact_panel_data', payload: {} }],
+      toolResults,
+      'Pode verificar o endereco Rua 210 quadra 527 lote 18?'
+    )).toEqual([
+      { type: 'sgp_fetch_contact_panel_data', payload: { contractId: '23832' } },
+    ]);
+
+    expect(getScopedContractIdFromToolResults([
+      {
+        ...toolResults[0],
+        input: { type: 'sgp_fetch_contact_panel_data', payload: { contractId: '23832' } },
+      },
+    ])).toBe('23832');
+  });
+
+  it('lets a newly cited contract override persisted focus', () => {
+    expect(scopeSgpLookupActionsToFocusedContract(
+      [{ type: 'sgp_fetch_contact_panel_data', payload: {} }],
+      'Contrato em foco explicitamente informado pelo cliente: 16317.',
+      'Cliente: Agora quero tratar do contrato 18848.'
+    )).toEqual([
+      { type: 'sgp_fetch_contact_panel_data', payload: { contractId: '18848' } },
+    ]);
+  });
+
+  it('clears persisted focus when the customer stops referring to that contract', () => {
+    expect(extractFocusedContractId(
+      'Contrato em foco explicitamente informado pelo cliente: 16317.',
+      'Cliente: Nao quero mais tratar desse contrato.'
+    )).toBeNull();
   });
 
   it('injects an SGP lookup when the AI promises to verify operational status', () => {
@@ -165,6 +298,11 @@ describe('autopilot SGP response guard', () => {
     );
 
     expect(response).toContain('2 faturas em aberto');
+    expect(response).toContain('*Fatura atual*');
+    expect(response).toContain('*Proxima fatura*');
+    expect(response).toContain('Numero: 886081');
+    expect(response).toContain('Vencimento: 10/06/2026');
+    expect(response).toContain('Valor: R$ 54,95');
     expect(response).toContain('PIX copia e cola: PIX_886081');
     expect(response).toContain('PIX copia e cola: PIX_886082');
     expect(response).not.toContain('Contrato principal');
@@ -454,7 +592,88 @@ describe('autopilot SGP response guard', () => {
     );
 
     expect(response).toContain('Nao consegui concluir a acao tecnica automaticamente');
+    expect(response).not.toContain('Vou encaminhar');
     expect(response).not.toContain('json:');
+  });
+
+  it('responds when an MCP action is rejected before reaching the external server', () => {
+    const response = buildToolFailureResponse(
+      [
+        {
+          toolName: 'mcp_call_tool',
+          status: 'rejected',
+          input: {
+            type: 'mcp_call_tool',
+            payload: { toolName: 'mcp:server:reboot_router', arguments: {} },
+          },
+          error: 'Servidor MCP nao encontrado ou inativo.',
+        },
+      ],
+      ''
+    );
+
+    expect(response).toContain('Nao consegui concluir a acao tecnica automaticamente');
+    expect(response).not.toContain('Vou encaminhar');
+    expect(response).not.toContain('Servidor MCP');
+  });
+
+  it('does not repeat the same reboot question when a short confirmation lost its context', () => {
+    const response = buildToolFailureResponse(
+      [{
+        toolName: 'mcp_call_tool',
+        status: 'rejected',
+        input: {
+          type: 'mcp_call_tool',
+          payload: { toolName: 'mcp:server:reboot_router', arguments: {} },
+        },
+        error: '[tool_policy:confirmation_context_missing] Confirmacao curta sem contexto.',
+      }],
+      ''
+    );
+
+    expect(response).toContain('Entendi sua confirmacao');
+    expect(response).toContain('pode reiniciar o roteador agora');
+    expect(response).not.toContain('Posso reiniciar seu roteador agora?');
+  });
+
+  it('explains when router lookup is blocked because the focused contract has no IPv4', () => {
+    const response = buildToolFailureResponse(
+      [{
+        toolName: 'mcp:router-server:find_router_by_ip',
+        status: 'rejected',
+        input: {
+          type: 'mcp_call_tool',
+          payload: {
+            toolName: 'mcp:router-server:find_router_by_ip',
+            arguments: {},
+          },
+        },
+        error: '[tool_policy:missing_parameters] Consulta do roteador exige o IPv4 do contrato selecionado.',
+      }],
+      ''
+    );
+
+    expect(response).toContain('Nao encontrei um IPv4 disponivel para esse contrato');
+    expect(response).toContain('nao executei nenhuma alteracao');
+  });
+
+  it('responds when an internal customer-visible action is rejected', () => {
+    const response = buildToolFailureResponse(
+      [
+        {
+          toolName: 'sgp_generate_invoice_pix',
+          status: 'rejected',
+          input: {
+            type: 'sgp_generate_invoice_pix',
+            payload: {},
+          },
+          error: 'Fatura ausente.',
+        },
+      ],
+      ''
+    );
+
+    expect(response).toContain('Nao consegui gerar o PIX');
   });
 
   it('forces SGP lookup when router reboot procedure is detected but the model returns no actions', () => {
@@ -497,6 +716,98 @@ describe('autopilot SGP response guard', () => {
           client_ip: '192.145.213.14',
         },
       },
+    });
+  });
+
+  it('uses the focused historical contract for reboot after unrelated messages', () => {
+    const action = buildRouterRebootActionFromSgpResults({
+      chatHistory: [
+        'Cliente: Estou com problema no contrato 16317.',
+        'Cliente: Antes disso, qual e o horario de atendimento?',
+        'Atendente: Atendemos normalmente.',
+        'Cliente: Certo, pode continuar.',
+      ].join('\n'),
+      customerMessage: 'Pode reiniciar o roteador entao?',
+      response: 'Vou realizar a reinicializacao.',
+      knowledgeToolProcedures: 'Tool resolvida: mcp:server:reboot_router',
+      toolResults: [
+        {
+          toolName: 'sgp_fetch_contact_panel_data',
+          status: 'success',
+          input: { type: 'sgp_fetch_contact_panel_data', payload: { contractId: '16317' } },
+          output: {
+            contracts: [
+              { id: '10102', ip: '10.0.0.1', connectionStatus: 'online' },
+              { id: '16317', ip: '192.145.213.14', connectionStatus: 'online' },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(action?.payload).toMatchObject({
+      arguments: {
+        client_ip: '192.145.213.14',
+      },
+    });
+  });
+
+  it('hydrates find_router_by_ip with the IPv4 from the focused SGP contract', () => {
+    const actions = hydrateFindRouterByIpActionsFromSgpResults({
+      contextText: 'Contrato em foco explicitamente informado pelo cliente: 10101.',
+      actions: [{
+        type: 'mcp_call_tool',
+        payload: {
+          toolName: 'mcp:router-server:find_router_by_ip',
+          arguments: {},
+        },
+      }],
+      toolResults: [{
+        toolName: 'sgp_fetch_contact_panel_data',
+        status: 'success',
+        input: { type: 'sgp_fetch_contact_panel_data', payload: { contractId: '10101' } },
+        output: {
+          contracts: [
+            { id: '10102', ip: '192.145.213.178' },
+            { id: '10101', ip: '192.145.212.134' },
+          ],
+        },
+      }],
+    });
+
+    expect(actions[0]?.payload).toMatchObject({
+      arguments: {
+        client_ip: '192.145.212.134',
+      },
+    });
+  });
+
+  it('does not borrow an IPv4 from another contract when the focused contract has no IP', () => {
+    const actions = hydrateFindRouterByIpActionsFromSgpResults({
+      contextText: 'Contrato em foco explicitamente informado pelo cliente: 16317.',
+      actions: [{
+        type: 'mcp_call_tool',
+        payload: {
+          toolName: 'mcp:router-server:find_router_by_ip',
+          arguments: {},
+        },
+      }],
+      toolResults: [{
+        toolName: 'sgp_fetch_contact_panel_data',
+        status: 'success',
+        input: { type: 'sgp_fetch_contact_panel_data', payload: { contractId: '16317' } },
+        output: {
+          contracts: [
+            { id: '10101', ip: '192.145.212.134' },
+            { id: '16317', ip: null },
+          ],
+        },
+      }],
+    });
+
+    expect(actions[0]?.payload).toEqual({
+      toolName: 'mcp:router-server:find_router_by_ip',
+      arguments: {},
     });
   });
 

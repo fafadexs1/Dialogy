@@ -61,8 +61,8 @@ export function hasConversationCloseClaim(response: string): boolean {
   const firstPersonClosePattern = new RegExp(
     `\\b(?:encerrei|finalizei|fechei|desliguei|encerramos|finalizamos|fechamos|desligamos)\\s+(?:o|a)?\\s*${CONVERSATION_OBJECT_PATTERN}\\b`
   );
-  const promiseClosePattern = new RegExp(
-    `\\b(?:vou|irei|vamos|posso)\\s+${CLOSE_VERB_PATTERN}\\s+(?:o\\s+)?${CONVERSATION_OBJECT_PATTERN}\\b`
+const promiseClosePattern = new RegExp(
+    `\\b(?:vou|irei|vamos|posso)\\s+${CLOSE_VERB_PATTERN}\\s+(?:${OPTIONAL_ARTICLE_PATTERN}\\s*)?${CONVERSATION_OBJECT_PATTERN}\\b`
   );
 
   return (

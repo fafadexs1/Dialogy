@@ -31,12 +31,24 @@ export function mergeChatsById(existingChats: Chat[], incomingChats: Chat[]): Ch
     const existing = chatMap.get(chat.id);
     if (existing) {
       const hasIncomingAgent = Object.prototype.hasOwnProperty.call(chat, 'agent');
+      const hasIncomingAgentId = Object.prototype.hasOwnProperty.call(chat, 'agentId');
+      const hasIncomingSystemAgent = Object.prototype.hasOwnProperty.call(chat, 'assignedSystemAgent');
+      const hasIncomingSystemAgentId = Object.prototype.hasOwnProperty.call(chat, 'assigned_system_agent_id');
       chatMap.set(chat.id, {
         ...existing,
         ...chat,
         messages: chat.messages?.length ? chat.messages : existing.messages,
         contact: chat.contact || existing.contact,
-        agent: hasIncomingAgent ? chat.agent : existing.agent,
+        agent: hasIncomingAgent
+          ? chat.agent
+          : hasIncomingAgentId && chat.agentId !== existing.agent?.id
+            ? undefined
+            : existing.agent,
+        assignedSystemAgent: hasIncomingSystemAgent
+          ? chat.assignedSystemAgent
+          : hasIncomingSystemAgentId && chat.assigned_system_agent_id !== existing.assignedSystemAgent?.id
+            ? undefined
+            : existing.assignedSystemAgent,
       });
     } else {
       chatMap.set(chat.id, chat);

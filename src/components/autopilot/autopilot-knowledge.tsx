@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Activity, CheckCircle2, FileText, Files, FlaskConical, FolderOpen, Loader2, PencilLine, Plus, RefreshCw, Server, Trash2, UploadCloud, Wrench, XCircle } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Activity, CheckCircle2, FileText, Files, FlaskConical, FolderOpen, Loader2, PencilLine, Plus, RefreshCw, Server, Sparkles, Trash2, UploadCloud, Wrench, XCircle } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,11 @@ type AgentToolCatalogItem = {
   serverName?: string;
 };
 
+type KnowledgeDocumentMetadataPatch = Partial<Pick<
+  KnowledgeBaseDocument,
+  'summary' | 'tags' | 'contextRole' | 'canonicalAnswer' | 'workflowHints'
+>>;
+
 interface AutopilotKnowledgeProps {
   documents: KnowledgeBaseDocument[];
   collections: KnowledgeCollection[];
@@ -30,10 +35,12 @@ interface AutopilotKnowledgeProps {
   onUpdateName: (id: string, name: string) => void;
   onUpdateCategory: (id: string, category: string) => void;
   onUpdateMaxPromptChars: (id: string, maxPromptChars: number | null) => void;
+  onUpdateMetadata: (id: string, patch: KnowledgeDocumentMetadataPatch) => void;
   onUpdateCollections: (id: string, collectionIds: string[]) => void;
   onAddCollection: (name: string) => boolean;
   onRemoveCollection: (id: string) => void;
   onAddManual: () => void;
+  onImproveDocument: (document: KnowledgeBaseDocument) => Promise<void>;
   isUploading: boolean;
   ragHealth: AutopilotRagHealth | null;
   onReindex: () => Promise<void>;
@@ -53,10 +60,12 @@ export function AutopilotKnowledge({
   onUpdateName,
   onUpdateCategory,
   onUpdateMaxPromptChars,
+  onUpdateMetadata,
   onUpdateCollections,
   onAddCollection,
   onRemoveCollection,
   onAddManual,
+  onImproveDocument,
   isUploading,
   ragHealth,
   onReindex,
@@ -67,13 +76,13 @@ export function AutopilotKnowledge({
 }: AutopilotKnowledgeProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLPreElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [toolQuery, setToolQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [collectionError, setCollectionError] = useState('');
+  const [improvingDocumentId, setImprovingDocumentId] = useState<string | null>(null);
 
   useEffect(() => {
     if (documents.length === 0) {
@@ -143,49 +152,6 @@ export function AutopilotKnowledge({
     all.findIndex((candidate) => candidate.mention === item.mention) === index
   ));
 
-  const renderHighlightedContent = (value: string) => {
-    const nodes: ReactNode[] = [];
-    const mentionPattern = /@([a-zA-Z0-9_.:-]+)/g;
-    let lastIndex = 0;
-
-    for (const match of value.matchAll(mentionPattern)) {
-      const index = match.index ?? 0;
-      const mention = match[1] || '';
-      const tool = toolLookup.get(mention.toLowerCase());
-
-      if (index > lastIndex) {
-        nodes.push(value.slice(lastIndex, index));
-      }
-
-      nodes.push(
-        <span
-          key={`${index}-${mention}`}
-          className={cn(
-            'rounded-sm ring-1 ring-inset',
-            tool
-              ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/40 dark:text-emerald-300'
-              : 'bg-destructive/15 text-destructive ring-destructive/40'
-          )}
-          title={tool?.description || 'Tool nao reconhecida no catalogo do agente'}
-        >
-          @{mention}
-        </span>
-      );
-
-      lastIndex = index + match[0].length;
-    }
-
-    if (lastIndex < value.length) {
-      nodes.push(value.slice(lastIndex));
-    }
-
-    if (value.endsWith('\n')) {
-      nodes.push('\n');
-    }
-
-    return nodes;
-  };
-
   const updateToolMentionState = (value: string, caret: number | null) => {
     if (caret == null) {
       setToolQuery(null);
@@ -224,7 +190,7 @@ export function AutopilotKnowledge({
   };
 
   return (
-    <div className="grid min-w-0 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+    <div className="grid min-w-0 gap-6 2xl:grid-cols-[340px_minmax(0,1fr)]">
       <Card className="min-w-0 overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
         <CardHeader className="border-b border-border/60 bg-muted/30">
           <div className="flex items-start justify-between gap-3">
@@ -450,7 +416,7 @@ export function AutopilotKnowledge({
               )}
             </div>
             <p className="mt-4 text-sm font-semibold text-foreground">Importar arquivos de contexto</p>
-            <p className="mt-1 text-xs text-muted-foreground">Arraste ou clique para enviar `.txt`, `.md`, `.csv` e `.json`.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Arraste ou clique para enviar `.txt`, `.md`, `.csv` e `.json`. O indice RAG normaliza o conteudo para Markdown ao publicar.</p>
           </div>
 
           <Button onClick={onAddManual} variant="outline" className="w-full rounded-2xl">
@@ -544,14 +510,14 @@ export function AutopilotKnowledge({
         {selectedDoc ? (
           <>
             <CardHeader className="border-b border-border/60 bg-muted/30">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex min-w-0 flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
                 <div className="min-w-0 flex-1 space-y-3">
                   <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     <PencilLine className="h-3.5 w-3.5 text-primary" />
                     Editor de documento
                   </div>
-                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.55fr)_minmax(180px,0.55fr)]">
-                    <div className="space-y-1.5">
+                  <div className="grid min-w-0 gap-3 md:grid-cols-2 2xl:grid-cols-[minmax(240px,1.2fr)_minmax(180px,0.75fr)_minmax(160px,0.55fr)]">
+                    <div className="min-w-0 space-y-1.5 md:col-span-2 2xl:col-span-1">
                       <Label htmlFor="autopilot-doc-name" className="text-xs uppercase tracking-wide text-muted-foreground">
                         Título do documento
                       </Label>
@@ -562,7 +528,7 @@ export function AutopilotKnowledge({
                         className="h-12 rounded-2xl border-border bg-background text-base font-semibold"
                       />
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="min-w-0 space-y-1.5">
                       <Label htmlFor="autopilot-doc-category" className="text-xs uppercase tracking-wide text-muted-foreground">
                         Categoria
                       </Label>
@@ -574,7 +540,7 @@ export function AutopilotKnowledge({
                         className="h-12 rounded-2xl border-border bg-background font-mono text-sm"
                       />
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="min-w-0 space-y-1.5">
                       <Label htmlFor="autopilot-doc-max-prompt-chars" className="text-xs uppercase tracking-wide text-muted-foreground">
                         Limite no prompt
                       </Label>
@@ -624,6 +590,25 @@ export function AutopilotKnowledge({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={improvingDocumentId === selectedDoc.id || !selectedDoc.content.trim()}
+                    onClick={async () => {
+                      setImprovingDocumentId(selectedDoc.id);
+                      try {
+                        await onImproveDocument(selectedDoc);
+                      } finally {
+                        setImprovingDocumentId(null);
+                      }
+                    }}
+                  >
+                    {improvingDocumentId === selectedDoc.id
+                      ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      : <Sparkles className="mr-2 h-4 w-4" />}
+                    Melhorar para IA
+                  </Button>
                   <Badge variant="outline" className="rounded-full">
                     {(selectedDoc.tokens || 0).toLocaleString()} tokens
                   </Badge>
@@ -636,23 +621,85 @@ export function AutopilotKnowledge({
 
             <CardContent className="min-w-0 p-4 sm:p-5">
               <div className="grid gap-4">
+                <div className="grid min-w-0 gap-3 rounded-[20px] border border-border bg-muted/20 p-4 lg:grid-cols-2">
+                  <div className="min-w-0 space-y-1.5">
+                    <Label htmlFor="autopilot-doc-summary" className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Resumo para recuperacao
+                    </Label>
+                    <Textarea
+                      id="autopilot-doc-summary"
+                      value={selectedDoc.summary || ''}
+                      onChange={(event) => onUpdateMetadata(selectedDoc.id, { summary: event.target.value || null })}
+                      placeholder="Resumo curto usado para facilitar a busca no RAG."
+                      className="min-h-[104px] resize-y rounded-2xl border-border bg-background text-sm leading-5"
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-1.5">
+                    <Label htmlFor="autopilot-doc-canonical-answer" className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Resposta canonica
+                    </Label>
+                    <Textarea
+                      id="autopilot-doc-canonical-answer"
+                      value={selectedDoc.canonicalAnswer || ''}
+                      onChange={(event) => onUpdateMetadata(selectedDoc.id, { canonicalAnswer: event.target.value || null })}
+                      placeholder="Resposta oficial e objetiva quando houver uma resposta direta."
+                      className="min-h-[104px] resize-y rounded-2xl border-border bg-background text-sm leading-5"
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-1.5">
+                    <Label htmlFor="autopilot-doc-tags" className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Tags de busca
+                    </Label>
+                    <Input
+                      key={`${selectedDoc.id}-tags-${(selectedDoc.tags || []).join(',')}`}
+                      id="autopilot-doc-tags"
+                      defaultValue={(selectedDoc.tags || []).join(', ')}
+                      onBlur={(event) => onUpdateMetadata(selectedDoc.id, {
+                        tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean),
+                      })}
+                      placeholder="wifi, senha, roteador"
+                      className="h-11 rounded-2xl border-border bg-background text-sm"
+                    />
+                  </div>
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(140px,0.45fr)_minmax(0,1fr)]">
+                    <div className="min-w-0 space-y-1.5">
+                      <Label htmlFor="autopilot-doc-context-role" className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Papel
+                      </Label>
+                      <select
+                        id="autopilot-doc-context-role"
+                        value={selectedDoc.contextRole || ''}
+                        onChange={(event) => onUpdateMetadata(selectedDoc.id, { contextRole: event.target.value || null })}
+                        className="flex h-11 w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value="">Automatico</option>
+                        <option value="fact">Fato</option>
+                        <option value="procedure">Procedimento</option>
+                        <option value="policy">Politica</option>
+                        <option value="persona">Persona</option>
+                      </select>
+                    </div>
+                    <div className="min-w-0 space-y-1.5">
+                      <Label htmlFor="autopilot-doc-workflow-hints" className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Hints de fluxo
+                      </Label>
+                      <Input
+                        key={`${selectedDoc.id}-workflow-hints-${(selectedDoc.workflowHints || []).join(',')}`}
+                        id="autopilot-doc-workflow-hints"
+                        defaultValue={(selectedDoc.workflowHints || []).join(', ')}
+                        onBlur={(event) => onUpdateMetadata(selectedDoc.id, {
+                          workflowHints: event.target.value.split(',').map((hint) => hint.trim()).filter(Boolean),
+                        })}
+                        placeholder="quando usar, intencao relacionada"
+                        className="h-11 rounded-2xl border-border bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
                 <div className="relative h-[min(68vh,720px)] min-h-[440px] rounded-[24px] border border-border bg-background shadow-sm">
-                  <pre
-                    ref={highlightRef}
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre-wrap break-words rounded-[24px] px-5 py-4 font-mono text-sm leading-6 text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                  >
-                    {selectedDoc.content ? (
-                      renderHighlightedContent(selectedDoc.content)
-                    ) : (
-                      <span className="text-muted-foreground">
-                        Insira o conteÃºdo que o agente deve consultar durante o atendimento.
-                      </span>
-                    )}
-                  </pre>
                   <Textarea
                     ref={textareaRef}
-                    className="relative z-10 h-full min-h-0 resize-none overflow-y-auto rounded-[24px] border-0 bg-transparent px-5 py-4 font-mono text-sm leading-6 text-transparent shadow-none caret-foreground placeholder:text-transparent selection:bg-primary/20 focus-visible:ring-2"
+                    className="relative z-10 h-full min-h-0 resize-none overflow-y-auto rounded-[24px] border-0 bg-background px-5 py-4 font-mono text-sm leading-6 text-foreground shadow-none selection:bg-primary/20 focus-visible:ring-2"
                     placeholder="Insira o conteúdo que o agente deve consultar durante o atendimento."
                     value={selectedDoc.content}
                     onChange={(event) => {
@@ -661,11 +708,6 @@ export function AutopilotKnowledge({
                     }}
                     onKeyUp={(event) => updateToolMentionState(event.currentTarget.value, event.currentTarget.selectionStart)}
                     onClick={(event) => updateToolMentionState(event.currentTarget.value, event.currentTarget.selectionStart)}
-                    onScroll={(event) => {
-                      if (!highlightRef.current) return;
-                      highlightRef.current.scrollTop = event.currentTarget.scrollTop;
-                      highlightRef.current.scrollLeft = event.currentTarget.scrollLeft;
-                    }}
                   />
                 </div>
 

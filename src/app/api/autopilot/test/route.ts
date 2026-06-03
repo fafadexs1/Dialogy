@@ -29,6 +29,7 @@ import {
 } from '@/services/autopilot/flow-routing';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
+import { compileAutopilotTurnPolicy, resolveAllowedKnowledgeDocumentIds } from '@/services/autopilot/turn-policy';
 
 type PreviewPayload = {
   workspaceId: string;
@@ -456,10 +457,9 @@ export async function POST(request: Request) {
       ...rule,
       action: typeof rule.action === 'string' ? JSON.parse(rule.action) : rule.action,
     }));
-    const enabledToolNames = Array.isArray(config.enabled_tool_names)
+    let enabledToolNames = Array.isArray(config.enabled_tool_names)
       ? config.enabled_tool_names
       : listAgentToolCatalogItems().filter((tool) => tool.enabledByDefault).map((tool) => tool.name);
-    const toolCatalog = await loadPreviewToolCatalog(workspaceId, enabledToolNames);
     const availableTeams = await loadPreviewTeams(workspaceId);
     const contact = await loadPreviewContact({
       workspaceId,
@@ -475,9 +475,18 @@ export async function POST(request: Request) {
     });
     const activeFlowIntentScope = resolveActiveFlowIntentScope(config, previewIntent.intent);
     const scopedKnowledgeDocuments = filterKnowledgeDocumentsForScope(config, config.knowledge_base_documents, activeFlowIntentScope);
-    const allowedDocumentIds = activeFlowIntentScope?.knowledgeCollectionIds?.length
-      ? scopedKnowledgeDocuments.map((document) => document.id)
-      : undefined;
+    const turnPolicy = compileAutopilotTurnPolicy({
+      config,
+      documents: config.knowledge_base_documents || [],
+      intentScope: activeFlowIntentScope,
+    });
+    enabledToolNames = turnPolicy.allowedToolNames;
+    const toolCatalog = await loadPreviewToolCatalog(workspaceId, enabledToolNames);
+    const allowedDocumentIds = resolveAllowedKnowledgeDocumentIds({
+      config,
+      documents: config.knowledge_base_documents || [],
+      intentScope: activeFlowIntentScope,
+    });
     const deterministicFlowMessageNode = resolveDeterministicFlowMessage(config, activeFlowIntentScope);
     const deterministicFlowMessage = deterministicFlowMessageNode
       ? renderDeterministicFlowMessage(config, deterministicFlowMessageNode.message, {
@@ -670,7 +679,12 @@ export async function POST(request: Request) {
         fallbackReply: config.default_fallback_reply || '',
         escalationPolicy: config.escalation_policy || '',
         closingPolicy: config.closing_policy || '',
-        enabledAgentToolsDescription: enabledToolNames.join(', '),
+        enabledAgentToolsDescription: enabledToolNames.map((toolName) => {
+          const instructions = turnPolicy.toolInstructionsByName[toolName];
+          return instructions
+            ? `- ${toolName}. Instrucao configurada no flow: ${instructions}`
+            : `- ${toolName}`;
+        }).join('\n'),
         enabledAgentToolNames: enabledToolNames,
         intentContext: buildIntentContext(baseTrace),
         model: resolvedModel.model,

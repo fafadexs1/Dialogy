@@ -31,8 +31,26 @@ function validTimestamp(value: string | null | undefined): string | null {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
+function markdownTitle(document: Pick<KnowledgeBaseDocument, 'name'>): string {
+  return String(document.name || 'Documento')
+    .replace(/\.(?:md|txt|csv|json)$/i, '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/^#+\s*/, '')
+    .trim() || 'Documento';
+}
+
+export function toCanonicalKnowledgeMarkdown(document: Pick<KnowledgeBaseDocument, 'name' | 'content'>): string {
+  const content = String(document.content || '').replace(/\r\n/g, '\n').trim();
+  if (!content) return '';
+  if (/^#\s+\S/m.test(content)) return content;
+  return `# ${markdownTitle(document)}\n\n${content}`;
+}
+
 export function buildKnowledgeChunkMetadata(document: KnowledgeBaseDocument) {
   return {
+    contentFormat: 'markdown',
+    sourceFormat: document.sourceFormat ?? 'markdown',
+    originalFilename: document.originalFilename ?? null,
     category: document.category ?? null,
     tags: document.tags ?? null,
     priority: document.priority ?? null,
@@ -51,6 +69,39 @@ export function buildKnowledgeChunkMetadata(document: KnowledgeBaseDocument) {
 }
 
 export async function splitKnowledgeDocument(document: KnowledgeBaseDocument): Promise<string[]> {
+  return (await splitKnowledgeDocumentWithMetadata(document)).map((chunk) => chunk.content);
+}
+
+export type KnowledgeDocumentChunk = {
+  content: string;
+  parentContent: string | null;
+  parentHeading: string | null;
+};
+
+function splitMarkdownSections(markdown: string): Array<{ heading: string | null; content: string }> {
+  const sections: Array<{ heading: string | null; lines: string[] }> = [];
+  let current = { heading: null as string | null, lines: [] as string[] };
+
+  for (const line of markdown.split('\n')) {
+    if (/^#{1,4}\s+\S/.test(line) && current.lines.some((item) => item.trim())) {
+      sections.push(current);
+      current = { heading: line.replace(/^#{1,4}\s+/, '').trim(), lines: [line] };
+      continue;
+    }
+    if (/^#{1,4}\s+\S/.test(line)) {
+      current.heading = line.replace(/^#{1,4}\s+/, '').trim();
+    }
+    current.lines.push(line);
+  }
+
+  if (current.lines.some((item) => item.trim())) sections.push(current);
+  return sections.map((section) => ({
+    heading: section.heading,
+    content: section.lines.join('\n').trim(),
+  }));
+}
+
+export async function splitKnowledgeDocumentWithMetadata(document: KnowledgeBaseDocument): Promise<KnowledgeDocumentChunk[]> {
   const role = inferKnowledgeContextRole(document);
   const category = categoryOf(document);
   const isCatalog = /(catalog|plan|pricing|price|promotion|offer|product|service)/i.test(category);
@@ -59,7 +110,36 @@ export async function splitKnowledgeDocument(document: KnowledgeBaseDocument): P
     chunkOverlap: isCatalog ? 0 : role === 'fact' ? 60 : 100,
     preserveHeadings: true,
   });
-  return splitter.splitText(document.content);
+  const markdown = toCanonicalKnowledgeMarkdown(document);
+  const sections = splitMarkdownSections(markdown);
+  const useParentContext = role === 'procedure' || role === 'policy';
+  const chunks: KnowledgeDocumentChunk[] = [];
+
+  for (const section of sections) {
+    const sectionChunks = await splitter.splitText(section.content);
+    for (const content of sectionChunks) {
+      const parentContent = useParentContext && section.content.length > content.length
+        ? section.content.slice(0, 2800)
+        : null;
+      chunks.push({
+        content,
+        parentContent,
+        parentHeading: parentContent ? section.heading : null,
+      });
+    }
+  }
+
+  return chunks;
+}
+
+export function hasKnowledgeDocumentIndexChanged(
+  previous: KnowledgeBaseDocument | undefined,
+  next: KnowledgeBaseDocument,
+): boolean {
+  if (!previous) return true;
+  if (previous.name !== next.name) return true;
+  if (toCanonicalKnowledgeMarkdown(previous) !== toCanonicalKnowledgeMarkdown(next)) return true;
+  return JSON.stringify(buildKnowledgeChunkMetadata(previous)) !== JSON.stringify(buildKnowledgeChunkMetadata(next));
 }
 
 export function partitionKnowledgeDocuments(documents: KnowledgeBaseDocument[]) {

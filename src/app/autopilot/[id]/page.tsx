@@ -51,6 +51,8 @@ import {
   getAutopilotRagHealth,
   reindexAutopilotKnowledgeBase,
   runAutopilotRagLab,
+  improveAutopilotKnowledgeDocument,
+  generateAutopilotFlowWithAi,
 } from '@/actions/autopilot';
 import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
@@ -88,6 +90,14 @@ type AgentToolCatalogItem = {
   serverId?: string;
   serverName?: string;
 };
+
+function inferKnowledgeSourceFormat(filename: string): KnowledgeBaseDocument['sourceFormat'] {
+  const extension = filename.split('.').pop()?.toLowerCase();
+  if (extension === 'md') return 'markdown';
+  if (extension === 'csv') return 'csv';
+  if (extension === 'json') return 'json';
+  return 'plain_text';
+}
 
 const DEFAULT_KNOWLEDGE_COLLECTION: KnowledgeCollection = {
   id: 'general',
@@ -625,6 +635,8 @@ export default function AutopilotDetailPage() {
           id: globalThis.crypto?.randomUUID?.() || `${file.name}-${Date.now()}`,
           name: file.name,
           content: text,
+          sourceFormat: inferKnowledgeSourceFormat(file.name),
+          originalFilename: file.name,
           tokens: estimateTokens(text),
         });
       }
@@ -642,6 +654,7 @@ export default function AutopilotDetailPage() {
       id: globalThis.crypto?.randomUUID?.() || `manual-${Date.now()}`,
       name: `Nota ${(knowledgeDocuments.length + 1).toString().padStart(2, '0')}`,
       content: '',
+      sourceFormat: 'markdown',
       tokens: 0,
     };
     setKnowledgeDocuments((prev) => [...prev, newDoc]);
@@ -670,10 +683,44 @@ export default function AutopilotDetailPage() {
     );
   };
 
+  const handleUpdateDocMetadata = (
+    id: string,
+    patch: Partial<Pick<KnowledgeBaseDocument, 'summary' | 'tags' | 'contextRole' | 'canonicalAnswer' | 'workflowHints'>>
+  ) => {
+    setKnowledgeDocuments((prev) =>
+      prev.map((doc) => (doc.id === id ? { ...doc, ...patch } : doc))
+    );
+  };
+
   const handleUpdateDocCollections = (id: string, collectionIds: string[]) => {
     setKnowledgeDocuments((prev) =>
       prev.map((doc) => (doc.id === id ? { ...doc, collectionIds } : doc))
     );
+  };
+
+  const handleImproveKnowledgeDocument = async (document: KnowledgeBaseDocument) => {
+    if (!config) return;
+    const result = await improveAutopilotKnowledgeDocument(config.id, document);
+    if (!result.document) {
+      toast({ title: 'Falha ao melhorar documento', description: result.error, variant: 'destructive' });
+      return;
+    }
+    setKnowledgeDocuments((previous) => previous.map((item) => {
+      if (item.id !== document.id) return item;
+      const improvedDocument = result.document!;
+      return {
+        ...item,
+        ...improvedDocument,
+        id: item.id,
+        collectionIds: item.collectionIds,
+        maxPromptChars: item.maxPromptChars,
+        tokens: estimateTokens(improvedDocument.content),
+      };
+    }));
+    toast({
+      title: 'Documento otimizado para RAG',
+      description: 'Revise o Markdown gerado e salve o agente para reindexar.',
+    });
   };
 
   const handleAddKnowledgeCollection = (name: string) => {
@@ -917,10 +964,12 @@ export default function AutopilotDetailPage() {
         onUpdateName={handleUpdateDocName}
         onUpdateCategory={handleUpdateDocCategory}
         onUpdateMaxPromptChars={handleUpdateDocMaxPromptChars}
+        onUpdateMetadata={handleUpdateDocMetadata}
         onUpdateCollections={handleUpdateDocCollections}
         onAddCollection={handleAddKnowledgeCollection}
         onRemoveCollection={handleRemoveKnowledgeCollection}
         onAddManual={handleAddManualDoc}
+        onImproveDocument={handleImproveKnowledgeDocument}
         isUploading={isUploading}
         ragHealth={ragHealth}
         onReindex={handleReindexKnowledgeBase}
@@ -1061,6 +1110,21 @@ export default function AutopilotDetailPage() {
         onSave={handleSaveConfig}
         onPublish={handlePublishConfig}
         onDiscard={handleDiscardDraft}
+        onGenerateFlowWithAi={(input) => generateAutopilotFlowWithAi({
+          configId: agentId,
+          conversation: input.conversation,
+          currentGraph: input.currentGraph,
+          currentSystemPrompt: input.currentSystemPrompt,
+        })}
+        onApplyAiProposal={(proposal) => {
+          setFlowGraph(proposal.flowGraph);
+          setKnowledgeBase(proposal.systemPrompt);
+          setEnabledToolNames((current) => Array.from(new Set([...current, ...proposal.enabledToolNames])));
+          toast({
+            title: 'Proposta aplicada ao rascunho',
+            description: 'Revise o flow, teste o atendimento e salve antes de publicar.',
+          });
+        }}
         onAddRule={() => {
           setEditingRule(null);
           setIsRuleModalOpen(true);
@@ -1401,10 +1465,12 @@ export default function AutopilotDetailPage() {
                 onUpdateName={handleUpdateDocName}
                 onUpdateCategory={handleUpdateDocCategory}
                 onUpdateMaxPromptChars={handleUpdateDocMaxPromptChars}
+                onUpdateMetadata={handleUpdateDocMetadata}
                 onUpdateCollections={handleUpdateDocCollections}
                 onAddCollection={handleAddKnowledgeCollection}
                 onRemoveCollection={handleRemoveKnowledgeCollection}
                 onAddManual={handleAddManualDoc}
+                onImproveDocument={handleImproveKnowledgeDocument}
                 isUploading={isUploading}
                 ragHealth={ragHealth}
                 onReindex={handleReindexKnowledgeBase}

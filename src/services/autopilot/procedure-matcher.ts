@@ -24,8 +24,54 @@ function normalizeText(value: string): string {
 }
 
 function countKeywordHits(message: string, keywords: string[]): number {
-  const normalized = normalizeText(message);
-  return keywords.filter((kw) => normalized.includes(normalizeText(kw))).length;
+  const normalizedMsg = normalizeText(message);
+  const msgWords = normalizedMsg.split(/\s+/).filter(w => w.length >= 3);
+
+  let hits = 0;
+  for (const kw of keywords) {
+    const normalizedKw = normalizeText(kw);
+    // Exact substring check
+    if (normalizedMsg.includes(normalizedKw)) {
+      hits++;
+      continue;
+    }
+
+    // Fuzzy prefix check
+    const kwWords = normalizedKw.split(/\s+/).filter(w => w.length >= 3);
+    let matched = false;
+    for (const msgWord of msgWords) {
+      for (const kwWord of kwWords) {
+        if (
+          msgWord.startsWith(kwWord.slice(0, 5)) ||
+          kwWord.startsWith(msgWord.slice(0, 5))
+        ) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) break;
+    }
+    if (matched) {
+      hits++;
+    }
+  }
+  return hits;
+}
+
+function hasRequiredDomainEvidence(documentName: string, customerMessage: string): boolean {
+  const normalizedName = normalizeText(documentName);
+  const normalizedMessage = normalizeText(customerMessage);
+
+  if (/\b(financeiro|pagamento|boleto|fatura|pix|cobranca)\b/.test(normalizedName)) {
+    return /\b(financeiro|pagamento|pagar|boleto|fatura|pix|cobranca|vencimento|negociacao|promessa)\b/.test(normalizedMessage);
+  }
+  if (/\b(cancelamento|cancelar)\b/.test(normalizedName)) {
+    return /\b(cancelar|cancelamento|desistir|encerrar contrato)\b/.test(normalizedMessage);
+  }
+  if (/\b(transferencia|transferir|humano|atendente)\b/.test(normalizedName)) {
+    return /\b(transferir|transferencia|humano|atendente|falar com alguem|pessoa)\b/.test(normalizedMessage);
+  }
+  return true;
 }
 
 /**
@@ -35,6 +81,7 @@ function countKeywordHits(message: string, keywords: string[]): number {
  * Scoring:
  *   +3 per intent match
  *   +1 per keyword hit
+ *   +2 per title word hit
  *   Minimum score of 2 to be considered a match
  */
 export function matchProcedure(input: {
@@ -49,6 +96,10 @@ export function matchProcedure(input: {
   const scored: ProcedureMatchResult[] = [];
 
   for (const graph of compiledProcedures) {
+    if (!hasRequiredDomainEvidence(graph.documentName, customerMessage)) {
+      continue;
+    }
+
     let score = 0;
     const reasons: string[] = [];
 
@@ -75,6 +126,28 @@ export function matchProcedure(input: {
     if (docNameHit) {
       score += 2;
       reasons.push('document name in message');
+    }
+
+    // NEW: Title word hits to boost specialized procedures
+    const docWords = normalizeText(graph.documentName)
+      .split(/[\s\-/,.:;!?()]+/)
+      .filter((w) => w.length >= 4 && w !== 'para' && w !== 'como' && w !== 'suporte' && w !== 'atendimento' && w !== 'tecnico');
+
+    const msgWords = normalizeText(customerMessage)
+      .split(/[\s\-/,.:;!?()]+/);
+
+    let titleWordHits = 0;
+    for (const dw of docWords) {
+      for (const mw of msgWords) {
+        if (mw.startsWith(dw.slice(0, 5)) || dw.startsWith(mw.slice(0, 5))) {
+          titleWordHits++;
+          break;
+        }
+      }
+    }
+    if (titleWordHits > 0) {
+      score += titleWordHits * 2;
+      reasons.push(`${titleWordHits} title word hit(s)`);
     }
 
     if (score >= 2) {

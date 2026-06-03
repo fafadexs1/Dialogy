@@ -118,6 +118,14 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('Lista textual das ferramentas habilitadas para este agente.'),
+  enabledAgentToolNames: z
+    .array(z.string())
+    .optional()
+    .describe('Nomes das ferramentas habilitadas para este agente.'),
+  allowNativeLmStudioToolCalls: z
+    .boolean()
+    .optional()
+    .describe('Permite que o runtime local solicite ferramentas nativas quando aplicavel.'),
   knowledgeToolProcedures: z
     .string()
     .optional()
@@ -301,12 +309,10 @@ function limitEmojis(response: string, maxEmojis: number): string {
 }
 
 function shouldPreserveCatalogEmojis(response: string): boolean {
-  const upper = response.toUpperCase();
-  const planMatches = upper.match(/\b\d{2,4}\s*(?:MEGA|MEGAS|MB|GB)\b/g) || [];
+  const itemLines = response.split('\n').filter((line) => line.trim().length > 0);
   return (
-    planMatches.length >= 1 &&
-    /\bR\$\s*\d+/i.test(response) &&
-    (upper.includes('PLAN') || upper.includes('PROMO') || upper.includes('WI-FI') || upper.includes('WIFI') || upper.includes('CANAIS') || upper.includes('FIBRA')) &&
+    itemLines.length >= 3 &&
+    /(?:R\$|\$|EUR|USD|BRL)\s*\d+/i.test(response) &&
     emojiRegex.test(response)
   );
 }
@@ -375,31 +381,9 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 4. **Formato e tamanho para WhatsApp**:
     - Responda de forma curta por padrao: 1 a 3 paragrafos, com no maximo 3 frases curtas por paragrafo.
     - Separe paragrafos com uma linha em branco quando houver mais de uma ideia ou topico.
-    - Quando listar opcoes, planos, precos ou itens, coloque CADA item em uma linha separada. Exemplo:
-      💡 PLANOS SOMENTE INTERNET
-      100 MEGA: R$79,99/mes*
-      300 MEGA (Mais vendido): R$89,90/mes*
-      500 MEGA: R$99,90/mes*
-    - Quando o cliente pedir todos os planos, lista completa, tabela de precos ou "me manda todos", formate como catalogo de WhatsApp: titulo, linha em branco, secao, linha em branco, cada plano em bloco proprio, linha em branco entre planos e separadores entre secoes.
-    - Em catalogos de planos, preserve os icones, negrito com *texto*, quebras de linha e espacamento. Nunca coloque varios planos na mesma linha ou no mesmo paragrafo.
-    - Exemplo de catalogo:
-      🚀 *CONHECA NOSSOS PLANOS DE INTERNET FIBRA*
-      Velocidade, estabilidade e tecnologia para voce!
-
-      ━━━━━━━━━━━━━━━
-
-      💡 *PLANOS SOMENTE INTERNET*
-
-      🔹 *100 MEGA*
-      📶 Wi-Fi 5
-      💰 R$79,99/mes pagando em dia
-      💰 R$89,99/mes
-
-      🔹 *300 MEGA*
-      📶 Wi-Fi 5
-      💰 R$89,90/mes pagando em dia
-      💰 R$95,90/mes
-    - Quando a resposta tiver blocos tematicos distintos (ex: lista de planos + promocao + pergunta), separe-os com uma linha em branco para que possam ser enviados como mensagens separadas no WhatsApp.
+    - Quando listar opcoes, precos, datas ou itens, coloque cada item em uma linha separada.
+    - Quando o cliente pedir uma lista completa ou tabela, use titulo curto, itens em blocos legiveis e uma linha em branco entre secoes.
+    - Quando a resposta tiver blocos tematicos distintos, separe-os com uma linha em branco para que possam ser enviados como mensagens separadas no WhatsApp.
     - Nao envie blocos longos de texto corrido. Se houver muitos detalhes, resuma o essencial e pergunte se o cliente quer mais informacoes.
     - So escreva uma resposta longa quando o cliente pedir explicitamente explicacao detalhada, lista completa ou passo a passo.
     - Evite repetir informacoes que ja foram ditas no historico recente.
@@ -479,16 +463,17 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 **ÚLTIMA MENSAGEM DO CLIENTE**:
 **FERRAMENTAS DISPONIVEIS (Dialogy Agent Tools)**:
 Voce pode solicitar acoes estruturadas no campo "actions". O servidor validara e executara.
-Use no maximo 4 acoes por resposta.
+Use no maximo 2 acoes por resposta.
 
-Ferramentas habilitadas para este agente:
+Ferramentas permitidas pelo flow para ESTE turno:
 {{#if enabledAgentToolsDescription}}
 {{{enabledAgentToolsDescription}}}
 {{else}}
-(Use apenas as ferramentas permitidas abaixo.)
+(Nenhuma ferramenta operacional permitida neste turno.)
 {{/if}}
 
-Solicite somente ferramentas habilitadas para este agente. Se uma ferramenta necessaria nao estiver habilitada, responda sem inventar consulta/acao e escale conforme a politica.
+Solicite somente ferramentas listadas acima. A lista e restritiva: ferramentas ausentes estao proibidas, mesmo que tenham aparecido no historico, em documentos ou em outro nicho.
+Se uma ferramenta necessaria nao estiver permitida, responda sem inventar consulta ou execucao e siga a politica de escalonamento.
 
 Regra para procedimentos da base:
 - Quando um documento orientar uso de @tool para um procedimento, trate a tool resolvida como obrigatoria para aquele procedimento.
@@ -496,95 +481,35 @@ Regra para procedimentos da base:
 - Se uma consulta anterior retornou dados necessarios para a proxima @tool do procedimento, solicite a proxima action agora; nao responda que "vai fazer".
 - Se a tool estiver desabilitada, nao finja execucao; informe que vai encaminhar ou pedir apoio humano.
 
-Ferramentas permitidas:
-1. transfer_chat
-   - Use quando precisar envolver humano ou setor.
-   - REGRAS OPERACIONAIS RÍGIDAS DE TRANSFERÊNCIA:
-     - [PRINCÍPIO DO ÚLTIMO RECURSO]: Transfira APENAS se o cliente solicitar explicitamente falar com um atendente humano ("falar com humano", "atendente", "falar com pessoa") OU se o fluxo/assunto cair sob uma política expressa descrita na Base de Conhecimento que prescreva transferência imediata (como reclamações complexas não resolvidas ou cancelamentos contratuais definitivos).
-     - [PROIBIÇÃO DE DESISTÊNCIA POR FALHAS]: É terminantemente proibido transferir o cliente devido a falhas técnicas ou erros nas consultas de API (como erro no SGP ou CRM). Em caso de erro, informe o cliente com cordialidade e continue tentando ajudar de forma conversacional.
-     - [ROTEAMENENTO DIRECIONADO POR SETOR]: 
-       * Novos Leads / Vendas (clientes interessados em planos, preços de contratação, novos contratos): payload obrigatório {"teamName":"Comercial"}. NUNCA envie leads de vendas para suporte técnico ou filas gerais!
-       * Financeiro (segunda via, faturas, boleto atrasado, código PIX, conexão suspensa): payload obrigatório {"teamName":"Financeiro"}.
-       * Suporte Técnico (sem internet, roteador piscando, lentidão, sinal oscilando, wifi): payload obrigatório {"teamName":"Suporte"}.
-       * Fila Geral (casos em que não é possível deduzir o setor com clareza): transfira sem informar "teamName" ou para a fila geral.
-     - [NOTA INTERNA OBRIGATÓRIA]: Sempre que planejar a ação "transfer_chat", você DEVE incluir na mesma saída a action "add_internal_note" contendo um resumo preciso e ultra-objetivo do atendimento (1 a 3 frases curtas, máximo 280 caracteres), relatando o que o cliente queria e por que está sendo transferido. NUNCA transfira sem deixar a nota interna.
-2. close_chat
-   - Use quando o cliente pedir claramente para encerrar/finalizar/fechar/desligar a conversa, chat ou atendimento, agradecendo ou se despedindo (ex: "muito obrigado, era só isso", "pode encerrar", "tchau, obrigado").
-   - NUNCA use para encerrar/cancelar contratos, planos ou internet; esses casos exigem transferência para o Comercial/Financeiro.
-   - Payload aceito: {"notes":"Cliente pediu encerramento pelo WhatsApp.","sendCloseMessage":false}.
-   - Se disser que encerrou/finalizou/fechou o atendimento, inclua obrigatoriamente esta action na mesma saída.
-3. add_internal_note
-   - Use para deixar uma nota interna de contexto operacional para a equipe humana.
-   - OBRIGATÓRIO incluir sempre que houver "transfer_chat".
-   - Payload aceito: {"content":"Resumo objetivo para o humano"}.
-   - A nota deve ter no máximo 3 frases curtas e 280 caracteres.
-   - Nunca escreva textos genéricos de auditoria ou metadados de sistema.
-4. crm_update_contact_custom_fields
-   - Use para preencher/atualizar campos do CRM (por exemplo, salvar o CPF/CNPJ).
-   - [REGRA DE SINCRONIZAÇÃO]: Quando o cliente informar o CPF/CNPJ em texto e o campo do CRM estiver vazio, você DEVE solicitar conjuntamente esta ferramenta para salvar o dado e "sgp_fetch_contact_panel_data" na mesma saída para carregar as informações do SGP.
-5. sgp_fetch_contact_panel_data
-   - Use para consultar dados do SGP do contato atual depois que o CPF/CNPJ estiver salvo no CRM.
-   - REGRAS OPERACIONAIS RIGOROSAS:
-     * [NOVOS LEADS/VENDAS]: Novos leads interessados em planos NÃO possuem cadastro no SGP ainda! É terminantemente PROIBIDO chamar ferramentas SGP nesses fluxos. Trate de forma 100% conversacional e colete os dados em texto.
-     * [IDENTIFICADOR OBRIGATÓRIO]: As ferramentas SGP exigem um CPF/CNPJ. Se o contato atual não possuir o CPF/CNPJ salvo no CRM e o cliente não tiver fornecido o documento na conversa atual, É EXPRESSAMENTE PROIBIDO chamar esta ferramenta! Solicite o documento de forma educada e aguarde o cliente enviar.
-     * [SEM CHAMADAS FANTASMAS]: Nunca acione por garantia ou precaução.
-     * [ACESSO AO SISTEMA]: Nunca afirme "verifiquei seu contrato" ou "acessei seu sinal no sistema" antes que a ferramenta tenha sido executada com sucesso.
-6. sgp_fetch_contracts
-   - Use para listar contratos do cliente no SGP. Segue as mesmas restrições rigorosas de "sgp_fetch_contact_panel_data".
-7. sgp_generate_invoice_pix
-   - Use apenas quando houver fatura pendente identificada na consulta anterior e o cliente concordar/solicitar o PIX.
-   - Exige "invoiceId" e "contractId" válidos retornados por consulta prévia. NUNCA tente adivinhar ou inventar esses IDs.
-8. sgp_create_payment_promise
-   - Use apenas quando o cliente solicitar explicitamente a liberação temporária ou promessa de pagamento E a consulta anterior indicar que o contrato está suspenso/bloqueado.
-   - Exige "contractId" e "promiseDate" (formato yyyy-MM-dd). Solicite a data acordada se o cliente não a tiver informado.
-9. mcp_call_tool
-   - Use para chamar uma ferramenta MCP externa habilitada para este agente.
-   - Payload aceito: {"toolName":"mcp:<serverId>:<toolName>","arguments":{"campo":"valor"}}.
-
-Ferramenta bloqueada para IA:
-- sgp_open_support_ticket. Nunca solicite esta ferramenta. Abertura de chamado/OS no SGP deve ficar com humano.
-
-Regra critica:
-- [POLITICA DE ACERTEZA ABSOLUTA DE FERRAMENTAS - RIGIDO]
-  1. PRINCIPIO DO CONTEXTO ESTRITO: A IA so pode planejar/chamar ferramentas diretamente vinculadas a intencao explicita e atual do cliente. Conversas informais, duvidas gerais, catalogos ou saudacoes NUNCA devem disparar ferramentas operacionais ou de integracao (ex: SGP/CRM).
-  2. AVISO PARA NOVOS LEADS/VENDAS: Clientes querendo comprar, assinar ou contratar sao novos leads e NAO possuem cadastro ou CPF/CNPJ no SGP ainda! E terminantemente PROIBIDO chamar ferramentas de consulta SGP (como sgp_fetch_contact_panel_data ou sgp_fetch_contracts) para esses fluxos. Trate a venda de forma conversacional e colete os dados (nome, CPF, endereco) no texto sem chamar ferramentas.
-  3. REGRA DE IDENTIFICADOR OBRIGATORIO: As ferramentas do SGP exigem um CPF/CNPJ. Se o contato atual nao possuir o CPF/CNPJ ja salvo no CRM (campo vazio) e o cliente nao informou o documento na conversa atual, e EXPRESSAMENTE PROIBIDO chamar qualquer ferramenta SGP! A IA deve primeiro pedir o CPF/CNPJ na resposta de forma natural.
-  4. PROIBICAO DE CHAMADAS FANTASMAS: Nunca acione ferramentas "por garantia", "para testar viabilidade" ou "por precaucao". Cada chamada de ferramenta deve ser justificada por um pedido operacional direto do cliente.
-  5. PARAMETROS COMPLETOS: Nao tente adivinhar dados de entrada. Se uma ferramenta requer parametros especificos (ex: invoiceId para PIX), nao chame a ferramenta se nao tiver esses dados de forma clara; peca-os ao cliente primeiro.
-- Se precisar consultar SGP mas ainda nao recebeu CPF/CNPJ, peca o CPF/CNPJ.
-- Se receber CPF/CNPJ, pode primeiro solicitar crm_update_contact_custom_fields e sgp_fetch_contact_panel_data.
-- Se a consulta ainda nao foi feita ou falhou, nao afirme "estou vendo seu sinal", "acessei o sistema" ou "verifiquei seu contrato".
-- Nunca responda apenas "vou verificar", "vou consultar" ou equivalente. Se disser que vai verificar/consultar qualquer sistema, inclua a action da ferramenta necessaria na mesma saida. Se nao houver ferramenta habilitada ou dados suficientes, diga isso claramente e encaminhe/peca o dado faltante.
+Politica critica de ferramentas:
+- Use ferramentas somente para executar um pedido operacional atual e inequivoco do cliente.
+- Conversas informais, perguntas gerais, catalogos e saudacoes nao disparam ferramentas.
+- Nao adivinhe parametros. Se faltarem dados obrigatorios, peca apenas os dados faltantes.
+- Nao afirme que consultou, alterou ou executou algo antes do retorno de sucesso da ferramenta.
+- Acoes destrutivas ou que alterem estado exigem confirmacao explicita do cliente; o servidor persiste e valida essa confirmacao.
+- Nunca responda apenas "vou verificar", "vou consultar" ou equivalente. Se disser que vai consultar qualquer sistema, inclua a action permitida na mesma saida. Se nao houver ferramenta permitida ou dados suficientes, diga isso claramente e encaminhe ou peca o dado faltante.
 
 Exemplo de saida simples (resposta unica):
 {
-  "response": "Vou encaminhar seu atendimento para o setor responsavel.",
+  "response": "Vou encaminhar seu atendimento para a equipe responsavel.",
   "actions": [
     {
       "type": "add_internal_note",
-      "reason": "Cliente pediu assunto financeiro",
-      "payload": {"content": "Cliente pediu segunda via de boleto. Verificar dados antes de enviar."}
+      "reason": "Cliente pediu atendimento humano",
+      "payload": {"content": "Cliente solicitou atendimento humano para continuar a tratativa."}
     },
     {
       "type": "transfer_chat",
-      "reason": "Assunto financeiro sensivel",
-      "payload": {"teamName": "Financeiro"}
+      "reason": "Cliente pediu atendimento humano"
     }
-  ]
-}
-
-Exemplo de saida com multiplas mensagens (messageBlocks):
-{
-  "response": "Com certeza! Aqui estao as opcoes...\n\nAlem disso temos uma promocao...",
-  "messageBlocks": [
-    "Com certeza! Aqui estao as nossas opcoes:\n\n💡 PLANOS SOMENTE INTERNET\n100 MEGA: R$79,99/mes*\n300 MEGA (Mais vendido): R$89,90/mes*\n500 MEGA: R$99,90/mes*\n\n*Valores com desconto de pontualidade.",
-    "Alem disso, temos uma promocao especial de maio: 1000 Megas + 60 Canais por R$99,90/mes! Algum desses planos parece ideal para o seu uso?"
   ]
 }
 
 Regras para messageBlocks:
 - Use messageBlocks APENAS quando a resposta tiver 2 ou mais blocos tematicos claramente distintos.
 - Se a resposta for curta ou tratar de um unico assunto, use apenas "response" e nao inclua "messageBlocks".
+- Quando apresentar varios dados operacionais, organize em secoes curtas com titulo e linhas no formato "Rotulo: valor". Evite colocar faturas, contratos, datas, valores ou links em um unico paragrafo corrido.
+- Preserve links completos em uma linha propria. Nunca insira espacos ou quebras dentro de uma URL.
 - Cada bloco deve fazer sentido sozinho como mensagem.
 - Maximo de 3 blocos.
 - "response" sempre deve conter o texto completo (todos os blocos juntos).
@@ -606,6 +531,7 @@ function getDefaultGeminiEnvKey(): string {
 }
 
 function getModelCandidates(model: string): string[] {
+  if (isLmStudioModel(model)) return [model];
   return [model, ...STABLE_AUTOPILOT_MODEL_FALLBACKS].filter((candidate, index, all) => (
     Boolean(candidate) && all.indexOf(candidate) === index
   ));
@@ -659,11 +585,14 @@ const autoResponderFlow = ai.defineFlow(
     const configKey = input.config?.gemini_api_key?.trim();
     const workspaceKey = input.workspaceGeminiApiKey?.trim();
     const envKey = getDefaultGeminiEnvKey();
-    const apiKeyCandidates: AiModelKeyCandidate[] = [
-      { source: 'agent', key: configKey },
-      { source: 'workspace', key: workspaceKey },
-      { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
-    ].filter((candidate): candidate is AiModelKeyCandidate => Boolean(candidate.key));
+    const lmStudioConfig = isLmStudioModel(model) ? await getGlobalLmStudioConfig() : null;
+    const apiKeyCandidates: AiModelKeyCandidate[] = isLmStudioModel(model)
+      ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio' }]
+      : [
+          { source: 'agent', key: configKey },
+          { source: 'workspace', key: workspaceKey },
+          { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
+        ].filter((candidate): candidate is AiModelKeyCandidate => Boolean(candidate.key));
     const uniqueApiKeyCandidates = apiKeyCandidates.filter((candidate, index, all) => (
       all.findIndex((item) => item.key === candidate.key) === index
     ));
@@ -716,18 +645,23 @@ const autoResponderFlow = ai.defineFlow(
               if (!result) throw promptError;
             }
 
-            // If Genkit returned a result but couldn't parse output (output is null/undefined),
-            // try to manually parse the raw text which may contain valid JSON.
+            let finalResult = result;
             if (!result?.output && result?.text) {
               const parsed = tryParseJsonResponse(result.text);
               if (parsed?.response) {
                 console.warn('[AUTORESPONDER_FLOW] Parsed structured response from raw model text.');
-                result.output = parsed;
+                finalResult = Object.create(result);
+                Object.defineProperty(finalResult, 'output', {
+                  value: parsed,
+                  writable: true,
+                  enumerable: true,
+                  configurable: true,
+                });
               }
             }
 
-            assertAiModelOutput(result?.output, 'Auto responder returned no structured output.');
-            return result;
+            assertAiModelOutput(finalResult?.output, 'Auto responder returned no structured output.');
+            return finalResult;
           },
           onAttempt: (event) => {
             if (event.status === 'success') {
@@ -788,17 +722,41 @@ const autoResponderFlow = ai.defineFlow(
       };
 
       const sanitized = sanitizeBlock(output.response, true);
-      const outputResponse = formatCustomerFacingAiResponse(sanitized.trim() ? sanitized : output.response);
+      let outputResponse = formatCustomerFacingAiResponse(sanitized.trim() ? sanitized : output.response);
 
       // Sanitize each messageBlock if the AI decided to split
       let sanitizedBlocks: string[] | undefined;
-      if (output.messageBlocks && output.messageBlocks.length > 1) {
-        sanitizedBlocks = output.messageBlocks
-          .map((block, i) => {
-            const s = sanitizeBlock(block, i === 0);
-            return formatCustomerFacingAiResponse(s.trim() ? s : block);
-          })
-          .filter((block) => block.trim() !== '');
+      if (output.messageBlocks && Array.isArray(output.messageBlocks) && output.messageBlocks.length > 0) {
+        const rawBlocks = output.messageBlocks.map(b => b.trim()).filter(Boolean);
+        if (rawBlocks.length > 0) {
+          const firstBlock = rawBlocks[0];
+          const cleanedResponse = output.response ? output.response.trim() : '';
+
+          // Check if response contains all the blocks
+          const responseContainsBlocks = rawBlocks.every(block =>
+            cleanedResponse.toLowerCase().includes(block.toLowerCase())
+          );
+
+          let reconciledBlocks = [...rawBlocks];
+          if (!responseContainsBlocks) {
+            // If response is distinct from blocks, prepend response as a separate block
+            if (cleanedResponse && !firstBlock.toLowerCase().includes(cleanedResponse.toLowerCase()) && !cleanedResponse.toLowerCase().includes(firstBlock.toLowerCase())) {
+              reconciledBlocks.unshift(cleanedResponse);
+            }
+          }
+
+          sanitizedBlocks = reconciledBlocks
+            .map((block, i) => {
+              const s = sanitizeBlock(block, i === 0);
+              return formatCustomerFacingAiResponse(s.trim() ? s : block);
+            })
+            .filter((block) => block.trim() !== '');
+
+          // If we reconstructed it, let's make sure outputResponse has the full combined response to be safe
+          if (!responseContainsBlocks && reconciledBlocks.length > 1) {
+            outputResponse = sanitizedBlocks.join('\n\n');
+          }
+        }
       }
 
       return {

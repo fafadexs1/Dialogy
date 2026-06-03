@@ -3,14 +3,13 @@ import { randomUUID } from 'crypto';
 import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { generateProcedureRuntimeOutput } from '@/ai/flows/procedure-runtime';
-import { sendAutomatedMessageAction } from '@/actions/messages';
 import { logToDebugFile } from '@/lib/debug-file';
 import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact-identity';
 import { retrieveHybridSupportContext, type KnowledgeRetrievalStrategy } from '@/services/rag/hybrid-retrieval';
 import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 import { runAgentTools } from '@/services/agent-tools/runtime';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
-import { listAgentToolCatalogItems, listDefaultEnabledAgentToolNames } from '@/services/agent-tools/catalog';
+import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { extractKnowledgeToolProcedures, formatKnowledgeToolProcedures } from '@/services/agent-tools/knowledge-procedures';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
@@ -20,6 +19,7 @@ import {
     type ToolRouterTeam,
 } from '@/services/agent-tools/router';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
+import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
 import { classifyToolIntent } from '@/ai/flows/tool-intent-gate';
 import { classifyAutopilotIntentWithAi, shouldUseAiIntentClassifier } from '@/ai/flows/intent-classifier';
@@ -40,7 +40,12 @@ import {
     buildToolFailureResponse,
     ensurePromisedSgpLookupAction,
     ensureProcedureSgpLookupAction,
-} from '@/services/autopilot-sgp-response';
+    extractFocusedContractId,
+    getScopedContractIdFromToolResults,
+    hydrateFindRouterByIpActionsFromSgpResults,
+    scopeSgpLookupActionsToAddressedContract,
+    scopeSgpLookupActionsToFocusedContract,
+} from '@/plugins/sgp/autopilot-response';
 import { resolveAutopilotIntent, resolveAutopilotIntentWithOverride } from '@/services/autopilot-intent';
 import type { KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
@@ -53,13 +58,14 @@ import {
     resolveActiveFlowIntentScope,
     resolveDeterministicFlowMessage,
     resolveEntryDeterministicFlowMessage,
+    resolveFlowCompletionPlan,
     resolveFlowFormGuidance,
 } from '@/services/autopilot/flow-routing';
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
-import { getActiveProcedureExecution, createProcedureExecution } from '@/services/autopilot/procedure-store';
+import { completeProcedureExecution, createProcedureExecution, getActiveProcedureExecution, saveProcedureExecution } from '@/services/autopilot/procedure-store';
 import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
 import { matchProcedure } from '@/services/autopilot/procedure-matcher';
 import {
@@ -93,6 +99,10 @@ import {
 } from '@/services/autopilot/runtime/tool-memory';
 import { getAutopilotConfigService } from '@/services/autopilot/runtime/config-service';
 import { executeTriggeredWebhookRule } from '@/services/autopilot/runtime/webhook-rules';
+import { compileAutopilotTurnPolicy, resolveAllowedKnowledgeDocumentIds, type AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
+import { getAutopilotConversationState, resolveConfirmedPendingAction, saveAutopilotTurnState } from '@/services/autopilot/flow-state-store';
+import { mapAgentToolActionsToResources } from '@/services/resource-mapper/agent-tool-actions';
+import type { SlotExtractionResult } from '@/services/autopilot/slots';
 
 async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames: string[]): Promise<AgentToolCatalogItem[]> {
     const enabledToolSet = new Set(enabledToolNames);
@@ -148,7 +158,7 @@ async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames
 function resolveEnabledToolNames(config: AutopilotConfig) {
     return Array.isArray(config.enabled_tool_names)
         ? config.enabled_tool_names
-        : listDefaultEnabledAgentToolNames();
+        : [];
 }
 
 function shouldRunCloseIntentGate(input: {
@@ -239,10 +249,12 @@ function buildIntentClassifierContactSignals(contact: Contact) {
     };
 }
 
-function buildEnabledAgentToolsDescription(config: AutopilotConfig, toolCatalog: AgentToolCatalogItem[]): string {
-    const configured = Array.isArray(config.enabled_tool_names)
-        ? new Set(config.enabled_tool_names)
-        : new Set(listDefaultEnabledAgentToolNames());
+function buildEnabledAgentToolsDescription(
+    enabledToolNames: string[],
+    toolCatalog: AgentToolCatalogItem[],
+    toolInstructionsByName: Record<string, string> = {},
+): string {
+    const configured = new Set(enabledToolNames);
 
     const enabledTools = toolCatalog.filter((tool) => configured.has(tool.name));
     if (enabledTools.length === 0) {
@@ -252,7 +264,10 @@ function buildEnabledAgentToolsDescription(config: AutopilotConfig, toolCatalog:
     return enabledTools
         .map((tool) => {
             const schema = tool.inputSchema ? ` Entrada JSON: ${JSON.stringify(tool.inputSchema).slice(0, 600)}` : '';
-            return `- ${tool.name}: ${tool.description}${schema}`;
+            const instructions = toolInstructionsByName[tool.name]
+                ? ` Instrucao configurada no flow: ${toolInstructionsByName[tool.name]}`
+                : '';
+            return `- ${tool.name}: ${tool.description}${schema}${instructions}`;
         })
         .join('\n');
 }
@@ -343,13 +358,9 @@ async function broadcastAiProcessing(chatId: string, event: 'ai_processing_start
     try {
         const { getSupabaseAdmin } = await import('@/lib/supabase');
         const supabase = getSupabaseAdmin();
-        await supabase.channel(`chat:${chatId}`).send({
-            type: 'broadcast',
-            event,
-            payload: {
+        await supabase.channel(`chat:${chatId}`).httpSend(event, {
                 chatId,
                 ...payload,
-            },
         });
     } catch (error) {
         console.error(`[AUTOPILOT_SERVICE] Failed to broadcast ${event}:`, error);
@@ -486,10 +497,7 @@ async function insertAgentToolStatusMessage(input: {
         try {
             const { getSupabaseAdmin } = await import('@/lib/supabase');
             const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${input.chatId}`).send({
-                type: 'broadcast',
-                event: 'agent_tool_status',
-                payload: {
+            await supabase.channel(`chat:${input.chatId}`).httpSend('agent_tool_status', {
                     chatId: input.chatId,
                     toolName: input.toolName,
                     status: input.status,
@@ -498,7 +506,6 @@ async function insertAgentToolStatusMessage(input: {
                     ...(input.prearm ? { prearm: input.prearm } : {}),
                     ...(compactOutput ? { output: compactOutput } : {}),
                     ...(input.toolResult?.error ? { error: input.toolResult.error } : {}),
-                },
             });
         } catch (broadcastError) {
             console.warn('[AUTOPILOT_TOOL_STATUS] Broadcast failed (non-blocking):', broadcastError);
@@ -552,6 +559,7 @@ async function buildMediaAnalysisContext(input: {
     chatId: string;
     messageId?: string | null;
     systemAgentId: string;
+    model?: string | null;
 }): Promise<string> {
     if (!input.messageId) return '';
 
@@ -590,6 +598,7 @@ async function buildMediaAnalysisContext(input: {
             mediaType: type as 'audio' | 'image' | 'video',
             mimetype: metadata.mimetype,
             caption: message.content,
+            model: input.model,
         });
         const compact = compactAiAnalysis(result.analysis);
         const label = type === 'audio'
@@ -621,12 +630,23 @@ async function runRequestedAgentTools(input: {
     systemAgentId: string;
     systemAgentName: string;
     autopilotConfig: AutopilotConfig;
+    turnPolicy: AutopilotTurnPolicy;
     customerMessage: string;
     actions: unknown;
+    chatHistory?: string;
+    slotExtraction?: SlotExtractionResult | null;
     orchestratorRunId?: string | null;
 }): Promise<AgentToolExecutionResult[]> {
     const normalizedActions = normalizeAgentActions(input.actions);
     if (normalizedActions.length === 0) return [];
+    const resourceMapped = await mapAgentToolActionsToResources({
+        workspaceId: input.workspaceId,
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
+        contact: input.contact,
+        slotExtraction: input.slotExtraction,
+        actions: normalizedActions,
+    });
 
     return runAgentTools(
         {
@@ -636,10 +656,11 @@ async function runRequestedAgentTools(input: {
             systemAgentId: input.systemAgentId,
             systemAgentName: input.systemAgentName,
             autopilotConfig: input.autopilotConfig,
+            turnPolicy: input.turnPolicy,
             customerMessage: input.customerMessage,
             orchestratorRunId: input.orchestratorRunId ?? null,
         },
-        normalizedActions
+        resourceMapped.actions
     );
 }
 
@@ -650,16 +671,28 @@ async function runRequestedAgentToolsWithStatus(input: {
     systemAgentId: string;
     systemAgentName: string;
     autopilotConfig: AutopilotConfig;
+    turnPolicy: AutopilotTurnPolicy;
     customerMessage: string;
     actions: unknown;
+    chatHistory?: string;
+    slotExtraction?: SlotExtractionResult | null;
     orchestratorRunId?: string | null;
 }): Promise<AgentToolExecutionResult[]> {
     const normalizedActions = normalizeAgentActions(input.actions);
     if (normalizedActions.length === 0) return [];
+    const resourceMapped = await mapAgentToolActionsToResources({
+        workspaceId: input.workspaceId,
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
+        contact: input.contact,
+        slotExtraction: input.slotExtraction,
+        actions: normalizedActions,
+    });
+    const actionsToRun = resourceMapped.actions;
 
-    console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${input.chat.id} planned_tools=${normalizedActions.length} tools=[${normalizedActions.map((a) => a.type === 'mcp_call_tool' ? String(a.payload?.toolName || a.type) : a.type).join(',')}]`);
+    console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${input.chat.id} planned_tools=${actionsToRun.length} tools=[${actionsToRun.map((a) => a.type === 'mcp_call_tool' ? String(a.payload?.toolName || a.type) : a.type).join(',')}]`);
 
-    const toolRuns = normalizedActions.map((action) => ({
+    const toolRuns = actionsToRun.map((action) => ({
         action,
         runId: randomUUID(),
         toolName: action.type === 'mcp_call_tool' ? String(action.payload?.toolName || action.type) : action.type,
@@ -679,7 +712,7 @@ async function runRequestedAgentToolsWithStatus(input: {
 
     const results = await runRequestedAgentTools({
         ...input,
-        actions: normalizedActions,
+        actions: actionsToRun,
     });
 
     const succeeded = results.filter((r) => r.status === 'success').length;
@@ -702,6 +735,36 @@ async function runRequestedAgentToolsWithStatus(input: {
     }
 
     return results;
+}
+
+function resolveActionToolName(action: AgentToolAction) {
+    return action.type === 'mcp_call_tool'
+        ? String(action.payload?.toolName || '')
+        : action.type;
+}
+
+async function sendToolFailureFollowUp(input: {
+    chatId: string;
+    systemAgentId: string;
+    instanceName?: string;
+    toolResults: AgentToolExecutionResult[];
+    previousResponse?: string | null;
+}): Promise<string | null> {
+    const failureResponse = buildToolFailureResponse(
+        input.toolResults,
+        input.previousResponse || ''
+    );
+    if (!failureResponse) return null;
+
+    const formattedResponse = formatCustomerFacingAiResponse(failureResponse);
+    await sendMultiBlockResponse(
+        input.chatId,
+        formattedResponse,
+        input.systemAgentId,
+        true,
+        input.instanceName
+    );
+    return formattedResponse;
 }
 
 async function loadToolRouterTeams(workspaceId: string): Promise<ToolRouterTeam[]> {
@@ -874,19 +937,40 @@ export async function processAutopilotForChat(
         const sender = m.from_me ? 'Atendente' : 'Cliente';
         return `${sender}: ${m.content}`;
     }).join('\n');
+    const focusedContractMessagesRes = await db.query(
+        `SELECT content
+         FROM messages
+         WHERE chat_id = $1
+           AND from_me = false
+           AND content ILIKE '%contrato%'
+         ORDER BY created_at DESC
+         LIMIT 20`,
+        [chat.id]
+    );
+    const focusedContractId = extractFocusedContractId(
+        ...focusedContractMessagesRes.rows.reverse().map((message: any) => String(message.content || ''))
+    );
+    let focusedContractContext = focusedContractId
+        ? `Contrato em foco explicitamente informado pelo cliente: ${focusedContractId}.`
+        : '';
 
     const mediaAnalysisContext = await buildMediaAnalysisContext({
         workspaceId,
         chatId: chat.id,
         messageId: sourceMessageId,
         systemAgentId: assignedSystemAgentId,
+        model: resolvedAiModel.model,
     });
     const enrichedLastMessageContent = [
         lastMessageContent || '',
         mediaAnalysisContext,
     ].filter((part) => part.trim().length > 0).join('\n\n');
+    let focusedOperationalContext = [
+        focusedContractContext,
+        enrichedLastMessageContent,
+    ].filter(Boolean).join('\n');
     const staticKnowledgeDocuments = autopilotConfig.knowledge_base_documents || [];
-    const enabledToolNames = resolveEnabledToolNames(autopilotConfig);
+    let enabledToolNames = resolveEnabledToolNames(autopilotConfig);
     const crmCustomFields = await loadContactCustomFieldsForAutopilot({
         workspaceId,
         contactId: chat.contact?.id || (chat as { contact_id?: string | null }).contact_id,
@@ -993,9 +1077,68 @@ export async function processAutopilotForChat(
 
     const activeFlowIntentScope = resolveActiveFlowIntentScope(autopilotConfig, intentResolution.intent);
     const scopedStaticKnowledgeDocuments = filterKnowledgeDocumentsForScope(autopilotConfig, staticKnowledgeDocuments, activeFlowIntentScope);
-    const allowedDocumentIds = activeFlowIntentScope?.knowledgeCollectionIds?.length
-        ? scopedStaticKnowledgeDocuments.map((document) => document.id)
-        : undefined;
+    const persistedFlowState = await getAutopilotConversationState(chat.id).catch((error) => {
+        console.warn('[AUTOPILOT_FLOW_STATE] Failed to load persisted state:', error);
+        return null;
+    });
+    const turnPolicy = compileAutopilotTurnPolicy({
+        config: autopilotConfig,
+        documents: staticKnowledgeDocuments,
+        intentScope: activeFlowIntentScope,
+        persistedActiveNodeId: persistedFlowState?.activeNodeId,
+    });
+    enabledToolNames = turnPolicy.allowedToolNames;
+    const flowCompletionPlan = resolveFlowCompletionPlan(autopilotConfig, turnPolicy.activeNodeId);
+    const allowedDocumentIds = resolveAllowedKnowledgeDocumentIds({
+        config: autopilotConfig,
+        documents: staticKnowledgeDocuments,
+        intentScope: activeFlowIntentScope,
+    });
+    await saveAutopilotTurnState({
+        chatId: chat.id,
+        workspaceId,
+        autopilotConfigId: autopilotConfig.id,
+        activeNodeId: turnPolicy.activeNodeId,
+    }).catch((error) => {
+        console.warn('[AUTOPILOT_FLOW_STATE] Failed to persist active node:', error);
+    });
+    const confirmedPendingAction = resolveConfirmedPendingAction({
+        state: persistedFlowState,
+        message: enrichedLastMessageContent || '',
+        allowedToolNames: turnPolicy.allowedToolNames,
+    });
+    if (confirmedPendingAction && currentCopilotMode === 'auto') {
+        const confirmedResults = await runRequestedAgentToolsWithStatus({
+            workspaceId,
+            chat,
+            contact: sanitizedContact,
+            systemAgentId: assignedSystemAgentId,
+            systemAgentName: assignedSystemAgentName,
+            autopilotConfig,
+            turnPolicy,
+            customerMessage: enrichedLastMessageContent || '',
+            actions: [confirmedPendingAction],
+            orchestratorRunId: orchestratorRun.id,
+        });
+        const confirmedResponse = buildMcpCustomerResponseFromToolResults(confirmedResults)
+            || buildMcpResponseFromToolResults(confirmedResults)
+            || buildSgpResponseFromToolResults(confirmedResults, enrichedLastMessageContent || '')
+            || buildToolFailureResponse(confirmedResults, '')
+            || (confirmedResults.some((result) => result.status === 'success')
+                ? 'Pronto, a acao confirmada foi executada com sucesso.'
+                : 'Nao consegui executar a acao confirmada. Vou encaminhar o contexto para atendimento humano.');
+        await sendMultiBlockResponse(chat.id, confirmedResponse, assignedSystemAgentId, true, instanceName);
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: confirmedResults.some((result) => result.status === 'success') ? 'success' : 'fallback',
+            timings: orchestratorTimings,
+            metadata: {
+                confirmedPendingAction: resolveActionToolName(confirmedPendingAction),
+                toolCount: confirmedResults.length,
+            },
+        });
+        return;
+    }
     let ragStrategy: KnowledgeRetrievalStrategy = scopedStaticKnowledgeDocuments.length > 0 ? 'static_documents' : 'none';
     let knowledgeCoverage: KnowledgeCoverage = scopedStaticKnowledgeDocuments.length > 0 ? 'low' : 'none';
     await recordOrchestratorEvent({
@@ -1162,14 +1305,10 @@ export async function processAutopilotForChat(
         if (currentCopilotMode === 'suggest') {
             const { getSupabaseAdmin } = await import('@/lib/supabase');
             const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).send({
-                type: 'broadcast',
-                event: 'ai_suggestion',
-                payload: {
+            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
                     suggestion: finalResponse,
                     chatId: chat.id,
                     configName: autopilotConfig.name,
-                },
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -1221,6 +1360,7 @@ export async function processAutopilotForChat(
                 systemAgentId: assignedSystemAgentId,
                 systemAgentName: assignedSystemAgentName,
                 autopilotConfig,
+                turnPolicy,
                 customerMessage: enrichedLastMessageContent || '',
                 actions: deterministicRouting.actions,
                 orchestratorRunId: orchestratorRun.id,
@@ -1229,6 +1369,13 @@ export async function processAutopilotForChat(
         );
         orchestratorTimings.tool_ms = toolsStage.durationMs;
         const toolResults = toolsStage.value;
+        await sendToolFailureFollowUp({
+            chatId: chat.id,
+            systemAgentId: assignedSystemAgentId,
+            instanceName,
+            toolResults,
+            previousResponse: finalResponse,
+        });
 
         await logIntelligentAttendantResponse({
             configId: autopilotConfig.id,
@@ -1335,6 +1482,8 @@ export async function processAutopilotForChat(
                     error: retrieval.error ?? null,
                     retrieved: retrieval.retrieved,
                     selected: retrieval.selected,
+                    internalKnowledgeSources: retrieval.diagnostics?.internalKnowledgeSources || [],
+                    correctiveRetrieval: retrieval.diagnostics?.correctiveRetrieval || null,
                     discarded: retrieval.discarded.slice(0, 8),
                     intent: intentResolution.intent,
                     workflowId: intentResolution.workflowId,
@@ -1365,13 +1514,45 @@ export async function processAutopilotForChat(
     }
 
     const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId, enabledToolNames);
-    const recentToolResults = await loadRecentToolResultsForAutopilot({
+    let recentToolResults = await loadRecentToolResultsForAutopilot({
         workspaceId,
         chatId: chat.id,
         toolNames: ['sgp_fetch_contact_panel_data', 'sgp_fetch_contracts'],
         maxAgeMinutes: 30,
         limit: 3,
     });
+    const recentScopedContractId = getScopedContractIdFromToolResults(recentToolResults);
+    if (recentScopedContractId) {
+        focusedContractContext = [
+            `Contrato em foco da ultima consulta especifica: ${recentScopedContractId}.`,
+            focusedContractContext,
+        ].filter(Boolean).join('\n');
+        focusedOperationalContext = [
+            focusedContractContext,
+            enrichedLastMessageContent,
+        ].filter(Boolean).join('\n');
+    }
+
+    const flowScopedDeterministicActions = deterministicRouting.actions.filter((action) => (
+        turnPolicy.allowedToolNames.includes(resolveActionToolName(action))
+    ));
+    if (flowScopedDeterministicActions.length !== deterministicRouting.actions.length) {
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'turn_policy_tool_filter',
+            status: 'skipped',
+            payload: {
+                reason: turnPolicy.reason,
+                requestedTools: deterministicRouting.actions.map(resolveActionToolName),
+                allowedTools: turnPolicy.allowedToolNames,
+            },
+        });
+        deterministicRouting = {
+            ...deterministicRouting,
+            actions: flowScopedDeterministicActions,
+            responseHint: flowScopedDeterministicActions.length > 0 ? deterministicRouting.responseHint : null,
+        };
+    }
     const recentToolMemoryContext = buildRecentToolMemoryContext(recentToolResults);
     if (recentToolMemoryContext) {
         relevantHistory = [
@@ -1470,6 +1651,7 @@ export async function processAutopilotForChat(
         missingSlots: workflowPlan.missingSlots,
         enabledToolNames,
         hasCustomerIdentifier: Boolean(workflowPlan.slotExtraction.slots.customer_identifier),
+        customerMessage: enrichedLastMessageContent || '',
     })) {
         try {
             const workflowClassifierStage = await timeOrchestratorStage(
@@ -1490,6 +1672,10 @@ export async function processAutopilotForChat(
                         knowledgeDocuments: scopedStaticKnowledgeDocuments,
                         enabledToolNames,
                         contactSignals: buildIntentClassifierContactSignals(sanitizedContact),
+                        recentToolResults: recentToolResults.map((result) => ({
+                            toolName: result.toolName,
+                            status: result.status,
+                        })),
                         model: process.env.AI_WORKFLOW_CLASSIFIER_MODEL || resolvedAiModel.model,
                         apiKey: workspaceGeminiApiKey,
                         timeoutMs: Number(process.env.AI_WORKFLOW_CLASSIFIER_TIMEOUT_MS || 1800),
@@ -1550,6 +1736,16 @@ export async function processAutopilotForChat(
             });
         }
     }
+    workflowPlan.actions = scopeSgpLookupActionsToFocusedContract(
+        workflowPlan.actions,
+        focusedContractContext,
+        enrichedLastMessageContent || ''
+    );
+    workflowPlan.actions = scopeSgpLookupActionsToAddressedContract(
+        workflowPlan.actions,
+        recentToolResults,
+        enrichedLastMessageContent || ''
+    );
     const workflowPrearmSignal = deriveToolPrearmSignal({
         intentResolution,
         missingSlots: workflowPlan.missingSlots,
@@ -1626,14 +1822,10 @@ export async function processAutopilotForChat(
         if (currentCopilotMode === 'suggest') {
             const { getSupabaseAdmin } = await import('@/lib/supabase');
             const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).send({
-                type: 'broadcast',
-                event: 'ai_suggestion',
-                payload: {
+            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
                     suggestion: deterministicFlowMessage,
                     chatId: chat.id,
                     configName: autopilotConfig.name,
-                },
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -1740,20 +1932,43 @@ export async function processAutopilotForChat(
         return;
     }
 
+    // Pre-load active procedure and compiled procedures early to be used by tool memory and lookup bypasses.
+    const activePEC = await getActiveProcedureExecution(chat.id);
+    const compiledProcedures = compileAllProcedures({
+        documents: scopedStaticKnowledgeDocuments,
+        tools: runtimeToolCatalog,
+        enabledToolNames,
+    });
+    const hasMatchingProcedure = compiledProcedures.length > 0 && matchProcedure({
+        intent: intentResolution.intent,
+        customerMessage: enrichedLastMessageContent || '',
+        compiledProcedures,
+    }) !== null;
+
+    const isTroubleshootingOrSupport =
+        intentResolution.intent === 'troubleshooting' ||
+        intentResolution.intent === 'support_request';
+
+    const shouldBypassToolMemoryResponse =
+        isTroubleshootingOrSupport || activePEC !== null || hasMatchingProcedure;
+
     const recentToolMemoryResponse = shouldAnswerFromRecentToolMemory({
         customerMessage: enrichedLastMessageContent || '',
         intent: intentResolution.intent,
         recentToolResults,
     })
-        ? buildSgpResponseFromToolResults(recentToolResults, enrichedLastMessageContent || '')
+        ? buildSgpResponseFromToolResults(recentToolResults, focusedOperationalContext)
         : null;
 
-    if (recentToolMemoryResponse) {
+    if (recentToolMemoryResponse && !shouldBypassToolMemoryResponse) {
         let finalResponse = formatCustomerFacingAiResponse(recentToolMemoryResponse);
         const responseValidator = validateAutopilotResponse({
             response: finalResponse,
             fallbackReply: autopilotConfig.default_fallback_reply || '',
             customerMessage: enrichedLastMessageContent || '',
+            chatHistory: chatHistoryForAI,
+            continuationRequiredSlots: workflowPlan.missingSlots,
+            completionActions: flowCompletionPlan?.actions,
             intentResolution,
             slotExtraction: workflowPlan.slotExtraction,
             plannedActions: [],
@@ -1763,6 +1978,7 @@ export async function processAutopilotForChat(
             contact: sanitizedContact,
             knowledgeCoverage,
             source: 'workflow_tools',
+            systemAgentName: assignedSystemAgentName,
         });
         await recordOrchestratorEvent({
             run: orchestratorRun,
@@ -1782,14 +1998,10 @@ export async function processAutopilotForChat(
         if (currentCopilotMode === 'suggest') {
             const { getSupabaseAdmin } = await import('@/lib/supabase');
             const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).send({
-                type: 'broadcast',
-                event: 'ai_suggestion',
-                payload: {
+            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
                     suggestion: finalResponse,
                     chatId: chat.id,
                     configName: autopilotConfig.name,
-                },
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -1930,14 +2142,10 @@ export async function processAutopilotForChat(
         if (currentCopilotMode === 'suggest') {
             const { getSupabaseAdmin } = await import('@/lib/supabase');
             const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).send({
-                type: 'broadcast',
-                event: 'ai_suggestion',
-                payload: {
+            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
                     suggestion: finalResponse,
                     chatId: chat.id,
                     configName: autopilotConfig.name,
-                },
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -2026,6 +2234,9 @@ export async function processAutopilotForChat(
             response: finalResponse,
             fallbackReply: autopilotConfig.default_fallback_reply || '',
             customerMessage: enrichedLastMessageContent || '',
+            chatHistory: chatHistoryForAI,
+            continuationRequiredSlots: workflowPlan.missingSlots,
+            completionActions: flowCompletionPlan?.actions,
             intentResolution,
             slotExtraction: workflowPlan.slotExtraction,
             plannedActions: workflowPlan.actions,
@@ -2035,6 +2246,7 @@ export async function processAutopilotForChat(
             contact: sanitizedContact,
             knowledgeCoverage,
             source: 'workflow_direct',
+            systemAgentName: assignedSystemAgentName,
         });
         await recordOrchestratorEvent({
             run: orchestratorRun,
@@ -2092,6 +2304,7 @@ export async function processAutopilotForChat(
                     systemAgentId: assignedSystemAgentId,
                     systemAgentName: assignedSystemAgentName,
                     autopilotConfig,
+                    turnPolicy,
                     customerMessage: enrichedLastMessageContent || '',
                     actions: validatedWorkflowActions,
                     orchestratorRunId: orchestratorRun.id,
@@ -2104,6 +2317,13 @@ export async function processAutopilotForChat(
             );
             orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
             toolResults = toolsStage.value;
+            await sendToolFailureFollowUp({
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                instanceName,
+                toolResults,
+                previousResponse: finalResponse,
+            });
         }
 
         await logIntelligentAttendantResponse({
@@ -2152,6 +2372,54 @@ export async function processAutopilotForChat(
             },
         });
         return;
+    }
+
+    // Check if we should run read-only SGP lookups in pass-through mode
+    // to avoid the static template response loop on troubleshooting / support intents and procedures.
+    const isReadOnlySgpLookupOnly =
+        workflowPlan.actions.length > 0 &&
+        workflowPlan.actions.every(
+            (action) =>
+                action.type === 'sgp_fetch_contact_panel_data' ||
+                action.type === 'sgp_fetch_contracts'
+        );
+
+    const shouldPassThroughReadOnlySgpLookup =
+        workflowPlan.executionMode === 'pre_response_tools' &&
+        isReadOnlySgpLookupOnly &&
+        (activePEC !== null || hasMatchingProcedure || isTroubleshootingOrSupport);
+
+    let passThroughToolResults: AgentToolExecutionResult[] = [];
+    if (shouldPassThroughReadOnlySgpLookup) {
+        console.log(`[PROCEDURE_BYPASS] Running SGP lookup in pass-through mode to avoid static response loop for chat=${chat.id}`);
+        const toolsStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'tool_execution',
+            () => runRequestedAgentToolsWithStatus({
+                workspaceId,
+                chat,
+                contact: sanitizedContact,
+                systemAgentId: assignedSystemAgentId,
+                systemAgentName: assignedSystemAgentName,
+                autopilotConfig,
+                turnPolicy,
+                customerMessage: enrichedLastMessageContent || '',
+                actions: workflowPlan.actions,
+                orchestratorRunId: orchestratorRun.id,
+            }),
+            {
+                requestedActions: workflowPlan.actions.map((action) => action.type),
+                workflowEngine: true,
+                beforeResponse: true,
+            }
+        );
+        orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
+        passThroughToolResults = toolsStage.value;
+        recentToolResults = [...recentToolResults, ...passThroughToolResults];
+
+        // Prevent the static pre_response_tools return by switching to continue_llm
+        workflowPlan.executionMode = 'continue_llm';
+        workflowPlan.actions = [];
     }
 
     if (workflowPlan.executionMode === 'pre_response_tools' && currentCopilotMode === 'auto' && workflowPlan.actions.length > 0) {
@@ -2203,6 +2471,7 @@ export async function processAutopilotForChat(
                 systemAgentId: assignedSystemAgentId,
                 systemAgentName: assignedSystemAgentName,
                 autopilotConfig,
+                turnPolicy,
                 customerMessage: enrichedLastMessageContent || '',
                 actions: workflowPlan.actions,
                 orchestratorRunId: orchestratorRun.id,
@@ -2217,7 +2486,7 @@ export async function processAutopilotForChat(
         let toolResults = toolsStage.value;
         const sgpResponse = buildSgpResponseFromToolResults(
             toolResults,
-            enrichedLastMessageContent || ''
+            focusedOperationalContext
         );
         const toolFailureResponse = buildToolFailureResponse(
             toolResults,
@@ -2233,6 +2502,9 @@ export async function processAutopilotForChat(
             response: finalResponse,
             fallbackReply: autopilotConfig.default_fallback_reply || '',
             customerMessage: enrichedLastMessageContent || '',
+            chatHistory: chatHistoryForAI,
+            continuationRequiredSlots: workflowPlan.missingSlots,
+            completionActions: flowCompletionPlan?.actions,
             intentResolution,
             slotExtraction: workflowPlan.slotExtraction,
             plannedActions: workflowPlan.actions,
@@ -2242,6 +2514,7 @@ export async function processAutopilotForChat(
             contact: sanitizedContact,
             knowledgeCoverage,
             source: 'workflow_tools',
+            systemAgentName: assignedSystemAgentName,
         });
         await recordOrchestratorEvent({
             run: orchestratorRun,
@@ -2282,6 +2555,7 @@ export async function processAutopilotForChat(
                     systemAgentId: assignedSystemAgentId,
                     systemAgentName: assignedSystemAgentName,
                     autopilotConfig,
+                    turnPolicy,
                     customerMessage: enrichedLastMessageContent || '',
                     actions: responseValidator.actions,
                     orchestratorRunId: orchestratorRun.id,
@@ -2294,6 +2568,13 @@ export async function processAutopilotForChat(
             );
             orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + validatorToolsStage.durationMs;
             toolResults = [...toolResults, ...validatorToolsStage.value];
+            await sendToolFailureFollowUp({
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                instanceName,
+                toolResults: validatorToolsStage.value,
+                previousResponse: finalResponse,
+            });
         }
 
         const workflowHadToolFailure = toolResults.some((result) => result.status !== 'success');
@@ -2355,8 +2636,7 @@ export async function processAutopilotForChat(
     // If the PRE handles the message, we return immediately (no LLM call).
     // ═══════════════════════════════════════════════════════════════════════
     try {
-        // 1. Check for active procedure
-        const activePEC = await getActiveProcedureExecution(chat.id);
+        // 1. Re-use preloaded active procedure
         let procedureResult: ProcedureAdvanceResult | null = null;
         let procedureGraph: ProcedureGraph | null = null;
         let procedureContext: ProcedureExecutionContext | null = null;
@@ -2449,16 +2729,12 @@ export async function processAutopilotForChat(
             const compiledProcedures = compileAllProcedures({
                 documents: scopedStaticKnowledgeDocuments,
                 tools: runtimeToolCatalog,
-                enabledToolNames: resolveEnabledToolNames(autopilotConfig),
+                enabledToolNames,
             });
             const graph = compiledProcedures.find((g) => g.id === activePEC.procedureId);
             if (graph) {
                 procedureGraph = graph;
                 procedureContext = activePEC;
-                console.log(
-                    `[PROCEDURE_RUNTIME] Resuming procedure "${activePEC.procedureName}" ` +
-                    `step=${activePEC.currentStepId} for chat=${chat.id}`,
-                );
                 procedureResult = await advanceProcedure({
                     graph,
                     context: activePEC,
@@ -2466,6 +2742,7 @@ export async function processAutopilotForChat(
                     availableTeams: availableTeams.map((t) => ({ id: t.id, name: t.name })),
                     decisionResolver: procedureDecisionResolver,
                     responseResolver: procedureResponseResolver,
+                    forceLlmRespond: isLmStudioModel(resolvedAiModel.model),
                 });
             }
         }
@@ -2475,7 +2752,7 @@ export async function processAutopilotForChat(
             const compiledProcedures = compileAllProcedures({
                 documents: scopedStaticKnowledgeDocuments,
                 tools: runtimeToolCatalog,
-                enabledToolNames: resolveEnabledToolNames(autopilotConfig),
+                enabledToolNames,
             });
 
             if (compiledProcedures.length > 0) {
@@ -2492,6 +2769,13 @@ export async function processAutopilotForChat(
                     );
                     const firstStep = match.graph.steps[0];
                     if (firstStep) {
+                        const initialSlots: Record<string, string> = {};
+                        if (workflowPlan.slotExtraction?.slots) {
+                            for (const [key, val] of Object.entries(workflowPlan.slotExtraction.slots)) {
+                                if (val) initialSlots[key] = String(val);
+                            }
+                        }
+
                         const newPEC = await createProcedureExecution({
                             chatId: chat.id,
                             workspaceId: workspaceId,
@@ -2500,6 +2784,7 @@ export async function processAutopilotForChat(
                             procedureName: match.graph.documentName,
                             currentStepId: firstStep.id,
                             status: 'running',
+                            collectedSlots: initialSlots,
                         });
 
                         if (newPEC) {
@@ -2512,6 +2797,8 @@ export async function processAutopilotForChat(
                                 availableTeams: availableTeams.map((t) => ({ id: t.id, name: t.name })),
                                 decisionResolver: procedureDecisionResolver,
                                 responseResolver: procedureResponseResolver,
+                                forceLlmRespond: isLmStudioModel(resolvedAiModel.model),
+                                priorToolResults: passThroughToolResults,
                             });
                         }
                     }
@@ -2540,6 +2827,7 @@ export async function processAutopilotForChat(
             // back into the same procedure step before replying to the customer.
             let procedureToolCycles = 0;
             const procedureExecutedActions: string[] = [];
+            const procedureToolResults: AgentToolExecutionResult[] = [];
             while (
                 procedureResult.actions.length > 0 &&
                 procedureGraph &&
@@ -2547,11 +2835,29 @@ export async function processAutopilotForChat(
                 procedureToolCycles < 3
             ) {
                 procedureToolCycles += 1;
-                const preToolActions: AgentToolAction[] = procedureResult.actions.map((a) => ({
+                let preToolActions: AgentToolAction[] = procedureResult.actions.map((a) => ({
                     type: a.type as any,
                     reason: a.reason,
                     payload: a.payload,
                 }));
+                preToolActions = scopeSgpLookupActionsToFocusedContract(
+                    preToolActions,
+                    focusedContractContext,
+                    enrichedLastMessageContent || ''
+                );
+                preToolActions = scopeSgpLookupActionsToAddressedContract(
+                    preToolActions,
+                    [...recentToolResults, ...procedureToolResults],
+                    enrichedLastMessageContent || ''
+                );
+                preToolActions = hydrateFindRouterByIpActionsFromSgpResults({
+                    actions: preToolActions,
+                    toolResults: [...recentToolResults, ...procedureToolResults],
+                    contextText: [
+                        focusedContractContext,
+                        enrichedLastMessageContent || '',
+                    ].filter(Boolean).join('\n'),
+                });
                 procedureExecutedActions.push(...preToolActions.map((action) => action.type));
 
                 const preToolStage = await timeOrchestratorStage(
@@ -2564,6 +2870,7 @@ export async function processAutopilotForChat(
                         systemAgentId: assignedSystemAgentId,
                         systemAgentName: assignedSystemAgentName,
                         autopilotConfig,
+                        turnPolicy,
                         customerMessage: enrichedLastMessageContent || '',
                         actions: preToolActions,
                         orchestratorRunId: orchestratorRun?.id,
@@ -2575,12 +2882,50 @@ export async function processAutopilotForChat(
                 );
                 orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + preToolStage.durationMs;
                 const preToolResults = preToolStage.value;
+                procedureToolResults.push(...preToolResults);
 
                 if (preToolResults.length > 0) {
                     console.log(
                         `[PROCEDURE_RUNTIME] Executed ${preToolResults.length} tool(s): ` +
                         preToolResults.map((r) => `${r.toolName}=${r.status}`).join(', '),
                     );
+                }
+
+                if (preToolResults.some((result) => (
+                    result.toolName === 'transfer_chat' && result.status === 'success'
+                ))) {
+                    procedureResult = {
+                        ...procedureResult,
+                        actions: [],
+                        status: 'completed',
+                        completionReason: 'Atendimento transferido com sucesso.',
+                    };
+                    break;
+                }
+
+                const preToolFailureResponse = buildToolFailureResponse(preToolResults, '');
+                if (preToolFailureResponse) {
+                    const waitsForCustomerConfirmation = preToolResults.some((result) => (
+                        result.status === 'rejected' &&
+                        result.error?.includes('[tool_policy:confirmation_required]')
+                    ));
+                    if (waitsForCustomerConfirmation) {
+                        procedureContext.status = 'waiting_input';
+                        await saveProcedureExecution(procedureContext);
+                    } else {
+                        await completeProcedureExecution(procedureContext.id, 'failed');
+                    }
+                    procedureResult = {
+                        ...procedureResult,
+                        response: preToolFailureResponse,
+                        actions: [],
+                        status: waitsForCustomerConfirmation ? 'waiting_input' : 'failed',
+                        completionReason: preToolResults
+                            .filter((result) => result.status !== 'success')
+                            .map((result) => result.error || `${result.toolName} falhou`)
+                            .join('; '),
+                    };
+                    break;
                 }
 
                 procedureResult = await advanceProcedure({
@@ -2591,6 +2936,7 @@ export async function processAutopilotForChat(
                     toolResults: preToolResults,
                     decisionResolver: procedureDecisionResolver,
                     responseResolver: procedureResponseResolver,
+                    forceLlmRespond: isLmStudioModel(resolvedAiModel.model),
                 });
             }
 
@@ -2601,14 +2947,10 @@ export async function processAutopilotForChat(
                 if (currentCopilotMode === 'suggest') {
                     const { getSupabaseAdmin } = await import('@/lib/supabase');
                     const supabase = getSupabaseAdmin();
-                    await supabase.channel(`chat:${chat.id}`).send({
-                        type: 'broadcast',
-                        event: 'ai_suggestion',
-                        payload: {
+                    await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
                             suggestion: finalResponse,
                             chatId: chat.id,
                             configName: autopilotConfig.name,
-                        },
                     });
                 } else {
                     await sendMultiBlockResponse(chat.id, finalResponse, assignedSystemAgentId, true, instanceName);
@@ -2641,7 +2983,7 @@ export async function processAutopilotForChat(
             }
 
             const shouldFallThroughToLlm =
-                procedureResult.status === 'completed' &&
+                (procedureResult.status === 'completed' || procedureResult.status === 'running') &&
                 !procedureResult.response &&
                 procedureResult.actions.length === 0;
 
@@ -2721,7 +3063,7 @@ export async function processAutopilotForChat(
             model: resolvedAiModel.model,
             contact: sanitizedContact,
             workspaceGeminiApiKey,
-            enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
+            enabledAgentToolsDescription: buildEnabledAgentToolsDescription(enabledToolNames, runtimeToolCatalog, turnPolicy.toolInstructionsByName),
             enabledAgentToolNames: enabledToolNames,
             knowledgeToolProcedures,
             intentContext: intentContextForAI,
@@ -2742,9 +3084,31 @@ export async function processAutopilotForChat(
 
         if (result?.response) {
             let finalResponse = result.response;
-            let aiMessageBlocks: string[] | null = (result as any).messageBlocks?.length > 1
-                ? (result as any).messageBlocks as string[]
-                : null;
+            let aiMessageBlocks: string[] | null = null;
+            if (Array.isArray((result as any).messageBlocks) && (result as any).messageBlocks.length > 0) {
+                const rawBlocks = ((result as any).messageBlocks as string[]).map(b => b.trim()).filter(Boolean);
+                if (rawBlocks.length > 0) {
+                    const firstBlock = rawBlocks[0];
+                    const cleanedResponse = finalResponse.trim();
+                    const responseContainsBlocks = rawBlocks.every(block =>
+                        cleanedResponse.toLowerCase().includes(block.toLowerCase())
+                    );
+
+                    let reconciledBlocks = [...rawBlocks];
+                    if (!responseContainsBlocks) {
+                        if (cleanedResponse && !firstBlock.toLowerCase().includes(cleanedResponse.toLowerCase()) && !cleanedResponse.toLowerCase().includes(firstBlock.toLowerCase())) {
+                            reconciledBlocks.unshift(cleanedResponse);
+                        }
+                    }
+
+                    if (reconciledBlocks.length > 1) {
+                        aiMessageBlocks = reconciledBlocks;
+                        if (!responseContainsBlocks) {
+                            finalResponse = reconciledBlocks.join('\n\n');
+                        }
+                    }
+                }
+            }
             let webhookExecution: Awaited<ReturnType<typeof executeTriggeredWebhookRule>> | null = null;
             const triggeredRule = result.triggeredRule
                 ? activeRules.find((rule) => rule.name === result.triggeredRule)
@@ -2782,14 +3146,10 @@ export async function processAutopilotForChat(
                 console.log(`[AUTOPILOT_SERVICE] Modo sugestao - enviando para agente: ${finalResponse.substring(0, 50)}...`);
                 const { getSupabaseAdmin } = await import('@/lib/supabase');
                 const supabase = getSupabaseAdmin();
-                await supabase.channel(`chat:${chat.id}`).send({
-                    type: 'broadcast',
-                    event: 'ai_suggestion',
-                    payload: {
+                await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
                         suggestion: finalResponse,
                         chatId: chat.id,
                         configName: autopilotConfig.name
-                    }
                 });
                 await logIntelligentAttendantResponse({
                     configId: autopilotConfig.id,
@@ -2867,19 +3227,58 @@ export async function processAutopilotForChat(
                     actions: normalizeAgentActions(result.actions),
                     enabledToolNames,
                 });
-                const llmActions = ensureProcedureSgpLookupAction({
+                let llmActions = scopeSgpLookupActionsToFocusedContract(ensureProcedureSgpLookupAction({
                     response: finalResponse,
                     customerMessage: enrichedLastMessageContent || '',
                     actions: promisedLookupActions,
                     enabledToolNames,
                     knowledgeToolProcedures,
+                }), focusedContractContext, enrichedLastMessageContent || '');
+                llmActions = scopeSgpLookupActionsToAddressedContract(
+                    llmActions,
+                    recentToolResults,
+                    enrichedLastMessageContent || ''
+                );
+                const resourceMappedActions = await mapAgentToolActionsToResources({
+                    workspaceId,
+                    customerMessage: enrichedLastMessageContent || '',
+                    chatHistory: chatHistoryForAI,
+                    contact: sanitizedContact,
+                    slotExtraction: workflowPlan.slotExtraction,
+                    actions: mergeAgentActions(deterministicRouting.actions, workflowPlannedActions, llmActions),
+                    enabledToolNames,
+                    inferCrmUpdateFromSlots: true,
                 });
+                if (resourceMappedActions.mappings.length > 0) {
+                    await recordOrchestratorEvent({
+                        run: orchestratorRun,
+                        kind: 'resource_mapper',
+                        status: resourceMappedActions.mappings.some((mapping) => mapping.status === 'mapped' || mapping.status === 'partial') ? 'success' : 'fallback',
+                        payload: {
+                            resources: resourceMappedActions.mappings.map((mapping) => ({
+                                resource: mapping.resource,
+                                operation: mapping.operation,
+                                status: mapping.status,
+                                mappedFields: mapping.mappings.map((item) => ({
+                                    fieldId: item.fieldId,
+                                    fieldLabel: item.fieldLabel,
+                                    slot: item.slot,
+                                    confidence: item.confidence,
+                                    source: item.source,
+                                    reason: item.reason,
+                                })),
+                                rejected: mapping.rejected.slice(0, 8),
+                            })),
+                        },
+                    });
+                }
+
                 const toolPlanner = planAutopilotTools({
                     response: finalResponse,
                     customerMessage: enrichedLastMessageContent || '',
                     intentResolution,
                     slotExtraction: workflowPlan.slotExtraction,
-                    actions: mergeAgentActions(deterministicRouting.actions, workflowPlannedActions, llmActions),
+                    actions: resourceMappedActions.actions,
                     enabledToolNames,
                     toolCatalog: runtimeToolCatalog,
                     availableTeams,
@@ -2939,12 +3338,15 @@ export async function processAutopilotForChat(
                     });
                 }
 
-                const requestedActions = filterImplicitTransferActions({
-                    actions: toolPlanner.actions,
-                    customerMessage: enrichedLastMessageContent || '',
-                    availableTeams,
-                    candidates: deterministicRouting.candidates,
-                });
+                const requestedActions = filterAlreadyExecutedActions(
+                    filterImplicitTransferActions({
+                        actions: toolPlanner.actions,
+                        customerMessage: enrichedLastMessageContent || '',
+                        availableTeams,
+                        candidates: deterministicRouting.candidates,
+                    }),
+                    passThroughToolResults
+                );
                 const preResponseActions = requestedActions
                     .filter(isPreResponseDataAction)
                     .sort((left, right) => {
@@ -2966,6 +3368,7 @@ export async function processAutopilotForChat(
                             systemAgentId: assignedSystemAgentId,
                             systemAgentName: assignedSystemAgentName,
                             autopilotConfig,
+                            turnPolicy,
                             customerMessage: enrichedLastMessageContent || '',
                             actions: preResponseActions,
                             orchestratorRunId: orchestratorRun.id,
@@ -2979,6 +3382,7 @@ export async function processAutopilotForChat(
                         toolResults,
                         customerMessage: enrichedLastMessageContent || '',
                         response: finalResponse,
+                        chatHistory: focusedContractContext,
                         knowledgeToolProcedures,
                     });
 
@@ -2993,6 +3397,7 @@ export async function processAutopilotForChat(
                                 systemAgentId: assignedSystemAgentId,
                                 systemAgentName: assignedSystemAgentName,
                                 autopilotConfig,
+                                turnPolicy,
                                 customerMessage: enrichedLastMessageContent || '',
                                 actions: [deterministicProcedureAction],
                                 orchestratorRunId: orchestratorRun.id,
@@ -3037,7 +3442,7 @@ export async function processAutopilotForChat(
                                     model: resolvedAiModel.model,
                                     contact: sanitizedContact,
                                     workspaceGeminiApiKey,
-                                    enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
+                                    enabledAgentToolsDescription: buildEnabledAgentToolsDescription(enabledToolNames, runtimeToolCatalog, turnPolicy.toolInstructionsByName),
                                     enabledAgentToolNames: enabledToolNames,
                                     allowNativeLmStudioToolCalls: false,
                                     knowledgeToolProcedures,
@@ -3072,6 +3477,7 @@ export async function processAutopilotForChat(
                                         systemAgentId: assignedSystemAgentId,
                                         systemAgentName: assignedSystemAgentName,
                                         autopilotConfig,
+                                        turnPolicy,
                                         customerMessage: enrichedLastMessageContent || '',
                                         actions: continuationActions,
                                         orchestratorRunId: orchestratorRun.id,
@@ -3097,17 +3503,9 @@ export async function processAutopilotForChat(
                         }
                     }
 
-                    const sgpResponse = buildSgpResponseFromToolResults(
-                        toolResults,
-                        `${enrichedLastMessageContent || ''}\n${finalResponse || ''}`
-                    );
-                    if (sgpResponse) {
-                        console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${chat.id} sgp_response_mapped=true`);
-                        finalResponse = formatCustomerFacingAiResponse(sgpResponse);
-                        aiMessageBlocks = null; // Tool response overrode AI blocks
-                    } else {
-                        console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${chat.id} sgp_response_mapped=false`);
-                    }
+                    // SGP tool mapping unconditional override is disabled so the configured agent can formulate a natural response.
+                    // The deterministic SGP response builder remains active in response-validator.ts as a safe guardrail/fallback.
+                    const sgpResponse = null;
                     const mcpResponse = buildMcpCustomerResponseFromToolResults(toolResults) ||
                         buildMcpResponseFromToolResults(toolResults);
                     if (mcpResponse) {
@@ -3164,7 +3562,7 @@ export async function processAutopilotForChat(
                                     model: resolvedAiModel.model,
                                     contact: sanitizedContact,
                                     workspaceGeminiApiKey,
-                                    enabledAgentToolsDescription: buildEnabledAgentToolsDescription(autopilotConfig, runtimeToolCatalog),
+                                    enabledAgentToolsDescription: buildEnabledAgentToolsDescription(enabledToolNames, runtimeToolCatalog, turnPolicy.toolInstructionsByName),
                                     enabledAgentToolNames: enabledToolNames,
                                     allowNativeLmStudioToolCalls: false,
                                     knowledgeToolProcedures,
@@ -3208,6 +3606,9 @@ export async function processAutopilotForChat(
                     response: finalResponse,
                     fallbackReply: autopilotConfig.default_fallback_reply || '',
                     customerMessage: enrichedLastMessageContent || '',
+                    chatHistory: chatHistoryForAI,
+                    continuationRequiredSlots: workflowPlan.missingSlots,
+                    completionActions: flowCompletionPlan?.actions,
                     intentResolution,
                     slotExtraction: workflowPlan.slotExtraction,
                     plannedActions: requestedActions,
@@ -3218,6 +3619,7 @@ export async function processAutopilotForChat(
                     knowledgeCoverage,
                     knowledgeDocuments: promptKnowledgeDocuments,
                     source: 'llm',
+                    systemAgentName: assignedSystemAgentName,
                 });
                 await recordOrchestratorEvent({
                     run: orchestratorRun,
@@ -3263,6 +3665,7 @@ export async function processAutopilotForChat(
                         systemAgentId: assignedSystemAgentId,
                         systemAgentName: assignedSystemAgentName,
                         autopilotConfig,
+                        turnPolicy,
                         customerMessage: enrichedLastMessageContent || '',
                         actions: finalPostResponseActions,
                         orchestratorRunId: orchestratorRun.id,
@@ -3271,6 +3674,13 @@ export async function processAutopilotForChat(
                 );
                 orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
                 toolResults = [...toolResults, ...toolsStage.value];
+                await sendToolFailureFollowUp({
+                    chatId: chat.id,
+                    systemAgentId: assignedSystemAgentId,
+                    instanceName,
+                    toolResults: toolsStage.value,
+                    previousResponse: finalResponse,
+                });
                 await logIntelligentAttendantResponse({
                     configId: autopilotConfig.id,
                     chatId: chat.id,
@@ -3316,12 +3726,46 @@ export async function processAutopilotForChat(
             }
         } else {
             console.log('[AUTOPILOT_SERVICE] Nenhuma resposta gerada.');
+            const emptyResponseResourceMappedActions = await mapAgentToolActionsToResources({
+                workspaceId,
+                customerMessage: enrichedLastMessageContent || '',
+                chatHistory: chatHistoryForAI,
+                contact: sanitizedContact,
+                slotExtraction: workflowPlan.slotExtraction,
+                actions: mergeAgentActions(deterministicRouting.actions, workflowPlannedActions, normalizeAgentActions(result?.actions)),
+                enabledToolNames,
+                inferCrmUpdateFromSlots: true,
+            });
+            if (emptyResponseResourceMappedActions.mappings.length > 0) {
+                await recordOrchestratorEvent({
+                    run: orchestratorRun,
+                    kind: 'resource_mapper',
+                    status: emptyResponseResourceMappedActions.mappings.some((mapping) => mapping.status === 'mapped' || mapping.status === 'partial') ? 'success' : 'fallback',
+                    payload: {
+                        emptyResponse: true,
+                        resources: emptyResponseResourceMappedActions.mappings.map((mapping) => ({
+                            resource: mapping.resource,
+                            operation: mapping.operation,
+                            status: mapping.status,
+                            mappedFields: mapping.mappings.map((item) => ({
+                                fieldId: item.fieldId,
+                                fieldLabel: item.fieldLabel,
+                                slot: item.slot,
+                                confidence: item.confidence,
+                                source: item.source,
+                                reason: item.reason,
+                            })),
+                            rejected: mapping.rejected.slice(0, 8),
+                        })),
+                    },
+                });
+            }
             const emptyResponseToolPlanner = planAutopilotTools({
                 response: null,
                 customerMessage: enrichedLastMessageContent || '',
                 intentResolution,
                 slotExtraction: workflowPlan.slotExtraction,
-                actions: mergeAgentActions(deterministicRouting.actions, workflowPlannedActions, normalizeAgentActions(result?.actions)),
+                actions: emptyResponseResourceMappedActions.actions,
                 enabledToolNames,
                 toolCatalog: runtimeToolCatalog,
                 availableTeams,
@@ -3355,6 +3799,7 @@ export async function processAutopilotForChat(
                         systemAgentId: assignedSystemAgentId,
                         systemAgentName: assignedSystemAgentName,
                         autopilotConfig,
+                        turnPolicy,
                         customerMessage: enrichedLastMessageContent || '',
                         actions: fallbackActions,
                         orchestratorRunId: orchestratorRun.id,
@@ -3362,14 +3807,36 @@ export async function processAutopilotForChat(
                     { requestedActions: fallbackActions.map((action) => action.type), noLlmResponse: true }
                 )).value
                 : [];
+            const emptyResponseFallback = currentCopilotMode === 'auto'
+                ? formatCustomerFacingAiResponse(
+                    buildToolFailureResponse(toolResults, '') ||
+                    autopilotConfig.default_fallback_reply?.trim() ||
+                    'Estou com uma instabilidade para responder agora. Nossa equipe vai acompanhar por aqui.'
+                )
+                : null;
+            if (emptyResponseFallback) {
+                const fallbackSendStage = await timeOrchestratorStage(
+                    orchestratorRun,
+                    'message_send',
+                    () => sendMultiBlockResponse(
+                        chat.id,
+                        emptyResponseFallback,
+                        assignedSystemAgentId,
+                        true,
+                        instanceName
+                    ),
+                    { responseLength: emptyResponseFallback.length, fallbackReason: 'empty_llm_response' }
+                );
+                orchestratorTimings.send_ms = fallbackSendStage.durationMs;
+            }
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
                 chatId: chat.id,
                 systemAgentId: assignedSystemAgentId,
                 modelName: resolvedAiModel.model,
                 customerMessage: enrichedLastMessageContent || '',
-                response: null,
-                status: 'empty',
+                response: emptyResponseFallback,
+                status: emptyResponseFallback ? 'sent' : 'empty',
                 triggeredRule: result?.triggeredRule || null,
                 metadata: {
                     ...(deterministicRouting.matchedReason ? { deterministicRouting: deterministicRouting.matchedReason } : {}),
@@ -3384,13 +3851,13 @@ export async function processAutopilotForChat(
             });
             await finishOrchestratorRun({
                 run: orchestratorRun,
-                status: toolResults.length > 0 ? 'success' : 'fallback',
+                status: 'fallback',
                 timings: orchestratorTimings,
                 intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : intentResolution.intent,
                 confidenceLevel: deterministicRouting.matchedReason ? 'deterministic' : 'low',
                 confidenceScore: deterministicRouting.matchedReason ? null : intentResolution.confidence,
                 metadata: {
-                    responseSent: false,
+                    responseSent: Boolean(emptyResponseFallback),
                     toolCount: toolResults.length,
                     deterministicRouting: deterministicRouting.matchedReason,
                     toolPlanner: emptyResponseToolPlanner.metadata,
@@ -3417,7 +3884,7 @@ export async function processAutopilotForChat(
                 const sendStage = await timeOrchestratorStage(
                     orchestratorRun,
                     'message_send',
-                    () => sendAutomatedMessageAction(
+                    () => sendMultiBlockResponse(
                         chat.id,
                         automaticFallback,
                         assignedSystemAgentId,

@@ -224,16 +224,37 @@ function buildMissingSlotsPrompt(slots: string[]): string {
   return `Para seguir, me informe: ${labels.join(', ')}.`;
 }
 
-function executeGatherDataStep(
+async function executeGatherDataStep(
   step: ProcedureStep,
   customerMessage: string,
   context: ProcedureExecutionContext,
   isResuming: boolean,
-): StepResult {
+  responseResolver?: ProcedureResponseResolver,
+  forceLlmRespond?: boolean,
+): Promise<StepResult> {
+  const missing = missingRequiredSlots(step.requiredSlots, context);
+  if (missing.length === 0) {
+    return { status: 'continue' };
+  }
+
   if (!isResuming) {
     const prompt = step.promptTemplate
       ? interpolate(step.promptTemplate, context)
-      : buildMissingSlotsPrompt(missingRequiredSlots(step.requiredSlots, context));
+      : buildMissingSlotsPrompt(missing);
+
+    if (forceLlmRespond && responseResolver) {
+      const resolved = await responseResolver({
+        step,
+        context,
+        customerMessage,
+        prompt: `Por favor, solicite de forma empática e profissional os seguintes dados do cliente que estão faltando: ${missing.join(', ')}. Contexto operacional: ${prompt}`,
+        toolResults: getAllToolResults(context),
+      });
+      if (resolved) {
+        return { status: 'pause', response: resolved };
+      }
+    }
+
     return { status: 'pause', response: prompt };
   }
 
@@ -256,6 +277,22 @@ function executeGatherDataStep(
   if (missingAfterExtraction.includes('customer_identifier')) {
     const invalidIdentifier = extraction.invalidSlots.find((slot) => slot.name === 'customer_identifier');
     if (invalidIdentifier) {
+      if (forceLlmRespond && responseResolver) {
+        const resolved = await responseResolver({
+          step,
+          context,
+          customerMessage,
+          prompt: `Informe ao cliente com empatia que o CPF/CNPJ digitado é inválido e peça para ele digitar novamente.`,
+          toolResults: getAllToolResults(context),
+        });
+        if (resolved) {
+          return {
+            status: 'pause',
+            response: resolved,
+            slotCollected: collected,
+          };
+        }
+      }
       return {
         status: 'pause',
         response: 'O CPF/CNPJ informado parece invalido. Pode enviar novamente, por favor?',
@@ -273,11 +310,30 @@ function executeGatherDataStep(
 
   const stillMissing = missingBefore.filter((slot) => !collected[slot] && !context.collectedSlots[slot]);
   if (stillMissing.length > 0) {
+    const prompt = step.promptTemplate
+      ? interpolate(step.promptTemplate, context)
+      : buildMissingSlotsPrompt(stillMissing);
+
+    if (forceLlmRespond && responseResolver) {
+      const resolved = await responseResolver({
+        step,
+        context,
+        customerMessage,
+        prompt: `Solicite de forma empática e profissional os seguintes dados que continuam ausentes: ${stillMissing.join(', ')}. Contexto operacional: ${prompt}`,
+        toolResults: getAllToolResults(context),
+      });
+      if (resolved) {
+        return {
+          status: 'pause',
+          response: resolved,
+          slotCollected: collected,
+        };
+      }
+    }
+
     return {
       status: 'pause',
-      response: step.promptTemplate
-        ? interpolate(step.promptTemplate, context)
-        : buildMissingSlotsPrompt(stillMissing),
+      response: prompt,
       slotCollected: collected,
     };
   }
@@ -294,7 +350,11 @@ function executeToolCallStep(
     return { status: 'error', error: 'Passo de tool_call sem toolName definido.' };
   }
 
-  if (step.toolName === 'close_chat' && !isConversationCloseRequest(customerMessage)) {
+  if (
+    step.toolName === 'close_chat' &&
+    !isConversationCloseRequest(customerMessage) &&
+    !stepAllowsProcedureDrivenClose(step)
+  ) {
     return {
       status: 'complete',
       output: {
@@ -309,9 +369,30 @@ function executeToolCallStep(
     return { status: 'continue', output: existingResults };
   }
 
+  if (
+    step.toolName === 'sgp_fetch_contact_panel_data' ||
+    step.toolName === 'sgp_fetch_contracts'
+  ) {
+    const reusableResults = getAllToolResults(context).filter((result) => (
+      result.toolName === step.toolName && result.status === 'success'
+    ));
+    if (reusableResults.length > 0) {
+      return {
+        status: 'continue',
+        output: {
+          reused: true,
+          toolName: step.toolName,
+        },
+      };
+    }
+  }
+
   const payload: Record<string, unknown> = {};
   for (const [key, template] of Object.entries(step.toolPayloadTemplate || {})) {
     payload[key] = interpolate(template, context);
+  }
+  if (step.toolName === 'add_internal_note' && !String(payload.content || '').trim()) {
+    payload.content = `Procedimento "${context.procedureName}": ${step.label}`;
   }
 
   const action: AgentToolAction = step.toolName.startsWith('mcp:')
@@ -330,6 +411,28 @@ function executeToolCallStep(
     };
 
   return { status: 'wait_tool', action };
+}
+
+function stepAllowsProcedureDrivenClose(step: ProcedureStep): boolean {
+  const text = [
+    step.id,
+    step.label,
+    step.promptTemplate || '',
+    step.responseTemplate || '',
+    step.condition || '',
+  ].join('\n')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (/\bquando\s+o\s+cliente\s+pedir\b|\bcliente\s+pedir\s+para\s+encerrar\b/.test(text)) {
+    return false;
+  }
+
+  return (
+    /\b(fim|final|finalizacao|conclusao|concluid|encerramento\s+automatico|apos\s+concluir|depois\s+de\s+concluir)\b/.test(text) &&
+    /\b(atendimento|chat|conversa|fluxo|procedimento)\b/.test(text)
+  );
 }
 
 function evaluateValidation(
@@ -418,12 +521,13 @@ async function executeRespondStep(
   context: ProcedureExecutionContext,
   customerMessage: string,
   responseResolver?: ProcedureResponseResolver,
+  forceLlmRespond?: boolean,
 ): Promise<StepResult> {
   const templateResponse = step.responseTemplate
     ? interpolate(step.responseTemplate, context)
     : '';
 
-  if (step.useLlm && responseResolver) {
+  if ((step.useLlm || forceLlmRespond) && responseResolver) {
     const resolved = await responseResolver({
       step,
       context,
@@ -440,15 +544,33 @@ async function executeRespondStep(
 function executeHandoffStep(
   step: ProcedureStep,
   context: ProcedureExecutionContext,
+  availableTeams: Array<{ id: string; name: string }> = [],
 ): StepResult {
   const reason = step.handoffReason || 'Procedimento requer atendimento humano.';
+  const normalizedReason = normalizeText(reason);
+  const targetTeam = availableTeams.find((team) => (
+    normalizeText(team.name).length >= 3 &&
+    normalizedReason.includes(normalizeText(team.name))
+  ));
+
+  if (!targetTeam) {
+    return {
+      status: 'complete',
+      response: 'Nao consegui concluir automaticamente. Sera necessario que a equipe responsavel continue a verificacao.',
+      output: {
+        skipped: true,
+        reason: 'Handoff sem equipe de destino explicita.',
+      },
+    };
+  }
+
   return {
     status: 'complete',
     response: interpolate(reason, context),
     action: {
       type: 'transfer_chat',
       reason: `Procedure handoff: ${step.label}`,
-      payload: {},
+      payload: { teamId: targetTeam.id },
     },
   };
 }
@@ -459,8 +581,10 @@ export async function advanceProcedure(input: {
   customerMessage: string;
   availableTeams?: Array<{ id: string; name: string }>;
   toolResults?: AgentToolExecutionResult[];
+  priorToolResults?: AgentToolExecutionResult[];
   decisionResolver?: ProcedureDecisionResolver;
   responseResolver?: ProcedureResponseResolver;
+  forceLlmRespond?: boolean;
 }): Promise<ProcedureAdvanceResult> {
   const { graph, context, customerMessage } = input;
   const executedSteps: string[] = [];
@@ -472,6 +596,10 @@ export async function advanceProcedure(input: {
   if (input.toolResults?.length) {
     context.toolResults = context.toolResults || {};
     context.toolResults[context.currentStepId] = input.toolResults;
+  }
+  if (input.priorToolResults?.length) {
+    context.toolResults = context.toolResults || {};
+    context.toolResults.__recent = input.priorToolResults;
   }
 
   context.status = 'running';
@@ -503,7 +631,14 @@ export async function advanceProcedure(input: {
     try {
       switch (currentStep.type) {
         case 'gather_data':
-          result = executeGatherDataStep(currentStep, customerMessage, context, isResuming);
+          result = await executeGatherDataStep(
+            currentStep,
+            customerMessage,
+            context,
+            isResuming,
+            input.responseResolver,
+            input.forceLlmRespond
+          );
           break;
         case 'tool_call':
           result = executeToolCallStep(currentStep, context, customerMessage);
@@ -515,10 +650,16 @@ export async function advanceProcedure(input: {
           result = await executeDecideStep(currentStep, context, customerMessage, input.decisionResolver);
           break;
         case 'respond':
-          result = await executeRespondStep(currentStep, context, customerMessage, input.responseResolver);
+          result = await executeRespondStep(
+            currentStep,
+            context,
+            customerMessage,
+            input.responseResolver,
+            input.forceLlmRespond
+          );
           break;
         case 'handoff':
-          result = executeHandoffStep(currentStep, context);
+          result = executeHandoffStep(currentStep, context, input.availableTeams);
           break;
         default:
           result = { status: 'error', error: `Tipo de passo desconhecido: ${(currentStep as ProcedureStep).type}` };

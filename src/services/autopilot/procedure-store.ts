@@ -13,47 +13,58 @@ import type {
   ProcedureExecutionStatus,
   StepExecutionRecord,
 } from './procedure-types';
+import { compactToolOutputForContinuation } from './runtime/tool-memory';
+
+function redactProcedureExecutionValue(value: unknown, key = ''): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactProcedureExecutionValue(item, key));
+  if (!value || typeof value !== 'object') {
+    if (/cpf|cnpj|document/i.test(key) && typeof value === 'string') {
+      const digits = value.replace(/\D/g, '');
+      return digits.length >= 4 ? `***${digits.slice(-4)}` : '***';
+    }
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([nestedKey]) => !/^(pixCode|barcode|digitableLine|paymentLink|ip|ipv6|login|addressLabel|customerName)$/i.test(nestedKey))
+      .map(([nestedKey, nested]) => [nestedKey, redactProcedureExecutionValue(nested, nestedKey)]),
+  );
+}
+
+function compactProcedureExecutionValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(compactProcedureExecutionValue);
+  if (!value || typeof value !== 'object') return value;
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.toolName === 'string' &&
+    typeof record.status === 'string' &&
+    record.input &&
+    typeof record.input === 'object'
+  ) {
+    return redactProcedureExecutionValue({
+      toolName: record.toolName,
+      status: record.status,
+      input: record.input,
+      ...(record.error ? { error: record.error } : {}),
+      ...(record.output
+        ? { output: compactToolOutputForContinuation(record as any) }
+        : {}),
+    });
+  }
+
+  return redactProcedureExecutionValue(Object.fromEntries(
+    Object.entries(record).map(([key, nested]) => [key, compactProcedureExecutionValue(nested)]),
+  ));
+}
 
 // ---------------------------------------------------------------------------
 // Schema guard — the table might not exist until migration runs
 // ---------------------------------------------------------------------------
 
-let tableVerified = false;
-
 async function ensureTable(): Promise<boolean> {
-  if (tableVerified) return true;
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS procedure_executions (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        workspace_id UUID NOT NULL,
-        chat_id UUID NOT NULL,
-        system_agent_id UUID,
-        procedure_id TEXT NOT NULL,
-        procedure_name TEXT NOT NULL,
-        current_step_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'running',
-        collected_slots JSONB DEFAULT '{}'::jsonb,
-        tool_results JSONB DEFAULT '{}'::jsonb,
-        decisions JSONB DEFAULT '{}'::jsonb,
-        retry_count JSONB DEFAULT '{}'::jsonb,
-        step_history JSONB DEFAULT '[]'::jsonb,
-        started_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        completed_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_procedure_executions_chat
-        ON procedure_executions(chat_id, status);
-      CREATE INDEX IF NOT EXISTS idx_procedure_executions_workspace
-        ON procedure_executions(workspace_id, status);
-    `);
-    tableVerified = true;
-    return true;
-  } catch (error) {
-    console.warn('[PROCEDURE_STORE] Could not ensure table:', error);
-    return false;
-  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,10 +166,10 @@ export async function saveProcedureExecution(
         context.currentStepId,
         context.status,
         JSON.stringify(context.collectedSlots),
-        JSON.stringify(context.toolResults),
+        JSON.stringify(compactProcedureExecutionValue(context.toolResults)),
         JSON.stringify(context.decisions),
         JSON.stringify(context.retryCount),
-        JSON.stringify(context.stepHistory),
+        JSON.stringify(compactProcedureExecutionValue(context.stepHistory)),
         context.completedAt || null,
         context.id,
       ],

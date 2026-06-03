@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
+import { redactSensitiveLogValue } from '@/lib/observability/redaction';
 
 export async function auditAgentToolExecution(
   context: AgentToolRuntimeContext,
@@ -27,8 +28,8 @@ export async function auditAgentToolExecution(
         context.autopilotConfig.id,
         result.toolName,
         result.status,
-        JSON.stringify(inputOverride || result.input),
-        result.output ? JSON.stringify(result.output) : null,
+        JSON.stringify(redactSensitiveLogValue(inputOverride || result.input)),
+        result.output ? JSON.stringify(redactSensitiveLogValue(result.output)) : null,
         result.error || null,
       ]
     );

@@ -5,7 +5,7 @@ module.prototype.require = function (id) {
   if (id === 'server-only') {
     return {};
   }
-  return originalRequire.apply(this, arguments);
+  return originalRequire.call(this, id);
 };
 
 import { Pool } from 'pg';

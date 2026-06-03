@@ -70,6 +70,24 @@ describe('resolveClientMediaUrl', () => {
     expect(resolveClientMediaUrl(input, { kind: 'image' })).toBe(input);
   });
 
+  it('converts a raw whatsapp jpeg thumbnail into a data url', async () => {
+    const { resolveClientMediaUrl } = await import('../src/lib/storage-url');
+
+    const input = '/9j/4AAQSkZJRgABAQAAAQABAAD';
+
+    expect(resolveClientMediaUrl(input, { kind: 'image' })).toBe(
+      `data:image/jpeg;base64,${input}`
+    );
+  });
+
+  it('keeps an existing thumbnail data url unchanged', async () => {
+    const { resolveClientMediaUrl } = await import('../src/lib/storage-url');
+
+    const input = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD';
+
+    expect(resolveClientMediaUrl(input, { kind: 'image' })).toBe(input);
+  });
+
   it('builds an absolute app url from a relative proxy path', async () => {
     vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dialogy.klyraai.com.br');
     const { toAbsoluteAppUrl } = await import('../src/lib/storage-url');

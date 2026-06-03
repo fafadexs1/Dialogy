@@ -23,6 +23,7 @@ import { enqueueAiAutopilotProcess, enqueueAiCaseMemoryRefresh, shouldEnqueueJob
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import { requireWorkspaceAccess } from '@/server/inbox/access';
 import { loadContactThreadContext } from '@/server/inbox/contact-thread-service';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -81,7 +82,8 @@ export const assignChatToSelfAction = withDebug(
                      is_autopilot_active = FALSE,
                      copilot_mode = 'off',
                      status = 'atendimentos',
-                     assigned_at = clock_timestamp()
+                     assigned_at = clock_timestamp(),
+                     updated_at = clock_timestamp()
                  WHERE id = $2 AND status = 'gerais'
                  RETURNING workspace_id`,
                 [currentAgentId, chatId]
@@ -105,6 +107,7 @@ export const assignChatToSelfAction = withDebug(
             );
 
             await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'assign_chat');
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
             console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
 
             // Fetch updated chat with full details (tags, colors) to return to frontend
@@ -239,7 +242,7 @@ export const transferChatAction = withDebug(
                     [teamId, workspaceId]
                 );
 
-                if (teamStatusRes.rowCount > 0) {
+                if ((teamStatusRes.rowCount ?? 0) > 0) {
                     const team = teamStatusRes.rows[0];
                     const timezone = team.timezone || 'America/Sao_Paulo';
                     const now = toZonedTime(new Date(), timezone);
@@ -357,7 +360,8 @@ export const transferChatAction = withDebug(
                 is_autopilot_active = FALSE,
                 copilot_mode = 'off',
                 status = 'atendimentos',
-                assigned_at = clock_timestamp()
+                assigned_at = clock_timestamp(),
+                updated_at = clock_timestamp()
             WHERE id = $2
         `, [finalAgentId, chatId]);
 
@@ -387,6 +391,7 @@ export const transferChatAction = withDebug(
             ]);
 
             await client.query('COMMIT');
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
             if (!isSystemAgent) {
                 await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'transfer_chat');
             }
@@ -533,7 +538,8 @@ export const transferChatToIntelligentAgentAction = withDebug(
                      autopilot_config_id = $2,
                      copilot_mode = 'auto',
                      status = 'atendimentos',
-                     assigned_at = clock_timestamp()
+                     assigned_at = clock_timestamp(),
+                     updated_at = clock_timestamp()
                  WHERE id = $3`,
                 [systemAgentId, intelligentAgent.autopilot_config_id, chatId]
             );
@@ -558,6 +564,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
             );
 
             await client.query('COMMIT');
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
 
             try {
                 const lastInboundRes = await db.query(
@@ -699,7 +706,8 @@ export const closeChatAction = withDebug(
                 close_reason_tag_id = $1,
                 close_notes = $2,
                 tag = $3,
-                color = $4
+                color = $4,
+                updated_at = clock_timestamp()
              WHERE id = $5`,
                 [
                     reasonTagId,
@@ -737,6 +745,7 @@ export const closeChatAction = withDebug(
             ]);
 
             await client.query('COMMIT');
+            await broadcastHydratedChatUpdate(workspace_id, chatId);
 
             try {
                 const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [chatId]);

@@ -219,15 +219,24 @@ const procedureRuntimeFlow = ai.defineFlow(
             lmStudioConfig: lmStudioConfig || undefined,
           });
           const result = await effectivePrompt(input, { model: context.model });
+          let finalResult = result;
           if (isLmStudioModel(context.model)) {
             const parsedOutput = coerceLmStudioPromptOutput<ProcedureRuntimeOutput & Record<string, unknown>>(
               result?.output,
               result?.text
             );
-            if (parsedOutput) result.output = parsedOutput;
+            if (parsedOutput) {
+              finalResult = Object.create(result);
+              Object.defineProperty(finalResult, 'output', {
+                value: parsedOutput,
+                writable: true,
+                enumerable: true,
+                configurable: true,
+              });
+            }
           }
-          assertAiModelOutput(result?.output, 'Procedure runtime slim returned no structured output.');
-          return result;
+          assertAiModelOutput(finalResult?.output, 'Procedure runtime slim returned no structured output.');
+          return finalResult;
         },
       });
 

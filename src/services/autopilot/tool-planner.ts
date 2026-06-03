@@ -135,6 +135,14 @@ function validatePayload(action: AgentToolAction): string | null {
     }
   }
 
+  if (
+    action.type === 'sgp_fetch_contact_panel_data' &&
+    action.payload?.contractId != null &&
+    !/^\d+$/.test(action.payload.contractId.trim())
+  ) {
+    return 'Consulta SGP por contrato exige contractId numerico.';
+  }
+
   if (action.type === 'sgp_create_payment_promise') {
     if (!action.payload?.contractId || !action.payload?.promiseDate) {
       return 'Promessa de pagamento exige contractId e promiseDate.';

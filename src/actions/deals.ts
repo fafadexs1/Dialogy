@@ -15,11 +15,8 @@ async function getAuthUser() {
     return user;
 }
 
-let conversionSchemaEnsured = false;
 async function ensureConversionSchema(): Promise<void> {
-    if (conversionSchemaEnsured) return;
-    await db.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS converted_at timestamptz`);
-    conversionSchemaEnsured = true;
+    // Applied by Prisma migration before runtime.
 }
 
 async function syncContactConvertedAt(contactId: string): Promise<void> {

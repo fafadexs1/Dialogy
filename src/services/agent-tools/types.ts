@@ -1,4 +1,5 @@
 import type { AutopilotConfig, Chat, Contact } from '@/lib/types';
+import type { AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
 
 export type AgentToolName =
   | 'transfer_chat'
@@ -47,9 +48,16 @@ export type AgentToolAction =
       } | null;
     }
   | {
-      type: 'sgp_fetch_contracts' | 'sgp_fetch_contact_panel_data';
+      type: 'sgp_fetch_contracts';
       reason?: string | null;
       payload?: Record<string, never> | null;
+    }
+  | {
+      type: 'sgp_fetch_contact_panel_data';
+      reason?: string | null;
+      payload?: {
+        contractId?: string | null;
+      } | null;
     }
   | {
       type: 'sgp_generate_invoice_pix';
@@ -89,7 +97,12 @@ export type AgentToolRuntimeContext = {
   systemAgentId: string;
   systemAgentName: string;
   autopilotConfig: AutopilotConfig;
+  turnPolicy: AutopilotTurnPolicy;
   customerMessage: string;
+  recentCustomerVisibleMessages?: Array<{
+    fromMe: boolean;
+    content: string;
+  }>;
   orchestratorRunId?: string | null;
 };
 

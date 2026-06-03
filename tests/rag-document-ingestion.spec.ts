@@ -22,6 +22,7 @@ vi.mock('@/lib/embeddings', () => ({
 }));
 
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
+import { hasKnowledgeDocumentIndexChanged, toCanonicalKnowledgeMarkdown } from '@/services/rag/knowledge-document';
 
 describe('RAG document ingestion safety', () => {
   beforeEach(() => {
@@ -55,7 +56,9 @@ describe('RAG document ingestion safety', () => {
     });
 
     expect(result.status).toBe('indexed');
-    expect(mocks.generateDocumentPassageEmbedding).toHaveBeenCalled();
+    expect(mocks.generateDocumentPassageEmbedding).toHaveBeenCalledWith(
+      '# Procedimento de segunda via\n\nPara emitir segunda via, valide o CPF e consulte a fatura em aberto.',
+    );
     expect(mocks.addDocumentEmbedding).toHaveBeenCalled();
   });
 
@@ -78,10 +81,58 @@ describe('RAG document ingestion safety', () => {
 
     expect(mocks.addDocumentEmbedding).toHaveBeenCalledWith(expect.objectContaining({
       metadata: expect.objectContaining({
+        contentFormat: 'markdown',
+        sourceFormat: 'markdown',
         category: 'commercial_plan_catalog',
         contextRole: 'fact',
         status: 'active',
         validUntilTimestamp: '2026-12-31T00:00:00.000Z',
+      }),
+    }));
+  });
+
+  it('preserves an existing Markdown title instead of adding a duplicate', () => {
+    expect(toCanonicalKnowledgeMarkdown({
+      name: 'Catalogo.md',
+      content: '# Planos oficiais\n\n500 MEGA - R$99,90.',
+    })).toBe('# Planos oficiais\n\n500 MEGA - R$99,90.');
+  });
+
+  it('reindexes when embedding-relevant document metadata changes', () => {
+    const previous = {
+      id: 'catalog-1',
+      name: 'Catalogo',
+      content: '500 MEGA - R$99,90.',
+      category: 'commercial_plan_catalog',
+    };
+
+    expect(hasKnowledgeDocumentIndexChanged(previous, {
+      ...previous,
+      category: 'pricing',
+    })).toBe(true);
+  });
+
+  it('stores the parent Markdown section for long procedures', async () => {
+    const steps = Array.from({ length: 18 }, (_, index) => `${index + 1}. Execute a validacao operacional detalhada do passo ${index + 1}.`).join('\n');
+    await ingestKnowledgeBaseDocument({
+      workspaceId: 'workspace-1',
+      autopilotConfigId: 'agent-1',
+      documentId: 'procedure-1',
+      documentName: 'Troca de senha',
+      content: `# Troca de senha\n\n## Procedimento\n\n${steps}`,
+      document: {
+        id: 'procedure-1',
+        name: 'Troca de senha',
+        category: 'tool_procedure',
+        contextRole: 'procedure',
+        content: `# Troca de senha\n\n## Procedimento\n\n${steps}`,
+      },
+    });
+
+    expect(mocks.addDocumentEmbedding).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        parentHeading: 'Procedimento',
+        parentContent: expect.stringContaining('Execute a validacao operacional'),
       }),
     }));
   });

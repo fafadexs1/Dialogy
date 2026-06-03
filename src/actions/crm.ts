@@ -394,7 +394,6 @@ export const saveContactAction = withDebug(
                 const missingConversionTimestamp = isConverted && !updatedContact?.converted_at;
 
                 if ((!wasConverted && isConverted) || missingConversionTimestamp) {
-                    await client.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS converted_at timestamptz`);
                     await client.query(
                         `UPDATE contacts SET converted_at = COALESCE(converted_at, timezone('utc', now())) WHERE id = $1`,
                         [contactId]
@@ -884,9 +883,6 @@ export const updateWorkspaceConversionFieldConfig = withDebug(
         const fieldValue = fieldId ? String(data.fieldValue || '') : '';
 
         try {
-            await db.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conversion_custom_field_id uuid`);
-            await db.query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conversion_custom_field_value text`);
-
             if (fieldId) {
                 const fieldRes = await db.query(
                     `SELECT 1 FROM custom_field_definitions WHERE id = $1 AND workspace_id = $2 LIMIT 1`,

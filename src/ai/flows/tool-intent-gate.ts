@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { isLmStudioModel } from '@/services/ai/lm-studio';
+import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
 
 const ToolIntentGateInputSchema = z.object({
   customerMessage: z.string(),
@@ -43,21 +45,8 @@ function extractJson(text: string): unknown {
 
 export async function classifyToolIntent(input: ToolIntentGateInput): Promise<ToolIntentGateOutput> {
   const parsedInput = ToolIntentGateInputSchema.parse(input);
+  const configuredModel = process.env.AI_TOOL_INTENT_GATE_MODEL || parsedInput.model || DEFAULT_AUTOPILOT_MODEL;
   const apiKey = parsedInput.apiKey?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
-
-  if (!apiKey) {
-    return { execute: false, confidence: 'low', reason: 'missing_api_key' };
-  }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: cleanModelName(parsedInput.model),
-    generationConfig: {
-      temperature: 0,
-      maxOutputTokens: 80,
-      responseMimeType: 'application/json',
-    },
-  });
 
   const toolSpecificRules = parsedInput.toolName === 'close_chat'
     ? [
@@ -97,6 +86,46 @@ export async function classifyToolIntent(input: ToolIntentGateInput): Promise<To
   ].filter(Boolean).join('\n');
 
   const timeoutMs = parsedInput.timeoutMs || 2500;
+  if (isLmStudioModel(configuredModel)) {
+    try {
+      return await requestLmStudioJson({
+        model: configuredModel,
+        schema: ToolIntentGateOutputSchema,
+        schemaName: 'dialogy_tool_intent_gate',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            execute: { type: 'boolean' },
+            confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+            reason: { type: 'string' },
+          },
+          required: ['execute', 'confidence', 'reason'],
+          additionalProperties: false,
+        },
+        systemPrompt: 'Decida se a ferramenta candidata deve ser executada e responda somente o JSON solicitado.',
+        userPrompt: prompt,
+        timeoutMs,
+        maxTokens: 80,
+      });
+    } catch (error) {
+      console.warn('[AI_TOOL_INTENT_GATE] LM Studio failed, rejecting optional tool action:', error);
+      return { execute: false, confidence: 'low', reason: 'lmstudio_gate_failed' };
+    }
+  }
+
+  if (!apiKey) {
+    return { execute: false, confidence: 'low', reason: 'missing_api_key' };
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: cleanModelName(configuredModel),
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 80,
+      responseMimeType: 'application/json',
+    },
+  });
   const response = await Promise.race([
     model.generateContent(prompt),
     new Promise<never>((_, reject) => {

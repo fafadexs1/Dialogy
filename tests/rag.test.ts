@@ -64,8 +64,14 @@ describe('RAG Integration Tests', () => {
             limit: 10,
             minSimilarity: 0,
         });
+        const keywordResults = await VectorStore.searchKeywordDocuments({
+            query: 'politica reembolso comprovante',
+            workspaceId,
+            limit: 10,
+        });
 
         expect(results.length).toBeGreaterThan(0);
+        expect(keywordResults.some((result) => result.document_id === testDocId)).toBe(true);
         const match = results.find((r) => r.document_id === testDocId);
         if (match) {
             expect(match.content).toContain(testContent);

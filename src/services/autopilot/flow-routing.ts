@@ -1,4 +1,5 @@
 import type { AutopilotConfig, AutopilotFlowNode, KnowledgeBaseDocument, NexusFlowInstance } from '@/lib/types';
+import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { UniversalAutopilotIntent } from './intent-types';
 
 export type ActiveFlowIntentScope = {
@@ -26,6 +27,12 @@ export type FlowFormGuidance = {
     required: boolean;
     placeholder?: string;
   }>;
+};
+
+export type FlowCompletionPlan = {
+  actions: AgentToolAction[];
+  reason: string;
+  terminalNodeId?: string;
 };
 
 function normalizeReferenceId(value: string): string {
@@ -101,8 +108,9 @@ export function filterKnowledgeDocumentsForScope(
   const list = documents || [];
   if (!config.flow_graph) return list;
 
-  const targetNodeId = scope?.nodeId || config.flow_graph.nodes.find((node) => node.kind === 'assistant')?.id;
-  if (!targetNodeId) return [];
+  const principalNodeId = config.flow_graph.nodes.find((node) => node.kind === 'assistant')?.id;
+  const targetNodeIds = new Set([principalNodeId, scope?.nodeId].filter((nodeId): nodeId is string => Boolean(nodeId)));
+  if (targetNodeIds.size === 0) return [];
 
   const attachedKnowledgeNodeIds = new Set(
     config.flow_graph.nodes
@@ -110,7 +118,7 @@ export function filterKnowledgeDocumentsForScope(
       .map((node) => node.id),
   );
   const hasAttachedKnowledge = config.flow_graph.edges.some((edge) => (
-    edge.target === targetNodeId && attachedKnowledgeNodeIds.has(edge.source)
+    targetNodeIds.has(edge.target) && attachedKnowledgeNodeIds.has(edge.source)
   ));
   if (!hasAttachedKnowledge) return [];
 
@@ -193,6 +201,79 @@ function deterministicMessageFromNode(node: AutopilotFlowNode): string | null {
   }
 
   return null;
+}
+
+function normalizeInstructionText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function directedReachableNodeIds(config: AutopilotConfig, startNodeId: string | null | undefined): Set<string> {
+  const graph = config.flow_graph;
+  const reachable = new Set<string>();
+  if (!graph || !startNodeId) return reachable;
+
+  const queue = [startNodeId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || reachable.has(current)) continue;
+    reachable.add(current);
+    for (const edge of graph.edges) {
+      if (edge.source === current && !reachable.has(edge.target)) {
+        queue.push(edge.target);
+      }
+    }
+  }
+
+  return reachable;
+}
+
+function nodeRequestsClose(node: AutopilotFlowNode): boolean {
+  const text = normalizeInstructionText([
+    node.kind,
+    node.title,
+    node.subtitle || '',
+    node.config?.referenceId || '',
+    node.config?.instructions || '',
+    node.config?.message || '',
+  ].join('\n'));
+
+  return (
+    node.kind === 'close' ||
+    /\b@?close_chat\b/.test(text) ||
+    (
+      /\b(fim|final|encerr|close|termin)\w*/.test(text) &&
+      /\b(atendimento|chat|conversa|fluxo)\b/.test(text)
+    )
+  );
+}
+
+export function resolveFlowCompletionPlan(
+  config: AutopilotConfig,
+  activeNodeId: string | null | undefined,
+): FlowCompletionPlan | null {
+  const graph = config.flow_graph;
+  if (!graph || !activeNodeId) return null;
+  if (!Array.isArray(config.enabled_tool_names) || !config.enabled_tool_names.includes('close_chat')) return null;
+
+  const reachable = directedReachableNodeIds(config, activeNodeId);
+  const terminalNode = graph.nodes.find((node) => reachable.has(node.id) && nodeRequestsClose(node));
+  if (!terminalNode) return null;
+
+  return {
+    actions: [{
+      type: 'close_chat',
+      reason: `Fluxo concluiu no bloco "${terminalNode.title}" e solicitou encerramento.`,
+      payload: {
+        notes: `Encerramento automatico por conclusao do fluxo: ${terminalNode.title}`,
+        sendCloseMessage: false,
+      },
+    }],
+    reason: 'flow_completion_requests_close_chat',
+    terminalNodeId: terminalNode.id,
+  };
 }
 
 export function resolveEntryDeterministicFlowMessage(config: AutopilotConfig): DeterministicFlowMessage | null {

@@ -1,4 +1,28 @@
 import { db } from '@/lib/db';
+import { redactSensitiveLogText, redactSensitiveLogValue } from '@/lib/observability/redaction';
+
+async function loadInternalKnowledgeSources(input: {
+  configId: string;
+  customerMessage: string;
+}) {
+  if (!input.customerMessage.trim()) return [];
+  try {
+    const { rows } = await db.query(
+      `SELECT diagnostics->'internalKnowledgeSources' AS sources
+       FROM rag_retrieval_logs
+       WHERE autopilot_config_id = $1
+         AND query = $2
+         AND created_at >= NOW() - interval '5 minutes'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [input.configId, redactSensitiveLogText(input.customerMessage)],
+    );
+    return Array.isArray(rows[0]?.sources) ? rows[0].sources : [];
+  } catch (error) {
+    console.warn('[AUTOPILOT_RESPONSE_LOG] Failed to load RAG source trace:', error);
+    return [];
+  }
+}
 
 export async function logIntelligentAttendantResponse(input: {
   configId: string;
@@ -13,6 +37,10 @@ export async function logIntelligentAttendantResponse(input: {
   metadata?: Record<string, unknown> | null;
 }) {
   try {
+    const internalKnowledgeSources = await loadInternalKnowledgeSources({
+      configId: input.configId,
+      customerMessage: input.customerMessage,
+    });
     await db.query(
       `INSERT INTO autopilot_usage_logs (
           config_id, flow_name, model_name, input_tokens, output_tokens, total_tokens, rule_name,
@@ -24,14 +52,15 @@ export async function logIntelligentAttendantResponse(input: {
         input.triggeredRule || null,
         input.chatId,
         input.systemAgentId,
-        input.customerMessage || null,
-        input.response || null,
+        input.customerMessage ? redactSensitiveLogText(input.customerMessage) : null,
+        input.response ? redactSensitiveLogText(input.response) : null,
         input.status,
-        JSON.stringify({
+        JSON.stringify(redactSensitiveLogValue({
           source: 'autopilot-service',
           error: input.errorMessage || null,
+          internalKnowledgeSources,
           ...(input.metadata || {}),
-        }),
+        })),
       ],
     );
   } catch (error) {

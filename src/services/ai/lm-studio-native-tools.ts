@@ -23,7 +23,7 @@ const nativeReadOnlyToolDescriptions: Record<NativeReadOnlyToolName, string> = {
   sgp_fetch_contracts:
     'Consulta contratos do cliente no SGP. Use somente quando o cliente informou CPF/CNPJ ou quando ele ja estiver salvo no CRM. Nunca invente identificadores, contratos, dados ou resultados. Solicite apenas a execucao; a resposta final deve usar somente o retorno real da ferramenta.',
   sgp_fetch_contact_panel_data:
-    'Consulta resumo, contratos, conexao e faturas do cliente no SGP. Use somente quando o cliente informou CPF/CNPJ ou quando ele ja estiver salvo no CRM. Nunca invente identificadores, contratos, faturas, datas, valores, links, diagnosticos ou procedimentos. Solicite apenas a execucao; a resposta final deve usar somente o retorno real da ferramenta.',
+    'Consulta resumo, contratos, conexao e faturas do cliente no SGP. Use somente quando o cliente informou CPF/CNPJ ou quando ele ja estiver salvo no CRM. Informe contractId somente para restringir a consulta a um contrato especifico quando possuir um ID real retornado anteriormente pelo SGP ou informado claramente pelo cliente. Nunca invente identificadores, contratos, faturas, datas, valores, links, diagnosticos ou procedimentos. Solicite apenas a execucao; a resposta final deve usar somente o retorno real da ferramenta.',
 };
 
 function isNativeReadOnlyToolName(value: unknown): value is NativeReadOnlyToolName {
@@ -41,11 +41,22 @@ export function buildLmStudioNativeTools(enabledToolNames: string[]) {
       function: {
         name,
         description: nativeReadOnlyToolDescriptions[name],
-        parameters: {
-          type: 'object',
-          properties: {},
-          additionalProperties: false,
-        },
+        parameters: name === 'sgp_fetch_contact_panel_data'
+          ? {
+              type: 'object',
+              properties: {
+                contractId: {
+                  type: 'string',
+                  description: 'ID real do contrato SGP. Use apenas para restringir a consulta a um contrato especifico.',
+                },
+              },
+              additionalProperties: false,
+            }
+          : {
+              type: 'object',
+              properties: {},
+              additionalProperties: false,
+            },
       },
     }));
 }
@@ -57,12 +68,26 @@ export function convertLmStudioNativeToolCalls(toolCalls: unknown): AgentToolAct
     const name = toolCall?.function?.name;
     if (!isNativeReadOnlyToolName(name)) return [];
 
-    // The executor obtains CPF/CNPJ from validated runtime context. Ignore every
-    // model-provided argument so an invented identifier never reaches SGP.
+    let payload = {};
+    if (name === 'sgp_fetch_contact_panel_data') {
+      try {
+        const args = typeof toolCall.function?.arguments === 'string'
+          ? JSON.parse(toolCall.function.arguments)
+          : toolCall.function?.arguments;
+        if (args && typeof args.contractId === 'string' && /^\d+$/.test(args.contractId.trim())) {
+          payload = { contractId: args.contractId.trim() };
+        }
+      } catch {
+        // Ignore malformed model-provided arguments.
+      }
+    }
+
+    // CPF/CNPJ always comes from validated runtime context. Only a numeric
+    // contractId may pass through to narrow the support lookup.
     return [{
       type: name,
       reason: `LM Studio native tool call: ${name}`,
-      payload: {},
+      payload,
     }];
   });
 }

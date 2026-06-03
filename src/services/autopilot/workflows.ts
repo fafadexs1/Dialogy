@@ -16,19 +16,7 @@ export type AutopilotWorkflowDefinition = {
   responsePolicy: 'llm_with_facts' | 'short_ack' | 'handoff_message';
 };
 
-const BILLING_TOOLS: AgentToolName[] = [
-  'crm_update_contact_custom_fields',
-  'sgp_fetch_contact_panel_data',
-  'sgp_fetch_contracts',
-  'sgp_generate_invoice_pix',
-  'sgp_create_payment_promise',
-  'mcp_call_tool',
-];
-
 const READ_ONLY_OPERATIONAL_TOOLS: AgentToolName[] = [
-  'crm_update_contact_custom_fields',
-  'sgp_fetch_contact_panel_data',
-  'sgp_fetch_contracts',
   'mcp_call_tool',
 ];
 
@@ -108,7 +96,7 @@ export const UNIVERSAL_AUTOPILOT_WORKFLOWS: Record<UniversalAutopilotIntent, Aut
     intent: 'billing_or_payment',
     requiredSlots: ['customer_identifier'],
     knowledgeCategories: ['billing', 'policy', 'faq', 'tool_procedure'],
-    allowedTools: BILLING_TOOLS,
+    allowedTools: READ_ONLY_OPERATIONAL_TOOLS,
     fallbackPolicy: 'handoff',
     handoffPolicy: 'on_tool_failure',
     responsePolicy: 'llm_with_facts',

@@ -25,6 +25,22 @@ const PLAN_SPEED_LOOKAHEAD = String.raw`\d{2,4}\s*(?:MEGA|MEGAS|MB|GB)\b`;
 const PLAN_SECTION_LOOKAHEAD = String.raw`PLANOS?\s+(?:SOMENTE\s+INTERNET|COM\s+INTERNET(?:\s*\+\s*TV)?|COM\s+TV|INTERNET\s*\+\s*TV)\b`;
 const PLAN_SECTION_PATTERN = new RegExp(String.raw`\b${PLAN_SECTION_LOOKAHEAD}`, 'i');
 const INLINE_LIST_MARKER_CLASS = String.raw`\p{Extended_Pictographic}\ufe0f\u2022\u00b7\u2013\u2014\-\*\u25b8\u25aa\u25cf\u25cb`;
+const URL_PATTERN = /https?:\/\/[^\s]+/gi;
+
+function protectUrls(value: string): { value: string; urls: string[] } {
+  const urls: string[] = [];
+  return {
+    value: value.replace(URL_PATTERN, (url) => {
+      const index = urls.push(url) - 1;
+      return `URLTOKEN${index}END`;
+    }),
+    urls,
+  };
+}
+
+function restoreUrls(value: string, urls: string[]): string {
+  return value.replace(/\bURLTOKEN(\d+)END\b/g, (_, index) => urls[Number(index)] || '');
+}
 
 function normalizeWhitespace(value: string): string {
   return value
@@ -173,6 +189,18 @@ function containsListLines(block: string): boolean {
   return listLineCount >= 2;
 }
 
+function containsStructuredLines(block: string): boolean {
+  const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return false;
+
+  const structuredLines = lines.filter((line) => (
+    /^URLTOKEN\d+END$/i.test(line) ||
+    /^\*[^*]{2,80}\*:?$/.test(line) ||
+    /^[\p{L}\p{N}][\p{L}\p{N}\s/()_-]{1,60}:\s*\S/iu.test(line)
+  ));
+  return structuredLines.length >= 2;
+}
+
 function paragraphize(value: string, maxParagraphs = MAX_PARAGRAPHS): string {
   const existingParagraphs = value
     .split(/\n{2,}/)
@@ -182,7 +210,7 @@ function paragraphize(value: string, maxParagraphs = MAX_PARAGRAPHS): string {
 
   for (const rawParagraph of existingParagraphs) {
     // If the paragraph contains list-like lines, preserve \n breaks
-    if (containsListLines(rawParagraph)) {
+    if (containsListLines(rawParagraph) || containsStructuredLines(rawParagraph)) {
       const cleanedLines = rawParagraph
         .split('\n')
         .map((line) => line.trim())
@@ -224,7 +252,8 @@ export function formatCustomerFacingAiResponse(
   response: string,
   maxChars = DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
 ): string {
-  const normalized = normalizeWhitespace(formatIsoDatesForCustomer(expandCompactPlanCatalog(response)));
+  const protectedUrls = protectUrls(expandCompactPlanCatalog(response));
+  const normalized = normalizeWhitespace(formatIsoDatesForCustomer(protectedUrls.value));
   if (!normalized) return '';
 
   const isCatalog = isStructuredCatalogResponse(normalized) || isPlanOfferResponse(normalized);
@@ -233,8 +262,8 @@ export function formatCustomerFacingAiResponse(
       ? STRUCTURED_CATALOG_MAX_CHARS
       : maxChars;
   const limited = trimToMaxLength(normalized, effectiveMaxChars);
-  if (isCatalog) return limited;
-  return paragraphize(limited);
+  if (isCatalog) return restoreUrls(limited, protectedUrls.urls);
+  return restoreUrls(paragraphize(limited), protectedUrls.urls);
 }
 
 /**
@@ -278,8 +307,13 @@ export function splitIntoMessageBlocks(formattedResponse: string): string[] {
   for (const paragraph of paragraphs) {
     const currentText = currentBlock.join('\n\n');
     const wouldBe = currentText ? `${currentText}\n\n${paragraph}` : paragraph;
+    const startsStructuredCard = /^\*[^*]{2,80}\*/.test(paragraph.trim());
+    const currentHasStructuredCard = currentBlock.some((item) => /^\*[^*]{2,80}\*/.test(item.trim()));
 
-    if (currentBlock.length > 0 && wouldBe.length > BLOCK_SOFT_LIMIT) {
+    if (
+      currentBlock.length > 0 &&
+      (wouldBe.length > BLOCK_SOFT_LIMIT || (startsStructuredCard && currentHasStructuredCard))
+    ) {
       blocks.push(currentText.trim());
       currentBlock = [paragraph];
     } else {

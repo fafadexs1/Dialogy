@@ -188,6 +188,24 @@
 }
 
 @layer utilities {
+  @keyframes toast-progress-shrink {
+    from {
+      transform: scaleX(1);
+    }
+
+    to {
+      transform: scaleX(0);
+    }
+  }
+
+  .toast-progressbar {
+    animation: toast-progress-shrink 4s linear forwards;
+  }
+
+  .group:hover > .toast-progressbar,
+  .group:focus-within > .toast-progressbar {
+    animation-play-state: paused;
+  }
 
   /* Glassmorphism */
   .glass {

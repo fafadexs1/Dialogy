@@ -541,8 +541,10 @@ export type Action =
 export interface KnowledgeBaseDocument {
   id: string;
   name: string;
-  content: string;
-  tokens?: number;
+    content: string;
+    sourceFormat?: 'markdown' | 'plain_text' | 'csv' | 'json' | string | null;
+    originalFilename?: string | null;
+    tokens?: number;
   maxPromptChars?: number | null;
   uploaded_at?: string;
   summary?: string | null;
@@ -563,6 +565,10 @@ export interface KnowledgeBaseDocument {
   contextRole?: 'fact' | 'procedure' | 'policy' | 'persona' | string | null;
   chunkIndex?: number | null;
   chunkCount?: number | null;
+  parentContent?: string | null;
+  parentHeading?: string | null;
+  retrievalSources?: string[] | null;
+  rrfScore?: number | null;
 }
 
 export interface KnowledgeCollection {
@@ -670,6 +676,13 @@ export interface AutopilotFlowGraph {
   variables?: AutopilotFlowVariable[];
 }
 
+export interface AutopilotFlowAiProposal {
+  summary: string;
+  systemPrompt: string;
+  enabledToolNames: string[];
+  flowGraph: AutopilotFlowGraph;
+}
+
 export interface AutopilotConfig {
   id: string;
   workspace_id: string;
@@ -689,6 +702,7 @@ export interface AutopilotConfig {
   closing_policy: string | null;
   enabled_tool_names?: string[] | null;
   flow_graph?: AutopilotFlowGraph | null;
+  tool_mode?: "deny" | "on_demand" | "required";
   created_at: string;
   updated_at: string;
 }

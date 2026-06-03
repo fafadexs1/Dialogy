@@ -117,7 +117,7 @@ export async function loadRecentToolResultsForAutopilot(input: {
          AND tool_name = ANY($3::text[])
          AND status = 'success'
          AND output IS NOT NULL
-         AND created_at >= timezone('utc', now()) - ($4::int * interval '1 minute')
+         AND created_at >= NOW() - ($4::int * interval '1 minute')
        ORDER BY created_at DESC
        LIMIT $5`,
       [input.workspaceId, input.chatId, input.toolNames, maxAgeMinutes, limit],

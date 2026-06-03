@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, LogOut, Check, UserCheck, BellOff, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote } from 'lucide-react';
+import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
+import { resolveClientMediaUrl } from '@/lib/storage-url';
 import { Virtuoso } from 'react-virtuoso';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { getInitialChatsData } from '@/actions/chats';
@@ -499,7 +500,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, curren
         {message.metadata?.thumbnail && typeof message.metadata.thumbnail === 'string' ? (
           <div className="relative">
             <img
-              src={message.metadata.thumbnail.startsWith('data:') ? message.metadata.thumbnail : `data:image/jpeg;base64,${message.metadata.thumbnail}`}
+              src={resolveClientMediaUrl(message.metadata.thumbnail, { kind: 'image' })}
               alt="Preview"
               className="h-5 w-5 object-cover rounded-sm"
             />
@@ -537,9 +538,6 @@ interface ChatListItemProps {
   isBulkMode?: boolean;
   isSelectedForBulk?: boolean;
   onToggleBulkSelection?: (chatId: string) => void;
-  snoozedUntil?: number;
-  onSnooze?: (chatId: string) => void;
-  onUnsnooze?: (chatId: string) => void;
   onAssign?: (chat: Chat) => Promise<void> | void;
   onPrefetch?: (chatId: string) => void;
 }
@@ -557,7 +555,7 @@ const getDraftPreviewText = (draft: string): string => {
     .trim();
 };
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, snoozedUntil, onSnooze, onUnsnooze, onAssign, onPrefetch }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, onAssign, onPrefetch }) => {
   const isMarketingChat = useMemo(() => {
     const hasMarketingMessage = chat.messages?.some((m: any) => isMarketingMessage(m as Message)) ?? false;
     // Hide marketing badge if chat is assigned to an agent OR is in 'atendimentos'/'encerrados'
@@ -579,21 +577,21 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const [isClosing, setIsClosing] = useState(false);
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
   const canAssign = chat.status === 'gerais';
-  const canSnooze = chat.status === 'atendimentos';
   const canTag = false;
   const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
-  const isSnoozed = !!snoozedUntil && snoozedUntil > Date.now();
   const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
   const statusTone = chat.status === 'encerrados'
-    ? 'bg-red-500/20 text-red-200'
+    ? 'border-red-500/20 bg-red-500/10 text-red-300'
     : chat.status === 'atendimentos'
-      ? 'bg-emerald-500/20 text-emerald-100'
-      : 'bg-blue-500/20 text-blue-100';
+      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+      : 'border-blue-500/20 bg-blue-500/10 text-blue-300';
   const hasTag = Boolean(chat.tag);
   const tagLabel = hasTag ? chat.tag : 'Sem tag';
+  const unreadCount = chat.unreadCount ?? 0;
+  const hasUnread = unreadCount > 0;
 
   // SLA Calculation
-  const isWaiting = chat.status === 'atendimentos' && !isSnoozed && lastMessage && !lastMessage.from_me;
+  const isWaiting = chat.status === 'atendimentos' && lastMessage && !lastMessage.from_me;
   const waitingMinutes = isWaiting && lastMessage ? (Date.now() - new Date(lastMessage.createdAt).getTime()) / 60000 : 0;
 
   const slaStatus = isWaiting && waitingMinutes > 30
@@ -648,15 +646,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     }
   };
 
-  const handleSnoozeClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isSnoozed) {
-      onUnsnooze?.(chat.id);
-    } else {
-      onSnooze?.(chat.id);
-    }
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -689,15 +678,16 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
       className={cn(
-        "relative flex items-start gap-2.5 md:gap-3 px-4 py-3 md:px-5 md:py-3 cursor-pointer group transition-all mx-2 my-1 rounded-xl border",
-        "border-transparent",
-        "hover:bg-muted/30 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
-        "min-h-[76px]", // Height adjustment
+        "relative flex min-h-[106px] cursor-pointer items-start gap-3 overflow-hidden rounded-2xl border px-3.5 py-3.5 transition-all duration-200",
+        "border-border/55 bg-card/45 shadow-[0_10px_28px_-24px_rgba(0,0,0,0.85)]",
+        "hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/80 hover:shadow-[0_18px_36px_-25px_rgba(0,0,0,0.95)]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
         isSelected && !isForwarding && !isBulkMode
-          ? "bg-sidebar-accent shadow-sm dark:bg-white/5 dark:border-white/10"
-          : "dark:hover:bg-white/5",
-        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "bg-primary/5 border-primary/20" : "",
-        isSnoozed ? "opacity-60 grayscale" : ""
+          ? "border-primary/45 bg-card shadow-[0_12px_28px_-24px_rgba(0,0,0,0.9)]"
+          : hasUnread
+            ? "border-blue-500/25 bg-blue-500/[0.045]"
+            : "",
+        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "border-primary/45 bg-primary/[0.09]" : "",
       )}
       onClick={handleSelect}
       onMouseEnter={handleMouseEnter}
@@ -707,11 +697,15 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       tabIndex={0}
       role="option"
       aria-selected={isSelected}
-      aria-label={`Conversa com ${chat.contact?.name || 'Desconhecido'}${isSnoozed ? ' adiada' : ''}`}
+      aria-label={`Conversa com ${chat.contact?.name || 'Desconhecido'}`}
     >
       {isSelected && !isForwarding && !isBulkMode && (
-        <div className="absolute left-0 top-3 bottom-3 w-1 bg-primary rounded-r-full shadow-glow-primary"></div>
+        <div className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-primary shadow-[0_0_18px_rgba(25,245,178,0.65)]" />
       )}
+      <div className={cn(
+        "pointer-events-none absolute inset-x-0 top-0 h-px opacity-70",
+        isSelected ? "bg-gradient-to-r from-transparent via-primary/80 to-transparent" : "bg-gradient-to-r from-transparent via-white/15 to-transparent"
+      )} />
 
       {/* Bulk Mode Checkbox */}
       {isBulkMode && (
@@ -745,7 +739,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         className="relative flex-shrink-0"
         layoutId={`avatar-morph-${chat.id}`}
       >
-        <Avatar className="h-12 w-12 md:h-10 md:w-10 border border-border">
+        <Avatar className={cn(
+          "h-12 w-12 border-2 shadow-sm transition-all duration-200 md:h-11 md:w-11",
+          isSelected ? "border-primary/55 shadow-[0_0_18px_-8px_rgba(25,245,178,0.75)]" : "border-border/80",
+          hasUnread && !isSelected ? "border-blue-500/45" : ""
+        )}>
           <AvatarImage src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || 'Contato'} data-ai-hint="person" />
           <AvatarFallback className="bg-muted text-muted-foreground">{(chat.contact?.name || '?').charAt(0)}</AvatarFallback>
         </Avatar>
@@ -771,7 +769,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full text-white border-2 border-black shadow-sm ${bg}`}>
+                  <div className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-card text-white shadow-sm ${bg}`}>
                     {icon}
                   </div>
                 </TooltipTrigger>
@@ -787,7 +785,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="absolute -top-1 -left-1 flex h-5 w-5 items-center justify-center rounded-full text-white border-2 border-black shadow-sm bg-orange-500">
+                <div className="absolute -left-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-card bg-orange-500 text-white shadow-sm">
                   <Megaphone size={10} />
                 </div>
               </TooltipTrigger>
@@ -799,23 +797,21 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         )}
       </motion.div >
 
-      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-nowrap">
-              <p className={cn("font-semibold truncate whitespace-nowrap max-w-[70%] md:max-w-[60%]", "text-base md:text-sm text-foreground")} title={chat.contact?.name}>
+              <span className={cn(
+                "h-2 w-2 flex-shrink-0 rounded-full",
+                chat.status === 'encerrados' ? "bg-slate-500" : chat.status === 'atendimentos' ? "bg-emerald-400" : "bg-blue-400",
+                hasUnread && "animate-pulse"
+              )} />
+              <p className={cn("max-w-[70%] truncate whitespace-nowrap text-base font-semibold tracking-tight text-foreground md:max-w-[60%] md:text-sm", hasUnread && "font-bold")} title={chat.contact?.name}>
                 {chat.contact?.name || 'Carregando...'}
               </p>
-              {chat.status === 'encerrados' && (
-                <Badge className={cn("text-[10px] border-0 px-1.5 py-0.5 flex-shrink-0", statusTone)}>
+              <Badge className={cn("flex-shrink-0 border px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wide", statusTone)}>
                   {statusLabel}
-                </Badge>
-              )}
-              {isSnoozed && (
-                <Badge className="text-[10px] px-1.5 py-0 bg-amber-500/30 text-amber-100 border-amber-500/40 flex-shrink-0" title="Conversa adiada temporariamente">
-                  Snooze
-                </Badge>
-              )}
+              </Badge>
               {isAssignedToIntelligentAgent && (
                 <Badge className="text-[10px] px-1.5 py-0 bg-cyan-500/20 text-cyan-100 border-cyan-500/30 flex-shrink-0" title={`Atendido por IA: ${chat.assignedSystemAgent?.name || 'Atendente Inteligente'}`}>
                   <Bot className="mr-1 h-3 w-3" />
@@ -824,8 +820,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 flex-nowrap justify-end">
-            <div className="flex items-center gap-1 flex-nowrap">
+          <div className="flex flex-shrink-0 flex-nowrap items-center justify-end gap-1.5">
+            <div className="flex flex-nowrap items-center gap-0.5 rounded-lg border border-border/55 bg-background/55 p-0.5 opacity-85 shadow-sm transition-all group-hover:border-border group-hover:bg-background/85 group-hover:opacity-100">
               {canAssign && (
                 <TooltipProvider>
                   <Tooltip>
@@ -833,7 +829,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
                         aria-label="Assumir conversa"
                         onClick={handleAssign}
                       >
@@ -841,24 +837,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Assumir</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-              {canSnooze && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn("h-7 w-7", isSnoozed ? "text-amber-500" : "text-muted-foreground hover:text-foreground")}
-                        aria-label={isSnoozed ? "Retomar conversa adiada" : "Adiantar conversa por 15 minutos"}
-                        onClick={handleSnoozeClick}
-                      >
-                        <BellOff className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{isSnoozed ? 'Retomar agora' : 'Soneca de 15 min'}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               )}
@@ -880,7 +858,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                   </Tooltip>
                 </TooltipProvider>
               )}
-            </div>
             {canQuickClose && (
               <TooltipProvider>
                 <Tooltip>
@@ -888,17 +865,18 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      className="h-6 w-6 rounded-md text-muted-foreground hover:bg-red-500/10 hover:text-red-400"
                       onClick={handleQuickClose}
                       disabled={isClosing}
                     >
-                      {isClosing ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                      {isClosing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Encerrar sem abrir</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             )}
+            </div>
             {slaStatus && (
               <TooltipProvider>
                 <Tooltip>
@@ -921,14 +899,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               </TooltipProvider>
             )}
             {lastMessage && (
-              <p className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
+              <p className="flex-shrink-0 whitespace-nowrap text-[10px] font-medium text-muted-foreground">
                 {formatMessageTime(lastMessage.createdAt || lastMessage.timestamp, currentUser?.activeWorkspaceTimezone || 'America/Sao_Paulo')}
               </p>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 min-h-[20px] flex-wrap">
+        <div className="flex min-h-[20px] flex-wrap items-center gap-1.5">
           {chat.status === 'atendimentos' && chat.teamName ? (
             <Badge
               style={{
@@ -936,7 +914,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 color: chat.teamColor ? (chat.teamColor.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
                 borderColor: chat.teamColor ? chat.teamColor : 'rgba(255,255,255,0.2)'
               }}
-              className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 border flex-shrink-0"
+              className="flex flex-shrink-0 items-center gap-1 border px-1.5 py-0 text-[10px] font-medium shadow-sm"
               title={chat.teamName}
             >
               <Users className="h-3 w-3" />
@@ -950,8 +928,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 borderColor: chat.color ? chat.color : 'rgba(255,255,255,0.2)'
               } : undefined}
               className={cn(
-                "text-[10px] border px-1.5 py-0.5 flex-shrink-0",
-                hasTag ? "" : "bg-muted/50 border-input text-muted-foreground"
+                "flex-shrink-0 border px-1.5 py-0 text-[10px]",
+                hasTag ? "shadow-sm" : "border-border/70 bg-muted/40 text-muted-foreground"
               )}
               title={hasTag ? chat.tag : 'Sem tag'}
             >
@@ -969,10 +947,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-border/35 bg-background/35 px-2 py-1.5">
           <div className="flex-1 min-w-0">
             {hasDraft ? (
-              <p className="text-xs text-red-500 font-medium truncate flex items-center gap-1">
+              <p className="flex items-center gap-1 truncate text-xs font-medium text-amber-400">
                 <PencilLine className="h-3 w-3" />
                 <span className="font-bold">[Rascunho]:</span> {draftPreview}
               </p>
@@ -981,10 +959,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             )}
           </div>
           {(() => {
-            const unread = chat.unreadCount ?? 0;
+            const unread = unreadCount;
             if (unread <= 0) return null;
             return (
-              <Badge className="h-5 min-w-[1.25rem] px-1.5 flex-shrink-0 justify-center rounded-full bg-blue-600 text-white border-0 shadow-md shadow-blue-500/20 text-[10px] font-bold">
+              <Badge className="h-5 min-w-[1.25rem] flex-shrink-0 justify-center rounded-full border-0 bg-red-500 px-1.5 text-[10px] font-bold text-white shadow-md shadow-red-500/25">
                 {unread}
               </Badge>
             );
@@ -1040,7 +1018,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [showMarketing, setShowMarketing] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
-  const [snoozedUntilMap, setSnoozedUntilMap] = useState<Record<string, number>>({});
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
@@ -1094,20 +1071,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       setBulkAction(action);
       setSelectedBulkChats(new Set());
     }
-  };
-
-  const handleSnooze = (chatId: string) => {
-    const until = Date.now() + 15 * 60 * 1000;
-    setSnoozedUntilMap((prev) => ({ ...prev, [chatId]: until }));
-    toast({ title: 'Conversa adiada', description: 'Voltaremos a mostrar esse chat em 15 minutos.' });
-  };
-
-  const handleUnsnooze = (chatId: string) => {
-    setSnoozedUntilMap((prev) => {
-      const next = { ...prev };
-      delete next[chatId];
-      return next;
-    });
   };
 
   const handleToggleBulkSelection = (chatId: string) => {
@@ -1370,7 +1333,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const filterChatByControls = useCallback(
     (chat: Chat) => {
-      const now = Date.now();
       const visibleMessages = showMarketing
         ? chat.messages
         : chat.messages.filter(m => !isMarketingMessage(m));
@@ -1400,9 +1362,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
       const matchesUnassigned = !showUnassignedOnly || (!chat.agent && !chatSystemAgentId);
-      const snoozedUntil = snoozedUntilMap[chat.id];
-      const matchesSnooze = !snoozedUntil || snoozedUntil <= now;
-
       const query = debouncedSearchTerm.toLowerCase();
       const protocol = chat.protocol || buildChatProtocol(chat.id);
       const matchesSearch =
@@ -1413,9 +1372,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         (chat.id || '').toLowerCase().includes(query) ||
         visibleMessages.some(m => (m.content || '').toLowerCase().includes(query));
 
-      return matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned && matchesSearch && matchesSnooze;
+      return matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned && matchesSearch;
     },
-    [statusFilter, ownershipFilter, teamFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, snoozedUntilMap, selectedChat?.id]
+    [statusFilter, ownershipFilter, teamFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, selectedChat?.id]
   );
 
   const filteredChats = useMemo(() => {
@@ -1988,12 +1947,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Virtuoso
               style={{ height: '100%', width: '100%' }}
               data={filteredChats}
-              components={{
-                Footer: () => <div style={{ height: bottomPadding || 0 }} />
-              }}
+        components={{
+          Header: () => <div className="h-2" />,
+          Footer: () => <div style={{ height: (bottomPadding || 0) + 8 }} />
+        }}
               endReached={handleEndReached}
               itemContent={(index, chat) => (
-                <div className="">
+          <div className="px-2 py-1">
                   <ChatListItem
                     key={chat.id}
                     chat={chat}
@@ -2008,9 +1968,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     isBulkMode={isBulkMode}
                     isSelectedForBulk={selectedBulkChats.has(chat.id)}
                     onToggleBulkSelection={handleToggleBulkSelection}
-                    snoozedUntil={snoozedUntilMap[chat.id]}
-                    onSnooze={chat.status === 'atendimentos' ? handleSnooze : undefined}
-                    onUnsnooze={chat.status === 'atendimentos' ? handleUnsnooze : undefined}
                     onAssign={chat.status === 'gerais' ? handleAssignChat : undefined}
                     onPrefetch={onPrefetch}
                   />

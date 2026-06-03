@@ -22,7 +22,7 @@ export function normalizeAgentActions(actions: unknown): AgentToolAction[] {
     'mcp_call_tool',
   ]);
 
-  return actions
+  const normalized = actions
     .filter((action: any) => action && typeof action === 'object')
     .filter((action: any) => allowedTypes.has(action.type))
     .map((action: any) => ({
@@ -30,6 +30,14 @@ export function normalizeAgentActions(actions: unknown): AgentToolAction[] {
       reason: typeof action.reason === 'string' ? action.reason : null,
       payload: action.payload && typeof action.payload === 'object' ? action.payload : {},
     })) as AgentToolAction[];
+
+  const seen = new Set<string>();
+  return normalized.filter((action) => {
+    const key = actionKey(action);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function mergeAgentActions(...actionSets: Array<AgentToolAction[] | null | undefined>): AgentToolAction[] {

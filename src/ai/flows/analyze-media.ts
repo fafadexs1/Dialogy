@@ -4,6 +4,9 @@ import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
 import { DEFAULT_AUTOPILOT_MODEL, getGoogleAiSdkModelName } from '@/lib/ai-models';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { transcribeAudio } from '@/ai/flows/transcribe-audio';
+import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
+import { isLmStudioModel } from '@/services/ai/lm-studio';
+import { requestLmStudioVisionText } from '@/services/ai/lm-studio-client';
 
 export type AnalyzeMediaInput = {
   mediaUrl: string;
@@ -11,6 +14,7 @@ export type AnalyzeMediaInput = {
   mediaType: 'audio' | 'image' | 'video' | 'document';
   mimetype?: string | null;
   caption?: string | null;
+  model?: string | null;
 };
 
 export type AnalyzeMediaOutput = {
@@ -41,6 +45,19 @@ export async function analyzeMediaForAutopilot(input: AnalyzeMediaInput): Promis
     });
     const caption = input.caption?.trim() ? ` Legenda/texto enviado pelo cliente: ${input.caption.trim()}` : '';
     return { analysis: `${result.transcription}${caption}`.trim() };
+  }
+
+  const selectedModel = input.model || (await resolveWorkspaceAiExecutionContext(input.workspaceId)).model;
+  if (input.mediaType === 'image' && isLmStudioModel(selectedModel)) {
+    return {
+      analysis: await requestLmStudioVisionText({
+        model: selectedModel,
+        prompt: buildPrompt(input),
+        mediaUrl: input.mediaUrl,
+        timeoutMs: Number.parseInt(process.env.AI_MEDIA_ANALYSIS_TIMEOUT_MS || '', 10) || 12000,
+        maxTokens: 320,
+      }),
+    };
   }
 
   const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);

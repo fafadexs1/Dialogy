@@ -2,6 +2,10 @@ import { z } from 'genkit';
 import { ai } from '@/ai/genkit';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import {
+  isLmStudioModel,
+} from '@/services/ai/lm-studio';
+import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
 
 const CaseMemoryInputSchema = z.object({
   workspaceId: z.string(),
@@ -68,14 +72,46 @@ export async function summarizeCaseMemory(input: CaseMemoryInput): Promise<CaseM
     process.env.GOOGLE_GENAI_API_KEY?.trim() ||
     '';
 
-  if (!apiKey || apiKey === 'no-key-configured') {
+  if (!isLmStudioModel(model) && (!apiKey || apiKey === 'no-key-configured')) {
     throw new Error('No Gemini API key configured for case memory summarization.');
   }
 
   let prompt = defaultPrompt;
   const defaultEnvKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
 
-  if (defaultEnvKey !== apiKey) {
+  if (isLmStudioModel(model)) {
+    return requestLmStudioJson({
+      model,
+      schema: CaseMemoryOutputSchema,
+      schemaName: 'dialogy_case_memory',
+      jsonSchema: {
+        type: 'object',
+        properties: {
+          shouldStore: { type: 'boolean' },
+          summary: { type: 'string' },
+          problem: { type: 'string' },
+          resolution: { type: 'string' },
+          outcome: { type: 'string' },
+          keywords: { type: 'array', items: { type: 'string' }, maxItems: 10 },
+        },
+        required: ['shouldStore', 'summary', 'problem', 'resolution', 'outcome', 'keywords'],
+        additionalProperties: false,
+      },
+      systemPrompt: [
+        'Condense um atendimento encerrado para memoria operacional reutilizavel.',
+        'Use somente fatos presentes no historico. Remova dados pessoais desnecessarios.',
+        'Se nao houver resolucao clara, use shouldStore=false. Responda somente JSON.',
+      ].join(' '),
+      userPrompt: [
+        `Canal: ${input.channel || ''}`,
+        `Motivo de encerramento: ${input.closeReasonLabel || ''}`,
+        `Observacoes: ${input.closeNotes || ''}`,
+        `Historico:\n${input.chatHistory}`,
+      ].join('\n'),
+      timeoutMs: Number.parseInt(process.env.AI_CASE_MEMORY_TIMEOUT_MS || '', 10) || 10000,
+      maxTokens: 500,
+    });
+  } else if (defaultEnvKey !== apiKey) {
     const { genkit } = require('genkit');
     const { googleAI } = require('@genkit-ai/googleai');
 
@@ -88,7 +124,10 @@ export async function summarizeCaseMemory(input: CaseMemoryInput): Promise<CaseM
   }
 
   const result = await prompt(input, { model });
-  const output = result.output!;
+  const output = result.output;
+  if (!output) {
+    throw new Error('Case memory summarization returned no structured output.');
+  }
 
   if (result.usage && input.autopilotConfigId) {
     await logAutopilotUsage({
@@ -101,5 +140,5 @@ export async function summarizeCaseMemory(input: CaseMemoryInput): Promise<CaseM
     });
   }
 
-  return output;
+  return CaseMemoryOutputSchema.parse(output);
 }

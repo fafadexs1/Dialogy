@@ -3,7 +3,10 @@ import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
-import { mergeAndRerankKnowledgeDocuments } from '@/services/rag/hybrid-retrieval';
+import {
+  mergeAndRerankKnowledgeDocuments,
+  type KnowledgeDocumentSelectionSource,
+} from '@/services/rag/hybrid-retrieval';
 import { planAutopilotTools } from './tool-planner';
 import { validateAutopilotResponse } from './response-validator';
 import { resolveAutopilotWorkflowPlan } from './workflow-engine';
@@ -29,7 +32,7 @@ export type AutopilotPlaygroundTrace = {
       name: string;
       category: string;
       score: number;
-      source: 'vector' | 'static';
+      source: KnowledgeDocumentSelectionSource;
     }>;
     discardedCount: number;
   };

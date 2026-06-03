@@ -13,6 +13,8 @@ import {
     Trash2,
     File as FileIcon,
     PlayCircle,
+    Image as ImageIcon,
+    Video,
     Download,
     StickyNote,
     MapPin,
@@ -339,6 +341,56 @@ function SafeMediaImage({ src, alt, className, width, height, onClick }: { src: 
     );
 }
 
+function VideoThumbnail({ videoSrc, thumbnailSrc, className }: { videoSrc: string; thumbnailSrc?: string; className?: string }) {
+    const [hasError, setHasError] = React.useState(false);
+
+    React.useEffect(() => {
+        setHasError(false);
+    }, [videoSrc, thumbnailSrc]);
+
+    if (thumbnailSrc) {
+        return (
+            <SafeMediaImage
+                src={thumbnailSrc}
+                alt="Vídeo"
+                width={320}
+                height={180}
+                className={className}
+            />
+        );
+    }
+
+    if (hasError) {
+        return (
+            <SafeMediaImage
+                src="/placeholder-video.png"
+                alt="Vídeo"
+                width={320}
+                height={180}
+                className={className}
+            />
+        );
+    }
+
+    return (
+        <video
+            src={videoSrc}
+            muted
+            playsInline
+            preload="metadata"
+            aria-label="Prévia do vídeo"
+            className={className}
+            onLoadedMetadata={(event) => {
+                const preview = event.currentTarget;
+                if (Number.isFinite(preview.duration) && preview.duration > 0.1) {
+                    preview.currentTime = Math.min(0.1, preview.duration / 2);
+                }
+            }}
+            onError={() => setHasError(true)}
+        />
+    );
+}
+
 function MediaMessage({ message, workspaceId }: { message: Message, workspaceId: string }) {
     const { mediaUrl, mimetype = '', fileName, thumbnail, duration, waveform } = message.metadata || {};
 
@@ -354,7 +406,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
     const rawThumbnail = validUrl(thumbnail);
     const mediaAssetUrl = resolveClientMediaUrl(rawMediaUrl || rawThumbnail, { kind: 'media' });
     const imageAssetUrl = resolveClientMediaUrl(rawMediaUrl || rawThumbnail, { kind: 'image' });
-    const safeThumbnail = resolveClientMediaUrl(rawThumbnail || rawMediaUrl, { kind: 'image' });
+    const safeThumbnail = resolveClientMediaUrl(rawThumbnail, { kind: 'image' });
     const urlToUse = effectiveMimeType.startsWith('image/')
         ? (imageAssetUrl || mediaAssetUrl)
         : mediaAssetUrl;
@@ -387,7 +439,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
             return (
                 <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName} chatId={message.chat_id}>
                     <div
-                        className="cursor-pointer relative overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px] aspect-square min-h-[200px] bg-muted/20"
+                        className="group relative w-[min(78vw,320px)] cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/10 shadow-sm dark:border-white/10"
                         onMouseDown={startPress}
                         onMouseUp={cancelPress}
                         onMouseLeave={cancelPress}
@@ -403,10 +455,17 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                         <SafeMediaImage
                             src={urlToUse}
                             alt={message.content || fileName || 'Imagem enviada'}
-                            width={300}
-                            height={300}
-                            className="object-cover w-full h-full hover:scale-105 transition-transform duration-300"
+                            width={320}
+                            height={320}
+                            className="block max-h-[420px] w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
                         />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/65 via-black/15 to-transparent px-3 pb-2 pt-10 text-white">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-white/90">
+                                <ImageIcon className="h-3.5 w-3.5" />
+                                Imagem
+                            </span>
+                            <span className="text-[10px] text-white/70">Toque para ampliar</span>
+                        </div>
                     </div>
                 </MediaViewer>
             );
@@ -415,21 +474,25 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
         if (effectiveMimeType.startsWith('video/')) {
             return (
                 <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName} chatId={message.chat_id}>
-                    <div className="relative group cursor-pointer overflow-hidden rounded-lg w-full max-w-[80vw] md:max-w-[300px] aspect-video min-h-[169px] bg-muted/20">
-                        <SafeMediaImage
-                            src={safeThumbnail || '/placeholder-video.png'}
-                            alt="Vídeo"
-                            width={300}
-                            height={169} // ~16:9 ratio
-                            className="object-cover w-full h-full brightness-90 group-hover:scale-105 transition-all duration-300"
+                    <div className="group relative aspect-video w-[min(78vw,320px)] cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/20 shadow-sm dark:border-white/10">
+                        <VideoThumbnail
+                            videoSrc={urlToUse}
+                            thumbnailSrc={safeThumbnail || undefined}
+                            className="h-full w-full object-cover brightness-[0.82] transition-all duration-300 group-hover:scale-[1.025] group-hover:brightness-[0.72]"
                         />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                            <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
-                                <PlayCircle className="h-8 w-8 text-white fill-white/20" />
+                        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+                            <div className="rounded-full border border-white/25 bg-black/45 p-3 shadow-lg backdrop-blur-sm transition-transform group-hover:scale-105">
+                                <PlayCircle className="h-8 w-8 fill-white/15 text-white" />
                             </div>
                         </div>
-                        <div className="absolute bottom-2 right-2 bg-black/60 px-2 py-1 rounded text-xs text-white font-medium pointer-events-none backdrop-blur-sm z-10">
-                            {duration ? formatDuration(duration) : 'Vídeo'}
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-between gap-3 bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 pb-2 pt-10 text-white">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-white/90">
+                                <Video className="h-3.5 w-3.5" />
+                                Vídeo
+                            </span>
+                            <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+                                {duration ? formatDuration(duration) : 'Reproduzir'}
+                            </span>
                         </div>
                     </div>
                 </MediaViewer>
@@ -467,10 +530,18 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
     };
 
     return (
-        <div className='flex flex-col gap-1.5'>
+        <div className="flex flex-col gap-2">
             {renderMedia()}
             {message.content && (
-                <p className="whitespace-pre-wrap text-sm" dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content, { isOutgoing: Boolean(message.from_me) }) }} />
+                <p
+                    className={cn(
+                        "whitespace-pre-wrap rounded-xl px-3 py-2 text-sm leading-relaxed shadow-sm",
+                        message.from_me
+                            ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+                            : "border border-slate-200/80 bg-white text-slate-800 dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100"
+                    )}
+                    dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content, { isOutgoing: Boolean(message.from_me) }) }}
+                />
             )}
         </div>
     )
@@ -583,6 +654,18 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
     const isAiAnalysis = message.metadata?.isAiAnalysis;
     const isToolExecution = message.metadata?.isToolExecution;
     const isPrearmedTool = isToolExecution && message.metadata?.agentToolStatus === 'prearmed';
+    const messageMimeType = message.metadata?.mimetype?.toLowerCase() || '';
+    const isVisualMediaMessage =
+        !isDeleted &&
+        !isInternalNote &&
+        !isAiAnalysis &&
+        !isToolExecution &&
+        (
+            message.type === 'image' ||
+            message.type === 'video' ||
+            messageMimeType.startsWith('image/') ||
+            messageMimeType.startsWith('video/')
+        );
     const failureDetails = normalizeFailureDetails(message);
     const replyPreview = resolveReplyPreview(message, quotedMessage);
     const statusTitle = isFailed
@@ -697,7 +780,8 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                             <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                                 <div
                                     className={cn(
-                                        "break-words rounded-[22px] md:rounded-2xl p-3 md:p-3 max-w-[85%] md:max-w-lg shadow-sm md:shadow-lg relative",
+                                        "relative max-w-[85%] break-words md:max-w-lg",
+                                        !isVisualMediaMessage && "rounded-[22px] p-3 shadow-sm md:rounded-2xl md:p-3 md:shadow-lg",
                                         isDeleted
                                             ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'
                                             : isPrearmedTool
@@ -706,8 +790,10 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                 ? 'border border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-200'
                                             : isAiAnalysis
                                                 ? 'border border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
-                                                : isInternalNote
+                                            : isInternalNote
                                                     ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-700'
+                                                : isVisualMediaMessage
+                                                    ? ''
                                                 : (isFromMe
                                                     ? 'rounded-tr-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_16px_30px_-18px_rgba(59,130,246,0.85)]'
                                                     : 'rounded-tl-sm border border-slate-200/80 bg-white text-slate-800 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100 dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.85)]')

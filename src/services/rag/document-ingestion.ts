@@ -3,7 +3,7 @@ import type { KnowledgeBaseDocument } from '@/lib/types';
 import { VectorStore } from '@/lib/vector-store';
 import { createHash } from 'crypto';
 import { isUnsafeAsCustomerFacingKnowledge } from './document-safety';
-import { buildKnowledgeChunkMetadata, splitKnowledgeDocument } from './knowledge-document';
+import { buildKnowledgeChunkMetadata, splitKnowledgeDocumentWithMetadata, toCanonicalKnowledgeMarkdown } from './knowledge-document';
 
 type IngestKnowledgeBaseDocumentInput = {
     workspaceId: string;
@@ -30,8 +30,9 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
     }
 
     const documentMetadata = buildKnowledgeChunkMetadata(document);
+    const canonicalMarkdown = toCanonicalKnowledgeMarkdown(document);
     const metadataHash = createHash('sha256').update(JSON.stringify(documentMetadata)).digest('hex');
-    const contentHash = createHash('sha256').update(`${input.content}\n${metadataHash}`).digest('hex');
+    const contentHash = createHash('sha256').update(`${canonicalMarkdown}\n${metadataHash}`).digest('hex');
     const existingStats = await VectorStore.getDocumentEmbeddingStats({
         workspaceId: input.workspaceId,
         autopilotConfigId: input.autopilotConfigId ?? null,
@@ -54,13 +55,13 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
         };
     }
 
-    const chunks = await splitKnowledgeDocument(document);
+    const chunks = await splitKnowledgeDocumentWithMetadata(document);
     await VectorStore.deleteDocumentEmbeddings(input.documentId);
 
     let embeddedChunks = 0;
     for (let index = 0; index < chunks.length; index++) {
         const chunk = chunks[index];
-        const vector = await generateDocumentPassageEmbedding(chunk);
+        const vector = await generateDocumentPassageEmbedding(chunk.content);
         if (vector.length === 0) {
             continue;
         }
@@ -70,14 +71,16 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
             workspaceId: input.workspaceId,
             autopilotConfigId: input.autopilotConfigId ?? null,
             documentName: input.documentName,
-            content: chunk,
+            content: chunk.content,
             vector,
             metadata: {
                 contentHash,
                 metadataHash,
                 chunkIndex: index,
                 chunkCount: chunks.length,
-                chunkLength: chunk.length,
+                chunkLength: chunk.content.length,
+                parentContent: chunk.parentContent,
+                parentHeading: chunk.parentHeading,
                 sourceType: 'knowledge_base_document',
                 embeddingModel: DOCUMENT_EMBEDDING_MODEL,
                 embeddingDimensions: DOCUMENT_EMBEDDING_DIMENSIONS,

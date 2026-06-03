@@ -184,6 +184,60 @@ function extractQuantity(text: string): string | null {
   return text.match(/\b(\d{1,4})\s*(?:unidades?|itens?|pessoas?|vagas?|servicos?|serviços?)\b/i)?.[1] || null;
 }
 
+function cleanCapturedText(value: string): string {
+  return value
+    .replace(/[.!?;:,]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractName(text: string, takeLast = false): string | null {
+  const patterns = [
+    /\b(?:meu nome(?: completo)?\s*(?:e|é)|nome(?: completo)?\s*[:=])\s+([a-zÀ-ÿ][a-zÀ-ÿ' ]{2,80})/gi,
+    /\b(?:sou|me chamo|chamo)\s+([a-zÀ-ÿ][a-zÀ-ÿ' ]{2,80})/gi,
+  ];
+  const matches = patterns.flatMap((pattern) => Array.from(text.matchAll(pattern)).map((match) => cleanCapturedText(match[1])));
+  const filtered = matches.filter((match) => match.split(/\s+/).length >= 2 || match.length >= 4);
+  if (filtered.length === 0) return null;
+  return takeLast ? filtered[filtered.length - 1] : filtered[0];
+}
+
+function extractProductPreference(text: string, takeLast = false): string | null {
+  const patterns = [
+    /\b(?:quero|vou querer|tenho interesse|escolhi|contratar|assinar|reservar|agendar|comprar)\s+(?:o|a|esse|essa|um|uma|produto|servico|serviço|item|opcao|opção)?\s*([^.!?\n]{3,80})/gi,
+    /\b([0-9]{2,4}\s*(?:mega|megas|mb|gb)(?:\s*\+\s*[^.!?\n]{1,40})?)/gi,
+  ];
+  const matches = patterns
+    .flatMap((pattern) => Array.from(text.matchAll(pattern)).map((match) => cleanCapturedText(match[1])))
+    .filter((match) => !/^(sim|ok|certo|obrigado|obrigada|por favor)$/i.test(match));
+  if (matches.length === 0) return null;
+  return takeLast ? matches[matches.length - 1] : matches[0];
+}
+
+function extractAddress(text: string, takeLast = false): string | null {
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const candidates = lines.flatMap((line) => {
+    const normalized = normalizeText(line);
+    const hasAddressSignal = /\b(endereco|endereço|rua|avenida|av\.|quadra|qd|lote|lt|numero|nº|bairro|cidade|condominio|condomínio|casa|apartamento|apto|cep|morada)\b/.test(normalized);
+    if (!hasAddressSignal) return [];
+    const explicit = line.match(/\b(?:meu endereco(?: completo)?\s*(?:e|é)|endereco(?: completo)?\s*[:=]|moro na?|moro em)\s+(.+)/i)?.[1];
+    return [cleanCapturedText(explicit || line)];
+  });
+  const filtered = candidates
+    .map((candidate) => candidate.replace(/^(?:meu\s+)?(?:endereco|endereço)\s*(?:completo)?\s*(?:e|é|:)?\s*/i, ''))
+    .filter((candidate) => candidate.length >= 8);
+  if (filtered.length === 0) return null;
+  return takeLast ? filtered[filtered.length - 1] : filtered[0];
+}
+
+function messageSaysUseCurrentPhone(text: string): boolean {
+  const normalized = normalizeText(text);
+  return (
+    /\b(telefone|whatsapp|numero|número)\b/.test(normalized) &&
+    /\b(o mesmo|este|esse|atual|que estou falando|que eu estou falando|deste contato|desse contato)\b/.test(normalized)
+  );
+}
+
 export function extractAutopilotSlots(input: {
   customerMessage: string;
   chatHistory?: string;
@@ -244,6 +298,18 @@ export function extractAutopilotSlots(input: {
     return null;
   };
 
+  const productExtract = extractFromTextOrHistory((text, takeLast) => extractProductPreference(text, takeLast));
+  if (productExtract) addSlot(result, { name: 'product_or_service_preference', value: productExtract.value, source: productExtract.source, confidence: 0.82 });
+
+  const nameExtract = extractFromTextOrHistory((text, takeLast) => extractName(text, takeLast));
+  const contactName = input.contact?.name && !/^cliente\b/i.test(input.contact.name) ? input.contact.name : null;
+  const name = nameExtract?.value || contactName || null;
+  if (name) addSlot(result, { name: 'name', value: name, source: name === contactName ? 'contact' : nameExtract?.source || 'message', confidence: name === contactName ? 0.72 : 0.9 });
+
+  const addressExtract = extractFromTextOrHistory((text, takeLast) => extractAddress(text, takeLast));
+  const address = addressExtract?.value || input.contact?.address || null;
+  if (address) addSlot(result, { name: 'address', value: address, source: address === input.contact?.address ? 'contact' : addressExtract?.source || 'message', confidence: address === input.contact?.address ? 0.7 : 0.84 });
+
   const emailExtract = extractFromTextOrHistory((text, takeLast) => {
     const matches = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig);
     if (!matches) return null;
@@ -257,8 +323,9 @@ export function extractAutopilotSlots(input: {
     if (!matches) return null;
     return takeLast ? matches[matches.length - 1] : matches[0];
   });
-  const phone = phoneExtract?.value || input.contact?.phone || null;
-  if (phone) addSlot(result, { name: 'phone', value: phone.replace(/\s+/g, ' ').trim(), source: phone === input.contact?.phone ? 'contact' : phoneExtract?.source || 'message', confidence: 0.85 });
+  const contactPhone = input.contact?.phone || input.contact?.phone_number_jid || null;
+  const phone = phoneExtract?.value || (messageSaysUseCurrentPhone(message) ? contactPhone : null) || input.contact?.phone || null;
+  if (phone) addSlot(result, { name: 'phone', value: onlyDigits(phone) || phone.replace(/\s+/g, ' ').trim(), source: phone === contactPhone || phone === input.contact?.phone ? 'contact' : phoneExtract?.source || 'message', confidence: 0.85 });
 
   const dateExtract = extractFromTextOrHistory((text) => extractDate(text, now));
   if (dateExtract) addSlot(result, { name: 'date', value: dateExtract.value, source: dateExtract.source, confidence: 0.88 });
@@ -274,10 +341,6 @@ export function extractAutopilotSlots(input: {
 
   const quantityExtract = extractFromTextOrHistory((text) => extractQuantity(text));
   if (quantityExtract) addSlot(result, { name: 'quantity', value: quantityExtract.value, source: quantityExtract.source, confidence: 0.7 });
-
-  if (input.contact?.address) {
-    addSlot(result, { name: 'address', value: input.contact.address, source: 'contact', confidence: 0.7 });
-  }
 
   return result;
 }

@@ -31,6 +31,7 @@ describe('autopilot close intent', () => {
     'Finalizei o atendimento por aqui.',
     'Atendimento encerrado conforme solicitado.',
     'Vou fechar o chat agora.',
+    'Vou encerrar nosso atendimento por aqui.',
     'Desliguei o chat conforme solicitado.',
     'Encerramos a conversa.',
   ])('detects closure claims: %s', (response) => {

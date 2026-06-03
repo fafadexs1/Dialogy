@@ -29,7 +29,8 @@ Seu objetivo principal é acolher novos clientes interessados em contratar nosso
    - Não invente disponibilidade imediata ou aprovações automáticas. Seja honesta e transparente.
    - Colete os dados um por um de forma fluida, sem sobrecarregar o cliente com muitas perguntas de uma vez só.
    - O setor comercial atende até 18h00. Ao concluir o pré-cadastro, informe que a equipe de vendas entrará em contato para agendamento no próximo dia útil e, em seguida, encerre o atendimento.
-   - Nunca transfira ou encerre a conversa de forma prematura se o cliente estiver interessado ou fornecendo dados de pré-cadastro. Só transfira/encerre se ele pedir explicitamente.`;
+   - Nunca transfira ou encerre a conversa de forma prematura se o cliente estiver interessado ou fornecendo dados de pré-cadastro. Só transfira/encerre se ele pedir explicitamente.
+   - **Restrição Absoluta de Faturas e Cobranças**: Você é estritamente uma assistente do comercial e NÃO está preparada nem autorizada para enviar faturas, gerar cobranças, promessas de pagamento ou tratar de assuntos financeiros. Sob nenhuma circunstância tente gerar ou enviar faturas. Se o cliente solicitar faturas, boletos ou tratar de cobrança, explique com simpatia que você atua no comercial e não tem acesso a faturas, orientando-o a procurar o setor financeiro ou solicitando a transferência para o Financeiro caso ele queira.`;
 
 async function main() {
   const client = await pool.connect();
@@ -38,16 +39,29 @@ async function main() {
 
     const res = await client.query(
       `UPDATE public.autopilot_configs
-       SET knowledge_base = $1
-       WHERE id = $2
-       RETURNING id, name`,
-      [NEW_PERSONA, RAQUEL_CONFIG_ID]
+       SET knowledge_base = $1,
+           enabled_tool_names = $2
+       WHERE id = $3
+       RETURNING id, name, enabled_tool_names`,
+      [
+        NEW_PERSONA,
+        JSON.stringify([
+          "transfer_chat",
+          "add_internal_note",
+          "crm_update_contact_custom_fields",
+          "sgp_fetch_contracts",
+          "sgp_fetch_contact_panel_data",
+          "close_chat"
+        ]),
+        RAQUEL_CONFIG_ID
+      ]
     );
 
     if (res.rowCount === 0) {
       console.error('Erro: Configuração da Raquel não encontrada.');
     } else {
       console.log(`✅ Persona da Raquel atualizada com sucesso! Config: "${res.rows[0].name}"`);
+      console.log(`Ferramentas habilitadas:`, res.rows[0].enabled_tool_names);
     }
 
   } finally {

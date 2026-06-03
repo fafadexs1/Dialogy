@@ -17,6 +17,8 @@ import { DEFAULT_AUTOPILOT_MODEL, getGoogleAiSdkModelName, normalizeGoogleAiMode
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
 import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
+import { isLmStudioModel } from '@/services/ai/lm-studio';
+import { requestLmStudioText } from '@/services/ai/lm-studio-client';
 
 
 const SmartRepliesInputSchema = z.object({
@@ -63,7 +65,25 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
     : { id: 'default', ai_model: DEFAULT_AUTOPILOT_MODEL };
   const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
   const apiKey = config.gemini_api_key || runtimeConfig.apiKey;
-  const configuredModel = normalizeGoogleAiModelId(config.ai_model || runtimeConfig.aiModel) || DEFAULT_AUTOPILOT_MODEL;
+  const requestedModel = config.ai_model || runtimeConfig.aiModel || DEFAULT_AUTOPILOT_MODEL;
+  const configuredModel = isLmStudioModel(requestedModel)
+    ? requestedModel
+    : normalizeGoogleAiModelId(requestedModel) || DEFAULT_AUTOPILOT_MODEL;
+
+  if (isLmStudioModel(configuredModel)) {
+    const text = await requestLmStudioText({
+      model: configuredModel,
+      systemPrompt: 'Sugira respostas curtas para um atendente humano. Responda somente um array JSON com 3 strings.',
+      userPrompt: `Historico: ${input.chatHistory || ''}\nMensagem do cliente: ${input.customerMessage}`,
+      timeoutMs: 5000,
+      maxTokens: 240,
+    });
+    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleanText);
+    return SmartRepliesOutputSchema.parse({
+      suggestedReplies: Array.isArray(parsed) ? parsed.slice(0, 3) : [],
+    });
+  }
 
   // Check if we have a custom Gemini API Key
   if (apiKey) {

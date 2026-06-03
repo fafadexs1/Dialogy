@@ -30,6 +30,9 @@ import { reportClientMetric } from '@/lib/observability/client';
 import { formatMessageDate } from '@/lib/utils';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
 import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
+import { reconcileRealtimeChatAssignment } from '@/lib/realtime/realtime-reconciler';
+import { shouldMarkChatAsRead } from '@/lib/inbox-read-state';
+import { persistChatRead } from '@/lib/inbox-mark-as-read';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -1112,20 +1115,17 @@ export default function CustomerChatLayout({
   }, [initialUser?.activeWorkspaceId]);
 
   const markSelectedChatAsRead = useCallback(() => {
-    if (!selectedChatId || !currentChatMessages.length || !document.hasFocus()) return;
-    const hasUnread = currentChatMessages.some((m) => !m.from_me && !m.is_read);
-
-    if (!hasUnread) return;
+    if (!selectedChatId || !document.hasFocus()) return;
+    if (!shouldMarkChatAsRead(selectedChat, currentChatMessages)) return;
 
     markChatAsReadInStore(selectedChatId);
-    fetch('/api/chats/mark-as-read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatId: selectedChatId })
-    }).catch(() => {
-      console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
+    void persistChatRead(selectedChatId).then((persisted) => {
+      if (!persisted) {
+        console.error('Failed to mark messages as read on the server. Data will sync on next fetch.');
+        void runDeltaSync({ force: true });
+      }
     });
-  }, [selectedChatId, currentChatMessages, markChatAsReadInStore]);
+  }, [selectedChat, selectedChatId, currentChatMessages, markChatAsReadInStore, runDeltaSync]);
 
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
@@ -1321,6 +1321,7 @@ export default function CustomerChatLayout({
       unreadCountValue = 0;
     }
 
+    const assignmentUpdate = reconcileRealtimeChatAssignment(existingChat, newChatData, initialUser);
     const optimisticUpdate: Partial<Chat> = {
       ...newChatData,
       id: newChatData.id,
@@ -1330,7 +1331,7 @@ export default function CustomerChatLayout({
         initialUser?.activeWorkspaceId ||
         '',
       status: incomingStatus,
-      agentId: newChatData.agent_id ?? undefined,
+      ...assignmentUpdate,
       updatedAt: newChatData.updated_at || existingChat?.updatedAt || previewIso,
       unreadCount:
         Number.isFinite(unreadCountValue)
@@ -1357,17 +1358,10 @@ export default function CustomerChatLayout({
       metaContactExternalId: newChatData.meta_contact_external_id || existingChat?.metaContactExternalId,
       metaContactUsername: newChatData.meta_contact_username || existingChat?.metaContactUsername,
       contact: existingChat?.contact,
-      agent: existingChat?.agent,
       messages: previewMessage
         ? [previewMessage]
         : (existingChat?.messages || []),
     };
-
-    if (newChatData.agent_id === initialUser?.id) {
-      optimisticUpdate.agent = initialUser ?? undefined;
-    } else if (newChatData.agent_id === null) {
-      optimisticUpdate.agent = undefined;
-    }
 
     if (!optimisticUpdate.contact && contactId) {
       optimisticUpdate.contact = {

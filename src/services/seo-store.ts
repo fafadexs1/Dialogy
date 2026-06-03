@@ -98,22 +98,7 @@ async function readLegacyEntries(): Promise<SeoEntry[]> {
 }
 
 async function ensureTable() {
-    await db.query(`
-        CREATE TABLE IF NOT EXISTS public.seo_pages (
-            id text PRIMARY KEY,
-            pathname text UNIQUE NOT NULL,
-            title text,
-            description text,
-            canonical text,
-            robots text NOT NULL DEFAULT 'index, follow',
-            og_image text,
-            og_type text NOT NULL DEFAULT 'website',
-            json_ld text,
-            updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_seo_pages_pathname ON public.seo_pages(pathname);
-    `);
+    // Applied by Prisma migration before runtime.
 }
 
 async function countRows() {

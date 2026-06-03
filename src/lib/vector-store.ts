@@ -116,7 +116,11 @@ export const VectorStore = {
                 input.workspaceId,
                 input.autopilotConfigId ?? null,
                 input.documentName,
-                JSON.stringify(input.metadata ?? {}),
+                JSON.stringify({
+                    embeddingModel: DOCUMENT_EMBEDDING_MODEL,
+                    embeddingDimensions: DOCUMENT_EMBEDDING_DIMENSIONS,
+                    ...(input.metadata ?? {}),
+                }),
             ]
         );
     },
@@ -148,7 +152,11 @@ export const VectorStore = {
                 MAX(created_at) AS last_indexed_at,
                 MIN(vector_dims(vector))::int AS min_dims,
                 MAX(vector_dims(vector))::int AS max_dims,
-                COUNT(*) FILTER (WHERE vector_dims(vector) <> ${DOCUMENT_EMBEDDING_DIMENSIONS})::int AS wrong_dims,
+                COUNT(*) FILTER (
+                    WHERE vector_dims(vector) <> ${DOCUMENT_EMBEDDING_DIMENSIONS}
+                       OR COALESCE(metadata->>'embeddingModel', '') <> '${DOCUMENT_EMBEDDING_MODEL}'
+                       OR COALESCE(metadata->>'contentFormat', '') <> 'markdown'
+                )::int AS wrong_dims,
                 jsonb_agg(DISTINCT metadata->>'contentHash') FILTER (WHERE metadata ? 'contentHash') AS content_hashes,
                 jsonb_agg(DISTINCT metadata->>'indexingStatus') FILTER (WHERE metadata ? 'indexingStatus') AS statuses
              FROM embeddings_documents
@@ -167,6 +175,7 @@ export const VectorStore = {
         autopilotConfigId?: string | null;
         limit?: number;
         excludeIds?: string[];
+        excludeDocumentIds?: string[];
         allowedDocumentIds?: string[];
     }): Promise<KeywordDocumentMatch[]> {
         const tokens = Array.from(new Set(
@@ -189,6 +198,13 @@ export const VectorStore = {
         ];
         const scoreParts: string[] = [];
         const keywordConditions: string[] = [];
+        params.push(input.query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase());
+        const normalizedQueryParam = `$${params.length}`;
+        const searchableText = `lower(COALESCE(document_name, '') || ' ' || content || ' ' || COALESCE(metadata->>'canonicalAnswer', ''))`;
+        const textSearchRank = `ts_rank_cd(to_tsvector('simple', ${searchableText}), plainto_tsquery('simple', ${normalizedQueryParam}))`;
+        keywordConditions.push(`to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${normalizedQueryParam})`);
+        scoreParts.push(`(${textSearchRank} * 12)`);
+        scoreParts.push(`CASE WHEN ${searchableText} LIKE ('%' || ${normalizedQueryParam} || '%') THEN 8 ELSE 0 END`);
 
         if (input.autopilotConfigId) {
             params.push(input.autopilotConfigId);
@@ -199,6 +215,10 @@ export const VectorStore = {
             params.push(input.excludeIds);
             filters.push(`id <> ALL($${params.length}::uuid[])`);
         }
+        if ((input.excludeDocumentIds ?? []).length > 0) {
+            params.push(input.excludeDocumentIds);
+            filters.push(`document_id <> ALL($${params.length}::uuid[])`);
+        }
         if (input.allowedDocumentIds) {
             if (input.allowedDocumentIds.length === 0) return [];
             params.push(input.allowedDocumentIds);
@@ -208,9 +228,10 @@ export const VectorStore = {
         for (const token of tokens) {
             params.push(`%${token}%`);
             const param = `$${params.length}`;
-            keywordConditions.push(`(unaccent(lower(content)) LIKE ${param} OR unaccent(lower(COALESCE(document_name, ''))) LIKE ${param})`);
+            keywordConditions.push(`(unaccent(lower(content)) LIKE ${param} OR unaccent(lower(COALESCE(document_name, ''))) LIKE ${param} OR unaccent(lower(COALESCE(metadata->>'canonicalAnswer', ''))) LIKE ${param})`);
             scoreParts.push(`CASE WHEN unaccent(lower(content)) LIKE ${param} THEN 1 ELSE 0 END`);
-            scoreParts.push(`CASE WHEN unaccent(lower(COALESCE(document_name, ''))) LIKE ${param} THEN 2 ELSE 0 END`);
+            scoreParts.push(`CASE WHEN unaccent(lower(COALESCE(document_name, ''))) LIKE ${param} THEN 3 ELSE 0 END`);
+            scoreParts.push(`CASE WHEN unaccent(lower(COALESCE(metadata->>'canonicalAnswer', ''))) LIKE ${param} THEN 2 ELSE 0 END`);
         }
         filters.push(`(${keywordConditions.join(' OR ')})`);
 
@@ -242,7 +263,8 @@ export const VectorStore = {
 
             const withoutUnaccent = (sql: string) => sql
                 .replace(/unaccent\(lower\(content\)\)/g, 'lower(content)')
-                .replace(/unaccent\(lower\(COALESCE\(document_name, ''\)\)\)/g, "lower(COALESCE(document_name, ''))");
+                .replace(/unaccent\(lower\(COALESCE\(document_name, ''\)\)\)/g, "lower(COALESCE(document_name, ''))")
+                .replace(/unaccent\(lower\(COALESCE\(metadata->>'canonicalAnswer', ''\)\)\)/g, "lower(COALESCE(metadata->>'canonicalAnswer', ''))");
             const fallbackFilters = filters.map(withoutUnaccent);
             const fallbackScoreParts = scoreParts.map(withoutUnaccent);
             const { rows } = await db.query(
@@ -274,7 +296,7 @@ export const VectorStore = {
         const minSimilarity = input.minSimilarity ?? 0;
         const excludeIds = input.excludeIds ?? [];
 
-        const params: any[] = [vectorStr, input.workspaceId, limit, minSimilarity];
+        const params: any[] = [vectorStr, input.workspaceId, limit, minSimilarity, DOCUMENT_EMBEDDING_MODEL];
         let autopilotFilter = '';
         let excludeFilter = '';
 
@@ -307,6 +329,7 @@ export const VectorStore = {
              WHERE workspace_id = $2
                ${autopilotFilter}
                ${excludeFilter}
+               AND metadata->>'embeddingModel' = $5
                AND COALESCE(metadata->>'status', 'active') NOT IN ('draft', 'archived', 'expired', 'inactive')
                AND (NULLIF(metadata->>'validFromTimestamp', '') IS NULL OR (metadata->>'validFromTimestamp')::timestamptz <= NOW())
                AND (NULLIF(metadata->>'validUntilTimestamp', '') IS NULL OR (metadata->>'validUntilTimestamp')::timestamptz >= NOW())
@@ -370,7 +393,11 @@ export const VectorStore = {
                 input.closeReasonTagId ?? null,
                 input.closeReasonLabel ?? null,
                 input.keywords ?? [],
-                JSON.stringify(input.metadata ?? {}),
+                JSON.stringify({
+                    embeddingModel: DOCUMENT_EMBEDDING_MODEL,
+                    embeddingDimensions: DOCUMENT_EMBEDDING_DIMENSIONS,
+                    ...(input.metadata ?? {}),
+                }),
                 vectorStr,
             ]
         );
@@ -385,8 +412,8 @@ export const VectorStore = {
         const vectorStr = toVectorString(input.vector);
         const limit = input.limit ?? 5;
         const minSimilarity = input.minSimilarity ?? 0;
-        const params: any[] = [vectorStr, input.workspaceId, limit, minSimilarity];
-        const filters: string[] = [];
+        const params: any[] = [vectorStr, input.workspaceId, limit, minSimilarity, DOCUMENT_EMBEDDING_MODEL];
+        const filters: string[] = [`metadata->>'embeddingModel' = $5`];
 
         if (input.autopilotConfigId) {
             params.push(input.autopilotConfigId);

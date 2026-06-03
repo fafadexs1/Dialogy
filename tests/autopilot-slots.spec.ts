@@ -67,4 +67,29 @@ describe('autopilot slot extraction', () => {
     expect(result.slots.time).toBe('14:30');
     expect(result.slots.order_or_request_id).toBe('ABCD-1234');
   });
+
+  it('extracts generic intake slots from message and history', () => {
+    const result = extractAutopilotSlots({
+      customerMessage: 'Meu telefone e o mesmo que estou falando contigo',
+      chatHistory: [
+        'Cliente: Ta certo, quero agendar manutencao preventiva.',
+        'Cliente: Meu nome completo e Fabricio de Sousa Soares',
+        'Cliente: CPF 529.982.247-25',
+        'Cliente: Quadra 12, Lote 13, Morada das Garcas, Cidade Ocidental',
+      ].join('\n'),
+      contact: {
+        id: 'contact-1',
+        workspace_id: 'workspace-1',
+        name: '',
+        phone: '5561995215930',
+        phone_number_jid: '5561995215930@s.whatsapp.net',
+      } as any,
+    });
+
+    expect(result.slots.product_or_service_preference).toContain('manutencao preventiva');
+    expect(result.slots.name).toBe('Fabricio de Sousa Soares');
+    expect(result.slots.customer_identifier).toBe('52998224725');
+    expect(result.slots.address).toContain('Quadra 12');
+    expect(result.slots.phone).toBe('5561995215930');
+  });
 });

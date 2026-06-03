@@ -50,8 +50,8 @@ export async function fetchSGPContracts(chatId: string) {
     return fetchSGPContractsImpl(chatId);
 }
 
-export async function fetchSGPContactPanelData(chatId: string) {
-    return fetchSGPContactPanelDataImpl(chatId);
+export async function fetchSGPContactPanelData(chatId: string, contractId?: string | null) {
+    return fetchSGPContactPanelDataImpl(chatId, contractId);
 }
 
 export async function createSGPServiceOrder(chatId: string, contractId: string, notes: string) {

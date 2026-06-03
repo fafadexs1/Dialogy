@@ -18,6 +18,7 @@ import {
   type ReactFlowInstance,
   useEdgesState,
   useNodesState,
+  useUpdateNodeInternals,
 } from '@xyflow/react';
 import {
   ArrowLeft,
@@ -40,8 +41,10 @@ import {
   Rocket,
   Save,
   Search,
+  Send,
   Settings2,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UserRound,
   Wrench,
@@ -53,12 +56,14 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type {
+  AutopilotFlowAiProposal,
   AutopilotFlowGraph,
   AutopilotFlowFormField,
   AutopilotFlowNodeKind,
@@ -95,6 +100,7 @@ type AttendantNodeData = {
   status?: string;
   risk?: 'low' | 'medium' | 'high';
   toolName?: string;
+  toolHandlePosition?: Position;
   config?: {
     instructions?: string;
     message?: string;
@@ -142,6 +148,12 @@ interface AutopilotFlowBuilderProps {
   onPublish: () => void;
   onDiscard: () => void;
   onAddRule: () => void;
+  onGenerateFlowWithAi: (input: {
+    conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+    currentGraph: AutopilotFlowGraph;
+    currentSystemPrompt: string;
+  }) => Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }>;
+  onApplyAiProposal: (proposal: AutopilotFlowAiProposal) => void;
 }
 
 const BUILT_IN_VARIABLES = [
@@ -223,12 +235,18 @@ function NodeIcon({ kind }: { kind: NodeKind }) {
   return <Wrench className={className} />;
 }
 
-function AttendantNodeCard({ data, selected }: NodeProps<AttendantNode>) {
+function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
   const isAttachmentNode = data.kind === 'knowledge' || data.kind === 'rule';
   const isKnowledgeNode = data.kind === 'knowledge';
   const isSkillNode = data.kind === 'rule';
   const acceptsKnowledge = isAgentNodeKind(data.kind);
   const exposesSkill = isAgentNodeKind(data.kind);
+  const toolHandlePosition = data.toolHandlePosition || Position.Top;
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  useEffect(() => {
+    if (data.kind === 'tool') updateNodeInternals(id);
+  }, [data.kind, id, toolHandlePosition, updateNodeInternals]);
 
   return (
     <div
@@ -249,6 +267,9 @@ function AttendantNodeCard({ data, selected }: NodeProps<AttendantNode>) {
       )}
       {isSkillNode && (
         <Handle id="target-left-skill" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.skill} />
+      )}
+      {data.kind === 'tool' && (
+        <Handle id={`target-${toolHandlePosition}-tool`} type="target" position={toolHandlePosition} className={HANDLE_CLASS_NAMES.skill} />
       )}
       <span
         className={cn(
@@ -290,6 +311,9 @@ function AttendantNodeCard({ data, selected }: NodeProps<AttendantNode>) {
       {exposesSkill && (
         <Handle id="source-right-skill" type="source" position={Position.Right} className={HANDLE_CLASS_NAMES.skill} />
       )}
+      {exposesSkill && (
+        <Handle id="source-left-skill" type="source" position={Position.Left} className={HANDLE_CLASS_NAMES.skill} />
+      )}
     </div>
   );
 }
@@ -301,12 +325,31 @@ const VERTICAL_TARGET_HANDLE = 'target-top';
 const KNOWLEDGE_SOURCE_HANDLE = 'source-right-knowledge';
 const KNOWLEDGE_TARGET_HANDLE = 'target-left-knowledge';
 const SKILL_SOURCE_HANDLE = 'source-right-skill';
+const SKILL_SOURCE_LEFT_HANDLE = 'source-left-skill';
 const SKILL_TARGET_HANDLE = 'target-left-skill';
 const DEFAULT_EDGE_COLOR = '#4485a5';
 const KNOWLEDGE_EDGE_COLOR = '#fb923c';
 const SKILL_EDGE_COLOR = '#f87171';
 
-function connectionVisual(sourceKind: NodeKind, targetKind: NodeKind) {
+function toolTargetPosition(source: AttendantNode, target: AttendantNode): Position {
+  const dx = source.position.x - target.position.x;
+  const dy = source.position.y - target.position.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx < 0 ? Position.Left : Position.Right;
+  return dy < 0 ? Position.Top : Position.Bottom;
+}
+
+function agentSkillSourceHandle(source: AttendantNode, target: AttendantNode) {
+  return target.position.x < source.position.x ? SKILL_SOURCE_LEFT_HANDLE : SKILL_SOURCE_HANDLE;
+}
+
+function connectionVisual(source: AttendantNode, target: AttendantNode): {
+  sourceHandle: string;
+  targetHandle: string;
+  color: string;
+  toolHandlePosition?: Position;
+} {
+  const sourceKind = source.data.kind;
+  const targetKind = target.data.kind;
   if (sourceKind === 'knowledge' && isAgentNodeKind(targetKind)) {
     return {
       sourceHandle: KNOWLEDGE_SOURCE_HANDLE,
@@ -316,9 +359,18 @@ function connectionVisual(sourceKind: NodeKind, targetKind: NodeKind) {
   }
   if (isAgentNodeKind(sourceKind) && targetKind === 'rule') {
     return {
-      sourceHandle: SKILL_SOURCE_HANDLE,
+      sourceHandle: agentSkillSourceHandle(source, target),
       targetHandle: SKILL_TARGET_HANDLE,
       color: SKILL_EDGE_COLOR,
+    };
+  }
+  if (isAgentNodeKind(sourceKind) && targetKind === 'tool') {
+    const targetPosition = toolTargetPosition(source, target);
+    return {
+      sourceHandle: agentSkillSourceHandle(source, target),
+      targetHandle: `target-${targetPosition}-tool`,
+      color: SKILL_EDGE_COLOR,
+      toolHandlePosition: targetPosition,
     };
   }
   return {
@@ -334,6 +386,9 @@ function canConnectNodeKinds(sourceKind: NodeKind, targetKind: NodeKind): boolea
   }
   if (sourceKind === 'rule' || targetKind === 'rule') {
     return isAgentNodeKind(sourceKind) && targetKind === 'rule';
+  }
+  if (sourceKind === 'tool' || targetKind === 'tool') {
+    return isAgentNodeKind(sourceKind) && targetKind === 'tool';
   }
   return true;
 }
@@ -368,7 +423,7 @@ function edge(
 }
 
 function edgeForNodes(id: string, source: AttendantNode, target: AttendantNode): Edge {
-  return edge(id, source.id, target.id, connectionVisual(source.data.kind, target.data.kind));
+  return edge(id, source.id, target.id, connectionVisual(source, target));
 }
 
 function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
@@ -484,7 +539,7 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
 }
 
 function restoreFlowGraph(graph: AutopilotFlowGraph) {
-  const nodes = graph.nodes.map((node): AttendantNode => ({
+  let nodes = graph.nodes.map((node): AttendantNode => ({
     id: node.id,
     type: 'attendant',
     position: node.position,
@@ -505,6 +560,14 @@ function restoreFlowGraph(graph: AutopilotFlowGraph) {
     return source && target
       ? edgeForNodes(savedEdge.id, source, target)
       : edge(savedEdge.id, savedEdge.source, savedEdge.target);
+  });
+  nodes = nodes.map((node) => {
+    if (node.data.kind !== 'tool') return node;
+    const incomingEdge = edges.find((flowEdge) => flowEdge.target === node.id);
+    const source = incomingEdge ? nodeById.get(incomingEdge.source) : null;
+    return source
+      ? { ...node, data: { ...node.data, toolHandlePosition: toolTargetPosition(source, node) } }
+      : node;
   });
   return {
     nodes,
@@ -1090,7 +1153,7 @@ function NodeInspector({
           <div className="space-y-2">
             <Label className="text-xs text-slate-400">
               {node.data.kind === 'tool'
-                ? 'Payload / instrucao da ferramenta'
+                ? 'Instrucao para montar o payload'
                 : node.data.kind === 'intent'
                   ? 'System prompt do sub-agente'
                   : 'Instrucao'}
@@ -1102,6 +1165,11 @@ function NodeInspector({
               knownReferenceIds={knownReferenceIds}
               className="min-h-[118px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-sky-500/30"
             />
+            {node.data.kind === 'tool' && (
+              <p className="text-[11px] leading-4 text-slate-500">
+                Esta instrucao sera enviada para a IA junto do schema da tool quando este bloco estiver conectado ao agente ativo. O servidor ainda valida o JSON antes de executar.
+              </p>
+            )}
           </div>
         )}
 
@@ -1480,6 +1548,8 @@ export function AutopilotFlowBuilder({
   onPublish,
   onDiscard,
   onAddRule,
+  onGenerateFlowWithAi,
+  onApplyAiProposal,
 }: AutopilotFlowBuilderProps) {
   const initialGraph = useMemo(
     () => flowGraph ? restoreFlowGraph(flowGraph) : buildInitialGraph(agentName, rules),
@@ -1493,6 +1563,17 @@ export function AutopilotFlowBuilder({
   const [isSystemVariablesOpen, setIsSystemVariablesOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [isAiBuilderOpen, setIsAiBuilderOpen] = useState(false);
+  const [aiBuilderInput, setAiBuilderInput] = useState('');
+  const [isGeneratingAiFlow, setIsGeneratingAiFlow] = useState(false);
+  const [aiFlowProposal, setAiFlowProposal] = useState<AutopilotFlowAiProposal | null>(null);
+  const [aiBuilderError, setAiBuilderError] = useState('');
+  const [aiBuilderMessages, setAiBuilderMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([
+    {
+      role: 'assistant',
+      content: 'Descreva o atendimento que deseja montar. Posso criar um flow novo ou revisar o atual usando as ferramentas disponiveis.',
+    },
+  ]);
   const suppressNextGraphChange = useRef(true);
   const lastSerializedGraph = useRef(JSON.stringify(serializeFlowGraph(initialGraph.nodes, initialGraph.edges, initialGraph.variables)));
 
@@ -1537,6 +1618,50 @@ export function AutopilotFlowBuilder({
     onFlowGraphChange(nextGraph);
   }, [edges, nodes, onFlowGraphChange, systemVariables]);
 
+  useEffect(() => {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const toolPositions = new Map<string, Position>();
+    setEdges((current) => {
+      let changed = false;
+      const next = current.map((flowEdge) => {
+        const source = nodeById.get(flowEdge.source);
+        const target = nodeById.get(flowEdge.target);
+        if (!source || !target || !isAgentNodeKind(source.data.kind) || target.data.kind !== 'tool') {
+          return flowEdge;
+        }
+        const visual = connectionVisual(source, target);
+        if (visual.toolHandlePosition) toolPositions.set(target.id, visual.toolHandlePosition);
+        if (
+          flowEdge.sourceHandle === visual.sourceHandle &&
+          flowEdge.targetHandle === visual.targetHandle &&
+          flowEdge.style?.stroke === visual.color
+        ) {
+          return flowEdge;
+        }
+        changed = true;
+        return {
+          ...flowEdge,
+          sourceHandle: visual.sourceHandle,
+          targetHandle: visual.targetHandle,
+          markerEnd: { type: MarkerType.ArrowClosed, color: visual.color, width: 16, height: 16 },
+          style: { ...flowEdge.style, stroke: visual.color, strokeWidth: 1.6 },
+        };
+      });
+      return changed ? next : current;
+    });
+    if (toolPositions.size === 0) return;
+    setNodes((current) => {
+      let changed = false;
+      const next = current.map((node) => {
+        const nextPosition = toolPositions.get(node.id);
+        if (!nextPosition || node.data.toolHandlePosition === nextPosition) return node;
+        changed = true;
+        return { ...node, data: { ...node.data, toolHandlePosition: nextPosition } };
+      });
+      return changed ? next : current;
+    });
+  }, [edges, nodes, setEdges, setNodes]);
+
   const isValidConnection = useCallback((connection: Connection | Edge) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return false;
     const source = nodes.find((node) => node.id === connection.source);
@@ -1551,7 +1676,14 @@ export function AutopilotFlowBuilder({
       const source = nodes.find((node) => node.id === connection.source);
       const target = nodes.find((node) => node.id === connection.target);
       if (!source || !target) return;
-      const visual = connectionVisual(source.data.kind, target.data.kind);
+      const visual = connectionVisual(source, target);
+      if (target.data.kind === 'tool' && visual.toolHandlePosition) {
+        setNodes((current) => current.map((node) => (
+          node.id === target.id
+            ? { ...node, data: { ...node.data, toolHandlePosition: visual.toolHandlePosition } }
+            : node
+        )));
+      }
       setEdges((current) => addEdge({
         ...connection,
         sourceHandle: visual.sourceHandle,
@@ -1561,7 +1693,7 @@ export function AutopilotFlowBuilder({
         style: { stroke: visual.color, strokeWidth: 1.6 },
       }, current));
     },
-    [isValidConnection, nodes, setEdges]
+    [isValidConnection, nodes, setEdges, setNodes]
   );
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
@@ -1858,6 +1990,58 @@ export function AutopilotFlowBuilder({
     }
   }, [agentName, flowInstance, setNodes]);
 
+  const submitAiBuilderMessage = useCallback(async () => {
+    const content = aiBuilderInput.trim();
+    if (!content || isGeneratingAiFlow) return;
+    const conversation = [...aiBuilderMessages, { role: 'user' as const, content }];
+    setAiBuilderMessages(conversation);
+    setAiBuilderInput('');
+    setAiBuilderError('');
+    setIsGeneratingAiFlow(true);
+    try {
+      const result = await onGenerateFlowWithAi({
+        conversation,
+        currentGraph: serializeFlowGraph(nodes, edges, systemVariables),
+        currentSystemPrompt: mainSystemPrompt,
+      });
+      if (!result.proposal) {
+        setAiBuilderError(result.error || 'Nao foi possivel gerar uma proposta de flow.');
+        return;
+      }
+      setAiFlowProposal(result.proposal);
+      setAiBuilderMessages((current) => current.concat({
+        role: 'assistant',
+        content: result.proposal!.summary,
+      }));
+    } catch (error) {
+      setAiBuilderError(error instanceof Error ? error.message : 'Falha ao gerar flow com IA.');
+    } finally {
+      setIsGeneratingAiFlow(false);
+    }
+  }, [
+    aiBuilderInput,
+    aiBuilderMessages,
+    edges,
+    isGeneratingAiFlow,
+    mainSystemPrompt,
+    nodes,
+    onGenerateFlowWithAi,
+    systemVariables,
+  ]);
+
+  const applyAiFlowProposal = useCallback(() => {
+    if (!aiFlowProposal) return;
+    const restored = restoreFlowGraph(aiFlowProposal.flowGraph);
+    suppressNextGraphChange.current = true;
+    setNodes(restored.nodes);
+    setEdges(restored.edges);
+    setSystemVariables(restored.variables);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    onApplyAiProposal(aiFlowProposal);
+    setIsAiBuilderOpen(false);
+  }, [aiFlowProposal, onApplyAiProposal, setEdges, setNodes]);
+
   const filteredTools = tools.filter((tool) => {
     const query = toolQuery.trim().toLowerCase();
     if (!query) return true;
@@ -1972,6 +2156,14 @@ export function AutopilotFlowBuilder({
             )}>
               {isActive ? 'Operando' : 'Pausado'}
             </Badge>
+            <button
+              type="button"
+              onClick={() => setIsAiBuilderOpen(true)}
+              title="Construir flow com IA"
+              className="flex h-11 w-11 items-center justify-center rounded-xl text-violet-300 hover:bg-violet-500/10 hover:text-violet-200"
+            >
+              <Sparkles className="h-5 w-5" />
+            </button>
             <button type="button" onClick={() => onOpenPanel('playground')} className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 hover:bg-white/5 hover:text-white">
               <FlaskConical className="h-5 w-5" />
             </button>
@@ -2197,6 +2389,111 @@ export function AutopilotFlowBuilder({
           </>
         )}
       </aside>
+      <Dialog open={isAiBuilderOpen} onOpenChange={setIsAiBuilderOpen}>
+        <DialogContent className="flex h-[88vh] max-h-[88vh] w-[min(920px,94vw)] max-w-none flex-col overflow-hidden rounded-[26px] border-white/10 bg-[#111316] p-0 text-slate-100 shadow-2xl">
+          <DialogHeader className="border-b border-white/10 bg-violet-500/[0.04] px-6 py-5">
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Sparkles className="h-5 w-5 text-violet-300" />
+              Construtor de flow com IA
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Descreva o atendimento. A IA pode montar blocos, associar tools reais, escrever instrucoes de payload e revisar o prompt system.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="flex min-h-0 flex-col border-r border-white/10">
+              <div className="flex-1 space-y-3 overflow-y-auto p-5">
+                {aiBuilderMessages.map((message, index) => (
+                  <div
+                    key={`${message.role}-${index}`}
+                    className={cn(
+                      'max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-6',
+                      message.role === 'user'
+                        ? 'ml-auto bg-violet-500/15 text-violet-100'
+                        : 'border border-white/10 bg-white/[0.04] text-slate-300'
+                    )}
+                  >
+                    {message.content}
+                  </div>
+                ))}
+                {isGeneratingAiFlow && (
+                  <div className="flex items-center gap-2 text-sm text-slate-400">
+                    <Loader2 className="h-4 w-4 animate-spin text-violet-300" />
+                    Projetando o flow e validando ferramentas...
+                  </div>
+                )}
+                {aiBuilderError && (
+                  <div className="rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                    {aiBuilderError}
+                  </div>
+                )}
+              </div>
+              <div className="border-t border-white/10 p-4">
+                <div className="flex gap-2">
+                  <Textarea
+                    value={aiBuilderInput}
+                    onChange={(event) => setAiBuilderInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        void submitAiBuilderMessage();
+                      }
+                    }}
+                    placeholder="Ex.: monte um atendimento comercial com coleta de dados, consulta de contratos somente quando necessario e transferencia para vendas ao final..."
+                    className="min-h-[92px] resize-none border-white/10 bg-[#17191c] text-slate-100 placeholder:text-slate-600 focus-visible:ring-violet-500/30"
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => void submitAiBuilderMessage()}
+                    disabled={!aiBuilderInput.trim() || isGeneratingAiFlow}
+                    className="h-[92px] w-14 shrink-0 bg-violet-600 text-white hover:bg-violet-500"
+                  >
+                    {isGeneratingAiFlow ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">Enter envia. Shift + Enter quebra linha. A proposta altera somente o rascunho depois da sua confirmacao.</p>
+              </div>
+            </div>
+            <aside className="min-h-0 overflow-y-auto bg-[#0e1012] p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-violet-300">Preview da proposta</p>
+              {aiFlowProposal ? (
+                <div className="mt-4 space-y-4">
+                  <p className="text-sm leading-6 text-slate-300">{aiFlowProposal.summary}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                      <p className="text-[10px] uppercase tracking-wide text-slate-500">Blocos</p>
+                      <p className="mt-1 text-xl font-semibold text-white">{aiFlowProposal.flowGraph.nodes.length}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                      <p className="text-[10px] uppercase tracking-wide text-slate-500">Tools</p>
+                      <p className="mt-1 text-xl font-semibold text-white">{aiFlowProposal.enabledToolNames.length}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tools associadas</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {aiFlowProposal.enabledToolNames.map((toolName) => (
+                        <Badge key={toolName} className="border border-violet-500/20 bg-violet-500/10 font-mono text-[10px] text-violet-200">
+                          {toolName}
+                        </Badge>
+                      ))}
+                      {aiFlowProposal.enabledToolNames.length === 0 && <span className="text-xs text-slate-500">Nenhuma tool necessaria.</span>}
+                    </div>
+                  </div>
+                  <Button type="button" onClick={applyAiFlowProposal} className="w-full bg-violet-600 text-white hover:bg-violet-500">
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Aplicar ao rascunho
+                  </Button>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-slate-500">
+                  Converse com a IA para receber uma proposta validada. Voce pode pedir ajustes antes de aplicar.
+                </p>
+              )}
+            </aside>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

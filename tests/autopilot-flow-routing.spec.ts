@@ -8,6 +8,7 @@ import {
   resolveActiveFlowIntentScope,
   resolveDeterministicFlowMessage,
   resolveEntryDeterministicFlowMessage,
+  resolveFlowCompletionPlan,
   resolveFlowFormGuidance,
 } from '@/services/autopilot/flow-routing';
 
@@ -225,5 +226,48 @@ describe('autopilot flow routing', () => {
     expect(prompt).toContain('bloco "Agente principal"');
     expect(prompt).toContain('@habilidade_coletar_contrato');
     expect(prompt).toContain('habilidade "Coletar contrato"');
+  });
+
+  it('resolves close_chat as a flow completion action from a reachable final block', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'assistant',
+          kind: 'assistant',
+          title: 'Agente principal',
+          subtitle: 'Responder com IA',
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: 'collect',
+          kind: 'understand',
+          title: 'Coletar dados',
+          subtitle: 'Entender dados',
+          position: { x: 100, y: 0 },
+        },
+        {
+          id: 'end',
+          kind: 'trigger',
+          title: 'Fim do fluxo',
+          subtitle: 'Encerrar',
+          position: { x: 200, y: 0 },
+          config: {
+            instructions: 'Finalize o atendimento e utilize @close_chat depois de concluir a coleta.',
+          },
+        },
+      ],
+      edges: [
+        { id: 'assistant-collect', source: 'assistant', target: 'collect' },
+        { id: 'collect-end', source: 'collect', target: 'end' },
+      ],
+    });
+    config.enabled_tool_names = ['close_chat'];
+
+    const plan = resolveFlowCompletionPlan(config, 'assistant');
+
+    expect(plan?.reason).toBe('flow_completion_requests_close_chat');
+    expect(plan?.terminalNodeId).toBe('end');
+    expect(plan?.actions.map((action) => action.type)).toEqual(['close_chat']);
   });
 });

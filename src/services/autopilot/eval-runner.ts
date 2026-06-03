@@ -189,6 +189,7 @@ function runOfflineAutopilotEvalCase(evalCase: AutopilotEvalCase): AutopilotEval
     response: responseAfterPlanner,
     fallbackReply: 'Fallback configurado para eval.',
     customerMessage: evalCase.customerMessage,
+    continuationRequiredSlots: workflowPlan.missingSlots,
     intentResolution,
     slotExtraction,
     plannedActions: toolPlanner.actions,

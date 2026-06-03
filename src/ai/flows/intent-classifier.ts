@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
+import { isLmStudioModel } from '@/services/ai/lm-studio';
+import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
 
 const UNIVERSAL_INTENTS = [
   'greeting',
@@ -100,25 +102,8 @@ export function shouldUseAiIntentClassifier(input: {
 
 export async function classifyAutopilotIntentWithAi(input: AiIntentClassifierInput): Promise<AiIntentClassifierOutput> {
   const parsedInput = AiIntentClassifierInputSchema.parse(input);
+  const configuredModel = process.env.AI_INTENT_CLASSIFIER_MODEL || parsedInput.model || DEFAULT_AUTOPILOT_MODEL;
   const apiKey = parsedInput.apiKey?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
-
-  if (!apiKey) {
-    return {
-      intent: parsedInput.deterministicIntent,
-      confidence: parsedInput.deterministicConfidence,
-      reason: 'missing_api_key',
-    };
-  }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: cleanModelName(parsedInput.model),
-    generationConfig: {
-      temperature: 0,
-      maxOutputTokens: 120,
-      responseMimeType: 'application/json',
-    },
-  });
 
   const prompt = [
     'Voce e um classificador barato de intencao para um agente de atendimento.',
@@ -142,6 +127,54 @@ export async function classifyAutopilotIntentWithAi(input: AiIntentClassifierInp
   ].filter(Boolean).join('\n');
 
   const timeoutMs = parsedInput.timeoutMs || 1800;
+  if (isLmStudioModel(configuredModel)) {
+    try {
+      return await requestLmStudioJson({
+        model: configuredModel,
+        schema: AiIntentClassifierOutputSchema,
+        schemaName: 'dialogy_intent_classifier',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            intent: { type: 'string', enum: UNIVERSAL_INTENTS },
+            confidence: { type: 'number' },
+            reason: { type: 'string' },
+          },
+          required: ['intent', 'confidence', 'reason'],
+          additionalProperties: false,
+        },
+        systemPrompt: 'Classifique a intencao de atendimento e responda somente o JSON solicitado.',
+        userPrompt: prompt,
+        timeoutMs,
+        maxTokens: 120,
+      });
+    } catch (error) {
+      console.warn('[AI_INTENT_CLASSIFIER] LM Studio failed, using deterministic intent:', error);
+      return {
+        intent: parsedInput.deterministicIntent,
+        confidence: parsedInput.deterministicConfidence,
+        reason: 'lmstudio_classifier_failed',
+      };
+    }
+  }
+
+  if (!apiKey) {
+    return {
+      intent: parsedInput.deterministicIntent,
+      confidence: parsedInput.deterministicConfidence,
+      reason: 'missing_api_key',
+    };
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: cleanModelName(configuredModel),
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 120,
+      responseMimeType: 'application/json',
+    },
+  });
   const response = await Promise.race([
     model.generateContent(prompt),
     new Promise<never>((_, reject) => {

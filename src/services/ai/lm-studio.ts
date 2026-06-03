@@ -157,6 +157,21 @@ export function parseLmStudioStructuredText(value: unknown): Record<string, unkn
   return null;
 }
 
+export function getLmStudioMessageText(message?: {
+  content?: unknown;
+  reasoning_content?: unknown;
+} | null): string {
+  if (typeof message?.content === 'string' && message.content.trim()) {
+    return message.content.trim();
+  }
+
+  if (typeof message?.reasoning_content === 'string' && message.reasoning_content.trim()) {
+    return message.reasoning_content.trim();
+  }
+
+  return '';
+}
+
 export function tryParseJsonResponse(text: string): {
   response?: string | null;
   messageBlocks?: string[] | null;
@@ -243,10 +258,14 @@ export function defineLmStudioPrompt(
     // Workaround for @genkit-ai/compat-oai bug: when tool_calls is [] (empty array),
     // compat-oai evaluates it as truthy and discards the choice's text content.
     const originalCreate = client.chat.completions.create.bind(client.chat.completions);
-    client.chat.completions.create = async function (body, options) {
+    client.chat.completions.create = async function (body: any, options?: any) {
       const response = await originalCreate(body, options);
       if (response && Array.isArray(response.choices)) {
         for (const choice of response.choices) {
+          const messageText = getLmStudioMessageText(choice.message);
+          if (choice.message && !choice.message.content && messageText) {
+            choice.message.content = messageText;
+          }
           if (choice.message && Array.isArray(choice.message.tool_calls) && choice.message.tool_calls.length === 0) {
             delete choice.message.tool_calls;
           }
@@ -297,14 +316,15 @@ export function defineLmStudioPrompt(
     if (outputKind === 'procedure') {
       customPrompt = `[MODO DE RACIOCÍNIO / THINKING MODE ATIVO]
 Você deve SEMPRE pensar passo a passo antes de decidir os próximos passos deste procedimento operacional.
+Importante: Você NÃO deve transferir o atendimento para humanos ou encerrar a conversa facilmente. Antes de planejar qualquer transferência (transfer_chat), analise com extrema atenção na sua fase de raciocínio se existem ferramentas habilitadas (@mcp, @sgp) ou instruções operacionais no passo que permitam realizar o diagnóstico, consulta ou restabelecimento do sinal de forma automática. A transferência é estritamente o ÚLTIMO RECURSO e só deve ocorrer se as ferramentas falharem ou não puderem de forma alguma resolver a questão e se a política de escalonamento exigir.
 Para isso, você DEVE escrever todo o seu processo de raciocínio detalhadamente dentro de blocos <think> e </think> na sua saída.
 Depois de fechar a tag </think>, você deve fornecer a decisão e resposta estruturadas exatamente no formato JSON especificado.
 
 Exemplo de estrutura de saída obrigatória:
 <think>
 1. Li as instruções do procedimento: "..."
-2. Avaliei o histórico do chat: "..."
-3. Analisei as condições e slots coletados.
+2. Avaliei o histórico do chat e as intenções.
+3. Analisei se existem ferramentas habilitadas adequadas antes de cogitar qualquer transferência.
 4. Tomei a decisão operacional.
 </think>
 {"decision": "...", "response": "..."}
@@ -316,16 +336,17 @@ Comece agora a pensar e responder:
     } else {
       customPrompt = `[MODO DE RACIOCÍNIO / THINKING MODE ATIVO]
 Você deve SEMPRE pensar passo a passo e planejar a sua resposta e ações de forma ultra-precisa antes de responder.
+Importante: Você NÃO deve transferir o atendimento para humanos ou encerrar a conversa facilmente. Antes de sugerir ou planejar a ação de transferência (transfer_chat), analise com extrema atenção na sua fase de raciocínio se existem ferramentas habilitadas ("enabledAgentToolsDescription") que permitam realizar o diagnóstico, consulta ou ação necessária (como consultar faturas, atualizar o CPF, ou reiniciar o roteador). A transferência é estritamente o ÚLTIMO RECURSO, sendo proibida se houver ferramentas adequadas disponíveis ou se o cliente não solicitou explicitamente falar com um atendente humano.
 Para isso, você DEVE escrever todo o seu processo de raciocínio, análise de regras operacionais, checagem de CPF/CNPJ, validações e decisões técnicas detalhadamente dentro de blocos <think> e </think> na sua saída.
 Depois de fechar a tag </think>, você deve fornecer a resposta final estruturada exatamente no formato JSON especificado.
 
 Exemplo de estrutura de saída obrigatória:
 <think>
-1. Analisei a mensagem do cliente: "..."
-2. Identifiquei a intenção: "..."
-3. Validei regras operacionais: [Detalhe das regras]
-4. Decidi as ações técnicas necessárias: [Detalhe das ações]
-5. Formatei a resposta para o WhatsApp.
+1. Analisei a mensagem do cliente.
+2. Identifiquei a intenção operacional.
+3. Verifiquei as ferramentas habilitadas ("enabledAgentToolsDescription") e o catálogo para buscar ações que evitem a transferência para humanos.
+4. Validei regras operacionais e CPF/CNPJ.
+5. Decidi as ações técnicas necessárias e formatei a resposta para o WhatsApp.
 </think>
 {"response": "...", "messageBlocks": ..., "triggeredRule": ..., "actions": [...]}
 

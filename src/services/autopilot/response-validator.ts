@@ -5,6 +5,7 @@ import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } 
 import { labelSlotForCustomer, type SlotExtractionResult } from './slots';
 import { hasConversationCloseClaim } from './close-intent';
 import { hasExternalLookupPromise } from './tool-planner';
+import { repairTurnContinuation } from './turn-continuation';
 import { buildSgpResponseFromToolResults } from '@/services/autopilot-sgp-response';
 
 export type ResponseValidatorDecision =
@@ -84,6 +85,14 @@ function hasLookupSuccessClaim(response: string): boolean {
   );
 }
 
+function asksForCustomerIdentifier(response: string): boolean {
+  const normalized = normalizeText(response);
+  return (
+    /\b(cpf|cnpj|identificador cadastral|documento)\b/.test(normalized) &&
+    /\b(informe|informar|envie|enviar|passe|passa|passar|preciso|pode me dizer|pode me informar|qual e)\b/.test(normalized)
+  );
+}
+
 function asksForPaymentArtifact(message: string): boolean {
   const normalized = normalizeText(message);
   const asksToSendInvoice = (
@@ -132,7 +141,7 @@ function hasExplicitHandoffRequest(message: string): boolean {
   );
 }
 
-function isCommercialSelfServiceIntent(intent: AutopilotIntentResolution['intent']): boolean {
+function isSelfServiceInformationIntent(intent: AutopilotIntentResolution['intent']): boolean {
   return ['purchase_inquiry', 'catalog_request', 'pricing_request', 'promotion_request', 'availability_request'].includes(intent);
 }
 
@@ -212,6 +221,14 @@ function missingSlotResponse(missingSlots: AutopilotSlotName[]): string {
   return `Para seguir com seguranca, me informe: ${missingSlots.map(labelSlotForCustomer).join(', ')}.`;
 }
 
+const FLOW_COMPLETION_REQUIRED_SLOTS: AutopilotSlotName[] = [
+  'product_or_service_preference',
+  'name',
+  'customer_identifier',
+  'address',
+  'phone',
+];
+
 function findHandoffTeam(input: {
   intent: AutopilotIntentResolution['intent'];
   availableTeams: ToolRouterTeam[];
@@ -263,6 +280,9 @@ export function validateAutopilotResponse(input: {
   response: string | null | undefined;
   fallbackReply?: string | null;
   customerMessage: string;
+  chatHistory?: string | null;
+  continuationRequiredSlots?: AutopilotSlotName[] | null;
+  completionActions?: AgentToolAction[] | null;
   intentResolution: AutopilotIntentResolution;
   slotExtraction: SlotExtractionResult;
   plannedActions: AgentToolAction[];
@@ -273,6 +293,7 @@ export function validateAutopilotResponse(input: {
   knowledgeCoverage: KnowledgeCoverage;
   knowledgeDocuments?: KnowledgeBaseDocument[] | null;
   source: 'workflow_direct' | 'workflow_tools' | 'llm' | 'fallback';
+  systemAgentName?: string;
 }): ResponseValidationResult {
   const originalResponse = compact(input.response || '');
   const reasons: string[] = [];
@@ -314,7 +335,7 @@ export function validateAutopilotResponse(input: {
     input.source === 'llm' &&
     !hasSuccessfulLookup(input.toolResults) &&
     (input.knowledgeDocuments?.length || 0) > 0 &&
-    !isCommercialSelfServiceIntent(input.intentResolution.intent)
+    !isSelfServiceInformationIntent(input.intentResolution.intent)
   ) {
     const unsupportedFacts = unsupportedKnowledgeFacts(originalResponse, input.knowledgeDocuments || []);
     if (unsupportedFacts.length > 0) {
@@ -334,6 +355,17 @@ export function validateAutopilotResponse(input: {
   const failedLookup = hasFailedLookup(input.toolResults);
   const lookupPromise = hasExternalLookupPromise(originalResponse);
   const lookupSuccessClaim = hasLookupSuccessClaim(originalResponse);
+
+  if (successfulLookup && asksForCustomerIdentifier(originalResponse)) {
+    reasons.push('customer_identifier_requested_after_successful_lookup');
+    return {
+      decision: 'repair',
+      response: 'Ja localizei os dados necessarios. Vou seguir com o atendimento usando as informacoes disponiveis e aviso antes de executar qualquer acao sensivel.',
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
 
   if (
     asksForPaymentArtifact(input.customerMessage) &&
@@ -420,30 +452,30 @@ export function validateAutopilotResponse(input: {
   if (
     hasTransferPromise(originalResponse) &&
     !hasPlannedTransfer(input.plannedActions) &&
-    isCommercialSelfServiceIntent(input.intentResolution.intent) &&
+    isSelfServiceInformationIntent(input.intentResolution.intent) &&
     !hasExplicitHandoffRequest(input.customerMessage)
   ) {
-    reasons.push('commercial_transfer_promise_suppressed');
+    reasons.push('self_service_transfer_promise_suppressed');
     
-    // Determine dynamically which commercial field is missing to ask a context-aware question
+    // Keep the agent in self-service mode unless the customer explicitly requested a human.
     const slots = input.slotExtraction.slots || {};
     let dynamicRepairMsg = 'Posso seguir com seu atendimento por aqui! ';
     
     const hasName = Boolean(slots.name || input.contact?.name);
-    const hasCpf = Boolean(slots.customer_identifier);
+    const hasIdentifier = Boolean(slots.customer_identifier);
     const hasPhone = Boolean(slots.phone || input.contact?.phone);
     const hasEmail = Boolean(slots.email || input.contact?.email);
     
-    if (!hasCpf) {
-      dynamicRepairMsg += 'Para darmos andamento à análise de viabilidade técnica e ao seu pré-cadastro, poderia me informar o seu CPF, por favor?';
+    if (!hasIdentifier) {
+      dynamicRepairMsg += 'Para continuar com seguranca, poderia me informar seu documento ou identificador cadastral?';
     } else if (!hasPhone) {
-      dynamicRepairMsg += 'Perfeito, CPF recebido! Para darmos continuidade ao pré-cadastro, me informe qual o seu melhor telefone de contato com DDD?';
+      dynamicRepairMsg += 'Perfeito, identificador recebido. Agora me informe seu melhor telefone ou WhatsApp de contato com DDD.';
     } else if (!hasEmail) {
-      dynamicRepairMsg += 'Maravilha! Já tenho o seu CPF anotado. Agora, para finalizarmos, me informe qual o seu e-mail de contato?';
+      dynamicRepairMsg += 'Maravilha, ja tenho um contato registrado. Agora me informe qual email devo usar, se for necessario para este atendimento.';
     } else if (!hasName) {
-      dynamicRepairMsg += 'Entendido! Para concluirmos o pré-cadastro comercial, me confirme o seu nome completo, por favor?';
+      dynamicRepairMsg += 'Entendido. Me confirme seu nome completo, por favor.';
     } else {
-      dynamicRepairMsg += 'Como estamos criando o seu cadastro, qual a próxima informação que deseja preencher?';
+      dynamicRepairMsg += 'Ja tenho os dados principais. Vou dar continuidade ao atendimento sem transferir automaticamente.';
     }
 
     return {
@@ -482,6 +514,18 @@ export function validateAutopilotResponse(input: {
   }
 
   if (hasConversationCloseClaim(originalResponse) && !hasPlannedClose(input.plannedActions)) {
+    const completionCloseActions = (input.completionActions || []).filter((action) => action.type === 'close_chat');
+    if (completionCloseActions.length > 0) {
+      reasons.push('close_promise_matched_flow_completion');
+      return {
+        decision: 'repair',
+        response: 'Atendimento encerrado conforme solicitado.',
+        actions: completionCloseActions,
+        reasons,
+        metadata: { decision: 'repair', reasons, source: input.source },
+      };
+    }
+
     if (input.enabledToolNames.includes('close_chat')) {
       reasons.push('close_promise_without_action');
       return {
@@ -507,6 +551,57 @@ export function validateAutopilotResponse(input: {
       actions: [],
       reasons,
       metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
+
+  const continuationRepair = repairTurnContinuation({
+    response: originalResponse,
+    customerMessage: input.customerMessage,
+    chatHistory: input.chatHistory,
+    intentResolution: input.intentResolution,
+    slotExtraction: input.slotExtraction,
+    contact: input.contact,
+    requiredSlots: input.continuationRequiredSlots?.length
+      ? input.continuationRequiredSlots
+      : (input.completionActions?.length ? FLOW_COMPLETION_REQUIRED_SLOTS : undefined),
+  });
+  if (continuationRepair.repaired) {
+    reasons.push('turn_continuation_repaired');
+    const completionActions = continuationRepair.requirement.reason === 'progress_complete'
+      ? (input.completionActions || [])
+      : [];
+    if (completionActions.length > 0) reasons.push('flow_completion_actions_added');
+    return {
+      decision: 'repair',
+      response: continuationRepair.response,
+      actions: completionActions,
+      reasons,
+      metadata: {
+        decision: 'repair',
+        reasons,
+        source: input.source,
+        continuation: continuationRepair.requirement,
+      },
+    };
+  }
+
+  if (
+    continuationRepair.requirement.required &&
+    continuationRepair.requirement.reason === 'progress_complete' &&
+    (input.completionActions?.length || 0) > 0
+  ) {
+    reasons.push('flow_completion_actions_added');
+    return {
+      decision: 'repair',
+      response: continuationRepair.response,
+      actions: input.completionActions || [],
+      reasons,
+      metadata: {
+        decision: 'repair',
+        reasons,
+        source: input.source,
+        continuation: continuationRepair.requirement,
+      },
     };
   }
 

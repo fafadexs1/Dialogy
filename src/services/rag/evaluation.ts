@@ -1,5 +1,6 @@
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import type { KnowledgeCoverage, UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
+import type { KnowledgeDocumentSelectionSource } from './hybrid-retrieval';
 
 export type RagLabCase = {
   id: string;
@@ -23,7 +24,7 @@ export type RagLabCaseResult = {
   activeSubAgent: string | null;
   allowedCollectionIds: string[] | null;
   knowledgeCoverage: KnowledgeCoverage;
-  selectedDocuments: Array<{ id: string; name: string; score: number; source: 'vector' | 'static' }>;
+  selectedDocuments: Array<{ id: string; name: string; score: number; source: KnowledgeDocumentSelectionSource }>;
   top1Passed: boolean;
   top3Passed: boolean;
   intentPassed: boolean;

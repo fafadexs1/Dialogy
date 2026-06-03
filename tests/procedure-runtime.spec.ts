@@ -278,6 +278,105 @@ describe('procedure runtime engine', () => {
     expect(match).toBeNull();
   });
 
+  it('does not select a financial procedure for a connection complaint without financial evidence', () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-financial-support',
+      documentId: 'doc-financial-support',
+      documentName: 'Financeiro dentro do suporte tecnico',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting', 'billing_or_payment'],
+      triggerKeywords: ['problema', 'pagamento'],
+      metadata: {},
+      steps: [
+        {
+          id: 'tool',
+          order: 1,
+          type: 'tool_call',
+          label: 'Consultar cadastro',
+          toolName: 'sgp_fetch_contact_panel_data',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const match = matchProcedure({
+      intent: 'troubleshooting',
+      customerMessage: 'minha internet esta caindo toda hora',
+      compiledProcedures: [graph],
+    });
+
+    expect(match).toBeNull();
+  });
+
+  it('does not select a handoff procedure unless the customer asks for human support', () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-handoff',
+      documentId: 'doc-handoff',
+      documentName: 'Transferencia para suporte humano e notas internas',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting', 'human_handoff'],
+      triggerKeywords: ['suporte'],
+      metadata: {},
+      steps: [],
+    };
+
+    const match = matchProcedure({
+      intent: 'troubleshooting',
+      customerMessage: 'minha internet esta caindo toda hora',
+      compiledProcedures: [graph],
+    });
+
+    expect(match).toBeNull();
+  });
+
+  it('reuses a fresh read-only SGP result passed into a new procedure', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-reuse-sgp',
+      documentId: 'doc-reuse-sgp',
+      documentName: 'Diagnostico',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['internet'],
+      metadata: {},
+      steps: [
+        {
+          id: 'lookup',
+          order: 1,
+          type: 'tool_call',
+          label: 'Consultar painel',
+          toolName: 'sgp_fetch_contact_panel_data',
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+    const priorToolResults: AgentToolExecutionResult[] = [
+      {
+        toolName: 'sgp_fetch_contact_panel_data',
+        status: 'success',
+        input: { type: 'sgp_fetch_contact_panel_data', payload: {} },
+        output: { contracts: [{ id: 'contract-1' }] },
+      },
+    ];
+
+    const result = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'minha internet esta caindo',
+      priorToolResults,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.actions).toHaveLength(0);
+    expect(runtimeContext.stepHistory[0].output).toMatchObject({
+      reused: true,
+      toolName: 'sgp_fetch_contact_panel_data',
+    });
+  });
+
   it('blocks close_chat procedure execution unless the current message explicitly asks to close', async () => {
     const graph: ProcedureGraph = {
       id: 'proc-close',
@@ -313,6 +412,149 @@ describe('procedure runtime engine', () => {
     expect(result.response).toBeNull();
     expect(context.stepHistory[0].output).toMatchObject({
       skipped: true,
+    });
+  });
+
+  it('allows close_chat when the procedure reaches an explicit finalization step', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-final-close',
+      documentId: 'doc-final-close',
+      documentName: 'Finalizacao do fluxo',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['unknown'],
+      triggerKeywords: ['finalizar'],
+      metadata: {},
+      steps: [
+        {
+          id: 'close',
+          order: 1,
+          type: 'tool_call',
+          label: 'Fim do fluxo: apos concluir a coleta, encerre o atendimento com @close_chat.',
+          toolName: 'close_chat',
+          toolPayloadTemplate: { sendCloseMessage: 'false' },
+          nextStepId: null,
+        },
+      ],
+    };
+    const context = contextFor(graph);
+
+    const result = await advanceProcedure({
+      graph,
+      context,
+      customerMessage: 'Obrigado',
+    });
+
+    expect(result.status).toBe('waiting_tool');
+    expect(result.actions.map((action) => action.type)).toEqual(['close_chat']);
+  });
+
+  it('builds deterministic content for compiled internal note steps', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-note',
+      documentId: 'doc-note',
+      documentName: 'Diagnostico tecnico',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['diagnostico'],
+      metadata: {},
+      steps: [
+        {
+          id: 'note',
+          order: 1,
+          type: 'tool_call',
+          label: 'Registre nota interna com @add_internal_note, incluindo sintomas e testes feitos.',
+          toolName: 'add_internal_note',
+          toolPayloadTemplate: {},
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'No aguardo!',
+    });
+
+    expect(result.status).toBe('waiting_tool');
+    expect(result.actions[0]).toMatchObject({
+      type: 'add_internal_note',
+      payload: {
+        content: 'Procedimento "Diagnostico tecnico": Registre nota interna com @add_internal_note, incluindo sintomas e testes feitos.',
+      },
+    });
+  });
+
+  it('does not emit an invalid transfer action when a handoff step has no explicit destination', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-handoff-no-target',
+      documentId: 'doc-handoff-no-target',
+      documentName: 'Escalonamento',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['equipe'],
+      metadata: {},
+      steps: [
+        {
+          id: 'handoff',
+          order: 1,
+          type: 'handoff',
+          label: 'Encaminhe para nossa equipe.',
+          handoffReason: 'Encaminhe para nossa equipe.',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'No aguardo!',
+      availableTeams: [{ id: 'support-team', name: 'Suporte' }],
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.actions).toHaveLength(0);
+    expect(result.response).toContain('Sera necessario que a equipe responsavel');
+    expect(result.response).not.toContain('encaminh');
+  });
+
+  it('targets a named team when a procedure handoff explicitly mentions it', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-handoff-target',
+      documentId: 'doc-handoff-target',
+      documentName: 'Escalonamento suporte',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['suporte'],
+      metadata: {},
+      steps: [
+        {
+          id: 'handoff',
+          order: 1,
+          type: 'handoff',
+          label: 'Encaminhe para a equipe Suporte.',
+          handoffReason: 'Vou encaminhar seu atendimento para a equipe Suporte.',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'Preciso de suporte',
+      availableTeams: [{ id: 'support-team', name: 'Suporte' }],
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.actions[0]).toMatchObject({
+      type: 'transfer_chat',
+      payload: { teamId: 'support-team' },
     });
   });
 });
