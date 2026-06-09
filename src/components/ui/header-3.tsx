@@ -159,7 +159,7 @@ export function Header() {
 						<span className="text-xs font-bold uppercase tracking-widest text-white/30 px-2">Soluções</span>
 						<div className="grid grid-cols-1 gap-1">
 							{productLinks.map((link) => (
-								<ListItem key={link.title} {...link} />
+								<MobileListItem key={link.title} {...link} />
 							))}
 						</div>
 					</div>
@@ -167,10 +167,10 @@ export function Header() {
 						<span className="text-xs font-bold uppercase tracking-widest text-white/30 px-2">Plataforma</span>
 						<div className="grid grid-cols-1 gap-1">
 							{companyLinks.map((link) => (
-								<ListItem key={link.title} {...link} />
+								<MobileListItem key={link.title} {...link} />
 							))}
 							{companyLinks2.map((link) => (
-								<ListItem key={link.title} {...link} />
+								<MobileListItem key={link.title} {...link} />
 							))}
 						</div>
 					</div>
@@ -243,6 +243,29 @@ function ListItem({
 				</div>
 			</Link>
 		</NavigationMenuLink>
+	);
+}
+
+function MobileListItem({
+	title,
+	description,
+	icon: Icon,
+	className,
+	href,
+}: LinkItem & { className?: string }) {
+	return (
+		<Link
+			href={href}
+			className={cn('w-full group flex flex-row gap-x-3 items-start hover:bg-white/5 rounded-xl p-3 transition-all duration-200', className)}
+		>
+			<div className="flex aspect-square size-10 items-center justify-center rounded-lg border border-white/10 bg-white/5 shadow-sm group-hover:border-brand-green/30 group-hover:bg-brand-green/10 transition-colors">
+				<Icon className="text-white/70 size-5 group-hover:text-brand-green transition-colors" />
+			</div>
+			<div className="flex flex-col items-start justify-center">
+				<span className="font-medium text-white/90 group-hover:text-white text-sm">{title}</span>
+				{description && <span className="text-white/40 text-xs line-clamp-1">{description}</span>}
+			</div>
+		</Link>
 	);
 }
 
