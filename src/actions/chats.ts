@@ -1553,6 +1553,18 @@ export const syncInboxData = withDebug(
         }
 
         try {
+            const access = await requireWorkspaceAccess(user.id, workspaceId);
+            if (!access.ok) {
+                return {
+                    deltaChats: [],
+                    lastSyncChats: null,
+                    updatedContacts: [],
+                    deltaMessages: [],
+                    lastSyncMessage: null,
+                    error: access.error,
+                };
+            }
+
             const timezone = await getWorkspaceTimezone(workspaceId);
 
             // 1. Fetch Chat Deltas
@@ -1589,6 +1601,8 @@ export const syncInboxData = withDebug(
                     chatId,
                     since,
                     timezone,
+                    workspaceId,
+                    userId: user.id,
                 });
                 deltaMessages = messages;
                 newLastSyncMessage = lastSyncMessage || lastSyncMessages;
@@ -2128,8 +2142,12 @@ export const getOrCreateChatAction = withDebug(
             const existingChat = await db.query(
                 `SELECT ch.id
                  FROM chats ch
-                 JOIN contacts c1 ON c1.id = ch.contact_id
-                 JOIN contacts c2 ON c2.id = $2
+                 JOIN contacts c1
+                   ON c1.id = ch.contact_id
+                  AND c1.workspace_id = ch.workspace_id
+                 JOIN contacts c2
+                   ON c2.id = $2
+                  AND c2.workspace_id = ch.workspace_id
                  WHERE ch.workspace_id = $1
                    AND ch.status IN ('gerais', 'atendimentos')
                    AND (
@@ -2867,9 +2885,12 @@ export async function getContactMessages({
             cont.address AS contact_address
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
-        JOIN contacts cont ON cont.id = c.contact_id
+        JOIN contacts cont
+          ON cont.id = c.contact_id
+         AND cont.workspace_id = c.workspace_id
         WHERE cont.id = $1
           AND c.workspace_id = $2
+          AND m.workspace_id = c.workspace_id
           ${beforeClause}
         ORDER BY m.created_at DESC
         LIMIT $3
@@ -2997,15 +3018,29 @@ export async function getChatMessagesWindow({
     // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
 
     const contactIdsCTE = chatOnly
-        ? `SELECT tc.contact_id FROM target_chat tc`
-        : `SELECT id FROM contacts 
-           WHERE id = (SELECT contact_id FROM target_chat)
-              OR (phone_canonical IS NOT NULL AND phone_canonical = (SELECT phone_canonical FROM contacts WHERE id = (SELECT contact_id FROM target_chat)))`;
+        ? `SELECT tc.contact_id FROM target_chat tc WHERE tc.contact_id IS NOT NULL`
+        : `SELECT c.id
+           FROM contacts c
+           JOIN target_chat tc
+             ON tc.workspace_id = c.workspace_id
+           LEFT JOIN contacts target_contact
+             ON target_contact.id = tc.contact_id
+            AND target_contact.workspace_id = tc.workspace_id
+           WHERE c.id = tc.contact_id
+              OR (
+                target_contact.phone_canonical IS NOT NULL
+                AND c.phone_canonical IS NOT NULL
+                AND c.phone_canonical = target_contact.phone_canonical
+              )`;
 
     const chatIdsCTE = chatOnly
         ? `SELECT tc.id FROM target_chat tc`
-        : `SELECT id FROM chats 
-           WHERE contact_id IN (SELECT id FROM matching_contact_ids)`;
+        : `SELECT ch.id
+           FROM chats ch
+           JOIN target_chat tc
+             ON tc.workspace_id = ch.workspace_id
+           WHERE ch.id = tc.id
+              OR ch.contact_id IN (SELECT id FROM matching_contact_ids)`;
 
     const { rows } = await db.query(
         `
@@ -3030,10 +3065,16 @@ export async function getChatMessagesWindow({
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address
         FROM matching_chat_ids mci
-        JOIN chats c ON c.id = mci.id
-        LEFT JOIN contacts cont ON cont.id = c.contact_id
-        JOIN messages m ON m.chat_id = c.id
-        WHERE 1=1
+        JOIN chats c
+          ON c.id = mci.id
+         AND c.workspace_id = (SELECT workspace_id FROM target_chat)
+        LEFT JOIN contacts cont
+          ON cont.id = c.contact_id
+         AND cont.workspace_id = c.workspace_id
+        JOIN messages m
+          ON m.chat_id = c.id
+         AND m.workspace_id = c.workspace_id
+        WHERE c.workspace_id = (SELECT workspace_id FROM target_chat)
         ${beforeClause}
         ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2
@@ -3080,10 +3121,14 @@ async function fetchMessageDeltas({
     chatId,
     since,
     timezone,
+    workspaceId,
+    userId,
 }: {
     chatId: string;
     since: string;
     timezone: string;
+    workspaceId: string;
+    userId: string;
 }): Promise<{ messages: Message[]; lastSyncMessage: string | null }> {
     const { rows } = await db.query(
         `
@@ -3098,11 +3143,19 @@ async function fetchMessageDeltas({
             cont.address AS contact_address
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
-        LEFT JOIN contacts cont ON cont.id = c.contact_id
-        WHERE m.chat_id = $1 AND m.created_at >= $2
+        JOIN user_workspace_roles uwr
+          ON uwr.workspace_id = c.workspace_id
+         AND uwr.user_id = $4
+        LEFT JOIN contacts cont
+          ON cont.id = c.contact_id
+         AND cont.workspace_id = c.workspace_id
+        WHERE m.chat_id = $1
+          AND m.created_at >= $2
+          AND c.workspace_id = $3
+          AND m.workspace_id = c.workspace_id
         ORDER BY m.created_at ASC
         `,
-        [chatId, since]
+        [chatId, since, workspaceId, userId]
     );
 
     if (!rows.length) {

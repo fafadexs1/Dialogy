@@ -48,62 +48,61 @@ export default function CrmPage() {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-background selection:bg-emerald-500/30">
+    <div className="relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-black selection:bg-emerald-500/30">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-[20%] left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 rounded-full bg-emerald-500/5 blur-[120px]" />
-        <div className="absolute left-[10%] top-[10%] h-[500px] w-[500px] rounded-full bg-blue-500/5 blur-[100px]" />
-        <div className="absolute bottom-[10%] right-[10%] h-[600px] w-[600px] rounded-full bg-violet-500/5 blur-[120px]" />
+        <div className="absolute -top-[20%] left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 rounded-full bg-emerald-500/8 blur-[120px]" />
+        <div className="absolute bottom-[8%] right-[8%] h-[620px] w-[620px] rounded-full bg-emerald-900/12 blur-[120px]" />
       </div>
 
       <div className="relative z-10 flex h-full w-full flex-col overflow-hidden">
         <Tabs defaultValue="dashboard" className="flex h-full flex-col">
-          <div className="flex shrink-0 items-center justify-between border-b border-slate-200/80 dark:border-slate-800/80 bg-white/85 dark:bg-slate-900/85 px-6 py-4 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.18)] dark:shadow-[0_18px_40px_-30px_rgba(0,0,0,0.5)] backdrop-blur-md">
+          <div className="flex shrink-0 items-center justify-between border-b border-emerald-400/15 bg-[#050807]/95 px-6 py-4 shadow-[0_18px_50px_-34px_rgba(16,185,129,0.32)] backdrop-blur-md">
             <div className="flex items-center gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-500/20 bg-blue-500/10 shadow-lg shadow-blue-500/10">
-                <LayoutDashboard className="h-5 w-5 text-blue-400" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 shadow-lg shadow-emerald-500/10">
+                <LayoutDashboard className="h-5 w-5 text-emerald-300" />
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-tight text-slate-950 dark:text-slate-50">CRM</h1>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Gerencie seus contatos e negociacoes.</p>
+                <h1 className="text-xl font-bold tracking-tight text-white">CRM</h1>
+                <p className="text-xs text-zinc-400">Gerencie seus contatos e negociacoes.</p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <TabsList className="h-10 border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/50 p-1">
+              <TabsList className="h-10 border border-emerald-400/15 bg-white/[0.04] p-1">
                 <TabsTrigger
                   value="dashboard"
-                  className="text-slate-500 dark:text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-slate-200 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-slate-950 dark:data-[state=active]:text-slate-50 data-[state=active]:shadow-sm"
+                  className="text-zinc-400 transition-colors hover:text-white data-[state=active]:bg-emerald-400/15 data-[state=active]:text-emerald-100 data-[state=active]:shadow-sm"
                 >
                   <LayoutDashboard className="mr-2 h-4 w-4" />Visao
                 </TabsTrigger>
                 <TabsTrigger
                   value="kanban"
-                  className="text-slate-500 dark:text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-slate-200 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-slate-950 dark:data-[state=active]:text-slate-50 data-[state=active]:shadow-sm"
+                  className="text-zinc-400 transition-colors hover:text-white data-[state=active]:bg-emerald-400/15 data-[state=active]:text-emerald-100 data-[state=active]:shadow-sm"
                 >
                   <Kanban className="mr-2 h-4 w-4" />Kanban
                 </TabsTrigger>
                 <TabsTrigger
                   value="list"
-                  className="text-slate-500 dark:text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-slate-200 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-slate-950 dark:data-[state=active]:text-slate-50 data-[state=active]:shadow-sm"
+                  className="text-zinc-400 transition-colors hover:text-white data-[state=active]:bg-emerald-400/15 data-[state=active]:text-emerald-100 data-[state=active]:shadow-sm"
                 >
                   <List className="mr-2 h-4 w-4" />Lista
                 </TabsTrigger>
                 <TabsTrigger
                   value="automations"
-                  className="text-slate-500 dark:text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-slate-200 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-slate-950 dark:data-[state=active]:text-slate-50 data-[state=active]:shadow-sm"
+                  className="text-zinc-400 transition-colors hover:text-white data-[state=active]:bg-emerald-400/15 data-[state=active]:text-emerald-100 data-[state=active]:shadow-sm"
                 >
                   <Zap className="mr-2 h-4 w-4" />Auto
                 </TabsTrigger>
               </TabsList>
 
               <div className="hidden items-center gap-2 xl:flex">
-                <Button asChild variant="outline" size="sm" className="gap-2">
+                <Button asChild variant="outline" size="sm" className="gap-2 border-emerald-400/20 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20 hover:text-white">
                   <Link href="/campaigns">
                     <Send className="h-4 w-4" />
                     Campanhas
                   </Link>
                 </Button>
-                <Button asChild variant="outline" size="sm" className="gap-2">
+                <Button asChild variant="outline" size="sm" className="gap-2 border-white/10 bg-white/[0.04] text-zinc-200 hover:bg-white/10 hover:text-white">
                   <Link href="/analytics">
                     <BarChart2 className="h-4 w-4" />
                     Analytics
@@ -133,7 +132,7 @@ export default function CrmPage() {
               </TabsContent>
 
               <TabsContent value="list" className="m-0 h-full border-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden bg-background p-4 md:p-6">
+                <div className="h-full overflow-hidden bg-black">
                   <CustomerList user={user} />
                 </div>
               </TabsContent>

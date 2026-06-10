@@ -1312,10 +1312,15 @@ export const sendAgentMessageAction = withDebug(
         chatId: string,
         content: string,
         tabId: string | null,
-        messageId?: string
+        messageId?: string,
+        userOverride?: { id: string; email?: string | null; user_metadata?: Record<string, any> }
     ): Promise<{ success: boolean; error?: string; message?: Message }> {
-        const supabase = await createClient();
-        const { data: { user } } = await supabase.auth.getUser();
+        let user = userOverride;
+        if (!user) {
+            const supabase = await createClient();
+            const { data } = await supabase.auth.getUser();
+            user = data.user || undefined;
+        }
         if (!user) {
             return { success: false, error: 'Usuário não autenticado.' };
         }

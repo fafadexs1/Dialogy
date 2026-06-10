@@ -1,69 +1,199 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Settings, Plus, Filter, ChevronLeft, ChevronRight, Eye, PhoneOff, PlusCircle, Trash2, Edit, MoreHorizontal, Loader2, ListFilter, Users } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { type Contact, Tag, User, Activity, Segment, CustomFieldDefinition } from '@/lib/types';
-import { Button } from '../ui/button';
-import { AddContactForm } from './add-contact-form';
-import { CrmSettings } from './crm-settings';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Checkbox } from '../ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Badge } from '../ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import CustomerProfile from './customer-profile';
-import { AddActivityForm } from './add-activity-form';
-import { LogAttemptForm } from './log-attempt-form';
-import { getContacts, getTags, getWorkspaceUsers, deleteContactAction, getSegments, createSegment, deleteSegment, getCustomFieldDefinitions } from '@/actions/crm';
-import { toast } from '@/hooks/use-toast';
-import { format } from 'date-fns';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+    BriefcaseBusiness,
+    CalendarClock,
+    ChevronLeft,
+    ChevronRight,
+    Clock3,
+    Edit,
+    Eye,
+    Filter,
+    ListFilter,
+    Loader2,
+    MessageCircle,
+    MoreHorizontal,
+    Phone,
+    PhoneOff,
+    Plus,
+    PlusCircle,
+    Search,
+    Settings,
+    Tags,
+    Trash2,
+    UserRound,
+    Users,
+    type LucideIcon,
+} from 'lucide-react';
+import { format, formatDistanceToNow, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { SegmentBuilder } from './segment-builder';
-import { CriteriaGroup } from '@/lib/crm-query-builder';
 
-function TableActions({ contact, onSelect }: { contact: Contact, onSelect: (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => void }) {
+import { AddContactForm } from './add-contact-form';
+import { AddActivityForm } from './add-activity-form';
+import { CrmSettings } from './crm-settings';
+import CustomerProfile from './customer-profile';
+import { LogAttemptForm } from './log-attempt-form';
+import { SegmentBuilder } from './segment-builder';
+import {
+    createSegment,
+    deleteContactAction,
+    deleteSegment,
+    getContacts,
+    getCustomFieldDefinitions,
+    getSegments,
+    getTags,
+    getWorkspaceUsers,
+} from '@/actions/crm';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+import { CriteriaGroup } from '@/lib/crm-query-builder';
+import { Contact, CustomFieldDefinition, Segment, Tag, User } from '@/lib/types';
+
+type ContactAction = 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete';
+type DateFilter = 'all' | '7d' | '30d' | 'inactive';
+
+const DATE_FILTERS: {
+    id: DateFilter;
+    label: string;
+    description: string;
+    icon: LucideIcon;
+}[] = [
+    { id: 'all', label: 'Todos', description: 'Sem filtro de data', icon: Users },
+    { id: '7d', label: '7 dias', description: 'Contato recente', icon: Clock3 },
+    { id: '30d', label: '30 dias', description: 'Aquecidos no mes', icon: CalendarClock },
+    { id: 'inactive', label: 'Sem contato', description: '+30 dias ou vazio', icon: PhoneOff },
+];
+
+function getInitials(name?: string | null) {
+    const cleanName = (name || 'Contato').trim();
+    const parts = cleanName.split(/\s+/).filter(Boolean);
+    return (parts[0]?.[0] || 'C') + (parts[1]?.[0] || '');
+}
+
+function getPhoneLabel(contact: Contact) {
+    const raw = contact.phone || contact.phone_number_jid || contact.phone_canonical || '';
+    return raw.replace('@s.whatsapp.net', '') || 'Sem telefone';
+}
+
+function formatLastActivity(value?: string | null) {
+    if (!value) {
+        return {
+            label: 'Sem registro',
+            detail: 'Nenhuma mensagem ou atividade',
+            tone: 'border-white/10 bg-white/[0.03] text-zinc-500',
+        };
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return {
+            label: 'Data invalida',
+            detail: String(value),
+            tone: 'border-white/10 bg-white/[0.03] text-zinc-500',
+        };
+    }
+
+    const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+    const tone = days <= 7
+        ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-200'
+        : days <= 30
+            ? 'border-amber-400/30 bg-amber-400/10 text-amber-100'
+            : 'border-rose-400/30 bg-rose-400/10 text-rose-100';
+
+    return {
+        label: formatDistanceToNow(date, { addSuffix: true, locale: ptBR }),
+        detail: format(date, "dd/MM/yyyy 'as' HH:mm", { locale: ptBR }),
+        tone,
+    };
+}
+
+function buildDateCriteria(filter: DateFilter): CriteriaGroup | undefined {
+    const today = new Date();
+    if (filter === '7d') {
+        return {
+            operator: 'AND',
+            conditions: [{ field: 'last_activity', operator: 'gte', value: format(subDays(today, 7), 'yyyy-MM-dd') }],
+        };
+    }
+    if (filter === '30d') {
+        return {
+            operator: 'AND',
+            conditions: [{ field: 'last_activity', operator: 'gte', value: format(subDays(today, 30), 'yyyy-MM-dd') }],
+        };
+    }
+    if (filter === 'inactive') {
+        return {
+            operator: 'OR',
+            conditions: [
+                { field: 'last_activity', operator: 'lt', value: format(subDays(today, 30), 'yyyy-MM-dd') },
+                { field: 'last_activity', operator: 'is_not_set' },
+            ],
+        };
+    }
+    return undefined;
+}
+
+function TableActions({ contact, onSelect }: { contact: Contact; onSelect: (action: ContactAction, contact: Contact) => void }) {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7">
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-zinc-400 hover:bg-white/10 hover:text-white">
                     <MoreHorizontal className="h-4 w-4" />
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => onSelect('view', contact)}><Eye className="mr-2 h-4 w-4" /> Ver Detalhes</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)}><PhoneOff className="mr-2 h-4 w-4" /> Registrar Tentativa</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelect('addActivity', contact)}><PlusCircle className="mr-2 h-4 w-4" /> Adicionar Atividade</DropdownMenuItem>
-                <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact); }}><Edit className="mr-2 h-4 w-4" /> Editar Contato</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir Contato</DropdownMenuItem>
+            <DropdownMenuContent align="end" className="border-white/10 bg-zinc-950 text-zinc-100 shadow-2xl">
+                <DropdownMenuItem onClick={() => onSelect('view', contact)} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+                    <Eye className="mr-2 h-4 w-4" /> Ver detalhes
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+                    <PhoneOff className="mr-2 h-4 w-4" /> Registrar tentativa
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onSelect('addActivity', contact)} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+                    <PlusCircle className="mr-2 h-4 w-4" /> Adicionar atividade
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact); }} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+                    <Edit className="mr-2 h-4 w-4" /> Editar contato
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-rose-300 focus:bg-rose-500/10 focus:text-rose-200">
+                    <Trash2 className="mr-2 h-4 w-4" /> Excluir contato
+                </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
     );
 }
 
 export default function CustomerList({ user }: { user: User }) {
-    // Data State
     const [customers, setCustomers] = useState<Contact[]>([]);
     const [tags, setTags] = useState<Tag[]>([]);
     const [agents, setAgents] = useState<User[]>([]);
     const [segments, setSegments] = useState<Segment[]>([]);
     const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
 
-    // UI State
     const [loading, setLoading] = useState(true);
-    const [refreshKey, setRefreshKey] = useState(0); // To force re-fetch
+    const [refreshKey, setRefreshKey] = useState(0);
     const [isSegmentBuilderOpen, setIsSegmentBuilderOpen] = useState(false);
 
-    // Filters & Pagination
-    const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null); // null = "All Contacts"
+    const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+    const [dateFilter, setDateFilter] = useState<DateFilter>('all');
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(25);
     const [totalItems, setTotalItems] = useState(0);
 
-    // Modals
     const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
@@ -71,17 +201,32 @@ export default function CustomerList({ user }: { user: User }) {
     const [isLogAttemptModalOpen, setIsLogAttemptModalOpen] = useState(false);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
 
+    const selectedSegment = useMemo(
+        () => segments.find((segment) => segment.id === selectedSegmentId) || null,
+        [segments, selectedSegmentId]
+    );
+
+    const dateCriteria = useMemo(() => buildDateCriteria(dateFilter), [dateFilter]);
+    const totalPages = Math.ceil(totalItems / itemsPerPage);
+    const startItem = totalItems > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
+    const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+    const recentContacts = customers.filter((contact) => {
+        if (!contact.last_activity) return false;
+        return new Date(contact.last_activity).getTime() >= subDays(new Date(), 7).getTime();
+    }).length;
+    const withoutActivity = customers.filter((contact) => !contact.last_activity).length;
+
     const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
         setLoading(true);
+
         try {
-            // First load metadata if empty
-            if (tags.length === 0 || agents.length === 0 || segments.length === 0) {
+            if (tags.length === 0 || agents.length === 0 || segments.length === 0 || customFields.length === 0) {
                 const [tagsRes, agentsRes, segmentsRes, customFieldsRes] = await Promise.all([
                     getTags(user.activeWorkspaceId),
                     getWorkspaceUsers(user.activeWorkspaceId),
                     getSegments(user.activeWorkspaceId),
-                    getCustomFieldDefinitions(user.activeWorkspaceId)
+                    getCustomFieldDefinitions(user.activeWorkspaceId),
                 ]);
                 if (tagsRes.tags) setTags(tagsRes.tags);
                 if (agentsRes.users) setAgents(agentsRes.users);
@@ -89,24 +234,35 @@ export default function CustomerList({ user }: { user: User }) {
                 if (customFieldsRes.fields) setCustomFields(customFieldsRes.fields);
             }
 
-            // Then load contacts with filters
             const contactsRes = await getContacts(user.activeWorkspaceId, {
                 page: currentPage,
                 limit: itemsPerPage,
                 search: searchTerm,
-                segmentId: selectedSegmentId || undefined
+                segmentId: selectedSegmentId || undefined,
+                criteria: dateCriteria,
             });
 
             if (contactsRes.error) throw new Error(contactsRes.error);
             setCustomers(contactsRes.contacts || []);
             setTotalItems(contactsRes.total || 0);
-
         } catch (error: any) {
-            toast({ title: "Erro ao carregar CRM", description: error.message, variant: 'destructive' });
+            toast({ title: 'Erro ao carregar CRM', description: error.message, variant: 'destructive' });
         } finally {
             setLoading(false);
         }
-    }, [user?.activeWorkspaceId, currentPage, itemsPerPage, searchTerm, selectedSegmentId, refreshKey]); // Add refreshKey
+    }, [
+        agents.length,
+        currentPage,
+        customFields.length,
+        dateCriteria,
+        itemsPerPage,
+        refreshKey,
+        searchTerm,
+        segments.length,
+        selectedSegmentId,
+        tags.length,
+        user?.activeWorkspaceId,
+    ]);
 
     useEffect(() => {
         if (user?.activeWorkspaceId) {
@@ -114,57 +270,52 @@ export default function CustomerList({ user }: { user: User }) {
         }
     }, [fetchData, user?.activeWorkspaceId]);
 
-    // Reset page on filter change
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, selectedSegmentId]);
+    }, [searchTerm, selectedSegmentId, dateFilter]);
 
-    // Update selectedContact when customers list changes (to reflect edits/new activities)
     useEffect(() => {
         if (selectedContact) {
-            const updated = customers.find(c => c.id === selectedContact.id);
+            const updated = customers.find((contact) => contact.id === selectedContact.id);
             if (updated && updated !== selectedContact) {
                 setSelectedContact(updated);
             }
         }
     }, [customers, selectedContact]);
 
-
     const handleSaveSegment = async (criteria: CriteriaGroup, name: string, description: string) => {
         if (!user.activeWorkspaceId) return;
         setLoading(true);
         const res = await createSegment(user.activeWorkspaceId, name, description, criteria);
         if (res.success) {
-            toast({ title: 'Segmento criado com sucesso!' });
+            toast({ title: 'Lista criada com sucesso' });
             setIsSegmentBuilderOpen(false);
-            // Refresh segments
             const segmentsRes = await getSegments(user.activeWorkspaceId);
             if (segmentsRes.segments) setSegments(segmentsRes.segments);
         } else {
-            toast({ title: 'Erro ao criar segmento', description: res.error, variant: 'destructive' });
+            toast({ title: 'Erro ao criar lista', description: res.error, variant: 'destructive' });
         }
         setLoading(false);
     };
 
-    const handleDeleteSegment = async (e: React.MouseEvent, segmentId: string) => {
-        e.stopPropagation();
-        if (!confirm('Tem certeza que deseja apagar esta lista? Esta ação não pode ser desfeita.')) return;
+    const handleDeleteSegment = async (event: React.MouseEvent, segmentId: string) => {
+        event.stopPropagation();
+        if (!confirm('Tem certeza que deseja apagar esta lista? Esta acao nao pode ser desfeita.')) return;
 
         setLoading(true);
         const res = await deleteSegment(segmentId);
         if (res.success) {
-            toast({ title: 'Lista apagada com sucesso!' });
+            toast({ title: 'Lista apagada com sucesso' });
             if (selectedSegmentId === segmentId) setSelectedSegmentId(null);
-            // Refresh segments
             const segmentsRes = await getSegments(user.activeWorkspaceId!);
             if (segmentsRes.segments) setSegments(segmentsRes.segments);
         } else {
             toast({ title: 'Erro ao apagar lista', description: res.error, variant: 'destructive' });
         }
         setLoading(false);
-    }
+    };
 
-    const handleAction = useCallback(async (action: 'view' | 'edit' | 'logAttempt' | 'addActivity' | 'delete', contact: Contact) => {
+    const handleAction = useCallback(async (action: ContactAction, contact: Contact) => {
         setSelectedContact(contact);
         switch (action) {
             case 'view':
@@ -184,8 +335,8 @@ export default function CustomerList({ user }: { user: User }) {
                 if (window.confirm(`Tem certeza que deseja excluir o contato "${contact.name}"?`)) {
                     const result = await deleteContactAction(contact.id);
                     if (result.success) {
-                        toast({ title: 'Contato excluído!' });
-                        setRefreshKey(prev => prev + 1);
+                        toast({ title: 'Contato excluido' });
+                        setRefreshKey((prev) => prev + 1);
                     } else {
                         toast({ title: 'Erro ao excluir', description: result.error, variant: 'destructive' });
                     }
@@ -199,178 +350,395 @@ export default function CustomerList({ user }: { user: User }) {
         setEditingContact(null);
         setIsActivityModalOpen(false);
         setIsLogAttemptModalOpen(false);
-        setRefreshKey(prev => prev + 1);
+        setRefreshKey((prev) => prev + 1);
     }, []);
 
     const getTagStyle = (tagValue: string) => {
-        const tag = tags.find(t => t.value === tagValue);
-        return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE') ? '#000' : '#fff', borderColor: 'transparent' } : {};
+        const tag = tags.find((item) => item.value === tagValue);
+        if (!tag) return {};
+        return {
+            backgroundColor: `${tag.color}24`,
+            color: tag.color,
+            borderColor: `${tag.color}55`,
+        };
     };
 
-    const totalPages = Math.ceil(totalItems / itemsPerPage);
-    const startItem = totalItems > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
-    const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-
     return (
-        <div className="flex-1 flex overflow-hidden h-full">
-            {/* Sidebar / Segments List (Visible on Desktop) */}
-            <div className="hidden lg:flex flex-col w-64 border-r border-slate-200/80 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Listas</h2>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-50" onClick={() => setIsSegmentBuilderOpen(true)}>
+        <div className="flex h-full flex-1 overflow-hidden bg-black text-zinc-100">
+            <aside className="hidden w-[292px] shrink-0 border-r border-white/10 bg-[#050807] p-5 lg:flex lg:flex-col">
+                <div className="mb-6 flex items-center justify-between">
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-300">CRM Dialogy</p>
+                        <h2 className="mt-1 text-xl font-semibold text-white">Listas</h2>
+                    </div>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 rounded-full border border-emerald-400/25 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20 hover:text-white"
+                        onClick={() => setIsSegmentBuilderOpen(true)}
+                    >
                         <Plus className="h-4 w-4" />
                     </Button>
                 </div>
 
-                <div className="space-y-1">
-                    <Button
-                        variant={selectedSegmentId === null ? 'secondary' : 'ghost'}
-                        className={`w-full justify-start ${selectedSegmentId === null ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-950 dark:hover:text-slate-50'}`}
-                        onClick={() => setSelectedSegmentId(null)}
-                    >
-                        <Users className="w-4 h-4 mr-2" /> Todos Contatos
-                    </Button>
-                    {segments.map(seg => (
-                        <div key={seg.id} className="group relative flex items-center">
+                <Button
+                    variant="ghost"
+                    className={cn(
+                        'mb-5 h-12 w-full justify-start rounded-2xl border px-4 text-sm font-semibold',
+                        selectedSegmentId === null
+                            ? 'border-emerald-400/35 bg-emerald-400/15 text-emerald-100 shadow-[0_0_26px_rgba(16,185,129,0.12)]'
+                            : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:bg-white/[0.06] hover:text-white'
+                    )}
+                    onClick={() => setSelectedSegmentId(null)}
+                >
+                    <Users className="mr-3 h-4 w-4" />
+                    Todos os contatos
+                    <span className="ml-auto rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-zinc-300">{totalItems}</span>
+                </Button>
+
+                <div className="mb-5">
+                    <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        Atalhos por data
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {DATE_FILTERS.map((filter) => {
+                            const Icon = filter.icon;
+                            const isActive = dateFilter === filter.id;
+                            return (
+                                <button
+                                    key={filter.id}
+                                    type="button"
+                                    onClick={() => setDateFilter(filter.id)}
+                                    className={cn(
+                                        'rounded-2xl border p-3 text-left transition',
+                                        isActive
+                                            ? 'border-emerald-400/45 bg-emerald-400/15 text-white'
+                                            : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-100'
+                                    )}
+                                >
+                                    <Icon className={cn('mb-2 h-4 w-4', isActive ? 'text-emerald-300' : 'text-zinc-500')} />
+                                    <div className="text-xs font-bold">{filter.label}</div>
+                                    <div className="mt-0.5 text-[10px] text-zinc-500">{filter.description}</div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <div className="mb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                    <span>Listas inteligentes</span>
+                    <span>{segments.length}</span>
+                </div>
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                    {segments.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-4 text-sm text-zinc-500">
+                            Crie listas por tag, vendedor, data de contato ou campos personalizados.
+                        </div>
+                    ) : segments.map((segment) => (
+                        <div key={segment.id} className="group relative">
                             <Button
-                                variant={selectedSegmentId === seg.id ? 'secondary' : 'ghost'}
-                                className={`w-full justify-start pr-10 ${selectedSegmentId === seg.id ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-950 dark:hover:text-slate-50'}`}
-                                onClick={() => setSelectedSegmentId(seg.id)}
+                                variant="ghost"
+                                className={cn(
+                                    'h-auto min-h-12 w-full justify-start rounded-2xl border px-4 py-3 pr-10 text-left text-sm font-semibold',
+                                    selectedSegmentId === segment.id
+                                        ? 'border-emerald-400/35 bg-emerald-400/15 text-emerald-100'
+                                        : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:bg-white/[0.06] hover:text-white'
+                                )}
+                                onClick={() => setSelectedSegmentId(segment.id)}
                             >
-                                <ListFilter className="w-4 h-4 mr-2" /> {seg.name}
+                                <ListFilter className="mr-3 h-4 w-4 shrink-0" />
+                                <span className="truncate">{segment.name}</span>
                             </Button>
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="absolute right-1 h-7 w-7 opacity-0 transition-opacity text-slate-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500 dark:hover:text-red-400 group-hover:opacity-100"
-                                onClick={(e) => handleDeleteSegment(e, seg.id)}
+                                className="absolute right-2 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-zinc-500 opacity-0 hover:bg-rose-500/10 hover:text-rose-300 group-hover:opacity-100"
+                                onClick={(event) => handleDeleteSegment(event, segment.id)}
                             >
-                                <Trash2 className="h-3 w-3" />
+                                <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                         </div>
                     ))}
                 </div>
-            </div>
+            </aside>
 
-            <div className="flex-1 flex flex-col overflow-hidden h-full">
-                {/* Header Actions */}
-                <div className="flex-shrink-0 p-4 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/92 dark:bg-slate-900/92 backdrop-blur-xl flex flex-wrap justify-between items-center gap-3">
-                    <div className="flex items-center space-x-3 w-full md:w-auto">
-                        <div className="relative flex-1 md:w-auto">
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                            <Input
-                                type="text"
-                                placeholder="Buscar contatos..."
-                                className="text-xs w-full md:w-64 h-9 pl-8 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus-visible:ring-emerald-500/20"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
+            <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.13),transparent_34%),linear-gradient(180deg,#07100d_0%,#030504_44%,#000_100%)]">
+                <div className="shrink-0 border-b border-white/10 bg-black/40 px-5 py-4 backdrop-blur-xl lg:px-7">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                        <div>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                                <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 font-semibold text-emerald-200">
+                                    {selectedSegment?.name || 'Todos os contatos'}
+                                </span>
+                                {dateFilter !== 'all' && (
+                                    <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-zinc-300">
+                                        {DATE_FILTERS.find((filter) => filter.id === dateFilter)?.description}
+                                    </span>
+                                )}
+                            </div>
+                            <h1 className="mt-2 text-2xl font-bold tracking-tight text-white">Lista do CRM</h1>
+                            <p className="mt-1 text-sm text-zinc-400">
+                                Organize contatos por comportamento, responsavel e recencia de atendimento.
+                            </p>
                         </div>
-                        {/* Mobile Segment Trigger */}
-                        <div className="lg:hidden">
-                            <Select value={selectedSegmentId || 'all'} onValueChange={(val) => setSelectedSegmentId(val === 'all' ? null : val)}>
-                                <SelectTrigger className="w-[150px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-50 h-9">
-                                    <SelectValue placeholder="Listas" />
-                                </SelectTrigger>
-                                <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-50">
-                                    <SelectItem value="all">Todos Contatos</SelectItem>
-                                    {segments.map(seg => <SelectItem key={seg.id} value={seg.id}>{seg.name}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                                variant="outline"
+                                className="h-10 rounded-full border-emerald-400/25 bg-emerald-400/10 px-4 text-emerald-100 hover:bg-emerald-400/20 hover:text-white"
+                                onClick={() => setIsSegmentBuilderOpen(true)}
+                            >
+                                <Filter className="mr-2 h-4 w-4" />
+                                Nova lista inteligente
+                            </Button>
+                            <CrmSettings user={user}>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    title="Configuracoes do CRM"
+                                    className="h-10 w-10 rounded-full border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/10 hover:text-white"
+                                >
+                                    <Settings className="h-4 w-4" />
+                                </Button>
+                            </CrmSettings>
+                            <Button
+                                className="h-10 rounded-full bg-white px-5 font-bold text-black hover:bg-emerald-100"
+                                onClick={() => { setEditingContact(null); setIsAddEditModalOpen(true); }}
+                            >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Novo contato
+                            </Button>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="hidden lg:flex h-9 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => setIsSegmentBuilderOpen(true)}>
-                            <Filter className="w-4 h-4 mr-2" /> Nova Lista Inteligente
-                        </Button>
 
-                        <CrmSettings user={user}>
-                            <Button variant="outline" size="icon" title="Configurações do CRM" className="h-9 w-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-slate-50">
-                                <Settings className="h-4 w-4" />
-                            </Button>
-                        </CrmSettings>
-                        <Button className="h-9 bg-blue-600 hover:bg-blue-700 text-white border-0" onClick={() => { setEditingContact(null); setIsAddEditModalOpen(true); }}>
-                            <Plus className="mr-1.5 h-4 w-4" />Novo Contato
-                        </Button>
+                    <div className="mt-5 grid gap-3 md:grid-cols-3">
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
+                                    <Users className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Resultado</p>
+                                    <p className="text-2xl font-bold text-white">{totalItems}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
+                                    <MessageCircle className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Ativos na pagina</p>
+                                    <p className="text-2xl font-bold text-white">{recentContacts}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 text-zinc-300">
+                                    <PhoneOff className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Sem atividade na pagina</p>
+                                    <p className="text-2xl font-bold text-white">{withoutActivity}</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-6 bg-transparent">
-                    <section className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 shadow-[0_24px_60px_-40px_rgba(15,23,42,0.18)] dark:shadow-[0_24px_60px_-40px_rgba(0,0,0,0.5)]">
-                        <div className="overflow-x-auto">
-                            <Table>
-                                <TableHeader className="bg-slate-50/90 dark:bg-slate-800/90">
-                                    <TableRow className="border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                                        <TableHead className="w-12 text-slate-500 dark:text-slate-400"><Checkbox className="border-slate-300 dark:border-slate-700 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /></TableHead>
-                                        <TableHead className="text-slate-500 dark:text-slate-400">Nome</TableHead>
-                                        <TableHead className="text-slate-500 dark:text-slate-400">JID do WhatsApp</TableHead>
-                                        <TableHead className="text-slate-500 dark:text-slate-400">Vendedor</TableHead>
-                                        <TableHead className="text-slate-500 dark:text-slate-400">Tags</TableHead>
-                                        <TableHead className="text-center text-slate-500 dark:text-slate-400">Última Atividade</TableHead>
-                                        <TableHead className="text-center text-slate-500 dark:text-slate-400">Ações</TableHead>
+                <div className="shrink-0 border-b border-white/10 bg-black/25 px-5 py-4 lg:px-7">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:items-center">
+                            <div className="relative w-full md:max-w-md">
+                                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                                <Input
+                                    type="text"
+                                    placeholder="Buscar por nome, telefone, JID ou email..."
+                                    className="h-11 rounded-2xl border-white/10 bg-white/[0.05] pl-11 text-sm text-white placeholder:text-zinc-500 focus-visible:ring-emerald-400/30"
+                                    value={searchTerm}
+                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                />
+                            </div>
+
+                            <div className="lg:hidden">
+                                <Select value={selectedSegmentId || 'all'} onValueChange={(value) => setSelectedSegmentId(value === 'all' ? null : value)}>
+                                    <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-white/[0.05] text-white">
+                                        <SelectValue placeholder="Listas" />
+                                    </SelectTrigger>
+                                    <SelectContent className="border-white/10 bg-zinc-950 text-zinc-100">
+                                        <SelectItem value="all">Todos os contatos</SelectItem>
+                                        {segments.map((segment) => (
+                                            <SelectItem key={segment.id} value={segment.id}>{segment.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 overflow-x-auto pb-1 lg:pb-0">
+                            {DATE_FILTERS.map((filter) => {
+                                const Icon = filter.icon;
+                                const isActive = dateFilter === filter.id;
+                                return (
+                                    <Button
+                                        key={filter.id}
+                                        variant="outline"
+                                        className={cn(
+                                            'h-10 shrink-0 rounded-full border px-4 text-sm',
+                                            isActive
+                                                ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-100'
+                                                : 'border-white/10 bg-white/[0.04] text-zinc-400 hover:bg-white/10 hover:text-white'
+                                        )}
+                                        onClick={() => setDateFilter(filter.id)}
+                                    >
+                                        <Icon className="mr-2 h-4 w-4" />
+                                        {filter.label}
+                                    </Button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-7">
+                    <section className="overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#070b09]/92 shadow-[0_24px_80px_-44px_rgba(16,185,129,0.35)]">
+                        <Table>
+                            <TableHeader className="bg-white/[0.04]">
+                                <TableRow className="border-white/10 hover:bg-transparent">
+                                    <TableHead className="w-12 text-zinc-500">
+                                        <Checkbox className="border-white/20 data-[state=checked]:border-emerald-400 data-[state=checked]:bg-emerald-500" />
+                                    </TableHead>
+                                    <TableHead className="min-w-[280px] text-zinc-400">Contato</TableHead>
+                                    <TableHead className="min-w-[190px] text-zinc-400">Canal</TableHead>
+                                    <TableHead className="min-w-[180px] text-zinc-400">Responsavel</TableHead>
+                                    <TableHead className="min-w-[180px] text-zinc-400">Tags</TableHead>
+                                    <TableHead className="min-w-[210px] text-zinc-400">Ultima atividade</TableHead>
+                                    <TableHead className="w-20 text-center text-zinc-400">Acoes</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {loading ? (
+                                    <TableRow className="border-white/10 hover:bg-white/[0.02]">
+                                        <TableCell colSpan={7} className="h-56 text-center">
+                                            <Loader2 className="mx-auto h-7 w-7 animate-spin text-emerald-300" />
+                                            <p className="mt-3 text-sm text-zinc-500">Carregando contatos...</p>
+                                        </TableCell>
                                     </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {loading ? (
-                                        <TableRow className="border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                                            <TableCell colSpan={7} className="h-24 text-center">
-                                                <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-500" />
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : customers.length === 0 ? (
-                                        <TableRow className="border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                                            <TableCell colSpan={7} className="h-24 text-center text-slate-500 dark:text-slate-400">
-                                                Nenhum contato encontrado.
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : customers.map(customer => (
+                                ) : customers.length === 0 ? (
+                                    <TableRow className="border-white/10 hover:bg-white/[0.02]">
+                                        <TableCell colSpan={7} className="h-56 text-center">
+                                            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-500">
+                                                <Search className="h-6 w-6" />
+                                            </div>
+                                            <p className="mt-4 text-base font-semibold text-white">Nenhum contato encontrado</p>
+                                            <p className="mt-1 text-sm text-zinc-500">Ajuste a busca, data ou lista selecionada.</p>
+                                        </TableCell>
+                                    </TableRow>
+                                ) : customers.map((customer) => {
+                                    const activity = formatLastActivity(customer.last_activity);
+                                    return (
                                         <TableRow
                                             key={customer.id}
-                                            className="border-slate-200/80 dark:border-slate-800/80 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/50"
+                                            className="group border-white/10 transition-colors hover:bg-emerald-400/[0.045]"
                                         >
-                                            <TableCell><Checkbox className="border-slate-300 dark:border-slate-700 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /></TableCell>
+                                            <TableCell>
+                                                <Checkbox className="border-white/20 data-[state=checked]:border-emerald-400 data-[state=checked]:bg-emerald-500" />
+                                            </TableCell>
                                             <TableCell>
                                                 <div className="flex items-center gap-3">
-                                                    <Avatar className="h-8 w-8 border border-slate-200 dark:border-slate-700">
+                                                    <Avatar className="h-11 w-11 border border-white/10 bg-white/[0.04]">
                                                         <AvatarImage src={customer.avatar_url || undefined} alt={customer.name} />
-                                                        <AvatarFallback className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">{customer.name.charAt(0)}</AvatarFallback>
+                                                        <AvatarFallback className="bg-emerald-400/12 font-bold text-emerald-100">
+                                                            {getInitials(customer.name)}
+                                                        </AvatarFallback>
                                                     </Avatar>
-                                                    <div>
-                                                        <p className="text-sm font-medium text-slate-950 dark:text-slate-50">{customer.name}</p>
-                                                        <p className="text-xs text-slate-500 dark:text-slate-400">{customer.email}</p>
+                                                    <div className="min-w-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleAction('view', customer)}
+                                                            className="block max-w-[280px] truncate text-left text-sm font-bold text-white underline-offset-4 hover:text-emerald-200 hover:underline"
+                                                        >
+                                                            {customer.name || 'Contato sem nome'}
+                                                        </button>
+                                                        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+                                                            <Phone className="h-3.5 w-3.5" />
+                                                            <span className="truncate">{getPhoneLabel(customer)}</span>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-xs text-slate-600 dark:text-slate-300">{customer.phone_number_jid}</TableCell>
-                                            <TableCell className="text-xs text-slate-600 dark:text-slate-300">{customer.owner?.name || 'N/A'}</TableCell>
                                             <TableCell>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {customer.tags?.map(tag => (
-                                                        <Badge key={tag.id} style={getTagStyle(tag.value)} className="border-0">{tag.label}</Badge>
-                                                    ))}
+                                                <div className="inline-flex max-w-[260px] items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                                                    <MessageCircle className="h-3.5 w-3.5" />
+                                                    <span className="truncate">{customer.phone_number_jid || customer.phone || 'Sem canal'}</span>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-center text-xs text-slate-600 dark:text-slate-300">
-                                                {customer.last_activity ? format(new Date(customer.last_activity), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}
+                                            <TableCell>
+                                                {customer.owner?.name ? (
+                                                    <div className="flex items-center gap-2 text-sm text-zinc-200">
+                                                        <UserRound className="h-4 w-4 text-emerald-300" />
+                                                        <span className="truncate">{customer.owner.name}</span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-zinc-500">
+                                                        <BriefcaseBusiness className="h-3.5 w-3.5" />
+                                                        Sem vendedor
+                                                    </span>
+                                                )}
+                                            </TableCell>
+                                            <TableCell>
+                                                {customer.tags?.length ? (
+                                                    <div className="flex max-w-[240px] flex-wrap gap-1.5">
+                                                        {customer.tags.slice(0, 3).map((tag) => (
+                                                            <Badge
+                                                                key={tag.id}
+                                                                style={getTagStyle(tag.value)}
+                                                                className="rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
+                                                            >
+                                                                {tag.label}
+                                                            </Badge>
+                                                        ))}
+                                                        {customer.tags.length > 3 && (
+                                                            <Badge className="rounded-full border border-white/10 bg-white/[0.04] text-[11px] text-zinc-400">
+                                                                +{customer.tags.length - 3}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-2 text-xs text-zinc-500">
+                                                        <Tags className="h-3.5 w-3.5" />
+                                                        Sem tags
+                                                    </span>
+                                                )}
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className={cn('inline-flex flex-col rounded-2xl border px-3 py-2 text-xs', activity.tone)}>
+                                                    <span className="font-bold">{activity.label}</span>
+                                                    <span className="mt-0.5 text-[11px] opacity-70">{activity.detail}</span>
+                                                </div>
                                             </TableCell>
                                             <TableCell className="text-center">
                                                 <TableActions contact={customer} onSelect={handleAction} />
                                             </TableCell>
                                         </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </div>
-                        <div className="flex items-center justify-between border-t border-slate-200/80 dark:border-slate-800/80 p-4 text-sm text-slate-500 dark:text-slate-400">
+                                    );
+                                })}
+                            </TableBody>
+                        </Table>
+
+                        <div className="flex flex-col gap-3 border-t border-white/10 bg-white/[0.025] p-4 text-sm text-zinc-500 lg:flex-row lg:items-center lg:justify-between">
                             <span>{`Mostrando ${startItem}-${endItem} de ${totalItems} contatos`}</span>
-                            <div className="flex items-center gap-2">
-                                <div className='flex items-center gap-1'>
-                                    <span>Linhas por página:</span>
-                                    <Select value={String(itemsPerPage)} onValueChange={(v) => setItemsPerPage(Number(v))}>
-                                        <SelectTrigger className="h-8 w-20 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex items-center gap-2">
+                                    <span>Linhas:</span>
+                                    <Select value={String(itemsPerPage)} onValueChange={(value) => setItemsPerPage(Number(value))}>
+                                        <SelectTrigger className="h-9 w-20 rounded-full border-white/10 bg-black/30 text-zinc-200">
                                             <SelectValue placeholder={itemsPerPage} />
                                         </SelectTrigger>
-                                        <SelectContent className="border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50">
+                                        <SelectContent className="border-white/10 bg-zinc-950 text-zinc-100">
                                             <SelectItem value="10">10</SelectItem>
                                             <SelectItem value="25">25</SelectItem>
                                             <SelectItem value="50">50</SelectItem>
@@ -378,14 +746,25 @@ export default function CustomerList({ user }: { user: User }) {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <span className="mx-2 h-6 w-[1px] bg-slate-200 dark:bg-slate-800"></span>
-                                <span className='font-medium text-slate-950 dark:text-slate-50'>
-                                    Página {currentPage} de {totalPages || 1}
+                                <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 font-semibold text-zinc-200">
+                                    Pagina {currentPage} de {totalPages || 1}
                                 </span>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-slate-50" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-9 w-9 rounded-full border border-white/10 text-zinc-400 hover:bg-white/10 hover:text-white"
+                                    onClick={() => setCurrentPage((page) => page - 1)}
+                                    disabled={currentPage === 1}
+                                >
                                     <ChevronLeft className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-slate-50" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages || totalPages === 0}>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-9 w-9 rounded-full border border-white/10 text-zinc-400 hover:bg-white/10 hover:text-white"
+                                    onClick={() => setCurrentPage((page) => page + 1)}
+                                    disabled={currentPage === totalPages || totalPages === 0}
+                                >
                                     <ChevronRight className="h-4 w-4" />
                                 </Button>
                             </div>
@@ -393,7 +772,6 @@ export default function CustomerList({ user }: { user: User }) {
                     </section>
                 </div>
 
-                {/* Modals and Side Panels */}
                 {user.activeWorkspaceId && (
                     <AddContactForm
                         isOpen={isAddEditModalOpen}
@@ -405,9 +783,10 @@ export default function CustomerList({ user }: { user: User }) {
                         user={user}
                     />
                 )}
+
                 {user.activeWorkspaceId && isSegmentBuilderOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                        <div className="w-full max-w-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
+                        <div className="w-full max-w-3xl animate-in fade-in zoom-in duration-200">
                             <SegmentBuilder
                                 tags={tags}
                                 customFields={customFields}
@@ -417,6 +796,7 @@ export default function CustomerList({ user }: { user: User }) {
                         </div>
                     </div>
                 )}
+
                 {selectedContact && (
                     <>
                         <CustomerProfile
@@ -424,7 +804,7 @@ export default function CustomerList({ user }: { user: User }) {
                             isOpen={isProfileOpen}
                             setIsOpen={setIsProfileOpen}
                             onAction={handleAction}
-                            onMutate={() => setRefreshKey(k => k + 1)}
+                            onMutate={() => setRefreshKey((key) => key + 1)}
                         />
                         <AddActivityForm
                             contact={selectedContact}
@@ -440,7 +820,7 @@ export default function CustomerList({ user }: { user: User }) {
                         />
                     </>
                 )}
-            </div>
+            </main>
         </div>
     );
 }

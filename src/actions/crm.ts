@@ -82,8 +82,10 @@ export async function getContacts(
         if (params.segmentId) {
             const segmentRes = await db.query('SELECT criteria FROM crm_segments WHERE id = $1 AND workspace_id = $2', [params.segmentId, workspaceId]);
             if (segmentRes.rows.length > 0) {
-                params.criteria = segmentRes.rows[0].criteria;
-                criteria = params.criteria;
+                const segmentCriteria = segmentRes.rows[0].criteria as CriteriaGroup | undefined;
+                criteria = criteria && segmentCriteria
+                    ? { operator: 'AND', conditions: [segmentCriteria, criteria] }
+                    : segmentCriteria || criteria;
             }
         }
 

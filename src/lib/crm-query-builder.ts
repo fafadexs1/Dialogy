@@ -1,8 +1,8 @@
 
 import { Segment } from "./types";
 
-export type Operator = 'equals' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte' | 'is_set' | 'is_not_set';
-export type Field = 'name' | 'email' | 'phone_number_jid' | 'owner_id' | 'tags' | 'last_activity' | 'created_at' | 'status' | string;
+export type Operator = 'equals' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte' | 'between' | 'is_set' | 'is_not_set';
+export type Field = 'name' | 'email' | 'phone_number_jid' | 'owner_id' | 'tags' | 'last_activity' | 'contacted_at' | 'created_at' | 'status' | string;
 
 export interface Condition {
     field: Field;
@@ -17,28 +17,56 @@ export interface CriteriaGroup {
 
 export function buildCountQuery(workspaceId: string, criteria?: CriteriaGroup, search?: string) {
     const { whereClause, values } = buildWhereClause(workspaceId, criteria, search);
+    const dedupeKeyExpression = buildContactDedupeKeyExpression('c');
+    const lastActivityExpression = buildLastActivityExpression('c');
+
     return {
-        text: `SELECT COUNT(*) as total FROM contacts c WHERE ${whereClause}`,
+        text: `
+            WITH ranked_contacts AS (
+                SELECT
+                    c.id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ${dedupeKeyExpression}
+                        ORDER BY ${lastActivityExpression} DESC NULLS LAST, c.created_at DESC NULLS LAST, c.id DESC
+                    ) AS rn
+                FROM contacts c
+                WHERE ${whereClause}
+            )
+            SELECT COUNT(*) as total
+            FROM ranked_contacts
+            WHERE rn = 1
+        `,
         values
     };
 }
 
 export function buildSegmentQuery(workspaceId: string, criteria?: CriteriaGroup, search?: string, limit = 50, offset = 0) {
     const { whereClause, values } = buildWhereClause(workspaceId, criteria, search);
+    const lastActivityExpression = buildLastActivityExpression('c');
+    const dedupeKeyExpression = buildContactDedupeKeyExpression('c');
 
     const query = `
+        WITH ranked_contacts AS (
         SELECT 
             c.*,
             (SELECT u.full_name FROM users u WHERE u.id = c.owner_id) as owner_name,
-            (SELECT MAX(a.date) FROM activities a WHERE a.contact_id = c.id) as last_activity,
+            ${lastActivityExpression} as last_activity,
             COALESCE(
                 (SELECT json_agg(json_build_object('id', t.id, 'label', t.label, 'value', t.value, 'color', t.color))
                  FROM tags t JOIN contact_tags ct ON t.id = ct.tag_id WHERE ct.contact_id = c.id),
                 '[]'::json
-            ) as tags
+            ) as tags,
+            ROW_NUMBER() OVER (
+                PARTITION BY ${dedupeKeyExpression}
+                ORDER BY ${lastActivityExpression} DESC NULLS LAST, c.created_at DESC NULLS LAST, c.id DESC
+            ) AS rn
         FROM contacts c
         WHERE ${whereClause}
-        ORDER BY c.created_at DESC
+        )
+        SELECT *
+        FROM ranked_contacts
+        WHERE rn = 1
+        ORDER BY last_activity DESC NULLS LAST, created_at DESC NULLS LAST
         LIMIT $${values.length + 1} OFFSET $${values.length + 2}
     `;
 
@@ -46,6 +74,45 @@ export function buildSegmentQuery(workspaceId: string, criteria?: CriteriaGroup,
         text: query,
         values: [...values, limit, offset]
     };
+}
+
+function buildContactDedupeKeyExpression(contactAlias = 'c'): string {
+    return `COALESCE(
+        NULLIF(
+            regexp_replace(
+                COALESCE(${contactAlias}.phone_canonical, ${contactAlias}.phone_number_jid, ${contactAlias}.phone, ''),
+                '[^0-9]',
+                '',
+                'g'
+            ),
+            ''
+        ),
+        ${contactAlias}.id::text
+    )`;
+}
+
+function buildLastActivityExpression(contactAlias = 'c'): string {
+    return `(
+        SELECT MAX(activity_at)
+        FROM (
+            SELECT MAX(a.date)::timestamptz AS activity_at
+            FROM activities a
+            WHERE a.contact_id = ${contactAlias}.id
+            UNION ALL
+            SELECT MAX(m.created_at)::timestamptz AS activity_at
+            FROM chats ch
+            JOIN messages m
+              ON m.chat_id = ch.id
+             AND m.workspace_id = ch.workspace_id
+            WHERE ch.workspace_id = ${contactAlias}.workspace_id
+              AND ch.contact_id = ${contactAlias}.id
+            UNION ALL
+            SELECT MAX(ch.last_activity_at)::timestamptz AS activity_at
+            FROM chats ch
+            WHERE ch.workspace_id = ${contactAlias}.workspace_id
+              AND ch.contact_id = ${contactAlias}.id
+        ) activity_sources
+    )`;
 }
 
 function buildWhereClause(workspaceId: string, criteria?: CriteriaGroup, search?: string) {
@@ -116,9 +183,8 @@ function processCondition(cond: Condition, values: any[]): string {
         return `EXISTS (SELECT 1 FROM contact_tags ct JOIN tags t ON ct.tag_id = t.id WHERE ct.contact_id = c.id AND t.value = $${values.length})`;
     }
 
-    if (cond.field === 'last_activity') {
-        // Subquery for max activity date
-        field = `(SELECT MAX(date) FROM activities WHERE contact_id = c.id)`;
+    if (cond.field === 'last_activity' || cond.field === 'contacted_at') {
+        field = buildLastActivityExpression('c');
     }
 
     // Custom Fields
@@ -170,6 +236,25 @@ function processCondition(cond: Condition, values: any[]): string {
         case 'lt':
             values.push(cond.value);
             return `${field} < $${values.length}`;
+        case 'gte':
+            values.push(cond.value);
+            return `${field} >= $${values.length}`;
+        case 'lte':
+            values.push(cond.value);
+            return `${field} <= $${values.length}`;
+        case 'between': {
+            const from = cond.value?.from;
+            const to = cond.value?.to;
+            if (!from && !to) return '';
+            if (from && to) {
+                values.push(from, to);
+                return `${field} >= $${values.length - 1}::date AND ${field} < ($${values.length}::date + INTERVAL '1 day')`;
+            }
+            values.push(from || to);
+            return from
+                ? `${field} >= $${values.length}::date`
+                : `${field} < ($${values.length}::date + INTERVAL '1 day')`;
+        }
         case 'is_set':
             return `${field} IS NOT NULL`;
         case 'is_not_set':
