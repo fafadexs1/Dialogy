@@ -1,6 +1,7 @@
-import type { AutopilotConfig, AutopilotFlowNode, KnowledgeBaseDocument, NexusFlowInstance } from '@/lib/types';
+import type { AutopilotConfig, AutopilotFlowNode, AutopilotFlowSwitchRoute, KnowledgeBaseDocument, NexusFlowInstance } from '@/lib/types';
 import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { UniversalAutopilotIntent } from './intent-types';
+import { migrateAutopilotFlowGraphToV2 } from './flow-v2';
 
 export type ActiveFlowIntentScope = {
   nodeId: string;
@@ -34,6 +35,69 @@ export type FlowCompletionPlan = {
   reason: string;
   terminalNodeId?: string;
 };
+
+export type FlowSwitchGuidance = {
+  nodeId: string;
+  title: string;
+  instructions: string;
+  mode: 'ai' | 'rules';
+  confidenceThreshold: number;
+  fallbackRouteId?: string;
+  routes: AutopilotFlowSwitchRoute[];
+};
+
+export type FlowSwitchResolution = {
+  switchNodeId: string;
+  switchTitle: string;
+  routeId: string;
+  routeLabel: string;
+  targetNodeId?: string;
+  confidence: number;
+  evidence: string[];
+  fallbackUsed: boolean;
+  candidateRoutes: FlowSwitchRouteCandidate[];
+  rejectedRoutes: FlowSwitchRouteCandidate[];
+};
+
+export type FlowSwitchRouteCandidate = {
+  routeId: string;
+  routeLabel: string;
+  targetNodeId?: string;
+  confidence: number;
+  selected: boolean;
+  fallback: boolean;
+  evidence: string[];
+  rejectedReason?: string;
+};
+
+function configWithV2FlowGraph(config: AutopilotConfig): AutopilotConfig {
+  return {
+    ...config,
+    flow_graph: migrateAutopilotFlowGraphToV2(config.flow_graph),
+  };
+}
+
+function switchRouteTargetFromEdges(
+  config: AutopilotConfig,
+  switchNodeId: string,
+  routeId: string | null | undefined,
+): string | undefined {
+  if (!routeId) return undefined;
+  const edge = config.flow_graph?.edges.find((candidate) => (
+    candidate.source === switchNodeId && candidate.routeId === routeId && Boolean(candidate.target)
+  ));
+  return edge?.target;
+}
+
+function hydrateSwitchRoutesFromEdges(
+  config: AutopilotConfig,
+  node: AutopilotFlowNode,
+): AutopilotFlowSwitchRoute[] {
+  return (node.config?.routes || []).map((route) => ({
+    ...route,
+    targetNodeId: route.targetNodeId || switchRouteTargetFromEdges(config, node.id, route.id),
+  }));
+}
 
 function normalizeReferenceId(value: string): string {
   return value
@@ -79,13 +143,23 @@ export function resolveActiveFlowIntentScope(
   config: AutopilotConfig,
   intent: UniversalAutopilotIntent,
 ): ActiveFlowIntentScope | null {
+  config = configWithV2FlowGraph(config);
   const nodes = config.flow_graph?.nodes || [];
   const edges = config.flow_graph?.edges || [];
+  const decisionRoute = nodes
+    .filter((node) => node.kind === 'decision')
+    .flatMap((node) => (node.config?.routes || []).map((route) => ({
+      route,
+      targetNodeId: route.targetNodeId || switchRouteTargetFromEdges(config, node.id, route.id),
+    })))
+    .find((item) => item.route.intent === intent && item.targetNodeId);
   const matchedNode = nodes.find((node): node is AutopilotFlowNode => (
-    node.kind === 'intent' &&
-    node.config?.intent === intent &&
-    Boolean(node.config.instructions?.trim()) &&
-    edges.some((edge) => edge.target === node.id)
+    node.kind === 'sub_agent' &&
+    Boolean(node.config?.instructions?.trim()) &&
+    (
+      node.id === decisionRoute?.targetNodeId ||
+      (!decisionRoute && edges.some((edge) => edge.target === node.id))
+    )
   ));
 
   if (!matchedNode) return null;
@@ -100,15 +174,40 @@ export function resolveActiveFlowIntentScope(
   };
 }
 
+export function resolveActiveFlowIntentScopeByNodeId(
+  config: AutopilotConfig,
+  nodeId: string | null | undefined,
+): ActiveFlowIntentScope | null {
+  config = configWithV2FlowGraph(config);
+  const node = config.flow_graph?.nodes.find((candidate) => candidate.id === nodeId);
+  if (
+    !node ||
+    node.kind !== 'sub_agent' ||
+    !node.config?.instructions?.trim()
+  ) {
+    return null;
+  }
+
+  return {
+    nodeId: node.id,
+    title: node.title,
+    intent: (node.config.intent as UniversalAutopilotIntent | undefined) || 'unknown',
+    customIntentLabel: node.config?.customIntentLabel?.trim() || undefined,
+    systemPrompt: node.config.instructions.trim(),
+    knowledgeCollectionIds: node.config?.knowledgeCollectionIds?.filter(Boolean),
+  };
+}
+
 export function filterKnowledgeDocumentsForScope(
   config: AutopilotConfig,
   documents: KnowledgeBaseDocument[] | null | undefined,
   scope: ActiveFlowIntentScope | null,
 ): KnowledgeBaseDocument[] {
+  config = configWithV2FlowGraph(config);
   const list = documents || [];
   if (!config.flow_graph) return list;
 
-  const principalNodeId = config.flow_graph.nodes.find((node) => node.kind === 'assistant')?.id;
+  const principalNodeId = config.flow_graph.nodes.find((node) => node.kind === 'sub_agent')?.id;
   const targetNodeIds = new Set([principalNodeId, scope?.nodeId].filter((nodeId): nodeId is string => Boolean(nodeId)));
   if (targetNodeIds.size === 0) return [];
 
@@ -155,6 +254,7 @@ export function resolveDeterministicFlowMessage(
   config: AutopilotConfig,
   scope: ActiveFlowIntentScope | null,
 ): DeterministicFlowMessage | null {
+  config = configWithV2FlowGraph(config);
   if (!scope || !config.flow_graph) return null;
 
   const directTargets = new Set(
@@ -165,9 +265,9 @@ export function resolveDeterministicFlowMessage(
   const messageNode = config.flow_graph.nodes.find((node) => (
     directTargets.has(node.id) &&
     (
-      (node.kind === 'send_message' && Boolean(node.config?.message?.trim())) ||
+      (node.kind === 'message' && Boolean(node.config?.message?.trim())) ||
       (
-        node.kind === 'form' &&
+        node.kind === 'collect' &&
         node.config?.formMode !== 'ai' &&
         (Boolean(node.config?.message?.trim()) || Boolean(node.config?.formFields?.length))
       )
@@ -175,7 +275,7 @@ export function resolveDeterministicFlowMessage(
   ));
 
   if (!messageNode) return null;
-  const message = messageNode.kind === 'form'
+  const message = messageNode.kind === 'collect'
     ? renderFormMessage(messageNode)
     : messageNode.config?.message?.trim();
   if (!message) return null;
@@ -188,12 +288,12 @@ export function resolveDeterministicFlowMessage(
 }
 
 function deterministicMessageFromNode(node: AutopilotFlowNode): string | null {
-  if (node.kind === 'send_message') {
+  if (node.kind === 'message') {
     return node.config?.message?.trim() || null;
   }
 
   if (
-    node.kind === 'form' &&
+    node.kind === 'collect' &&
     node.config?.formMode !== 'ai' &&
     (Boolean(node.config?.message?.trim()) || Boolean(node.config?.formFields?.length))
   ) {
@@ -210,7 +310,236 @@ function normalizeInstructionText(value: string): string {
     .toLowerCase();
 }
 
+function tokenizeSwitchText(value: string): string[] {
+  return normalizeInstructionText(value)
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function scoreSwitchRoute(message: string, route: AutopilotFlowSwitchRoute): { score: number; evidence: string[] } {
+  const normalizedMessage = normalizeInstructionText(message);
+  const evidence: string[] = [];
+  let score = 0;
+
+  for (const example of route.examples || []) {
+    const normalizedExample = normalizeInstructionText(example);
+    if (normalizedExample && normalizedMessage.includes(normalizedExample)) {
+      evidence.push(`Mensagem contem exemplo da rota: "${example}"`);
+      score = Math.max(score, 0.95);
+    }
+  }
+
+  const routeTokens = new Set(tokenizeSwitchText([
+    route.label,
+    route.description,
+    ...(route.examples || []),
+  ].join(' ')));
+  const messageTokens = tokenizeSwitchText(message);
+  const matched = messageTokens.filter((token) => routeTokens.has(token));
+  if (matched.length > 0) {
+    const overlapScore = Math.min(0.9, 0.35 + matched.length / Math.max(4, Math.min(messageTokens.length, routeTokens.size)));
+    score = Math.max(score, overlapScore);
+    evidence.push(`Termos relacionados: ${Array.from(new Set(matched)).slice(0, 6).join(', ')}`);
+  }
+
+  return { score: Number(score.toFixed(2)), evidence };
+}
+
+export function listFlowSwitchGuidance(config: AutopilotConfig): FlowSwitchGuidance[] {
+  config = configWithV2FlowGraph(config);
+  const graph = config.flow_graph;
+  if (!graph) return [];
+
+  return graph.nodes
+    .filter((node) => node.kind === 'decision' && Array.isArray(node.config?.routes) && node.config.routes.length > 0)
+    .map((node) => ({
+      nodeId: node.id,
+      title: node.title,
+      instructions: node.config?.instructions?.trim() || `Escolha uma rota para ${node.title}.`,
+      mode: node.config?.switchMode || 'ai',
+      confidenceThreshold: typeof node.config?.confidenceThreshold === 'number'
+        ? Math.max(0, Math.min(1, node.config.confidenceThreshold))
+        : 0.75,
+      fallbackRouteId: node.config?.fallbackRouteId,
+      routes: hydrateSwitchRoutesFromEdges(config, node),
+    }));
+}
+
+export function resolveFlowSwitchRoute(input: {
+  config: AutopilotConfig;
+  switchNodeId: string;
+  customerMessage: string;
+}): FlowSwitchResolution | null {
+  const config = configWithV2FlowGraph(input.config);
+  const guidance = listFlowSwitchGuidance(config).find((item) => item.nodeId === input.switchNodeId);
+  if (!guidance) return null;
+
+  const scoredRoutes = guidance.routes
+    .map((route) => ({ route, ...scoreSwitchRoute(input.customerMessage, route) }))
+    .sort((left, right) => right.score - left.score);
+  const best = scoredRoutes[0] || null;
+  const fallbackRoute = guidance.routes.find((route) => route.id === guidance.fallbackRouteId) || guidance.routes.at(-1) || null;
+  if (!best && !fallbackRoute) return null;
+
+  const accepted = best && best.score >= guidance.confidenceThreshold ? best : null;
+  const selected = accepted || (fallbackRoute ? { route: fallbackRoute, score: best?.score || 0, evidence: best?.evidence || [] } : best);
+  if (!selected) return null;
+  const selectedRouteId = selected.route.id;
+  const candidateRoutes = scoredRoutes.map((candidate): FlowSwitchRouteCandidate => {
+    const selectedCandidate = candidate.route.id === selectedRouteId;
+    const fallback = candidate.route.id === fallbackRoute?.id;
+    let rejectedReason: string | undefined;
+    if (!selectedCandidate) {
+      rejectedReason = candidate.score < guidance.confidenceThreshold
+        ? `Confianca ${candidate.score.toFixed(2)} abaixo do minimo ${guidance.confidenceThreshold.toFixed(2)}.`
+        : `Rota menos aderente que ${selected.route.id}.`;
+    } else if (!accepted && fallback) {
+      rejectedReason = undefined;
+    }
+
+    return {
+      routeId: candidate.route.id,
+      routeLabel: candidate.route.label,
+      targetNodeId: candidate.route.targetNodeId,
+      confidence: candidate.score,
+      selected: selectedCandidate,
+      fallback,
+      evidence: candidate.evidence.slice(0, 4),
+      rejectedReason,
+    };
+  });
+
+  if (!candidateRoutes.some((candidate) => candidate.routeId === selectedRouteId)) {
+    candidateRoutes.unshift({
+      routeId: selected.route.id,
+      routeLabel: selected.route.label,
+      targetNodeId: selected.route.targetNodeId,
+      confidence: selected.score,
+      selected: true,
+      fallback: selected.route.id === fallbackRoute?.id,
+      evidence: selected.evidence.slice(0, 4),
+    });
+  }
+
+  return {
+    switchNodeId: guidance.nodeId,
+    switchTitle: guidance.title,
+    routeId: selected.route.id,
+    routeLabel: selected.route.label,
+    targetNodeId: selected.route.targetNodeId,
+    confidence: accepted ? selected.score : Number((best?.score || 0).toFixed(2)),
+    evidence: accepted
+      ? selected.evidence
+      : [
+          ...(selected.evidence || []),
+          `Confianca abaixo de ${guidance.confidenceThreshold.toFixed(2)}; usando fallback.`,
+        ],
+    fallbackUsed: !accepted,
+    candidateRoutes,
+    rejectedRoutes: candidateRoutes.filter((candidate) => !candidate.selected),
+  };
+}
+
+export function resolveFirstFlowSwitchRoute(input: {
+  config: AutopilotConfig;
+  customerMessage: string;
+}): FlowSwitchResolution | null {
+  const config = configWithV2FlowGraph(input.config);
+  const firstSwitch = listFlowSwitchGuidance(config)[0];
+  if (!firstSwitch) return null;
+  return resolveFlowSwitchRoute({
+    config,
+    switchNodeId: firstSwitch.nodeId,
+    customerMessage: input.customerMessage,
+  });
+}
+
+function entryFlowNodeId(config: AutopilotConfig): string | null {
+  config = configWithV2FlowGraph(config);
+  const graph = config.flow_graph;
+  if (!graph) return null;
+  return graph.nodes.find((node) => node.kind === 'start')?.id
+    || graph.nodes.find((node) => node.kind === 'sub_agent')?.id
+    || graph.nodes[0]?.id
+    || null;
+}
+
+function findNearestReachableSwitchNodeId(
+  config: AutopilotConfig,
+  activeNodeId: string | null | undefined,
+): string | null {
+  config = configWithV2FlowGraph(config);
+  const graph = config.flow_graph;
+  if (!graph) return null;
+
+  const startNodeId = activeNodeId && graph.nodes.some((node) => node.id === activeNodeId)
+    ? activeNodeId
+    : entryFlowNodeId(config);
+  if (!startNodeId) return listFlowSwitchGuidance(config)[0]?.nodeId || null;
+
+  const visited = new Set<string>();
+  const queue = [startNodeId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+
+    const node = graph.nodes.find((candidate) => candidate.id === current);
+    if (node?.kind === 'decision' && node.config?.routes?.length) return node.id;
+
+    for (const edge of graph.edges) {
+      if (edge.source === current && !visited.has(edge.target)) {
+        queue.push(edge.target);
+      }
+    }
+  }
+
+  return null;
+}
+
+export function resolveFlowSwitchRouteForActivePath(input: {
+  config: AutopilotConfig;
+  customerMessage: string;
+  activeNodeId?: string | null;
+}): FlowSwitchResolution | null {
+  const config = configWithV2FlowGraph(input.config);
+  const switchNodeId = findNearestReachableSwitchNodeId(config, input.activeNodeId);
+  if (!switchNodeId) return null;
+  return resolveFlowSwitchRoute({
+    config,
+    switchNodeId,
+    customerMessage: input.customerMessage,
+  });
+}
+
+export function formatFlowSwitchGuidanceForPrompt(config: AutopilotConfig): string {
+  config = configWithV2FlowGraph(config);
+  const switches = listFlowSwitchGuidance(config);
+  if (switches.length === 0) return '';
+
+  return [
+    'SWITCHES DO FLUXO',
+    'Quando houver um Switch conectado ao caminho atual, escolha uma unica rota configurada e respeite fallback quando nao houver evidencia suficiente.',
+    ...switches.map((flowSwitch) => [
+      `Switch: ${flowSwitch.title} (@${flowSwitch.nodeId})`,
+      `Objetivo: ${flowSwitch.instructions}`,
+      `Modo: ${flowSwitch.mode}; confianca minima: ${flowSwitch.confidenceThreshold.toFixed(2)}; fallback: ${flowSwitch.fallbackRouteId || 'ultima rota'}`,
+      'Rotas:',
+      ...flowSwitch.routes.map((route) => [
+        `- ${route.id}: ${route.label}`,
+        `  Quando usar: ${route.description}`,
+        route.examples?.length ? `  Exemplos: ${route.examples.join(' | ')}` : '',
+        route.requiredSlots?.length ? `  Dados obrigatorios: ${route.requiredSlots.join(', ')}` : '',
+        route.targetNodeId ? `  Destino: @${route.targetNodeId}` : '',
+      ].filter(Boolean).join('\n')),
+    ].join('\n')),
+  ].join('\n');
+}
+
 function directedReachableNodeIds(config: AutopilotConfig, startNodeId: string | null | undefined): Set<string> {
+  config = configWithV2FlowGraph(config);
   const graph = config.flow_graph;
   const reachable = new Set<string>();
   if (!graph || !startNodeId) return reachable;
@@ -241,7 +570,7 @@ function nodeRequestsClose(node: AutopilotFlowNode): boolean {
   ].join('\n'));
 
   return (
-    node.kind === 'close' ||
+    node.kind === 'end' ||
     /\b@?close_chat\b/.test(text) ||
     (
       /\b(fim|final|encerr|close|termin)\w*/.test(text) &&
@@ -254,6 +583,7 @@ export function resolveFlowCompletionPlan(
   config: AutopilotConfig,
   activeNodeId: string | null | undefined,
 ): FlowCompletionPlan | null {
+  config = configWithV2FlowGraph(config);
   const graph = config.flow_graph;
   if (!graph || !activeNodeId) return null;
   if (!Array.isArray(config.enabled_tool_names) || !config.enabled_tool_names.includes('close_chat')) return null;
@@ -277,19 +607,20 @@ export function resolveFlowCompletionPlan(
 }
 
 export function resolveEntryDeterministicFlowMessage(config: AutopilotConfig): DeterministicFlowMessage | null {
+  config = configWithV2FlowGraph(config);
   const graph = config.flow_graph;
   if (!graph) return null;
 
-  const triggerNodeIds = new Set(
+  const startNodeIds = new Set(
     graph.nodes
-      .filter((node) => node.kind === 'trigger')
+      .filter((node) => node.kind === 'start')
       .map((node) => node.id),
   );
-  if (triggerNodeIds.size === 0) return null;
+  if (startNodeIds.size === 0) return null;
 
   const entryTargets = new Set(
     graph.edges
-      .filter((edge) => triggerNodeIds.has(edge.source))
+      .filter((edge) => startNodeIds.has(edge.source))
       .map((edge) => edge.target),
   );
 
@@ -310,6 +641,7 @@ export function resolveFlowFormGuidance(
   config: AutopilotConfig,
   scope: ActiveFlowIntentScope | null,
 ): FlowFormGuidance | null {
+  config = configWithV2FlowGraph(config);
   if (!scope || !config.flow_graph) return null;
 
   const directTargets = new Set(
@@ -319,7 +651,7 @@ export function resolveFlowFormGuidance(
   );
   const formNode = config.flow_graph.nodes.find((node) => (
     directTargets.has(node.id) &&
-    node.kind === 'form' &&
+    node.kind === 'collect' &&
     node.config?.formMode === 'ai' &&
     (Boolean(node.config?.message?.trim()) || Boolean(node.config?.formFields?.length))
   ));
@@ -372,6 +704,7 @@ export function formatFlowReferencesForPrompt(
   config: AutopilotConfig,
   rules: NexusFlowInstance[] | null | undefined,
 ): string {
+  config = configWithV2FlowGraph(config);
   const nodeReferences = (config.flow_graph?.nodes || [])
     .map((node) => {
       const aliases = uniqueReferenceAliases([

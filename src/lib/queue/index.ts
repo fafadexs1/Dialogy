@@ -11,6 +11,7 @@ import {
 } from './config';
 import type {
   AiAutopilotProcessPayload,
+  AiAutopilotLearningCyclePayload,
   AiCaseMemoryRefreshPayload,
   AiDocumentIngestPayload,
   AiTaskPayload,
@@ -39,7 +40,10 @@ declare global {
 }
 
 function isAiQueueJob(type: QueueJobType) {
-  return type === 'ai_document_ingest' || type === 'ai_autopilot_process' || type === 'ai_case_memory_refresh';
+  return type === 'ai_document_ingest'
+    || type === 'ai_autopilot_process'
+    || type === 'ai_autopilot_learning_cycle'
+    || type === 'ai_case_memory_refresh';
 }
 
 function getQueueName(type: QueueJobType) {
@@ -101,6 +105,13 @@ function getJobId(type: QueueJobType, payload: QueueJobPayload) {
       const typedPayload = payload as AiAutopilotProcessPayload;
       return `ai_autopilot_process__${toSafeJobIdPart(typedPayload.messageId)}`;
     }
+    case 'ai_autopilot_learning_cycle': {
+      const typedPayload = payload as AiAutopilotLearningCyclePayload;
+      const revision = typedPayload.jobKey || Date.now();
+      return `ai_autopilot_learning_cycle__${toSafeJobIdPart(
+        typedPayload.workspaceId || 'all'
+      )}__${toSafeJobIdPart(typedPayload.sinceDays || 30)}__${toSafeJobIdPart(revision)}`;
+    }
     case 'ai_case_memory_refresh': {
       const typedPayload = payload as AiCaseMemoryRefreshPayload;
       return `ai_case_memory_refresh__${toSafeJobIdPart(typedPayload.chatId)}__${toSafeJobIdPart(
@@ -138,6 +149,7 @@ function getDefaultMaxAttemptsForType(type: QueueJobType) {
       return 1;
     case 'ai_document_ingest':
     case 'ai_autopilot_process':
+    case 'ai_autopilot_learning_cycle':
     case 'ai_case_memory_refresh':
       return 3;
     default:
@@ -197,6 +209,13 @@ export async function enqueueAiAutopilotProcess(
   options?: EnqueueOptions
 ) {
   return enqueueJob('ai_autopilot_process', payload, options);
+}
+
+export async function enqueueAiAutopilotLearningCycle(
+  payload: AiAutopilotLearningCyclePayload,
+  options?: EnqueueOptions
+) {
+  return enqueueJob('ai_autopilot_learning_cycle', payload, options);
 }
 
 export async function enqueueAiCaseMemoryRefresh(

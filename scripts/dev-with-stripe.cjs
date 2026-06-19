@@ -45,9 +45,17 @@ function main() {
     return;
   }
 
-  const stripeArgs = ["listen", "--skip-update", "--forward-to", forwardTo];
-  if (process.env.STRIPE_SECRET_KEY) {
-    stripeArgs.push("--api-key", process.env.STRIPE_SECRET_KEY);
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
+  const stripeCliApiKey = process.env.STRIPE_CLI_API_KEY?.trim();
+  const isLiveSecretKey = stripeSecretKey?.startsWith("sk_live_");
+  const stripeArgs = ["listen"];
+  if (isLiveSecretKey) {
+    stripeArgs.push("--live");
+    logDev("Detected a live Stripe secret key; starting Stripe listener in live mode using Stripe CLI authentication.");
+  }
+  stripeArgs.push("--skip-update", "--forward-to", forwardTo);
+  if (stripeCliApiKey || (stripeSecretKey && !isLiveSecretKey)) {
+    stripeArgs.push("--api-key", stripeCliApiKey || stripeSecretKey);
   }
 
   logDev(`Starting Stripe listener via ${stripeCommand.label}.`);
@@ -255,10 +263,6 @@ function normalizeDevArgs(args) {
 }
 
 function resolveTurboMode() {
-  if (Object.prototype.hasOwnProperty.call(process.env, "DIALOGY_USE_TURBO")) {
-    return !isFalsey(process.env.DIALOGY_USE_TURBO);
-  }
-
   const isWindows = process.platform === "win32";
   const hasNonAsciiPath = /[^\x00-\x7F]/.test(rootDir);
   const isOneDrivePath = /OneDrive/i.test(rootDir);
@@ -268,6 +272,10 @@ function resolveTurboMode() {
       "Disabling Turbopack for local dev because this Windows workspace path uses OneDrive and/or non-ASCII characters."
     );
     return false;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(process.env, "DIALOGY_USE_TURBO")) {
+    return !isFalsey(process.env.DIALOGY_USE_TURBO);
   }
 
   return true;

@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { getContacts } from '@/actions/crm';
 import { findWhatsappTemplates, getEvolutionApiInstances } from '@/actions/evolution-api';
-import { getTelegramInstances } from '@/actions/telegram';
-import { listMetaChannels } from '@/actions/meta-channels';
+import { getTelegramInstances as fetchTelegramInstances } from '@/actions/telegram';
+import { listMetaChannels as fetchMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
 import type { CampaignChannel, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -28,6 +28,26 @@ type WhatsappTemplateOption = CampaignTemplate & {
   status?: string;
   category?: string;
 };
+
+type CampaignDestination = {
+  id: string;
+  label: string;
+};
+
+async function loadCampaignChannels(workspaceId: string) {
+  const [whatsappRes, telegramRes, messengerChannels, instagramChannels] = await Promise.all([
+    getEvolutionApiInstances(workspaceId),
+    fetchTelegramInstances(workspaceId),
+    fetchMetaChannels(workspaceId, 'messenger'),
+    fetchMetaChannels(workspaceId, 'instagram'),
+  ]);
+
+  return {
+    whatsappRes,
+    telegramRes,
+    activeMetaChannels: [...messengerChannels, ...instagramChannels].filter(channel => channel.status === 'active'),
+  };
+}
 
 function templatePreview(template: WhatsappTemplateOption | null) {
   const body = template?.components?.find((component: any) => component.type?.toUpperCase() === 'BODY');
@@ -217,20 +237,15 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [selectedCrmIds, setSelectedCrmIds] = useState(() => new Set());
+  const [selectedCrmIds, setSelectedCrmIds] = useState<Set<string>>(() => new Set<string>());
 
   // Fetch initial data
   useEffect(() => {
     if (!user?.activeWorkspaceId) return;
 
     setLoadingInstances(true);
-    Promise.all([
-      getEvolutionApiInstances(user.activeWorkspaceId),
-      getTelegramInstances(user.activeWorkspaceId),
-      listMetaChannels(user.activeWorkspaceId, 'messenger'),
-      listMetaChannels(user.activeWorkspaceId, 'instagram'),
-    ])
-      .then(([whatsappRes, telegramRes, messengerChannels, instagramChannels]) => {
+    loadCampaignChannels(user.activeWorkspaceId)
+      .then(({ whatsappRes, telegramRes, activeMetaChannels }) => {
         if (whatsappRes.error) {
           toast({ title: 'Erro ao carregar inst\u00e2ncias', description: whatsappRes.error, variant: 'destructive' });
         }
@@ -239,7 +254,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
         }
         setInstances(whatsappRes.instances || []);
         setTelegramInstances(telegramRes.instances || []);
-        setMetaChannels([...messengerChannels, ...instagramChannels].filter(channel => channel.status === 'active'));
+        setMetaChannels(activeMetaChannels);
       })
       .catch((error) => {
         console.error('[NEW_CAMPAIGN] Falha ao buscar canais', error);
@@ -285,7 +300,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     };
   }, [query, toast, user?.activeWorkspaceId]);
 
-  const channelDestinations = useMemo(() => {
+  const channelDestinations = useMemo<CampaignDestination[]>(() => {
     if (deliveryChannel === 'whatsapp_baileys') {
       return instances.filter(instance => instance.type === 'baileys').map(instance => ({ id: instance.instance_name, label: instance.display_name || instance.instance_name }));
     }
@@ -302,8 +317,16 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
 
   const selectedTemplate = whatsappTemplates.find(template => template.name === selectedTemplateName) || null;
   const campaignMessage = deliveryChannel === 'whatsapp_cloud' ? templatePreview(selectedTemplate) : message;
-  const selectedChannel = CHANNEL_OPTIONS.find(channel => channel.value === deliveryChannel)!;
-  const selectedDestinationLabel = channelDestinations.find(destination => destination.id === destinationId)?.label || selectedChannel.label;
+  const preview = useMemo(() => {
+    const channel = CHANNEL_OPTIONS.find(option => option.value === deliveryChannel) ?? CHANNEL_OPTIONS[0];
+    const destinationLabel = channelDestinations.find(destination => destination.id === destinationId)?.label || channel.label;
+
+    return {
+      channel,
+      destinationLabel,
+      message: campaignMessage,
+    };
+  }, [campaignMessage, channelDestinations, deliveryChannel, destinationId]);
 
   useEffect(() => {
     setDestinationId(null);
@@ -669,15 +692,15 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
               <CardContent>
                 <div className="mx-auto w-full max-w-sm rounded-2xl border bg-background p-4">
                   <div className="flex items-center gap-3 pb-3 border-b">
-                    <div className="h-9 w-9 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-700 text-xs font-bold">{selectedChannel.shortLabel}</div>
+                    <div className="h-9 w-9 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-700 text-xs font-bold">{preview.channel.shortLabel}</div>
                     <div>
-                      <p className="text-sm font-semibold">{selectedDestinationLabel}</p>
+                      <p className="text-sm font-semibold">{preview.destinationLabel}</p>
                       <p className="text-xs text-muted-foreground">online agora</p>
                     </div>
                   </div>
                   <div className="mt-3 space-y-2">
                     <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-emerald-600 text-white px-3 py-2 text-sm shadow">
-                      {campaignMessage ? applyPlaceholder(campaignMessage, "Maria") : "Sua mensagem aparecerá aqui..."}
+                      {preview.message ? applyPlaceholder(preview.message, "Maria") : "Sua mensagem aparecerá aqui..."}
                     </div>
                     <p className="text-[10px] text-muted-foreground">Prévia com {PLACEHOLDER} → "Maria"</p>
                   </div>

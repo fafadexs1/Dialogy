@@ -11,6 +11,7 @@
 
 export type ProcedureStepType =
   | 'gather_data'    // Ask the customer for information
+  | 'retrieve_knowledge' // Fetch grounded knowledge before answering
   | 'validate'       // Check a condition locally
   | 'tool_call'      // Execute an agent tool
   | 'decide'         // LLM picks the best branch
@@ -22,15 +23,51 @@ export type ProcedureBranch = {
   nextStepId: string;
 };
 
+export type ProcedureSlotDefinition = {
+  key: string;
+  label: string;
+  type?: 'text' | 'name' | 'phone' | 'email' | 'document' | 'date' | 'time' | 'address' | 'number' | 'boolean';
+  required?: boolean;
+  aliases?: string[];
+  placeholder?: string;
+};
+
+export type ProcedureKnowledgeChunk = {
+  documentId: string;
+  chunkId: string;
+  title: string;
+  category: string;
+  score: number;
+  excerpt: string;
+  source: string;
+  coverage?: 'high' | 'medium' | 'low' | 'none';
+};
+
+export type ProcedureKnowledgeContext = {
+  coverage: 'high' | 'medium' | 'low' | 'none';
+  chunks: ProcedureKnowledgeChunk[];
+  strategy?: string;
+  reason?: string;
+};
+
 export type ProcedureStep = {
   id: string;
   order: number;
   type: ProcedureStepType;
   label: string;
+  visualNodeId?: string;
+  visualNodeKind?: string;
 
   // gather_data
   requiredSlots?: string[];
+  slotDefinitions?: ProcedureSlotDefinition[];
   promptTemplate?: string;
+
+  // retrieve_knowledge
+  knowledgeQueryTemplate?: string;
+  knowledgeCollectionIds?: string[];
+  requiredKnowledgeCoverage?: 'high' | 'medium' | 'low' | 'none';
+  onLowKnowledge?: 'continue' | 'pause' | 'handoff';
 
   // tool_call
   toolName?: string;
@@ -47,6 +84,7 @@ export type ProcedureStep = {
   // respond
   responseTemplate?: string;
   useLlm?: boolean;
+  requireGrounding?: boolean;
 
   // handoff
   handoffReason?: string;
@@ -105,6 +143,7 @@ export type ProcedureExecutionContext = {
   // Accumulated state
   collectedSlots: Record<string, string>;
   toolResults: Record<string, unknown>;
+  knowledgeContext?: ProcedureKnowledgeContext | null;
   decisions: Record<string, string>;
 
   // Control

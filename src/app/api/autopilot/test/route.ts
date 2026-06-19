@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
+import { generateProcedureRuntimeOutput } from '@/ai/flows/procedure-runtime';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 import type { AutopilotConfig, AutopilotConfigDraftSnapshot, KnowledgeBaseDocument, KnowledgeCollection, NexusFlowInstance } from '@/lib/types';
@@ -13,12 +14,24 @@ import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
 import { buildAutopilotPlaygroundTrace, type AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
 import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
+import { compileProcedureFromFlowGraph } from '@/services/autopilot/procedure-flow-compiler';
 import { matchProcedure } from '@/services/autopilot/procedure-matcher';
-import { advanceProcedure } from '@/services/autopilot/procedure-executor';
+import {
+  advanceProcedure,
+  type ProcedureDecisionResolver,
+  type ProcedureKnowledgeResolver,
+  type ProcedureResponseResolver,
+} from '@/services/autopilot/procedure-executor';
 import {
   createProcedureExecution,
   getActiveProcedureExecution,
 } from '@/services/autopilot/procedure-store';
+import {
+  buildProcedureSlimChatHistory,
+  compactProcedureText,
+  compactProcedureToolResults,
+  PROCEDURE_SLIM_LIMITS,
+} from '@/services/autopilot/procedure-prompt-slim';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import {
   buildIntentScopedKnowledgeBase,
@@ -30,6 +43,7 @@ import {
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 import { compileAutopilotTurnPolicy, resolveAllowedKnowledgeDocumentIds } from '@/services/autopilot/turn-policy';
+import { migrateAutopilotFlowGraphToV2 } from '@/services/autopilot/flow-v2';
 
 type PreviewPayload = {
   workspaceId: string;
@@ -60,7 +74,14 @@ async function ensureMembership(userId: string, workspaceId: string): Promise<bo
 async function loadPreviewTeams(workspaceId: string): Promise<ToolRouterTeam[]> {
   try {
     const res = await db.query(
-      'SELECT id, name, routing_config FROM teams WHERE workspace_id = $1 ORDER BY name LIMIT 20',
+      `SELECT
+         id,
+         name,
+         COALESCE(agent_routing_config, '{}'::jsonb) AS routing_config
+       FROM teams
+       WHERE workspace_id = $1
+       ORDER BY name
+       LIMIT 20`,
       [workspaceId],
     );
 
@@ -288,6 +309,15 @@ function hasRuntimeGeminiKey(config: AutopilotConfig, workspaceRuntime: Workspac
   );
 }
 
+function withPreviewTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    promise
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
+
 function buildIntentContext(trace: ReturnType<typeof buildAutopilotPlaygroundTrace>) {
   return [
     `intent=${trace.intent.intent}`,
@@ -343,6 +373,20 @@ function normalizeToolNames(raw: unknown): string[] {
     : [];
 }
 
+function parseFlowGraph(raw: unknown): AutopilotConfig['flow_graph'] {
+  if (!raw) return null;
+  const parsed = typeof raw === 'string'
+    ? (() => {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    })()
+    : raw;
+  return migrateAutopilotFlowGraphToV2(parsed as AutopilotConfig['flow_graph']);
+}
+
 function applyDraftSnapshot(config: AutopilotConfig, snapshot?: AutopilotConfigDraftSnapshot | null): AutopilotConfig {
   if (!snapshot) return config;
 
@@ -365,7 +409,7 @@ function applyDraftSnapshot(config: AutopilotConfig, snapshot?: AutopilotConfigD
     escalation_policy: typeof snapshot.escalation_policy === 'string' && snapshot.escalation_policy.length > 0 ? snapshot.escalation_policy : null,
     closing_policy: typeof snapshot.closing_policy === 'string' && snapshot.closing_policy.length > 0 ? snapshot.closing_policy : null,
     enabled_tool_names: normalizeToolNames(snapshot.enabled_tool_names),
-    flow_graph: snapshot.flow_graph || config.flow_graph || null,
+    flow_graph: parseFlowGraph(snapshot.flow_graph || config.flow_graph || null),
   };
 }
 
@@ -423,6 +467,7 @@ export async function POST(request: Request) {
         knowledge_base_documents: parseKnowledgeDocuments(row.knowledge_base_documents),
         knowledge_collections: parseKnowledgeCollections(row.knowledge_collections),
         enabled_tool_names: normalizeToolNames(row.enabled_tool_names),
+        flow_graph: parseFlowGraph(row.flow_graph),
         is_active: Boolean(row.is_active),
         is_primary: Boolean(row.is_primary),
         is_private: Boolean(row.is_private),
@@ -520,6 +565,7 @@ export async function POST(request: Request) {
       enabledToolNames,
       toolCatalog,
       availableTeams,
+      systemAgentName: config.name,
     });
 
     let result: {
@@ -543,17 +589,132 @@ export async function POST(request: Request) {
       };
     }
 
-    const compiledProcedures = compileAllProcedures({
-      documents: scopedKnowledgeDocuments,
-      tools: toolCatalog,
-      enabledToolNames,
-    });
     const validProcedureChatId =
       typeof procedureChatId === 'string' &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(procedureChatId)
         ? procedureChatId
         : null;
+    const documentProcedures = compileAllProcedures({
+      documents: scopedKnowledgeDocuments,
+      tools: toolCatalog,
+      enabledToolNames,
+    });
+    const procedureSlimChatHistory = buildProcedureSlimChatHistory(chatHistory || '');
+    const procedureSlimPersona = compactProcedureText(
+      [
+        config.name ? `Agente: ${config.name}` : '',
+        config.knowledge_base || '',
+        config.escalation_policy ? `Politica de escalonamento:\n${config.escalation_policy}` : '',
+      ].filter(Boolean).join('\n\n'),
+      PROCEDURE_SLIM_LIMITS.personaChars,
+    );
+    const procedureDecisionResolver: ProcedureDecisionResolver = async ({ step, prompt, context, branches, toolResults }) => {
+      try {
+        const decision = await withPreviewTimeout(generateProcedureRuntimeOutput({
+          config,
+          chatId: validProcedureChatId || `preview-${Date.now()}`,
+          mode: 'decision',
+          customerMessage: message,
+          chatHistory: procedureSlimChatHistory,
+          persona: procedureSlimPersona,
+          fallbackReply: config.default_fallback_reply || '',
+          escalationPolicy: config.escalation_policy || '',
+          model: resolvedModel.model,
+          workspaceGeminiApiKey: workspaceGeminiRuntime.apiKey,
+          contact,
+          procedure: {
+            id: context.procedureId,
+            name: context.procedureName,
+            currentStepId: context.currentStepId,
+            stepLabel: step.label,
+            prompt,
+            branchOptions: branches.map((branch) => ({
+              condition: branch.condition,
+              nextStepId: branch.nextStepId,
+            })),
+            collectedSlots: context.collectedSlots,
+            decisions: context.decisions,
+            toolResults: compactProcedureToolResults(toolResults),
+          },
+        }), 12_000, 'procedure decision preview');
+        return decision.decision || null;
+      } catch (error) {
+        console.warn('[AUTOPILOT_TEST_API] Procedure decision resolver failed; using heuristic:', error);
+        return null;
+      }
+    };
+    const procedureResponseResolver: ProcedureResponseResolver = async ({ step, prompt, context, toolResults }) => {
+      try {
+        const response = await withPreviewTimeout(generateProcedureRuntimeOutput({
+          config,
+          chatId: validProcedureChatId || `preview-${Date.now()}`,
+          mode: 'response',
+          customerMessage: message,
+          chatHistory: procedureSlimChatHistory,
+          persona: procedureSlimPersona,
+          fallbackReply: config.default_fallback_reply || '',
+          escalationPolicy: config.escalation_policy || '',
+          model: resolvedModel.model,
+          workspaceGeminiApiKey: workspaceGeminiRuntime.apiKey,
+          contact,
+          procedure: {
+            id: context.procedureId,
+            name: context.procedureName,
+            currentStepId: context.currentStepId,
+            stepLabel: step.label,
+            prompt,
+            collectedSlots: context.collectedSlots,
+            decisions: context.decisions,
+            toolResults: compactProcedureToolResults(toolResults),
+          },
+        }), 18_000, 'procedure response preview');
+        return response.response || null;
+      } catch (error) {
+        console.warn('[AUTOPILOT_TEST_API] Procedure response resolver failed; using template response:', error);
+        return null;
+      }
+    };
+    const procedureKnowledgeResolver: ProcedureKnowledgeResolver = async ({ step, context, query, requiredCoverage }) => {
+      const retrieval = await retrieveHybridSupportContext({
+        workspaceId,
+        autopilotConfigId: config.id,
+        query: query || message || context.procedureName,
+        staticDocuments: scopedKnowledgeDocuments,
+        intent: previewIntent,
+        allowedDocumentIds,
+      });
+      const selectedById = new Map(retrieval.selected.map((item) => [item.id, item]));
+      const chunks = retrieval.knowledgeBaseDocuments.map((document) => {
+        const selected = selectedById.get(document.id);
+        const rawDocument = document as KnowledgeBaseDocument & Record<string, unknown>;
+        const content = String(document.content || rawDocument.canonicalAnswer || rawDocument.summary || '').trim();
+        return {
+          documentId: document.id,
+          chunkId: String(rawDocument.chunkId || rawDocument.chunkIndex || document.id),
+          title: document.name || 'Base de conhecimento',
+          category: selected?.category || String(rawDocument.category || 'uncategorized'),
+          score: selected?.score || 0,
+          excerpt: content.length > 900 ? `${content.slice(0, 899).trim()}...` : content,
+          source: selected?.source || String(rawDocument.source || 'static'),
+          coverage: retrieval.knowledgeCoverage,
+        };
+      }).filter((chunk) => chunk.excerpt);
 
+      return {
+        coverage: retrieval.knowledgeCoverage,
+        chunks,
+        strategy: retrieval.strategy,
+        reason: retrieval.fallbackReason || retrieval.error || `required=${requiredCoverage}; step=${step.id}`,
+      };
+    };
+    const visualProcedure = compileProcedureFromFlowGraph({
+      flowGraph: config.flow_graph,
+      configId: config.id,
+      name: `Fluxo visual: ${config.name}`,
+    });
+    const compiledProcedures = visualProcedure.success && visualProcedure.graph
+      ? [...documentProcedures, visualProcedure.graph]
+      : documentProcedures;
     if (!deterministicFlowMessage && validProcedureChatId && compiledProcedures.length > 0) {
       try {
         let activeProcedure = await getActiveProcedureExecution(validProcedureChatId);
@@ -582,6 +743,8 @@ export async function POST(request: Request) {
               procedureName: procedureMatch.graph.documentName,
               currentStepId: procedureMatch.graph.steps[0]?.id || 'step_1',
               status: 'running',
+              graph: procedureMatch.graph,
+              goal: previewIntent.intent,
             });
           }
         }
@@ -592,6 +755,10 @@ export async function POST(request: Request) {
             context: activeProcedure,
             customerMessage: message,
             availableTeams,
+            decisionResolver: procedureDecisionResolver,
+            responseResolver: procedureResponseResolver,
+            knowledgeResolver: procedureKnowledgeResolver,
+            forceLlmRespond: resolvedModel.model.startsWith('lmstudio/'),
           });
 
           if (procedureResult.handled && (procedureResult.response || procedureResult.actions.length > 0)) {
@@ -611,10 +778,12 @@ export async function POST(request: Request) {
               fallbackReply: config.default_fallback_reply || '',
               modelResponse: result.response || null,
               modelActions: (result.actions || []) as AgentToolAction[],
+              preferModelResponse: true,
               contact,
               enabledToolNames,
               toolCatalog,
               availableTeams,
+              systemAgentName: config.name,
             }) as AutopilotPlaygroundTrace;
 
             procedureTrace.procedure = {
@@ -630,6 +799,7 @@ export async function POST(request: Request) {
               actions: procedureResult.actions.map((action) => action.type),
               completionReason: procedureResult.completionReason || null,
             };
+            (procedureTrace.procedure as any).knowledgeContext = activeProcedure.knowledgeContext || null;
             (procedureTrace as any).ragDiagnostics = ragContext?.diagnostics || null;
 
             return NextResponse.json({
@@ -738,6 +908,7 @@ export async function POST(request: Request) {
       enabledToolNames,
       toolCatalog,
       availableTeams,
+      systemAgentName: config.name,
     });
     trace.procedure = {
       enabled: compiledProcedures.length > 0,

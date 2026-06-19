@@ -97,6 +97,8 @@ export function buildAutopilotPlaygroundTrace(input: {
   fallbackReply?: string | null;
   modelResponse?: string | null;
   modelActions?: AgentToolAction[] | null;
+  preferModelResponse?: boolean;
+  systemAgentName?: string | null;
   contact: Contact;
   enabledToolNames: string[];
   toolCatalog: AgentToolCatalogItem[];
@@ -124,9 +126,10 @@ export function buildAutopilotPlaygroundTrace(input: {
     knowledgeCoverage: rag.knowledgeCoverage,
   });
   const responseBeforePlanner = compactResponse(
-    workflowPlan.response ||
-      input.modelResponse,
-    input.fallbackReply
+    input.preferModelResponse
+      ? input.modelResponse || workflowPlan.response
+      : workflowPlan.response || input.modelResponse,
+    input.fallbackReply,
   );
   const modelActions = input.modelActions || [];
   const candidateActions = workflowPlan.executionMode === 'continue_llm'
@@ -148,6 +151,8 @@ export function buildAutopilotPlaygroundTrace(input: {
     response: responseAfterPlanner,
     fallbackReply: input.fallbackReply || '',
     customerMessage: input.customerMessage,
+    chatHistory: input.chatHistory || '',
+    continuationRequiredSlots: workflowPlan.missingSlots,
     intentResolution,
     slotExtraction: workflowPlan.slotExtraction,
     plannedActions: toolPlanner.actions,
@@ -158,6 +163,7 @@ export function buildAutopilotPlaygroundTrace(input: {
     knowledgeCoverage: rag.knowledgeCoverage,
     knowledgeDocuments: rag.knowledgeBaseDocuments,
     source: workflowPlan.handledByWorkflow ? 'workflow_direct' : 'llm',
+    systemAgentName: input.systemAgentName || undefined,
   });
 
   return {

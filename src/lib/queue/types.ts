@@ -5,6 +5,7 @@ export type QueueJobType =
   | 'marketing_auto_close'
   | 'ai_document_ingest'
   | 'ai_autopilot_process'
+  | 'ai_autopilot_learning_cycle'
   | 'ai_case_memory_refresh'
   | 'analytics_event'
   | 'notification_send'
@@ -86,6 +87,17 @@ export type AiCaseMemoryRefreshPayload = {
   force?: boolean;
 };
 
+export type AiAutopilotLearningCyclePayload = {
+  workspaceId?: string;
+  vertical?: string;
+  sinceDays?: number;
+  limit?: number;
+  dryRun?: boolean;
+  promoteEcosystem?: boolean;
+  createScoreSuggestions?: boolean;
+  jobKey?: string;
+};
+
 export type AiTaskPayload = {
   workspaceId?: string;
   task: string;
@@ -99,6 +111,7 @@ export type QueueJobPayload =
   | MarketingAutoClosePayload
   | AiDocumentIngestPayload
   | AiAutopilotProcessPayload
+  | AiAutopilotLearningCyclePayload
   | AiCaseMemoryRefreshPayload
   | AnalyticsEventPayload
   | NotificationPayload

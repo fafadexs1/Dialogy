@@ -487,10 +487,45 @@ describe('procedure runtime engine', () => {
     });
   });
 
-  it('does not emit an invalid transfer action when a handoff step has no explicit destination', async () => {
+  it('falls back safely when a handoff step has no explicit destination and no team is available', async () => {
     const graph: ProcedureGraph = {
       id: 'proc-handoff-no-target',
       documentId: 'doc-handoff-no-target',
+      documentName: 'Escalonamento',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['equipe'],
+      metadata: {},
+      steps: [
+        {
+          id: 'handoff',
+          order: 1,
+          type: 'handoff',
+          label: 'Encaminhe para nossa equipe.',
+          handoffReason: 'Encaminhe para nossa equipe.',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'No aguardo!',
+      availableTeams: [],
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.actions).toHaveLength(0);
+    expect(result.response).toContain('Sera necessario que a equipe responsavel');
+    expect(result.response).not.toContain('encaminh');
+  });
+
+  it('uses the first available team when a reached handoff step has no explicit destination', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-handoff-default-team',
+      documentId: 'doc-handoff-default-team',
       documentName: 'Escalonamento',
       version: 1,
       compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
@@ -517,9 +552,11 @@ describe('procedure runtime engine', () => {
     });
 
     expect(result.status).toBe('completed');
-    expect(result.actions).toHaveLength(0);
-    expect(result.response).toContain('Sera necessario que a equipe responsavel');
-    expect(result.response).not.toContain('encaminh');
+    expect(result.actions[0]).toMatchObject({
+      type: 'transfer_chat',
+      payload: { teamId: 'support-team' },
+    });
+    expect(result.response).toContain('Encaminhe para nossa equipe');
   });
 
   it('targets a named team when a procedure handoff explicitly mentions it', async () => {
@@ -556,5 +593,513 @@ describe('procedure runtime engine', () => {
       type: 'transfer_chat',
       payload: { teamId: 'support-team' },
     });
+  });
+
+  it('uses the terminal handoff response instead of concatenating earlier step text', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-handoff-overrides',
+      documentId: 'doc-handoff-overrides',
+      documentName: 'Risco imediato',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['risco'],
+      metadata: {},
+      steps: [
+        {
+          id: 'intro',
+          order: 1,
+          type: 'respond',
+          label: 'Acolhimento',
+          responseTemplate: 'Vou fazer uma pergunta antes.',
+          nextStepId: 'handoff',
+        },
+        {
+          id: 'handoff',
+          order: 2,
+          type: 'handoff',
+          label: 'Transferir para Suporte',
+          handoffReason: 'Estou transferindo para a equipe Suporte.',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'risco agora',
+      availableTeams: [{ id: 'support-team', name: 'Suporte' }],
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.response).toBe('Estou transferindo para a equipe Suporte.');
+    expect(result.actions[0]).toMatchObject({ type: 'transfer_chat' });
+  });
+
+  it('pauses question messages and resumes at the next step instead of stacking responses', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-question-pause',
+      documentId: 'doc-question-pause',
+      documentName: 'Pergunta inicial',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['ajuda'],
+      metadata: {},
+      steps: [
+        {
+          id: 'welcome',
+          order: 1,
+          type: 'respond',
+          label: 'Boas-vindas',
+          visualNodeKind: 'message',
+          responseTemplate: 'Ola! Qual e o nome da crianca e o motivo do contato?',
+          nextStepId: 'decision',
+        },
+        {
+          id: 'decision',
+          order: 2,
+          type: 'decide',
+          label: 'Classificar',
+          branches: [
+            { condition: 'triagem', nextStepId: 'triage' },
+          ],
+        },
+        {
+          id: 'triage',
+          order: 3,
+          type: 'respond',
+          label: 'Triagem',
+          responseTemplate: 'Vamos seguir a triagem.',
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+
+    const result = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Oi, preciso de ajuda',
+    });
+
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toBe('Ola! Qual e o nome da crianca e o motivo do contato?');
+    expect(result.executedSteps).toEqual(['welcome']);
+    expect(runtimeContext.currentStepId).toBe('decision');
+  });
+
+  it('keeps question message nodes deterministic even when LM Studio forces LLM responses', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-force-llm-message',
+      documentId: 'doc-force-llm-message',
+      documentName: 'Mensagem deterministica',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['ajuda'],
+      metadata: {},
+      steps: [
+        {
+          id: 'welcome',
+          order: 1,
+          type: 'respond',
+          label: 'Boas-vindas',
+          visualNodeKind: 'message',
+          responseTemplate: 'Ola! Qual e a idade e o motivo do contato?',
+          nextStepId: 'next',
+        },
+        {
+          id: 'next',
+          order: 2,
+          type: 'respond',
+          label: 'Proximo',
+          responseTemplate: 'Nao deve executar agora.',
+          nextStepId: null,
+        },
+      ],
+    };
+    const responseResolver = vi.fn(async () => 'Resposta indevida do LLM.');
+    const runtimeContext = contextFor(graph);
+
+    const result = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Quero marcar consulta agora, sem pergunta.',
+      responseResolver,
+      forceLlmRespond: true,
+    });
+
+    expect(responseResolver).not.toHaveBeenCalled();
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toBe('Ola! Qual e a idade e o motivo do contato?');
+    expect(runtimeContext.currentStepId).toBe('next');
+  });
+
+  it('does not route medication dosage requests to a high-risk handoff without red flags', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-dosage-triage',
+      documentId: 'doc-dosage-triage',
+      documentName: 'Dosagem',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['febre'],
+      metadata: {},
+      steps: [
+        {
+          id: 'risk',
+          order: 1,
+          type: 'decide',
+          label: 'Classificar risco',
+          branches: [
+            { condition: 'Risco Vermelho Grave emergencia pronto socorro', nextStepId: 'handoff' },
+            { condition: 'Triagem Azul Amarelo febre vomito resfriado', nextStepId: 'triage' },
+          ],
+        },
+        {
+          id: 'handoff',
+          order: 2,
+          type: 'handoff',
+          label: 'Transferir',
+          handoffReason: 'Transferir para equipe.',
+          nextStepId: null,
+        },
+        {
+          id: 'triage',
+          order: 3,
+          type: 'respond',
+          label: 'Triagem',
+          responseTemplate: 'Nao posso orientar dosagem de medicamento por aqui por seguranca. Qual e a temperatura e ha quanto tempo a febre comecou?',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'Meu filho tem 5 anos e febre. Quantas gotas de dipirona eu dou?',
+      availableTeams: [{ id: 'team', name: 'Equipe' }],
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.executedSteps).toEqual(['risk', 'triage']);
+    expect(result.response).toContain('Nao posso orientar dosagem');
+  });
+
+  it('pauses sub-agent responses even when an end node is connected next', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-subagent-pause',
+      documentId: 'doc-subagent-pause',
+      documentName: 'Sub agente',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['febre'],
+      metadata: {},
+      steps: [
+        {
+          id: 'agent',
+          order: 1,
+          type: 'respond',
+          label: 'Sub agente',
+          visualNodeKind: 'sub_agent',
+          responseTemplate: 'Responda.',
+          useLlm: true,
+          nextStepId: 'end',
+        },
+        {
+          id: 'end',
+          order: 2,
+          type: 'respond',
+          label: 'Fim',
+          responseTemplate: 'Mensagem final que nao deve ser empilhada.',
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+
+    const result = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'meu filho esta com febre',
+      responseResolver: async () => 'Primeira resposta do sub-agente.',
+    });
+
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toBe('Primeira resposta do sub-agente.');
+    expect(result.executedSteps).toEqual(['agent']);
+    expect(runtimeContext.currentStepId).toBe('agent');
+  });
+
+  it('collects custom typed slots by field definition and does not ask them again', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-custom-slots',
+      documentId: 'doc-custom-slots',
+      documentName: 'Agendamento com dados customizados',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['scheduling_request'],
+      triggerKeywords: ['agendar'],
+      metadata: {},
+      steps: [
+        {
+          id: 'collect',
+          order: 1,
+          type: 'gather_data',
+          label: 'Coletar responsavel',
+          requiredSlots: ['nome_resp', 'tel_resp'],
+          slotDefinitions: [
+            { key: 'nome_resp', label: 'Nome completo do responsavel', type: 'name', required: true },
+            { key: 'tel_resp', label: 'Telefone de contato', type: 'phone', required: true },
+          ],
+          promptTemplate: 'Me informe o nome completo do responsavel e telefone com DDD.',
+          nextStepId: 'done',
+        },
+        {
+          id: 'done',
+          order: 2,
+          type: 'respond',
+          label: 'Confirmar',
+          responseTemplate: 'Recebi os dados: {{nome_resp}} / {{tel_resp}}.',
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+
+    const first = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'quero agendar',
+    });
+
+    expect(first.status).toBe('waiting_input');
+    expect(first.response).toContain('nome completo');
+    expect(runtimeContext.currentStepId).toBe('collect');
+
+    const second = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Fabricio de Sousa Soares, telefone 61995215930',
+    });
+
+    expect(second.status).toBe('completed');
+    expect(second.response).toBe('Recebi os dados: Fabricio de Sousa Soares / 61995215930.');
+    expect(runtimeContext.collectedSlots).toMatchObject({
+      nome_resp: 'Fabricio de Sousa Soares',
+      tel_resp: '61995215930',
+    });
+  });
+
+  it('keeps a waiting collect step active when the customer asks a generic follow-up', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-resume-collect',
+      documentId: 'doc-resume-collect',
+      documentName: 'Retomar coleta',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['suporte'],
+      metadata: {},
+      steps: [
+        {
+          id: 'collect',
+          order: 1,
+          type: 'gather_data',
+          label: 'Coletar telefone',
+          requiredSlots: ['phone'],
+          slotDefinitions: [{ key: 'phone', label: 'Telefone com DDD', type: 'phone', required: true }],
+          promptTemplate: 'Qual e o telefone com DDD?',
+          nextStepId: 'done',
+        },
+        {
+          id: 'done',
+          order: 2,
+          type: 'respond',
+          label: 'Final',
+          responseTemplate: 'Obrigado.',
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+    runtimeContext.status = 'waiting_input';
+    runtimeContext.currentStepId = 'collect';
+
+    const result = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'e agora?',
+    });
+
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toBe('Qual e o telefone com DDD?');
+    expect(runtimeContext.currentStepId).toBe('collect');
+    expect(runtimeContext.collectedSlots.phone).toBeUndefined();
+  });
+
+  it('does not collect customer questions as text registration slots', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-registration-question',
+      documentId: 'doc-registration-question',
+      documentName: 'Pre-cadastro',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['purchase_inquiry'],
+      triggerKeywords: ['planos'],
+      metadata: {},
+      steps: [
+        {
+          id: 'collect',
+          order: 1,
+          type: 'gather_data',
+          label: 'Pre-Cadastro',
+          requiredSlots: ['nome', 'documento', 'telefone', 'endereco'],
+          slotDefinitions: [
+            { key: 'nome', label: 'Nome Completo', type: 'text', required: true },
+            { key: 'documento', label: 'CPF ou CNPJ', type: 'text', required: true },
+            { key: 'telefone', label: 'Telefone de Contato', type: 'phone', required: true },
+            { key: 'endereco', label: 'Endereco Completo', type: 'text', required: true },
+          ],
+          promptTemplate: 'Para reservar o plano, me envie seus dados.',
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+    runtimeContext.status = 'waiting_input';
+    runtimeContext.currentStepId = 'collect';
+
+    const result = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'E esse Wi-Fi 6 e o que?',
+    });
+
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toContain('nome');
+    expect(runtimeContext.currentStepId).toBe('collect');
+    expect(runtimeContext.collectedSlots).toEqual({});
+  });
+
+  it('injects retrieved knowledge chunks into grounded AI responses', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-grounding',
+      documentId: 'doc-grounding',
+      documentName: 'Responder com base',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['febre'],
+      metadata: {},
+      steps: [
+        {
+          id: 'knowledge',
+          order: 1,
+          type: 'retrieve_knowledge',
+          label: 'Buscar base',
+          knowledgeQueryTemplate: 'febre pediatrica {{customerMessage}}',
+          requiredKnowledgeCoverage: 'medium',
+          nextStepId: 'respond',
+        },
+        {
+          id: 'respond',
+          order: 2,
+          type: 'respond',
+          label: 'Responder',
+          responseTemplate: 'Responda com base nas orientacoes disponiveis.',
+          useLlm: true,
+          requireGrounding: true,
+          requiredKnowledgeCoverage: 'medium',
+          nextStepId: null,
+        },
+      ],
+    };
+    const prompts: string[] = [];
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'meu filho esta com febre',
+      knowledgeResolver: async () => ({
+        coverage: 'medium',
+        chunks: [
+          {
+            documentId: 'doc-1',
+            chunkId: 'chunk-1',
+            title: 'Febre',
+            category: 'pediatria',
+            score: 0.91,
+            excerpt: 'Ofereca liquidos com frequencia e observe sinais de piora.',
+            source: 'knowledge_base',
+          },
+        ],
+      }),
+      responseResolver: async ({ prompt }) => {
+        prompts.push(prompt);
+        return 'Com base nas orientacoes disponiveis, ofereca liquidos com frequencia.';
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.response).toContain('Com base nas orientacoes');
+    expect(prompts[0]).toContain('Contexto permitido da base de conhecimento');
+    expect(prompts[0]).toContain('Ofereca liquidos com frequencia');
+  });
+
+  it('blocks grounded responses when knowledge coverage is too low', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-low-coverage',
+      documentId: 'doc-low-coverage',
+      documentName: 'Baixa cobertura',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['febre'],
+      metadata: {},
+      steps: [
+        {
+          id: 'knowledge',
+          order: 1,
+          type: 'retrieve_knowledge',
+          label: 'Buscar base',
+          requiredKnowledgeCoverage: 'medium',
+          onLowKnowledge: 'pause',
+          nextStepId: 'respond',
+        },
+        {
+          id: 'respond',
+          order: 2,
+          type: 'respond',
+          label: 'Responder',
+          responseTemplate: 'Nunca deve chegar aqui sem base.',
+          useLlm: true,
+          requireGrounding: true,
+          requiredKnowledgeCoverage: 'medium',
+          nextStepId: null,
+        },
+      ],
+    };
+    const responseResolver = vi.fn(async () => 'inventado');
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'posso dar algum remedio?',
+      knowledgeResolver: async () => ({
+        coverage: 'low',
+        chunks: [],
+        reason: 'no_relevant_chunks',
+      }),
+      responseResolver,
+    });
+
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toContain('Nao encontrei orientacao suficiente');
+    expect(responseResolver).not.toHaveBeenCalled();
   });
 });

@@ -104,6 +104,18 @@ describe('autopilot universal intent resolver', () => {
     expect(handoff.shouldTransfer).toBe(true);
   });
 
+  it('prioritizes pediatric symptom guidance over scheduling keywords', () => {
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Ola, tudo bem? O nome da crianca e Joaquina. Meu bebe de 6 meses esta com febre de 38.5 desde ontem a noite. O que eu devo fazer antes da consulta?',
+    });
+
+    expect(resolution.intent).toBe('support_request');
+    expect(resolution.workflowId).toBe('universal.support_request');
+    expect(resolution.requiredSlots).toEqual([]);
+    expect(resolution.shouldRetrieveKnowledge).toBe(true);
+    expect(resolution.reason).toContain('triagem');
+  });
+
   it('uses recent catalog offer context for affirmative follow-ups', () => {
     const history = 'Atendente: Deseja conhecer nossas opcoes de servicos?';
 

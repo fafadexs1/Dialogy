@@ -208,6 +208,33 @@ describe('agent tool execution policy', () => {
     expect(result.reason).toContain('[tool_policy:dependency_failed]');
   });
 
+  it('does not block transfer when the previous internal note failed', async () => {
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Pode me transferir para um humano',
+      },
+      action: {
+        type: 'transfer_chat',
+        reason: 'Cliente pediu atendimento humano.',
+        payload: { teamId: 'team-1' },
+      },
+      previousResults: [
+        {
+          toolName: 'add_internal_note',
+          status: 'rejected',
+          input: {
+            type: 'add_internal_note',
+            payload: { content: 'Cliente pediu humano.' },
+          },
+          error: 'Ferramenta habilitada no agente, mas nao liberada para o no atual do fluxo.',
+        },
+      ],
+    });
+
+    expect(result).toEqual({ allowed: true, riskLevel: 'medium' });
+  });
+
   it('blocks payment promises outside a financial request before asking for confirmation', async () => {
     const result = await evaluateAgentToolPolicy({
       context,

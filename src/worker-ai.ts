@@ -1,6 +1,7 @@
 import { createAiQueueWorker } from '@/lib/queue/ai-worker';
 import { prewarmEmbeddingModels } from '@/lib/embeddings';
 import { prewarmBgeRerankerV2M3 } from '@/services/rag/bge-reranker-v2-m3';
+import { startAutopilotLearningCycleScheduler } from '@/services/autopilot/learning-cycle-scheduler';
 
 async function loadEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -31,11 +32,13 @@ async function main() {
   await maybePrewarmModels();
 
   const { worker, connection } = createAiQueueWorker();
+  const learningCycleScheduler = startAutopilotLearningCycleScheduler();
 
   const shutdown = async (signal: string) => {
     console.log(`[AI_QUEUE_WORKER] Received ${signal}. Shutting down gracefully...`);
 
     try {
+      learningCycleScheduler?.stop();
       await worker.close();
       await connection.quit();
       process.exit(0);

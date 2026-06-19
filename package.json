@@ -22,6 +22,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "eval:autopilot": "tsx scripts/eval-autopilot.ts --offline",
+    "autopilot:learn": "tsx scripts/run-autopilot-learning-cycle.ts",
     "benchmark:embeddings": "tsx scripts/benchmark-embeddings.ts",
     "rag:reindex:bge-m3": "tsx scripts/reindex-bge-m3.ts"
   },
@@ -139,6 +140,7 @@
     "@playwright/test": "^1.59.1",
     "@types/node": "^20.19.0",
     "@types/papaparse": "^5.3.14",
+    "@types/pdfjs-dist": "^2.10.377",
     "@types/pg": "^8.11.6",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
@@ -147,6 +149,7 @@
     "dotenv": "^17.2.3",
     "esbuild": "^0.28.0",
     "genkit-cli": "^0.0.2",
+    "pdfjs-dist": "^6.0.227",
     "postcss": "8.5.14",
     "prisma": "6.0.1",
     "tailwindcss": "^3.4.1",

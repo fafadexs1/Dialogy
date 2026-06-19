@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   History,
   LineChart,
+  BrainCircuit,
   RotateCcw,
   TestTube2,
   BookOpen,
@@ -53,6 +54,17 @@ import {
   runAutopilotRagLab,
   improveAutopilotKnowledgeDocument,
   generateAutopilotFlowWithAi,
+  getAutopilotDecisionInsights,
+  refreshAutopilotDecisionPatterns,
+  reviewAutopilotCausalPattern,
+  previewAutopilotCausalPatternApplication,
+  applyAutopilotCausalPattern,
+  applySafeAutopilotCausalPatternAutoTune,
+  applyAutopilotScoreSuggestion,
+  revertAutopilotCausalPatternApplication,
+  importAutopilotEcosystemPattern,
+  type AutopilotCausalPatternApplicationPreview,
+  type AutopilotDecisionInsights,
 } from '@/actions/autopilot';
 import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
@@ -72,6 +84,7 @@ import { AutopilotRules } from '@/components/autopilot/autopilot-rules';
 import { AutopilotSettings } from '@/components/autopilot/autopilot-settings';
 import { AutopilotPlayground } from '@/components/autopilot/autopilot-playground';
 import { AutopilotReadiness } from '@/components/autopilot/autopilot-readiness';
+import { AutopilotDecisionInsightsPanel } from '@/components/autopilot/autopilot-decision-insights';
 import { AutomationForm } from '@/components/autopilot/automation-form';
 import { AutopilotFlowBuilder, type AgentEditorPanel } from '@/components/autopilot/autopilot-flow-builder';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
@@ -96,6 +109,7 @@ function inferKnowledgeSourceFormat(filename: string): KnowledgeBaseDocument['so
   if (extension === 'md') return 'markdown';
   if (extension === 'csv') return 'csv';
   if (extension === 'json') return 'json';
+  if (extension === 'pdf') return 'pdf';
   return 'plain_text';
 }
 
@@ -332,6 +346,20 @@ export default function AutopilotDetailPage() {
   const [isReindexingKnowledge, setIsReindexingKnowledge] = useState(false);
   const [ragLabReport, setRagLabReport] = useState<RagLabReport | null>(null);
   const [isRunningRagLab, setIsRunningRagLab] = useState(false);
+  const [decisionInsights, setDecisionInsights] = useState<AutopilotDecisionInsights | null>(null);
+  const [isLoadingDecisionInsights, setIsLoadingDecisionInsights] = useState(false);
+  const [hasAttemptedDecisionInsightsLoad, setHasAttemptedDecisionInsightsLoad] = useState(false);
+  const [decisionInsightsLoadError, setDecisionInsightsLoadError] = useState<string | null>(null);
+  const [isRefreshingDecisionInsights, setIsRefreshingDecisionInsights] = useState(false);
+  const [reviewingPatternId, setReviewingPatternId] = useState<string | null>(null);
+  const [previewingPatternId, setPreviewingPatternId] = useState<string | null>(null);
+  const [applicationPreviewPatternId, setApplicationPreviewPatternId] = useState<string | null>(null);
+  const [applicationPreview, setApplicationPreview] = useState<AutopilotCausalPatternApplicationPreview | null>(null);
+  const [applyingPatternId, setApplyingPatternId] = useState<string | null>(null);
+  const [revertingPatternId, setRevertingPatternId] = useState<string | null>(null);
+  const [applyingScoreHistoryId, setApplyingScoreHistoryId] = useState<string | null>(null);
+  const [importingEcosystemPatternId, setImportingEcosystemPatternId] = useState<string | null>(null);
+  const [isAutoTuningDecisionInsights, setIsAutoTuningDecisionInsights] = useState(false);
 
   const estimateTokens = useCallback((content: string) => {
     const normalized = content?.trim() || '';
@@ -630,19 +658,48 @@ export default function AutopilotDetailPage() {
     try {
       const additions: KnowledgeBaseDocument[] = [];
       for (const file of Array.from(files)) {
-        const text = (await file.text()).trim();
+        let text = '';
+        const sourceFormat = inferKnowledgeSourceFormat(file.name);
+
+        if (sourceFormat === 'pdf' || file.type === 'application/pdf') {
+          // Import dynamic to avoid breaking SSR
+          const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/legacy/build/pdf.worker.mjs`;
+
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          const totalPages = pdf.numPages;
+
+          for (let i = 1; i <= totalPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            // @ts-ignore
+            const pageText = textContent.items.map((item) => item.str).join(' ');
+            text += pageText + '\\n\\n';
+
+            // Yield to event loop to avoid freezing UI for large PDFs
+            if (i % 10 === 0) {
+              await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+          }
+          text = text.trim();
+        } else {
+          text = (await file.text()).trim();
+        }
+
         additions.push({
           id: globalThis.crypto?.randomUUID?.() || `${file.name}-${Date.now()}`,
           name: file.name,
           content: text,
-          sourceFormat: inferKnowledgeSourceFormat(file.name),
+          sourceFormat,
           originalFilename: file.name,
           tokens: estimateTokens(text),
         });
       }
       setKnowledgeDocuments((prev) => [...prev, ...additions]);
       toast({ title: 'Arquivos carregados', description: 'Revise e salve para reindexar o agente.' });
-    } catch {
+    } catch (error) {
+      console.error('Error parsing file:', error);
       toast({ title: 'Falha ao ler arquivos', variant: 'destructive' });
     } finally {
       setIsUploading(false);
@@ -802,6 +859,223 @@ export default function AutopilotDetailPage() {
     }
   };
 
+  const loadDecisionInsights = useCallback(async (options?: { silent?: boolean }) => {
+    const configId = config?.id || agentId;
+    if (!configId) return;
+
+    setHasAttemptedDecisionInsightsLoad(true);
+    if (!options?.silent) setIsLoadingDecisionInsights(true);
+    try {
+      const result = await getAutopilotDecisionInsights(configId);
+      if (!result.insights) {
+        const message = result.error || 'Nao foi possivel carregar os aprendizados do agente.';
+        setDecisionInsightsLoadError(message);
+        toast({
+          title: 'Erro ao carregar motor',
+          description: message,
+          variant: 'destructive',
+        });
+        return;
+      }
+      setDecisionInsightsLoadError(null);
+      setDecisionInsights(result.insights);
+    } finally {
+      if (!options?.silent) setIsLoadingDecisionInsights(false);
+    }
+  }, [agentId, config?.id, toast]);
+
+  const handleRefreshDecisionInsights = useCallback(async () => {
+    if (!config) return;
+
+    setIsRefreshingDecisionInsights(true);
+    try {
+      const result = await refreshAutopilotDecisionPatterns(config.id);
+      if (!result.success) {
+        setDecisionInsightsLoadError(result.error || 'Falha ao atualizar aprendizados do agente.');
+        toast({
+          title: 'Falha ao atualizar aprendizados',
+          description: result.error,
+          variant: 'destructive',
+        });
+        return;
+      }
+      setHasAttemptedDecisionInsightsLoad(true);
+      setDecisionInsightsLoadError(null);
+      setDecisionInsights(result.insights || null);
+      toast({ title: 'Aprendizados atualizados', description: 'O motor recalculou os padroes recentes do agente.' });
+    } finally {
+      setIsRefreshingDecisionInsights(false);
+    }
+  }, [config, toast]);
+
+  const handleReviewDecisionPattern = useCallback(async (patternId: string, decision: 'approve' | 'dismiss') => {
+    if (!config) return;
+
+    setReviewingPatternId(patternId);
+    try {
+      const result = await reviewAutopilotCausalPattern({
+        configId: config.id,
+        patternId,
+        decision,
+      });
+      if (!result.success) {
+        toast({ title: 'Falha ao revisar sugestao', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setDecisionInsights(result.insights || null);
+      if (applicationPreviewPatternId === patternId) {
+        setApplicationPreviewPatternId(null);
+        setApplicationPreview(null);
+      }
+      toast({ title: decision === 'approve' ? 'Sugestao aprovada' : 'Sugestao ignorada' });
+    } finally {
+      setReviewingPatternId(null);
+    }
+  }, [applicationPreviewPatternId, config, toast]);
+
+  const handlePreviewDecisionPattern = useCallback(async (patternId: string) => {
+    if (!config) return;
+
+    setPreviewingPatternId(patternId);
+    try {
+      const result = await previewAutopilotCausalPatternApplication({
+        configId: config.id,
+        patternId,
+      });
+      if (!result.success) {
+        toast({ title: 'Falha ao gerar preview', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setApplicationPreviewPatternId(patternId);
+      setApplicationPreview(result.preview || null);
+    } finally {
+      setPreviewingPatternId(null);
+    }
+  }, [config, toast]);
+
+  const handleApplyDecisionPattern = useCallback(async (
+    patternId: string,
+    applicationMode?: 'full' | 'knowledge_only',
+  ) => {
+    if (!config) return;
+
+    setApplyingPatternId(patternId);
+    try {
+      const result = await applyAutopilotCausalPattern({
+        configId: config.id,
+        patternId,
+        applicationMode,
+      });
+      if (!result.success) {
+        toast({ title: 'Falha ao aplicar sugestao', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setDecisionInsights(result.insights || null);
+      setApplicationPreviewPatternId(null);
+      setApplicationPreview(null);
+      if (result.draftUpdatedAt) setDraftUpdatedAt(result.draftUpdatedAt);
+      await fetchData({ showLoading: false });
+      toast({ title: 'Sugestao aplicada ao rascunho', description: 'Revise o flow e publique quando estiver pronto.' });
+    } finally {
+      setApplyingPatternId(null);
+    }
+  }, [config, fetchData, toast]);
+
+  const handleRevertDecisionPattern = useCallback(async (patternId: string) => {
+    if (!config) return;
+    if (!confirm('Reverter esta sugestao aplicada no rascunho?')) return;
+
+    setRevertingPatternId(patternId);
+    try {
+      const result = await revertAutopilotCausalPatternApplication({
+        configId: config.id,
+        patternId,
+      });
+      if (!result.success) {
+        toast({ title: 'Falha ao reverter sugestao', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setDecisionInsights(result.insights || null);
+      if (result.draftUpdatedAt) setDraftUpdatedAt(result.draftUpdatedAt);
+      await fetchData({ showLoading: false });
+      toast({ title: 'Sugestao revertida', description: 'O rascunho foi atualizado com a reversao.' });
+    } finally {
+      setRevertingPatternId(null);
+    }
+  }, [config, fetchData, toast]);
+
+  const handleApplyDecisionScoreHistory = useCallback(async (scoreHistoryId: string) => {
+    if (!config) return;
+
+    setApplyingScoreHistoryId(scoreHistoryId);
+    try {
+      const result = await applyAutopilotScoreSuggestion({
+        configId: config.id,
+        scoreHistoryId,
+      });
+      if (!result.success) {
+        toast({ title: 'Falha ao aplicar pesos', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setDecisionInsights(result.insights || null);
+      toast({ title: 'Pesos aplicados', description: 'O motor de decisao usara os novos pesos nas proximas execucoes.' });
+    } finally {
+      setApplyingScoreHistoryId(null);
+    }
+  }, [config, toast]);
+
+  const handleImportDecisionEcosystemPattern = useCallback(async (ecosystemPatternId: string) => {
+    if (!config) return;
+
+    setImportingEcosystemPatternId(ecosystemPatternId);
+    try {
+      const result = await importAutopilotEcosystemPattern({
+        configId: config.id,
+        ecosystemPatternId,
+      });
+      if (!result.success) {
+        toast({ title: 'Falha ao importar sugestao', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setDecisionInsights(result.insights || null);
+      toast({ title: 'Sugestao importada', description: 'Ela entrou na lista de padroes deste workspace.' });
+    } finally {
+      setImportingEcosystemPatternId(null);
+    }
+  }, [config, toast]);
+
+  const handleSafeDecisionAutoTune = useCallback(async () => {
+    if (!config) return;
+
+    setIsAutoTuningDecisionInsights(true);
+    try {
+      const result = await applySafeAutopilotCausalPatternAutoTune({ configId: config.id });
+      if (!result.success) {
+        toast({ title: 'Auto-tune nao aplicado', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setDecisionInsights(result.insights || null);
+      if (result.draftUpdatedAt) setDraftUpdatedAt(result.draftUpdatedAt);
+      await fetchData({ showLoading: false });
+      toast({
+        title: 'Auto-tune aplicado ao rascunho',
+        description: `${result.appliedCount || 0} melhoria(s) aplicada(s), ${result.skippedCount || 0} ignorada(s).`,
+      });
+    } finally {
+      setIsAutoTuningDecisionInsights(false);
+    }
+  }, [config, fetchData, toast]);
+
+  useEffect(() => {
+    if (
+      editorPanel !== 'decision'
+      || decisionInsights
+      || isLoadingDecisionInsights
+      || hasAttemptedDecisionInsightsLoad
+    ) return;
+    void loadDecisionInsights();
+  }, [decisionInsights, editorPanel, hasAttemptedDecisionInsightsLoad, isLoadingDecisionInsights, loadDecisionInsights]);
+
   const upsertRuleFlowNode = (rule: NexusFlowInstance) => {
     const nodeId = `rule-${rule.id}`;
     setFlowGraph((previous) => {
@@ -907,7 +1181,7 @@ export default function AutopilotDetailPage() {
   if (!config) return null;
 
   const handleOpenEditorPanel = (panel: AgentEditorPanel) => {
-    const inlinePanels: AgentEditorPanel[] = ['knowledge', 'capabilities', 'analytics', 'settings'];
+    const inlinePanels: AgentEditorPanel[] = ['knowledge', 'capabilities', 'analytics', 'decision', 'settings'];
     setEditorPanel((current) => (current === panel && inlinePanels.includes(panel) ? null : panel));
   };
 
@@ -1029,6 +1303,61 @@ export default function AutopilotDetailPage() {
       });
     }
 
+    if (editorPanel === 'decision') {
+      return renderInlinePanelFrame({
+        eyebrow: 'Motor auto evolutivo',
+        title: 'Ledger, padroes e auto-tune',
+        description: 'Veja decisoes reais, resultados observados e melhorias seguras que o agente pode aplicar no rascunho.',
+        icon: <BrainCircuit className="h-3.5 w-3.5" />,
+        accentClassName: 'border-violet-500/25 bg-violet-500/10 text-violet-300',
+        children: (
+          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
+            {decisionInsightsLoadError && (
+              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100 sm:flex-row sm:items-center sm:justify-between">
+                <span>{decisionInsightsLoadError}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadDecisionInsights()}
+                  disabled={isLoadingDecisionInsights}
+                  className="w-fit rounded-xl border-red-500/30 bg-red-950/30 text-red-100 hover:bg-red-900/35 hover:text-white"
+                >
+                  {isLoadingDecisionInsights ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Tentar novamente
+                </Button>
+              </div>
+            )}
+            <AutopilotDecisionInsightsPanel
+              insights={decisionInsights}
+              loading={isLoadingDecisionInsights}
+              refreshing={isRefreshingDecisionInsights}
+              reviewingPatternId={reviewingPatternId}
+              previewingPatternId={previewingPatternId}
+              applicationPreviewPatternId={applicationPreviewPatternId}
+              applicationPreview={applicationPreview}
+              applyingPatternId={applyingPatternId}
+              revertingPatternId={revertingPatternId}
+              applyingScoreHistoryId={applyingScoreHistoryId}
+              importingEcosystemPatternId={importingEcosystemPatternId}
+              autoTuning={isAutoTuningDecisionInsights}
+              onRefresh={handleRefreshDecisionInsights}
+              onReviewPattern={handleReviewDecisionPattern}
+              onPreviewPattern={handlePreviewDecisionPattern}
+              onClearPreview={() => {
+                setApplicationPreviewPatternId(null);
+                setApplicationPreview(null);
+              }}
+              onApplyPattern={handleApplyDecisionPattern}
+              onRevertPattern={handleRevertDecisionPattern}
+              onApplyScoreHistory={handleApplyDecisionScoreHistory}
+              onImportEcosystemPattern={handleImportDecisionEcosystemPattern}
+              onSafeAutoTune={handleSafeDecisionAutoTune}
+            />
+          </div>
+        ),
+      });
+    }
+
     if (editorPanel === 'settings') {
       return renderInlinePanelFrame({
         eyebrow: 'Controle do agente',
@@ -1076,7 +1405,7 @@ export default function AutopilotDetailPage() {
     return null;
   })();
   const inlineEditorPanelName: AgentEditorPanel | null =
-    editorPanel === 'knowledge' || editorPanel === 'capabilities' || editorPanel === 'analytics' || editorPanel === 'settings'
+    editorPanel === 'knowledge' || editorPanel === 'capabilities' || editorPanel === 'analytics' || editorPanel === 'decision' || editorPanel === 'settings'
       ? editorPanel
       : null;
 
@@ -1096,7 +1425,6 @@ export default function AutopilotDetailPage() {
         isDiscarding={isDiscardingDraft}
         enabledToolNames={enabledToolNames}
         tools={toolCatalog}
-        rules={instances}
         knowledgeDocuments={knowledgeDocuments}
         knowledgeCollections={knowledgeCollections}
         mainSystemPrompt={knowledgeBase}
@@ -1115,6 +1443,7 @@ export default function AutopilotDetailPage() {
           conversation: input.conversation,
           currentGraph: input.currentGraph,
           currentSystemPrompt: input.currentSystemPrompt,
+          model: aiModel,
         })}
         onApplyAiProposal={(proposal) => {
           setFlowGraph(proposal.flowGraph);
@@ -1124,10 +1453,6 @@ export default function AutopilotDetailPage() {
             title: 'Proposta aplicada ao rascunho',
             description: 'Revise o flow, teste o atendimento e salve antes de publicar.',
           });
-        }}
-        onAddRule={() => {
-          setEditingRule(null);
-          setIsRuleModalOpen(true);
         }}
       />
 
@@ -1346,6 +1671,15 @@ export default function AutopilotDetailPage() {
             <TabsTrigger value="analytics" className="gap-2 rounded-xl px-4 py-2">
               <LineChart className="h-4 w-4" /> Analytics
             </TabsTrigger>
+            <TabsTrigger
+              value="decision"
+              onClick={() => {
+                if (!decisionInsights && !isLoadingDecisionInsights && !hasAttemptedDecisionInsightsLoad) void loadDecisionInsights();
+              }}
+              className="gap-2 rounded-xl px-4 py-2"
+            >
+              <BrainCircuit className="h-4 w-4" /> Motor
+            </TabsTrigger>
             <TabsTrigger value="settings" className="gap-2 rounded-xl px-4 py-2">
               <Settings2 className="h-4 w-4" /> Ajustes
             </TabsTrigger>
@@ -1504,6 +1838,50 @@ export default function AutopilotDetailPage() {
 
             <TabsContent value="analytics" className="mt-0 min-w-0 pb-10">
               <AutopilotStats usageLogs={usageLogs} loading={loading} />
+            </TabsContent>
+
+            <TabsContent value="decision" className="mt-0 min-w-0 pb-10">
+              {decisionInsightsLoadError && (
+                <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
+                  <span>{decisionInsightsLoadError}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadDecisionInsights()}
+                    disabled={isLoadingDecisionInsights}
+                    className="w-fit rounded-xl"
+                  >
+                    {isLoadingDecisionInsights ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Tentar novamente
+                  </Button>
+                </div>
+              )}
+              <AutopilotDecisionInsightsPanel
+                insights={decisionInsights}
+                loading={isLoadingDecisionInsights}
+                refreshing={isRefreshingDecisionInsights}
+                reviewingPatternId={reviewingPatternId}
+                previewingPatternId={previewingPatternId}
+                applicationPreviewPatternId={applicationPreviewPatternId}
+                applicationPreview={applicationPreview}
+                applyingPatternId={applyingPatternId}
+                revertingPatternId={revertingPatternId}
+                applyingScoreHistoryId={applyingScoreHistoryId}
+                importingEcosystemPatternId={importingEcosystemPatternId}
+                autoTuning={isAutoTuningDecisionInsights}
+                onRefresh={handleRefreshDecisionInsights}
+                onReviewPattern={handleReviewDecisionPattern}
+                onPreviewPattern={handlePreviewDecisionPattern}
+                onClearPreview={() => {
+                  setApplicationPreviewPatternId(null);
+                  setApplicationPreview(null);
+                }}
+                onApplyPattern={handleApplyDecisionPattern}
+                onRevertPattern={handleRevertDecisionPattern}
+                onApplyScoreHistory={handleApplyDecisionScoreHistory}
+                onImportEcosystemPattern={handleImportDecisionEcosystemPattern}
+                onSafeAutoTune={handleSafeDecisionAutoTune}
+              />
             </TabsContent>
 
             <TabsContent value="settings" className="mt-0 min-w-0 pb-10">
@@ -1667,6 +2045,7 @@ export default function AutopilotDetailPage() {
             isActive={isActive}
             isDirty={hasUnpublishedChanges}
             lastTrace={lastPlaygroundTrace}
+            flowGraph={flowGraph}
           />
         </aside>
       </main>

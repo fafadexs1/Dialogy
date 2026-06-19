@@ -480,6 +480,7 @@ Regra para procedimentos da base:
 - Antes de chamar a tool, colete e valide os dados exigidos pelo procedimento.
 - Se uma consulta anterior retornou dados necessarios para a proxima @tool do procedimento, solicite a proxima action agora; nao responda que "vai fazer".
 - Se a tool estiver desabilitada, nao finja execucao; informe que vai encaminhar ou pedir apoio humano.
+- Nunca responda prometendo uma analise, triagem, verificacao ou orientacao futura sem entregar agora uma orientacao segura, uma pergunta objetiva de continuidade ou uma action executavel. Toda resposta ao cliente precisa terminar com um proximo passo claro.
 
 Politica critica de ferramentas:
 - Use ferramentas somente para executar um pedido operacional atual e inequivoco do cliente.

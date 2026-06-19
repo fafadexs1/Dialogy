@@ -3,11 +3,13 @@ const enableWebpackOverrides = process.env.NODE_ENV === 'production';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   output: 'standalone',
   trailingSlash: false,
   allowedDevOrigins: ['192.145.213.2'],
   serverExternalPackages: ['genkit', '@genkit-ai/core', 'handlebars'],
   experimental: {
+    lockDistDir: false,
     serverActions: {
       bodySizeLimit: '100mb',
     },
@@ -55,20 +57,6 @@ const nextConfig = {
   */
   async headers() {
     return [
-      {
-        source: '/_next/server-actions/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'no-store, must-revalidate' },
-          { key: 'Pragma', value: 'no-cache' },
-        ],
-      },
-      {
-        source: '/_next/data/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'no-store, must-revalidate' },
-          { key: 'Pragma', value: 'no-cache' },
-        ],
-      },
       {
         source: '/api/:path*',
         headers: [

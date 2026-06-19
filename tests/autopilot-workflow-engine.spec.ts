@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Contact } from '@/lib/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
+import type { AutopilotIntentResolution } from '@/services/autopilot/intent-types';
 import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
 
 const contact = { id: 'contact-1', workspace_id: 'workspace-1', name: 'Cliente Teste' } satisfies Contact;
@@ -22,9 +23,10 @@ function planFor(input: {
   enabledToolNames?: string[];
   teams?: ToolRouterTeam[];
   closeIntentGate?: { execute: boolean; confidence: 'low' | 'medium' | 'high'; reason?: string | null } | null;
+  intentResolution?: AutopilotIntentResolution;
 }) {
   return resolveAutopilotWorkflowPlan({
-    intentResolution: resolveAutopilotIntent({ customerMessage: input.message }),
+    intentResolution: input.intentResolution || resolveAutopilotIntent({ customerMessage: input.message }),
     customerMessage: input.message,
     contact,
     enabledToolNames: input.enabledToolNames || [],
@@ -83,6 +85,23 @@ describe('universal autopilot workflow engine', () => {
     expect(plan.executionMode).toBe('direct_response');
     expect(plan.missingSlots).toEqual(['time']);
     expect(plan.response).toContain('horario');
+  });
+
+  it('does not ask only for scheduling slots when the message contains pediatric symptoms', () => {
+    const message = 'O nome da crianca e Joaquina. Meu bebe de 6 meses esta com febre de 38.5 desde ontem a noite. O que eu devo fazer antes da consulta?';
+    const mistakenSchedulingResolution = resolveAutopilotIntent({
+      customerMessage: 'Quero agendar uma consulta amanha',
+    });
+    const plan = planFor({
+      message,
+      intentResolution: mistakenSchedulingResolution,
+    });
+
+    expect(plan.executionMode).toBe('continue_llm');
+    expect(plan.handledByWorkflow).toBe(false);
+    expect(plan.response).toBeNull();
+    expect(plan.reason).toContain('sintoma');
+    expect(plan.metadata.clinicalTriageSignal).toBe(true);
   });
 
   it('asks for an order identifier before checking status', () => {

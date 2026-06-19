@@ -13,7 +13,9 @@ import type {
   ProcedureAdvanceResult,
   ProcedureBranch,
   ProcedureExecutionContext,
+  ProcedureKnowledgeContext,
   ProcedureGraph,
+  ProcedureSlotDefinition,
   ProcedureStep,
   StepExecutionRecord,
 } from './procedure-types';
@@ -21,6 +23,7 @@ import { saveProcedureExecution } from './procedure-store';
 import { extractAutopilotSlots, isValidCustomerIdentifier, labelSlotForCustomer } from './slots';
 import type { AutopilotSlotName } from './intent-types';
 import { isConversationCloseRequest } from './close-intent';
+import { hasClinicalTriageSignal } from './clinical-triage';
 
 const MAX_STEPS_PER_INVOCATION = 6;
 
@@ -41,6 +44,14 @@ export type ProcedureResponseResolver = (input: {
   toolResults: AgentToolExecutionResult[];
 }) => Promise<string | null | undefined>;
 
+export type ProcedureKnowledgeResolver = (input: {
+  step: ProcedureStep;
+  context: ProcedureExecutionContext;
+  customerMessage: string;
+  query: string;
+  requiredCoverage: NonNullable<ProcedureStep['requiredKnowledgeCoverage']>;
+}) => Promise<ProcedureKnowledgeContext | null | undefined>;
+
 type StepResult = {
   status: 'continue' | 'pause' | 'wait_tool' | 'complete' | 'error';
   response?: string | null;
@@ -48,7 +59,10 @@ type StepResult = {
   error?: string;
   slotCollected?: Record<string, string>;
   decision?: string;
+  knowledgeContext?: ProcedureKnowledgeContext | null;
   output?: unknown;
+  replaceResponse?: boolean;
+  advanceToNextOnPause?: boolean;
 };
 
 function interpolate(
@@ -79,6 +93,42 @@ function normalizeText(value: string): string {
     .trim();
 }
 
+function compactText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function customerMessageLooksLikeQuestion(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+  return value.includes('?') ||
+    /^(e\s+)?(o que|que|qual|quais|como|quando|onde|por que|porque|me explica|explica|queria saber|gostaria de saber|tenho duvida|duvida)\b/.test(normalized) ||
+    /\b(como funciona|o que e|o que eh|queria saber|gostaria de saber|me explica|tenho duvida)\b/.test(normalized);
+}
+
+function responseAsksForCustomerInput(value: string): boolean {
+  const normalized = normalizeText(value);
+  return value.includes('?') ||
+    /\b(me informe|informe|envie|me passe|passa|diga|responda|confirme|qual e|qual seria|quando|onde|como prefere|como deseja|preciso que|por favor|escolha|selecione)\b/.test(normalized);
+}
+
+function customerAlreadyProvidedActionableDetails(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+  return (
+    hasClinicalTriageSignal(value) ||
+    /\d/.test(normalized) ||
+    (
+      wordCount >= 8 &&
+      /\b(problema|febre|tosse|vomit|diarreia|dor|respir|cansaco|pedido|protocolo|fatura|boleto|agendar|consulta|internet|conexao|entrega|orcamento)\b/.test(normalized)
+    )
+  );
+}
+
+function digits(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
 function isKnownAutopilotSlot(slot: string): slot is AutopilotSlotName {
   return [
     'name',
@@ -95,6 +145,107 @@ function isKnownAutopilotSlot(slot: string): slot is AutopilotSlotName {
     'quantity',
     'location',
   ].includes(slot);
+}
+
+function inferSlotType(slot: string, definition?: ProcedureSlotDefinition): ProcedureSlotDefinition['type'] {
+  const explicitType = definition?.type;
+  const text = normalizeText([
+    slot,
+    definition?.label || '',
+    ...(definition?.aliases || []),
+  ].join(' '));
+
+  if (explicitType && explicitType !== 'text') return explicitType;
+
+  if (/\b(nome|name|responsavel|responsavel|crianca|criança|paciente)\b/.test(text)) return 'name';
+  if (/\b(telefone|phone|whatsapp|celular|contato|ddd)\b/.test(text)) return 'phone';
+  if (/\b(email|e-mail)\b/.test(text)) return 'email';
+  if (/\b(cpf|cnpj|documento|identificador)\b/.test(text)) return 'document';
+  if (/\b(data|nascimento|dia)\b/.test(text)) return 'date';
+  if (/\b(horario|hora|periodo|período)\b/.test(text)) return 'time';
+  if (/\b(endereco|endereço|bairro|cidade|local|localidade)\b/.test(text)) return 'address';
+  if (/\b(quantidade|numero|número|idade|valor)\b/.test(text)) return 'number';
+  return 'text';
+}
+
+function knownSlotForDefinition(slot: string, definition?: ProcedureSlotDefinition): AutopilotSlotName | null {
+  if (isKnownAutopilotSlot(slot)) return slot;
+  const type = inferSlotType(slot, definition);
+  if (type === 'name') return 'name';
+  if (type === 'phone') return 'phone';
+  if (type === 'email') return 'email';
+  if (type === 'document') return 'customer_identifier';
+  if (type === 'date') return 'date';
+  if (type === 'time') return 'time';
+  if (type === 'address') return 'address';
+  return null;
+}
+
+function findSlotDefinition(step: ProcedureStep, slot: string): ProcedureSlotDefinition | undefined {
+  return step.slotDefinitions?.find((definition) => definition.key === slot);
+}
+
+function extractPhone(text: string): string | null {
+  const matches = text.match(/(?:\+?\d{1,3}\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}/g);
+  if (!matches?.length) return null;
+  return digits(matches[matches.length - 1]) || compactText(matches[matches.length - 1]);
+}
+
+function extractEmail(text: string): string | null {
+  const matches = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig);
+  return matches?.[matches.length - 1]?.toLowerCase() || null;
+}
+
+function extractDocument(text: string): string | null {
+  const match = text.match(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/);
+  return match ? digits(match[0]) : null;
+}
+
+function extractGenericName(text: string): string | null {
+  if (customerMessageLooksLikeQuestion(text)) return null;
+  const withoutPhoneEmailDoc = text
+    .replace(/(?:\+?\d{1,3}\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}/g, ' ')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig, ' ')
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, ' ');
+  const explicit = withoutPhoneEmailDoc.match(/\b(?:meu nome(?: completo)?\s*(?:e|é|eh)|nome(?: completo)?\s*[:=]|sou|me chamo|chamo)\s+([a-zÀ-ÿ][a-zÀ-ÿ' ]{2,80})/i)?.[1];
+  const candidate = compactText(explicit || withoutPhoneEmailDoc.split(/[,;\n]/)[0] || '');
+  if (!candidate || candidate.length < 4) return null;
+  const normalized = normalizeText(candidate);
+  if (/^(oi|ola|olá|sim|nao|não|ok|certo|obrigad[ao]|e agora|por favor)$/.test(normalized)) return null;
+  if (!/[a-zÀ-ÿ]{2,}/i.test(candidate)) return null;
+  return candidate.replace(/[.!?;:,]+$/g, '').trim();
+}
+
+function isLikelyRawAddressAnswer(text: string): boolean {
+  if (customerMessageLooksLikeQuestion(text)) return false;
+  const normalized = normalizeText(text);
+  return /\d/.test(normalized) ||
+    /\b(rua|avenida|av|travessa|alameda|rodovia|estrada|quadra|lote|numero|nro|bairro|cidade|casa|apto|apartamento|bloco|condominio|cep)\b/.test(normalized);
+}
+
+function extractGenericSlotValue(input: {
+  slot: string;
+  definition?: ProcedureSlotDefinition;
+  customerMessage: string;
+  extraction: ReturnType<typeof extractAutopilotSlots>;
+}): string | null {
+  const slotType = inferSlotType(input.slot, input.definition);
+  const knownSlot = knownSlotForDefinition(input.slot, input.definition);
+  if (knownSlot && input.extraction.slots[knownSlot]) return String(input.extraction.slots[knownSlot]);
+
+  if (slotType === 'phone') return extractPhone(input.customerMessage);
+  if (slotType === 'email') return extractEmail(input.customerMessage);
+  if (slotType === 'document') return extractDocument(input.customerMessage);
+  if (slotType === 'name') return extractGenericName(input.customerMessage);
+  if (slotType === 'number') return input.customerMessage.match(/\b\d+(?:[,.]\d+)?\b/)?.[0] || null;
+  if (
+    slotType === 'text' &&
+    compactText(input.customerMessage).length >= 2 &&
+    !customerMessageLooksLikeQuestion(input.customerMessage)
+  ) {
+    return compactText(input.customerMessage);
+  }
+  return null;
 }
 
 function findStep(graph: ProcedureGraph, stepId: string): ProcedureStep | null {
@@ -178,6 +329,18 @@ function chooseBranchHeuristically(
   if (branches.length === 1) return branches[0];
 
   const haystack = summarizeRuntimeContext(context, customerMessage);
+  const explicitHighRiskBranch = branches.find((branch) => {
+    const branchText = normalizeText(branch.condition);
+    return /\b(vermelh|emergenc|emergencia|transferencia imediata|pronto socorro|pronto atendimento)\w*/.test(branchText);
+  });
+  if (explicitHighRiskBranch && hasExplicitHighRiskSignal(haystack)) {
+    return explicitHighRiskBranch;
+  }
+  if (explicitHighRiskBranch && isMedicationDosageRequest(haystack)) {
+    const nonHighRiskBranch = branches.find((branch) => branch !== explicitHighRiskBranch);
+    if (nonHighRiskBranch) return nonHighRiskBranch;
+  }
+
   let best: { branch: ProcedureBranch; score: number } | null = null;
 
   for (const branch of branches) {
@@ -191,6 +354,35 @@ function chooseBranchHeuristically(
   }
 
   return best && best.score > 0 ? best.branch : null;
+}
+
+function isMedicationDosageRequest(text: string): boolean {
+  return (
+    /\b(quant[ao]s?|dose|dosagem|gotas?|gotinha|ml|mg)\b/.test(text) &&
+    /\b(dipirona|paracetamol|ibuprofeno|remedio|medicamento|antitermico|antiinflamatorio|antibiotico|dar|dou|posso dar)\b/.test(text)
+  );
+}
+
+function hasExplicitHighRiskSignal(text: string): boolean {
+  const hasSevereRespiratorySignal =
+    /\b(costela|costelas|furcula|peito)\b.{0,40}\b(afunda|afundando|puxa|repuxa)\b/.test(text) ||
+    /\b(respirando|respiracao|respira)\b.{0,40}\b(muito rapido|rapida demais|dificuldade|falta de ar|cansaco intenso)\b/.test(text) ||
+    /\b(labios?|dedos?)\b.{0,30}\b(rox|azulad|cianos)\w*/.test(text);
+  const hasNeurologicalSignal =
+    /\b(convuls|dificil de acordar|nao acorda|sonolencia extrema|muito sonolent|inconsolavel)\w*/.test(text);
+  const hasSevereDehydrationSignal =
+    /\b(nao urina|sem urinar|nao fez xixi|sem xixi)\b.{0,30}\b(6|7|8|9|10|seis|sete|oito|nove|dez)\b/.test(text) ||
+    /\b(vomita tudo|vomitando tudo|vomitos incoerciveis|recusa liquidos|nao aceita liquido|boca seca|olhos fundos|choro sem lagrima)\b/.test(text);
+  const hasPurpuricRash = /\b(manchas?)\b.{0,40}\b(rox|arroxead|vermelh)\w*/.test(text) && /\b(nao somem|nao some|pressionar)\b/.test(text);
+  const hasYoungBabyFever =
+    /\b(0|1|2)\s*mes(?:es)?\b/.test(text) &&
+    /\b(38|38\s*[1-9]|39|40|41|42)\b/.test(text);
+
+  return hasSevereRespiratorySignal ||
+    hasNeurologicalSignal ||
+    hasSevereDehydrationSignal ||
+    hasPurpuricRash ||
+    hasYoungBabyFever;
 }
 
 function findNextStep(
@@ -216,12 +408,24 @@ function missingRequiredSlots(
   return (requiredSlots || []).filter((slot) => !String(context.collectedSlots[slot] || '').trim());
 }
 
-function buildMissingSlotsPrompt(slots: string[]): string {
+function labelProcedureSlot(slot: string, step?: ProcedureStep): string {
+  const definition = step ? findSlotDefinition(step, slot) : undefined;
+  if (definition?.label?.trim()) return definition.label.trim();
+  return isKnownAutopilotSlot(slot) ? labelSlotForCustomer(slot) : slot;
+}
+
+function buildMissingSlotsPrompt(slots: string[], step?: ProcedureStep): string {
   if (slots.length === 0) return 'Para seguir, me informe os dados solicitados.';
-  const labels = slots.map((slot) => (
-    isKnownAutopilotSlot(slot) ? labelSlotForCustomer(slot) : slot
-  ));
-  return `Para seguir, me informe: ${labels.join(', ')}.`;
+  const label = labelProcedureSlot(slots[0], step).replace(/^./, (char) => char.toLowerCase());
+  return `Para seguir, me informe ${label}.`;
+}
+
+function buildCollectPromptForNextSlot(step: ProcedureStep, slots: string[], context: ProcedureExecutionContext): string {
+  const requestedSlots = slots.slice(0, 1);
+  if (requestedSlots.length === 1 && step.requiredSlots?.length === 1 && step.promptTemplate?.trim()) {
+    return interpolate(step.promptTemplate, context);
+  }
+  return buildMissingSlotsPrompt(requestedSlots, step);
 }
 
 async function executeGatherDataStep(
@@ -236,13 +440,15 @@ async function executeGatherDataStep(
   if (missing.length === 0) {
     return { status: 'continue' };
   }
+  const priorWaitAttempts = context.stepHistory.filter((record) => (
+    record.stepId === step.id && record.status === 'waiting'
+  )).length;
 
   if (!isResuming) {
-    const prompt = step.promptTemplate
-      ? interpolate(step.promptTemplate, context)
-      : buildMissingSlotsPrompt(missing);
+    const requestedSlots = missing.slice(0, 1);
+    const prompt = buildCollectPromptForNextSlot(step, requestedSlots, context);
 
-    if (forceLlmRespond && responseResolver) {
+    if (forceLlmRespond && responseResolver && process.env.AI_COLLECT_LLM_PROMPTS === '1') {
       const resolved = await responseResolver({
         step,
         context,
@@ -268,8 +474,21 @@ async function executeGatherDataStep(
 
   const extraction = extractAutopilotSlots({ customerMessage });
   for (const slot of missingBefore) {
-    if (isKnownAutopilotSlot(slot) && extraction.slots[slot]) {
-      collected[slot] = String(extraction.slots[slot]);
+    const definition = findSlotDefinition(step, slot);
+    const knownSlot = knownSlotForDefinition(slot, definition);
+    if (knownSlot && extraction.slots[knownSlot]) {
+      collected[slot] = String(extraction.slots[knownSlot]);
+      continue;
+    }
+
+    const genericValue = extractGenericSlotValue({
+      slot,
+      definition,
+      customerMessage,
+      extraction,
+    });
+    if (genericValue) {
+      collected[slot] = genericValue;
     }
   }
 
@@ -303,18 +522,40 @@ async function executeGatherDataStep(
 
   if (missingAfterExtraction.length === 1 && customerMessage.trim()) {
     const fallbackSlot = missingAfterExtraction[0];
-    if (fallbackSlot !== 'customer_identifier' || isValidCustomerIdentifier(customerMessage)) {
+    const fallbackDefinition = findSlotDefinition(step, fallbackSlot);
+    const fallbackType = inferSlotType(fallbackSlot, fallbackDefinition);
+    const canUseRawTextFallback = fallbackType === 'text'
+      ? !customerMessageLooksLikeQuestion(customerMessage)
+      : fallbackType === 'address' && isLikelyRawAddressAnswer(customerMessage);
+    if (
+      (fallbackSlot === 'customer_identifier' && isValidCustomerIdentifier(customerMessage)) ||
+      (fallbackSlot !== 'customer_identifier' && canUseRawTextFallback)
+    ) {
       collected[fallbackSlot] = customerMessage.trim();
     }
   }
 
   const stillMissing = missingBefore.filter((slot) => !collected[slot] && !context.collectedSlots[slot]);
   if (stillMissing.length > 0) {
-    const prompt = step.promptTemplate
-      ? interpolate(step.promptTemplate, context)
-      : buildMissingSlotsPrompt(stillMissing);
+    const madeProgress = Object.keys(collected).some((slot) => Boolean(collected[slot]));
+    const maxAttempts = step.maxRetries ?? 2;
+    if (!madeProgress && priorWaitAttempts >= maxAttempts) {
+      return {
+        status: 'complete',
+        response: 'Para evitar repetir a mesma pergunta, vou pausar esta etapa automatica. Pode enviar os dados em uma unica mensagem ou solicitar atendimento humano.',
+        slotCollected: collected,
+        output: {
+          loopBreaker: true,
+          missingSlots: stillMissing,
+          attempts: priorWaitAttempts + 1,
+        },
+      };
+    }
 
-    if (forceLlmRespond && responseResolver) {
+    const requestedSlots = stillMissing.slice(0, 1);
+    const prompt = buildCollectPromptForNextSlot(step, requestedSlots, context);
+
+    if (forceLlmRespond && responseResolver && process.env.AI_COLLECT_LLM_PROMPTS === '1') {
       const resolved = await responseResolver({
         step,
         context,
@@ -481,6 +722,87 @@ function executeValidateStep(
   return { status: 'error', error: validation.reason || `Validacao falhou: ${step.condition || step.label}` };
 }
 
+function coverageRank(value: ProcedureKnowledgeContext['coverage'] | null | undefined): number {
+  if (value === 'high') return 3;
+  if (value === 'medium') return 2;
+  if (value === 'low') return 1;
+  return 0;
+}
+
+function formatKnowledgeChunksForPrompt(context: ProcedureKnowledgeContext | null | undefined): string {
+  const chunks = context?.chunks || [];
+  if (chunks.length === 0) return '';
+  return [
+    'Contexto permitido da base de conhecimento:',
+    ...chunks.slice(0, 5).map((chunk, index) => [
+      `[${index + 1}] ${chunk.title} (${chunk.category}, score ${chunk.score})`,
+      chunk.excerpt,
+    ].join('\n')),
+  ].join('\n\n');
+}
+
+async function executeRetrieveKnowledgeStep(
+  step: ProcedureStep,
+  customerMessage: string,
+  context: ProcedureExecutionContext,
+  knowledgeResolver?: ProcedureKnowledgeResolver,
+): Promise<StepResult> {
+  const requiredCoverage = step.requiredKnowledgeCoverage || 'medium';
+  const query = step.knowledgeQueryTemplate
+    ? interpolate(step.knowledgeQueryTemplate, context, { customerMessage })
+    : customerMessage;
+
+  if (!knowledgeResolver) {
+    const knowledgeContext: ProcedureKnowledgeContext = {
+      coverage: 'none',
+      chunks: [],
+      reason: 'knowledge_resolver_missing',
+    };
+    return {
+      status: step.onLowKnowledge === 'continue' ? 'continue' : 'pause',
+      response: step.onLowKnowledge === 'continue'
+        ? null
+        : 'Nao encontrei uma base suficiente para responder isso com seguranca agora. Pode me dar mais detalhes ou solicitar atendimento humano.',
+      knowledgeContext,
+      output: knowledgeContext,
+    };
+  }
+
+  const resolvedKnowledgeContext = await knowledgeResolver({
+    step,
+    context,
+    customerMessage,
+    query,
+    requiredCoverage,
+  }) || { coverage: 'none' as const, chunks: [], reason: 'knowledge_empty' };
+  const knowledgeContext: ProcedureKnowledgeContext = {
+    ...resolvedKnowledgeContext,
+    chunks: (resolvedKnowledgeContext.chunks || []).map((chunk) => ({
+      ...chunk,
+      coverage: chunk.coverage || resolvedKnowledgeContext.coverage,
+    })),
+  };
+  const enoughCoverage = coverageRank(knowledgeContext.coverage) >= coverageRank(requiredCoverage);
+  if (!enoughCoverage && step.onLowKnowledge !== 'continue') {
+    return {
+      status: step.onLowKnowledge === 'handoff' ? 'complete' : 'pause',
+      response: 'Nao encontrei orientacao suficiente na base para responder isso com seguranca. Vou evitar inventar informacoes; posso coletar mais detalhes ou encaminhar para atendimento humano.',
+      knowledgeContext,
+      output: {
+        ...knowledgeContext,
+        lowCoverage: true,
+        requiredCoverage,
+      },
+    };
+  }
+
+  return {
+    status: 'continue',
+    knowledgeContext,
+    output: knowledgeContext,
+  };
+}
+
 async function executeDecideStep(
   step: ProcedureStep,
   context: ProcedureExecutionContext,
@@ -494,7 +816,7 @@ async function executeDecideStep(
     ? interpolate(step.decisionPrompt, context)
     : `Escolha uma das opcoes: ${branches.map((branch) => branch.condition).join(', ')}`;
 
-  let selectedBranch: ProcedureBranch | null = null;
+  let selectedBranch: ProcedureBranch | null = chooseBranchHeuristically(branches, context, customerMessage);
   if (decisionResolver) {
     const resolved = await decisionResolver({
       step,
@@ -504,10 +826,9 @@ async function executeDecideStep(
       prompt,
       toolResults: getAllToolResults(context),
     });
-    selectedBranch = matchDecisionToBranch(branches, resolved);
+    selectedBranch ||= matchDecisionToBranch(branches, resolved);
   }
 
-  selectedBranch ||= chooseBranchHeuristically(branches, context, customerMessage);
   selectedBranch ||= branches.length === 1 ? branches[0] : null;
 
   return {
@@ -526,19 +847,58 @@ async function executeRespondStep(
   const templateResponse = step.responseTemplate
     ? interpolate(step.responseTemplate, context)
     : '';
+  const knowledgePrompt = formatKnowledgeChunksForPrompt(context.knowledgeContext);
+  const requiresGrounding = Boolean(step.requireGrounding);
+  const isSubAgent = step.useLlm && step.visualNodeKind === 'sub_agent';
+  const isQuestionMessage = step.visualNodeKind === 'message' && responseAsksForCustomerInput(templateResponse);
+
+  if (isQuestionMessage && step.nextStepId && customerAlreadyProvidedActionableDetails(customerMessage)) {
+    return { status: 'continue', response: null };
+  }
+
+  if (isQuestionMessage) {
+    return {
+      status: 'pause',
+      response: templateResponse || null,
+      advanceToNextOnPause: Boolean(step.nextStepId),
+    };
+  }
+
+  if (requiresGrounding && coverageRank(context.knowledgeContext?.coverage) < coverageRank(step.requiredKnowledgeCoverage || 'low')) {
+    return {
+      status: 'pause',
+      response: 'Nao encontrei confirmacao suficiente na base para responder isso com seguranca. Posso coletar mais detalhes ou encaminhar para atendimento humano.',
+      output: {
+        groundingBlocked: true,
+        knowledgeCoverage: context.knowledgeContext?.coverage || 'none',
+      },
+    };
+  }
 
   if ((step.useLlm || forceLlmRespond) && responseResolver) {
     const resolved = await responseResolver({
       step,
       context,
       customerMessage,
-      prompt: templateResponse || step.label,
+      prompt: [
+        templateResponse || step.label,
+        requiresGrounding
+          ? 'Use somente os fatos presentes no contexto da base e nos dados confirmados. Se nao houver suporte, diga que nao encontrou base suficiente.'
+          : '',
+        knowledgePrompt,
+      ].filter(Boolean).join('\n\n'),
       toolResults: getAllToolResults(context),
     });
-    return { status: 'continue', response: resolved || templateResponse || null };
+    return {
+      status: isSubAgent ? 'pause' : 'continue',
+      response: resolved || templateResponse || null,
+    };
   }
 
-  return { status: 'continue', response: templateResponse || null };
+  return {
+    status: isSubAgent ? 'pause' : 'continue',
+    response: templateResponse || null,
+  };
 }
 
 function executeHandoffStep(
@@ -551,7 +911,7 @@ function executeHandoffStep(
   const targetTeam = availableTeams.find((team) => (
     normalizeText(team.name).length >= 3 &&
     normalizedReason.includes(normalizeText(team.name))
-  ));
+  )) || availableTeams[0] || null;
 
   if (!targetTeam) {
     return {
@@ -565,14 +925,15 @@ function executeHandoffStep(
   }
 
   return {
-    status: 'complete',
-    response: interpolate(reason, context),
-    action: {
-      type: 'transfer_chat',
-      reason: `Procedure handoff: ${step.label}`,
-      payload: { teamId: targetTeam.id },
-    },
-  };
+      status: 'complete',
+      response: interpolate(reason, context),
+      action: {
+        type: 'transfer_chat',
+        reason: `Procedure handoff: ${step.label}`,
+        payload: { teamId: targetTeam.id },
+      },
+      replaceResponse: true,
+    };
 }
 
 export async function advanceProcedure(input: {
@@ -584,6 +945,7 @@ export async function advanceProcedure(input: {
   priorToolResults?: AgentToolExecutionResult[];
   decisionResolver?: ProcedureDecisionResolver;
   responseResolver?: ProcedureResponseResolver;
+  knowledgeResolver?: ProcedureKnowledgeResolver;
   forceLlmRespond?: boolean;
 }): Promise<ProcedureAdvanceResult> {
   const { graph, context, customerMessage } = input;
@@ -643,6 +1005,14 @@ export async function advanceProcedure(input: {
         case 'tool_call':
           result = executeToolCallStep(currentStep, context, customerMessage);
           break;
+        case 'retrieve_knowledge':
+          result = await executeRetrieveKnowledgeStep(
+            currentStep,
+            customerMessage,
+            context,
+            input.knowledgeResolver
+          );
+          break;
         case 'validate':
           result = executeValidateStep(currentStep, context);
           break;
@@ -690,8 +1060,21 @@ export async function advanceProcedure(input: {
     if (result.output) {
       stepRecord.output = result.output;
     }
+    if (result.knowledgeContext) {
+      context.knowledgeContext = result.knowledgeContext;
+      context.toolResults = context.toolResults || {};
+      context.toolResults.__knowledge_context = result.knowledgeContext;
+      stepRecord.output = {
+        ...(typeof stepRecord.output === 'object' && stepRecord.output ? stepRecord.output as Record<string, unknown> : {}),
+        knowledgeContext: result.knowledgeContext,
+      };
+    }
     if (result.response) {
-      responseText = result.response;
+      responseText = result.replaceResponse
+        ? result.response
+        : responseText
+        ? `${responseText}\n\n${result.response}`
+        : result.response;
     }
     if (result.action) {
       actions.push({
@@ -710,6 +1093,12 @@ export async function advanceProcedure(input: {
         stepRecord.status = 'waiting';
         context.status = 'waiting_input';
         context.stepHistory.push(stepRecord);
+        if (result.advanceToNextOnPause) {
+          const nextStep = findNextStep(graph, currentStep, context);
+          if (nextStep) {
+            context.currentStepId = nextStep.id;
+          }
+        }
         await saveProcedureExecution(context);
 
         return {

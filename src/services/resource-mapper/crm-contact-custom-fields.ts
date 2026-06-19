@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { createHash } from 'crypto';
 import { extractAutopilotSlots, type ExtractedSlotDetail } from '@/services/autopilot/slots';
 import type { AutopilotSlotName } from '@/services/autopilot/intent-types';
 import type {
@@ -8,6 +9,7 @@ import type {
   ResourceMappingResult,
   ResourceSlotEvidence,
 } from './types';
+import { loadResourceMappingProfileAliases } from './profiles';
 
 const MIN_FIELD_MATCH_SCORE = 0.72;
 const MIN_INFERRED_MATCH_SCORE = 0.82;
@@ -51,6 +53,11 @@ function stringifyFieldValue(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return String(value).replace(/\s+/g, ' ').trim().slice(0, MAX_FIELD_VALUE_CHARS);
+}
+
+function hashPayload(value: unknown): string | null {
+  if (!value || (typeof value === 'object' && Object.keys(value as Record<string, unknown>).length === 0)) return null;
+  return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
 }
 
 function parseOptions(options: unknown): string[] {
@@ -117,6 +124,18 @@ function fieldAliases(field: Pick<ResourceFieldContract, 'label' | 'placeholder'
     field.placeholder || '',
     ...field.aliases,
   ].map((item) => normalizeText(item)).filter(Boolean)));
+}
+
+function aliasesForFieldFromProfile(
+  field: Pick<ResourceFieldContract, 'id' | 'label'>,
+  profile: Record<string, string[]>,
+): string[] {
+  const normalizedLabel = normalizeText(field.label);
+  return Array.from(new Set([
+    ...(profile[field.id] || []),
+    ...(profile[field.label] || []),
+    ...(profile[normalizedLabel] || []),
+  ].map((item) => String(item || '').trim()).filter(Boolean)));
 }
 
 function scoreAliasToField(alias: string, field: ResourceFieldContract): number {
@@ -236,15 +255,16 @@ function bestFieldForEvidence(
 }
 
 export async function loadCrmContactCustomFieldContracts(workspaceId: string): Promise<ResourceFieldContract[]> {
-  const { rows } = await db.query(
+  const fieldsRes = await db.query(
     `SELECT id, label, type, placeholder, options
      FROM public.custom_field_definitions
      WHERE workspace_id = $1
      ORDER BY label ASC`,
     [workspaceId]
   );
+  const aliasesByField = await loadResourceMappingProfileAliases({ workspaceId });
 
-  return rows
+  return fieldsRes.rows
     .filter((row) => row.id && row.label)
     .map((row) => ({
       id: String(row.id),
@@ -252,7 +272,10 @@ export async function loadCrmContactCustomFieldContracts(workspaceId: string): P
       type: String(row.type || 'text'),
       placeholder: row.placeholder ? String(row.placeholder) : null,
       options: row.options ?? null,
-      aliases: [],
+      aliases: aliasesForFieldFromProfile({
+        id: String(row.id),
+        label: String(row.label || ''),
+      }, aliasesByField),
     }));
 }
 
@@ -271,6 +294,10 @@ export async function mapCrmContactCustomFields(input: ResourceMappingInput): Pr
       mappings: [],
       rejected: [{ slot: 'crm.contact.custom_fields', reason: 'Workspace nao possui campos customizados de CRM.' }],
       status: 'unmapped',
+      confidence: 0,
+      evidence: ['Workspace nao possui campos customizados de CRM para mapear.'],
+      warnings: ['crm_fields_missing'],
+      payloadHash: null,
     };
   }
 
@@ -319,6 +346,10 @@ export async function mapCrmContactCustomFields(input: ResourceMappingInput): Pr
     : rejected.length > 0
       ? 'partial'
       : 'mapped';
+  const confidence = mappings.length > 0
+    ? Number((mappings.reduce((total, mapping) => total + mapping.confidence, 0) / mappings.length).toFixed(3))
+    : 0;
+  const payloadHash = hashPayload(mappedFields);
 
   return {
     resource: 'crm.contact.custom_fields',
@@ -333,5 +364,11 @@ export async function mapCrmContactCustomFields(input: ResourceMappingInput): Pr
     mappings,
     rejected,
     status,
+    confidence,
+    evidence: mappings.map((mapping) => (
+      `${mapping.slot} -> ${mapping.fieldLabel} (${mapping.reason}, ${mapping.confidence})`
+    )),
+    warnings: rejected.map((item) => item.reason),
+    payloadHash,
   };
 }

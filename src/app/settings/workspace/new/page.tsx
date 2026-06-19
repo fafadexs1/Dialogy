@@ -6,12 +6,27 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { createWorkspaceAction } from '@/actions/workspace';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, Loader2, PlusCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { useI18n } from '@/i18n/i18n-provider';
+
+const workspaceVerticalOptions = [
+    { value: '__none__', label: 'Nao definido' },
+    { value: 'isp', label: 'Provedor / ISP' },
+    { value: 'clinica', label: 'Clinica' },
+    { value: 'ecommerce', label: 'E-commerce' },
+    { value: 'delivery', label: 'Delivery' },
+    { value: 'saas', label: 'SaaS' },
+    { value: 'servicos', label: 'Servicos locais' },
+    { value: 'educacao', label: 'Educacao' },
+    { value: 'imobiliaria', label: 'Imobiliaria' },
+    { value: 'financeiro', label: 'Financeiro' },
+    { value: 'geral', label: 'Geral' },
+];
 
 function SubmitButton() {
     const { t } = useI18n();
@@ -56,7 +71,7 @@ export default function NewWorkspacePage() {
                         {t("De um nome ao seu novo workspace. Voce podera convidar membros depois.")}
                     </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                     <div className="space-y-2">
                         <Label htmlFor="workspace-name">{t("Nome do workspace")}</Label>
                         <Input
@@ -66,6 +81,20 @@ export default function NewWorkspacePage() {
                             required
                             autoFocus
                         />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="workspace-vertical">Nicho do workspace</Label>
+                        <Select name="vertical" defaultValue="__none__">
+                            <SelectTrigger id="workspace-vertical">
+                                <SelectValue placeholder="Selecione o nicho" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {workspaceVerticalOptions.map(option => (
+                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Ajuda o agente a receber sugestoes de aprendizado do nicho certo.</p>
                     </div>
                      {state.error && (
                         <Alert variant="destructive" className="mt-4">

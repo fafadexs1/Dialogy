@@ -23,4 +23,35 @@ describe('autopilot persisted confirmation', () => {
     expect(resolveConfirmedPendingAction({ state, message: 'sim', allowedToolNames: ['close_chat'] })).toEqual(action);
     expect(resolveConfirmedPendingAction({ state, message: 'sim', allowedToolNames: [] })).toBeNull();
   });
+
+  it('matches pending MCP confirmations by qualified tool name', () => {
+    const action = {
+      type: 'mcp_call_tool' as const,
+      reason: 'Reiniciar roteador apos confirmacao.',
+      payload: {
+        toolName: 'mcp:router:reboot_router',
+        arguments: { contract_id: '123' },
+      },
+    };
+    const state = {
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      autopilotConfigId: 'config',
+      activeNodeId: 'node',
+      pendingConfirmation: { action, requestedAt: new Date().toISOString() },
+      lastAction: null,
+      repetitionCount: 0,
+    };
+
+    expect(resolveConfirmedPendingAction({
+      state,
+      message: 'pode sim',
+      allowedToolNames: ['mcp:router:reboot_router'],
+    })).toEqual(action);
+    expect(resolveConfirmedPendingAction({
+      state,
+      message: 'pode sim',
+      allowedToolNames: ['mcp:router:other_tool'],
+    })).toBeNull();
+  });
 });

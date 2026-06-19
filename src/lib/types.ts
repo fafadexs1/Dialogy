@@ -16,6 +16,7 @@ export type Workspace = {
   roleName?: string;
   isOwner?: boolean;
   plan?: string;
+  vertical?: string | null;
   nexus_settings?: {
     mode?: 'workspace_managed' | 'existing_account';
     email?: string;
@@ -607,16 +608,24 @@ export interface NexusFlowInstance {
 }
 
 export type AutopilotFlowNodeKind =
+  | 'start'
   | 'trigger'
+  | 'message'
   | 'understand'
+  | 'decision'
+  | 'switch'
   | 'intent'
   | 'assistant'
   | 'knowledge'
+  | 'collect'
+  | 'sub_agent'
+  | 'ai_response'
   | 'reply'
   | 'send_message'
   | 'form'
   | 'handoff'
   | 'close'
+  | 'end'
   | 'tool'
   | 'rule';
 
@@ -626,6 +635,18 @@ export interface AutopilotFlowFormField {
   fieldKey?: string;
   required?: boolean;
   placeholder?: string;
+  type?: 'text' | 'name' | 'phone' | 'email' | 'document' | 'date' | 'time' | 'address' | 'number' | 'boolean';
+  aliases?: string[];
+}
+
+export interface AutopilotFlowSwitchRoute {
+  id: string;
+  label: string;
+  description: string;
+  examples?: string[];
+  intent?: string;
+  requiredSlots?: string[];
+  targetNodeId?: string;
 }
 
 export interface AutopilotFlowNode {
@@ -642,6 +663,13 @@ export interface AutopilotFlowNode {
     message?: string;
     formFields?: AutopilotFlowFormField[];
     formMode?: 'static' | 'ai';
+    requiredSlots?: string[];
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    successHandles?: string[];
+    errorHandles?: string[];
+    maxAttempts?: number;
+    requiredKnowledgeCoverage?: 'high' | 'medium' | 'low' | 'none';
     referenceId?: string;
     variableName?: string;
     destination?: string;
@@ -650,6 +678,10 @@ export interface AutopilotFlowNode {
     customIntentLabel?: string;
     returnToMainPrompt?: boolean;
     knowledgeCollectionIds?: string[];
+    switchMode?: 'ai' | 'rules';
+    confidenceThreshold?: number;
+    fallbackRouteId?: string;
+    routes?: AutopilotFlowSwitchRoute[];
   };
 }
 
@@ -659,6 +691,8 @@ export interface AutopilotFlowEdge {
   target: string;
   sourceHandle?: string | null;
   targetHandle?: string | null;
+  routeId?: string | null;
+  label?: string | null;
 }
 
 export interface AutopilotFlowVariable {
@@ -678,6 +712,7 @@ export interface AutopilotFlowGraph {
 
 export interface AutopilotFlowAiProposal {
   summary: string;
+  procedureManifest?: string;
   systemPrompt: string;
   enabledToolNames: string[];
   flowGraph: AutopilotFlowGraph;

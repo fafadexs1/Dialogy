@@ -35,8 +35,9 @@ async function requestLmStudioCompletion(input: LmStudioCompletionInput): Promis
     throw new Error('LM Studio endpoint is not configured in superadmin.');
   }
 
+  const timeoutMs = input.timeoutMs ?? 4000;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), input.timeoutMs ?? 4000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -73,6 +74,11 @@ async function requestLmStudioCompletion(input: LmStudioCompletionInput): Promis
       throw new Error('LM Studio returned an empty response.');
     }
     return content;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`LM Studio request timed out after ${timeoutMs}ms.`);
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -107,7 +113,22 @@ export async function requestLmStudioJson<TSchema extends z.ZodTypeAny>(input: {
     allowReasoningContentFallback: true,
   });
   const parsed = parseLmStudioStructuredText(text);
-  return input.schema.parse(parsed);
+  if (!parsed) {
+    throw new Error(
+      `LM Studio returned invalid JSON for ${input.schemaName}. ` +
+      'The response may be truncated or incompatible with the requested schema.'
+    );
+  }
+
+  const result = input.schema.safeParse(parsed);
+  if (!result.success) {
+    const issueSummary = result.error.issues
+      .slice(0, 3)
+      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('; ');
+    throw new Error(`LM Studio returned JSON that does not match ${input.schemaName}: ${issueSummary}`);
+  }
+  return result.data;
 }
 
 export function requestLmStudioText(input: {

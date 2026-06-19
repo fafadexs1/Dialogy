@@ -165,7 +165,8 @@ export async function evaluateAgentToolPolicy(input: {
     ? classifyMcpTool(toolName, mcpTool)
     : definition?.riskLevel || 'medium';
 
-  const failedDependency = (input.previousResults || []).find((result) => result.status !== 'success');
+  const failedDependency = (input.previousResults || [])
+    .find((result) => result.status !== 'success' && result.toolName !== 'add_internal_note');
   if (failedDependency && input.action.type !== 'add_internal_note') {
     return policyReject(
       riskLevel,

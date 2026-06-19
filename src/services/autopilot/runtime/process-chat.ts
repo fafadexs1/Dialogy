@@ -47,17 +47,20 @@ import {
     scopeSgpLookupActionsToFocusedContract,
 } from '@/plugins/sgp/autopilot-response';
 import { resolveAutopilotIntent, resolveAutopilotIntentWithOverride } from '@/services/autopilot-intent';
-import type { KnowledgeCoverage } from '@/services/autopilot/intent-types';
+import type { AutopilotSlotName, KnowledgeCoverage } from '@/services/autopilot/intent-types';
 import { resolveAutopilotWorkflowPlan } from '@/services/autopilot/workflow-engine';
 import {
     buildIntentScopedKnowledgeBase,
     formatFlowFormGuidanceForPrompt,
     formatFlowReferencesForPrompt,
+    formatFlowSwitchGuidanceForPrompt,
     filterKnowledgeDocumentsForScope,
     renderDeterministicFlowMessage,
     resolveActiveFlowIntentScope,
+    resolveActiveFlowIntentScopeByNodeId,
     resolveDeterministicFlowMessage,
     resolveEntryDeterministicFlowMessage,
+    resolveFlowSwitchRouteForActivePath,
     resolveFlowCompletionPlan,
     resolveFlowFormGuidance,
 } from '@/services/autopilot/flow-routing';
@@ -67,10 +70,12 @@ import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal }
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
 import { completeProcedureExecution, createProcedureExecution, getActiveProcedureExecution, saveProcedureExecution } from '@/services/autopilot/procedure-store';
 import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
+import { compileProcedureFromFlowGraph } from '@/services/autopilot/procedure-flow-compiler';
 import { matchProcedure } from '@/services/autopilot/procedure-matcher';
 import {
     advanceProcedure,
     type ProcedureDecisionResolver,
+    type ProcedureKnowledgeResolver,
     type ProcedureResponseResolver,
 } from '@/services/autopilot/procedure-executor';
 import type { ProcedureGraph, ProcedureAdvanceResult, ProcedureExecutionContext } from '@/services/autopilot/procedure-types';
@@ -103,6 +108,31 @@ import { compileAutopilotTurnPolicy, resolveAllowedKnowledgeDocumentIds, type Au
 import { getAutopilotConversationState, resolveConfirmedPendingAction, saveAutopilotTurnState } from '@/services/autopilot/flow-state-store';
 import { mapAgentToolActionsToResources } from '@/services/resource-mapper/agent-tool-actions';
 import type { SlotExtractionResult } from '@/services/autopilot/slots';
+import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
+import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
+import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
+
+function compileRuntimeProcedures(input: {
+    config: AutopilotConfig;
+    documents: KnowledgeBaseDocument[];
+    tools: AgentToolCatalogItem[];
+    enabledToolNames: string[];
+}): ProcedureGraph[] {
+    const documentProcedures = compileAllProcedures({
+        documents: input.documents,
+        tools: input.tools,
+        enabledToolNames: input.enabledToolNames,
+    });
+    const flowProcedure = compileProcedureFromFlowGraph({
+        flowGraph: input.config.flow_graph,
+        configId: input.config.id,
+        name: `Fluxo visual: ${input.config.name}`,
+    });
+
+    return flowProcedure.success && flowProcedure.graph
+        ? [...documentProcedures, flowProcedure.graph]
+        : documentProcedures;
+}
 
 async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames: string[]): Promise<AgentToolCatalogItem[]> {
     const enabledToolSet = new Set(enabledToolNames);
@@ -1075,17 +1105,34 @@ export async function processAutopilotForChat(
         }
     }
 
-    const activeFlowIntentScope = resolveActiveFlowIntentScope(autopilotConfig, intentResolution.intent);
-    const scopedStaticKnowledgeDocuments = filterKnowledgeDocumentsForScope(autopilotConfig, staticKnowledgeDocuments, activeFlowIntentScope);
+    let activeFlowIntentScope = resolveActiveFlowIntentScope(autopilotConfig, intentResolution.intent);
     const persistedFlowState = await getAutopilotConversationState(chat.id).catch((error) => {
         console.warn('[AUTOPILOT_FLOW_STATE] Failed to load persisted state:', error);
         return null;
     });
+    const switchResolution = resolveFlowSwitchRouteForActivePath({
+        config: autopilotConfig,
+        customerMessage: enrichedLastMessageContent || '',
+        activeNodeId: persistedFlowState?.activeNodeId,
+    });
+    if (switchResolution) {
+        if (switchResolution.targetNodeId) {
+            activeFlowIntentScope = resolveActiveFlowIntentScopeByNodeId(autopilotConfig, switchResolution.targetNodeId);
+        }
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'switch_resolution',
+            status: switchResolution.fallbackUsed ? 'fallback' : 'success',
+            payload: switchResolution,
+        });
+    }
+    const effectivePersistedActiveNodeId = switchResolution?.targetNodeId || persistedFlowState?.activeNodeId;
+    const scopedStaticKnowledgeDocuments = filterKnowledgeDocumentsForScope(autopilotConfig, staticKnowledgeDocuments, activeFlowIntentScope);
     const turnPolicy = compileAutopilotTurnPolicy({
         config: autopilotConfig,
         documents: staticKnowledgeDocuments,
         intentScope: activeFlowIntentScope,
-        persistedActiveNodeId: persistedFlowState?.activeNodeId,
+        persistedActiveNodeId: effectivePersistedActiveNodeId,
     });
     enabledToolNames = turnPolicy.allowedToolNames;
     const flowCompletionPlan = resolveFlowCompletionPlan(autopilotConfig, turnPolicy.activeNodeId);
@@ -1098,7 +1145,7 @@ export async function processAutopilotForChat(
         chatId: chat.id,
         workspaceId,
         autopilotConfigId: autopilotConfig.id,
-        activeNodeId: turnPolicy.activeNodeId,
+        activeNodeId: switchResolution?.targetNodeId || turnPolicy.activeNodeId,
     }).catch((error) => {
         console.warn('[AUTOPILOT_FLOW_STATE] Failed to persist active node:', error);
     });
@@ -1514,6 +1561,29 @@ export async function processAutopilotForChat(
     }
 
     const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId, enabledToolNames);
+    const activeToolSelectionScore = await loadLatestActiveToolSelectionScoreWeights({
+        workspaceId,
+        agentId: assignedSystemAgentId,
+        autopilotConfigId: autopilotConfig.id,
+    }).catch((error) => {
+        console.warn('[AUTOPILOT_SCORE_HISTORY] Failed to load active score weights:', error);
+        return null;
+    });
+    if (activeToolSelectionScore) {
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'tool_score_weights',
+            status: 'success',
+            payload: {
+                historyId: activeToolSelectionScore.id,
+                source: activeToolSelectionScore.source,
+                agentId: activeToolSelectionScore.agentId,
+                autopilotConfigId: activeToolSelectionScore.autopilotConfigId,
+                weights: activeToolSelectionScore.weights,
+                reason: activeToolSelectionScore.reason,
+            },
+        });
+    }
     let recentToolResults = await loadRecentToolResultsForAutopilot({
         workspaceId,
         chatId: chat.id,
@@ -1769,12 +1839,47 @@ export async function processAutopilotForChat(
             reason: workflowPlan.reason,
         },
     });
+    const workflowAgentDecision = decideAgentNextAction({
+        workspaceId,
+        chatId: chat.id,
+        messageId: sourceMessageId ?? null,
+        runId: orchestratorRun.id,
+        autopilotConfigId: autopilotConfig.id,
+        stage: 'workflow_plan',
+        intentResolution,
+        workflowPlan: {
+            executionMode: workflowPlan.executionMode,
+            reason: workflowPlan.reason,
+            handledByWorkflow: workflowPlan.handledByWorkflow,
+            missingSlots: workflowPlan.missingSlots,
+            actions: workflowPlan.actions,
+            slotExtraction: workflowPlan.slotExtraction,
+        },
+        policyContext: {
+            activeNodeId: turnPolicy.activeNodeId,
+            allowedToolNames: turnPolicy.allowedToolNames,
+            reason: turnPolicy.reason,
+        },
+        switchResolution,
+        metadata: {
+            prearmedTool: workflowPrearmSignal?.toolName ?? null,
+            knowledgeCoverage,
+            candidateTools: deterministicRouting.candidates.slice(0, 8).map((candidate) => ({
+                tool: candidate.toolName,
+                source: candidate.source,
+                reason: candidate.reason,
+                team: candidate.team.name,
+            })),
+        },
+    });
+    await recordAgentDecisionLedger(workflowAgentDecision.ledgerEntry);
     let workflowPlannedActions: AgentToolAction[] = workflowPlan.executionMode === 'continue_llm'
         ? []
         : workflowPlan.actions;
+    const activePEC = await getActiveProcedureExecution(chat.id);
     const entryFlowMessageNode = resolveEntryDeterministicFlowMessage(autopilotConfig);
     const shouldSendEntryFlowMessage = entryFlowMessageNode
-        ? !(await hasSentFlowNodeMessage({
+        ? !activePEC && !(await hasSentFlowNodeMessage({
             configId: autopilotConfig.id,
             chatId: chat.id,
             nodeId: entryFlowMessageNode.nodeId,
@@ -1782,7 +1887,9 @@ export async function processAutopilotForChat(
         : false;
     const deterministicFlowMessageNode = shouldSendEntryFlowMessage
         ? entryFlowMessageNode
-        : resolveDeterministicFlowMessage(autopilotConfig, activeFlowIntentScope);
+        : activePEC
+            ? null
+            : resolveDeterministicFlowMessage(autopilotConfig, activeFlowIntentScope);
     const deterministicFlowMessage = deterministicFlowMessageNode
         ? renderDeterministicFlowMessage(autopilotConfig, deterministicFlowMessageNode.message, {
             customerMessage: enrichedLastMessageContent || '',
@@ -1792,6 +1899,7 @@ export async function processAutopilotForChat(
     const flowFormGuidance = resolveFlowFormGuidance(autopilotConfig, activeFlowIntentScope);
     const flowFormGuidanceForPrompt = formatFlowFormGuidanceForPrompt(flowFormGuidance);
     const flowReferencesForPrompt = formatFlowReferencesForPrompt(autopilotConfig, activeRules);
+    const flowSwitchGuidanceForPrompt = formatFlowSwitchGuidanceForPrompt(autopilotConfig);
     const scopedKnowledgeBase = buildIntentScopedKnowledgeBase(
         autopilotConfig.knowledge_base || '',
         activeFlowIntentScope
@@ -1815,6 +1923,7 @@ export async function processAutopilotForChat(
         `reason=${intentResolution.reason}`,
         `flowSubAgent=${activeFlowIntentScope?.title || 'main_agent'}`,
         flowReferencesForPrompt,
+        flowSwitchGuidanceForPrompt,
         flowFormGuidanceForPrompt,
     ].join('\n');
 
@@ -1933,8 +2042,8 @@ export async function processAutopilotForChat(
     }
 
     // Pre-load active procedure and compiled procedures early to be used by tool memory and lookup bypasses.
-    const activePEC = await getActiveProcedureExecution(chat.id);
-    const compiledProcedures = compileAllProcedures({
+    const compiledProcedures = compileRuntimeProcedures({
+        config: autopilotConfig,
         documents: scopedStaticKnowledgeDocuments,
         tools: runtimeToolCatalog,
         enabledToolNames,
@@ -2724,15 +2833,71 @@ export async function processAutopilotForChat(
             }
         };
 
+        const procedureKnowledgeResolver: ProcedureKnowledgeResolver = async ({ step, context, query, requiredCoverage }) => {
+            const retrieval = await retrieveHybridSupportContext({
+                workspaceId,
+                autopilotConfigId: autopilotConfig.id,
+                query: query || enrichedLastMessageContent || context.procedureName,
+                excludeChatId: chat.id,
+                staticDocuments: scopedStaticKnowledgeDocuments,
+                intent: intentResolution,
+                allowedDocumentIds,
+            });
+            const selectedById = new Map(retrieval.selected.map((item) => [item.id, item]));
+            const chunks = retrieval.knowledgeBaseDocuments.map((document) => {
+                const selected = selectedById.get(document.id);
+                const rawDocument = document as KnowledgeBaseDocument & Record<string, unknown>;
+                const content = String(document.content || rawDocument.canonicalAnswer || rawDocument.summary || '').trim();
+                return {
+                    documentId: document.id,
+                    chunkId: String(rawDocument.chunkId || rawDocument.chunkIndex || document.id),
+                    title: document.name || 'Base de conhecimento',
+                    category: selected?.category || String(rawDocument.category || 'uncategorized'),
+                    score: selected?.score || 0,
+                    excerpt: content.length > 900 ? `${content.slice(0, 899).trim()}...` : content,
+                    source: selected?.source || String(rawDocument.source || 'static'),
+                    coverage: retrieval.knowledgeCoverage,
+                };
+            }).filter((chunk) => chunk.excerpt);
+
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'procedure_knowledge_retrieval',
+                status: retrieval.knowledgeCoverage === 'none' || retrieval.knowledgeCoverage === 'low' ? 'fallback' : 'success',
+                payload: {
+                    procedureId: context.procedureId,
+                    stepId: step.id,
+                    query,
+                    requiredCoverage,
+                    strategy: retrieval.strategy,
+                    knowledgeCoverage: retrieval.knowledgeCoverage,
+                    selected: retrieval.selected,
+                    chunkCount: chunks.length,
+                },
+            });
+
+            return {
+                coverage: retrieval.knowledgeCoverage,
+                chunks,
+                strategy: retrieval.strategy,
+                reason: retrieval.fallbackReason || retrieval.error || undefined,
+            };
+        };
+
+        let procedureRuntimeSource: 'active' | 'matched' | null = null;
+        let procedureRuntimeMatch: { score: number; matchReason: string } | null = null;
+
         if (activePEC) {
             // Resume the active procedure
-            const compiledProcedures = compileAllProcedures({
+            const compiledProcedures = compileRuntimeProcedures({
+                config: autopilotConfig,
                 documents: scopedStaticKnowledgeDocuments,
                 tools: runtimeToolCatalog,
                 enabledToolNames,
             });
             const graph = compiledProcedures.find((g) => g.id === activePEC.procedureId);
             if (graph) {
+                procedureRuntimeSource = 'active';
                 procedureGraph = graph;
                 procedureContext = activePEC;
                 procedureResult = await advanceProcedure({
@@ -2742,6 +2907,7 @@ export async function processAutopilotForChat(
                     availableTeams: availableTeams.map((t) => ({ id: t.id, name: t.name })),
                     decisionResolver: procedureDecisionResolver,
                     responseResolver: procedureResponseResolver,
+                    knowledgeResolver: procedureKnowledgeResolver,
                     forceLlmRespond: isLmStudioModel(resolvedAiModel.model),
                 });
             }
@@ -2749,7 +2915,8 @@ export async function processAutopilotForChat(
 
         if (!procedureResult) {
             // 2. Try to match a new procedure
-            const compiledProcedures = compileAllProcedures({
+            const compiledProcedures = compileRuntimeProcedures({
+                config: autopilotConfig,
                 documents: scopedStaticKnowledgeDocuments,
                 tools: runtimeToolCatalog,
                 enabledToolNames,
@@ -2763,6 +2930,11 @@ export async function processAutopilotForChat(
                 });
 
                 if (match) {
+                    procedureRuntimeSource = 'matched';
+                    procedureRuntimeMatch = {
+                        score: match.score,
+                        matchReason: match.matchReason,
+                    };
                     console.log(
                         `[PROCEDURE_RUNTIME] Starting procedure "${match.graph.documentName}" ` +
                         `(score=${match.score}, reason=${match.matchReason}) for chat=${chat.id}`,
@@ -2770,9 +2942,12 @@ export async function processAutopilotForChat(
                     const firstStep = match.graph.steps[0];
                     if (firstStep) {
                         const initialSlots: Record<string, string> = {};
-                        if (workflowPlan.slotExtraction?.slots) {
-                            for (const [key, val] of Object.entries(workflowPlan.slotExtraction.slots)) {
-                                if (val) initialSlots[key] = String(val);
+                        for (const detail of workflowPlan.slotExtraction?.details || []) {
+                            if (
+                                (detail.source === 'message' || detail.source === 'contact') &&
+                                detail.value
+                            ) {
+                                initialSlots[detail.name] = String(detail.value);
                             }
                         }
 
@@ -2785,6 +2960,8 @@ export async function processAutopilotForChat(
                             currentStepId: firstStep.id,
                             status: 'running',
                             collectedSlots: initialSlots,
+                            graph: match.graph,
+                            goal: intentResolution.intent,
                         });
 
                         if (newPEC) {
@@ -2797,6 +2974,7 @@ export async function processAutopilotForChat(
                                 availableTeams: availableTeams.map((t) => ({ id: t.id, name: t.name })),
                                 decisionResolver: procedureDecisionResolver,
                                 responseResolver: procedureResponseResolver,
+                                knowledgeResolver: procedureKnowledgeResolver,
                                 forceLlmRespond: isLmStudioModel(resolvedAiModel.model),
                                 priorToolResults: passThroughToolResults,
                             });
@@ -2808,6 +2986,66 @@ export async function processAutopilotForChat(
 
         // Process PRE result
         if (procedureResult && procedureResult.handled) {
+            const currentProcedureStep = procedureGraph?.steps.find((step) => step.id === procedureContext?.currentStepId) || null;
+            const procedureActionsForLedger = normalizeAgentActions(procedureResult.actions.map((action) => ({
+                type: action.type as any,
+                reason: action.reason,
+                payload: action.payload,
+            })));
+            const procedureMissingSlots = procedureResult.status === 'waiting_input'
+                ? (currentProcedureStep?.requiredSlots || [])
+                : [];
+            const procedureExecutionMode = procedureActionsForLedger.length > 0
+                ? 'pre_response_tools'
+                : procedureResult.response
+                    ? 'direct_response'
+                    : 'continue_llm';
+            const procedureAgentDecision = decideAgentNextAction({
+                workspaceId,
+                chatId: chat.id,
+                messageId: sourceMessageId ?? null,
+                runId: orchestratorRun.id,
+                autopilotConfigId: autopilotConfig.id,
+                stage: 'procedure_runtime',
+                intentResolution,
+                workflowPlan: {
+                    executionMode: procedureExecutionMode,
+                    reason: procedureResult.completionReason
+                        || `Procedure runtime ${procedureRuntimeSource || 'unknown'} advanced with status ${procedureResult.status}.`,
+                    handledByWorkflow: true,
+                    actions: procedureActionsForLedger,
+                    missingSlots: procedureMissingSlots,
+                    slotExtraction: workflowPlan.slotExtraction,
+                },
+                procedure: procedureContext ? {
+                    activeProcedureId: procedureContext.id,
+                    procedureId: procedureContext.procedureId,
+                    procedureName: procedureContext.procedureName,
+                    currentStepId: procedureContext.currentStepId,
+                    matchScore: procedureRuntimeMatch?.score ?? null,
+                    matchReason: procedureRuntimeMatch?.matchReason
+                        || (procedureRuntimeSource === 'active' ? 'Retomou procedimento ativo.' : null),
+                    status: procedureResult.status,
+                } : null,
+                policyContext: {
+                    procedureHandled: procedureResult.handled,
+                    procedureRuntimeSource,
+                    procedureStatus: procedureResult.status,
+                    executedSteps: procedureResult.executedSteps,
+                    actionCount: procedureResult.actions.length,
+                    hasResponse: Boolean(procedureResult.response),
+                    completionReason: procedureResult.completionReason || null,
+                },
+                metadata: {
+                    procedureRuntime: true,
+                    procedureRuntimeSource,
+                    procedureGraphId: procedureGraph?.id || null,
+                    procedureStepLabel: currentProcedureStep?.label || null,
+                    procedureActions: procedureActionsForLedger.map((action) => action.type),
+                },
+            });
+            await recordAgentDecisionLedger(procedureAgentDecision.ledgerEntry);
+
             await recordOrchestratorEvent({
                 run: orchestratorRun,
                 kind: 'procedure_runtime',
@@ -2936,13 +3174,52 @@ export async function processAutopilotForChat(
                     toolResults: preToolResults,
                     decisionResolver: procedureDecisionResolver,
                     responseResolver: procedureResponseResolver,
+                    knowledgeResolver: procedureKnowledgeResolver,
                     forceLlmRespond: isLmStudioModel(resolvedAiModel.model),
                 });
             }
 
             // Send the response to the customer
             if (procedureResult.response) {
-                const finalResponse = formatCustomerFacingAiResponse(procedureResult.response);
+                let finalResponse = formatCustomerFacingAiResponse(procedureResult.response);
+                const procedureValidatorPlannedActions: AgentToolAction[] = procedureResult.actions.map((action) => ({
+                    type: action.type as any,
+                    reason: action.reason,
+                    payload: action.payload,
+                }));
+                if (
+                    procedureExecutedActions.includes('transfer_chat') &&
+                    !procedureValidatorPlannedActions.some((action) => action.type === 'transfer_chat')
+                ) {
+                    procedureValidatorPlannedActions.push({
+                        type: 'transfer_chat',
+                        reason: 'Procedure handoff already executed.',
+                        payload: {},
+                    });
+                }
+                const procedureResponseValidator = validateAutopilotResponse({
+                    response: finalResponse,
+                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                    customerMessage: enrichedLastMessageContent || '',
+                    chatHistory: chatHistoryForAI,
+                    continuationRequiredSlots: procedureMissingSlots.length > 0
+                        ? procedureMissingSlots as AutopilotSlotName[]
+                        : workflowPlan.missingSlots,
+                    intentResolution,
+                    slotExtraction: workflowPlan.slotExtraction,
+                    plannedActions: procedureValidatorPlannedActions,
+                    toolResults: [...recentToolResults, ...procedureToolResults],
+                    enabledToolNames,
+                    availableTeams,
+                    contact: sanitizedContact,
+                    knowledgeCoverage,
+                    knowledgeDocuments: ragDocuments,
+                    source: 'llm',
+                    systemAgentName: assignedSystemAgentName,
+                });
+                if (procedureResponseValidator.decision !== 'approve') {
+                    finalResponse = formatCustomerFacingAiResponse(procedureResponseValidator.response);
+                }
 
                 if (currentCopilotMode === 'suggest') {
                     const { getSupabaseAdmin } = await import('@/lib/supabase');
@@ -2978,6 +3255,7 @@ export async function processAutopilotForChat(
                         workflowId: intentResolution.workflowId,
                         ragStrategy,
                         knowledgeCoverage,
+                        responseValidator: procedureResponseValidator.metadata,
                     },
                 });
             }
@@ -3241,6 +3519,9 @@ export async function processAutopilotForChat(
                 );
                 const resourceMappedActions = await mapAgentToolActionsToResources({
                     workspaceId,
+                    chatId: chat.id,
+                    messageId: sourceMessageId ?? null,
+                    procedureExecutionId: activePEC?.id ?? null,
                     customerMessage: enrichedLastMessageContent || '',
                     chatHistory: chatHistoryForAI,
                     contact: sanitizedContact,
@@ -3259,6 +3540,8 @@ export async function processAutopilotForChat(
                                 resource: mapping.resource,
                                 operation: mapping.operation,
                                 status: mapping.status,
+                                confidence: mapping.confidence,
+                                payloadHash: mapping.payloadHash,
                                 mappedFields: mapping.mappings.map((item) => ({
                                     fieldId: item.fieldId,
                                     fieldLabel: item.fieldLabel,
@@ -3283,6 +3566,7 @@ export async function processAutopilotForChat(
                     toolCatalog: runtimeToolCatalog,
                     availableTeams,
                     contact: sanitizedContact,
+                    scoringWeights: activeToolSelectionScore?.weights || null,
                 });
                 await recordOrchestratorEvent({
                     run: orchestratorRun,
@@ -3294,6 +3578,50 @@ export async function processAutopilotForChat(
                         ...toolPlanner.metadata,
                     },
                 });
+                const toolPlannerAgentDecision = decideAgentNextAction({
+                    workspaceId,
+                    chatId: chat.id,
+                    messageId: sourceMessageId ?? null,
+                    runId: orchestratorRun.id,
+                    autopilotConfigId: autopilotConfig.id,
+                    stage: 'tool_planner',
+                    intentResolution,
+                    workflowPlan: {
+                        executionMode: workflowPlan.executionMode,
+                        reason: workflowPlan.reason,
+                        handledByWorkflow: workflowPlan.handledByWorkflow,
+                        missingSlots: workflowPlan.missingSlots,
+                        actions: workflowPlan.actions,
+                        slotExtraction: workflowPlan.slotExtraction,
+                    },
+                    toolPlanner: {
+                        actions: toolPlanner.actions,
+                        rejectedActions: toolPlanner.rejectedActions,
+                        responseOverride: toolPlanner.responseOverride,
+                        metadata: toolPlanner.metadata,
+                    },
+                    procedure: activePEC ? {
+                        activeProcedureId: activePEC.id,
+                        procedureId: activePEC.procedureId,
+                        procedureName: activePEC.procedureName,
+                        currentStepId: activePEC.currentStepId,
+                        status: activePEC.status,
+                    } : null,
+                    policyContext: {
+                        allowedToolNames: turnPolicy.allowedToolNames,
+                        rejectedActions: toolPlanner.metadata.rejectedActions,
+                        promiseValidation: toolPlanner.promiseValidation,
+                    },
+                    metadata: {
+                        candidateTools: deterministicRouting.candidates.slice(0, 8).map((candidate) => ({
+                            tool: candidate.toolName,
+                            source: candidate.source,
+                            reason: candidate.reason,
+                            team: candidate.team.name,
+                        })),
+                    },
+                });
+                await recordAgentDecisionLedger(toolPlannerAgentDecision.ledgerEntry);
                 const plannerMissingSlots = Array.from(new Set(
                     toolPlanner.rejectedActions.flatMap((item) => item.missingSlots || [])
                 ));
@@ -3728,6 +4056,9 @@ export async function processAutopilotForChat(
             console.log('[AUTOPILOT_SERVICE] Nenhuma resposta gerada.');
             const emptyResponseResourceMappedActions = await mapAgentToolActionsToResources({
                 workspaceId,
+                chatId: chat.id,
+                messageId: sourceMessageId ?? null,
+                procedureExecutionId: activePEC?.id ?? null,
                 customerMessage: enrichedLastMessageContent || '',
                 chatHistory: chatHistoryForAI,
                 contact: sanitizedContact,
@@ -3747,6 +4078,8 @@ export async function processAutopilotForChat(
                             resource: mapping.resource,
                             operation: mapping.operation,
                             status: mapping.status,
+                            confidence: mapping.confidence,
+                            payloadHash: mapping.payloadHash,
                             mappedFields: mapping.mappings.map((item) => ({
                                 fieldId: item.fieldId,
                                 fieldLabel: item.fieldLabel,
@@ -3770,6 +4103,7 @@ export async function processAutopilotForChat(
                 toolCatalog: runtimeToolCatalog,
                 availableTeams,
                 contact: sanitizedContact,
+                scoringWeights: activeToolSelectionScore?.weights || null,
             });
             await recordOrchestratorEvent({
                 run: orchestratorRun,

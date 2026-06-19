@@ -119,6 +119,12 @@ function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
 
+function requestedToolName(action: AgentToolAction) {
+  return action.type === 'mcp_call_tool'
+    ? String(action.payload?.toolName || '').trim()
+    : action.type;
+}
+
 export function isExplicitAffirmativeMessage(message: string) {
   return /^(sim|s|confirmo|confirmado|pode|pode sim|pode fazer|autorizo|prosseguir|prossiga|ok|okay|certo)$/i
     .test(normalize(message));
@@ -131,7 +137,8 @@ export function resolveConfirmedPendingAction(input: {
 }) {
   const pending = input.state?.pendingConfirmation;
   if (!pending || !isExplicitAffirmativeMessage(input.message)) return null;
-  if (!input.allowedToolNames.includes(pending.action.type)) return null;
+  const requested = requestedToolName(pending.action);
+  if (!input.allowedToolNames.includes(pending.action.type) && !input.allowedToolNames.includes(requested)) return null;
   const requestedAt = Date.parse(pending.requestedAt);
   if (!Number.isFinite(requestedAt) || Date.now() - requestedAt > CONFIRMATION_TTL_MS) return null;
   return pending.action;

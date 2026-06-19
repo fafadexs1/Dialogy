@@ -30,7 +30,7 @@ import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import { buildRagLabCases, summarizeRagLabResults, type RagLabCaseResult, type RagLabReport } from '@/services/rag/evaluation';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { filterKnowledgeDocumentsForScope, resolveActiveFlowIntentScope } from '@/services/autopilot/flow-routing';
-import { isAllowedAutopilotModel } from '@/services/ai/model-selection';
+import { isAllowedAutopilotModel, resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
 import { normalizeGoogleAiModelId } from '@/lib/ai-models';
@@ -38,6 +38,35 @@ import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-re
 import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
 import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
 import { resolveAllowedKnowledgeDocumentIds } from '@/services/autopilot/turn-policy';
+import { auditAutopilotFlowGraph, summarizeFlowAuditIssues } from '@/services/autopilot/flow-audit';
+import { migrateAutopilotFlowGraphToV2 } from '@/services/autopilot/flow-v2';
+import { detectAndPersistCausalPatternsForWorkspace } from '@/services/autopilot/causal-patterns';
+import { reviewCausalPattern, type CausalPatternReviewDecision } from '@/services/autopilot/causal-pattern-review';
+import {
+    buildCausalPatternImpactReport,
+    type CausalPatternImpactDecision,
+    type CausalPatternImpactReport,
+} from '@/services/autopilot/causal-pattern-impact';
+import { buildAutopilotLearningTrend, type AutopilotLearningTrendInsight } from '@/services/autopilot/learning-trend';
+import {
+    buildAutopilotProcedureOutcomeInsights,
+    type AutopilotProcedureOutcomeInsight,
+} from '@/services/autopilot/procedure-outcomes';
+import {
+    buildAutopilotSwitchRouteOutcomeInsights,
+    type AutopilotSwitchRouteOutcomeInsight,
+} from '@/services/autopilot/switch-route-outcomes';
+import {
+    applyCausalPatternToDraft,
+    applySafeCausalPatternAutoTuneToDraft,
+    markDraftCausalPatternApplicationsDiscarded,
+    markDraftCausalPatternApplicationsPublished,
+    previewCausalPatternDraftApplication,
+    revertCausalPatternDraftApplication,
+    type CausalPatternDraftApplicationPreview,
+} from '@/services/autopilot/causal-pattern-apply';
+import { normalizeToolSelectionScoreWeights, recordAgentScoreHistory } from '@/services/autopilot/score-history';
+import { importEcosystemPatternForWorkspace } from '@/services/autopilot/ecosystem-patterns';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -103,7 +132,7 @@ function parseFlowGraph(raw: unknown): AutopilotFlowGraph | null {
     if (!parsed || typeof parsed !== 'object') return null;
     const graph = parsed as Partial<AutopilotFlowGraph>;
     if (graph.version !== 1 || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return null;
-    return graph as AutopilotFlowGraph;
+    return migrateAutopilotFlowGraphToV2(graph as AutopilotFlowGraph);
 }
 
 function readFormBoolean(formData: FormData, field: string, fallback = false): boolean {
@@ -741,6 +770,7 @@ export async function generateAutopilotFlowWithAi(input: {
     conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
     currentGraph?: AutopilotFlowGraph | null;
     currentSystemPrompt?: string | null;
+    model?: string | null;
 }): Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -775,12 +805,18 @@ export async function generateAutopilotFlowWithAi(input: {
         ]);
         if (catalog.error) return { proposal: null, error: catalog.error };
 
+        let targetModel = runtime.model;
+        if (input.model) {
+            const resolved = await resolveAutopilotModelFromCatalog(input.model);
+            targetModel = resolved.model;
+        }
+
         const proposal = await generateAutopilotFlowProposal({
             conversation,
             currentGraph: input.currentGraph || null,
             currentSystemPrompt: input.currentSystemPrompt || '',
             tools: catalog.tools,
-            model: runtime.model,
+            model: targetModel,
             apiKey: config.gemini_api_key || runtime.workspaceGeminiApiKey,
         });
         return { proposal };
@@ -1218,21 +1254,40 @@ export async function discardAutopilotDraft(configId: string): Promise<{ success
 
     try {
         await ensureAutopilotVersioningTables();
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
 
-        const configRes = await db.query(
-            'SELECT workspace_id FROM autopilot_configs WHERE id = $1 LIMIT 1',
-            [configId]
-        );
-        if (configRes.rowCount === 0) {
-            return { success: false, error: 'Agente nao encontrado.' };
+            const configRes = await client.query(
+                'SELECT workspace_id FROM autopilot_configs WHERE id = $1 LIMIT 1',
+                [configId]
+            );
+            if (configRes.rowCount === 0) {
+                await client.query('ROLLBACK');
+                return { success: false, error: 'Agente nao encontrado.' };
+            }
+
+            const workspaceId = configRes.rows[0].workspace_id;
+            if (!await isWorkspaceMember(user.id, workspaceId)) {
+                await client.query('ROLLBACK');
+                return { success: false, error: 'Acesso nao autorizado.' };
+            }
+
+            await markDraftCausalPatternApplicationsDiscarded(client, {
+                workspaceId: String(workspaceId),
+                configId,
+                userId: user.id,
+                reason: 'draft_discarded',
+            });
+
+            await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK').catch(() => undefined);
+            throw error;
+        } finally {
+            client.release();
         }
-
-        const workspaceId = configRes.rows[0].workspace_id;
-        if (!await isWorkspaceMember(user.id, workspaceId)) {
-            return { success: false, error: 'Acesso nao autorizado.' };
-        }
-
-        await db.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
 
         revalidatePath('/autopilot');
         revalidatePath(`/autopilot/${configId}`);
@@ -1294,6 +1349,15 @@ export async function publishAutopilotDraft(configId: string): Promise<{
         if (snapshot.ai_model && !(await isAllowedAutopilotModel(snapshot.ai_model))) {
             await client.query('ROLLBACK');
             return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global.' };
+        }
+        const flowAudit = auditAutopilotFlowGraph(snapshot.flow_graph);
+        if (flowAudit.status === 'failed') {
+            await client.query('ROLLBACK');
+            return {
+                success: false,
+                error: summarizeFlowAuditIssues(flowAudit.issues)
+                    || 'Fluxo possui problemas criticos antes de publicar.',
+            };
         }
 
         previousDocs = fallback.knowledge_base_documents;
@@ -1357,6 +1421,13 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 JSON.stringify(snapshot),
             ]
         );
+
+        await markDraftCausalPatternApplicationsPublished(client, {
+            workspaceId: currentWorkspaceId,
+            configId,
+            userId: user.id,
+            versionNumber,
+        });
 
         await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
         await client.query('COMMIT');
@@ -1497,6 +1568,13 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
                 JSON.stringify(snapshot),
             ]
         );
+
+        await markDraftCausalPatternApplicationsDiscarded(client, {
+            workspaceId: currentWorkspaceId,
+            configId,
+            userId: user.id,
+            reason: 'version_restored',
+        });
 
         await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
         await client.query('COMMIT');
@@ -1759,6 +1837,1152 @@ export async function getAutopilotUsageLogs(configId: string): Promise<{ logs: A
     } catch (error) {
         console.error('[GET_AUTOPILOT_LOGS] Erro ao buscar logs de uso:', error);
         return { logs: null, error: "Falha ao buscar o histórico de uso." };
+    }
+}
+
+export type AutopilotDecisionInsightItem = {
+    id: string;
+    stage: string;
+    decisionType: string;
+    goal: string | null;
+    procedureId: string | null;
+    stepId: string | null;
+    selectedTool: string | null;
+    selectedTools: string[];
+    candidateTools: AutopilotDecisionToolCandidateInsight[];
+    blockedTools: AutopilotBlockedToolInsight[];
+    blockedToolsCount: number;
+    presentSlots: AutopilotDecisionPresentSlotInsight[];
+    invalidSlots: AutopilotDecisionInvalidSlotInsight[];
+    requiredSlots: string[];
+    switchResolution: AutopilotDecisionSwitchInsight | null;
+    confidence: number | null;
+    outcomeResolutionType: string | null;
+    outcomeResolved: boolean | null;
+    createdAt: string;
+};
+
+export type AutopilotDecisionPresentSlotInsight = {
+    name: string;
+    source: string | null;
+    confidence: number | null;
+};
+
+export type AutopilotDecisionInvalidSlotInsight = {
+    name: string;
+    reason: string | null;
+};
+
+export type AutopilotDecisionSwitchRouteInsight = {
+    routeId: string;
+    routeLabel: string | null;
+    targetNodeId: string | null;
+    confidence: number | null;
+    selected: boolean;
+    fallback: boolean;
+    rejectedReason: string | null;
+};
+
+export type AutopilotDecisionSwitchInsight = {
+    switchNodeId: string;
+    routeId: string;
+    routeLabel: string | null;
+    targetNodeId: string | null;
+    confidence: number | null;
+    fallbackUsed: boolean;
+    candidateRoutes: AutopilotDecisionSwitchRouteInsight[];
+    rejectedRoutes: AutopilotDecisionSwitchRouteInsight[];
+};
+
+export type AutopilotDecisionToolCandidateInsight = {
+    tool: string;
+    capability: string | null;
+    allowed: boolean;
+    code: string | null;
+    score: number | null;
+    reason: string | null;
+    missingSlots: string[];
+};
+
+export type AutopilotBlockedToolInsight = {
+    toolName: string;
+    reason: string;
+    missingSlots: string[];
+};
+
+export type AutopilotResourceMappingFieldInsight = {
+    slot: string;
+    fieldId: string | null;
+    fieldLabel: string | null;
+    confidence: number | null;
+    source: string | null;
+    reason: string | null;
+};
+
+export type AutopilotResourceMappingInsight = {
+    id: string;
+    resource: string;
+    operation: string;
+    status: string;
+    confidence: number | null;
+    mappedFields: AutopilotResourceMappingFieldInsight[];
+    rejectedFieldsCount: number;
+    payloadHash: string | null;
+    createdAt: string;
+};
+
+export type AutopilotCausalPatternInsight = {
+    id: string;
+    patternType: string;
+    procedureId: string | null;
+    stepId: string | null;
+    switchNodeId: string | null;
+    switchRouteId: string | null;
+    toolName: string | null;
+    insight: string;
+    evidence: Record<string, unknown>;
+    suggestedFix: Record<string, unknown>;
+    impact: Record<string, unknown>;
+    confidence: number;
+    status: string;
+    applicationStatus: string | null;
+    applicationType: string | null;
+    appliedAt: string | null;
+    applicationImpact: CausalPatternImpactReport | null;
+    createdAt: string;
+};
+
+export type AutopilotCausalPatternApplicationInsight = {
+    id: string;
+    patternId: string;
+    patternType: string;
+    insight: string;
+    applicationType: string;
+    applicationSource: 'manual' | 'safe_auto_tune' | 'unknown';
+    status: string;
+    beforeSnapshotHash: string;
+    afterSnapshotHash: string;
+    graphPatchIncluded: boolean;
+    graphPatchOperationCount: number;
+    publishedVersionNumber: number | null;
+    publishedAt: string | null;
+    revertedAt: string | null;
+    createdAt: string;
+};
+
+export type AutopilotEcosystemPatternInsight = {
+    id: string;
+    fingerprint: string;
+    patternType: string;
+    vertical: string;
+    insight: string;
+    evidence: Record<string, unknown>;
+    suggestedFix: Record<string, unknown>;
+    sourceWorkspaceCount: number;
+    sampleSize: number;
+    confidence: number;
+    status: string;
+    validatedAt: string | null;
+    createdAt: string;
+};
+
+export type AutopilotScoreHistoryInsight = {
+    id: string;
+    source: string;
+    weights: Record<string, number>;
+    evidencePatternId: string | null;
+    reason: string | null;
+    appliedAt: string;
+};
+
+export type AutopilotDecisionInsights = {
+    summary: {
+        totalDecisions: number;
+        decisionsWithOutcome: number;
+        resolvedOutcomes: number;
+        handoffOutcomes: number;
+        averageConfidence: number | null;
+        blockedToolDecisions: number;
+        pendingPatterns: number;
+        approvedPatterns: number;
+        appliedPatterns: number;
+    };
+    decisionTypeCounts: Array<{ decisionType: string; count: number }>;
+    outcomeCounts: Array<{ resolutionType: string; count: number }>;
+    recentDecisions: AutopilotDecisionInsightItem[];
+    patterns: AutopilotCausalPatternInsight[];
+    recentApplications: AutopilotCausalPatternApplicationInsight[];
+    ecosystemPatterns: AutopilotEcosystemPatternInsight[];
+    scoreHistory: AutopilotScoreHistoryInsight[];
+    learningTrend: AutopilotLearningTrendInsight;
+    procedureOutcomes: AutopilotProcedureOutcomeInsight[];
+    switchRouteOutcomes: AutopilotSwitchRouteOutcomeInsight[];
+    resourceMappings: AutopilotResourceMappingInsight[];
+};
+
+export type AutopilotCausalPatternApplicationPreview = CausalPatternDraftApplicationPreview;
+
+function parseJsonValue(value: unknown): unknown {
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch {
+            return null;
+        }
+    }
+    return value ?? null;
+}
+
+function parseStringList(value: unknown): string[] {
+    const parsed = parseJsonValue(value);
+    return Array.isArray(parsed)
+        ? Array.from(new Set(parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)))
+        : [];
+}
+
+function parseObject(value: unknown): Record<string, unknown> {
+    const parsed = parseJsonValue(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+}
+
+function parseOptionalNumber(value: unknown): number | null {
+    const numberValue = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function parseBlockedToolInsights(value: unknown): AutopilotBlockedToolInsight[] {
+    const parsed = parseJsonValue(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+        .map((item): AutopilotBlockedToolInsight | null => {
+            const record = parseObject(item);
+            const toolName = String(record.toolName || record.tool || '').trim();
+            if (!toolName) return null;
+            return {
+                toolName,
+                reason: String(record.reason || '').trim(),
+                missingSlots: parseStringList(record.missingSlots),
+            };
+        })
+        .filter((item): item is AutopilotBlockedToolInsight => item !== null);
+}
+
+function parseCandidateToolInsights(input: {
+    metadata: unknown;
+    selectedTools: string[];
+    blockedTools: AutopilotBlockedToolInsight[];
+}): AutopilotDecisionToolCandidateInsight[] {
+    const metadata = parseObject(input.metadata);
+    const planner = parseObject(metadata.toolPlanner);
+    const capabilityDecisions = parseJsonValue(planner.capabilityDecisions);
+    const explicitCandidates = parseJsonValue(metadata.candidateTools);
+    const byTool = new Map<string, AutopilotDecisionToolCandidateInsight>();
+
+    if (Array.isArray(capabilityDecisions)) {
+        for (const item of capabilityDecisions) {
+            const record = parseObject(item);
+            const tool = String(record.tool || '').trim();
+            if (!tool) continue;
+            byTool.set(tool, {
+                tool,
+                capability: typeof record.capability === 'string' ? record.capability : null,
+                allowed: Boolean(record.allowed),
+                code: typeof record.code === 'string' ? record.code : null,
+                score: parseOptionalNumber(record.score),
+                reason: typeof record.reason === 'string' ? record.reason : null,
+                missingSlots: parseStringList(record.missingSlots),
+            });
+        }
+    }
+
+    if (Array.isArray(explicitCandidates)) {
+        for (const item of explicitCandidates) {
+            const record = parseObject(item);
+            const tool = String(record.tool || record.toolName || '').trim();
+            if (!tool || byTool.has(tool)) continue;
+            byTool.set(tool, {
+                tool,
+                capability: typeof record.source === 'string' ? record.source : null,
+                allowed: input.selectedTools.includes(tool),
+                code: input.selectedTools.includes(tool) ? 'selected' : 'candidate',
+                score: null,
+                reason: typeof record.reason === 'string' ? record.reason : null,
+                missingSlots: [],
+            });
+        }
+    }
+
+    for (const tool of input.selectedTools) {
+        if (!byTool.has(tool)) {
+            byTool.set(tool, {
+                tool,
+                capability: null,
+                allowed: true,
+                code: 'selected',
+                score: null,
+                reason: 'Ferramenta selecionada pelo motor.',
+                missingSlots: [],
+            });
+        }
+    }
+
+    for (const blocked of input.blockedTools) {
+        if (!byTool.has(blocked.toolName)) {
+            byTool.set(blocked.toolName, {
+                tool: blocked.toolName,
+                capability: null,
+                allowed: false,
+                code: 'blocked',
+                score: null,
+                reason: blocked.reason,
+                missingSlots: blocked.missingSlots,
+            });
+        }
+    }
+
+    return Array.from(byTool.values()).slice(0, 8);
+}
+
+function parsePresentSlotInsights(metadata: unknown): AutopilotDecisionPresentSlotInsight[] {
+    const slotSummary = parseObject(parseObject(metadata).slotSummary);
+    const presentSlots = parseJsonValue(slotSummary.presentSlots);
+    if (!Array.isArray(presentSlots)) return [];
+    return presentSlots
+        .map((item): AutopilotDecisionPresentSlotInsight | null => {
+            const record = parseObject(item);
+            const name = String(record.name || '').trim();
+            if (!name) return null;
+            return {
+                name,
+                source: typeof record.source === 'string' ? record.source : null,
+                confidence: parseOptionalNumber(record.confidence),
+            };
+        })
+        .filter((item): item is AutopilotDecisionPresentSlotInsight => item !== null)
+        .slice(0, 8);
+}
+
+function parseInvalidSlotInsights(metadata: unknown): AutopilotDecisionInvalidSlotInsight[] {
+    const slotSummary = parseObject(parseObject(metadata).slotSummary);
+    const invalidSlots = parseJsonValue(slotSummary.invalidSlots);
+    if (!Array.isArray(invalidSlots)) return [];
+    return invalidSlots
+        .map((item): AutopilotDecisionInvalidSlotInsight | null => {
+            const record = parseObject(item);
+            const name = String(record.name || '').trim();
+            if (!name) return null;
+            return {
+                name,
+                reason: typeof record.reason === 'string' ? record.reason : null,
+            };
+        })
+        .filter((item): item is AutopilotDecisionInvalidSlotInsight => item !== null)
+        .slice(0, 8);
+}
+
+function parseSwitchRouteInsights(value: unknown): AutopilotDecisionSwitchRouteInsight[] {
+    const parsed = parseJsonValue(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+        .map((item): AutopilotDecisionSwitchRouteInsight | null => {
+            const record = parseObject(item);
+            const routeId = String(record.routeId || '').trim();
+            if (!routeId) return null;
+            return {
+                routeId,
+                routeLabel: typeof record.routeLabel === 'string' ? record.routeLabel : null,
+                targetNodeId: typeof record.targetNodeId === 'string' ? record.targetNodeId : null,
+                confidence: parseOptionalNumber(record.confidence),
+                selected: Boolean(record.selected),
+                fallback: Boolean(record.fallback),
+                rejectedReason: typeof record.rejectedReason === 'string' ? record.rejectedReason : null,
+            };
+        })
+        .filter((item): item is AutopilotDecisionSwitchRouteInsight => item !== null)
+        .slice(0, 8);
+}
+
+function parseSwitchResolutionInsight(metadata: unknown): AutopilotDecisionSwitchInsight | null {
+    const switchResolution = parseObject(parseObject(metadata).switchResolution);
+    const switchNodeId = String(switchResolution.switchNodeId || '').trim();
+    const routeId = String(switchResolution.routeId || '').trim();
+    if (!switchNodeId || !routeId) return null;
+    const candidateRoutes = parseSwitchRouteInsights(switchResolution.candidateRoutes);
+    const rejectedRoutes = parseSwitchRouteInsights(switchResolution.rejectedRoutes);
+
+    return {
+        switchNodeId,
+        routeId,
+        routeLabel: typeof switchResolution.routeLabel === 'string' ? switchResolution.routeLabel : null,
+        targetNodeId: typeof switchResolution.targetNodeId === 'string' ? switchResolution.targetNodeId : null,
+        confidence: parseOptionalNumber(switchResolution.confidence),
+        fallbackUsed: Boolean(switchResolution.fallbackUsed),
+        candidateRoutes,
+        rejectedRoutes: rejectedRoutes.length > 0
+            ? rejectedRoutes
+            : candidateRoutes.filter((candidate) => !candidate.selected),
+    };
+}
+
+function parseResourceMappingFieldInsights(value: unknown): AutopilotResourceMappingFieldInsight[] {
+    const parsed = parseJsonValue(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+        .map((item): AutopilotResourceMappingFieldInsight | null => {
+            const record = parseObject(item);
+            const slot = String(record.slot || record.slotName || '').trim();
+            if (!slot) return null;
+            return {
+                slot,
+                fieldId: typeof record.fieldId === 'string' ? record.fieldId : null,
+                fieldLabel: typeof record.fieldLabel === 'string'
+                    ? record.fieldLabel
+                    : typeof record.field === 'string'
+                        ? record.field
+                        : null,
+                confidence: parseOptionalNumber(record.confidence),
+                source: typeof record.source === 'string' ? record.source : null,
+                reason: typeof record.reason === 'string'
+                    ? record.reason
+                    : Array.isArray(record.matchReasons)
+                        ? record.matchReasons.map((item) => String(item)).join(', ')
+                        : null,
+            };
+        })
+        .filter((item): item is AutopilotResourceMappingFieldInsight => item !== null);
+}
+
+function countBy<T extends string>(values: T[]): Array<{ key: T; count: number }> {
+    const counts = new Map<T, number>();
+    for (const value of values) {
+        counts.set(value, (counts.get(value) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+        .map(([key, count]) => ({ key, count }))
+        .sort((a, b) => b.count - a.count);
+}
+
+async function resolveAutopilotConfigWorkspace(configId: string, userId: string) {
+    const configRes = await db.query(
+        `SELECT c.id, c.workspace_id, w.vertical
+         FROM autopilot_configs c
+         LEFT JOIN workspaces w ON w.id = c.workspace_id
+         WHERE c.id = $1
+         LIMIT 1`,
+        [configId],
+    );
+    const config = configRes.rows[0];
+    if (!config) return { error: 'Agente nao encontrado.' };
+    if (!(await isWorkspaceMember(userId, config.workspace_id))) {
+        return { error: 'Voce nao tem acesso a este workspace.' };
+    }
+    return {
+        workspaceId: config.workspace_id as string,
+        vertical: typeof config.vertical === 'string' && config.vertical.trim().length > 0
+            ? config.vertical.trim().toLowerCase()
+            : null,
+    };
+}
+
+async function optionalDecisionInsightQuery<T extends { rows: any[] }>(
+    label: string,
+    query: Promise<T>,
+): Promise<T> {
+    try {
+        return await query;
+    } catch (error) {
+        console.warn(`[GET_AUTOPILOT_DECISION_INSIGHTS] Consulta opcional indisponivel (${label}):`, error);
+        return { rows: [] } as unknown as T;
+    }
+}
+
+export async function getAutopilotDecisionInsights(configId: string): Promise<{
+    insights: AutopilotDecisionInsights | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { insights: null, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { insights: null, error: resolved.error };
+
+        const [decisionsRes, patternsRes, impactDecisionsRes, applicationsRes, ecosystemPatternsRes, scoreHistoryRes, resourceMappingsRes] = await Promise.all([
+            optionalDecisionInsightQuery('agent_decision_ledger.recent', db.query(
+                `SELECT id, decision_type, goal, procedure_id, step_id,
+                        selected_tool, selected_tools_json, blocked_tools_json,
+                        missing_slots_json, confidence, outcome_json, metadata, created_at
+                 FROM agent_decision_ledger
+                 WHERE workspace_id = $1
+                   AND autopilot_config_id = $2
+                 ORDER BY created_at DESC
+                 LIMIT 80`,
+                [resolved.workspaceId, configId],
+            )),
+            optionalDecisionInsightQuery('agent_causal_patterns.active', db.query(
+                `SELECT p.id, p.pattern_type, p.procedure_id, p.step_id, p.switch_node_id, p.switch_route_id,
+                        p.tool_name, p.insight, p.evidence_json, p.suggested_fix_json, p.impact_json,
+                        p.confidence, p.status, p.applied_at, p.created_at,
+                        a.status AS application_status,
+                        a.application_type AS application_type,
+                        a.created_at AS application_created_at
+                 FROM agent_causal_patterns p
+                 LEFT JOIN agent_causal_pattern_applications a
+                   ON a.workspace_id = p.workspace_id
+                  AND a.config_id = $2
+                  AND a.pattern_id = p.id
+                 WHERE p.workspace_id = $1
+                   AND p.status IN ('pending', 'approved', 'applied')
+                 ORDER BY CASE p.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'applied' THEN 2 ELSE 3 END,
+                          p.confidence DESC,
+                          p.created_at DESC
+                LIMIT 12`,
+                [resolved.workspaceId, configId],
+            )),
+            optionalDecisionInsightQuery('agent_decision_ledger.outcomes', db.query(
+                `SELECT decision_type, procedure_id, step_id, selected_tool, selected_tools_json,
+                        metadata, outcome_json, created_at
+                 FROM agent_decision_ledger
+                 WHERE workspace_id = $1
+                   AND autopilot_config_id = $2
+                   AND outcome_json IS NOT NULL
+                   AND created_at >= clock_timestamp() - (90::int * interval '1 day')
+                 ORDER BY created_at ASC
+                LIMIT 2000`,
+                [resolved.workspaceId, configId],
+            )),
+            optionalDecisionInsightQuery('agent_causal_pattern_applications.recent', db.query(
+                `SELECT a.id, a.pattern_id, a.application_type, a.status,
+                        a.before_snapshot_hash, a.after_snapshot_hash,
+                        a.patch_json, a.created_at,
+                        p.pattern_type, p.insight, p.review_metadata
+                 FROM agent_causal_pattern_applications a
+                 INNER JOIN agent_causal_patterns p
+                   ON p.id = a.pattern_id
+                  AND p.workspace_id = a.workspace_id
+                 WHERE a.workspace_id = $1
+                   AND a.config_id = $2
+                 ORDER BY a.created_at DESC
+                LIMIT 10`,
+                [resolved.workspaceId, configId],
+            )),
+            optionalDecisionInsightQuery('agent_ecosystem_patterns.available', db.query(
+                `SELECT e.id, e.fingerprint, e.pattern_type, e.vertical, e.insight,
+                        e.evidence_json, e.suggested_fix_json, e.source_workspace_count,
+                        e.sample_size, e.confidence, e.status, e.validated_at, e.created_at
+                 FROM agent_ecosystem_patterns e
+                 WHERE e.vertical = $2
+                   AND e.status IN ('validated', 'active')
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM agent_causal_patterns p
+                     WHERE p.workspace_id = $1
+                       AND p.fingerprint = e.fingerprint
+                       AND p.status IN ('pending', 'approved', 'applied', 'dismissed', 'conflicted')
+                   )
+                 ORDER BY CASE e.status WHEN 'active' THEN 0 ELSE 1 END,
+                          e.confidence DESC,
+                          e.validated_at DESC NULLS LAST,
+                          e.created_at DESC
+                 LIMIT 6`,
+                [resolved.workspaceId, resolved.vertical || '__none__'],
+            )),
+            optionalDecisionInsightQuery('agent_score_history.recent', db.query(
+                `SELECT id, weights_json, source, evidence_pattern_id, reason, applied_at
+                 FROM agent_score_history
+                 WHERE workspace_id = $1
+                   AND (autopilot_config_id = $2 OR autopilot_config_id IS NULL)
+                 ORDER BY applied_at DESC
+                 LIMIT 8`,
+                [resolved.workspaceId, configId],
+            )),
+            optionalDecisionInsightQuery('resource_mapping_ledger.recent', db.query(
+                `SELECT id, resource, operation, status, confidence, mapped_fields_json,
+                        rejected_fields_json, payload_hash, created_at
+                 FROM resource_mapping_ledger
+                 WHERE workspace_id = $1
+                 ORDER BY created_at DESC
+                 LIMIT 12`,
+                [resolved.workspaceId],
+            )),
+        ]);
+
+        const decisions = decisionsRes.rows.map((row): AutopilotDecisionInsightItem => {
+            const outcome = parseObject(row.outcome_json);
+            const selectedTools = parseStringList(row.selected_tools_json);
+            const blockedTools = parseBlockedToolInsights(row.blocked_tools_json);
+            const metadata = parseObject(row.metadata);
+            return {
+                id: row.id,
+                stage: row.decision_type || 'runtime',
+                decisionType: row.decision_type,
+                goal: row.goal || null,
+                procedureId: row.procedure_id || null,
+                stepId: row.step_id || null,
+                selectedTool: row.selected_tool || null,
+                selectedTools,
+                candidateTools: parseCandidateToolInsights({
+                    metadata,
+                    selectedTools,
+                    blockedTools,
+                }),
+                blockedTools,
+                blockedToolsCount: blockedTools.length,
+                presentSlots: parsePresentSlotInsights(metadata),
+                invalidSlots: parseInvalidSlotInsights(metadata),
+                requiredSlots: parseStringList(row.missing_slots_json),
+                switchResolution: parseSwitchResolutionInsight(metadata),
+                confidence: row.confidence == null ? null : Number(row.confidence),
+                outcomeResolutionType: typeof outcome.resolutionType === 'string' ? outcome.resolutionType : null,
+                outcomeResolved: typeof outcome.resolved === 'boolean' ? outcome.resolved : null,
+                createdAt: new Date(row.created_at).toISOString(),
+            };
+        });
+
+        const impactDecisions = impactDecisionsRes.rows
+            .map((row): CausalPatternImpactDecision | null => {
+                const outcome = parseObject(row.outcome_json);
+                if (typeof outcome.resolved !== 'boolean'
+                    || typeof outcome.resolutionType !== 'string'
+                    || !Array.isArray(outcome.toolsExecuted)
+                    || !Array.isArray(outcome.toolsFailed)) {
+                    return null;
+                }
+                return {
+                    createdAt: row.created_at,
+                    decisionType: String(row.decision_type || ''),
+                    procedureId: row.procedure_id || null,
+                    stepId: row.step_id || null,
+                    selectedTool: row.selected_tool || null,
+                    selectedTools: parseStringList(row.selected_tools_json),
+                    metadata: parseObject(row.metadata),
+                    outcome: {
+                        resolved: outcome.resolved,
+                        resolutionType: outcome.resolutionType as any,
+                        turnsToResolve: typeof outcome.turnsToResolve === 'number' ? outcome.turnsToResolve : 0,
+                        timeToResolutionSeconds: typeof outcome.timeToResolutionSeconds === 'number' ? outcome.timeToResolutionSeconds : null,
+                        customerAskedForHuman: Boolean(outcome.customerAskedForHuman),
+                        customerSentimentFinal: typeof outcome.customerSentimentFinal === 'string' ? outcome.customerSentimentFinal as any : 'neutral',
+                        toolsExecuted: parseStringList(outcome.toolsExecuted),
+                        toolsFailed: parseStringList(outcome.toolsFailed),
+                        escalationNeeded: Boolean(outcome.escalationNeeded),
+                        closedBy: typeof outcome.closedBy === 'string' ? outcome.closedBy as any : null,
+                        chatStatus: typeof outcome.chatStatus === 'string' ? outcome.chatStatus : null,
+                        stepOutcomes: Array.isArray(outcome.stepOutcomes) ? outcome.stepOutcomes as any : [],
+                    },
+                };
+            })
+            .filter((decision): decision is CausalPatternImpactDecision => decision !== null);
+
+        const patterns = patternsRes.rows.map((row): AutopilotCausalPatternInsight => {
+            const appliedAt = row.applied_at
+                ? new Date(row.applied_at).toISOString()
+                : row.application_created_at
+                    ? new Date(row.application_created_at).toISOString()
+                    : null;
+            const applicationStatus = row.application_status || null;
+            const applicationImpact = row.status === 'applied'
+                ? buildCausalPatternImpactReport({
+                    id: row.id,
+                    patternType: row.pattern_type,
+                    procedureId: row.procedure_id || null,
+                    stepId: row.step_id || null,
+                    switchNodeId: row.switch_node_id || null,
+                    switchRouteId: row.switch_route_id || null,
+                    toolName: row.tool_name || null,
+                    appliedAt,
+                    applicationStatus,
+                }, impactDecisions)
+                : null;
+
+            return ({
+                id: row.id,
+                patternType: row.pattern_type,
+                procedureId: row.procedure_id || null,
+                stepId: row.step_id || null,
+                switchNodeId: row.switch_node_id || null,
+                switchRouteId: row.switch_route_id || null,
+                toolName: row.tool_name || null,
+                insight: row.insight,
+                evidence: parseObject(row.evidence_json),
+                suggestedFix: parseObject(row.suggested_fix_json),
+                impact: parseObject(row.impact_json),
+                confidence: row.confidence == null ? 0 : Number(row.confidence),
+                status: row.status,
+                applicationStatus,
+                applicationType: row.application_type || null,
+                appliedAt,
+                applicationImpact,
+                createdAt: new Date(row.created_at).toISOString(),
+            });
+        });
+
+        const recentApplications = applicationsRes.rows.map((row): AutopilotCausalPatternApplicationInsight => {
+            const patch = parseObject(row.patch_json);
+            const reviewMetadata = parseObject(row.review_metadata);
+            const publication = parseObject(patch.publication);
+            const rollback = parseObject(patch.rollback);
+            const graphPatch = parseObject(patch.graphPatch);
+            const rawSource = typeof patch.applicationSource === 'string'
+                ? patch.applicationSource
+                : typeof reviewMetadata.applicationSource === 'string'
+                    ? reviewMetadata.applicationSource
+                    : 'unknown';
+            const applicationSource = rawSource === 'manual' || rawSource === 'safe_auto_tune'
+                ? rawSource
+                : 'unknown';
+            const graphPatchOperations = Array.isArray(graphPatch.operations) ? graphPatch.operations : [];
+
+            return {
+                id: row.id,
+                patternId: row.pattern_id,
+                patternType: row.pattern_type,
+                insight: row.insight,
+                applicationType: row.application_type,
+                applicationSource,
+                status: row.status,
+                beforeSnapshotHash: row.before_snapshot_hash,
+                afterSnapshotHash: row.after_snapshot_hash,
+                graphPatchIncluded: Boolean(patch.graphPatchIncluded),
+                graphPatchOperationCount: typeof graphPatch.operationCount === 'number'
+                    ? graphPatch.operationCount
+                    : graphPatchOperations.length,
+                publishedVersionNumber: typeof publication.versionNumber === 'number'
+                    ? publication.versionNumber
+                    : null,
+                publishedAt: typeof publication.publishedAt === 'string' ? publication.publishedAt : null,
+                revertedAt: typeof rollback.revertedAt === 'string' ? rollback.revertedAt : null,
+                createdAt: new Date(row.created_at).toISOString(),
+            };
+        });
+
+        const ecosystemPatterns = ecosystemPatternsRes.rows.map((row): AutopilotEcosystemPatternInsight => ({
+            id: row.id,
+            fingerprint: row.fingerprint,
+            patternType: row.pattern_type,
+            vertical: row.vertical,
+            insight: row.insight,
+            evidence: parseObject(row.evidence_json),
+            suggestedFix: parseObject(row.suggested_fix_json),
+            sourceWorkspaceCount: Number(row.source_workspace_count || 0),
+            sampleSize: Number(row.sample_size || 0),
+            confidence: row.confidence == null ? 0 : Number(row.confidence),
+            status: row.status,
+            validatedAt: row.validated_at ? new Date(row.validated_at).toISOString() : null,
+            createdAt: new Date(row.created_at).toISOString(),
+        }));
+
+        const scoreHistory = scoreHistoryRes.rows.map((row): AutopilotScoreHistoryInsight => {
+            const rawWeights = parseObject(row.weights_json);
+            const weights = Object.fromEntries(
+                Object.entries(rawWeights)
+                    .map(([key, value]) => [key, Number(value)])
+                    .filter((entry): entry is [string, number] => Number.isFinite(entry[1])),
+            );
+            return {
+                id: row.id,
+                source: row.source,
+                weights,
+                evidencePatternId: row.evidence_pattern_id || null,
+                reason: row.reason || null,
+                appliedAt: new Date(row.applied_at).toISOString(),
+            };
+        });
+        const resourceMappings = resourceMappingsRes.rows.map((row): AutopilotResourceMappingInsight => {
+            const rejectedFields = parseJsonValue(row.rejected_fields_json);
+            return {
+                id: row.id,
+                resource: row.resource,
+                operation: row.operation,
+                status: row.status,
+                confidence: row.confidence == null ? null : Number(row.confidence),
+                mappedFields: parseResourceMappingFieldInsights(row.mapped_fields_json).slice(0, 8),
+                rejectedFieldsCount: Array.isArray(rejectedFields) ? rejectedFields.length : 0,
+                payloadHash: row.payload_hash || null,
+                createdAt: new Date(row.created_at).toISOString(),
+            };
+        });
+        const learningTrend = buildAutopilotLearningTrend(impactDecisions);
+        const procedureOutcomes = buildAutopilotProcedureOutcomeInsights(impactDecisions);
+        const switchRouteOutcomes = buildAutopilotSwitchRouteOutcomeInsights(impactDecisions);
+
+        const confidences = decisions
+            .map((decision) => decision.confidence)
+            .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+        const decisionsWithOutcome = decisions.filter((decision) => decision.outcomeResolutionType);
+        const decisionTypeCounts = countBy(decisions.map((decision) => decision.decisionType))
+            .map(({ key, count }) => ({ decisionType: key, count }));
+        const outcomeCounts = countBy(decisionsWithOutcome.map((decision) => decision.outcomeResolutionType || 'unknown'))
+            .map(({ key, count }) => ({ resolutionType: key, count }));
+        const pendingPatterns = patterns.filter((pattern) => pattern.status === 'pending').length;
+        const approvedPatterns = patterns.filter((pattern) => pattern.status === 'approved').length;
+        const appliedPatterns = patterns.filter((pattern) => pattern.status === 'applied').length;
+
+        return {
+            insights: {
+                summary: {
+                    totalDecisions: decisions.length,
+                    decisionsWithOutcome: decisionsWithOutcome.length,
+                    resolvedOutcomes: decisionsWithOutcome.filter((decision) => decision.outcomeResolved === true).length,
+                    handoffOutcomes: decisionsWithOutcome.filter((decision) => decision.outcomeResolutionType === 'human_handoff').length,
+                    averageConfidence: confidences.length > 0
+                        ? Number((confidences.reduce((sum, value) => sum + value, 0) / confidences.length).toFixed(3))
+                        : null,
+                    blockedToolDecisions: decisions.filter((decision) => decision.blockedToolsCount > 0).length,
+                    pendingPatterns,
+                    approvedPatterns,
+                    appliedPatterns,
+                },
+                decisionTypeCounts,
+                outcomeCounts,
+                recentDecisions: decisions.slice(0, 12),
+                patterns,
+                recentApplications,
+                ecosystemPatterns,
+                scoreHistory,
+                learningTrend,
+                procedureOutcomes,
+                switchRouteOutcomes,
+                resourceMappings,
+            },
+        };
+    } catch (error) {
+        console.error('[GET_AUTOPILOT_DECISION_INSIGHTS] Erro ao buscar insights:', error);
+        return { insights: null, error: 'Falha ao buscar insights do motor de decisao.' };
+    }
+}
+
+export async function refreshAutopilotDecisionPatterns(configId: string): Promise<{
+    success: boolean;
+    insights?: AutopilotDecisionInsights | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+        await detectAndPersistCausalPatternsForWorkspace({
+            workspaceId: resolved.workspaceId,
+            sinceDays: 30,
+        });
+        const nextInsights = await getAutopilotDecisionInsights(configId);
+        return {
+            success: !nextInsights.error,
+            insights: nextInsights.insights,
+            error: nextInsights.error,
+        };
+    } catch (error) {
+        console.error('[REFRESH_AUTOPILOT_DECISION_PATTERNS] Erro ao atualizar padroes:', error);
+        return { success: false, error: 'Falha ao atualizar aprendizados do agente.' };
+    }
+}
+
+export async function importAutopilotEcosystemPattern(input: {
+    configId: string;
+    ecosystemPatternId: string;
+}): Promise<{
+    success: boolean;
+    insights?: AutopilotDecisionInsights | null;
+    patternId?: string;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(input.configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+        if (!resolved.vertical) {
+            return { success: false, error: 'Defina a vertical do workspace antes de importar sugestoes do ecossistema.' };
+        }
+
+        const imported = await importEcosystemPatternForWorkspace({
+            workspaceId: resolved.workspaceId,
+            ecosystemPatternId: input.ecosystemPatternId,
+            vertical: resolved.vertical,
+            importedByUserId: user.id,
+        });
+        if (imported.error || !imported.pattern) {
+            return { success: false, error: imported.error || 'Falha ao importar sugestao do ecossistema.' };
+        }
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${input.configId}`);
+
+        const nextInsights = await getAutopilotDecisionInsights(input.configId);
+        return {
+            success: !nextInsights.error,
+            insights: nextInsights.insights,
+            patternId: imported.pattern.id,
+            error: nextInsights.error,
+        };
+    } catch (error) {
+        console.error('[IMPORT_AUTOPILOT_ECOSYSTEM_PATTERN] Erro ao importar padrao do ecossistema:', error);
+        return { success: false, error: 'Falha ao importar sugestao do ecossistema.' };
+    }
+}
+
+export async function reviewAutopilotCausalPattern(input: {
+    configId: string;
+    patternId: string;
+    decision: CausalPatternReviewDecision;
+    note?: string | null;
+}): Promise<{
+    success: boolean;
+    insights?: AutopilotDecisionInsights | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(input.configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+        const review = await reviewCausalPattern({
+            workspaceId: resolved.workspaceId,
+            patternId: input.patternId,
+            decision: input.decision,
+            reviewedByUserId: user.id,
+            note: input.note,
+        });
+        if (review.error) return { success: false, error: review.error };
+
+        const nextInsights = await getAutopilotDecisionInsights(input.configId);
+        return {
+            success: !nextInsights.error,
+            insights: nextInsights.insights,
+            error: nextInsights.error,
+        };
+    } catch (error) {
+        console.error('[REVIEW_AUTOPILOT_CAUSAL_PATTERN] Erro ao revisar padrao:', error);
+        return { success: false, error: 'Falha ao revisar sugestao do agente.' };
+    }
+}
+
+export async function previewAutopilotCausalPatternApplication(input: {
+    configId: string;
+    patternId: string;
+}): Promise<{
+    success: boolean;
+    preview?: AutopilotCausalPatternApplicationPreview | null;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(input.configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+
+        const preview = await previewCausalPatternDraftApplication({
+            workspaceId: resolved.workspaceId,
+            configId: input.configId,
+            patternId: input.patternId,
+        });
+        if (preview.error) return { success: false, error: preview.error };
+        return { success: true, preview: preview.preview };
+    } catch (error) {
+        console.error('[PREVIEW_AUTOPILOT_CAUSAL_PATTERN_APPLICATION] Erro ao gerar preview:', error);
+        return { success: false, error: 'Falha ao gerar preview da sugestao.' };
+    }
+}
+
+export async function applyAutopilotCausalPattern(input: {
+    configId: string;
+    patternId: string;
+    applicationMode?: 'full' | 'knowledge_only';
+}): Promise<{
+    success: boolean;
+    insights?: AutopilotDecisionInsights | null;
+    draftUpdatedAt?: string;
+    documentId?: string;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(input.configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+
+        const applied = await applyCausalPatternToDraft({
+            workspaceId: resolved.workspaceId,
+            configId: input.configId,
+            patternId: input.patternId,
+            userId: user.id,
+            includeGraphPatch: input.applicationMode !== 'knowledge_only',
+        });
+        if (!applied.success) return { success: false, error: applied.error };
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${input.configId}`);
+
+        const nextInsights = await getAutopilotDecisionInsights(input.configId);
+        return {
+            success: !nextInsights.error,
+            insights: nextInsights.insights,
+            draftUpdatedAt: applied.draftUpdatedAt,
+            documentId: applied.documentId,
+            error: nextInsights.error,
+        };
+    } catch (error) {
+        console.error('[APPLY_AUTOPILOT_CAUSAL_PATTERN] Erro ao aplicar padrao:', error);
+        return { success: false, error: 'Falha ao aplicar sugestao no rascunho.' };
+    }
+}
+
+export async function applySafeAutopilotCausalPatternAutoTune(input: {
+    configId: string;
+}): Promise<{
+    success: boolean;
+    insights?: AutopilotDecisionInsights | null;
+    appliedCount?: number;
+    skippedCount?: number;
+    draftUpdatedAt?: string;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(input.configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+
+        const result = await applySafeCausalPatternAutoTuneToDraft({
+            workspaceId: resolved.workspaceId,
+            configId: input.configId,
+            userId: user.id,
+        });
+        if (!result.success && result.appliedCount === 0) {
+            return { success: false, error: result.error || 'Nenhum aprendizado seguro foi aplicado.' };
+        }
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${input.configId}`);
+
+        const nextInsights = await getAutopilotDecisionInsights(input.configId);
+        return {
+            success: !nextInsights.error && result.errors.length === 0,
+            insights: nextInsights.insights,
+            appliedCount: result.appliedCount,
+            skippedCount: result.skippedCount,
+            draftUpdatedAt: result.draftUpdatedAt,
+            error: result.errors.length > 0 ? result.error : nextInsights.error,
+        };
+    } catch (error) {
+        console.error('[SAFE_AUTOPILOT_CAUSAL_PATTERN_AUTO_TUNE] Erro ao executar auto-tune:', error);
+        return { success: false, error: 'Falha ao executar auto-tune seguro.' };
+    }
+}
+
+export async function applyAutopilotScoreSuggestion(input: {
+    configId: string;
+    scoreHistoryId: string;
+}): Promise<{
+    success: boolean;
+    insights?: AutopilotDecisionInsights | null;
+    appliedScoreHistoryId?: string;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(input.configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+
+        const suggestionRes = await db.query(
+            `SELECT id, workspace_id, agent_id, autopilot_config_id, weights_json, reason, evidence_pattern_id, source
+               FROM agent_score_history
+              WHERE id = $1
+                AND workspace_id = $2
+                AND source = 'suggestion'
+                AND (autopilot_config_id = $3 OR autopilot_config_id IS NULL)
+              LIMIT 1`,
+            [input.scoreHistoryId, resolved.workspaceId, input.configId],
+        );
+        const suggestion = suggestionRes.rows[0];
+        if (!suggestion) {
+            return { success: false, error: 'Sugestao de score nao encontrada ou ja aplicada.' };
+        }
+
+        const applied = await recordAgentScoreHistory({
+            workspaceId: resolved.workspaceId,
+            agentId: suggestion.agent_id || null,
+            autopilotConfigId: suggestion.autopilot_config_id || input.configId,
+            weights: normalizeToolSelectionScoreWeights(parseObject(suggestion.weights_json) as any),
+            source: 'manual',
+            evidencePatternId: suggestion.evidence_pattern_id || null,
+            reason: `Aplicado manualmente a partir da sugestao ${suggestion.id}. ${suggestion.reason || ''}`.trim(),
+            userId: user.id,
+        });
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${input.configId}`);
+
+        const nextInsights = await getAutopilotDecisionInsights(input.configId);
+        return {
+            success: Boolean(applied) && !nextInsights.error,
+            insights: nextInsights.insights,
+            appliedScoreHistoryId: applied?.id,
+            error: nextInsights.error,
+        };
+    } catch (error) {
+        console.error('[APPLY_AUTOPILOT_SCORE_SUGGESTION] Erro ao aplicar sugestao de score:', error);
+        return { success: false, error: 'Falha ao aplicar pesos do score.' };
+    }
+}
+
+export async function revertAutopilotCausalPatternApplication(input: {
+    configId: string;
+    patternId: string;
+}): Promise<{
+    success: boolean;
+    insights?: AutopilotDecisionInsights | null;
+    draftUpdatedAt?: string;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+    try {
+        const resolved = await resolveAutopilotConfigWorkspace(input.configId, user.id);
+        if (resolved.error || !resolved.workspaceId) return { success: false, error: resolved.error };
+
+        const reverted = await revertCausalPatternDraftApplication({
+            workspaceId: resolved.workspaceId,
+            configId: input.configId,
+            patternId: input.patternId,
+            userId: user.id,
+        });
+        if (!reverted.success) return { success: false, error: reverted.error };
+
+        revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${input.configId}`);
+
+        const nextInsights = await getAutopilotDecisionInsights(input.configId);
+        return {
+            success: !nextInsights.error,
+            insights: nextInsights.insights,
+            draftUpdatedAt: reverted.draftUpdatedAt,
+            error: nextInsights.error,
+        };
+    } catch (error) {
+        console.error('[REVERT_AUTOPILOT_CAUSAL_PATTERN_APPLICATION] Erro ao reverter aplicacao:', error);
+        return { success: false, error: 'Falha ao reverter sugestao no rascunho.' };
     }
 }
 

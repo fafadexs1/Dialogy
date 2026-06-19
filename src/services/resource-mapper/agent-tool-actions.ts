@@ -3,6 +3,7 @@ import type { Contact } from '@/lib/types';
 import type { AgentToolAction } from '@/services/agent-tools/types';
 import { mapCrmContactCustomFields } from './crm-contact-custom-fields';
 import type { ResourceMappingResult } from './types';
+import { recordResourceMappingLedger } from './ledger';
 
 export type ResourceMappedAgentActionsResult = {
   actions: AgentToolAction[];
@@ -18,6 +19,9 @@ export async function mapAgentToolActionsToResources(input: {
   actions: AgentToolAction[];
   enabledToolNames?: string[];
   inferCrmUpdateFromSlots?: boolean;
+  chatId?: string | null;
+  messageId?: string | null;
+  procedureExecutionId?: string | null;
 }): Promise<ResourceMappedAgentActionsResult> {
   const mappedActions: AgentToolAction[] = [];
   const mappings: ResourceMappingResult[] = [];
@@ -40,6 +44,15 @@ export async function mapAgentToolActionsToResources(input: {
       reason: action.reason,
     });
     mappings.push(mapping);
+    if (input.chatId || input.messageId || input.procedureExecutionId) {
+      await recordResourceMappingLedger({
+        workspaceId: input.workspaceId,
+        chatId: input.chatId,
+        messageId: input.messageId,
+        procedureExecutionId: input.procedureExecutionId,
+        mapping,
+      });
+    }
 
     if (mapping.mappedAction) {
       mappedActions.push(mapping.mappedAction);
@@ -64,6 +77,15 @@ export async function mapAgentToolActionsToResources(input: {
     });
     if (inferredMapping.mappedAction) {
       mappings.push(inferredMapping);
+      if (input.chatId || input.messageId || input.procedureExecutionId) {
+        await recordResourceMappingLedger({
+          workspaceId: input.workspaceId,
+          chatId: input.chatId,
+          messageId: input.messageId,
+          procedureExecutionId: input.procedureExecutionId,
+          mapping: inferredMapping,
+        });
+      }
       mappedActions.unshift(inferredMapping.mappedAction);
     }
   }

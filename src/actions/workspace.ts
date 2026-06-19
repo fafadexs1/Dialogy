@@ -9,6 +9,28 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { Buffer } from 'node:buffer';
 import { ensurePermissionsSeed } from '@/lib/permissions-seed';
 import { updateUserOnlineStatus } from '@/lib/presence-server';
+import { loadResourceMappingProfileText, upsertResourceMappingProfile } from '@/services/resource-mapper/profiles';
+
+function normalizeWorkspaceVertical(value: FormDataEntryValue | null): string | null {
+  if (typeof value !== 'string') return null;
+  if (value === '__none__') return null;
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+  return normalized || null;
+}
+
+async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
+  const res = await db.query(
+    'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2 LIMIT 1',
+    [userId, workspaceId]
+  );
+  return (res.rowCount ?? 0) > 0;
+}
 
 export async function createWorkspaceAction(
   prevState: any,
@@ -22,6 +44,7 @@ export async function createWorkspaceAction(
   }
   const userId = user.id;
   const workspaceName = formData.get('workspaceName') as string;
+  const workspaceVertical = normalizeWorkspaceVertical(formData.get('vertical'));
 
   if (!workspaceName) {
     return { success: false, error: 'O nome do workspace é obrigatório.' };
@@ -34,8 +57,8 @@ export async function createWorkspaceAction(
 
     // 1. Inserir o novo workspace.
     const workspaceRes = await client.query(
-      'INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id',
-      [workspaceName, userId]
+      'INSERT INTO workspaces (name, owner_id, vertical) VALUES ($1, $2, $3) RETURNING id',
+      [workspaceName, userId, workspaceVertical]
     );
     const newWorkspaceId = workspaceRes.rows[0].id;
 
@@ -95,6 +118,49 @@ export async function createWorkspaceAction(
   return { success: true, error: null };
 }
 
+export async function getResourceMappingProfile(workspaceId: string): Promise<{
+  profileText: string;
+  error?: string | null;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { profileText: '', error: 'Usuario nao autenticado.' };
+  if (!workspaceId || !(await isWorkspaceMember(user.id, workspaceId))) {
+    return { profileText: '', error: 'Voce nao tem acesso a este workspace.' };
+  }
+
+  return {
+    profileText: await loadResourceMappingProfileText({ workspaceId }),
+    error: null,
+  };
+}
+
+export async function updateResourceMappingProfileAction(
+  prevState: any,
+  formData: FormData
+): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+
+  const workspaceId = String(formData.get('workspaceId') || '').trim();
+  const aliasesText = String(formData.get('resourceMappingAliases') || '');
+  if (!workspaceId) return { success: false, error: 'ID do workspace nao encontrado.' };
+  if (!(await isWorkspaceMember(user.id, workspaceId))) {
+    return { success: false, error: 'Voce nao tem acesso a este workspace.' };
+  }
+
+  try {
+    await upsertResourceMappingProfile({ workspaceId, aliasesText });
+  } catch (error: any) {
+    console.error('[RESOURCE_MAPPING_PROFILE] Failed to update profile:', error);
+    return { success: false, error: `Falha ao salvar aliases do Resource Mapper: ${error.message || 'erro desconhecido'}` };
+  }
+
+  revalidatePath('/settings/workspace');
+  return { success: true, error: null };
+}
+
 
 export async function updateWorkspaceAction(
   prevState: any,
@@ -125,6 +191,7 @@ export async function updateWorkspaceAction(
   const fieldsToUpdate: { [key: string]: any } = {};
   if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;
   if (formData.has('timezone')) fieldsToUpdate.timezone = timezone;
+  if (formData.has('vertical')) fieldsToUpdate.vertical = normalizeWorkspaceVertical(formData.get('vertical'));
   if (formData.has('closeMessageTemplate')) fieldsToUpdate.close_message_template = closeMessageTemplate || '';
   if (formData.has('transferMessageTemplate')) fieldsToUpdate.transfer_team_message_template = transferMessageTemplate || '';
   if (formData.has('marketingAutoCloseSeconds')) {

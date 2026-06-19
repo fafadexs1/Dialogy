@@ -76,6 +76,22 @@ function connectedToolInstructions(graph: AutopilotFlowGraph, activeNodeId: stri
   }, {});
 }
 
+function includeCompanionTools(input: {
+  scopedToolNames: string[];
+  globallyEnabledToolNames: string[];
+}) {
+  const allowed = new Set(input.scopedToolNames);
+  const enabled = new Set(input.globallyEnabledToolNames);
+
+  if (allowed.has("transfer_chat") && enabled.has("add_internal_note")) {
+    allowed.add("add_internal_note");
+  }
+
+  return input.scopedToolNames.concat(
+    [...allowed].filter((name) => !input.scopedToolNames.includes(name)),
+  );
+}
+
 export function resolveAllowedKnowledgeDocumentIds(input: {
   config: AutopilotConfig;
   documents: KnowledgeBaseDocument[];
@@ -100,9 +116,13 @@ export function compileAutopilotTurnPolicy(input: {
   const requestedMode = input.config.tool_mode;
   const toolMode: AutopilotToolMode = requestedMode ?? (attachedToolNames.length ? "on_demand" : "deny");
   const enabled = new Set(globallyEnabledToolNames);
-  const allowedToolNames = toolMode === "deny"
+  const scopedToolNames = toolMode === "deny"
     ? []
     : attachedToolNames.filter((name) => enabled.has(name));
+  const allowedToolNames = includeCompanionTools({
+    scopedToolNames,
+    globallyEnabledToolNames,
+  });
 
   return {
     activeNodeId,

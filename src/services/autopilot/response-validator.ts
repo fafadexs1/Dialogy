@@ -7,6 +7,7 @@ import { hasConversationCloseClaim } from './close-intent';
 import { hasExternalLookupPromise } from './tool-planner';
 import { repairTurnContinuation } from './turn-continuation';
 import { buildSgpResponseFromToolResults } from '@/services/autopilot-sgp-response';
+import { hasClinicalRedFlagSignal, hasClinicalTriageSignal } from './clinical-triage';
 
 export type ResponseValidatorDecision =
   | 'approve'
@@ -77,6 +78,10 @@ function hasPlannedTransfer(actions: AgentToolAction[]): boolean {
   return actions.some((action) => action.type === 'transfer_chat');
 }
 
+function hasOperationalAction(actions: AgentToolAction[]): boolean {
+  return actions.some((action) => action.type !== 'add_internal_note');
+}
+
 function hasLookupSuccessClaim(response: string): boolean {
   const normalized = normalizeText(response);
   return (
@@ -131,6 +136,203 @@ function hasTransferPromise(response: string): boolean {
   const normalized = normalizeText(response);
   return /\b(vou|irei|vamos)\s+(encaminhar|transferir|passar|chamar)\b/.test(normalized) &&
     /\b(equipe|setor|atendente|humano|responsavel)\b/.test(normalized);
+}
+
+function hasAutomationLimitationForScheduling(response: string): boolean {
+  const normalized = normalizeText(response);
+  return /\b(nao consigo consultar|verificar disponibilidade|consultar disponibilidade|vou encaminhar|vou envolver|atendente humano|equipe pediatras|equipe responsavel)\b/.test(normalized);
+}
+
+function hasSchedulingPreferenceText(text: string): boolean {
+  return /\b(prefiro|pode ser|quero|manha|tarde|noite|hoje|amanha|cedo|rotina|eletiv|urgente|horario|periodo|consulta)\b/.test(normalizeText(text));
+}
+
+function inferPediatricScheduleClass(text: string): 'azul' | 'amarelo' | null {
+  const normalized = normalizeText(text);
+  const hasBlueSignal = (
+    /\b(sem febre|nao tem febre|temperatura normal)\b/.test(normalized) &&
+    /\b(respiracao normal|sem cansaco|nao esta cansad[ao]|sem falta de ar)\b/.test(normalized) &&
+    /\b(ativa|ativo|brincando|comeu|comendo|alimenta|urinando normal|urinou normal|urina normal)\b/.test(normalized)
+  ) || (
+    /\b(tosse leve|coriza clara|espirrando|espirros)\b/.test(normalized) &&
+    /\b(sem febre|respiracao normal|ativa|ativo|brincando|comeu|urinou|urinando)\b/.test(normalized)
+  );
+  if (hasBlueSignal) return 'azul';
+
+  const hasHighFeverValue = /\b(?:38[\s,.]*[5-9]|39(?:[\s,.]*\d)?|4[0-2](?:[\s,.]*\d)?)\b/.test(normalized);
+  const hasPersistentFeverDuration = /\b(36|48|anteontem|dois dias|2 dias|ha dois dias|mais de um dia|persistente)\b/.test(normalized);
+  const hasYellowSignal = (
+    hasHighFeverValue &&
+    hasPersistentFeverDuration
+  ) || (
+    /\b(vomitou|vomito|vomitos|diarreia)\b/.test(normalized) &&
+    /\b(aceita agua|aceitando agua|pequenos goles|urinou|fez xixi|sem olhos fundos|nao tem boca seca|nao tem olhos fundos)\b/.test(normalized)
+  );
+  if (hasYellowSignal) return 'amarelo';
+
+  return null;
+}
+
+function buildPediatricSchedulingRepair(input: {
+  customerMessage: string;
+  chatHistory?: string | null;
+  response: string;
+}): string | null {
+  const context = [
+    input.chatHistory || '',
+    input.customerMessage,
+    input.response,
+  ].filter(Boolean).join('\n');
+  const normalized = normalizeText(context);
+
+  if (!/\b(filh[ao]|crianca|bebe|pediatr|febre|tosse|coriza|vomit|diarreia|respiracao|consulta)\b/.test(normalized)) {
+    return null;
+  }
+  if (!hasSchedulingPreferenceText(context)) return null;
+
+  const scheduleClass = inferPediatricScheduleClass(context);
+  if (scheduleClass === 'azul') {
+    return 'Perfeito. Pelo que voce informou, o quadro segue como leve, entao vamos continuar com o agendamento de uma consulta eletiva/de rotina. Para concluir, qual dia fica melhor?';
+  }
+  if (scheduleClass === 'amarelo') {
+    return 'Perfeito. Pelo que voce informou, o caso precisa de consulta urgente, idealmente hoje ou no maximo amanha. Para concluir, qual horario especifico fica melhor?';
+  }
+
+  return null;
+}
+
+function buildClinicalHandoffRepair(input: {
+  customerMessage: string;
+  chatHistory?: string | null;
+  response: string;
+  systemAgentName?: string | null;
+}): string | null {
+  const context = [
+    input.systemAgentName || '',
+    input.chatHistory || '',
+    input.customerMessage,
+    input.response,
+  ].filter(Boolean).join('\n');
+
+  if (!hasClinicalRedFlagSignal(context)) return null;
+
+  return [
+    'Identifiquei sinais de alerta importantes. Leve a crianca agora mesmo ao pronto-socorro fisico mais proximo.',
+    'Estou transferindo a conversa para nossa equipe humana de plantao para suporte imediato.',
+    '',
+    '[TRANSFERIR_HUMANO]',
+  ].join('\n');
+}
+
+function hasDeferredAnswerPromise(response: string): boolean {
+  const normalized = normalizeText(response);
+  if (!normalized) return false;
+
+  return [
+    /\b(vou|irei|vamos|posso|consigo)\s+(?:realizar|fazer|iniciar|seguir com|preparar|montar|elaborar|aprofundar)\b.{0,90}\b(analise|avaliacao|triagem|verificacao|investigacao|levantamento|diagnostico|retorno)\b/,
+    /\b(vou|irei|vamos|posso|consigo)\b.{0,70}\b(analisar|avaliar|verificar melhor|olhar com mais detalhe|entender melhor|investigar)\b/,
+    /\b(vou|irei|vamos)\b.{0,110}\b(?:te|lhe)?\s*(?:passar|enviar|trazer|dar)\b.{0,60}\b(orientacoes|detalhes|retorno|resposta|analise)\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function hasCustomerFacingNextStep(response: string): boolean {
+  const normalized = normalizeText(response);
+  return (
+    response.includes('?') ||
+    /\b(me informe|informe|envie|me passe|passa|diga|responda|confirme|preciso que|por favor|escolha|selecione)\b/.test(normalized) ||
+    /\b(qual e|qual seria|quando voce|onde fica|onde voce|como prefere|como deseja|como posso)\b/.test(normalized) ||
+    /\b(recomendo|oriento|minha orientacao|a orientacao e|o proximo passo|leve|procure|agende|acesse|clique|preencha|vou encaminhar|encaminhando)\b/.test(normalized)
+  );
+}
+
+function hasSlotValue(slots: SlotExtractionResult['slots'], slot: AutopilotSlotName): boolean {
+  return Boolean(slots[slot]?.trim());
+}
+
+function slotQuestionForDeferredPromise(slot: AutopilotSlotName, contact?: Contact | null): string {
+  switch (slot) {
+    case 'product_or_service_preference':
+      return 'Qual produto ou servico voce quer resolver agora?';
+    case 'name':
+      return 'Qual e o seu nome completo?';
+    case 'customer_identifier':
+      return 'Para continuar com seguranca, me informe o CPF/CNPJ ou identificador cadastrado.';
+    case 'address':
+      return 'Qual e o endereco ou localidade completa?';
+    case 'phone':
+      if (contact?.phone || contact?.phone_number_jid) return 'Posso usar este WhatsApp como telefone de contato?';
+      return 'Qual e o melhor telefone ou WhatsApp de contato com DDD?';
+    case 'email':
+      return 'Qual email devo usar para contato?';
+    case 'date':
+      return 'Qual data voce prefere?';
+    case 'time':
+      return 'Qual horario voce prefere?';
+    case 'order_or_request_id':
+      return 'Qual e o numero do pedido, protocolo ou solicitacao?';
+    case 'invoice_or_payment_id':
+      return 'Qual e o numero da fatura, boleto ou cobranca?';
+    case 'location':
+      return 'Qual e a localidade, bairro ou cidade?';
+    case 'quantity':
+      return 'Qual quantidade voce precisa?';
+    case 'product_or_service_id':
+      return 'Qual produto, servico, plano ou contrato devo considerar?';
+    default:
+      return `Para continuar, me informe ${slot}.`;
+  }
+}
+
+function buildDeferredPromiseRepair(input: {
+  response: string;
+  customerMessage: string;
+  chatHistory?: string | null;
+  continuationRequiredSlots?: AutopilotSlotName[] | null;
+  intentResolution: AutopilotIntentResolution;
+  slotExtraction: SlotExtractionResult;
+  contact?: Contact | null;
+  systemAgentName?: string;
+}): string {
+  const clinicalContext = [
+    input.systemAgentName || '',
+    input.customerMessage,
+    input.chatHistory || '',
+    input.response,
+  ].filter(Boolean).join('\n');
+
+  if (hasClinicalTriageSignal(clinicalContext)) {
+    return 'Entendi. Para continuar a triagem com seguranca, a respiracao da crianca esta normal ou voce percebe cansaco, respiracao muito rapida, costelas afundando ou labios/rosto arroxeados?';
+  }
+
+  const requiredSlots = [
+    ...(input.continuationRequiredSlots || []),
+    ...input.intentResolution.requiredSlots,
+  ].filter((slot, index, all) => all.indexOf(slot) === index);
+  const nextSlot = requiredSlots.find((slot) => !hasSlotValue(input.slotExtraction.slots, slot));
+  if (nextSlot) {
+    return `Entendi. Para seguir sem deixar o atendimento parado, ${slotQuestionForDeferredPromise(nextSlot, input.contact)}`;
+  }
+
+  switch (input.intentResolution.intent) {
+    case 'scheduling_request':
+      return 'Entendi. Para continuar, qual data e periodo voce prefere?';
+    case 'billing_or_payment':
+      return 'Entendi. Para continuar com seguranca, me informe o CPF/CNPJ ou identificador cadastrado.';
+    case 'order_or_request_status':
+      return 'Entendi. Para verificar o andamento, qual e o numero do pedido, protocolo ou solicitacao?';
+    case 'troubleshooting':
+      return 'Entendi. Para seguir com o suporte, o problema esta acontecendo agora e desde quando comecou?';
+    case 'purchase_inquiry':
+    case 'catalog_request':
+    case 'pricing_request':
+    case 'promotion_request':
+    case 'availability_request':
+      return 'Entendi. Para te ajudar de forma objetiva, qual produto, servico ou opcao voce quer avaliar agora?';
+    case 'complaint':
+      return 'Entendi. Para registrar corretamente, me conte em uma frase o que aconteceu e qual resultado voce espera.';
+    default:
+      return 'Entendi. Para continuar de forma objetiva, me diga qual e o proximo ponto que voce quer resolver agora.';
+  }
 }
 
 function hasExplicitHandoffRequest(message: string): boolean {
@@ -355,6 +557,47 @@ export function validateAutopilotResponse(input: {
   const failedLookup = hasFailedLookup(input.toolResults);
   const lookupPromise = hasExternalLookupPromise(originalResponse);
   const lookupSuccessClaim = hasLookupSuccessClaim(originalResponse);
+  const deferredAnswerPromise = hasDeferredAnswerPromise(originalResponse);
+  const pediatricSchedulingRepair = (
+    !hasExplicitHandoffRequest(input.customerMessage) &&
+    (lookupPromise || hasTransferPromise(originalResponse) || hasAutomationLimitationForScheduling(originalResponse))
+  )
+    ? buildPediatricSchedulingRepair({
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
+        response: originalResponse,
+      })
+    : null;
+
+  if (pediatricSchedulingRepair) {
+    reasons.push('pediatric_scheduling_handoff_repaired');
+    return {
+      decision: 'repair',
+      response: pediatricSchedulingRepair,
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
+
+  if (hasPlannedTransfer(input.plannedActions)) {
+    const clinicalHandoffRepair = buildClinicalHandoffRepair({
+      customerMessage: input.customerMessage,
+      chatHistory: input.chatHistory,
+      response: originalResponse,
+      systemAgentName: input.systemAgentName,
+    });
+    if (clinicalHandoffRepair) {
+      reasons.push('clinical_handoff_terminal_response');
+      return {
+        decision: 'repair',
+        response: clinicalHandoffRepair,
+        actions: input.plannedActions,
+        reasons,
+        metadata: { decision: 'repair', reasons, source: input.source },
+      };
+    }
+  }
 
   if (successfulLookup && asksForCustomerIdentifier(originalResponse)) {
     reasons.push('customer_identifier_requested_after_successful_lookup');
@@ -383,6 +626,31 @@ export function validateAutopilotResponse(input: {
         metadata: { decision: 'repair', reasons, source: input.source },
       };
     }
+  }
+
+  if (
+    deferredAnswerPromise &&
+    !hasCustomerFacingNextStep(originalResponse) &&
+    !hasOperationalAction(input.plannedActions) &&
+    !successfulLookup
+  ) {
+    reasons.push('deferred_response_promise_repaired');
+    return {
+      decision: 'repair',
+      response: buildDeferredPromiseRepair({
+        response: originalResponse,
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
+        continuationRequiredSlots: input.continuationRequiredSlots,
+        intentResolution: input.intentResolution,
+        slotExtraction: input.slotExtraction,
+        contact: input.contact,
+        systemAgentName: input.systemAgentName,
+      }),
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
   }
 
   if (lookupPromise && !plannedLookup && !successfulLookup) {
@@ -551,6 +819,29 @@ export function validateAutopilotResponse(input: {
       actions: [],
       reasons,
       metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
+
+  const clinicalContinuationContext = [
+    input.systemAgentName || '',
+    input.chatHistory || '',
+    input.customerMessage,
+    originalResponse,
+  ].filter(Boolean).join('\n');
+  if (
+    input.continuationRequiredSlots?.includes('product_or_service_preference') &&
+    hasClinicalTriageSignal(clinicalContinuationContext)
+  ) {
+    reasons.push('clinical_product_slot_suppressed');
+    const response = hasCustomerFacingNextStep(originalResponse)
+      ? originalResponse
+      : `${originalResponse}\n\nPara continuar a triagem com seguranca, a respiracao da crianca esta normal ou voce percebe cansaco, respiracao muito rapida, costelas afundando ou labios/rosto arroxeados?`;
+    return {
+      decision: response === originalResponse ? 'approve' : 'repair',
+      response,
+      actions: [],
+      reasons,
+      metadata: { decision: response === originalResponse ? 'approve' : 'repair', reasons, source: input.source },
     };
   }
 

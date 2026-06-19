@@ -77,6 +77,9 @@ Regras obrigatorias:
 - Se TAREFA for "response", retorne apenas o campo JSON "response" com uma resposta curta, natural e objetiva para WhatsApp.
 - Se uma ferramenta falhou ou nao retornou sucesso, nao diga que a consulta/acao foi feita com sucesso.
 - Se faltar dado essencial, peca esse dado de forma direta.
+- Nunca prescreva ou calcule dosagem de medicamento. Se o cliente pedir dose, gotas, ml ou mg, diga que nao pode orientar dosagem por seguranca e siga a triagem.
+- Nunca peca peso com a finalidade de calcular dose de remedio.
+- Nunca cite SAMU, ambulancia, 192, 193 ou 911. Em urgencia, use apenas "pronto atendimento fisico", "pronto-socorro fisico" ou "unidade de saude mais proxima".
 - Nao solicite actions. O executor ja cuida de ferramentas.
 
 Persona curta:
@@ -138,6 +141,126 @@ const PROCEDURE_MODEL_FALLBACKS = [
   'googleai/gemini-2.0-flash',
   'googleai/gemini-1.5-pro',
 ];
+
+function normalizeRuntimeText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function asksMedicationDosage(value: string): boolean {
+  const text = normalizeRuntimeText(value);
+  return (
+    /\b(quant[ao]s?|dose|dosagem|gotas?|gotinha|ml|mg)\b/.test(text) &&
+    /\b(dipirona|paracetamol|ibuprofeno|remedio|medicamento|antitermico|antiinflamatorio|antibiotico|dar|dou|posso dar)\b/.test(text)
+  );
+}
+
+function responseStillHandlesMedicationDosageSafely(response: string): boolean {
+  const text = normalizeRuntimeText(response);
+  return (
+    /\b(nao posso|nao consigo|nao devo|nao e seguro|por seguranca)\b/.test(text) &&
+    /\b(dosagem|dose|medicamento|remedio|gotas?)\b/.test(text)
+  );
+}
+
+function sanitizeProcedureRuntimeResponse(response: string, input: ProcedureRuntimeInput): string {
+  let sanitized = response
+    .replace(/\bSAMU\b/gi, 'pronto atendimento fisico')
+    .replace(/\bambul[aâ]ncia\b/gi, 'pronto atendimento fisico')
+    .replace(/\b(?:192|193|911)\b/g, 'pronto atendimento fisico');
+
+  const normalized = normalizeRuntimeText(sanitized);
+  const unsafeDosageContinuation = asksMedicationDosage(input.customerMessage) && (
+    !responseStillHandlesMedicationDosageSafely(sanitized) ||
+    /\b(peso|kg|quilo)\b.*\b(dose|dosagem|gotas?|ml|mg)\b/.test(normalized) ||
+    /\b(dose|dosagem|gotas?|ml|mg)\b.*\b(peso|kg|quilo)\b/.test(normalized)
+  );
+
+  if (unsafeDosageContinuation) {
+    sanitized = [
+      'Nao posso orientar dosagem de medicamento por aqui por seguranca.',
+      'A dose correta depende de avaliacao medica e dados clinicos da crianca.',
+      'Para seguir com seguranca, qual e a idade da crianca e ha quanto tempo a febre comecou?',
+    ].join(' ');
+  }
+
+  sanitized = repairPediatricSchedulingFallback(sanitized, input);
+
+  return sanitized;
+}
+
+function isPediatricProcedure(input: ProcedureRuntimeInput): boolean {
+  const text = normalizeRuntimeText([
+    input.config?.name,
+    input.procedure?.name,
+    input.procedure?.stepLabel,
+    input.persona,
+    input.procedure?.prompt,
+  ].filter(Boolean).join(' '));
+  return /\b(roberta|pediatr|crianca|crianca|filh[ao]|bebe)\b/.test(text);
+}
+
+function looksLikeGenericSchedulingPrompt(response: string): boolean {
+  const text = normalizeRuntimeText(response);
+  return /^para continuar me informe (?:data e horario|horario|data)\.?$/.test(text) ||
+    /\bme informe (?:data e horario|horario|data)\b/.test(text) && text.length <= 90 ||
+    /\b(nao consigo consultar|verificar disponibilidade|consultar disponibilidade|vou encaminhar|vou envolver|atendente humano|equipe pediatras|equipe responsavel)\b/.test(text);
+}
+
+function hasSchedulingPreference(text: string): boolean {
+  return /\b(prefiro|pode ser|quero|manha|tarde|noite|hoje|amanha|cedo|rotina|eletiv|urgente|horario|periodo)\b/.test(text);
+}
+
+function inferPediatricScheduleClass(text: string): 'azul' | 'amarelo' | null {
+  const hasBlueSignal = (
+    /\b(sem febre|nao tem febre|temperatura normal)\b/.test(text) &&
+    /\b(respiracao normal|sem cansaco|nao esta cansad[ao]|sem falta de ar)\b/.test(text) &&
+    /\b(ativa|ativo|brincando|comeu|comendo|alimenta|urinando normal|urinou normal|urina normal)\b/.test(text)
+  ) || (
+    /\b(tosse leve|coriza clara|espirrando|espirros)\b/.test(text) &&
+    /\b(sem febre|respiracao normal|ativa|ativo|brincando)\b/.test(text)
+  );
+  if (hasBlueSignal) return 'azul';
+
+  const hasYellowSignal = (
+    /\b(38\s*[5-9]|39|40|41|42)\b/.test(text) &&
+    /\b(36|48|anteontem|dois dias|2 dias|persistente)\b/.test(text)
+  ) || (
+    /\b(vomitou|vomito|vomitos|diarreia)\b/.test(text) &&
+    /\b(aceita agua|aceitando agua|pequenos goles|urinou|fez xixi|sem olhos fundos|nao tem boca seca)\b/.test(text)
+  );
+  if (hasYellowSignal) return 'amarelo';
+
+  return null;
+}
+
+function repairPediatricSchedulingFallback(response: string, input: ProcedureRuntimeInput): string {
+  if (!isPediatricProcedure(input) || !looksLikeGenericSchedulingPrompt(response)) return response;
+
+  const conversation = normalizeRuntimeText([
+    input.chatHistory,
+    input.customerMessage,
+  ].filter(Boolean).join('\n'));
+
+  if (/\b(agendar|agendamento|marcar consulta|marcar)\b/.test(conversation) && !/\b(febre|tosse|coriza|vomit|diarreia|respir|dor|sintoma)\b/.test(conversation)) {
+    return 'Compreendo a pressa, mas preciso fazer uma triagem curta para direcionar com seguranca. A consulta e para uma crianca? Qual e a idade e o motivo principal do atendimento?';
+  }
+
+  if (!hasSchedulingPreference(conversation)) return response;
+
+  const scheduleClass = inferPediatricScheduleClass(conversation);
+  if (scheduleClass === 'azul') {
+    return 'Perfeito. Pelo que voce informou, o quadro segue como leve, entao vamos continuar com o agendamento de uma consulta eletiva/de rotina. Para concluir, qual dia fica melhor?';
+  }
+
+  if (scheduleClass === 'amarelo') {
+    return 'Perfeito. Pelo que voce informou, o caso precisa de consulta urgente, idealmente hoje ou no maximo amanha. Para concluir, qual horario especifico fica melhor?';
+  }
+
+  return response;
+}
 
 function getDefaultGeminiEnvKey(): string {
   return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
@@ -256,8 +379,9 @@ const procedureRuntimeFlow = ai.defineFlow(
       }
 
       if (input.mode === 'response' && output.response?.trim()) {
+        const sanitizedResponse = sanitizeProcedureRuntimeResponse(output.response.trim(), input);
         return {
-          response: formatCustomerFacingAiResponse(output.response.trim()),
+          response: formatCustomerFacingAiResponse(sanitizedResponse),
         };
       }
 

@@ -1,11 +1,12 @@
-import { AlertTriangle, CheckCircle2, Circle, Database, KeyRound, Rocket, ShieldCheck, TestTube2, Wrench, XCircle, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, Database, GitBranch, KeyRound, Rocket, ShieldCheck, TestTube2, Wrench, XCircle, type LucideIcon } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import type { KnowledgeBaseDocument } from '@/lib/types';
+import type { AutopilotFlowGraph, KnowledgeBaseDocument } from '@/lib/types';
 import type { AiModelCatalogEntry } from '@/lib/ai-models';
 import type { AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
 import { cn } from '@/lib/utils';
+import { auditAutopilotFlowGraph } from '@/services/autopilot/flow-audit';
 
 type ReadinessState = 'ready' | 'warning' | 'blocked' | 'pending';
 
@@ -29,6 +30,7 @@ interface AutopilotReadinessProps {
   isActive: boolean;
   isDirty: boolean;
   lastTrace: AutopilotPlaygroundTrace | null;
+  flowGraph?: AutopilotFlowGraph | null;
 }
 
 function countDocumentChars(documents: KnowledgeBaseDocument[]) {
@@ -85,6 +87,7 @@ export function AutopilotReadiness({
   isActive,
   isDirty,
   lastTrace,
+  flowGraph,
 }: AutopilotReadinessProps) {
   const hasModel = Boolean(aiModel && modelOptions.some((model) => model.id === aiModel));
   const documentChars = countDocumentChars(documents);
@@ -105,7 +108,7 @@ export function AutopilotReadiness({
       ? 'warning'
       : 'ready';
 
-  const items: ReadinessItem[] = [
+  const configItems: ReadinessItem[] = [
     {
       key: 'model',
       label: 'Modelo',
@@ -164,10 +167,35 @@ export function AutopilotReadiness({
     },
   ];
 
-  const readyCount = items.filter((item) => item.state === 'ready').length;
-  const score = Math.round((readyCount / items.length) * 100);
-  const scoreState: ReadinessState = score >= 85 ? 'ready' : score >= 60 ? 'warning' : 'blocked';
-  const scoreStyle = readinessStyle(scoreState);
+  const flowAudit = auditAutopilotFlowGraph(flowGraph);
+  const hasFlow = Boolean(flowGraph?.nodes?.length);
+  const flowItems: ReadinessItem[] = [
+    {
+      key: 'flow-v2',
+      label: 'Fluxo V2',
+      detail: hasFlow ? `${flowGraph?.nodes.length || 0} bloco(s) conectaveis.` : 'Nenhum fluxo visual configurado.',
+      state: hasFlow ? 'ready' : 'pending',
+      icon: GitBranch,
+    },
+    {
+      key: 'flow-audit',
+      label: 'Auditoria',
+      detail: flowAudit.status === 'passed'
+        ? 'Sem bloqueios estruturais criticos.'
+        : flowAudit.issues[0]?.message || 'Fluxo possui problemas criticos.',
+      state: flowAudit.status === 'passed' ? 'ready' : 'blocked',
+      icon: ShieldCheck,
+    },
+  ];
+
+  const configReadyCount = configItems.filter((item) => item.state === 'ready').length;
+  const configScore = Math.round((configReadyCount / configItems.length) * 100);
+  const configScoreState: ReadinessState = configScore >= 85 ? 'ready' : configScore >= 60 ? 'warning' : 'blocked';
+  const configScoreStyle = readinessStyle(configScoreState);
+  const flowReadyCount = flowItems.filter((item) => item.state === 'ready').length;
+  const flowScore = Math.round((flowReadyCount / flowItems.length) * 100);
+  const flowScoreState: ReadinessState = flowScore >= 85 ? 'ready' : flowScore >= 60 ? 'warning' : 'blocked';
+  const flowScoreStyle = readinessStyle(flowScoreState);
 
   return (
     <section className="rounded-[26px] border border-border bg-card shadow-sm">
@@ -175,17 +203,23 @@ export function AutopilotReadiness({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-foreground">Prontidao</h2>
-            <p className="text-xs text-muted-foreground">Checklist operacional do agente.</p>
+            <p className="text-xs text-muted-foreground">Configuração e qualidade do fluxo separadas.</p>
           </div>
-          <Badge variant="outline" className={cn('rounded-full', scoreStyle.badge)}>
-            {score}%
-          </Badge>
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge variant="outline" className={cn('rounded-full', configScoreStyle.badge)}>
+              Config {configScore}%
+            </Badge>
+            <Badge variant="outline" className={cn('rounded-full', flowScoreStyle.badge)}>
+              Flow {flowScore}%
+            </Badge>
+          </div>
         </div>
-        <Progress value={score} className="mt-4 h-2" indicatorClassName={scoreState === 'ready' ? 'bg-emerald-500' : scoreState === 'warning' ? 'bg-amber-500' : 'bg-destructive'} />
+        <Progress value={configScore} className="mt-4 h-2" indicatorClassName={configScoreState === 'ready' ? 'bg-emerald-500' : configScoreState === 'warning' ? 'bg-amber-500' : 'bg-destructive'} />
+        <Progress value={flowScore} className="mt-2 h-1.5" indicatorClassName={flowScoreState === 'ready' ? 'bg-emerald-500' : flowScoreState === 'warning' ? 'bg-amber-500' : 'bg-destructive'} />
       </div>
 
       <div className="grid gap-2 p-3">
-        {items.map((item) => {
+        {[...configItems, ...flowItems].map((item) => {
           const Icon = item.icon;
           const status = readinessStyle(item.state);
           const StatusIcon = status.icon;

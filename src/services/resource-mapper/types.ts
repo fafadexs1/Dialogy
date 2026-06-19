@@ -60,6 +60,10 @@ export type ResourceMappingResult = {
   mappings: ResourceFieldMapping[];
   rejected: ResourceMappingRejection[];
   status: 'mapped' | 'partial' | 'unmapped';
+  confidence: number;
+  evidence: string[];
+  warnings: string[];
+  payloadHash?: string | null;
 };
 
 export type ResourceMappingInput = {
@@ -70,6 +74,9 @@ export type ResourceMappingInput = {
   slotExtraction?: SlotExtractionResult | null;
   fields?: Record<string, unknown> | null;
   reason?: string | null;
+  chatId?: string | null;
+  messageId?: string | null;
+  procedureExecutionId?: string | null;
 };
 
 export type ResourceMapperRuntimeContext = {

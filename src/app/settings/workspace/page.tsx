@@ -4,13 +4,13 @@
 import { useActionState, useEffect, useState, useRef, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { updateWorkspaceAction } from '@/actions/workspace';
+import { getResourceMappingProfile, updateResourceMappingProfileAction, updateWorkspaceAction } from '@/actions/workspace';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Settings, Copy, Check, PlusCircle, Trash2, Clock, LogIn, AlertCircle, UploadCloud, Save, Building2, Globe, MessageSquare, Timer, Users, Mail } from 'lucide-react';
+import { Loader2, Settings, Copy, Check, PlusCircle, Trash2, Clock, LogIn, AlertCircle, UploadCloud, Save, Building2, Globe, MessageSquare, Timer, Users, Mail, BrainCircuit } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -26,6 +26,20 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+const workspaceVerticalOptions = [
+    { value: '__none__', label: 'Nao definido' },
+    { value: 'isp', label: 'Provedor / ISP' },
+    { value: 'clinica', label: 'Clinica' },
+    { value: 'ecommerce', label: 'E-commerce' },
+    { value: 'delivery', label: 'Delivery' },
+    { value: 'saas', label: 'SaaS' },
+    { value: 'servicos', label: 'Servicos locais' },
+    { value: 'educacao', label: 'Educacao' },
+    { value: 'imobiliaria', label: 'Imobiliaria' },
+    { value: 'financeiro', label: 'Financeiro' },
+    { value: 'geral', label: 'Geral' },
+];
+
 function SubmitButton() {
     const { pending } = useFormStatus();
     return (
@@ -34,6 +48,16 @@ function SubmitButton() {
             {pending ? 'Salvando...' : 'Salvar Alterações'}
         </Button>
     )
+}
+
+function ResourceMappingSubmitButton() {
+    const { pending } = useFormStatus();
+    return (
+        <Button type="submit" disabled={pending} className="min-w-[150px]">
+            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            {pending ? 'Salvando...' : 'Salvar aliases'}
+        </Button>
+    );
 }
 
 function CreateInviteButton() {
@@ -110,7 +134,10 @@ export default function WorkspaceSettingsPage() {
     const formRef = useRef<HTMLFormElement>(null);
 
     const [updateState, updateAction] = useActionState(updateWorkspaceAction, { success: false, error: null });
+    const [mappingProfileState, mappingProfileAction] = useActionState(updateResourceMappingProfileAction, { success: false, error: null });
     const [inviteError, inviteAction] = useActionState(createWorkspaceInvite, undefined);
+    const [resourceMappingAliases, setResourceMappingAliases] = useState('');
+    const [resourceMappingLoading, setResourceMappingLoading] = useState(false);
 
     const { toast } = useToast();
 
@@ -153,6 +180,33 @@ export default function WorkspaceSettingsPage() {
     }, [user, fetchInvites, refreshWorkspaceFromServer]);
 
     useEffect(() => {
+        let cancelled = false;
+        if (!activeWorkspace?.id) return;
+
+        setResourceMappingLoading(true);
+        getResourceMappingProfile(activeWorkspace.id)
+            .then((result) => {
+                if (cancelled) return;
+                setResourceMappingAliases(result.profileText || '');
+                if (result.error) {
+                    toast({ title: 'Aliases nao carregados', description: result.error, variant: 'destructive' });
+                }
+            })
+            .catch((error) => {
+                if (cancelled) return;
+                console.error('[WORKSPACE_SETTINGS] Falha ao carregar aliases do Resource Mapper:', error);
+                toast({ title: 'Aliases nao carregados', description: 'Falha ao carregar o perfil do Resource Mapper.', variant: 'destructive' });
+            })
+            .finally(() => {
+                if (!cancelled) setResourceMappingLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeWorkspace?.id, toast]);
+
+    useEffect(() => {
         if (updateState.success) {
             if (activeWorkspace?.id) {
                 void refreshWorkspaceFromServer(activeWorkspace.id);
@@ -163,6 +217,19 @@ export default function WorkspaceSettingsPage() {
             toast({ title: "Erro ao atualizar", description: updateState.error, variant: "destructive" });
         }
     }, [updateState, toast, router, activeWorkspace?.id, refreshWorkspaceFromServer]);
+
+    useEffect(() => {
+        if (mappingProfileState.success) {
+            toast({ title: 'Aliases salvos', description: 'O Resource Mapper usara esses sinonimos nos proximos atendimentos.' });
+            if (activeWorkspace?.id) {
+                void getResourceMappingProfile(activeWorkspace.id).then((result) => {
+                    setResourceMappingAliases(result.profileText || '');
+                });
+            }
+        } else if (mappingProfileState.error) {
+            toast({ title: 'Erro ao salvar aliases', description: mappingProfileState.error, variant: 'destructive' });
+        }
+    }, [mappingProfileState, toast, activeWorkspace?.id]);
 
     useEffect(() => {
         if (inviteError === null) {
@@ -231,12 +298,13 @@ export default function WorkspaceSettingsPage() {
             <Tabs defaultValue="general" className="space-y-6">
                 <TabsList className="bg-muted/50 p-1">
                     <TabsTrigger value="general" className="gap-2"><Settings className="h-4 w-4" /> Geral</TabsTrigger>
+                    <TabsTrigger value="ai-ops" className="gap-2"><BrainCircuit className="h-4 w-4" /> IA operacional</TabsTrigger>
                     <TabsTrigger value="members" className="gap-2"><Users className="h-4 w-4" /> Membros & Convites</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="general">
                     <form
-                        key={`workspace-form-${activeWorkspace.id}-${activeWorkspace.closeMessageTemplate || ''}-${activeWorkspace.transferTeamMessageTemplate || ''}-${activeWorkspace.marketingAutoCloseSeconds ?? ''}-${activeWorkspace.queueAutoCloseSeconds ?? ''}`}
+                        key={`workspace-form-${activeWorkspace.id}-${activeWorkspace.vertical || ''}-${activeWorkspace.closeMessageTemplate || ''}-${activeWorkspace.transferTeamMessageTemplate || ''}-${activeWorkspace.marketingAutoCloseSeconds ?? ''}-${activeWorkspace.queueAutoCloseSeconds ?? ''}`}
                         ref={formRef}
                         onSubmit={handleSubmit}
                         encType="multipart/form-data"
@@ -295,6 +363,20 @@ export default function WorkspaceSettingsPage() {
                                             defaultValue={activeWorkspace.name}
                                             className="font-medium text-lg h-11"
                                         />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="vertical">Nicho do workspace</Label>
+                                        <Select name="vertical" defaultValue={activeWorkspace.vertical || '__none__'}>
+                                            <SelectTrigger id="vertical" className="h-11">
+                                                <SelectValue placeholder="Selecione o nicho" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {workspaceVerticalOptions.map(option => (
+                                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-xs text-muted-foreground">Usado para sugerir aprendizados validados em negocios parecidos.</p>
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="timezone">Fuso Horário Operacional</Label>
@@ -405,6 +487,43 @@ export default function WorkspaceSettingsPage() {
                         <CardContent>
                             <JoinWorkspaceForm className="max-w-md" />
                         </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="ai-ops" className="space-y-6">
+                    <Card>
+                        <form action={mappingProfileAction}>
+                            <input type="hidden" name="workspaceId" value={activeWorkspace.id} />
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <BrainCircuit className="h-5 w-5 text-primary" />
+                                    Aliases do Resource Mapper
+                                </CardTitle>
+                                <CardDescription>
+                                    CRM contato / campos customizados.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="resourceMappingAliases">CRM contato / campos customizados</Label>
+                                    <Textarea
+                                        id="resourceMappingAliases"
+                                        name="resourceMappingAliases"
+                                        value={resourceMappingAliases}
+                                        onChange={(event) => setResourceMappingAliases(event.target.value)}
+                                        placeholder={'Nome completo: nome, titular, cliente\nCPF: documento, cpf/cnpj\nEndereco: localizacao, endereco completo'}
+                                        disabled={resourceMappingLoading}
+                                        className="min-h-[220px] font-mono text-sm"
+                                    />
+                                </div>
+                            </CardContent>
+                            <CardFooter className="justify-between border-t bg-muted/20">
+                                <span className="text-xs text-muted-foreground">
+                                    Recurso: crm.contact.custom_fields
+                                </span>
+                                <ResourceMappingSubmitButton />
+                            </CardFooter>
+                        </form>
                     </Card>
                 </TabsContent>
 

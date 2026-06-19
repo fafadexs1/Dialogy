@@ -24,6 +24,7 @@ import { abortActiveProcedures } from '@/services/autopilot/procedure-store';
 import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { clearPendingToolConfirmation, setPendingToolConfirmation } from '@/services/autopilot/flow-state-store';
 import { redactSensitiveLogValue } from '@/lib/observability/redaction';
+import { recordDecisionOutcomesForChat, type AutopilotOutcomeTrigger } from '@/services/autopilot/outcome-tracker';
 
 const MAX_ACTIONS_PER_MESSAGE = 2;
 const MAX_INTERNAL_NOTE_CHARS = 500;
@@ -38,6 +39,19 @@ const ALLOWED_TOOLS = new Set([
   'sgp_create_payment_promise',
   'mcp_call_tool',
 ]);
+
+async function recordOutcomeSafely(input: {
+  workspaceId: string;
+  chatId: string;
+  trigger: AutopilotOutcomeTrigger;
+  closedAt?: string | Date | null;
+}) {
+  try {
+    await recordDecisionOutcomesForChat(input);
+  } catch (error) {
+    console.warn('[AGENT_TOOL_OUTCOME_TRACKER] Failed to record outcome:', error);
+  }
+}
 
 function normalizeSearchText(value: string): string {
   return value
@@ -71,6 +85,14 @@ function contextRun(context: AgentToolRuntimeContext): OrchestratorRunHandle | n
 
 function isToolEnabledForAgent(context: AgentToolRuntimeContext, toolName: string): boolean {
   return context.turnPolicy.allowedToolNames.includes(toolName);
+}
+
+function buildToolNotAllowedMessage(context: AgentToolRuntimeContext, toolName: string): string {
+  if (context.turnPolicy.globallyEnabledToolNames.includes(toolName)) {
+    return `Ferramenta habilitada no agente, mas nao liberada para o no atual do fluxo (${context.turnPolicy.reason}).`;
+  }
+
+  return 'Ferramenta desabilitada nas configuracoes deste agente.';
 }
 
 function resolveRequestedToolName(action: AgentToolAction): string {
@@ -829,7 +851,7 @@ export async function runAgentTools(
 
     const requestedToolName = resolveRequestedToolName(action);
     if (!isToolEnabledForAgent(runtimeContext, requestedToolName)) {
-      const result = reject(action, 'Ferramenta desabilitada nas configuracoes deste agente.');
+      const result = reject(action, buildToolNotAllowedMessage(runtimeContext, requestedToolName));
       await auditToolResult(runtimeContext, result, Date.now() - startedAt);
       results.push(result);
       continue;
@@ -909,6 +931,13 @@ export async function runAgentTools(
     }
 
     await auditToolResult(runtimeContext, result, Date.now() - startedAt);
+    if (result.status === 'success' && (action.type === 'transfer_chat' || action.type === 'close_chat')) {
+      await recordOutcomeSafely({
+        workspaceId: runtimeContext.workspaceId,
+        chatId: runtimeContext.chat.id,
+        trigger: action.type === 'transfer_chat' ? 'handoff' : 'closed',
+      });
+    }
     results.push(result);
   }
 

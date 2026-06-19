@@ -7,6 +7,7 @@ import type {
 } from '@/services/autopilot/intent-types';
 import { extractAutopilotSlots } from '@/services/autopilot/slots';
 import { getAutopilotWorkflow } from '@/services/autopilot/workflows';
+import { hasClinicalTriageSignal } from '@/services/autopilot/clinical-triage';
 
 export type AutopilotIntentName = UniversalAutopilotIntent;
 
@@ -414,6 +415,14 @@ function detectIntent(customerMessage: string, chatHistory = ''): DetectedIntent
 
   const shortFollowUpIntent = inferShortFollowUpIntent(normalized, normalizedHistory);
   if (shortFollowUpIntent) return shortFollowUpIntent;
+
+  if (hasClinicalTriageSignal(customerMessage)) {
+    return {
+      intent: 'support_request',
+      confidence: 0.91,
+      reason: 'Mensagem descreve sintoma clinico/pediatrico e pede orientacao; priorizando triagem antes de agendamento.',
+    };
+  }
 
   if (
     matchesAny(normalized, 'catalog_request') &&

@@ -2,7 +2,7 @@
   NODE_ENV: ${NODE_ENV:-production}
   PORT: ${PORT:-9045}
   QUEUE_MODE: ${QUEUE_MODE:-enqueue}
-  QUEUE_ENABLED_JOBS: ${QUEUE_ENABLED_JOBS:-whatsapp_send,webhook_outbound,queue_auto_close,marketing_auto_close,ai_document_ingest,ai_autopilot_process,ai_case_memory_refresh}
+  QUEUE_ENABLED_JOBS: ${QUEUE_ENABLED_JOBS:-whatsapp_send,webhook_outbound,queue_auto_close,marketing_auto_close,ai_document_ingest,ai_autopilot_process,ai_autopilot_learning_cycle,ai_case_memory_refresh}
   NEXTAUTH_URL: ${NEXTAUTH_URL}
   NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
   NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
@@ -49,6 +49,9 @@
   AI_ORCHESTRATOR_RAG_TIMEOUT_MS: ${AI_ORCHESTRATOR_RAG_TIMEOUT_MS:-7000}
   AI_ORCHESTRATOR_TOOL_TIMEOUT_MS: ${AI_ORCHESTRATOR_TOOL_TIMEOUT_MS:-8000}
   AI_ORCHESTRATOR_MAX_TOOL_CALLS: ${AI_ORCHESTRATOR_MAX_TOOL_CALLS:-2}
+  AI_FLOW_BUILDER_TIMEOUT_MS: ${AI_FLOW_BUILDER_TIMEOUT_MS:-600000}
+  AI_FLOW_BUILDER_MAX_TOKENS: ${AI_FLOW_BUILDER_MAX_TOKENS:-32000}
+  AI_FLOW_BUILDER_RETRY_ATTEMPTS: ${AI_FLOW_BUILDER_RETRY_ATTEMPTS:-2}
   AI_TOOL_INTENT_GATE_MODEL: ${AI_TOOL_INTENT_GATE_MODEL:-}
   AI_TOOL_INTENT_GATE_TIMEOUT_MS: ${AI_TOOL_INTENT_GATE_TIMEOUT_MS:-5000}
   AI_INTENT_CLASSIFIER_MODEL: ${AI_INTENT_CLASSIFIER_MODEL:-}
@@ -82,6 +85,14 @@
   AI_QUEUE_WORKER_CONCURRENCY: ${AI_QUEUE_WORKER_CONCURRENCY:-}
   QUEUE_MAX_ATTEMPTS: ${QUEUE_MAX_ATTEMPTS:-}
   QUEUE_BACKOFF_BASE_MS: ${QUEUE_BACKOFF_BASE_MS:-}
+  AUTOPILOT_LEARNING_SCHEDULER_ENABLED: ${AUTOPILOT_LEARNING_SCHEDULER_ENABLED:-true}
+  AUTOPILOT_LEARNING_SCHEDULE_HOUR_UTC: ${AUTOPILOT_LEARNING_SCHEDULE_HOUR_UTC:-3}
+  AUTOPILOT_LEARNING_SCHEDULE_MINUTE_UTC: ${AUTOPILOT_LEARNING_SCHEDULE_MINUTE_UTC:-20}
+  AUTOPILOT_LEARNING_SINCE_DAYS: ${AUTOPILOT_LEARNING_SINCE_DAYS:-30}
+  AUTOPILOT_LEARNING_WORKSPACE_LIMIT: ${AUTOPILOT_LEARNING_WORKSPACE_LIMIT:-50}
+  AUTOPILOT_LEARNING_DRY_RUN: ${AUTOPILOT_LEARNING_DRY_RUN:-false}
+  AUTOPILOT_LEARNING_SKIP_ECOSYSTEM_PROMOTION: ${AUTOPILOT_LEARNING_SKIP_ECOSYSTEM_PROMOTION:-false}
+  AUTOPILOT_LEARNING_SKIP_SCORE_SUGGESTIONS: ${AUTOPILOT_LEARNING_SKIP_SCORE_SUGGESTIONS:-false}
   AI_PREWARM_MODELS: ${AI_PREWARM_MODELS:-true}
   TRANSFORMERS_CACHE_DIR: ${TRANSFORMERS_CACHE_DIR:-/tmp/dialogy-transformers-cache}
   RAG_BGE_RERANKER_V2_M3_ENABLED: ${RAG_BGE_RERANKER_V2_M3_ENABLED:-true}
@@ -111,7 +122,7 @@ x-worker-ai-environment: &worker-ai-environment
 
 services:
   dialogy:
-    image: fafadexs/dialogy:PBE-5.124
+    image: fafadexs/dialogy:PBE-5.145
     restart: unless-stopped
     init: true
     environment:
@@ -133,7 +144,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PBE-5.124
+    image: fafadexs/dialogy-worker:PBE-5.145
     restart: unless-stopped
     init: true
     depends_on:
@@ -144,7 +155,7 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PBE-5.124
+    image: fafadexs/dialogy-worker-ai:PBE-5.145
     restart: unless-stopped
     init: true
     depends_on:

@@ -30,6 +30,7 @@ function validate(input: {
   enabledToolNames?: string[];
   contactOverride?: Contact;
   knowledgeDocuments?: KnowledgeBaseDocument[];
+  systemAgentName?: string;
 }) {
   const resolvedContact = input.contactOverride || contact;
   const intentResolution = resolveAutopilotIntent({ customerMessage: input.message });
@@ -54,6 +55,7 @@ function validate(input: {
     knowledgeCoverage: 'medium',
     knowledgeDocuments: input.knowledgeDocuments,
     source: 'llm',
+    systemAgentName: input.systemAgentName,
   });
 }
 
@@ -184,6 +186,49 @@ describe('autopilot response validator', () => {
     expect(result.actions.map((action) => action.type)).toEqual(['add_internal_note', 'transfer_chat']);
   });
 
+  it('repairs deferred pediatric analysis promises with the next triage question', () => {
+    const result = validate({
+      message: 'A Joaquina tem 6 meses. Ela esta com febre 38.5 desde ontem, prostrada, mamando pouco e teve diarreia hoje.',
+      response: 'Entendido, Fabricio. Obrigada por confirmar que a Joaquina tem 6 meses.\n\nComo ela esta com febre desde ontem, apresentando prostracao e uma diarreia hoje, vou realizar agora uma analise mais detalhada do quadro dela para te passar as orientacoes adequadas.',
+      plannedActions: [{
+        type: 'add_internal_note',
+        reason: 'Registro de dados clinicos para triagem',
+        payload: {
+          content: 'Paciente: Joaquina, 6 meses. Sintomas: febre, prostracao e diarreia.',
+        },
+      }],
+      systemAgentName: 'Dra Roberta',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('deferred_response_promise_repaired');
+    expect(result.response).toContain('respiracao da crianca');
+    expect(result.response).toContain('?');
+    expect(result.response).not.toContain('analise mais detalhada');
+  });
+
+  it('repairs deferred generic analysis promises with an operational next step', () => {
+    const result = validate({
+      message: 'Meu pedido atrasou e queria saber o andamento',
+      response: 'Obrigado por avisar. Vou fazer uma analise mais detalhada do seu pedido para te dar um retorno.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('deferred_response_promise_repaired');
+    expect(result.response).toContain('numero do pedido');
+    expect(result.response).toContain('?');
+  });
+
+  it('allows analysis language when the same response already asks a clear next question', () => {
+    const result = validate({
+      message: 'A Joaquina tem 6 meses e esta com febre desde ontem',
+      response: 'Entendi. Vou avaliar com cuidado e seguir a triagem. A respiracao dela esta normal ou voce percebe cansaco?',
+      systemAgentName: 'Dra Roberta',
+    });
+
+    expect(result.decision).toBe('approve');
+  });
+
   it('approves lookup success claim when a lookup tool succeeded', () => {
     const result = validate({
       message: 'Preciso da segunda via do boleto. CPF 529.982.247-25',
@@ -280,6 +325,119 @@ describe('autopilot response validator', () => {
     expect(result.actions).toEqual([]);
     expect(result.reasons).toContain('self_service_transfer_promise_suppressed');
     expect(result.response).toContain('seguir com seu atendimento por aqui');
+  });
+
+  it('keeps clinical red handoff terminal and does not ask generic slots', () => {
+    const result = validate({
+      message: 'Meu filho Lucas tem 2 anos, esta respirando muito rapido e a costela afunda.',
+      response: 'Identifiquei sinais de urgencia. Por favor, procure um pronto-socorro imediatamente ou entre em contato com a equipe de emergencia agora.',
+      plannedActions: [{ type: 'transfer_chat', reason: 'Risco vermelho', payload: { teamId: 'team-support' } }],
+      systemAgentName: 'Dra Roberta',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('clinical_handoff_terminal_response');
+    expect(result.response).toContain('[TRANSFERIR_HUMANO]');
+    expect(result.response).toContain('pronto-socorro');
+    expect(result.response).not.toContain('produto');
+    expect(result.response).not.toContain('servico');
+  });
+
+  it('suppresses generic product slot continuation in pediatric triage', () => {
+    const result = validateAutopilotResponse({
+      response: 'Que bom saber que a Ana esta se alimentando bem e brincando normalmente. Isso e um otimo sinal.',
+      fallbackReply: 'Fallback configurado.',
+      customerMessage: 'Nao tem febre, esta brincando, comendo e urinando normal.',
+      chatHistory: 'Cliente: Minha filha Ana tem 5 anos, esta com coriza clara e espirrando.',
+      continuationRequiredSlots: ['product_or_service_preference'],
+      intentResolution: resolveAutopilotIntent({ customerMessage: 'Nao tem febre, esta brincando, comendo e urinando normal.' }),
+      slotExtraction: extractAutopilotSlots({
+        customerMessage: 'Nao tem febre, esta brincando, comendo e urinando normal.',
+        chatHistory: 'Cliente: Minha filha Ana tem 5 anos, esta com coriza clara e espirrando.',
+        contact,
+      }),
+      plannedActions: [],
+      toolResults: [],
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+      availableTeams: [team],
+      contact,
+      knowledgeCoverage: 'medium',
+      source: 'llm',
+      systemAgentName: 'Dra Roberta',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('clinical_product_slot_suppressed');
+    expect(result.response).toContain('respiracao da crianca');
+    expect(result.response).not.toContain('produto');
+    expect(result.response).not.toContain('servico');
+  });
+
+  it('repairs pediatric blue scheduling handoff into elective scheduling', () => {
+    const result = validate({
+      message: 'Prefiro consulta de tarde.',
+      chatHistory: [
+        'Cliente: Minha filha Laura Silva tem 6 anos, tosse leve e sem febre. Meu telefone e 5561995215930.',
+        'Atendente: Ha quanto tempo ela esta com tosse?',
+        'Cliente: Ela esta bem ativa, comeu e urinou normal.',
+      ].join('\n'),
+      response: 'Nao consigo consultar isso automaticamente com seguranca agora. Vou encaminhar seu atendimento para a equipe Pediatras.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('pediatric_scheduling_handoff_repaired');
+    expect(result.response).toContain('consulta eletiva/de rotina');
+    expect(result.actions).toEqual([]);
+  });
+
+  it('repairs pediatric yellow scheduling handoff into urgent scheduling', () => {
+    const result = validate({
+      message: 'Quero um horario amanha cedo. Meu telefone e 5561995215930.',
+      chatHistory: [
+        'Cliente: Meu filho Davi tem 6 anos, vomitou 3 vezes e esta com diarreia desde cedo.',
+        'Cliente: Ele aceita agua em pequenos goles e urinou duas vezes hoje.',
+        'Cliente: Nao tem boca seca nem olhos fundos.',
+      ].join('\n'),
+      response: 'Vou encaminhar seu atendimento para a equipe Pediatras.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('pediatric_scheduling_handoff_repaired');
+    expect(result.response).toContain('consulta urgente');
+    expect(result.actions).toEqual([]);
+  });
+
+  it('repairs pediatric scheduling handoff even when the current turn is not classified as scheduling', () => {
+    const result = validateAutopilotResponse({
+      response: 'Vou encaminhar seu atendimento para a equipe Pediatras.',
+      fallbackReply: 'Fallback configurado.',
+      customerMessage: 'Tudo bem, pode ser.',
+      chatHistory: [
+        'Cliente: Meu filho Pedro tem 4 anos e esta com febre 38.8 desde anteontem.',
+        'Cliente: Quando a febre baixa ele melhora, bebe agua e fez xixi hoje.',
+        'Cliente: Nao esta com falta de ar, mas esta abatido quando a febre sobe.',
+        'Cliente: Pode ser hoje no periodo da manha. Telefone 5561995215930.',
+      ].join('\n'),
+      intentResolution: resolveAutopilotIntent({ customerMessage: 'Tudo bem, pode ser.' }),
+      slotExtraction: extractAutopilotSlots({
+        customerMessage: 'Tudo bem, pode ser.',
+        chatHistory: '',
+        contact,
+      }),
+      plannedActions: [],
+      toolResults: [],
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+      availableTeams: [team],
+      contact,
+      knowledgeCoverage: 'medium',
+      source: 'llm',
+      systemAgentName: 'Dra Roberta',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('pediatric_scheduling_handoff_repaired');
+    expect(result.response).toContain('consulta urgente');
+    expect(result.actions).toEqual([]);
   });
 
   it('repairs intake acknowledgements that do not ask the next required slot', () => {

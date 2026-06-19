@@ -200,6 +200,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   },
   ai_document_ingest: undefined,
   ai_autopilot_process: undefined,
+  ai_autopilot_learning_cycle: undefined,
   ai_case_memory_refresh: undefined,
 };
 

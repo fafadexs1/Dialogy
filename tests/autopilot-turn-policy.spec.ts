@@ -95,6 +95,46 @@ describe('autopilot turn policy', () => {
     });
   });
 
+  it('allows internal notes as a transfer companion when globally enabled', () => {
+    const policy = compileAutopilotTurnPolicy({
+      config: {
+        enabled_tool_names: ['transfer_chat', 'add_internal_note'],
+        flow_graph: {
+          version: 1,
+          nodes: [
+            { id: 'assistant', kind: 'assistant', title: 'Assistant' },
+            { id: 'transfer', kind: 'tool', title: 'Transfer', toolName: 'transfer_chat' },
+          ],
+          edges: [{ id: 'assistant-transfer', source: 'assistant', target: 'transfer' }],
+        },
+      } as unknown as AutopilotConfig,
+      documents,
+      intentScope: null,
+    });
+
+    expect(policy.allowedToolNames).toEqual(['transfer_chat', 'add_internal_note']);
+  });
+
+  it('does not allow internal notes as a companion when they are globally disabled', () => {
+    const policy = compileAutopilotTurnPolicy({
+      config: {
+        enabled_tool_names: ['transfer_chat'],
+        flow_graph: {
+          version: 1,
+          nodes: [
+            { id: 'assistant', kind: 'assistant', title: 'Assistant' },
+            { id: 'transfer', kind: 'tool', title: 'Transfer', toolName: 'transfer_chat' },
+          ],
+          edges: [{ id: 'assistant-transfer', source: 'assistant', target: 'transfer' }],
+        },
+      } as unknown as AutopilotConfig,
+      documents,
+      intentScope: null,
+    });
+
+    expect(policy.allowedToolNames).toEqual(['transfer_chat']);
+  });
+
   it('denies vector retrieval when a configured flow node has no attached knowledge', () => {
     const policy = compileAutopilotTurnPolicy({
       config: {

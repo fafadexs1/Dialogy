@@ -404,7 +404,7 @@ export function AutopilotKnowledge({
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".txt,.md,.csv,.json"
+              accept=".txt,.md,.csv,.json,.pdf"
               className="hidden"
               onChange={(event) => void onUpload(event.target.files)}
             />
@@ -416,7 +416,7 @@ export function AutopilotKnowledge({
               )}
             </div>
             <p className="mt-4 text-sm font-semibold text-foreground">Importar arquivos de contexto</p>
-            <p className="mt-1 text-xs text-muted-foreground">Arraste ou clique para enviar `.txt`, `.md`, `.csv` e `.json`. O indice RAG normaliza o conteudo para Markdown ao publicar.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Arraste ou clique para enviar `.txt`, `.md`, `.csv`, `.json` e `.pdf`. O indice RAG normaliza o conteudo para Markdown ao publicar.</p>
           </div>
 
           <Button onClick={onAddManual} variant="outline" className="w-full rounded-2xl">

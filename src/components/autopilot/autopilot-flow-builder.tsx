@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { toast } from '@/hooks/use-toast';
 import {
   addEdge,
   Background,
@@ -21,6 +22,7 @@ import {
   useUpdateNodeInternals,
 } from '@xyflow/react';
 import {
+  AlertTriangle,
   ArrowLeft,
   BookOpen,
   Bot,
@@ -32,6 +34,7 @@ import {
   FlaskConical,
   GitBranch,
   History,
+  LayoutGrid,
   Loader2,
   MessageSquareText,
   Monitor,
@@ -45,13 +48,14 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  TestTube2,
   Trash2,
   UserRound,
   Wrench,
   X,
-  Zap,
+  XCircle,
+  Wand2,
 } from 'lucide-react';
-
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -62,23 +66,29 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import {
+  auditAutopilotFlowGraph,
+  type AutopilotFlowAuditResult,
+  type AutopilotFlowSimulationResult,
+} from '@/services/autopilot/flow-audit';
 import type {
   AutopilotFlowAiProposal,
   AutopilotFlowGraph,
   AutopilotFlowFormField,
+  AutopilotFlowSwitchRoute,
   AutopilotFlowNodeKind,
   AutopilotFlowVariable,
   KnowledgeBaseDocument,
   KnowledgeCollection,
-  NexusFlowInstance,
 } from '@/lib/types';
-import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
+import { migrateAutopilotFlowGraphToV2 } from '@/services/autopilot/flow-v2';
 
 export type AgentEditorPanel =
   | 'settings'
   | 'knowledge'
   | 'capabilities'
   | 'playground'
+  | 'decision'
   | 'analytics'
   | 'versions';
 
@@ -106,18 +116,32 @@ type AttendantNodeData = {
     message?: string;
     formFields?: AutopilotFlowFormField[];
     formMode?: 'static' | 'ai';
+    requiredSlots?: string[];
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    successHandles?: string[];
+    errorHandles?: string[];
+    maxAttempts?: number;
+    requiredKnowledgeCoverage?: 'high' | 'medium' | 'low' | 'none';
     referenceId?: string;
     variableName?: string;
     destination?: string;
     useAi?: boolean;
-    intent?: string;
-    customIntentLabel?: string;
-    returnToMainPrompt?: boolean;
     knowledgeCollectionIds?: string[];
+    switchMode?: 'ai' | 'rules';
+    confidenceThreshold?: number;
+    fallbackRouteId?: string;
+    routes?: AutopilotFlowSwitchRoute[];
   };
 };
 
 type AttendantNode = Node<AttendantNodeData, 'attendant'>;
+type AttendantEdgeData = {
+  routeId?: string;
+  routeLabel?: string;
+};
+type AttendantEdge = Edge<AttendantEdgeData>;
+const SWITCH_EDGE_LABEL_BG_PADDING: [number, number] = [6, 3];
 
 interface AutopilotFlowBuilderProps {
   agentId: string;
@@ -133,7 +157,6 @@ interface AutopilotFlowBuilderProps {
   isDiscarding: boolean;
   enabledToolNames: string[];
   tools: ToolCatalogItem[];
-  rules: NexusFlowInstance[];
   knowledgeDocuments: KnowledgeBaseDocument[];
   knowledgeCollections: KnowledgeCollection[];
   mainSystemPrompt: string;
@@ -147,7 +170,6 @@ interface AutopilotFlowBuilderProps {
   onSave: () => void;
   onPublish: () => void;
   onDiscard: () => void;
-  onAddRule: () => void;
   onGenerateFlowWithAi: (input: {
     conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
     currentGraph: AutopilotFlowGraph;
@@ -162,28 +184,6 @@ const BUILT_IN_VARIABLES = [
   '{{flow.customer_identifier}}',
 ];
 
-const INTENT_OPTIONS: Array<{ value: UniversalAutopilotIntent; label: string }> = [
-  { value: 'greeting', label: 'Saudacao' },
-  { value: 'billing_or_payment', label: 'Financeiro / pagamento' },
-  { value: 'purchase_inquiry', label: 'Compra / contratacao' },
-  { value: 'catalog_request', label: 'Catalogo' },
-  { value: 'pricing_request', label: 'Preco' },
-  { value: 'promotion_request', label: 'Promocao' },
-  { value: 'availability_request', label: 'Disponibilidade' },
-  { value: 'scheduling_request', label: 'Agendamento' },
-  { value: 'order_or_request_status', label: 'Status de solicitacao' },
-  { value: 'support_request', label: 'Suporte' },
-  { value: 'troubleshooting', label: 'Problema tecnico' },
-  { value: 'change_request', label: 'Alteracao de servico' },
-  { value: 'return_or_refund', label: 'Devolucao / reembolso' },
-  { value: 'cancellation_request', label: 'Cancelamento' },
-  { value: 'document_request', label: 'Documento' },
-  { value: 'complaint', label: 'Reclamacao' },
-  { value: 'human_handoff', label: 'Atendimento humano' },
-  { value: 'thanks', label: 'Agradecimento' },
-  { value: 'unknown', label: 'Outros / nao identificado' },
-];
-
 function normalizeVariableName(value: string): string {
   return value
     .normalize('NFD')
@@ -194,19 +194,16 @@ function normalizeVariableName(value: string): string {
     .replace(/^[0-9]+/, '');
 }
 
-const NODE_SURFACES: Record<NodeKind, string> = {
-  trigger: 'border-blue-500/35 bg-blue-950/30 shadow-[0_0_26px_rgba(20,122,220,0.12)]',
-  understand: 'border-cyan-500/30 bg-[#15191d]',
-  intent: 'border-fuchsia-500/30 bg-[#1b1520]',
-  assistant: 'border-cyan-400/30 bg-[#181a1d] shadow-[0_0_28px_rgba(42,150,220,0.1)]',
+const NODE_SURFACES: Partial<Record<NodeKind, string>> = {
+  start: 'border-blue-500/35 bg-blue-950/30 shadow-[0_0_26px_rgba(20,122,220,0.12)]',
+  message: 'border-sky-500/35 bg-blue-950/25',
+  decision: 'border-amber-400/45 bg-amber-950/25 shadow-[0_0_26px_rgba(245,158,11,0.12)]',
   knowledge: 'border-orange-400/65 bg-orange-950/35 shadow-[0_0_26px_rgba(251,146,60,0.16)]',
-  reply: 'border-cyan-500/35 bg-blue-950/25',
-  send_message: 'border-sky-500/35 bg-blue-950/25',
-  form: 'border-emerald-500/35 bg-emerald-950/25',
+  collect: 'border-emerald-500/35 bg-emerald-950/25',
+  sub_agent: 'border-cyan-400/30 bg-[#181a1d] shadow-[0_0_28px_rgba(42,150,220,0.1)]',
   handoff: 'border-violet-500/30 bg-[#181820]',
-  close: 'border-emerald-500/30 bg-[#171c1b]',
+  end: 'border-emerald-500/30 bg-[#171c1b]',
   tool: 'border-sky-500/35 bg-[#141b22]',
-  rule: 'border-red-400/65 bg-red-950/35 shadow-[0_0_26px_rgba(248,113,113,0.16)]',
 };
 
 const HANDLE_CLASS_NAMES = {
@@ -216,29 +213,25 @@ const HANDLE_CLASS_NAMES = {
 };
 
 function isAgentNodeKind(kind: NodeKind): boolean {
-  return kind === 'assistant' || kind === 'intent';
+  return kind === 'sub_agent';
 }
 
 function NodeIcon({ kind }: { kind: NodeKind }) {
   const className = 'h-5 w-5';
-  if (kind === 'trigger') return <Zap className={className} />;
-  if (kind === 'understand') return <BrainCircuit className={className} />;
-  if (kind === 'intent') return <GitBranch className={className} />;
-  if (kind === 'assistant') return <Bot className={className} />;
+  if (kind === 'start') return <Play className={className} />;
+  if (kind === 'message') return <MessageSquareText className={className} />;
+  if (kind === 'decision') return <GitBranch className={className} />;
   if (kind === 'knowledge') return <Database className={className} />;
-  if (kind === 'reply') return <MessageSquareText className={className} />;
-  if (kind === 'send_message') return <MessageSquareText className={className} />;
-  if (kind === 'form') return <ClipboardList className={className} />;
+  if (kind === 'collect') return <ClipboardList className={className} />;
+  if (kind === 'sub_agent') return <Bot className={className} />;
   if (kind === 'handoff') return <UserRound className={className} />;
-  if (kind === 'close') return <CheckCircle2 className={className} />;
-  if (kind === 'rule') return <GitBranch className={className} />;
+  if (kind === 'end') return <CheckCircle2 className={className} />;
   return <Wrench className={className} />;
 }
 
 function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
-  const isAttachmentNode = data.kind === 'knowledge' || data.kind === 'rule';
+  const isAttachmentNode = data.kind === 'knowledge';
   const isKnowledgeNode = data.kind === 'knowledge';
-  const isSkillNode = data.kind === 'rule';
   const acceptsKnowledge = isAgentNodeKind(data.kind);
   const exposesSkill = isAgentNodeKind(data.kind);
   const toolHandlePosition = data.toolHandlePosition || Position.Top;
@@ -255,7 +248,7 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
         isAttachmentNode
           ? 'min-h-[124px] w-[124px] rounded-full px-4 py-4'
           : 'min-h-[112px] w-[188px] rounded-[20px] px-4 py-4',
-        NODE_SURFACES[data.kind],
+        NODE_SURFACES[data.kind] || NODE_SURFACES.sub_agent,
         selected && 'border-sky-400/70 shadow-[0_0_0_1px_rgba(56,189,248,0.3),0_0_30px_rgba(14,165,233,0.2)]'
       )}
     >
@@ -264,9 +257,6 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
       )}
       {acceptsKnowledge && (
         <Handle id="target-left-knowledge" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.knowledge} />
-      )}
-      {isSkillNode && (
-        <Handle id="target-left-skill" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.skill} />
       )}
       {data.kind === 'tool' && (
         <Handle id={`target-${toolHandlePosition}-tool`} type="target" position={toolHandlePosition} className={HANDLE_CLASS_NAMES.skill} />
@@ -277,9 +267,7 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
           isAttachmentNode ? 'right-1 top-1' : '-top-3 right-3',
           isKnowledgeNode
             ? 'border-orange-400/40 bg-orange-500'
-            : isSkillNode
-              ? 'border-red-400/40 bg-red-500'
-              : 'border-sky-500/40 bg-sky-600'
+            : 'border-sky-500/40 bg-sky-600'
         )}
       >
         <Plus className="h-4 w-4" />
@@ -289,9 +277,7 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
         isAttachmentNode ? 'h-9 w-9' : 'h-10 w-10',
         isKnowledgeNode
           ? 'bg-orange-500/15 text-orange-300'
-          : isSkillNode
-            ? 'bg-red-500/15 text-red-300'
-            : 'bg-sky-500/15 text-sky-400'
+          : 'bg-sky-500/15 text-sky-400'
       )}>
         <NodeIcon kind={data.kind} />
       </div>
@@ -326,10 +312,10 @@ const KNOWLEDGE_SOURCE_HANDLE = 'source-right-knowledge';
 const KNOWLEDGE_TARGET_HANDLE = 'target-left-knowledge';
 const SKILL_SOURCE_HANDLE = 'source-right-skill';
 const SKILL_SOURCE_LEFT_HANDLE = 'source-left-skill';
-const SKILL_TARGET_HANDLE = 'target-left-skill';
 const DEFAULT_EDGE_COLOR = '#4485a5';
 const KNOWLEDGE_EDGE_COLOR = '#fb923c';
 const SKILL_EDGE_COLOR = '#f87171';
+const SWITCH_EDGE_COLOR = '#f59e0b';
 
 function toolTargetPosition(source: AttendantNode, target: AttendantNode): Position {
   const dx = source.position.x - target.position.x;
@@ -357,13 +343,6 @@ function connectionVisual(source: AttendantNode, target: AttendantNode): {
       color: KNOWLEDGE_EDGE_COLOR,
     };
   }
-  if (isAgentNodeKind(sourceKind) && targetKind === 'rule') {
-    return {
-      sourceHandle: agentSkillSourceHandle(source, target),
-      targetHandle: SKILL_TARGET_HANDLE,
-      color: SKILL_EDGE_COLOR,
-    };
-  }
   if (isAgentNodeKind(sourceKind) && targetKind === 'tool') {
     const targetPosition = toolTargetPosition(source, target);
     return {
@@ -371,6 +350,13 @@ function connectionVisual(source: AttendantNode, target: AttendantNode): {
       targetHandle: `target-${targetPosition}-tool`,
       color: SKILL_EDGE_COLOR,
       toolHandlePosition: targetPosition,
+    };
+  }
+  if (sourceKind === 'decision') {
+    return {
+      sourceHandle: VERTICAL_SOURCE_HANDLE,
+      targetHandle: VERTICAL_TARGET_HANDLE,
+      color: SWITCH_EDGE_COLOR,
     };
   }
   return {
@@ -384,12 +370,20 @@ function canConnectNodeKinds(sourceKind: NodeKind, targetKind: NodeKind): boolea
   if (sourceKind === 'knowledge' || targetKind === 'knowledge') {
     return sourceKind === 'knowledge' && isAgentNodeKind(targetKind);
   }
-  if (sourceKind === 'rule' || targetKind === 'rule') {
-    return isAgentNodeKind(sourceKind) && targetKind === 'rule';
-  }
   if (sourceKind === 'tool' || targetKind === 'tool') {
-    return isAgentNodeKind(sourceKind) && targetKind === 'tool';
+    if (targetKind === 'tool') {
+      return isAgentNodeKind(sourceKind) || sourceKind === 'collect' || sourceKind === 'message';
+    }
+    if (sourceKind === 'tool') {
+      return isAgentNodeKind(targetKind)
+        || targetKind === 'collect'
+        || targetKind === 'message'
+        || targetKind === 'handoff'
+        || targetKind === 'end';
+    }
   }
+  if (sourceKind === 'handoff' || sourceKind === 'end') return false;
+  if (targetKind === 'start') return false;
   return true;
 }
 
@@ -402,13 +396,183 @@ function keepValidGraphEdges(nodes: AttendantNode[], edges: Edge[]): Edge[] {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Auto-layout: organizes nodes into clean, layered positions using a
+// simplified Sugiyama-style algorithm. Attachment nodes (knowledge, tool)
+// are placed as satellites to their connected sub-agent node.
+// ---------------------------------------------------------------------------
+
+const LAYOUT_NODE_W = 188;
+const LAYOUT_NODE_H = 132;
+const LAYOUT_GAP_X = 80;
+const LAYOUT_GAP_Y = 70;
+const LAYOUT_SATELLITE_OFFSET_X = 240;
+const LAYOUT_SATELLITE_GAP_Y = 50;
+
+function autoLayoutNodes(nodes: AttendantNode[], edges: Edge[]): AttendantNode[] {
+  if (nodes.length === 0) return nodes;
+
+  // Separate main-flow nodes from satellite/attachment nodes
+  const satelliteKinds = new Set<NodeKind>(['knowledge', 'tool']);
+  const mainNodes = nodes.filter((n) => !satelliteKinds.has(n.data.kind));
+  const satelliteNodes = nodes.filter((n) => satelliteKinds.has(n.data.kind));
+
+  // Build adjacency from edges (only for main nodes)
+  const mainIds = new Set(mainNodes.map((n) => n.id));
+  const children = new Map<string, string[]>();
+  const parents = new Map<string, string[]>();
+  for (const n of mainNodes) {
+    children.set(n.id, []);
+    parents.set(n.id, []);
+  }
+  for (const e of edges) {
+    if (!mainIds.has(e.source) || !mainIds.has(e.target)) continue;
+    children.get(e.source)?.push(e.target);
+    parents.get(e.target)?.push(e.source);
+  }
+
+  // Assign layers via BFS from roots (nodes with no incoming edges from main nodes)
+  const layer = new Map<string, number>();
+  const roots = mainNodes.filter((n) => (parents.get(n.id)?.length || 0) === 0);
+  if (roots.length === 0 && mainNodes.length > 0) roots.push(mainNodes[0]);
+
+  // Find back-edges to break cycles
+  const visited = new Set<string>();
+  const stack = new Set<string>();
+  const backEdges = new Set<string>();
+
+  function dfs(nodeId: string) {
+    visited.add(nodeId);
+    stack.add(nodeId);
+    for (const childId of children.get(nodeId) || []) {
+      if (stack.has(childId)) {
+        backEdges.add(`${nodeId}->${childId}`);
+      } else if (!visited.has(childId)) {
+        dfs(childId);
+      }
+    }
+    stack.delete(nodeId);
+  }
+
+  // Run DFS from all roots to ensure we cover reachable components
+  for (const r of roots) {
+    if (!visited.has(r.id)) {
+      dfs(r.id);
+    }
+  }
+  // Also run DFS from any other unvisited nodes just in case they are part of a disconnected cycle
+  for (const n of mainNodes) {
+    if (!visited.has(n.id)) {
+      dfs(n.id);
+    }
+  }
+
+  const queue: string[] = [];
+  for (const r of roots) {
+    layer.set(r.id, 0);
+    queue.push(r.id);
+  }
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const currentLayer = layer.get(current)!;
+    for (const child of children.get(current) || []) {
+      if (backEdges.has(`${current}->${child}`)) continue;
+
+      const existingLayer = layer.get(child);
+      if (existingLayer === undefined || existingLayer < currentLayer + 1) {
+        if (currentLayer + 1 < mainNodes.length) {
+          layer.set(child, currentLayer + 1);
+          queue.push(child);
+        }
+      }
+    }
+  }
+  // Any unvisited main nodes get appended to the last layer
+  let maxLayer = 0;
+  for (const l of layer.values()) if (l > maxLayer) maxLayer = l;
+  for (const n of mainNodes) {
+    if (!layer.has(n.id)) {
+      maxLayer++;
+      layer.set(n.id, maxLayer);
+    }
+  }
+
+  // Group nodes by layer
+  const layerGroups = new Map<number, AttendantNode[]>();
+  for (const n of mainNodes) {
+    const l = layer.get(n.id) || 0;
+    if (!layerGroups.has(l)) layerGroups.set(l, []);
+    layerGroups.get(l)!.push(n);
+  }
+
+  // Position main nodes
+  const positionMap = new Map<string, { x: number; y: number }>();
+  const sortedLayers = [...layerGroups.keys()].sort((a, b) => a - b);
+  let yOffset = 60;
+  for (const l of sortedLayers) {
+    const group = layerGroups.get(l)!;
+    const totalWidth = group.length * LAYOUT_NODE_W + (group.length - 1) * LAYOUT_GAP_X;
+    let xStart = Math.max(60, (800 - totalWidth) / 2); // Center around 800px wide canvas
+    for (const n of group) {
+      positionMap.set(n.id, { x: xStart, y: yOffset });
+      xStart += LAYOUT_NODE_W + LAYOUT_GAP_X;
+    }
+    yOffset += LAYOUT_NODE_H + LAYOUT_GAP_Y;
+  }
+
+  // Position satellite nodes next to their parent agent node
+  const satelliteCountByParent = new Map<string, number>();
+  for (const sat of satelliteNodes) {
+    // Find connected parent sub-agent from edges
+    let parentId: string | null = null;
+    for (const e of edges) {
+      if (e.target === sat.id && mainIds.has(e.source)) { parentId = e.source; break; }
+      if (e.source === sat.id && mainIds.has(e.target)) { parentId = e.target; break; }
+    }
+    if (!parentId) {
+      // No connected parent — find nearest agent node
+      const agents = mainNodes.filter((n) => isAgentNodeKind(n.data.kind));
+      if (agents.length > 0) parentId = agents[0].id;
+    }
+    const parentPos = parentId ? positionMap.get(parentId) : null;
+    const baseX = parentPos ? parentPos.x : 60;
+    const baseY = parentPos ? parentPos.y : 60;
+    const satIndex = satelliteCountByParent.get(parentId || '') || 0;
+    satelliteCountByParent.set(parentId || '', satIndex + 1);
+
+    const side = sat.data.kind === 'knowledge' ? -1 : 1; // knowledge on left, tools on right
+    positionMap.set(sat.id, {
+      x: baseX + side * LAYOUT_SATELLITE_OFFSET_X,
+      y: baseY + satIndex * (124 + LAYOUT_SATELLITE_GAP_Y),
+    });
+  }
+
+  // Apply positions
+  return nodes.map((n) => {
+    const pos = positionMap.get(n.id);
+    return pos ? { ...n, position: { x: pos.x, y: pos.y } } : n;
+  });
+}
+
+function findSwitchRouteForEdge(source: AttendantNode | undefined, targetId: string, routeId?: string | null): AutopilotFlowSwitchRoute | null {
+  if (!source || source.data.kind !== 'decision') return null;
+  const routes = source.data.config?.routes || [];
+  return routes.find((route) => route.id === routeId && (!route.targetNodeId || route.targetNodeId === targetId))
+    || routes.find((route) => route.targetNodeId === targetId)
+    || null;
+}
+
 function edge(
   id: string,
   source: string,
   target: string,
-  options?: { sourceHandle?: string; targetHandle?: string; color?: string },
-): Edge {
+  options?: { sourceHandle?: string; targetHandle?: string; color?: string; routeId?: string; routeLabel?: string },
+): AttendantEdge {
   const color = options?.color || DEFAULT_EDGE_COLOR;
+  const routeData = options?.routeId ? {
+    routeId: options.routeId,
+    routeLabel: options.routeLabel || options.routeId,
+  } : undefined;
   return {
     id,
     source,
@@ -417,76 +581,146 @@ function edge(
     targetHandle: options?.targetHandle || VERTICAL_TARGET_HANDLE,
     type: 'smoothstep',
     animated: false,
+    data: routeData,
+    label: routeData?.routeLabel,
+    labelStyle: routeData ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
+    labelBgStyle: routeData ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
+    labelBgPadding: routeData ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
+    labelBgBorderRadius: routeData ? 6 : undefined,
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     style: { stroke: color, strokeWidth: 1.6 },
   };
 }
 
-function edgeForNodes(id: string, source: AttendantNode, target: AttendantNode): Edge {
-  return edge(id, source.id, target.id, connectionVisual(source, target));
+function edgeForNodes(id: string, source: AttendantNode, target: AttendantNode, routeId?: string | null): AttendantEdge {
+  const visual = connectionVisual(source, target);
+  const route = findSwitchRouteForEdge(source, target.id, routeId);
+  return edge(id, source.id, target.id, {
+    ...visual,
+    routeId: route?.id,
+    routeLabel: route?.label,
+  });
 }
 
-function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
+function buildInitialGraph(agentName: string) {
   const nodes: AttendantNode[] = [
     {
-      id: 'incoming',
+      id: 'start',
       type: 'attendant',
       position: { x: 100, y: 140 },
       data: {
-        kind: 'trigger',
-        title: 'Mensagem recebida',
-        subtitle: 'Inicio do atendimento',
-        config: { instructions: 'Iniciar quando chegar uma nova mensagem do cliente.', referenceId: 'entrada', variableName: 'mensagem_recebida' },
+        kind: 'start',
+        title: 'Start',
+        subtitle: 'Inicio do fluxo',
+        config: { instructions: 'Inicie a execucao do fluxo e avance para o primeiro passo conectado.', referenceId: 'start', variableName: 'start' },
       },
     },
     {
-      id: 'intent',
+      id: 'welcome',
       type: 'attendant',
       position: { x: 382, y: 140 },
       data: {
-        kind: 'understand',
-        title: 'Entender cliente',
-        subtitle: 'Intencao e dados',
-        config: { instructions: 'Identifique a necessidade do cliente e os dados ja informados.', referenceId: 'entender', variableName: 'entender_cliente' },
+        kind: 'message',
+        title: 'Acolher cliente',
+        subtitle: 'Mensagem inicial',
+        config: { message: `Ola! Eu sou ${agentName || 'o agente IA'} e vou te ajudar. Me conte rapidamente o que voce precisa.`, referenceId: 'acolhimento', variableName: 'mensagem_acolhimento' },
       },
     },
     {
-      id: 'assistant',
+      id: 'decision',
       type: 'attendant',
-      position: { x: 382, y: 350 },
+      position: { x: 650, y: 140 },
       data: {
-        kind: 'assistant',
-        title: agentName || 'Agente IA',
-        subtitle: 'Responder com IA',
-        config: { instructions: 'Responda usando apenas informacoes seguras do atendimento.', referenceId: 'agente', variableName: 'resposta_ia', useAi: true },
+        kind: 'decision',
+        title: 'Decidir caminho',
+        subtitle: 'Rotas com fallback',
+        config: {
+          instructions: 'Escolha somente uma rota configurada. Use fallback quando faltar evidencia.',
+          switchMode: 'ai',
+          confidenceThreshold: 0.8,
+          fallbackRouteId: 'atender',
+          referenceId: 'decidir_caminho',
+          variableName: 'rota_escolhida',
+          routes: [
+            {
+              id: 'coletar',
+              label: 'Coletar dados',
+              description: 'Use quando faltarem dados obrigatorios para seguir.',
+              examples: ['Quero agendar', 'Preciso passar meus dados'],
+              targetNodeId: 'collect',
+            },
+            {
+              id: 'atender',
+              label: 'Atender com IA',
+              description: 'Use para responder a solicitacao principal com contexto e seguranca.',
+              examples: ['Tenho uma duvida', 'Preciso de ajuda'],
+              targetNodeId: 'knowledge',
+            },
+            {
+              id: 'humano',
+              label: 'Transferir humano',
+              description: 'Use quando o cliente pedir atendimento humano ou o fluxo exigir escalonamento.',
+              examples: ['Quero falar com atendente', 'Me transfira'],
+              targetNodeId: 'handoff',
+            },
+          ],
+        },
       },
     },
     {
       id: 'knowledge',
       type: 'attendant',
-      position: { x: 92, y: 352 },
+      position: { x: 922, y: 80 },
       data: {
         kind: 'knowledge',
         title: 'Conhecimento',
         subtitle: 'Consultar base',
-        config: { instructions: 'Buscar documentos relevantes para a solicitacao atual.', referenceId: 'conhecimento', variableName: 'conhecimento_encontrado' },
+        config: { instructions: 'Buscar chunks relevantes para a solicitacao atual antes do sub-agente responder.', message: '{{customerMessage}}', requiredKnowledgeCoverage: 'low', referenceId: 'conhecimento', variableName: 'conhecimento_encontrado' },
       },
     },
     {
-      id: 'reply',
+      id: 'collect',
       type: 'attendant',
-      position: { x: 112, y: 582 },
+      position: { x: 922, y: 260 },
       data: {
-        kind: 'reply',
-        title: 'Enviar resposta',
-        subtitle: 'Mensagem ao cliente',
-        config: { message: 'Olá {{system.contact.name}}, vou ajudar com sua solicitacao.', referenceId: 'resposta', variableName: 'resposta_enviada' },
+        kind: 'collect',
+        title: 'Coletar dados',
+        subtitle: 'Slots tipados',
+        config: {
+          message: 'Para seguir com seguranca, me informe os dados abaixo:',
+          formMode: 'ai',
+          maxAttempts: 2,
+          referenceId: 'coletar_dados',
+          variableName: 'dados_coletados',
+          formFields: [
+            { id: 'field-name', label: 'Nome completo', fieldKey: 'name', type: 'name', aliases: ['nome'], required: true },
+            { id: 'field-phone', label: 'Telefone com DDD', fieldKey: 'phone', type: 'phone', aliases: ['whatsapp', 'celular'], required: true },
+          ],
+        },
+      },
+    },
+    {
+      id: 'sub-agent',
+      type: 'attendant',
+      position: { x: 1190, y: 140 },
+      data: {
+        kind: 'sub_agent',
+        title: agentName || 'Sub-agente principal',
+        subtitle: 'IA V2 grounded',
+        config: {
+          instructions: 'Atenda o cliente nesta etapa usando somente slots confirmados, resultados de tools e chunks de knowledge recuperados. Se faltar base, diga que nao encontrou informacao suficiente e siga o proximo passo seguro.',
+          message: 'Componha a resposta para o cliente com linguagem natural e segura.',
+          referenceId: 'sub_agente_principal',
+          variableName: 'resposta_sub_agente',
+          useAi: true,
+          requiredKnowledgeCoverage: 'low',
+        },
       },
     },
     {
       id: 'handoff',
       type: 'attendant',
-      position: { x: 382, y: 582 },
+      position: { x: 1190, y: 340 },
       data: {
         kind: 'handoff',
         title: 'Transferir humano',
@@ -495,27 +729,17 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
       },
     },
     {
-      id: 'resolved',
+      id: 'end',
       type: 'attendant',
-      position: { x: 650, y: 582 },
+      position: { x: 1460, y: 140 },
       data: {
-        kind: 'close',
-        title: 'Finalizar conversa',
-        subtitle: 'Problema resolvido',
+        kind: 'end',
+        title: 'End',
+        subtitle: 'Fim da execucao',
         config: { message: 'Seu atendimento foi finalizado. Precisa de mais alguma coisa?', referenceId: 'finalizar', variableName: 'conversa_finalizada' },
       },
     },
   ];
-
-  const activeRules = rules.filter((rule) => rule.enabled);
-  activeRules.forEach((activeRule, index) => {
-    nodes.push({
-      id: `rule-${activeRule.id}`,
-      type: 'attendant',
-      position: { x: 650, y: 300 + index * 150 },
-      data: ruleNodeData(activeRule),
-    });
-  });
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const buildEdge = (id: string, source: string, target: string) => {
@@ -524,22 +748,21 @@ function buildInitialGraph(agentName: string, rules: NexusFlowInstance[]) {
     return sourceNode && targetNode ? edgeForNodes(id, sourceNode, targetNode) : edge(id, source, target);
   };
   const edges = [
-    buildEdge('incoming-intent', 'incoming', 'intent'),
-    buildEdge('intent-assistant', 'intent', 'assistant'),
-    buildEdge('knowledge-assistant', 'knowledge', 'assistant'),
-    buildEdge('assistant-reply', 'assistant', 'reply'),
-    buildEdge('assistant-handoff', 'assistant', 'handoff'),
-    buildEdge('assistant-resolved', 'assistant', 'resolved'),
+    buildEdge('start-welcome', 'start', 'welcome'),
+    buildEdge('welcome-decision', 'welcome', 'decision'),
+    edge('decision-collect', 'decision', 'collect', { routeId: 'coletar', routeLabel: 'Coletar dados', color: SWITCH_EDGE_COLOR }),
+    edge('decision-knowledge', 'decision', 'knowledge', { routeId: 'atender', routeLabel: 'Atender com IA', color: SWITCH_EDGE_COLOR }),
+    edge('decision-handoff', 'decision', 'handoff', { routeId: 'humano', routeLabel: 'Transferir humano', color: SWITCH_EDGE_COLOR }),
+    buildEdge('collect-knowledge', 'collect', 'knowledge'),
+    buildEdge('knowledge-sub-agent', 'knowledge', 'sub-agent'),
+    buildEdge('sub-agent-end', 'sub-agent', 'end'),
   ];
-  activeRules.forEach((activeRule) => {
-    edges.push(buildEdge(`assistant-rule-${activeRule.id}`, 'assistant', `rule-${activeRule.id}`));
-  });
-
   return { nodes, edges, variables: [] as AutopilotFlowVariable[] };
 }
 
 function restoreFlowGraph(graph: AutopilotFlowGraph) {
-  let nodes = graph.nodes.map((node): AttendantNode => ({
+  const v2Graph = migrateAutopilotFlowGraphToV2(graph) || graph;
+  let nodes = v2Graph.nodes.map((node): AttendantNode => ({
     id: node.id,
     type: 'attendant',
     position: node.position,
@@ -554,11 +777,11 @@ function restoreFlowGraph(graph: AutopilotFlowGraph) {
     },
   }));
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const edges = graph.edges.map((savedEdge) => {
+  const edges = v2Graph.edges.map((savedEdge) => {
     const source = nodeById.get(savedEdge.source);
     const target = nodeById.get(savedEdge.target);
     return source && target
-      ? edgeForNodes(savedEdge.id, source, target)
+      ? edgeForNodes(savedEdge.id, source, target, savedEdge.routeId)
       : edge(savedEdge.id, savedEdge.source, savedEdge.target);
   });
   nodes = nodes.map((node) => {
@@ -572,7 +795,7 @@ function restoreFlowGraph(graph: AutopilotFlowGraph) {
   return {
     nodes,
     edges: keepValidGraphEdges(nodes, edges),
-    variables: graph.variables || [],
+    variables: v2Graph.variables || [],
   };
 }
 
@@ -596,6 +819,8 @@ function serializeFlowGraph(nodes: AttendantNode[], edges: Edge[], variables: Au
       target: savedEdge.target,
       sourceHandle: savedEdge.sourceHandle,
       targetHandle: savedEdge.targetHandle,
+      routeId: typeof savedEdge.data?.routeId === 'string' ? savedEdge.data.routeId : undefined,
+      label: typeof savedEdge.data?.routeLabel === 'string' ? savedEdge.data.routeLabel : undefined,
     })),
     variables,
   };
@@ -645,23 +870,21 @@ function ToolButton({
   );
 }
 
-function ruleNodeData(rule: NexusFlowInstance): AttendantNodeData {
-  const normalizedRuleName = normalizeVariableName(rule.name) || 'ativa';
-  return {
-    kind: 'rule',
-    title: rule.name,
-    subtitle: rule.enabled ? 'Habilidade ativa' : 'Habilidade pausada',
-    config: {
-      instructions: rule.trigger,
-      referenceId: `habilidade_${normalizedRuleName}`,
-      variableName: `regra_${normalizedRuleName}`,
-    },
-  };
-}
-
-function RuleBlockButton({ rule }: { rule: NexusFlowInstance }) {
+function FlowV2BlockButton({
+  kind,
+  title,
+  subtitle,
+  icon,
+  tone,
+}: {
+  kind: Extract<NodeKind, 'start' | 'message' | 'collect' | 'decision' | 'knowledge' | 'sub_agent' | 'handoff' | 'end'>;
+  title: string;
+  subtitle: string;
+  icon: ReactNode;
+  tone: string;
+}) {
   const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
-    event.dataTransfer.setData('application/dialogy-attendant-rule', JSON.stringify(rule));
+    event.dataTransfer.setData('application/dialogy-attendant-block', kind);
     event.dataTransfer.effectAllowed = 'move';
   };
 
@@ -671,90 +894,14 @@ function RuleBlockButton({ rule }: { rule: NexusFlowInstance }) {
       draggable
       onDragStart={handleDragStart}
       className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
-      title={rule.trigger}
+      title={`${title}: ${subtitle}`}
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-300">
-        <GitBranch className="h-4 w-4" />
+      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', tone)}>
+        {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate">{rule.name}</span>
-        <span className="block text-[11px] text-slate-500">{rule.enabled ? 'Arrastar habilidade' : 'Pausada'}</span>
-      </span>
-      <span className={cn('h-2 w-2 rounded-full', rule.enabled ? 'bg-emerald-400' : 'bg-slate-600')} />
-    </button>
-  );
-}
-
-function SubAgentBlockButton() {
-  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
-    event.dataTransfer.setData('application/dialogy-attendant-block', 'intent');
-    event.dataTransfer.effectAllowed = 'move';
-  };
-
-  return (
-    <button
-      type="button"
-      draggable
-      onDragStart={handleDragStart}
-      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
-      title="Cria um sub-agente especializado ativado pela intencao do cliente."
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fuchsia-500/15 text-fuchsia-300">
-        <GitBranch className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block">Sub-agente</span>
-        <span className="block text-[11px] text-slate-500">Prompt por assunto</span>
-      </span>
-    </button>
-  );
-}
-
-function MainAgentBlockButton() {
-  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
-    event.dataTransfer.setData('application/dialogy-attendant-block', 'assistant');
-    event.dataTransfer.effectAllowed = 'move';
-  };
-
-  return (
-    <button
-      type="button"
-      draggable
-      onDragStart={handleDragStart}
-      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
-      title="Representa o agente principal e o prompt system padrao do atendimento."
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-300">
-        <Bot className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block">Agente principal</span>
-        <span className="block text-[11px] text-slate-500">Persona / system prompt</span>
-      </span>
-    </button>
-  );
-}
-
-function DeterministicMessageBlockButton() {
-  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
-    event.dataTransfer.setData('application/dialogy-attendant-block', 'send_message');
-    event.dataTransfer.effectAllowed = 'move';
-  };
-
-  return (
-    <button
-      type="button"
-      draggable
-      onDragStart={handleDragStart}
-      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
-      title="Envia uma mensagem configurada sem chamar a IA."
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/15 text-sky-300">
-        <MessageSquareText className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block">Enviar mensagem</span>
-        <span className="block text-[11px] text-slate-500">Texto fixo / sem IA</span>
+        <span className="block">{title}</span>
+        <span className="block text-[11px] text-slate-500">{subtitle}</span>
       </span>
     </button>
   );
@@ -831,61 +978,32 @@ function HighlightedReferenceTextarea({
   );
 }
 
-function FormBlockButton() {
-  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
-    event.dataTransfer.setData('application/dialogy-attendant-block', 'form');
-    event.dataTransfer.effectAllowed = 'move';
-  };
-
-  return (
-    <button
-      type="button"
-      draggable
-      onDragStart={handleDragStart}
-      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.05]"
-      title="Envia uma lista fixa de dados que devem ser coletados do cliente."
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
-        <ClipboardList className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block">Formulario</span>
-        <span className="block text-[11px] text-slate-500">Coleta de dados / sem IA</span>
-      </span>
-    </button>
-  );
-}
-
 function NodeInspector({
   node,
+  flowNodes,
   availableNodeVariables,
   systemVariables,
-  knowledgeCollections,
   knowledgeAttachment,
   knownReferenceIds,
-  mainSystemPrompt,
   variableNameConflict,
   referenceIdConflict,
-  onMainSystemPromptChange,
   onClose,
   onUpdate,
   onDelete,
 }: {
   node: AttendantNode;
+  flowNodes: AttendantNode[];
   availableNodeVariables: string[];
   systemVariables: AutopilotFlowVariable[];
-  knowledgeCollections: KnowledgeCollection[];
   knowledgeAttachment?: {
     targetTitle: string;
-    targetKind: 'assistant' | 'intent';
+    targetKind: 'sub_agent';
     collectionNames: string[];
     documents: KnowledgeBaseDocument[];
   } | null;
   knownReferenceIds: Set<string>;
-  mainSystemPrompt: string;
   variableNameConflict: boolean;
   referenceIdConflict: boolean;
-  onMainSystemPromptChange: (prompt: string) => void;
   onClose: () => void;
   onUpdate: (patch: Partial<AttendantNodeData>) => void;
   onDelete: () => void;
@@ -894,12 +1012,48 @@ function NodeInspector({
   const updateConfig = (patch: NonNullable<AttendantNodeData['config']>) => {
     onUpdate({ config: { ...config, ...patch } });
   };
+  const switchRoutes = config.routes || [];
+  const updateSwitchRoute = (routeId: string, patch: Partial<AutopilotFlowSwitchRoute>) => {
+    updateConfig({
+      routes: switchRoutes.map((route) => (
+        route.id === routeId ? { ...route, ...patch } : route
+      )),
+      ...(patch.id && config.fallbackRouteId === routeId ? { fallbackRouteId: patch.id } : {}),
+    });
+  };
+  const deleteSwitchRoute = (routeId: string) => {
+    const nextRoutes = switchRoutes.filter((route) => route.id !== routeId);
+    updateConfig({
+      routes: nextRoutes,
+      fallbackRouteId: config.fallbackRouteId === routeId ? nextRoutes.at(-1)?.id : config.fallbackRouteId,
+    });
+  };
+  const addSwitchRoute = () => {
+    const nextIndex = switchRoutes.length + 1;
+    const id = `rota_${nextIndex}_${Date.now()}`;
+    updateConfig({
+      routes: [
+        ...switchRoutes,
+        {
+          id,
+          label: 'Nova rota',
+          description: 'Descreva quando o atendimento deve seguir por este caminho.',
+          examples: [],
+        },
+      ],
+      fallbackRouteId: config.fallbackRouteId || id,
+    });
+  };
   const variables = [
     ...BUILT_IN_VARIABLES,
     ...systemVariables.map((variable) => `{{system.${variable.name}}}`),
     ...availableNodeVariables.map((variable) => `{{${variable}}}`),
   ];
-  const mainField = node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'form' || node.data.kind === 'handoff' || node.data.kind === 'close'
+  const mainField = node.data.kind === 'message'
+    || node.data.kind === 'collect'
+    || node.data.kind === 'sub_agent'
+    || node.data.kind === 'handoff'
+    || node.data.kind === 'end'
     ? 'message'
     : 'instructions';
   const insertVariable = (variable: string) => {
@@ -986,23 +1140,17 @@ function NodeInspector({
           )}
         </div>
 
-        {node.data.kind === 'trigger' && (
-          <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.06] p-4 text-xs leading-5 text-slate-400">
-            Este bloco representa a entrada do procedimento. No runtime futuro ele sera vinculado a uma intencao ou evento do atendimento.
-          </div>
-        )}
-
         {node.data.kind === 'knowledge' && (
           <div className="space-y-4 rounded-xl border border-orange-500/25 bg-orange-500/[0.05] p-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-orange-300">Conhecimento vinculado</p>
               {knowledgeAttachment ? (
                 <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                  Este bloco libera consulta de base para {knowledgeAttachment.targetKind === 'assistant' ? 'o agente principal' : 'o sub-agente'} <span className="text-slate-300">{knowledgeAttachment.targetTitle}</span>.
+                  Este bloco libera consulta de base para o sub-agente <span className="text-slate-300">{knowledgeAttachment.targetTitle}</span>.
                 </p>
               ) : (
                 <p className="mt-1 text-[11px] leading-4 text-amber-200">
-                  Conecte este bloco na lateral esquerda de um agente principal ou sub-agente para liberar consulta RAG.
+                  Conecte este bloco na lateral esquerda de um sub-agente para liberar consulta RAG.
                 </p>
               )}
             </div>
@@ -1055,107 +1203,156 @@ function NodeInspector({
           </div>
         )}
 
-        {node.data.kind === 'assistant' && (
-          <div className="space-y-4 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] p-4">
+        {node.data.kind === 'decision' && (
+          <div className="space-y-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.05] p-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Agente principal</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">Decision de caminhos</p>
               <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                Este bloco representa o prompt system padrao. Sub-agentes podem assumir assuntos especificos e retornar para esta persona principal.
+                A IA escolhe uma rota configurada e o fluxo segue para o bloco destino dessa rota.
               </p>
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs text-slate-300">Prompt system / persona</Label>
-              <HighlightedReferenceTextarea
-                value={mainSystemPrompt}
-                onChange={onMainSystemPromptChange}
-                placeholder="Descreva quem e o agente, como deve falar, limites, objetivo operacional e quando deve escalar."
-                knownReferenceIds={knownReferenceIds}
-                className="min-h-[180px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-cyan-500/30"
-              />
-              <p className="text-[11px] leading-4 text-slate-500">
-                Este e o mesmo prompt base configurado nos ajustes gerais do agente.
-              </p>
-            </div>
-          </div>
-        )}
 
-        {node.data.kind === 'intent' && (
-          <div className="space-y-4 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/[0.04] p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-300">Modo</Label>
+                <select
+                  value={config.switchMode || 'ai'}
+                  onChange={(event) => updateConfig({ switchMode: event.target.value as 'ai' | 'rules' })}
+                  className="h-10 w-full rounded-md border border-white/10 bg-[#17191c] px-3 text-sm text-slate-100 outline-none focus:border-amber-400/50"
+                >
+                  <option value="ai">IA</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-300">Confianca minima</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={config.confidenceThreshold ?? 0.75}
+                  onChange={(event) => updateConfig({
+                    confidenceThreshold: Math.max(0, Math.min(1, Number(event.target.value) || 0)),
+                  })}
+                  className="h-10 border-white/10 bg-[#17191c] text-slate-100 focus-visible:ring-amber-500/30"
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
-              <Label className="text-xs text-slate-300">Ativar sub-agente quando a intencao for</Label>
+              <Label className="text-xs text-slate-300">Rota fallback</Label>
               <select
-                value={config.intent || 'support_request'}
-                onChange={(event) => updateConfig({
-                  intent: event.target.value as UniversalAutopilotIntent,
-                  ...(event.target.value !== 'unknown' ? { customIntentLabel: '' } : {}),
-                })}
-                className="h-11 w-full rounded-md border border-white/10 bg-[#17191c] px-3 text-sm text-slate-100 outline-none focus:border-fuchsia-400/50"
+                value={config.fallbackRouteId || switchRoutes.at(-1)?.id || ''}
+                onChange={(event) => updateConfig({ fallbackRouteId: event.target.value })}
+                className="h-10 w-full rounded-md border border-white/10 bg-[#17191c] px-3 text-sm text-slate-100 outline-none focus:border-amber-400/50"
               >
-                {INTENT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                {switchRoutes.map((route) => (
+                  <option key={route.id} value={route.id}>{route.label || route.id}</option>
                 ))}
               </select>
             </div>
-            {config.intent === 'unknown' && (
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-300">Qual intencao este sub-agente deve atender?</Label>
-                <Input
-                  value={config.customIntentLabel || ''}
-                  onChange={(event) => updateConfig({ customIntentLabel: event.target.value })}
-                  placeholder="Ex.: negociar renovacao de contrato"
-                  className="h-11 border-white/10 bg-[#17191c] text-slate-100 placeholder:text-slate-600 focus-visible:ring-fuchsia-500/30"
-                />
+
+            <div className="space-y-3 border-t border-amber-500/15 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Rotas</p>
+                  <p className="mt-1 text-[11px] leading-4 text-slate-500">Cada rota representa uma saida possivel do Decision.</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={addSwitchRoute}
+                  className="h-9 border-amber-500/25 bg-amber-500/[0.06] px-3 text-amber-300 hover:bg-amber-500/15 hover:text-amber-200"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Rota
+                </Button>
               </div>
-            )}
-            <p className="text-[11px] leading-4 text-slate-500">
-              Quando esta intencao for identificada, este sub-agente assume a resposta com as instrucoes abaixo.
-            </p>
-            <div className="space-y-2 border-t border-fuchsia-500/15 pt-4">
-              <Label className="text-xs text-slate-300">Conhecimento permitido</Label>
-              <p className="text-[11px] leading-4 text-slate-500">
-                Selecione as colecoes da base que este sub-agente pode consultar.
-              </p>
-              <div className="space-y-2 pt-1">
-                {knowledgeCollections.map((collection) => {
-                  const selectedIds = config.knowledgeCollectionIds || [];
-                  const checked = selectedIds.includes(collection.id);
-                  return (
-                    <label key={collection.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#17191c] px-3 py-2 text-xs text-slate-200">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) => {
-                          const nextIds = event.target.checked
-                            ? Array.from(new Set([...selectedIds, collection.id]))
-                            : selectedIds.filter((id) => id !== collection.id);
-                          updateConfig({
-                            knowledgeCollectionIds: nextIds.length > 0 ? nextIds : ['general'],
-                          });
-                        }}
-                      />
-                      {collection.name}
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span>
-                <span className="block text-sm text-slate-200">Retorno ao agente principal</span>
-                <span className="block text-[11px] text-slate-500">Quando a proxima mensagem sair desta intencao.</span>
-              </span>
-              <Badge className="border-0 bg-emerald-500/15 text-emerald-300">Automatico</Badge>
+
+              {switchRoutes.map((route, index) => (
+                <div key={route.id} className="space-y-2 rounded-xl border border-white/10 bg-[#17191c] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Rota {index + 1}</span>
+                    <button
+                      type="button"
+                      onClick={() => deleteSwitchRoute(route.id)}
+                      className="text-slate-500 hover:text-red-300"
+                      aria-label={`Excluir rota ${route.label || route.id}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-[0.85fr_1fr] gap-2">
+                    <Input
+                      value={route.id}
+                      onChange={(event) => updateSwitchRoute(route.id, { id: normalizeVariableName(event.target.value) || route.id })}
+                      placeholder="alterar_wifi"
+                      className="h-10 border-white/10 bg-[#111316] font-mono text-xs text-slate-100 focus-visible:ring-amber-500/30"
+                    />
+                    <Input
+                      value={route.label}
+                      onChange={(event) => updateSwitchRoute(route.id, { label: event.target.value })}
+                      placeholder="Alterar nome/senha"
+                      className="h-10 border-white/10 bg-[#111316] text-slate-100 focus-visible:ring-amber-500/30"
+                    />
+                  </div>
+                  <Textarea
+                    value={route.description}
+                    onChange={(event) => updateSwitchRoute(route.id, { description: event.target.value })}
+                    placeholder="Quando usar esta rota?"
+                    className="min-h-[74px] resize-none border-white/10 bg-[#111316] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-amber-500/30"
+                  />
+                  <Textarea
+                    value={(route.examples || []).join('\n')}
+                    onChange={(event) => updateSwitchRoute(route.id, {
+                      examples: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean),
+                    })}
+                    placeholder="Exemplos, um por linha"
+                    className="min-h-[74px] resize-none border-white/10 bg-[#111316] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-amber-500/30"
+                  />
+                  <Input
+                    value={(route.requiredSlots || []).join(', ')}
+                    onChange={(event) => updateSwitchRoute(route.id, {
+                      requiredSlots: event.target.value.split(',').map((slot) => normalizeVariableName(slot)).filter(Boolean),
+                    })}
+                    placeholder="Slots obrigatorios: wifi_ssid, wifi_password"
+                    className="h-10 border-white/10 bg-[#111316] text-slate-100 focus-visible:ring-amber-500/30"
+                  />
+                  <select
+                    value={route.targetNodeId || ''}
+                    onChange={(event) => updateSwitchRoute(route.id, { targetNodeId: event.target.value || undefined })}
+                    className="h-10 w-full rounded-md border border-white/10 bg-[#111316] px-3 text-sm text-slate-100 outline-none focus:border-amber-400/50"
+                  >
+                    <option value="">Destino ainda nao definido</option>
+                    {flowNodes
+                      .filter((candidate) => candidate.id !== node.id)
+                      .map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.data.title} ({candidate.data.kind})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              ))}
+
+              {switchRoutes.length === 0 && (
+                <p className="rounded-lg border border-white/10 bg-[#17191c] px-3 py-3 text-xs text-slate-500">
+                  Nenhuma rota configurada. Adicione pelo menos duas rotas antes de publicar.
+                </p>
+              )}
             </div>
           </div>
         )}
 
-        {(node.data.kind === 'understand' || node.data.kind === 'intent' || node.data.kind === 'knowledge' || node.data.kind === 'rule' || node.data.kind === 'tool' || node.data.kind === 'trigger') && (
+        {(node.data.kind === 'decision' || node.data.kind === 'sub_agent' || node.data.kind === 'knowledge' || node.data.kind === 'tool' || node.data.kind === 'start') && (
           <div className="space-y-2">
             <Label className="text-xs text-slate-400">
               {node.data.kind === 'tool'
                 ? 'Instrucao para montar o payload'
-                : node.data.kind === 'intent'
-                  ? 'System prompt do sub-agente'
+                : node.data.kind === 'decision'
+                  ? 'Objetivo do decisor'
+                : node.data.kind === 'sub_agent'
+                  ? 'System prompt do sub-agente V2'
                   : 'Instrucao'}
             </Label>
             <HighlightedReferenceTextarea
@@ -1173,13 +1370,15 @@ function NodeInspector({
           </div>
         )}
 
-        {(node.data.kind === 'reply' || node.data.kind === 'send_message' || node.data.kind === 'form' || node.data.kind === 'handoff' || node.data.kind === 'close') && (
+        {(node.data.kind === 'message' || node.data.kind === 'collect' || node.data.kind === 'sub_agent' || node.data.kind === 'handoff' || node.data.kind === 'end') && (
           <div className="space-y-2">
             <Label className="text-xs text-slate-400">
-              {node.data.kind === 'send_message'
+              {node.data.kind === 'message'
                 ? 'Mensagem fixa ao cliente'
-                : node.data.kind === 'form'
-                  ? 'Introducao do formulario'
+                : node.data.kind === 'collect'
+                  ? 'Introducao da coleta'
+                : node.data.kind === 'sub_agent'
+                  ? 'Instrucao de composicao'
                   : 'Mensagem ao cliente'}
             </Label>
             <HighlightedReferenceTextarea
@@ -1189,25 +1388,20 @@ function NodeInspector({
               knownReferenceIds={knownReferenceIds}
               className="min-h-[126px] border-white/10 bg-[#17191c] text-sm text-slate-100 placeholder:text-slate-600 focus-visible:ring-sky-500/30"
             />
-            {node.data.kind === 'send_message' && (
+            {node.data.kind === 'collect' && (
               <p className="text-[11px] leading-4 text-slate-500">
-                Este texto sera enviado diretamente, sem gerar resposta com IA.
-              </p>
-            )}
-            {node.data.kind === 'form' && (
-              <p className="text-[11px] leading-4 text-slate-500">
-                Este formulario sera enviado como mensagem fixa de WhatsApp, sem gerar resposta com IA.
+                Esta coleta pode ser conduzida pela IA sem repetir dados ja informados.
               </p>
             )}
           </div>
         )}
 
-        {node.data.kind === 'form' && (
+        {node.data.kind === 'collect' && (
           <div className="space-y-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">Campos para coletar</p>
               <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                Escolha se o formulario sera enviado como mensagem fixa ou conduzido pela IA durante a conversa.
+                Escolha se a coleta sera enviada como mensagem fixa ou conduzida pela IA durante a conversa.
               </p>
             </div>
             <label className="flex items-center justify-between rounded-xl border border-white/10 bg-[#17191c] px-3 py-3">
@@ -1309,19 +1503,6 @@ function NodeInspector({
               className="h-11 border-white/10 bg-[#17191c] text-slate-100 focus-visible:ring-sky-500/30"
             />
           </div>
-        )}
-
-        {node.data.kind === 'assistant' && (
-          <label className="flex items-center justify-between rounded-xl border border-white/10 bg-[#17191c] px-4 py-3">
-            <span>
-              <span className="block text-sm text-slate-200">Usar IA para redigir</span>
-              <span className="block text-xs text-slate-500">Formula uma resposta natural com contexto.</span>
-            </span>
-            <Switch
-              checked={config.useAi !== false}
-              onCheckedChange={(checked) => updateConfig({ useAi: checked })}
-            />
-          </label>
         )}
 
         {node.data.kind === 'tool' && node.data.toolName && (
@@ -1467,14 +1648,22 @@ function EdgeInspector({
   nodes,
   onClose,
   onDelete,
+  onRouteChange,
 }: {
   edge: Edge;
   nodes: AttendantNode[];
   onClose: () => void;
   onDelete: () => void;
+  onRouteChange: (routeId: string) => void;
 }) {
-  const source = nodes.find((node) => node.id === selectedEdge.source)?.data.title || selectedEdge.source;
-  const target = nodes.find((node) => node.id === selectedEdge.target)?.data.title || selectedEdge.target;
+  const sourceNode = nodes.find((node) => node.id === selectedEdge.source);
+  const targetNode = nodes.find((node) => node.id === selectedEdge.target);
+  const source = sourceNode?.data.title || selectedEdge.source;
+  const target = targetNode?.data.title || selectedEdge.target;
+  const switchRoutes = sourceNode?.data.kind === 'decision' ? sourceNode.data.config?.routes || [] : [];
+  const selectedRouteId = typeof selectedEdge.data?.routeId === 'string'
+    ? selectedEdge.data.routeId
+    : switchRoutes.find((route) => route.targetNodeId === selectedEdge.target)?.id || '';
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1500,6 +1689,24 @@ function EdgeInspector({
           <p className="my-2 text-sky-400">para</p>
           <p className="truncate">{target}</p>
         </div>
+        {switchRoutes.length > 0 && (
+          <div className="mt-4 space-y-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4">
+            <Label className="text-xs text-amber-200">Rota desta conexao</Label>
+            <select
+              value={selectedRouteId}
+              onChange={(event) => onRouteChange(event.target.value)}
+              className="h-10 w-full rounded-md border border-white/10 bg-[#17191c] px-3 text-sm text-slate-100 outline-none focus:border-amber-400/50"
+            >
+              <option value="">Sem rota vinculada</option>
+              {switchRoutes.map((route) => (
+                <option key={route.id} value={route.id}>{route.label || route.id}</option>
+              ))}
+            </select>
+            <p className="text-[11px] leading-4 text-slate-500">
+              Quando esta rota for escolhida, o runtime usa este bloco como destino do caminho.
+            </p>
+          </div>
+        )}
         <p className="mt-4 text-xs leading-5 text-slate-500">
           Selecione a corda e exclua para remover apenas esta passagem do fluxo.
         </p>
@@ -1519,6 +1726,212 @@ function EdgeInspector({
   );
 }
 
+function publishGateTone(audit: AutopilotFlowAuditResult) {
+  if (audit.status === 'failed') {
+    return {
+      label: 'Bloqueado',
+      className: 'border-red-500/35 bg-red-500/10 text-red-200 hover:bg-red-500/15',
+      icon: XCircle,
+    };
+  }
+  if (audit.issues.some((issue) => issue.severity === 'warning') || audit.simulations.some((simulation) => simulation.status === 'warning')) {
+    return {
+      label: 'Com avisos',
+      className: 'border-amber-500/35 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15',
+      icon: AlertTriangle,
+    };
+  }
+  return {
+    label: 'Aprovado',
+    className: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15',
+    icon: ShieldCheck,
+  };
+}
+
+function simulationStatusMeta(status: AutopilotFlowSimulationResult['status']) {
+  if (status === 'failed') {
+    return {
+      label: 'Falhou',
+      className: 'border-red-500/30 bg-red-500/10 text-red-200',
+      icon: XCircle,
+    };
+  }
+  if (status === 'warning') {
+    return {
+      label: 'Aviso',
+      className: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+      icon: AlertTriangle,
+    };
+  }
+  if (status === 'skipped') {
+    return {
+      label: 'Ignorado',
+      className: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
+      icon: CircleHelp,
+    };
+  }
+  return {
+    label: 'Passou',
+    className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+    icon: CheckCircle2,
+  };
+}
+
+function PublishGatePanel({
+  audit,
+  open,
+  onToggle,
+  onRepairWithAi,
+  isRepairing,
+}: {
+  audit: AutopilotFlowAuditResult;
+  open: boolean;
+  onToggle: () => void;
+  onRepairWithAi?: () => void;
+  isRepairing?: boolean;
+}) {
+  const criticalIssues = audit.issues.filter((issue) => issue.severity === 'critical');
+  const warningIssues = audit.issues.filter((issue) => issue.severity === 'warning');
+  const failedSimulations = audit.simulations.filter((simulation) => simulation.status === 'failed');
+  const warningSimulations = audit.simulations.filter((simulation) => simulation.status === 'warning');
+  const passedSimulations = audit.simulations.filter((simulation) => simulation.status === 'passed');
+  const skippedSimulations = audit.simulations.filter((simulation) => simulation.status === 'skipped');
+  const tone = publishGateTone(audit);
+  const ToneIcon = tone.icon;
+  const visibleIssues = [...criticalIssues, ...warningIssues];
+  const visibleSimulations = [
+    ...failedSimulations,
+    ...warningSimulations,
+    ...passedSimulations,
+    ...skippedSimulations,
+  ];
+  const canRepairWithAi = criticalIssues.length > 0 || failedSimulations.length > 0;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        title="Ver gate de publicacao"
+        className={cn(
+          'pointer-events-auto flex h-[54px] items-center gap-2 rounded-xl border px-4 text-sm shadow-xl backdrop-blur',
+          tone.className,
+        )}
+      >
+        <ToneIcon className="h-4 w-4" />
+        <span className="hidden sm:inline">Gate</span>
+        <span className="rounded-lg bg-black/20 px-2 py-1 text-[11px]">
+          {passedSimulations.length}/{audit.simulations.length || 0}
+        </span>
+      </button>
+
+      {open && (
+        <div className="pointer-events-auto absolute bottom-[76px] left-1/2 flex max-h-[calc(100vh_-_132px)] min-h-0 w-[min(720px,calc(100vw_-_2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#111417]/98 shadow-2xl backdrop-blur">
+          <div className="flex shrink-0 flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide', tone.className)}>
+                  <ToneIcon className="h-3.5 w-3.5" />
+                  {tone.label}
+                </span>
+                <span className="text-xs leading-5 text-slate-500">
+                  {criticalIssues.length} critico(s), {warningIssues.length + warningSimulations.length} aviso(s)
+                </span>
+              </div>
+              <h3 className="mt-3 text-sm font-semibold text-white">Gate de publicacao</h3>
+              <p className="mt-1 max-w-xl text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]">
+                Simulacoes deterministicamente geradas para validar rotas, fallback, confirmacao, falha de ferramenta e pedido por humano.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center justify-end gap-2">
+              {onRepairWithAi && canRepairWithAi && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onRepairWithAi}
+                  disabled={isRepairing}
+                  className="h-9 max-w-full shrink border-purple-500/30 bg-purple-500/10 px-3 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200"
+                >
+                  {isRepairing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                  <span className="truncate">{isRepairing ? 'Corrigindo...' : 'Corrigir erros com IA'}</span>
+                </Button>
+              )}
+              <button type="button" onClick={onToggle} className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-3">
+                <div className="text-[11px] text-emerald-200">Passou</div>
+                <div className="mt-1 text-xl font-semibold text-white">{passedSimulations.length}</div>
+              </div>
+              <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] p-3">
+                <div className="text-[11px] text-red-200">Falhou</div>
+                <div className="mt-1 text-xl font-semibold text-white">{failedSimulations.length}</div>
+              </div>
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3">
+                <div className="text-[11px] text-amber-200">Avisos</div>
+                <div className="mt-1 text-xl font-semibold text-white">{warningSimulations.length + warningIssues.length}</div>
+              </div>
+              <div className="rounded-xl border border-slate-500/20 bg-slate-500/[0.06] p-3">
+                <div className="text-[11px] text-slate-300">Ignorado</div>
+                <div className="mt-1 text-xl font-semibold text-white">{skippedSimulations.length}</div>
+              </div>
+            </div>
+
+            {visibleIssues.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Bloqueios e avisos</div>
+                {visibleIssues.map((issue) => {
+                  const isCritical = issue.severity === 'critical';
+                  const IssueIcon = isCritical ? XCircle : AlertTriangle;
+                  return (
+                    <div key={`${issue.code}-${issue.nodeId || ''}-${issue.routeId || ''}`} className={cn(
+                      'flex min-w-0 gap-2 rounded-xl border p-3 text-xs leading-5',
+                      isCritical ? 'border-red-500/20 bg-red-500/[0.06] text-red-100' : 'border-amber-500/20 bg-amber-500/[0.06] text-amber-100',
+                    )}>
+                      <IssueIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span className="min-w-0 break-words [overflow-wrap:anywhere]">{issue.message}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-4 space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Simulacoes</div>
+              <div className="grid gap-2">
+                {visibleSimulations.map((simulation, index) => {
+                  const meta = simulationStatusMeta(simulation.status);
+                  const SimulationIcon = meta.icon;
+                  return (
+                    <div key={`${simulation.caseId}-${simulation.nodeId || ''}-${simulation.routeId || ''}-${index}`} className="grid min-w-0 gap-2 rounded-xl border border-white/10 bg-[#17191c] p-3">
+                      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                        <div className="flex min-w-0 items-start gap-2">
+                          <TestTube2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
+                          <span className="min-w-0 break-words text-xs font-medium leading-5 text-slate-100 [overflow-wrap:anywhere]">{simulation.title}</span>
+                        </div>
+                        <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]', meta.className)}>
+                          <SimulationIcon className="h-3 w-3" />
+                          {meta.label}
+                        </span>
+                      </div>
+                      <p className="min-w-0 break-words text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]">{simulation.message}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function AutopilotFlowBuilder({
   agentId,
   agentName,
@@ -1533,12 +1946,10 @@ export function AutopilotFlowBuilder({
   isDiscarding,
   enabledToolNames,
   tools,
-  rules,
   knowledgeDocuments,
   knowledgeCollections,
   mainSystemPrompt,
   flowGraph,
-  onMainSystemPromptChange,
   onFlowGraphChange,
   onBack,
   onOpenPanel,
@@ -1547,13 +1958,12 @@ export function AutopilotFlowBuilder({
   onSave,
   onPublish,
   onDiscard,
-  onAddRule,
   onGenerateFlowWithAi,
   onApplyAiProposal,
 }: AutopilotFlowBuilderProps) {
   const initialGraph = useMemo(
-    () => flowGraph ? restoreFlowGraph(flowGraph) : buildInitialGraph(agentName, rules),
-    [agentName, flowGraph, rules]
+    () => flowGraph ? restoreFlowGraph(flowGraph) : buildInitialGraph(agentName),
+    [agentName, flowGraph]
   );
   const [nodes, setNodes, onNodesChange] = useNodesState<AttendantNode>(initialGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialGraph.edges);
@@ -1574,11 +1984,87 @@ export function AutopilotFlowBuilder({
       content: 'Descreva o atendimento que deseja montar. Posso criar um flow novo ou revisar o atual usando as ferramentas disponiveis.',
     },
   ]);
+  const [isPublishGateOpen, setIsPublishGateOpen] = useState(false);
   const suppressNextGraphChange = useRef(true);
   const lastSerializedGraph = useRef(JSON.stringify(serializeFlowGraph(initialGraph.nodes, initialGraph.edges, initialGraph.variables)));
+  const currentFlowGraph = useMemo(
+    () => serializeFlowGraph(nodes, edges, systemVariables),
+    [edges, nodes, systemVariables],
+  );
+  // Debounced audit: avoid running 11 heavy simulations on every micro-change
+  const [publishAudit, setPublishAudit] = useState<AutopilotFlowAuditResult>(() => auditAutopilotFlowGraph(currentFlowGraph));
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPublishAudit(auditAutopilotFlowGraph(currentFlowGraph));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [currentFlowGraph]);
+  const hasPublishGateBlockers = publishAudit.status === 'failed';
+
+  const [isRepairingGate, setIsRepairingGate] = useState(false);
+
+  const handleRepairWithAi = useCallback(async () => {
+    if (!onGenerateFlowWithAi || !onApplyAiProposal) return;
+    try {
+      setIsRepairingGate(true);
+      const repairableIssues = publishAudit.issues.filter((issue) => issue.severity === 'critical');
+      const repairableSimulations = publishAudit.simulations.filter((simulation) => simulation.status === 'failed');
+      if (repairableIssues.length === 0 && repairableSimulations.length === 0) {
+        toast({ title: 'Nao ha erros criticos para corrigir com IA.' });
+        return;
+      }
+
+      const issues = repairableIssues
+        .map((issue, index) => [
+          `${index + 1}. ${issue.message}`,
+          `   code: ${issue.code}`,
+          issue.nodeId ? `   nodeId afetado: ${issue.nodeId}` : null,
+          issue.routeId ? `   routeId afetado: ${issue.routeId}` : null,
+        ].filter(Boolean).join('\n'))
+        .join('\n');
+      const simulations = repairableSimulations
+        .map((simulation, index) => [
+          `${index + 1}. ${simulation.title}: ${simulation.message}`,
+          `   caseId: ${simulation.caseId}`,
+          simulation.nodeId ? `   nodeId afetado: ${simulation.nodeId}` : null,
+          simulation.routeId ? `   routeId afetado: ${simulation.routeId}` : null,
+        ].filter(Boolean).join('\n'))
+        .join('\n');
+      const repairPrompt = [
+        'Modo patch cirurgico do Gate de Validacao.',
+        'Corrija somente os erros criticos e as simulacoes falhas listados abaixo.',
+        'Nao redesenhe, reordene ou reescreva o fluxo inteiro.',
+        'Preserve textos, IDs, posicoes, variaveis, rotas, ferramentas e conhecimento que nao estejam diretamente ligados aos itens listados.',
+        'Nao altere simulacoes que ja passaram e nao corrija avisos que nao bloqueiam publicacao.',
+        'Se precisar criar no ou aresta, crie apenas o minimo necessario para resolver o item afetado.',
+        '',
+        'Erros criticos:',
+        issues || '- Nenhum erro critico estrutural.',
+        '',
+        'Simulacoes falhas:',
+        simulations || '- Nenhuma simulacao falha.',
+      ].join('\n');
+      
+      const { proposal, error } = await onGenerateFlowWithAi({
+        conversation: [{ role: 'user', content: repairPrompt }],
+        currentGraph: currentFlowGraph,
+        currentSystemPrompt: mainSystemPrompt,
+      });
+      if (error || !proposal) {
+        throw new Error(error || 'Falha ao gerar proposta de reparo');
+      }
+      onApplyAiProposal(proposal);
+      toast({ title: 'Reparo com IA concluído! O fluxo foi atualizado.' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Falha ao tentar reparar o fluxo usando IA.', variant: 'destructive' });
+    } finally {
+      setIsRepairingGate(false);
+    }
+  }, [publishAudit, currentFlowGraph, mainSystemPrompt, onGenerateFlowWithAi, onApplyAiProposal]);
 
   useEffect(() => {
-    const currentSignature = JSON.stringify(serializeFlowGraph(nodes, edges, systemVariables));
+    const currentSignature = JSON.stringify(currentFlowGraph);
     const nextSignature = JSON.stringify(serializeFlowGraph(initialGraph.nodes, initialGraph.edges, initialGraph.variables));
     if (currentSignature === nextSignature) return;
     lastSerializedGraph.current = nextSignature;
@@ -1598,7 +2084,7 @@ export function AutopilotFlowBuilder({
     setNodes((current) => {
       let changed = false;
       const next = current.map((node) => {
-        if (node.id !== 'assistant' || node.data.title === nextTitle) return node;
+        if (node.data.kind !== 'sub_agent' || node.data.title === nextTitle) return node;
         changed = true;
         return { ...node, data: { ...node.data, title: nextTitle } };
       });
@@ -1606,60 +2092,83 @@ export function AutopilotFlowBuilder({
     });
   }, [agentName, setNodes]);
 
+  // Debounced propagation to parent: avoids dozens of onFlowGraphChange calls during stabilization
   useEffect(() => {
     if (suppressNextGraphChange.current) {
       suppressNextGraphChange.current = false;
       return;
     }
-    const nextGraph = serializeFlowGraph(nodes, edges, systemVariables);
-    const nextSignature = JSON.stringify(nextGraph);
-    if (lastSerializedGraph.current === nextSignature) return;
-    lastSerializedGraph.current = nextSignature;
-    onFlowGraphChange(nextGraph);
-  }, [edges, nodes, onFlowGraphChange, systemVariables]);
+    const timer = setTimeout(() => {
+      const nextGraph = currentFlowGraph;
+      const nextSignature = JSON.stringify(nextGraph);
+      if (lastSerializedGraph.current === nextSignature) return;
+      lastSerializedGraph.current = nextSignature;
+      onFlowGraphChange(nextGraph);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [currentFlowGraph, onFlowGraphChange]);
 
+  // Deferred tool-handle adjustment: breaks the synchronous cascade that freezes the UI
+  // by deferring the edge/node adjustment to the next idle frame
   useEffect(() => {
-    const nodeById = new Map(nodes.map((node) => [node.id, node]));
-    const toolPositions = new Map<string, Position>();
-    setEdges((current) => {
-      let changed = false;
-      const next = current.map((flowEdge) => {
-        const source = nodeById.get(flowEdge.source);
-        const target = nodeById.get(flowEdge.target);
-        if (!source || !target || !isAgentNodeKind(source.data.kind) || target.data.kind !== 'tool') {
-          return flowEdge;
-        }
-        const visual = connectionVisual(source, target);
-        if (visual.toolHandlePosition) toolPositions.set(target.id, visual.toolHandlePosition);
-        if (
-          flowEdge.sourceHandle === visual.sourceHandle &&
-          flowEdge.targetHandle === visual.targetHandle &&
-          flowEdge.style?.stroke === visual.color
-        ) {
-          return flowEdge;
-        }
-        changed = true;
-        return {
-          ...flowEdge,
-          sourceHandle: visual.sourceHandle,
-          targetHandle: visual.targetHandle,
-          markerEnd: { type: MarkerType.ArrowClosed, color: visual.color, width: 16, height: 16 },
-          style: { ...flowEdge.style, stroke: visual.color, strokeWidth: 1.6 },
-        };
+    const timer = setTimeout(() => {
+      const nodeById = new Map(nodes.map((node) => [node.id, node]));
+      const toolPositions = new Map<string, Position>();
+      setEdges((current) => {
+        let changed = false;
+        const next = current.map((flowEdge) => {
+          const source = nodeById.get(flowEdge.source);
+          const target = nodeById.get(flowEdge.target);
+          if (!source || !target || !isAgentNodeKind(source.data.kind) || target.data.kind !== 'tool') {
+            return flowEdge;
+          }
+          const visual = connectionVisual(source, target);
+          if (visual.toolHandlePosition) toolPositions.set(target.id, visual.toolHandlePosition);
+          const route = findSwitchRouteForEdge(
+            source,
+            target.id,
+            typeof flowEdge.data?.routeId === 'string' ? flowEdge.data.routeId : undefined,
+          );
+          const routeData = route ? { routeId: route.id, routeLabel: route.label } : undefined;
+          if (
+            flowEdge.sourceHandle === visual.sourceHandle &&
+            flowEdge.targetHandle === visual.targetHandle &&
+            flowEdge.style?.stroke === visual.color &&
+            (typeof flowEdge.data?.routeId === 'string' ? flowEdge.data.routeId : undefined) === routeData?.routeId &&
+            flowEdge.label === routeData?.routeLabel
+          ) {
+            return flowEdge;
+          }
+          changed = true;
+          return {
+            ...flowEdge,
+            sourceHandle: visual.sourceHandle,
+            targetHandle: visual.targetHandle,
+            data: routeData,
+            label: routeData?.routeLabel,
+            labelStyle: routeData ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
+            labelBgStyle: routeData ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
+            labelBgPadding: routeData ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
+            labelBgBorderRadius: routeData ? 6 : undefined,
+            markerEnd: { type: MarkerType.ArrowClosed, color: visual.color, width: 16, height: 16 },
+            style: { ...flowEdge.style, stroke: visual.color, strokeWidth: 1.6 },
+          };
+        });
+        return changed ? next : current;
       });
-      return changed ? next : current;
-    });
-    if (toolPositions.size === 0) return;
-    setNodes((current) => {
-      let changed = false;
-      const next = current.map((node) => {
-        const nextPosition = toolPositions.get(node.id);
-        if (!nextPosition || node.data.toolHandlePosition === nextPosition) return node;
-        changed = true;
-        return { ...node, data: { ...node.data, toolHandlePosition: nextPosition } };
+      if (toolPositions.size === 0) return;
+      setNodes((current) => {
+        let changed = false;
+        const next = current.map((node) => {
+          const nextPosition = toolPositions.get(node.id);
+          if (!nextPosition || node.data.toolHandlePosition === nextPosition) return node;
+          changed = true;
+          return { ...node, data: { ...node.data, toolHandlePosition: nextPosition } };
+        });
+        return changed ? next : current;
       });
-      return changed ? next : current;
-    });
+    }, 0);
+    return () => clearTimeout(timer);
   }, [edges, nodes, setEdges, setNodes]);
 
   const isValidConnection = useCallback((connection: Connection | Edge) => {
@@ -1677,10 +2186,35 @@ export function AutopilotFlowBuilder({
       const target = nodes.find((node) => node.id === connection.target);
       if (!source || !target) return;
       const visual = connectionVisual(source, target);
+      const routeForConnection = source.data.kind === 'decision'
+        ? (
+            (source.data.config?.routes || []).find((route) => route.targetNodeId === target.id)
+            || (source.data.config?.routes || []).find((route) => !route.targetNodeId)
+            || null
+          )
+        : null;
       if (target.data.kind === 'tool' && visual.toolHandlePosition) {
         setNodes((current) => current.map((node) => (
           node.id === target.id
             ? { ...node, data: { ...node.data, toolHandlePosition: visual.toolHandlePosition } }
+            : node
+        )));
+      }
+      if (source.data.kind === 'decision' && routeForConnection && !routeForConnection.targetNodeId) {
+        setNodes((current) => current.map((node) => (
+          node.id === source.id
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  config: {
+                    ...node.data.config,
+                    routes: (node.data.config?.routes || []).map((route) => (
+                      route.id === routeForConnection.id ? { ...route, targetNodeId: target.id } : route
+                    )),
+                  },
+                },
+              }
             : node
         )));
       }
@@ -1689,6 +2223,12 @@ export function AutopilotFlowBuilder({
         sourceHandle: visual.sourceHandle,
         targetHandle: visual.targetHandle,
         type: 'smoothstep',
+        data: routeForConnection ? { routeId: routeForConnection.id, routeLabel: routeForConnection.label } : undefined,
+        label: routeForConnection?.label,
+        labelStyle: routeForConnection ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
+        labelBgStyle: routeForConnection ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
+        labelBgPadding: routeForConnection ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
+        labelBgBorderRadius: routeForConnection ? 6 : undefined,
         markerEnd: { type: MarkerType.ArrowClosed, color: visual.color, width: 16, height: 16 },
         style: { stroke: visual.color, strokeWidth: 1.6 },
       }, current));
@@ -1704,22 +2244,19 @@ export function AutopilotFlowBuilder({
     const targetNode = targetId ? nodes.find((node) => node.id === targetId) : null;
     if (!targetNode || !isAgentNodeKind(targetNode.data.kind)) return null;
 
-    const allowedCollectionIds = targetNode.data.kind === 'intent'
-      ? targetNode.data.config?.knowledgeCollectionIds?.filter(Boolean) || ['general']
-      : knowledgeCollections.map((collection) => collection.id);
+    const allowedCollectionIds = targetNode.data.config?.knowledgeCollectionIds?.filter(Boolean) || ['general'];
     const allowedSet = new Set(allowedCollectionIds);
     const collectionNames = knowledgeCollections
       .filter((collection) => allowedSet.has(collection.id))
       .map((collection) => collection.name);
     const scopedDocuments = knowledgeDocuments.filter((document) => {
-      if (targetNode.data.kind === 'assistant') return true;
       const documentCollectionIds = document.collectionIds?.length ? document.collectionIds : ['general'];
       return documentCollectionIds.some((collectionId) => allowedSet.has(collectionId));
     });
 
     return {
       targetTitle: targetNode.data.title,
-      targetKind: targetNode.data.kind as 'assistant' | 'intent',
+      targetKind: 'sub_agent' as const,
       collectionNames,
       documents: scopedDocuments,
     };
@@ -1751,19 +2288,19 @@ export function AutopilotFlowBuilder({
     selectedNode?.data.config?.referenceId &&
     nodes.some((node) => node.id !== selectedNode.id && node.data.config?.referenceId === selectedNode.data.config?.referenceId)
   );
-  const hasVariableConflicts = nodes.some((node, index) => (
+  const hasVariableConflicts = useMemo(() => nodes.some((node, index) => (
     Boolean(node.data.config?.variableName) &&
     nodes.some((otherNode, otherIndex) => (
       index !== otherIndex && otherNode.data.config?.variableName === node.data.config?.variableName
     ))
-  ));
-  const hasReferenceConflicts = nodes.some((node, index) => (
+  )), [nodes]);
+  const hasReferenceConflicts = useMemo(() => nodes.some((node, index) => (
     Boolean(node.data.config?.referenceId) &&
     nodes.some((otherNode, otherIndex) => (
       index !== otherIndex && otherNode.data.config?.referenceId === node.data.config?.referenceId
     ))
-  ));
-  const knownReferenceIds = useMemo(() => new Set(
+  )), [nodes]);
+  const knownReferenceIds = useMemo<Set<string>>(() => new Set(
     nodes
       .flatMap((node) => [
         node.id,
@@ -1791,6 +2328,55 @@ export function AutopilotFlowBuilder({
     setEdges((current) => current.filter((flowEdge) => flowEdge.id !== selectedEdgeId));
     setSelectedEdgeId(null);
   }, [selectedEdgeId, setEdges]);
+  const updateSelectedEdgeRoute = useCallback((routeId: string) => {
+    if (!selectedEdgeId) return;
+    const selectedFlowEdge = edges.find((flowEdge) => flowEdge.id === selectedEdgeId);
+    if (!selectedFlowEdge) return;
+    const sourceNode = nodes.find((node) => node.id === selectedFlowEdge.source);
+    if (!sourceNode || sourceNode.data.kind !== 'decision') return;
+    const route = routeId
+      ? (sourceNode.data.config?.routes || []).find((candidate) => candidate.id === routeId)
+      : null;
+    const previousRouteId = typeof selectedFlowEdge.data?.routeId === 'string'
+      ? selectedFlowEdge.data.routeId
+      : '';
+
+    setNodes((current) => current.map((node) => {
+      if (node.id !== sourceNode.id) return node;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          config: {
+            ...node.data.config,
+            routes: (node.data.config?.routes || []).map((candidate) => {
+              if (route && candidate.id === route.id) {
+                return { ...candidate, targetNodeId: selectedFlowEdge.target };
+              }
+              if (previousRouteId && candidate.id === previousRouteId && candidate.targetNodeId === selectedFlowEdge.target) {
+                return { ...candidate, targetNodeId: undefined };
+              }
+              return candidate;
+            }),
+          },
+        },
+      };
+    }));
+
+    setEdges((current) => current.map((flowEdge) => {
+      if (flowEdge.id !== selectedEdgeId) return flowEdge;
+      const routeData = route ? { routeId: route.id, routeLabel: route.label } : undefined;
+      return {
+        ...flowEdge,
+        data: routeData,
+        label: routeData?.routeLabel,
+        labelStyle: routeData ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
+        labelBgStyle: routeData ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
+        labelBgPadding: routeData ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
+        labelBgBorderRadius: routeData ? 6 : undefined,
+      };
+    }));
+  }, [edges, nodes, selectedEdgeId, setEdges, setNodes]);
   const addSystemVariable = useCallback((name: string, defaultValue: string) => {
     const normalizedName = normalizeVariableName(name);
     if (
@@ -1819,146 +2405,130 @@ export function AutopilotFlowBuilder({
     event.preventDefault();
     if (!flowInstance) return;
     const blockKind = event.dataTransfer.getData('application/dialogy-attendant-block');
-    if (blockKind === 'intent') {
+    if (['start', 'message', 'collect', 'decision', 'knowledge', 'sub_agent', 'handoff', 'end'].includes(blockKind)) {
       const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      const id = `intent-${Date.now()}`;
-      setNodes((current) => current.concat({
-        id,
-        type: 'attendant',
-        position,
-        data: {
-          kind: 'intent',
-          title: 'Sub-agente: Suporte',
-          subtitle: 'Ativado por intencao',
+      const timestamp = Date.now();
+      const nodeKind = blockKind as Extract<NodeKind, 'start' | 'message' | 'collect' | 'decision' | 'knowledge' | 'sub_agent' | 'handoff' | 'end'>;
+      const id = `${nodeKind}-${timestamp}`;
+      const defaults: Record<typeof nodeKind, AttendantNode['data']> = {
+        start: {
+          kind: 'start',
+          title: 'Inicio do fluxo',
+          subtitle: 'Entrada sequencial',
           config: {
-            intent: 'support_request',
-            instructions: 'Atenda este assunto com instrucoes especificas, sem fugir do escopo definido.',
-            referenceId: `sub_agente_suporte_${Date.now()}`,
-            variableName: `intencao_suporte_${Date.now()}`,
-            returnToMainPrompt: true,
-            knowledgeCollectionIds: ['general'],
+            instructions: 'Inicie a execucao deste fluxo e avance para o primeiro passo conectado.',
+            referenceId: `inicio_${timestamp}`,
+            variableName: `inicio_${timestamp}`,
           },
         },
-      }));
-      setSelectedNodeId(id);
-      return;
-    }
-    if (blockKind === 'assistant') {
-      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      let selectedAssistantId = 'assistant';
-      setNodes((current) => {
-        const existingAssistant = current.find((node) => node.id === 'assistant' || node.data.kind === 'assistant');
-        if (existingAssistant) {
-          selectedAssistantId = existingAssistant.id;
-          return current.map((node) => (
-            node.id === existingAssistant.id
-              ? {
-                  ...node,
-                  position,
-                  data: {
-                    ...node.data,
-                    title: agentName || node.data.title || 'Agente IA',
-                    subtitle: 'Responder com IA',
-                  },
-                }
-              : node
-          ));
-        }
-        return current.concat({
-          id: 'assistant',
-          type: 'attendant',
-          position,
-          data: {
-            kind: 'assistant',
-            title: agentName || 'Agente IA',
-            subtitle: 'Responder com IA',
-            config: {
-              instructions: 'Use o prompt system principal para responder ao cliente.',
-              referenceId: 'agente',
-              variableName: 'resposta_ia',
-              useAi: true,
-            },
-          },
-        });
-      });
-      setSelectedNodeId(selectedAssistantId);
-      return;
-    }
-    if (blockKind === 'send_message') {
-      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      const id = `message-${Date.now()}`;
-      setNodes((current) => current.concat({
-        id,
-        type: 'attendant',
-        position,
-        data: {
-          kind: 'send_message',
-          title: 'Enviar mensagem',
-          subtitle: 'Sem IA',
+        message: {
+          kind: 'message',
+          title: 'Mensagem',
+          subtitle: 'Texto fixo',
           config: {
             message: 'Digite a mensagem que sera enviada ao cliente.',
-            referenceId: `mensagem_${Date.now()}`,
-            variableName: `mensagem_enviada_${Date.now()}`,
+            referenceId: `mensagem_${timestamp}`,
+            variableName: `mensagem_${timestamp}`,
           },
         },
-      }));
-      setSelectedNodeId(id);
-      return;
-    }
-    if (blockKind === 'form') {
-      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      const id = `form-${Date.now()}`;
+        collect: {
+          kind: 'collect',
+          title: 'Coletar dados',
+          subtitle: 'Slots tipados',
+          config: {
+            message: 'Para seguir, me informe os dados abaixo:',
+            formMode: 'ai',
+            maxAttempts: 2,
+            referenceId: `coletar_${timestamp}`,
+            variableName: `coleta_${timestamp}`,
+            formFields: [
+              { id: `field-name-${timestamp}`, label: 'Nome completo', fieldKey: 'name', type: 'name', aliases: ['nome'], required: true },
+              { id: `field-phone-${timestamp}`, label: 'Telefone com DDD', fieldKey: 'phone', type: 'phone', aliases: ['whatsapp', 'celular'], required: true },
+            ],
+          },
+        },
+        decision: {
+          kind: 'decision',
+          title: 'Decisao',
+          subtitle: 'Rotas configuradas',
+          config: {
+            instructions: 'Escolha somente uma rota configurada. Use fallback quando faltar evidencia.',
+            switchMode: 'ai',
+            confidenceThreshold: 0.8,
+            fallbackRouteId: 'fallback',
+            referenceId: `decisao_${timestamp}`,
+            variableName: `rota_${timestamp}`,
+            routes: [
+              {
+                id: 'principal',
+                label: 'Rota principal',
+                description: 'Use quando a mensagem se encaixar no objetivo principal deste fluxo.',
+                examples: ['Quero seguir com o atendimento'],
+              },
+              {
+                id: 'fallback',
+                label: 'Esclarecer',
+                description: 'Use quando nao houver confianca suficiente para escolher outra rota.',
+                examples: ['Nao entendi', 'Pode explicar melhor?'],
+              },
+            ],
+          },
+        },
+        knowledge: {
+          kind: 'knowledge',
+          title: 'Conhecimento',
+          subtitle: 'Consultar base',
+          config: {
+            instructions: 'Busque chunks relevantes na base antes do sub-agente responder. Entregue apenas contexto recuperado e seguro para o proximo no.',
+            message: '{{customerMessage}}',
+            requiredKnowledgeCoverage: 'medium',
+            referenceId: `conhecimento_${timestamp}`,
+            variableName: `conhecimento_${timestamp}`,
+          },
+        },
+        sub_agent: {
+          kind: 'sub_agent',
+          title: 'Sub-agente',
+          subtitle: 'IA V2 grounded',
+          config: {
+            instructions: 'Responda usando apenas slots confirmados, resultados de tools e chunks de knowledge recuperados.',
+            message: 'Componha uma resposta natural e segura para o cliente.',
+            requiredKnowledgeCoverage: 'low',
+            useAi: true,
+            referenceId: `resposta_ia_${timestamp}`,
+            variableName: `resposta_ia_${timestamp}`,
+          },
+        },
+        handoff: {
+          kind: 'handoff',
+          title: 'Transferir humano',
+          subtitle: 'Escalonamento',
+          config: {
+            destination: 'Equipe de atendimento',
+            message: 'Vou transferir voce para um atendente humano. Aguarde um momento, por favor.',
+            referenceId: `transferir_${timestamp}`,
+            variableName: `transferencia_${timestamp}`,
+          },
+        },
+        end: {
+          kind: 'end',
+          title: 'Fim',
+          subtitle: 'Encerrar execucao',
+          config: {
+            message: 'Atendimento concluido. Fico a disposicao se precisar de algo mais.',
+            referenceId: `fim_${timestamp}`,
+            variableName: `fim_${timestamp}`,
+          },
+        },
+      };
       setNodes((current) => current.concat({
         id,
         type: 'attendant',
         position,
-        data: {
-          kind: 'form',
-          title: 'Coletar dados',
-          subtitle: 'Formulario com IA',
-          config: {
-            message: 'Para continuar, me envie os dados abaixo:',
-            formMode: 'ai',
-            referenceId: `coletar_dados_${Date.now()}`,
-            formFields: [
-              { id: `field-name-${Date.now()}`, label: 'Nome completo', fieldKey: 'nome_completo', required: true },
-              { id: `field-address-${Date.now()}`, label: 'Endereco de instalacao', fieldKey: 'endereco_instalacao', required: true },
-              { id: `field-plan-${Date.now()}`, label: 'Plano escolhido', fieldKey: 'plano_escolhido', required: true },
-            ],
-            variableName: `formulario_enviado_${Date.now()}`,
-          },
-        },
+        data: defaults[nodeKind],
       }));
       setSelectedNodeId(id);
       return;
-    }
-    const rawRule = event.dataTransfer.getData('application/dialogy-attendant-rule');
-    if (rawRule) {
-      try {
-        const rule = JSON.parse(rawRule) as NexusFlowInstance;
-        const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-        const id = `rule-${rule.id}`;
-        setNodes((current) => {
-          const existing = current.some((node) => node.id === id);
-          if (existing) {
-            return current.map((node) => (
-              node.id === id
-                ? { ...node, position, data: ruleNodeData(rule) }
-                : node
-            ));
-          }
-          return current.concat({
-            id,
-            type: 'attendant',
-            position,
-            data: ruleNodeData(rule),
-          });
-        });
-        setSelectedNodeId(id);
-        return;
-      } catch {
-        return;
-      }
     }
     const raw = event.dataTransfer.getData('application/dialogy-attendant-tool');
     if (!raw) return;
@@ -2001,7 +2571,7 @@ export function AutopilotFlowBuilder({
     try {
       const result = await onGenerateFlowWithAi({
         conversation,
-        currentGraph: serializeFlowGraph(nodes, edges, systemVariables),
+        currentGraph: currentFlowGraph,
         currentSystemPrompt: mainSystemPrompt,
       });
       if (!result.proposal) {
@@ -2021,26 +2591,38 @@ export function AutopilotFlowBuilder({
   }, [
     aiBuilderInput,
     aiBuilderMessages,
-    edges,
+    currentFlowGraph,
     isGeneratingAiFlow,
     mainSystemPrompt,
-    nodes,
     onGenerateFlowWithAi,
-    systemVariables,
   ]);
+
+  const organizeLayout = useCallback(() => {
+    setNodes((currentNodes) => {
+      const organized = autoLayoutNodes(currentNodes, edges);
+      return organized;
+    });
+    requestAnimationFrame(() => {
+      flowInstance?.fitView({ padding: 0.25, maxZoom: 1, duration: 400 });
+    });
+  }, [edges, flowInstance, setNodes]);
 
   const applyAiFlowProposal = useCallback(() => {
     if (!aiFlowProposal) return;
     const restored = restoreFlowGraph(aiFlowProposal.flowGraph);
+    const organizedNodes = autoLayoutNodes(restored.nodes, restored.edges);
     suppressNextGraphChange.current = true;
-    setNodes(restored.nodes);
+    setNodes(organizedNodes);
     setEdges(restored.edges);
     setSystemVariables(restored.variables);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     onApplyAiProposal(aiFlowProposal);
     setIsAiBuilderOpen(false);
-  }, [aiFlowProposal, onApplyAiProposal, setEdges, setNodes]);
+    requestAnimationFrame(() => {
+      flowInstance?.fitView({ padding: 0.25, maxZoom: 1, duration: 400 });
+    });
+  }, [aiFlowProposal, flowInstance, onApplyAiProposal, setEdges, setNodes]);
 
   const filteredTools = tools.filter((tool) => {
     const query = toolQuery.trim().toLowerCase();
@@ -2138,6 +2720,14 @@ export function AutopilotFlowBuilder({
               <button type="button" onClick={() => onOpenPanel('analytics')} className={cn('flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/5 hover:text-white', inlinePanelName === 'analytics' ? 'bg-sky-500/15 text-sky-400' : 'text-slate-400')}>
                 <GitBranch className="h-5 w-5" />
               </button>
+              <button
+                type="button"
+                onClick={() => onOpenPanel('decision')}
+                title="Motor auto evolutivo"
+                className={cn('flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/5 hover:text-white', inlinePanelName === 'decision' ? 'bg-violet-500/15 text-violet-300' : 'text-slate-400')}
+              >
+                <BrainCircuit className="h-5 w-5" />
+              </button>
               <span className="mx-2 h-8 w-px bg-white/10" />
               <button type="button" onClick={() => onOpenPanel('settings')} className={cn('flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/5 hover:text-white', inlinePanelName === 'settings' ? 'bg-sky-500/15 text-sky-400' : 'text-slate-400')}>
                 <Settings2 className="h-5 w-5" />
@@ -2163,6 +2753,14 @@ export function AutopilotFlowBuilder({
               className="flex h-11 w-11 items-center justify-center rounded-xl text-violet-300 hover:bg-violet-500/10 hover:text-violet-200"
             >
               <Sparkles className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={organizeLayout}
+              title="Organizar blocos"
+              className="flex h-11 w-11 items-center justify-center rounded-xl text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200"
+            >
+              <LayoutGrid className="h-5 w-5" />
             </button>
             <button type="button" onClick={() => onOpenPanel('playground')} className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 hover:bg-white/5 hover:text-white">
               <FlaskConical className="h-5 w-5" />
@@ -2207,6 +2805,13 @@ export function AutopilotFlowBuilder({
             <Play className="mr-2 h-4 w-4 fill-current" />
             Testar atendimento
           </Button>
+          <PublishGatePanel
+            audit={publishAudit}
+            open={isPublishGateOpen}
+            onToggle={() => setIsPublishGateOpen((open) => !open)}
+            onRepairWithAi={handleRepairWithAi}
+            isRepairing={isRepairingGate}
+          />
           <div className="pointer-events-auto flex h-[54px] items-center gap-1 rounded-xl border border-white/10 bg-[#15181b]/95 px-2 shadow-xl">
             {(hasDraft || isDirty) && (
               <button
@@ -2230,8 +2835,9 @@ export function AutopilotFlowBuilder({
             <span className="mx-1 h-7 w-px bg-white/10" />
             <button
               type="button"
-              disabled={isPublishing || hasVariableConflicts || hasReferenceConflicts || (!hasDraft && !isDirty)}
+              disabled={isPublishing || hasVariableConflicts || hasReferenceConflicts || hasPublishGateBlockers || (!hasDraft && !isDirty)}
               onClick={onPublish}
+              title={hasPublishGateBlockers ? 'Resolva o gate de publicacao antes de publicar' : 'Publicar rascunho'}
               className="flex h-10 items-center gap-2 rounded-lg px-3 text-sm text-slate-300 hover:bg-white/5 disabled:opacity-40"
             >
               {isPublishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
@@ -2252,15 +2858,13 @@ export function AutopilotFlowBuilder({
         {selectedNode ? (
           <NodeInspector
             node={selectedNode}
+            flowNodes={nodes}
             availableNodeVariables={availableNodeVariables}
             systemVariables={systemVariables}
-            knowledgeCollections={knowledgeCollections}
             knowledgeAttachment={selectedKnowledgeAttachment}
             knownReferenceIds={knownReferenceIds}
-            mainSystemPrompt={mainSystemPrompt}
             variableNameConflict={variableNameConflict}
             referenceIdConflict={referenceIdConflict}
-            onMainSystemPromptChange={onMainSystemPromptChange}
             onClose={() => setSelectedNodeId(null)}
             onUpdate={updateSelectedNode}
             onDelete={deleteSelectedNode}
@@ -2271,6 +2875,7 @@ export function AutopilotFlowBuilder({
             nodes={nodes}
             onClose={() => setSelectedEdgeId(null)}
             onDelete={deleteSelectedEdge}
+            onRouteChange={updateSelectedEdgeRoute}
           />
         ) : (
           <>
@@ -2287,13 +2892,28 @@ export function AutopilotFlowBuilder({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <Accordion type="multiple" defaultValue={['control', 'tools', 'messages']} className="space-y-3">
+          <Accordion type="multiple" defaultValue={['flow-v2', 'control', 'tools', 'messages']} className="space-y-3">
+            <AccordionItem value="flow-v2" className="rounded-xl border border-emerald-500/20 bg-[#111a17] px-4">
+              <AccordionTrigger className="py-4 text-sm font-medium text-emerald-300 hover:no-underline">
+                <span className="flex items-center gap-3"><GitBranch className="h-4 w-4" /> Fluxo sequencial v2</span>
+              </AccordionTrigger>
+              <AccordionContent className="border-t border-white/[0.08] pt-3">
+                <FlowV2BlockButton kind="start" title="Start" subtitle="Entrada do fluxo" icon={<Play className="h-4 w-4" />} tone="bg-blue-500/15 text-blue-300" />
+                <FlowV2BlockButton kind="message" title="Message" subtitle="Texto fixo" icon={<MessageSquareText className="h-4 w-4" />} tone="bg-sky-500/15 text-sky-300" />
+                <FlowV2BlockButton kind="collect" title="Collect" subtitle="Slots tipados" icon={<ClipboardList className="h-4 w-4" />} tone="bg-emerald-500/15 text-emerald-300" />
+                <FlowV2BlockButton kind="decision" title="Decision" subtitle="Rotas com fallback" icon={<GitBranch className="h-4 w-4" />} tone="bg-amber-500/15 text-amber-300" />
+                <FlowV2BlockButton kind="knowledge" title="Knowledge" subtitle="Busca RAG" icon={<Database className="h-4 w-4" />} tone="bg-orange-500/15 text-orange-300" />
+                <FlowV2BlockButton kind="sub_agent" title="Sub-agent" subtitle="IA V2 grounded" icon={<Bot className="h-4 w-4" />} tone="bg-cyan-500/15 text-cyan-300" />
+                <FlowV2BlockButton kind="handoff" title="Handoff" subtitle="Humano" icon={<UserRound className="h-4 w-4" />} tone="bg-violet-500/15 text-violet-300" />
+                <FlowV2BlockButton kind="end" title="End" subtitle="Fim da execucao" icon={<CheckCircle2 className="h-4 w-4" />} tone="bg-emerald-500/15 text-emerald-300" />
+              </AccordionContent>
+            </AccordionItem>
+
             <AccordionItem value="control" className="rounded-xl border border-white/[0.08] bg-[#15171a] px-4">
               <AccordionTrigger className="py-4 text-sm font-medium text-slate-300 hover:no-underline">
                 <span className="flex items-center gap-3"><Settings2 className="h-4 w-4" /> Controle do agente</span>
               </AccordionTrigger>
               <AccordionContent className="border-t border-white/[0.08] pt-3">
-                <MainAgentBlockButton />
                 <button type="button" onClick={() => onOpenPanel('settings')} className="w-full rounded-lg px-2 py-2 text-left text-sm text-slate-400 hover:bg-white/5">
                   Configuracoes gerais
                 </button>
@@ -2322,17 +2942,20 @@ export function AutopilotFlowBuilder({
                 <span className="flex items-center gap-3"><MessageSquareText className="h-4 w-4" /> Mensagens</span>
               </AccordionTrigger>
               <AccordionContent className="border-t border-white/[0.08] pt-3">
-                <DeterministicMessageBlockButton />
-                <FormBlockButton />
+                <p className="px-2 py-2 text-xs leading-5 text-slate-500">
+                  Use os blocos V2 Message e Collect no grupo Fluxo sequencial v2.
+                </p>
               </AccordionContent>
             </AccordionItem>
 
             <AccordionItem value="routing" className="rounded-xl border border-white/[0.08] bg-[#15171a] px-4">
               <AccordionTrigger className="py-4 text-sm font-medium text-slate-300 hover:no-underline">
-                <span className="flex items-center gap-3"><GitBranch className="h-4 w-4" /> Sub-agentes</span>
+                <span className="flex items-center gap-3"><GitBranch className="h-4 w-4" /> Rotas e sub-agentes</span>
               </AccordionTrigger>
               <AccordionContent className="border-t border-white/[0.08] pt-3">
-                <SubAgentBlockButton />
+                <p className="px-2 py-2 text-xs leading-5 text-slate-500">
+                  Use os blocos V2 Decision e Sub-agent para novos flows.
+                </p>
               </AccordionContent>
             </AccordionItem>
 
@@ -2354,16 +2977,9 @@ export function AutopilotFlowBuilder({
                 <span className="flex items-center gap-3"><GitBranch className="h-4 w-4" /> Habilidades</span>
               </AccordionTrigger>
               <AccordionContent className="border-t border-white/[0.08] pt-3">
-                {rules.map((rule) => (
-                  <RuleBlockButton key={rule.id} rule={rule} />
-                ))}
-                {rules.length === 0 && (
-                  <p className="px-3 py-3 text-xs text-slate-500">Nenhuma habilidade criada.</p>
-                )}
-                <button type="button" onClick={onAddRule} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-300 hover:bg-white/5">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/15 text-sky-400"><Plus className="h-4 w-4" /></span>
-                  Nova habilidade
-                </button>
+                <p className="px-2 py-2 text-xs leading-5 text-slate-500">
+                  Novos flows usam somente blocos V2. Habilidades legadas ficam disponiveis apenas nas configuracoes.
+                </p>
                 <button type="button" onClick={() => onOpenPanel('capabilities')} className="w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:text-slate-300">
                   Ver permissoes e regras configuradas
                 </button>

@@ -1,9 +1,11 @@
 import { db } from '@/lib/db';
 import type { Chat, Contact } from '@/lib/types';
 import { processAutopilotForChat } from '@/services/autopilot-service';
+import { runAutopilotLearningCycle } from '@/services/autopilot/learning-cycle';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 import type {
+  AiAutopilotLearningCyclePayload,
   AiAutopilotProcessPayload,
   AiCaseMemoryRefreshPayload,
   AiDocumentIngestPayload,
@@ -107,6 +109,28 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       payload.instanceName,
       payload.messageId
     );
+  },
+  ai_autopilot_learning_cycle: async (job) => {
+    const payload = job.payload as AiAutopilotLearningCyclePayload;
+    const result = await runAutopilotLearningCycle({
+      workspaceId: payload.workspaceId || null,
+      vertical: payload.vertical || null,
+      sinceDays: payload.sinceDays,
+      limit: payload.limit,
+      dryRun: payload.dryRun,
+      promoteEcosystem: payload.promoteEcosystem,
+      createScoreSuggestions: payload.createScoreSuggestions,
+    });
+
+    console.log('[AI_QUEUE] Autopilot learning cycle completed:', JSON.stringify({
+      workspaceCount: result.workspaceCount,
+      sinceDays: result.sinceDays,
+      dryRun: result.dryRun,
+      detectedPatterns: result.results.reduce((sum, item) => sum + item.detectedPatterns, 0),
+      scoreSuggestionsCreated: result.results.reduce((sum, item) => sum + item.scoreSuggestionsCreated, 0),
+      ecosystemPromoted: result.ecosystemPromotion?.promoted.length || 0,
+      errors: result.results.filter((item) => item.error).length,
+    }));
   },
   ai_case_memory_refresh: async (job) => {
     const payload = job.payload as AiCaseMemoryRefreshPayload;

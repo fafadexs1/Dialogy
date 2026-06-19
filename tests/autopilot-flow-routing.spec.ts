@@ -3,8 +3,13 @@ import { describe, expect, it } from 'vitest';
 import type { AutopilotConfig } from '@/lib/types';
 import {
   formatFlowReferencesForPrompt,
+  formatFlowSwitchGuidanceForPrompt,
   formatFlowFormGuidanceForPrompt,
   renderDeterministicFlowMessage,
+  resolveActiveFlowIntentScopeByNodeId,
+  resolveFirstFlowSwitchRoute,
+  resolveFlowSwitchRouteForActivePath,
+  resolveFlowSwitchRoute,
   resolveActiveFlowIntentScope,
   resolveDeterministicFlowMessage,
   resolveEntryDeterministicFlowMessage,
@@ -269,5 +274,263 @@ describe('autopilot flow routing', () => {
     expect(plan?.reason).toBe('flow_completion_requests_close_chat');
     expect(plan?.terminalNodeId).toBe('end');
     expect(plan?.actions.map((action) => action.type)).toEqual(['close_chat']);
+  });
+
+  it('resolves configured switch routes from customer message evidence', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'switch-wifi',
+          kind: 'switch',
+          title: 'Tipo de problema Wi-Fi',
+          subtitle: 'Decisor',
+          position: { x: 0, y: 0 },
+          config: {
+            instructions: 'Classifique o problema de Wi-Fi do cliente.',
+            confidenceThreshold: 0.7,
+            fallbackRouteId: 'outro',
+            routes: [
+              {
+                id: 'alterar_wifi',
+                label: 'Alterar nome/senha',
+                description: 'Cliente quer trocar nome da rede, senha, SSID ou credenciais do Wi-Fi.',
+                examples: ['trocar a senha do Wi-Fi', 'mudar nome da rede'],
+                requiredSlots: ['wifi_ssid', 'wifi_password'],
+                targetNodeId: 'coletar-wifi',
+              },
+              {
+                id: 'lentidao_wifi',
+                label: 'Lentidao no Wi-Fi',
+                description: 'Cliente relata lentidao, travamento, oscilacao ou sinal fraco.',
+                examples: ['Wi-Fi lento', 'internet travando'],
+                targetNodeId: 'diagnosticar-lentidao',
+              },
+              {
+                id: 'outro',
+                label: 'Outro',
+                description: 'Use quando nao houver evidencia suficiente.',
+                targetNodeId: 'perguntar-melhor',
+              },
+            ],
+          },
+        },
+        { id: 'coletar-wifi', kind: 'form', title: 'Coletar Wi-Fi', subtitle: 'Dados', position: { x: 200, y: 0 } },
+        { id: 'diagnosticar-lentidao', kind: 'understand', title: 'Diagnosticar lentidao', subtitle: 'Suporte', position: { x: 200, y: 140 } },
+        { id: 'perguntar-melhor', kind: 'send_message', title: 'Perguntar melhor', subtitle: 'Fallback', position: { x: 200, y: 280 } },
+      ],
+      edges: [],
+    });
+
+    const resolution = resolveFlowSwitchRoute({
+      config,
+      switchNodeId: 'switch-wifi',
+      customerMessage: 'Oi, preciso trocar a senha do Wi-Fi aqui de casa',
+    });
+    const guidance = formatFlowSwitchGuidanceForPrompt(config);
+
+    expect(resolution).toMatchObject({
+      routeId: 'alterar_wifi',
+      routeLabel: 'Alterar nome/senha',
+      targetNodeId: 'coletar-wifi',
+      fallbackUsed: false,
+    });
+    expect(resolution?.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(resolution?.candidateRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        routeId: 'alterar_wifi',
+        selected: true,
+      }),
+      expect.objectContaining({
+        routeId: 'lentidao_wifi',
+        selected: false,
+      }),
+    ]));
+    expect(resolution?.rejectedRoutes.map((route) => route.routeId)).toEqual(expect.arrayContaining([
+      'lentidao_wifi',
+      'outro',
+    ]));
+    expect(guidance).toContain('SWITCHES DO FLUXO');
+    expect(guidance).toContain('alterar_wifi');
+    expect(resolveFirstFlowSwitchRoute({
+      config,
+      customerMessage: 'Meu Wi-Fi esta lento e fica travando',
+    })).toMatchObject({
+      routeId: 'lentidao_wifi',
+      targetNodeId: 'diagnosticar-lentidao',
+    });
+  });
+
+  it('resolves intent scope directly from a target node id', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'suporte-wifi',
+          kind: 'intent',
+          title: 'Suporte Wi-Fi',
+          subtitle: 'Sub-agente',
+          position: { x: 0, y: 0 },
+          config: {
+            intent: 'troubleshooting',
+            instructions: 'Conduza diagnosticos de Wi-Fi.',
+            knowledgeCollectionIds: ['wifi'],
+          },
+        },
+      ],
+      edges: [],
+    });
+
+    expect(resolveActiveFlowIntentScopeByNodeId(config, 'suporte-wifi')).toMatchObject({
+      nodeId: 'suporte-wifi',
+      intent: 'troubleshooting',
+      systemPrompt: 'Conduza diagnosticos de Wi-Fi.',
+      knowledgeCollectionIds: ['wifi'],
+    });
+  });
+
+  it('falls back when switch confidence is below threshold', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'switch-wifi',
+          kind: 'switch',
+          title: 'Tipo de problema Wi-Fi',
+          subtitle: 'Decisor',
+          position: { x: 0, y: 0 },
+          config: {
+            confidenceThreshold: 0.9,
+            fallbackRouteId: 'outro',
+            routes: [
+              {
+                id: 'alterar_wifi',
+                label: 'Alterar nome/senha',
+                description: 'Cliente quer trocar nome da rede ou senha do Wi-Fi.',
+              },
+              {
+                id: 'outro',
+                label: 'Outro',
+                description: 'Use quando nao houver evidencia suficiente.',
+              },
+            ],
+          },
+        },
+      ],
+      edges: [],
+    });
+
+    expect(resolveFlowSwitchRoute({
+      config,
+      switchNodeId: 'switch-wifi',
+      customerMessage: 'isso ai esta ruim',
+    })).toMatchObject({
+      routeId: 'outro',
+      fallbackUsed: true,
+    });
+  });
+
+  it('uses route-labeled edges as switch targets when route config has no targetNodeId', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'switch-wifi',
+          kind: 'switch',
+          title: 'Tipo de problema Wi-Fi',
+          subtitle: 'Decisor',
+          position: { x: 0, y: 0 },
+          config: {
+            confidenceThreshold: 0.7,
+            fallbackRouteId: 'outro',
+            routes: [
+              {
+                id: 'alterar_wifi',
+                label: 'Alterar nome/senha',
+                description: 'Cliente quer trocar nome ou senha do Wi-Fi.',
+                examples: ['trocar senha wifi'],
+              },
+              {
+                id: 'outro',
+                label: 'Outro',
+                description: 'Use quando nao houver evidencia suficiente.',
+              },
+            ],
+          },
+        },
+        { id: 'coletar-wifi', kind: 'form', title: 'Coletar Wi-Fi', subtitle: 'Dados', position: { x: 200, y: 0 } },
+        { id: 'perguntar-melhor', kind: 'send_message', title: 'Perguntar melhor', subtitle: 'Fallback', position: { x: 200, y: 160 } },
+      ],
+      edges: [
+        { id: 'switch-coletar', source: 'switch-wifi', target: 'coletar-wifi', routeId: 'alterar_wifi' },
+        { id: 'switch-fallback', source: 'switch-wifi', target: 'perguntar-melhor', routeId: 'outro' },
+      ],
+    });
+
+    expect(resolveFlowSwitchRoute({
+      config,
+      switchNodeId: 'switch-wifi',
+      customerMessage: 'preciso trocar senha wifi',
+    })).toMatchObject({
+      routeId: 'alterar_wifi',
+      targetNodeId: 'coletar-wifi',
+      fallbackUsed: false,
+    });
+  });
+
+  it('resolves the nearest switch reachable from the active flow node', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'orphan-switch',
+          kind: 'switch',
+          title: 'Switch fora do caminho',
+          subtitle: 'Nao deve rodar',
+          position: { x: 0, y: 0 },
+          config: {
+            confidenceThreshold: 0.6,
+            fallbackRouteId: 'outro',
+            routes: [
+              { id: 'billing', label: 'Financeiro', description: 'Cliente fala de boleto.', examples: ['boleto'] },
+              { id: 'outro', label: 'Outro', description: 'Fallback.' },
+            ],
+          },
+        },
+        { id: 'assistant', kind: 'assistant', title: 'Agente', subtitle: 'Principal', position: { x: 0, y: 120 } },
+        {
+          id: 'wifi-switch',
+          kind: 'switch',
+          title: 'Switch Wi-Fi',
+          subtitle: 'Rota ativa',
+          position: { x: 200, y: 120 },
+          config: {
+            confidenceThreshold: 0.6,
+            fallbackRouteId: 'outro',
+            routes: [
+              { id: 'lentidao_wifi', label: 'Lentidao', description: 'Cliente relata Wi-Fi lento ou travando.', examples: ['wifi lento'], targetNodeId: 'diagnostico' },
+              { id: 'outro', label: 'Outro', description: 'Fallback.', targetNodeId: 'fallback' },
+            ],
+          },
+        },
+        { id: 'diagnostico', kind: 'intent', title: 'Diagnostico', subtitle: 'Wi-Fi', position: { x: 400, y: 80 }, config: { intent: 'troubleshooting', instructions: 'Diagnosticar Wi-Fi.' } },
+        { id: 'fallback', kind: 'send_message', title: 'Perguntar melhor', subtitle: 'Fallback', position: { x: 400, y: 200 } },
+      ],
+      edges: [
+        { id: 'assistant-switch', source: 'assistant', target: 'wifi-switch' },
+        { id: 'switch-diagnostico', source: 'wifi-switch', target: 'diagnostico', routeId: 'lentidao_wifi' },
+        { id: 'switch-fallback', source: 'wifi-switch', target: 'fallback', routeId: 'outro' },
+      ],
+    });
+
+    expect(resolveFlowSwitchRouteForActivePath({
+      config,
+      activeNodeId: 'assistant',
+      customerMessage: 'meu wifi lento demais',
+    })).toMatchObject({
+      switchNodeId: 'wifi-switch',
+      routeId: 'lentidao_wifi',
+      targetNodeId: 'diagnostico',
+    });
   });
 });

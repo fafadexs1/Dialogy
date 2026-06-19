@@ -283,4 +283,58 @@ describe('autopilot tool planner', () => {
     expect(result.actions).toHaveLength(0);
     expect(result.rejectedActions[0]).toMatchObject({ code: 'requires_human_approval' });
   });
+
+  it('rejects tools whose selection score falls below the execution threshold', () => {
+    const weakEvidenceTool: AgentToolCatalogItem = {
+      ...listAgentToolCatalogItems()[0],
+      name: 'mcp:router:weak_lookup' as any,
+      source: 'mcp',
+      description: '',
+      class: 'read_only',
+      riskLevel: 'low',
+      sideEffect: 'none',
+      requiredSlots: [],
+      allowedIntents: ['troubleshooting'],
+      requiresHumanApproval: false,
+      enabledByDefault: false,
+      serverId: 'router',
+      serverName: 'Router',
+      inputSchema: null,
+      outputSchema: null,
+    };
+    const intentResolution = resolveAutopilotIntent({ customerMessage: 'Minha internet esta lenta' });
+    const result = planAutopilotTools({
+      response: null,
+      customerMessage: 'Minha internet esta lenta',
+      intentResolution,
+      slotExtraction: { slots: {}, details: [], invalidSlots: [] },
+      actions: [{
+        type: 'mcp_call_tool',
+        reason: 'Consulta fraca sem evidencia operacional.',
+        payload: { toolName: 'mcp:router:weak_lookup', arguments: {} },
+      }],
+      enabledToolNames: ['mcp:router:weak_lookup'],
+      toolCatalog: [...listAgentToolCatalogItems(), weakEvidenceTool],
+      availableTeams: [team],
+      contact,
+      scoringWeights: {
+        goalMatch: 0,
+        procedureStepMatch: 0,
+        requiredSlotsPresent: 0,
+        policyAllowed: 0,
+        toolEvidence: 1,
+      },
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.rejectedActions[0]).toMatchObject({ code: 'score_below_threshold' });
+    expect(result.metadata).toMatchObject({
+      capabilityDecisions: [
+        expect.objectContaining({
+          code: 'score_below_threshold',
+          allowed: false,
+        }),
+      ],
+    });
+  });
 });

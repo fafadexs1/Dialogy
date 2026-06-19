@@ -1,9 +1,11 @@
 import type { Contact } from '@/lib/types';
-import { getAgentToolDefinition, type AgentToolCatalogItem, type AgentToolDefinition } from '@/services/agent-tools/catalog';
-import type { AgentToolAction, AgentToolName } from '@/services/agent-tools/types';
+import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
+import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName } from './intent-types';
+import type { ToolSelectionScoreWeights } from './score-history';
 import { labelSlotForCustomer, type SlotExtractionResult } from './slots';
+import { evaluateToolCapabilityGate, resolveRequestedToolName, type ToolCapabilityGateCode } from './tool-capability-registry';
 
 export type ToolPlannerRejectedAction = {
   action: AgentToolAction;
@@ -11,8 +13,11 @@ export type ToolPlannerRejectedAction = {
     | 'unknown_tool'
     | 'disabled_tool'
     | 'intent_not_allowed'
+    | 'forbidden_goal'
     | 'missing_slots'
     | 'requires_human_approval'
+    | 'step_not_allowed'
+    | 'score_below_threshold'
     | 'invalid_payload';
   reason: string;
   missingSlots?: AutopilotSlotName[];
@@ -54,51 +59,6 @@ function normalizeText(value: string): string {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function resolveRequestedToolName(action: AgentToolAction): string {
-  if (action.type === 'mcp_call_tool') return action.payload?.toolName?.trim() || '';
-  return action.type;
-}
-
-function findRuntimeDefinition(
-  action: AgentToolAction,
-  toolCatalog: AgentToolCatalogItem[]
-): AgentToolDefinition | AgentToolCatalogItem | null {
-  const requestedToolName = resolveRequestedToolName(action);
-  return toolCatalog.find((tool) => tool.name === requestedToolName || tool.name === action.type) ||
-    getAgentToolDefinition(action.type as AgentToolName);
-}
-
-function isToolEnabled(input: {
-  action: AgentToolAction;
-  enabledToolNames: string[];
-}) {
-  const requested = resolveRequestedToolName(input.action);
-  if (input.action.type === 'mcp_call_tool') return Boolean(requested && input.enabledToolNames.includes(requested));
-  return input.enabledToolNames.includes(input.action.type);
-}
-
-function slotSatisfiedByActionPayload(action: AgentToolAction, slot: AutopilotSlotName): boolean {
-  if (action.type === 'sgp_generate_invoice_pix' && slot === 'invoice_or_payment_id') {
-    return Boolean(action.payload?.invoiceId);
-  }
-
-  if (action.type === 'sgp_create_payment_promise' && slot === 'date') {
-    return Boolean(action.payload?.promiseDate && /^\d{4}-\d{2}-\d{2}$/.test(action.payload.promiseDate));
-  }
-
-  return false;
-}
-
-function missingSlotsForAction(input: {
-  action: AgentToolAction;
-  definition: AgentToolDefinition | AgentToolCatalogItem;
-  slotExtraction: SlotExtractionResult;
-}): AutopilotSlotName[] {
-  return (input.definition.requiredSlots || []).filter((slot) => (
-    !input.slotExtraction.slots[slot] && !slotSatisfiedByActionPayload(input.action, slot)
-  ));
 }
 
 function validatePayload(action: AgentToolAction): string | null {
@@ -150,6 +110,10 @@ function validatePayload(action: AgentToolAction): string | null {
   }
 
   return null;
+}
+
+function toPlannerRejectCode(code: ToolCapabilityGateCode): ToolPlannerRejectedAction['code'] {
+  return code === 'allowed' ? 'unknown_tool' : code;
 }
 
 export function hasExternalLookupPromise(response: string | null | undefined): boolean {
@@ -255,9 +219,11 @@ export function planAutopilotTools(input: {
   toolCatalog: AgentToolCatalogItem[];
   availableTeams: ToolRouterTeam[];
   contact?: Contact | null;
+  scoringWeights?: Partial<ToolSelectionScoreWeights> | null;
 }): ToolPlannerResult {
   const rejectedActions: ToolPlannerRejectedAction[] = [];
   const acceptedActions: AgentToolAction[] = [];
+  const capabilityDecisions: Array<ReturnType<typeof evaluateToolCapabilityGate>> = [];
   const isInformationalIntent = INFORMATIONAL_INTENTS.has(input.intentResolution.intent);
 
   for (const action of input.actions) {
@@ -270,12 +236,21 @@ export function planAutopilotTools(input: {
       continue;
     }
 
-    const definition = findRuntimeDefinition(action, input.toolCatalog);
-    if (!definition) {
+    const capabilityGate = evaluateToolCapabilityGate({
+      action,
+      intentResolution: input.intentResolution,
+      slotExtraction: input.slotExtraction,
+      enabledToolNames: input.enabledToolNames,
+      toolCatalog: input.toolCatalog,
+      scoringWeights: input.scoringWeights,
+    });
+    capabilityDecisions.push(capabilityGate);
+
+    if (capabilityGate.code === 'unknown_tool') {
       rejectedActions.push({
         action,
         code: 'unknown_tool',
-        reason: `Ferramenta ${action.type} nao possui contrato registrado.`,
+        reason: capabilityGate.reason,
       });
       continue;
     }
@@ -286,44 +261,12 @@ export function planAutopilotTools(input: {
       continue;
     }
 
-    if (!isToolEnabled({ action, enabledToolNames: input.enabledToolNames })) {
+    if (!capabilityGate.allowed) {
       rejectedActions.push({
         action,
-        code: 'disabled_tool',
-        reason: `Ferramenta ${resolveRequestedToolName(action) || action.type} nao esta habilitada para este agente.`,
-      });
-      continue;
-    }
-
-    if (definition.requiresHumanApproval) {
-      rejectedActions.push({
-        action,
-        code: 'requires_human_approval',
-        reason: `Ferramenta ${resolveRequestedToolName(action) || action.type} exige aprovacao humana.`,
-      });
-      continue;
-    }
-
-    if (definition.allowedIntents.length > 0 && !definition.allowedIntents.includes(input.intentResolution.intent)) {
-      rejectedActions.push({
-        action,
-        code: 'intent_not_allowed',
-        reason: `Ferramenta ${resolveRequestedToolName(action) || action.type} nao e permitida para a intencao ${input.intentResolution.intent}.`,
-      });
-      continue;
-    }
-
-    const missingSlots = missingSlotsForAction({
-      action,
-      definition,
-      slotExtraction: input.slotExtraction,
-    });
-    if (missingSlots.length > 0) {
-      rejectedActions.push({
-        action,
-        code: 'missing_slots',
-        reason: `Ferramenta ${resolveRequestedToolName(action) || action.type} precisa de slots ausentes: ${missingSlots.join(', ')}.`,
-        missingSlots,
+        code: toPlannerRejectCode(capabilityGate.code),
+        reason: capabilityGate.reason,
+        missingSlots: capabilityGate.missingSlots,
       });
       continue;
     }
@@ -383,6 +326,16 @@ export function planAutopilotTools(input: {
         code: item.code,
         reason: item.reason,
         missingSlots: item.missingSlots || [],
+      })),
+      capabilityDecisions: capabilityDecisions.map((decision) => ({
+        tool: decision.capability?.name || null,
+        capability: decision.capability?.capability || null,
+        code: decision.code,
+        allowed: decision.allowed,
+        score: decision.score,
+        scoreBreakdown: decision.scoreBreakdown,
+        missingSlots: decision.missingSlots,
+        reason: decision.reason,
       })),
       promiseValidation: {
         promisedExternalLookup,

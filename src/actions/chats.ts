@@ -24,6 +24,7 @@ import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import { requireWorkspaceAccess } from '@/server/inbox/access';
 import { loadContactThreadContext } from '@/server/inbox/contact-thread-service';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
+import { recordDecisionOutcomesForChat } from '@/services/autopilot/outcome-tracker';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -768,6 +769,18 @@ export const closeChatAction = withDebug(
                 }
             } catch (caseMemoryError) {
                 console.error('[CLOSE_CHAT] Falha ao atualizar memoria de caso:', caseMemoryError);
+            }
+
+            try {
+                const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [chatId]);
+                await recordDecisionOutcomesForChat({
+                    workspaceId: workspace_id,
+                    chatId,
+                    trigger: 'closed',
+                    closedAt: closedAtRes.rows[0]?.closed_at || null,
+                });
+            } catch (outcomeError) {
+                console.error('[CLOSE_CHAT] Falha ao registrar outcome do ledger:', outcomeError);
             }
 
             if (closeTemplate && sendCloseMessage) {

@@ -6,6 +6,7 @@ import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } 
 import { getAutopilotWorkflow } from './workflows';
 import { isConversationCloseRequest } from './close-intent';
 import { extractAutopilotSlots, getMissingSlots, labelSlotForCustomer, type SlotExtractionResult } from './slots';
+import { hasClinicalTriageSignal } from './clinical-triage';
 
 export type WorkflowExecutionMode = 'continue_llm' | 'direct_response' | 'pre_response_tools';
 
@@ -151,6 +152,26 @@ export function resolveAutopilotWorkflowPlan(input: {
       slotExtraction,
       handledByWorkflow: true,
       metadata: { ...metadata, teamId: team?.id ?? null, teamName: team?.name ?? null },
+    };
+  }
+
+  if (
+    input.intentResolution.intent === 'scheduling_request'
+    && missingSlots.length > 0
+    && hasClinicalTriageSignal(input.customerMessage)
+  ) {
+    const plan = fallbackPlan({
+      workflowId: workflow.id,
+      intent: input.intentResolution.intent,
+      missingSlots,
+      slotExtraction,
+      knowledgeCoverage: input.knowledgeCoverage,
+    });
+
+    return {
+      ...plan,
+      reason: 'Mensagem contem sintoma clinico/pediatrico; priorizando orientacao assistida antes de pedir horario.',
+      metadata: { ...plan.metadata, clinicalTriageSignal: true },
     };
   }
 
