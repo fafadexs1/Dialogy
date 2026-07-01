@@ -31,6 +31,13 @@ export async function getMcpWorkspaceConfig(workspaceId: string): Promise<McpWor
         isActive: Boolean(server.isActive),
         syncedAt: server.syncedAt || null,
         lastError: server.lastError || null,
+        healthStatus: server.healthStatus === 'healthy' || server.healthStatus === 'unreachable'
+          ? server.healthStatus
+          : 'unknown',
+        healthCheckedAt: server.healthCheckedAt || null,
+        healthLatencyMs: Number.isFinite(Number(server.healthLatencyMs))
+          ? Number(server.healthLatencyMs)
+          : null,
         tools: Array.isArray(server.tools) ? server.tools : [],
       }))
       .filter((server: McpServerConfig) => (
@@ -49,6 +56,51 @@ export async function saveMcpWorkspaceConfig(workspaceId: string, config: McpWor
      ON CONFLICT (workspace_id, provider)
      DO UPDATE SET config = $3, is_active = $4, updated_at = NOW()`,
     [workspaceId, MCP_PROVIDER, JSON.stringify(config), config.servers.some((server) => server.isActive)]
+  );
+}
+
+export async function recordMcpServerHealth(input: {
+  workspaceId: string;
+  serverId: string;
+  status: 'healthy' | 'unreachable';
+  latencyMs: number;
+  error?: string | null;
+}): Promise<void> {
+  const healthPatch = {
+    healthStatus: input.status,
+    healthCheckedAt: new Date().toISOString(),
+    healthLatencyMs: Math.max(0, Math.round(input.latencyMs)),
+    lastError: input.error?.slice(0, 2000) || null,
+  };
+  await db.query(
+    `UPDATE workspace_integrations integration
+     SET config = jsonb_set(
+           COALESCE(integration.config, '{}'::jsonb),
+           '{servers}',
+           COALESCE((
+             SELECT jsonb_agg(
+               CASE
+                 WHEN server.item->>'id' = $3
+                   THEN server.item || $4::jsonb
+                 ELSE server.item
+               END
+               ORDER BY server.ordinality
+             )
+             FROM jsonb_array_elements(
+               COALESCE(integration.config->'servers', '[]'::jsonb)
+             ) WITH ORDINALITY AS server(item, ordinality)
+           ), '[]'::jsonb),
+           true
+         ),
+         updated_at = clock_timestamp()
+     WHERE integration.workspace_id = $1
+       AND integration.provider = $2`,
+    [
+      input.workspaceId,
+      MCP_PROVIDER,
+      input.serverId,
+      JSON.stringify(healthPatch),
+    ],
   );
 }
 

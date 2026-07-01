@@ -26,6 +26,7 @@ import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { usePresence } from '@/hooks/use-online-status';
+import { useInboxConnectionRecovery } from '@/hooks/use-inbox-connection-recovery';
 import ReactDOM from 'react-dom';
 import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
@@ -331,8 +332,6 @@ export default function MobileChatLayout({
   const unreadCountsRef = useRef<Record<string, number>>({});
   const unreadWatchInitializedRef = useRef(false);
   const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
-  const initialBuildIdRef = useRef<string>('');
-  const buildMismatchTriggeredRef = useRef(false);
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
   const messageWindowLoadsInFlightRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
@@ -1008,6 +1007,12 @@ export default function MobileChatLayout({
     runDeltaSyncRef.current = () => runDeltaSync({ force: true });
   }, [runDeltaSync]);
 
+  const { scheduleRecoverySync, clearRecoverySync } = useInboxConnectionRecovery({
+    workspaceId: initialUser?.activeWorkspaceId,
+    runDeltaSync,
+    realtimeHealthyRef,
+  });
+
   const notifyPeers = useCallback(() => {
     if (!broadcastChannel) return;
     broadcastChannel.postMessage({ type: 'DELTA_SYNC', sourceTabId: tabIdRef.current });
@@ -1032,6 +1037,14 @@ export default function MobileChatLayout({
       } else {
         next.add(chatId);
       }
+      return next;
+    });
+  }, []);
+
+  const handleSelectAllForwarding = useCallback((chatIds: string[]) => {
+    setSelectedForwardingChatIds(prev => {
+      const next = new Set(prev);
+      chatIds.forEach((chatId) => next.add(chatId));
       return next;
     });
   }, []);
@@ -1349,13 +1362,20 @@ export default function MobileChatLayout({
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
-    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-      console.warn(`[REALTIME] Connection lost (${status}). Running delta sync as fallback.`);
-      if (document.visibilityState === 'visible') {
-        runDeltaSync();
+    if (status === 'SUBSCRIBED') {
+      if (realtimeHealthyRef.current) {
+        clearRecoverySync();
+      } else {
+        scheduleRecoverySync(`${type}:subscribed-waiting-peer`);
       }
+      return;
     }
-  }, [runDeltaSync]);
+
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      console.warn(`[REALTIME] Connection lost (${status}). Running delta sync recovery.`);
+      scheduleRecoverySync(`${type}:${status}`);
+    }
+  }, [clearRecoverySync, scheduleRecoverySync]);
 
   const handleRealtimeContactUpdate = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
     if (payload.eventType === 'DELETE') return;
@@ -1446,45 +1466,6 @@ export default function MobileChatLayout({
   }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!initialBuildIdRef.current) {
-      initialBuildIdRef.current = (window as any).__NEXT_DATA__?.buildId || 'dev';
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const checkBuild = async () => {
-      if (cancelled || buildMismatchTriggeredRef.current) return;
-      try {
-        const res = await fetch('/api/build-id', { signal: controller.signal, cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data?.buildId && data.buildId !== initialBuildIdRef.current) {
-          buildMismatchTriggeredRef.current = true;
-          console.warn('[BUILD_ID] Mismatch detected. Reloading to refresh assets.', {
-            current: initialBuildIdRef.current,
-            server: data.buildId
-          });
-          window.location.reload();
-        }
-      } catch (err) {
-        // Ignore network errors; will retry on next interval.
-        console.debug('[BUILD_ID] Check failed', err);
-      }
-    };
-
-    checkBuild();
-    const interval = setInterval(checkBuild, 60000);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
     if (selectedChatId) {
       selectedChatIdRef.current = selectedChatId;
     }
@@ -1545,7 +1526,7 @@ export default function MobileChatLayout({
     return (
       <div
         className={cn(
-          'mobile-app-shell fixed inset-0 z-50 flex h-dvh w-full flex-col',
+          'mobile-app-shell relative z-50 flex h-full min-h-0 w-full flex-col overflow-hidden',
           highContrast ? 'contrast-125 saturate-150' : ''
         )}
         dir={isRTL ? 'rtl' : 'ltr'}
@@ -1593,7 +1574,7 @@ export default function MobileChatLayout({
   return (
     <div
       className={cn(
-        'mobile-app-shell fixed inset-0 z-40 flex h-dvh w-full flex-col',
+        'mobile-app-shell relative z-40 flex h-full min-h-0 w-full flex-col overflow-hidden',
         highContrast ? 'contrast-125 saturate-150' : ''
       )}
       dir={isRTL ? 'rtl' : 'ltr'}
@@ -1616,6 +1597,7 @@ export default function MobileChatLayout({
                   isForwarding={isForwarding}
                   selectedForwardingChatIds={selectedForwardingChatIds}
                   onToggleForwardSelection={handleToggleForwardSelection}
+                  onSelectAllForwarding={handleSelectAllForwarding}
                   onConfirmForward={handleConfirmForward}
                   onCancelForward={handleCancelForward}
                   onPrefetch={prefetchChat}

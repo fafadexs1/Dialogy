@@ -82,6 +82,13 @@ import type {
   KnowledgeCollection,
 } from '@/lib/types';
 import { migrateAutopilotFlowGraphToV2 } from '@/services/autopilot/flow-v2';
+import { autoLayoutFlowNodes } from '@/services/autopilot/flow-layout';
+import {
+  analyzeAutopilotToolCoverage,
+  isAutopilotToolCoveragePublishBlocked,
+  type AutopilotToolCoverageReport,
+} from '@/services/autopilot/tool-coverage';
+import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 
 export type AgentEditorPanel =
   | 'settings'
@@ -97,8 +104,14 @@ type ToolCatalogItem = {
   description: string;
   class: string;
   riskLevel: 'low' | 'medium' | 'high';
+  sideEffect?: 'none' | 'low' | 'medium' | 'high';
+  idempotent?: boolean;
+  requiresHumanApproval?: boolean;
   source: 'dialogy' | 'mcp';
   serverName?: string;
+  serverId?: string;
+  inputSchema?: Record<string, unknown> | null;
+  outputSchema?: Record<string, unknown> | null;
 };
 
 type NodeKind = AutopilotFlowNodeKind;
@@ -408,6 +421,41 @@ const LAYOUT_GAP_X = 80;
 const LAYOUT_GAP_Y = 70;
 const LAYOUT_SATELLITE_OFFSET_X = 240;
 const LAYOUT_SATELLITE_GAP_Y = 50;
+const LAYOUT_COLLISION_GAP = 36;
+
+function layoutBoxesOverlap(left: { x: number; y: number }, right: { x: number; y: number }) {
+  return !(
+    left.x + LAYOUT_NODE_W + LAYOUT_COLLISION_GAP <= right.x ||
+    right.x + LAYOUT_NODE_W + LAYOUT_COLLISION_GAP <= left.x ||
+    left.y + LAYOUT_NODE_H + LAYOUT_COLLISION_GAP <= right.y ||
+    right.y + LAYOUT_NODE_H + LAYOUT_COLLISION_GAP <= left.y
+  );
+}
+
+function resolveLayoutCollisions(nodes: AttendantNode[], positionMap: Map<string, { x: number; y: number }>) {
+  const placed: Array<{ id: string; x: number; y: number }> = [];
+  const ordered = [...nodes].sort((left, right) => {
+    const leftPos = positionMap.get(left.id) || left.position;
+    const rightPos = positionMap.get(right.id) || right.position;
+    return leftPos.y - rightPos.y || leftPos.x - rightPos.x || left.id.localeCompare(right.id);
+  });
+
+  for (const node of ordered) {
+    const original = positionMap.get(node.id) || node.position;
+    let next = { x: Math.max(40, original.x), y: Math.max(40, original.y) };
+    let guard = 0;
+    while (placed.some((candidate) => layoutBoxesOverlap(next, candidate)) && guard < nodes.length * 4) {
+      const blocker = placed.find((candidate) => layoutBoxesOverlap(next, candidate));
+      next = {
+        x: next.x,
+        y: blocker ? blocker.y + LAYOUT_NODE_H + LAYOUT_COLLISION_GAP : next.y + LAYOUT_NODE_H + LAYOUT_COLLISION_GAP,
+      };
+      guard += 1;
+    }
+    positionMap.set(node.id, next);
+    placed.push({ id: node.id, ...next });
+  }
+}
 
 function autoLayoutNodes(nodes: AttendantNode[], edges: Edge[]): AttendantNode[] {
   if (nodes.length === 0) return nodes;
@@ -547,10 +595,30 @@ function autoLayoutNodes(nodes: AttendantNode[], edges: Edge[]): AttendantNode[]
     });
   }
 
+  resolveLayoutCollisions(nodes, positionMap);
+
   // Apply positions
   return nodes.map((n) => {
     const pos = positionMap.get(n.id);
     return pos ? { ...n, position: { x: pos.x, y: pos.y } } : n;
+  });
+}
+
+function autoLayoutNodesStable(nodes: AttendantNode[], edges: Edge[]): AttendantNode[] {
+  const layoutNodes = nodes.map((node) => ({
+    id: node.id,
+    kind: node.data.kind,
+    position: node.position,
+  }));
+  const layoutEdges = edges.map((flowEdge) => ({
+    source: flowEdge.source,
+    target: flowEdge.target,
+  }));
+  const organized = autoLayoutFlowNodes(layoutNodes, layoutEdges);
+  const positionById = new Map(organized.map((node) => [node.id, node.position]));
+  return nodes.map((node) => {
+    const position = positionById.get(node.id);
+    return position ? { ...node, position } : node;
   });
 }
 
@@ -1748,6 +1816,33 @@ function publishGateTone(audit: AutopilotFlowAuditResult) {
   };
 }
 
+function toolForCoverage(tool: ToolCatalogItem): AgentToolCatalogItem {
+  const sideEffect = tool.sideEffect
+    || (tool.class === 'read_only' || tool.class === 'compute_only' ? 'none' : tool.riskLevel === 'high' ? 'high' : 'medium');
+  return {
+    name: tool.name as any,
+    version: 'editor',
+    description: tool.description,
+    class: tool.class as AgentToolCatalogItem['class'],
+    riskLevel: tool.riskLevel,
+    sideEffect,
+    idempotent: tool.idempotent ?? sideEffect === 'none',
+    timeoutMs: 8000,
+    maxAttempts: 1,
+    requiresHumanApproval: tool.requiresHumanApproval ?? false,
+    customerVisible: true,
+    allowedIntents: [],
+    requiredSlots: [],
+    fallbackAction: 'handoff',
+    source: tool.source,
+    enabledByDefault: false,
+    serverId: tool.serverId,
+    serverName: tool.serverName,
+    inputSchema: tool.inputSchema || null,
+    outputSchema: tool.outputSchema || null,
+  };
+}
+
 function simulationStatusMeta(status: AutopilotFlowSimulationResult['status']) {
   if (status === 'failed') {
     return {
@@ -1779,12 +1874,14 @@ function simulationStatusMeta(status: AutopilotFlowSimulationResult['status']) {
 
 function PublishGatePanel({
   audit,
+  toolCoverage,
   open,
   onToggle,
   onRepairWithAi,
   isRepairing,
 }: {
   audit: AutopilotFlowAuditResult;
+  toolCoverage: AutopilotToolCoverageReport;
   open: boolean;
   onToggle: () => void;
   onRepairWithAi?: () => void;
@@ -1796,7 +1893,19 @@ function PublishGatePanel({
   const warningSimulations = audit.simulations.filter((simulation) => simulation.status === 'warning');
   const passedSimulations = audit.simulations.filter((simulation) => simulation.status === 'passed');
   const skippedSimulations = audit.simulations.filter((simulation) => simulation.status === 'skipped');
-  const tone = publishGateTone(audit);
+  const tone = publishGateTone({
+    ...audit,
+    issues: toolCoverage.status === 'covered'
+      ? audit.issues
+      : [
+        ...audit.issues,
+        {
+          severity: 'warning',
+          code: 'tool_coverage_incomplete',
+          message: 'Existem ferramentas habilitadas que nao estao declaradas no fluxo.',
+        },
+      ],
+  });
   const ToneIcon = tone.icon;
   const visibleIssues = [...criticalIssues, ...warningIssues];
   const visibleSimulations = [
@@ -1835,7 +1944,7 @@ function PublishGatePanel({
                   {tone.label}
                 </span>
                 <span className="text-xs leading-5 text-slate-500">
-                  {criticalIssues.length} critico(s), {warningIssues.length + warningSimulations.length} aviso(s)
+                  {criticalIssues.length} critico(s), {warningIssues.length + warningSimulations.length + (toolCoverage.status === 'covered' ? 0 : 1)} aviso(s)
                 </span>
               </div>
               <h3 className="mt-3 text-sm font-semibold text-white">Gate de publicacao</h3>
@@ -1898,6 +2007,40 @@ function PublishGatePanel({
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {toolCoverage.status !== 'covered' && (
+              <div className="mt-4 space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cobertura de ferramentas</div>
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs leading-5 text-amber-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span>{Math.round(toolCoverage.coverageRatio * 100)}% coberto para execucao segura</span>
+                    <span className="text-amber-200/70">
+                      {toolCoverage.attachedEnabledToolNames.length}/{toolCoverage.enabledToolNames.length} declaradas
+                    </span>
+                  </div>
+                  {toolCoverage.safeFallbackToolNames.length > 0 && (
+                    <p className="mt-2 break-words text-emerald-200 [overflow-wrap:anywhere]">
+                      Fallback read-only: {toolCoverage.safeFallbackToolNames.join(', ')}
+                    </p>
+                  )}
+                  {toolCoverage.branchRequiredToolNames.length > 0 && (
+                    <p className="mt-2 break-words text-amber-100 [overflow-wrap:anywhere]">
+                      Exigem branch explicito: {toolCoverage.branchRequiredToolNames.join(', ')}
+                    </p>
+                  )}
+                  {toolCoverage.unguardedToolNames.length > 0 && (
+                    <p className="mt-2 break-words text-red-200 [overflow-wrap:anywhere]">
+                      Sem confirmacao explicita: {toolCoverage.unguardedToolNames.join(', ')}
+                    </p>
+                  )}
+                  {toolCoverage.unknownEnabledToolNames.length > 0 && (
+                    <p className="mt-2 break-words text-red-200 [overflow-wrap:anywhere]">
+                      Ausentes do catalogo: {toolCoverage.unknownEnabledToolNames.join(', ')}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1991,6 +2134,11 @@ export function AutopilotFlowBuilder({
     () => serializeFlowGraph(nodes, edges, systemVariables),
     [edges, nodes, systemVariables],
   );
+  const toolCoverage = useMemo(() => analyzeAutopilotToolCoverage({
+    graph: currentFlowGraph,
+    enabledToolNames,
+    toolCatalog: tools.map(toolForCoverage),
+  }), [currentFlowGraph, enabledToolNames, tools]);
   // Debounced audit: avoid running 11 heavy simulations on every micro-change
   const [publishAudit, setPublishAudit] = useState<AutopilotFlowAuditResult>(() => auditAutopilotFlowGraph(currentFlowGraph));
   useEffect(() => {
@@ -1999,7 +2147,8 @@ export function AutopilotFlowBuilder({
     }, 500);
     return () => clearTimeout(timer);
   }, [currentFlowGraph]);
-  const hasPublishGateBlockers = publishAudit.status === 'failed';
+  const hasPublishGateBlockers = publishAudit.status === 'failed'
+    || isAutopilotToolCoveragePublishBlocked(toolCoverage);
 
   const [isRepairingGate, setIsRepairingGate] = useState(false);
 
@@ -2009,7 +2158,11 @@ export function AutopilotFlowBuilder({
       setIsRepairingGate(true);
       const repairableIssues = publishAudit.issues.filter((issue) => issue.severity === 'critical');
       const repairableSimulations = publishAudit.simulations.filter((simulation) => simulation.status === 'failed');
-      if (repairableIssues.length === 0 && repairableSimulations.length === 0) {
+      const uncoveredTools = [
+        ...toolCoverage.branchRequiredToolNames,
+        ...toolCoverage.unknownEnabledToolNames,
+      ];
+      if (repairableIssues.length === 0 && repairableSimulations.length === 0 && uncoveredTools.length === 0) {
         toast({ title: 'Nao ha erros criticos para corrigir com IA.' });
         return;
       }
@@ -2043,6 +2196,9 @@ export function AutopilotFlowBuilder({
         '',
         'Simulacoes falhas:',
         simulations || '- Nenhuma simulacao falha.',
+        '',
+        'Ferramentas habilitadas sem branch seguro:',
+        uncoveredTools.length > 0 ? uncoveredTools.map((toolName) => `- ${toolName}`).join('\n') : '- Nenhuma.',
       ].join('\n');
       
       const { proposal, error } = await onGenerateFlowWithAi({
@@ -2061,7 +2217,7 @@ export function AutopilotFlowBuilder({
     } finally {
       setIsRepairingGate(false);
     }
-  }, [publishAudit, currentFlowGraph, mainSystemPrompt, onGenerateFlowWithAi, onApplyAiProposal]);
+  }, [publishAudit, toolCoverage, currentFlowGraph, mainSystemPrompt, onGenerateFlowWithAi, onApplyAiProposal]);
 
   useEffect(() => {
     const currentSignature = JSON.stringify(currentFlowGraph);
@@ -2551,6 +2707,8 @@ export function AutopilotFlowBuilder({
             instructions: 'Use os valores dos blocos anteriores para montar os parametros desta ferramenta.',
             referenceId: `ferramenta_${normalizeVariableName(toolDisplayName(tool)) || 'acao'}`,
             variableName: `resultado_${normalizeVariableName(toolDisplayName(tool)) || 'ferramenta'}`,
+            maxAttempts: 3,
+            errorHandles: ['error'],
           },
         },
       }));
@@ -2599,7 +2757,7 @@ export function AutopilotFlowBuilder({
 
   const organizeLayout = useCallback(() => {
     setNodes((currentNodes) => {
-      const organized = autoLayoutNodes(currentNodes, edges);
+      const organized = autoLayoutNodesStable(currentNodes, edges);
       return organized;
     });
     requestAnimationFrame(() => {
@@ -2610,7 +2768,7 @@ export function AutopilotFlowBuilder({
   const applyAiFlowProposal = useCallback(() => {
     if (!aiFlowProposal) return;
     const restored = restoreFlowGraph(aiFlowProposal.flowGraph);
-    const organizedNodes = autoLayoutNodes(restored.nodes, restored.edges);
+    const organizedNodes = autoLayoutNodesStable(restored.nodes, restored.edges);
     suppressNextGraphChange.current = true;
     setNodes(organizedNodes);
     setEdges(restored.edges);
@@ -2807,6 +2965,7 @@ export function AutopilotFlowBuilder({
           </Button>
           <PublishGatePanel
             audit={publishAudit}
+            toolCoverage={toolCoverage}
             open={isPublishGateOpen}
             onToggle={() => setIsPublishGateOpen((open) => !open)}
             onRepairWithAi={handleRepairWithAi}

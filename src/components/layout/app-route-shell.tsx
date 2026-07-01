@@ -2,18 +2,21 @@ import { getCurrentUser } from '@/actions/user';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { MainAppLayout } from '@/components/layout/main-app-layout';
 import { Toaster } from '@/components/ui/toaster';
-import { I18nProvider } from '@/i18n/i18n-provider';
 import { getServerLocale } from '@/i18n/server';
 import { ensureServerHeartbeat } from '@/lib/observability/logger';
 import { PresenceProvider } from '@/hooks/use-online-status';
 import { AuthProvider } from '@/providers/auth-provider';
 import { ThemeProvider } from '@/providers/theme-provider';
+import { getWorkspaceLimits } from '@/lib/billing-logic';
 
 export async function AppRouteShell({ children }: { children: React.ReactNode }) {
   ensureServerHeartbeat();
 
   const user = await getCurrentUser();
   const locale = await getServerLocale();
+  const billing = user?.activeWorkspaceId
+    ? await getWorkspaceLimits(user.activeWorkspaceId)
+    : null;
 
   return (
     <>
@@ -25,13 +28,16 @@ export async function AppRouteShell({ children }: { children: React.ReactNode })
           enableSystem
           disableTransitionOnChange
         >
-          <I18nProvider initialLocale={locale}>
             <AuthProvider>
               <PresenceProvider initialUser={user}>
-                <MainAppLayout>{children}</MainAppLayout>
+                <MainAppLayout
+                  billingStatus={billing?.billingStatus ?? null}
+                  billingBlocked={billing?.blocked ?? false}
+                >
+                  {children}
+                </MainAppLayout>
               </PresenceProvider>
             </AuthProvider>
-          </I18nProvider>
         </ThemeProvider>
       </ErrorBoundary>
       <Toaster />

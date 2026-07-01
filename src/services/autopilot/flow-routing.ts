@@ -160,6 +160,10 @@ export function resolveActiveFlowIntentScope(
       node.id === decisionRoute?.targetNodeId ||
       (!decisionRoute && edges.some((edge) => edge.target === node.id))
     )
+  )) || nodes.find((node): node is AutopilotFlowNode => (
+    node.kind === 'decision' &&
+    Boolean(node.config?.instructions?.trim()) &&
+    (node.config?.routes || []).some((route) => route.intent === intent)
   ));
 
   if (!matchedNode) return null;
@@ -182,16 +186,19 @@ export function resolveActiveFlowIntentScopeByNodeId(
   const node = config.flow_graph?.nodes.find((candidate) => candidate.id === nodeId);
   if (
     !node ||
-    node.kind !== 'sub_agent' ||
+    !['sub_agent', 'decision'].includes(node.kind) ||
     !node.config?.instructions?.trim()
   ) {
     return null;
   }
+  const routeIntent = node.kind === 'decision'
+    ? node.config.routes?.find((route) => route.intent)?.intent as UniversalAutopilotIntent | undefined
+    : undefined;
 
   return {
     nodeId: node.id,
     title: node.title,
-    intent: (node.config.intent as UniversalAutopilotIntent | undefined) || 'unknown',
+    intent: (node.config.intent as UniversalAutopilotIntent | undefined) || routeIntent || 'unknown',
     customIntentLabel: node.config?.customIntentLabel?.trim() || undefined,
     systemPrompt: node.config.instructions.trim(),
     knowledgeCollectionIds: node.config?.knowledgeCollectionIds?.filter(Boolean),
@@ -320,8 +327,43 @@ function tokenizeSwitchText(value: string): string[] {
 
 function scoreSwitchRoute(message: string, route: AutopilotFlowSwitchRoute): { score: number; evidence: string[] } {
   const normalizedMessage = normalizeInstructionText(message);
+  const routeText = normalizeInstructionText([
+    route.id,
+    route.label,
+    route.description,
+    ...(route.examples || []),
+  ].join(' '));
   const evidence: string[] = [];
   let score = 0;
+
+  const mentionsWifi = /\b(wi[\s-]?fi|ssid|rede|roteador|router|modem)\b/.test(normalizedMessage);
+  const mentionsCredentials = /\b(usuario|login|senha|password|ssid|credencia|nome da rede)\b/.test(normalizedMessage);
+  const requestsChange = /\b(trocar|mudar|alterar|atualizar|nova|novo|change|update)\b/.test(normalizedMessage);
+  const requestsLookup = /\b(esqueci|consultar|verificar|qual|quais|mostrar|informe|informar|passa|recuperar)\b/.test(normalizedMessage);
+  const requestsDiagnostics = /\b(lento|lentidao|oscila|queda|interferencia|canal|canais|redes ao redor|sinal fraco|diagnost)\w*/.test(normalizedMessage);
+  const requestsReboot = /\b(reiniciar|reinicie|reboot|restart|resetar|desligar e ligar)\w*/.test(normalizedMessage);
+  const requestsHuman = /\b(humano|atendente|pessoa|especialista|transferir|equipe)\w*/.test(normalizedMessage);
+  const routeIsLookup = /\b(consultar|consulta|credenciais atuais|wifi atual|senha atual)\b/.test(routeText);
+  const routeIsChange = /\b(trocar|troca|alterar|mudanca|change|update)\b/.test(routeText);
+  const routeIsDiagnostics = /\b(diagnost|lentidao|canal|interferencia|redes ao redor)\w*/.test(routeText);
+  const routeIsReboot = /\b(reiniciar|reboot|restart|resetar)\w*/.test(routeText);
+  const routeIsHuman = /\b(humano|atendente|transfer|equipe)\w*/.test(routeText);
+  if (mentionsWifi && mentionsCredentials && requestsLookup && !requestsChange && routeIsLookup && !routeIsChange) {
+    score = 0.99;
+    evidence.push('Pedido explicito de consulta das credenciais atuais do Wi-Fi.');
+  } else if (mentionsWifi && requestsChange && routeIsChange) {
+    score = 0.99;
+    evidence.push('Pedido explicito de alteracao de Wi-Fi.');
+  } else if (mentionsWifi && requestsDiagnostics && routeIsDiagnostics) {
+    score = 0.99;
+    evidence.push('Pedido explicito de diagnostico de Wi-Fi.');
+  } else if (requestsReboot && routeIsReboot) {
+    score = 0.99;
+    evidence.push('Pedido explicito de reboot do roteador.');
+  } else if (requestsHuman && routeIsHuman) {
+    score = 0.99;
+    evidence.push('Pedido explicito de atendimento humano.');
+  }
 
   for (const example of route.examples || []) {
     const normalizedExample = normalizeInstructionText(example);
@@ -487,7 +529,14 @@ function findNearestReachableSwitchNodeId(
     visited.add(current);
 
     const node = graph.nodes.find((candidate) => candidate.id === current);
-    if (node?.kind === 'decision' && node.config?.routes?.length) return node.id;
+    if (node?.kind === 'decision' && node.config?.routes?.length) {
+      const isLegacyIntentWrapper = node.config.legacyNodeKind === 'intent';
+      const hasDownstreamDecision = graph.edges.some((edge) => (
+        edge.source === node.id &&
+        graph.nodes.some((candidate) => candidate.id === edge.target && candidate.kind === 'decision')
+      ));
+      if (!isLegacyIntentWrapper || !hasDownstreamDecision) return node.id;
+    }
 
     for (const edge of graph.edges) {
       if (edge.source === current && !visited.has(edge.target)) {
@@ -506,12 +555,21 @@ export function resolveFlowSwitchRouteForActivePath(input: {
 }): FlowSwitchResolution | null {
   const config = configWithV2FlowGraph(input.config);
   const switchNodeId = findNearestReachableSwitchNodeId(config, input.activeNodeId);
-  if (!switchNodeId) return null;
-  return resolveFlowSwitchRoute({
+  if (switchNodeId) {
+    return resolveFlowSwitchRoute({
+      config,
+      switchNodeId,
+      customerMessage: input.customerMessage,
+    });
+  }
+  const firstSwitch = listFlowSwitchGuidance(config)[0];
+  if (!firstSwitch) return null;
+  const reentry = resolveFlowSwitchRoute({
     config,
-    switchNodeId,
+    switchNodeId: firstSwitch.nodeId,
     customerMessage: input.customerMessage,
   });
+  return reentry && !reentry.fallbackUsed ? reentry : null;
 }
 
 export function formatFlowSwitchGuidanceForPrompt(config: AutopilotConfig): string {

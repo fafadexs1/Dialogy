@@ -25,6 +25,7 @@ import { requireWorkspaceAccess } from '@/server/inbox/access';
 import { loadContactThreadContext } from '@/server/inbox/contact-thread-service';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { recordDecisionOutcomesForChat } from '@/services/autopilot/outcome-tracker';
+import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -39,20 +40,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: st
             .catch(reject)
             .finally(() => clearTimeout(timer));
     });
-}
-
-// Helper function to check for permissions
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    const res = await db.query(`
-        SELECT 1
-        FROM user_workspace_roles uwr
-        JOIN role_permissions rp ON rp.role_id = uwr.role_id
-        WHERE uwr.user_id = $1
-          AND uwr.workspace_id = $2
-          AND rp.permission_id = $3
-        LIMIT 1
-    `, [userId, workspaceId, permission]);
-    return (res.rowCount ?? 0) > 0;
 }
 
 /**
@@ -216,6 +203,8 @@ export const transferChatAction = withDebug(
             let transferTargetName = '';
             let transferActorName = currentAgentName;
             let transferActorAvatarUrl: string | null = null;
+            let automaticTeamTag: string | null = null;
+            let automaticTeamTagColor: string | null = null;
 
             if (isSystemAgent) {
                 const actorRes = await client.query('SELECT name, avatar_url FROM system_agents WHERE id = $1', [currentAgentId]);
@@ -232,19 +221,24 @@ export const transferChatAction = withDebug(
                 // --- Active Business Hours & Exceptions Validation ---
                 const teamStatusRes = await client.query(
                     `SELECT t.id, t.name, w.timezone,
+                            team_tag.label AS automatic_tag_label,
+                            team_tag.color AS automatic_tag_color,
                             COALESCE(json_agg(bh.*) FILTER (WHERE bh.id IS NOT NULL), '[]') as "businessHours",
                             COALESCE(json_agg(se.*) FILTER (WHERE se.id IS NOT NULL), '[]') as "scheduleExceptions"
                      FROM teams t
                      JOIN workspaces w ON t.workspace_id = w.id
+                     LEFT JOIN tags team_tag ON team_tag.id = t.tag_id AND team_tag.workspace_id = t.workspace_id
                      LEFT JOIN business_hours bh ON t.id = bh.team_id
                      LEFT JOIN schedule_exceptions se ON t.id = se.team_id AND se.date = CURRENT_DATE
                      WHERE t.id = $1 AND t.workspace_id = $2
-                     GROUP BY t.id, w.timezone`,
+                     GROUP BY t.id, w.timezone, team_tag.label, team_tag.color`,
                     [teamId, workspaceId]
                 );
 
                 if ((teamStatusRes.rowCount ?? 0) > 0) {
                     const team = teamStatusRes.rows[0];
+                    automaticTeamTag = team.automatic_tag_label || null;
+                    automaticTeamTagColor = team.automatic_tag_color || null;
                     const timezone = team.timezone || 'America/Sao_Paulo';
                     const now = toZonedTime(new Date(), timezone);
 
@@ -362,9 +356,11 @@ export const transferChatAction = withDebug(
                 copilot_mode = 'off',
                 status = 'atendimentos',
                 assigned_at = clock_timestamp(),
-                updated_at = clock_timestamp()
+                updated_at = clock_timestamp(),
+                tag = COALESCE($3, tag),
+                color = COALESCE($4, color)
             WHERE id = $2
-        `, [finalAgentId, chatId]);
+        `, [finalAgentId, chatId, automaticTeamTag, automaticTeamTagColor]);
 
             // Log system message
             const systemMessageContent = isHumanTakingFromAi ? `Atendimento reassumido por ${transferTargetName}.` : !isFirstAssignment
@@ -1216,9 +1212,8 @@ async function fetchChats({
         contact_custom_fields AS (
             SELECT
                 cfv.contact_id,
-                json_object_agg(cfd.id, cfv.value) AS contact_custom_fields
+                json_object_agg(cfv.field_id, cfv.value) AS contact_custom_fields
             FROM contact_custom_field_values cfv
-            JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
             JOIN (
                 SELECT DISTINCT contact_id
                 FROM merged_chats
@@ -1326,12 +1321,15 @@ async function fetchChats({
         LEFT JOIN contact_custom_fields ccf ON ccf.contact_id = c.contact_id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
         LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
-        LEFT JOIN contacts cont ON cont.id = c.contact_id
+        LEFT JOIN contacts cont
+          ON cont.id = c.contact_id
+         AND cont.workspace_id = c.workspace_id
         LEFT JOIN LATERAL (
             SELECT mct2.username, mct2.external_id, mch.type as platform_type
             FROM meta_contacts mct2
             JOIN meta_channels mch ON mch.id = mct2.channel_id
-            WHERE mct2.external_id = lmd.external_sender_id
+            WHERE lmd.external_sender_id IS NOT NULL
+              AND mct2.external_id = lmd.external_sender_id
               AND mch.workspace_id = c.workspace_id
               AND (
                 lmd.external_channel_id IS NULL
@@ -1349,23 +1347,34 @@ async function fetchChats({
             SELECT mct2.username, mct2.external_id, mch.type as platform_type
             FROM meta_contacts mct2
             JOIN meta_channels mch ON mch.id = mct2.channel_id
-            WHERE mct2.contact_id = c.contact_id
+            WHERE NULLIF(cont.phone_number_jid, '') IS NULL
+              AND mct2.contact_id = c.contact_id
             ORDER BY mct2.created_at DESC
             LIMIT 1
         ) mct_stable ON true
-        LEFT JOIN team_members tm ON c.agent_id = tm.user_id
-        LEFT JOIN teams t ON tm.team_id = t.id
+        LEFT JOIN LATERAL (
+            SELECT t.id, t.name, t.color
+            FROM team_members tm
+            JOIN teams t
+              ON t.id = tm.team_id
+             AND t.workspace_id = c.workspace_id
+            WHERE tm.user_id = c.agent_id
+            ORDER BY t.name ASC, t.id ASC
+            LIMIT 1
+        ) t ON true
         LEFT JOIN LATERAL (
             SELECT type
             FROM (
                 SELECT eai.type
                 FROM evolution_api_instances eai
-                WHERE eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
+                WHERE COALESCE(lmd.instance_name, lci.instance_name) IS NOT NULL
+                  AND eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND eai.workspace_id = c.workspace_id
                 UNION ALL
                 SELECT 'telegram'::text AS type
                 FROM telegram_bot_instances tbi
-                WHERE tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
+                WHERE COALESCE(lmd.instance_name, lci.instance_name) IS NOT NULL
+                  AND tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND tbi.workspace_id = c.workspace_id
             ) instances
             LIMIT 1
@@ -1426,6 +1435,23 @@ export const getInitialChatsData = withDebug(
         }
 
         try {
+            const access = await requireWorkspaceAccess(userId, workspaceId);
+            if (!access.ok) {
+                return {
+                    chats: [],
+                    messages: [],
+                    selectedChatId: null,
+                    lastSyncChats: null,
+                    lastSyncMessageForSelected: null,
+                    oldestMessageDate: null,
+                    oldestMessageId: null,
+                    hasMoreHistory: false,
+                    hasMoreChats: false,
+                    timezone: DEFAULT_TIMEZONE,
+                    error: access.error,
+                };
+            }
+
             // Repair chats that were marked as attending without an assigned agent.
             // Fire-and-forget: don't block the main loading path.
             db.query(
@@ -1439,10 +1465,11 @@ export const getInitialChatsData = withDebug(
                 [workspaceId]
             ).catch(err => console.error('[REPAIR_CHATS] Failed:', err));
 
-            const timezone = workspaceTimezone || await getWorkspaceTimezone(workspaceId);
-
             const activeChatsLimit = 200; // Paginated; more loaded on scroll
-            const activeChatRows = await withTimeout(
+            const timezonePromise = workspaceTimezone
+                ? Promise.resolve(workspaceTimezone)
+                : getWorkspaceTimezone(workspaceId);
+            const activeChatRowsPromise = withTimeout(
                 fetchChats({
                     workspaceId,
                     userId,
@@ -1455,9 +1482,9 @@ export const getInitialChatsData = withDebug(
                 'Timeout ao buscar chats ativos'
             );
 
-            const closedChatsLimit = ownership === 'everyone' ? 10 : 20;
+            const closedChatsLimit = 10;
             let closedChatsDegraded = false;
-            const closedChatRows = await withTimeout(
+            const closedChatRowsPromise = withTimeout(
                 fetchChats({
                     workspaceId,
                     userId,
@@ -1473,6 +1500,12 @@ export const getInitialChatsData = withDebug(
                 console.warn('[GET_INITIAL_CHATS] Closed chats load degraded:', error);
                 return [] as ChatRow[];
             });
+
+            const [timezone, activeChatRows, closedChatRows] = await Promise.all([
+                timezonePromise,
+                activeChatRowsPromise,
+                closedChatRowsPromise,
+            ]);
 
             const allChatRows = [...activeChatRows, ...closedChatRows];
 
@@ -1697,9 +1730,19 @@ export const searchChatsAndContacts = withDebug(
                         t.name AS team_name,
                         t.color AS team_color
                     FROM chats c
-                    LEFT JOIN contacts cont ON c.contact_id = cont.id
-                    LEFT JOIN team_members tm ON c.agent_id = tm.user_id
-                    LEFT JOIN teams t ON tm.team_id = t.id
+                    LEFT JOIN contacts cont
+                      ON c.contact_id = cont.id
+                     AND cont.workspace_id = c.workspace_id
+                    LEFT JOIN LATERAL (
+                        SELECT t.name, t.color
+                        FROM team_members tm
+                        JOIN teams t
+                          ON t.id = tm.team_id
+                         AND t.workspace_id = c.workspace_id
+                        WHERE tm.user_id = c.agent_id
+                        ORDER BY t.name ASC, t.id ASC
+                        LIMIT 1
+                    ) t ON true
                     WHERE c.workspace_id = $1
                       AND c.protocol ILIKE $2
                     LIMIT 1
@@ -1833,9 +1876,19 @@ export const searchChatsAndContacts = withDebug(
                         LIMIT 1
                     ) as last_message_json
                 FROM chats c
-                LEFT JOIN contacts cont ON c.contact_id = cont.id
-                LEFT JOIN team_members tm ON c.agent_id = tm.user_id
-                LEFT JOIN teams t ON tm.team_id = t.id
+                LEFT JOIN contacts cont
+                  ON c.contact_id = cont.id
+                 AND cont.workspace_id = c.workspace_id
+                LEFT JOIN LATERAL (
+                    SELECT t.name, t.color
+                    FROM team_members tm
+                    JOIN teams t
+                      ON t.id = tm.team_id
+                     AND t.workspace_id = c.workspace_id
+                    WHERE tm.user_id = c.agent_id
+                    ORDER BY t.name ASC, t.id ASC
+                    LIMIT 1
+                ) t ON true
                 WHERE c.workspace_id = $1
                   AND (
                       cont.name ILIKE $2
@@ -1944,7 +1997,9 @@ export const searchChatsAndContacts = withDebug(
                     cont.address AS contact_address
                 FROM messages m
                 JOIN chats c ON c.id = m.chat_id
-                LEFT JOIN contacts cont ON cont.id = c.contact_id
+                LEFT JOIN contacts cont
+                  ON cont.id = c.contact_id
+                 AND cont.workspace_id = c.workspace_id
                 WHERE c.workspace_id = $1
                   AND m.content ILIKE $2
                 ORDER BY m.created_at DESC
@@ -2322,12 +2377,15 @@ export const getMergedContactThreadAction = withDebug(
                 ) lci ON TRUE
                 LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
                 LEFT JOIN meta_contacts mct ON mct.id = mc.meta_contact_id
-                LEFT JOIN contacts cont ON cont.id = c.contact_id
+                LEFT JOIN contacts cont
+                  ON cont.id = c.contact_id
+                 AND cont.workspace_id = c.workspace_id
                 LEFT JOIN LATERAL (
                     SELECT mct2.username, mct2.external_id, mch.type as platform_type
                     FROM meta_contacts mct2
                     JOIN meta_channels mch ON mch.id = mct2.channel_id
-                    WHERE mct2.external_id = lmd.external_sender_id
+                    WHERE lmd.external_sender_id IS NOT NULL
+                      AND mct2.external_id = lmd.external_sender_id
                       AND mch.workspace_id = c.workspace_id
                       AND (
                         lmd.external_channel_id IS NULL
@@ -2345,23 +2403,34 @@ export const getMergedContactThreadAction = withDebug(
                     SELECT mct2.username, mct2.external_id, mch.type as platform_type
                     FROM meta_contacts mct2
                     JOIN meta_channels mch ON mch.id = mct2.channel_id
-                    WHERE mct2.contact_id = c.contact_id
+                    WHERE NULLIF(cont.phone_number_jid, '') IS NULL
+                      AND mct2.contact_id = c.contact_id
                     ORDER BY mct2.created_at DESC
                     LIMIT 1
                 ) mct_stable ON true
-                LEFT JOIN team_members tm ON c.agent_id = tm.user_id
-                LEFT JOIN teams t ON tm.team_id = t.id
+                LEFT JOIN LATERAL (
+                    SELECT t.id, t.name, t.color
+                    FROM team_members tm
+                    JOIN teams t
+                      ON t.id = tm.team_id
+                     AND t.workspace_id = c.workspace_id
+                    WHERE tm.user_id = c.agent_id
+                    ORDER BY t.name ASC, t.id ASC
+                    LIMIT 1
+                ) t ON true
                 LEFT JOIN LATERAL (
                     SELECT type
                     FROM (
                         SELECT eai.type
                         FROM evolution_api_instances eai
-                        WHERE eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
+                        WHERE COALESCE(lmd.instance_name, lci.instance_name) IS NOT NULL
+                          AND eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                           AND eai.workspace_id = c.workspace_id
                         UNION ALL
                         SELECT 'telegram'::text AS type
                         FROM telegram_bot_instances tbi
-                        WHERE tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
+                        WHERE COALESCE(lmd.instance_name, lci.instance_name) IS NOT NULL
+                          AND tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                           AND tbi.workspace_id = c.workspace_id
                     ) instances
                     LIMIT 1
@@ -2425,7 +2494,9 @@ export const getMergedContactThreadAction = withDebug(
                     cont.address AS contact_address
                 FROM messages m
                 JOIN chats c ON c.id = m.chat_id
-                LEFT JOIN contacts cont ON cont.id = c.contact_id
+                LEFT JOIN contacts cont
+                  ON cont.id = c.contact_id
+                 AND cont.workspace_id = c.workspace_id
                 WHERE c.workspace_id = $1
                   AND c.contact_id = ANY($2::uuid[])
                 ORDER BY m.created_at DESC, m.id DESC
@@ -2601,9 +2672,8 @@ async function fetchChatsDelta({
         contact_custom_fields AS (
             SELECT
                 cfv.contact_id,
-                json_object_agg(cfd.id, cfv.value) AS contact_custom_fields
+                json_object_agg(cfv.field_id, cfv.value) AS contact_custom_fields
             FROM contact_custom_field_values cfv
-            JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
             JOIN (
                 SELECT DISTINCT contact_id
                 FROM changed_chats
@@ -2665,20 +2735,32 @@ async function fetchChatsDelta({
         LEFT JOIN unread_counts uc ON uc.chat_id = c.id
         LEFT JOIN contact_custom_fields ccf ON ccf.contact_id = c.contact_id
         LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
-        LEFT JOIN contacts cont ON cont.id = c.contact_id
-        LEFT JOIN team_members tm ON c.agent_id = tm.user_id
-        LEFT JOIN teams t ON tm.team_id = t.id
+        LEFT JOIN contacts cont
+          ON cont.id = c.contact_id
+         AND cont.workspace_id = c.workspace_id
+        LEFT JOIN LATERAL (
+            SELECT t.id, t.name, t.color
+            FROM team_members tm
+            JOIN teams t
+              ON t.id = tm.team_id
+             AND t.workspace_id = c.workspace_id
+            WHERE tm.user_id = c.agent_id
+            ORDER BY t.name ASC, t.id ASC
+            LIMIT 1
+        ) t ON true
         LEFT JOIN LATERAL (
             SELECT type
             FROM (
                 SELECT eai.type
                 FROM evolution_api_instances eai
-                WHERE eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
+                WHERE COALESCE(lmd.instance_name, lci.instance_name) IS NOT NULL
+                  AND eai.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND eai.workspace_id = c.workspace_id
                 UNION ALL
                 SELECT 'telegram'::text AS type
                 FROM telegram_bot_instances tbi
-                WHERE tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
+                WHERE COALESCE(lmd.instance_name, lci.instance_name) IS NOT NULL
+                  AND tbi.instance_name = COALESCE(lmd.instance_name, lci.instance_name)
                   AND tbi.workspace_id = c.workspace_id
             ) instances
             LIMIT 1

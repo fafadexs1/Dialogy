@@ -23,6 +23,7 @@ import { ptBR } from 'date-fns/locale';
 import { replaceChatPath } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
+import { useInboxConnectionRecovery } from '@/hooks/use-inbox-connection-recovery';
 import ReactDOM from 'react-dom';
 import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
@@ -43,9 +44,42 @@ const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const DELTA_SYNC_MIN_INTERVAL_MS = 3000;
 const HEALTHY_REALTIME_POLL_VISIBLE_MS = 60000;
-const HEALTHY_REALTIME_POLL_HIDDEN_MS = 180000;
+const HEALTHY_REALTIME_POLL_HIDDEN_MS = 30000;
 const FALLBACK_POLL_VISIBLE_MS = 15000;
-const FALLBACK_POLL_HIDDEN_MS = 45000;
+const FALLBACK_POLL_HIDDEN_MS = 15000;
+const HIDDEN_TAB_CATCH_UP_DELAY_MS = 1000;
+
+type NotificationSoundKind = keyof typeof SOUND_SOURCES;
+type InboxSnapshot = ReturnType<typeof useInboxStore.getState>;
+
+function getLatestChatMessage(chat: Chat | null | undefined): Message | null {
+  const messages = chat?.messages;
+  if (!messages?.length) return null;
+  return messages[messages.length - 1] ?? null;
+}
+
+function isMessageCached(snapshot: InboxSnapshot, message: Message): boolean {
+  const threadHasMessage = snapshot.messagesByChat[message.chat_id]?.some((cached) => cached.id === message.id);
+  if (threadHasMessage) return true;
+
+  const chatPreviewHasMessage = snapshot.chats
+    .find((chat) => chat.id === message.chat_id)
+    ?.messages?.some((cached) => cached.id === message.id);
+
+  return Boolean(chatPreviewHasMessage);
+}
+
+function getNotificationSoundKind(
+  chat: Pick<Chat, 'status' | 'agent' | 'agentId'> | null | undefined,
+  userId?: string | null,
+): NotificationSoundKind | null {
+  if (!chat) return 'queue';
+  if (chat.status === 'gerais') return 'queue';
+  if (chat.status === 'atendimentos' && (chat.agent?.id === userId || chat.agentId === userId)) {
+    return 'attending';
+  }
+  return null;
+}
 
 const hasRecordKey = (record: Record<string, unknown>, key: string) =>
   Object.prototype.hasOwnProperty.call(record, key);
@@ -249,8 +283,6 @@ export default function CustomerChatLayout({
   const unreadCountsRef = useRef<Record<string, number>>({});
   const unreadWatchInitializedRef = useRef(false);
   const runDeltaSyncRef = useRef<(() => Promise<void>) | null>(null);
-  const initialBuildIdRef = useRef<string>('');
-  const buildMismatchTriggeredRef = useRef(false);
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
   const messageWindowLoadsInFlightRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
@@ -523,6 +555,27 @@ export default function CustomerChatLayout({
     });
   }, []);
 
+  const getIncomingMessageSoundKind = useCallback((
+    message: Message,
+    chat: Chat | null | undefined,
+    currentSelectedChatId: string | null,
+  ): NotificationSoundKind | null => {
+    if (message.from_me) return null;
+    if (message.sentByTab && message.sentByTab === tabIdRef.current) return null;
+
+    const kind = getNotificationSoundKind(chat, initialUser?.id);
+    if (!kind) return null;
+
+    const isVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+    const isSelectedChat = message.chat_id === currentSelectedChatId;
+
+    if (isVisible && isSelectedChat && kind !== 'queue') {
+      return null;
+    }
+
+    return kind;
+  }, [initialUser?.id]);
+
   // REDUNDANT useEffect REMOVED HERE used to watch unreadCountsRef
 
   useEffect(() => {
@@ -557,7 +610,7 @@ export default function CustomerChatLayout({
     const messageChat = snapshot.chats.find((chat) => chat.id === message.chat_id);
     const isQueueMessage = messageChat?.status === 'gerais';
     const isAttendingMessage = messageChat?.status === 'atendimentos';
-    const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
+    const isOwnAttending = isAttendingMessage && (messageChat?.agent?.id === initialUser?.id || messageChat?.agentId === initialUser?.id);
     const currentSelectedChatId = snapshot.selectedChatId;
 
     // Always update the data store
@@ -584,16 +637,12 @@ export default function CustomerChatLayout({
         incrementUnread(message.chat_id);
       }
 
-      const shouldPlay = document.visibilityState !== 'visible' || message.chat_id !== currentSelectedChatId || isQueueMessage;
-      if (shouldPlay) {
-        if (isQueueMessage || !messageChat) {
-          playNotificationSound('queue');
-        } else if (isOwnAttending) {
-          playNotificationSound('attending');
-        }
+      const soundKind = getIncomingMessageSoundKind(message, messageChat, currentSelectedChatId);
+      if (soundKind) {
+        playNotificationSound(soundKind);
       }
     }
-  }, [appendMessagesToChat, incrementUnread, initialUser?.id, initialUser?.activeWorkspaceId, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
+  }, [appendMessagesToChat, getIncomingMessageSoundKind, incrementUnread, initialUser?.id, initialUser?.activeWorkspaceId, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
 
   const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
@@ -967,16 +1016,44 @@ export default function CustomerChatLayout({
           return;
         }
 
+        const visibleDeltaChats = result.deltaChats.filter((chat) =>
+          isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId)
+        );
+        const hiddenDeltaChatIds = result.deltaChats
+          .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId))
+          .map((chat) => chat.id)
+          .filter((chatId) => chatId !== snapshot.selectedChatId);
+
+        const latestSnapshot = useInboxStore.getState();
+        const notificationKinds = new Set<NotificationSoundKind>();
+        const notificationMessageKeys = new Set<string>();
+        const queueNotification = (message: Message | null | undefined, chat: Chat | null | undefined) => {
+          if (!message) return;
+          const key = `${message.chat_id}:${message.id}`;
+          if (notificationMessageKeys.has(key)) return;
+          if (isMessageCached(latestSnapshot, message)) return;
+
+          const resolvedChat =
+            chat ||
+            latestSnapshot.chats.find((candidate) => candidate.id === message.chat_id) ||
+            visibleDeltaChats.find((candidate) => candidate.id === message.chat_id) ||
+            null;
+          const soundKind = getIncomingMessageSoundKind(message, resolvedChat, latestSnapshot.selectedChatId);
+          if (!soundKind) return;
+
+          notificationMessageKeys.add(key);
+          notificationKinds.add(soundKind);
+        };
+
+        visibleDeltaChats.forEach((chat) => {
+          queueNotification(getLatestChatMessage(chat), chat);
+        });
+        result.deltaMessages.forEach((message) => {
+          queueNotification(message, latestSnapshot.chats.find((chat) => chat.id === message.chat_id) || null);
+        });
+
         // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
         React.startTransition(() => {
-          const visibleDeltaChats = result.deltaChats.filter((chat) =>
-            isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId)
-          );
-          const hiddenDeltaChatIds = result.deltaChats
-            .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId))
-            .map((chat) => chat.id)
-            .filter((chatId) => chatId !== snapshot.selectedChatId);
-
           hiddenDeltaChatIds.forEach((chatId) => removeChat(chatId));
 
           // If the chat is currently selected and visible, it should remain read
@@ -1007,6 +1084,10 @@ export default function CustomerChatLayout({
             appendMessagesToChat(snapshot.selectedChatId, result.deltaMessages, result.lastSyncMessage ?? undefined);
           }
         });
+
+        notificationKinds.forEach((kind) => {
+          playNotificationSound(kind);
+        });
       } catch (error) {
         console.error('[SYNC_INBOX] Unexpected error:', error);
       } finally {
@@ -1022,11 +1103,17 @@ export default function CustomerChatLayout({
       deltaSyncQueuedRef.current = false;
       await runDeltaSync({ force: true });
     }
-  }, [appendMessagesToChat, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, updateChatContact, upsertChats]);
+  }, [appendMessagesToChat, getIncomingMessageSoundKind, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, playNotificationSound, removeChat, updateChatContact, upsertChats]);
 
   useEffect(() => {
     runDeltaSyncRef.current = () => runDeltaSync({ force: true });
   }, [runDeltaSync]);
+
+  const { scheduleRecoverySync, clearRecoverySync } = useInboxConnectionRecovery({
+    workspaceId: initialUser?.activeWorkspaceId,
+    runDeltaSync,
+    realtimeHealthyRef,
+  });
 
   const notifyPeers = useCallback(() => {
     if (!broadcastChannel) return;
@@ -1059,6 +1146,14 @@ export default function CustomerChatLayout({
       } else {
         next.add(chatId);
       }
+      return next;
+    });
+  }, []);
+
+  const handleSelectAllForwarding = useCallback((chatIds: string[]) => {
+    setSelectedForwardingChatIds(prev => {
+      const next = new Set(prev);
+      chatIds.forEach((chatId) => next.add(chatId));
       return next;
     });
   }, []);
@@ -1130,15 +1225,32 @@ export default function CustomerChatLayout({
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
 
+    let hiddenCatchUpTimeout: ReturnType<typeof setTimeout> | undefined;
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        if (hiddenCatchUpTimeout) {
+          clearTimeout(hiddenCatchUpTimeout);
+          hiddenCatchUpTimeout = undefined;
+        }
         runDeltaSync({ force: true });
         markSelectedChatAsRead();
+        return;
       }
+
+      runDeltaSync({ force: true });
+      hiddenCatchUpTimeout = setTimeout(() => {
+        runDeltaSync({ force: true });
+      }, HIDDEN_TAB_CATCH_UP_DELAY_MS);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (hiddenCatchUpTimeout) {
+        clearTimeout(hiddenCatchUpTimeout);
+      }
+    };
   }, [initialUser?.activeWorkspaceId, runDeltaSync, markSelectedChatAsRead]);
 
   useEffect(() => {
@@ -1379,13 +1491,20 @@ export default function CustomerChatLayout({
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
-    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-      console.warn(`[REALTIME] Connection lost (${status}). Running delta sync as fallback.`);
-      if (document.visibilityState === 'visible') {
-        runDeltaSync();
+    if (status === 'SUBSCRIBED') {
+      if (realtimeHealthyRef.current) {
+        clearRecoverySync();
+      } else {
+        scheduleRecoverySync(`${type}:subscribed-waiting-peer`);
       }
+      return;
     }
-  }, [runDeltaSync]);
+
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      console.warn(`[REALTIME] Connection lost (${status}). Running delta sync recovery.`);
+      scheduleRecoverySync(`${type}:${status}`);
+    }
+  }, [clearRecoverySync, scheduleRecoverySync]);
 
   const handleRealtimeContactUpdate = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
     if (payload.eventType === 'DELETE') return;
@@ -1492,45 +1611,6 @@ export default function CustomerChatLayout({
   }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!initialBuildIdRef.current) {
-      initialBuildIdRef.current = (window as any).__NEXT_DATA__?.buildId || 'dev';
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const checkBuild = async () => {
-      if (cancelled || buildMismatchTriggeredRef.current) return;
-      try {
-        const res = await fetch('/api/build-id', { signal: controller.signal, cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data?.buildId && data.buildId !== initialBuildIdRef.current) {
-          buildMismatchTriggeredRef.current = true;
-          console.warn('[BUILD_ID] Mismatch detected. Reloading to refresh assets.', {
-            current: initialBuildIdRef.current,
-            server: data.buildId
-          });
-          window.location.reload();
-        }
-      } catch (err) {
-        // Ignore network errors; will retry on next interval.
-        console.debug('[BUILD_ID] Check failed', err);
-      }
-    };
-
-    checkBuild();
-    const interval = setInterval(checkBuild, 60000);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
     if (selectedChatId) {
       selectedChatIdRef.current = selectedChatId;
     }
@@ -1566,7 +1646,7 @@ export default function CustomerChatLayout({
 
 
   return (
-    <div className="flex h-screen w-full bg-transparent relative overflow-hidden">
+    <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-transparent">
 
       <LayoutGroup>
         <div
@@ -1598,6 +1678,7 @@ export default function CustomerChatLayout({
               isForwarding={isForwarding}
               selectedForwardingChatIds={selectedForwardingChatIds}
               onToggleForwardSelection={handleToggleForwardSelection}
+              onSelectAllForwarding={handleSelectAllForwarding}
               onConfirmForward={handleConfirmForward}
               onCancelForward={handleCancelForward}
               onPrefetch={prefetchChat}

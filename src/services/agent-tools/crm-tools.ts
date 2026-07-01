@@ -25,6 +25,43 @@ async function resolveContactId(context: AgentToolRuntimeContext): Promise<strin
   return rows[0]?.contact_id || null;
 }
 
+async function resolveCustomFieldContactIds(context: AgentToolRuntimeContext): Promise<string[]> {
+  const contactId = await resolveContactId(context);
+  if (!contactId) return [];
+
+  const { rows } = await db.query(
+    `WITH target_contact AS (
+       SELECT id, workspace_id, phone_number_jid, phone_canonical
+       FROM public.contacts
+       WHERE id = $1
+         AND workspace_id = $2
+       LIMIT 1
+     )
+     SELECT DISTINCT
+       c.id,
+       CASE WHEN c.id = $1 THEN 0 ELSE 1 END AS sort_order
+     FROM public.contacts c
+     JOIN target_contact tc
+       ON tc.workspace_id = c.workspace_id
+     WHERE c.id = tc.id
+        OR (
+          tc.phone_canonical IS NOT NULL
+          AND c.phone_canonical IS NOT NULL
+          AND c.phone_canonical = tc.phone_canonical
+        )
+        OR (
+          NULLIF(tc.phone_number_jid, '') IS NOT NULL
+          AND NULLIF(c.phone_number_jid, '') IS NOT NULL
+          AND c.phone_number_jid = tc.phone_number_jid
+        )
+     ORDER BY sort_order, c.id`,
+    [contactId, context.workspaceId]
+  );
+
+  const contactIds = rows.map((row) => String(row.id)).filter(Boolean);
+  return contactIds.length > 0 ? contactIds : [contactId];
+}
+
 export async function runCrmUpdateContactCustomFieldsTool(
   context: AgentToolRuntimeContext,
   action: Extract<AgentToolAction, { type: 'crm_update_contact_custom_fields' }>
@@ -43,8 +80,8 @@ export async function runCrmUpdateContactCustomFieldsTool(
     };
   }
 
-  const contactId = await resolveContactId(context);
-  if (!contactId) {
+  const contactIds = await resolveCustomFieldContactIds(context);
+  if (contactIds.length === 0) {
     return {
       toolName: action.type,
       status: 'error',
@@ -72,13 +109,15 @@ export async function runCrmUpdateContactCustomFieldsTool(
       continue;
     }
 
-    await db.query(
-      `INSERT INTO public.contact_custom_field_values (contact_id, field_id, value)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (contact_id, field_id)
-       DO UPDATE SET value = EXCLUDED.value`,
-      [contactId, field.id, value]
-    );
+    for (const targetContactId of contactIds) {
+      await db.query(
+        `INSERT INTO public.contact_custom_field_values (contact_id, field_id, value)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (contact_id, field_id)
+         DO UPDATE SET value = EXCLUDED.value`,
+        [targetContactId, field.id, value]
+      );
+    }
 
     updated.push({ fieldId: field.id, label: field.label, value });
   }
@@ -98,7 +137,8 @@ export async function runCrmUpdateContactCustomFieldsTool(
     status: 'success',
     input: action,
     output: {
-      contactId,
+      contactId: contactIds[0],
+      contactIds,
       updated,
       skipped,
     },

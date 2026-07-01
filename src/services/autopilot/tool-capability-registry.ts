@@ -4,6 +4,10 @@ import type { AgentToolAction, AgentToolName } from '@/services/agent-tools/type
 import type { AutopilotIntentResolution, AutopilotSlotName, UniversalAutopilotIntent } from './intent-types';
 import type { SlotExtractionResult } from './slots';
 import { calculateToolSelectionScore, type ToolSelectionScoreWeights } from './score-history';
+import {
+  catalogToolRequiresConfirmation,
+  isSensitiveMcpCatalogTool,
+} from './tool-confirmation-policy';
 
 export type ProcedureStepType =
   | 'classify'
@@ -94,17 +98,18 @@ export function toolCapabilityFromCatalogItem(
   tool: AgentToolDefinition | AgentToolCatalogItem,
 ): ToolCapability {
   const source = 'source' in tool ? tool.source : 'dialogy';
+  const sensitiveMcp = isSensitiveMcpCatalogTool(tool);
   return {
     name: tool.name,
     capability: capabilityName(tool.name),
     description: tool.description,
-    riskLevel: tool.riskLevel,
-    sideEffect: tool.sideEffect,
+    riskLevel: sensitiveMcp ? 'high' : tool.riskLevel,
+    sideEffect: sensitiveMcp ? 'high' : tool.sideEffect,
     requiredSlots: tool.requiredSlots,
     allowedGoals: tool.allowedIntents,
     forbiddenGoals: [],
     allowedStepTypes: allowedStepTypesForTool(tool),
-    requiresConfirmation: tool.riskLevel === 'high' || tool.requiresHumanApproval,
+    requiresConfirmation: catalogToolRequiresConfirmation(tool),
     requiresHumanApproval: tool.requiresHumanApproval,
     inputSchema: tool.inputSchema || null,
     outputSchema: tool.outputSchema || null,

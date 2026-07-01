@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { hasConversationCloseClaim, isConversationCloseRequest } from '@/services/autopilot/close-intent';
+import {
+  hasConversationCloseClaim,
+  isConversationCloseRequest,
+  isPotentialConversationCloseRequest,
+} from '@/services/autopilot/close-intent';
 
 describe('autopilot close intent', () => {
   it.each([
@@ -25,6 +29,25 @@ describe('autopilot close intent', () => {
     'finalizar instalacao',
   ])('does not confuse business cancellation with conversation close: %s', (message) => {
     expect(isConversationCloseRequest(message)).toBe(false);
+  });
+
+  it.each([
+    'esqueci o usuario e senha do wifi',
+    'qual o status do meu pedido?',
+    'me manda o cardapio',
+    'meu CPF e 52998224725',
+    'a internet esta lenta',
+  ])('does not run the close LLM gate for unrelated messages: %s', (message) => {
+    expect(isPotentialConversationCloseRequest(message)).toBe(false);
+  });
+
+  it.each([
+    'pode encerrar por aqui?',
+    'era so isso',
+    'nao quero mais nada',
+    'tchau',
+  ])('keeps close-adjacent messages eligible for deterministic/gated resolution: %s', (message) => {
+    expect(isPotentialConversationCloseRequest(message)).toBe(true);
   });
 
   it.each([

@@ -56,7 +56,14 @@ export function formatWhatsappText(text: string, options: { isOutgoing?: boolean
 
   // URL regex to find links
   const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const documentRegex = /(^|[^\d])(\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}|\d{11}|\d{14})(?=$|[^\d])/g;
   const { isOutgoing } = options;
+  const protectedFragments: string[] = [];
+  const protectFragment = (fragment: string) => {
+    const marker = `@@DIALOGY_PROTECTED_${protectedFragments.length}@@`;
+    protectedFragments.push(fragment);
+    return marker;
+  };
 
   // First, escape HTML to prevent XSS from other content
   let processedText = text
@@ -66,12 +73,16 @@ export function formatWhatsappText(text: string, options: { isOutgoing?: boolean
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
+  processedText = processedText.replace(documentRegex, (_match, prefix, documentValue) => {
+    return `${prefix}${protectFragment(documentValue)}`;
+  });
+
   // Then, apply rich text formatting for whatsapp-style markdown
   // Note: Lookbehind support varies, so we use a more compatible approach
   processedText = processedText
-    .replace(/(\s|^)\*(.*?)\*(?=\s|$|[.,:;!?])/g, '$1<b>$2</b>') // Bold
-    .replace(/(\s|^)_(.*?)_(?=\s|$|[.,:;!?])/g, '$1<i>$2</i>') // Italic
-    .replace(/(\s|^)~(.*?)~(?=\s|$|[.,:;!?])/g, '$1<s>$2</s>') // Strikethrough
+    .replace(/(\s|^)\*([^*\n]+?)\*(?=\s|$|[.,:;!?])/g, '$1<b>$2</b>') // Bold
+    .replace(/(\s|^)_([^_\n]+?)_(?=\s|$|[.,:;!?])/g, '$1<i>$2</i>') // Italic
+    .replace(/(\s|^)~([^~\n]+?)~(?=\s|$|[.,:;!?])/g, '$1<s>$2</s>') // Strikethrough
     .replace(/```([\s\S]*?)```/g, (match, p1) => `<pre><code>${p1}</code></pre>`); // Code block
 
   // Finally, replace URLs with anchor tags
@@ -82,6 +93,10 @@ export function formatWhatsappText(text: string, options: { isOutgoing?: boolean
     const outgoingClasses = 'text-white/90 underline decoration-white/60 hover:decoration-white';
     const incomingClasses = 'text-blue-400 hover:text-blue-300 underline';
     return `<a href="${decodedUrl}" target="_blank" rel="noopener noreferrer" class="${isOutgoing ? outgoingClasses : incomingClasses}">${url}</a>`;
+  });
+
+  processedText = processedText.replace(/@@DIALOGY_PROTECTED_(\d+)@@/g, (_match, index) => {
+    return protectedFragments[Number(index)] ?? '';
   });
 
   return processedText.replace(/\n/g, '<br />'); // Handle line breaks

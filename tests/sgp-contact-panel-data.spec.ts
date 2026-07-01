@@ -164,6 +164,7 @@ describe('buildSGPContactPanelData', () => {
           rad_framedipv6prefix: '2804:3cd0:80::/64',
           rad_delegatedipv6prefix: '2804:3cd0:c6:80f0::/62',
           servico_onu_cto: 'PQM - 10-O2 - 17',
+          servico_onu_serial: 'ZTEG12345678',
           contrato_endereco_ll: '-16.115829624,-47.9918647332',
           endereco_logradouro: 'QUADRA 02 CHACARA 07 BLOCO 22 APT 101',
           endereco_bairro: 'CHACARAS BRASIL',
@@ -182,6 +183,7 @@ describe('buildSGPContactPanelData', () => {
     expect(contract?.ipv6).toBe('2804:3cd0:80::/64');
     expect(contract?.delegatedIpv6).toBe('2804:3cd0:c6:80f0::/62');
     expect(contract?.cto).toBe('PQM - 10-O2 - 17');
+    expect(contract?.serial).toBe('ZTEG12345678');
     expect(contract?.geoLocation).toBe('-16.115829624,-47.9918647332');
     expect(contract?.addressLabel).toBe('QUADRA 02 CHACARA 07 BLOCO 22 APT 101 - CHACARAS BRASIL - VALPARAISO DE GOIAS - GO - COND GRAN PARIS');
     expect(contract?.connectedAt).toBe('2026-04-07T09:26:23');

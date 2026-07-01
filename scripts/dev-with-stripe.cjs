@@ -263,6 +263,14 @@ function normalizeDevArgs(args) {
 }
 
 function resolveTurboMode() {
+  if (Object.prototype.hasOwnProperty.call(process.env, "DIALOGY_USE_TURBO")) {
+    const enabled = !isFalsey(process.env.DIALOGY_USE_TURBO);
+    if (enabled) {
+      logDev("Forcing Turbopack because DIALOGY_USE_TURBO is enabled.");
+    }
+    return enabled;
+  }
+
   const isWindows = process.platform === "win32";
   const hasNonAsciiPath = /[^\x00-\x7F]/.test(rootDir);
   const isOneDrivePath = /OneDrive/i.test(rootDir);
@@ -272,10 +280,6 @@ function resolveTurboMode() {
       "Disabling Turbopack for local dev because this Windows workspace path uses OneDrive and/or non-ASCII characters."
     );
     return false;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(process.env, "DIALOGY_USE_TURBO")) {
-    return !isFalsey(process.env.DIALOGY_USE_TURBO);
   }
 
   return true;

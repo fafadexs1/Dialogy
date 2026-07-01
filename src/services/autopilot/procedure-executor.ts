@@ -303,6 +303,103 @@ function summarizeRuntimeContext(
   ].filter(Boolean).join(' '));
 }
 
+type CustomerToolIntent =
+  | 'wifi_credentials_lookup'
+  | 'wifi_credentials_change'
+  | 'wifi_channel_diagnostics'
+  | 'router_reboot'
+  | 'unknown';
+
+function inferCustomerToolIntent(customerMessage: string): CustomerToolIntent {
+  const normalized = normalizeText(customerMessage);
+  const mentionsWifi = /\b(wi fi|wifi|ssid|rede|senha|usuario|credencia)\w*/.test(normalized);
+  const wantsChange = /\b(trocar|mudar|alterar|atualizar|nova|novo|configurar)\w*/.test(normalized);
+  if (/\b(reiniciar|reinicie|reboot|resetar|desligar e ligar)\w*/.test(normalized)) {
+    return 'router_reboot';
+  }
+  if (mentionsWifi && wantsChange) return 'wifi_credentials_change';
+  if (mentionsWifi && /\b(canal|canais|redes ao redor|vizin|interferencia|lento|lentidao|oscila|queda|sinal fraco|analisar)\w*/.test(normalized)) {
+    return 'wifi_channel_diagnostics';
+  }
+  if (mentionsWifi && /\b(ver|verificar|consultar|saber|mostrar|recuperar|esqueci|qual|usuario|senha|ssid|nome da rede|credencia)\w*/.test(normalized)) {
+    return 'wifi_credentials_lookup';
+  }
+  return 'unknown';
+}
+
+function semanticIntentForToolStep(step: ProcedureStep): CustomerToolIntent {
+  const text = normalizeText([
+    step.semanticIntent || '',
+    step.toolName || '',
+    step.label || '',
+    step.promptTemplate || '',
+    step.condition || '',
+  ].join(' '));
+  if (/\b(router_reboot|reboot_router|reboot|reiniciar|resetar)\b/.test(text)) return 'router_reboot';
+  if (/\b(wifi_credentials_change|change_wifi_credentials|trocar|mudar|alterar)\b/.test(text) && /\b(wifi|wi fi|ssid|senha|rede|credentials)\b/.test(text)) {
+    return 'wifi_credentials_change';
+  }
+  if (/\b(wifi_channel_diagnostics|scan_wifi_neighbors|get_wifi_scan_cached|canal|canais|interferencia|redes ao redor|vizin|lento|lentidao)\b/.test(text)) {
+    return 'wifi_channel_diagnostics';
+  }
+  if (/\b(wifi_credentials_lookup|get_wifi_view|refresh_wifi_summary|ssid|senha|usuario|credencia|nome da rede)\b/.test(text)) {
+    return 'wifi_credentials_lookup';
+  }
+  return 'unknown';
+}
+
+function buildToolIntentMismatchResponse(input: {
+  step: ProcedureStep;
+  customerIntent: CustomerToolIntent;
+  stepIntent: CustomerToolIntent;
+}): string | null {
+  if (input.customerIntent === 'unknown' || input.stepIntent === 'unknown') return null;
+  if (input.customerIntent === input.stepIntent) return null;
+
+  if (input.customerIntent === 'wifi_credentials_lookup' && input.stepIntent === 'router_reboot') {
+    return 'Entendi que voce quer consultar os dados atuais do Wi-Fi, nao reiniciar o roteador. Vou interromper esta etapa automatica para seguir pela consulta correta de usuario/senha/SSID.';
+  }
+  if (input.customerIntent === 'wifi_credentials_lookup' && input.stepIntent === 'wifi_credentials_change') {
+    return 'Entendi que voce quer consultar os dados atuais do Wi-Fi, nao trocar nome ou senha. Vou pausar esta etapa para seguir pelo caminho correto de consulta.';
+  }
+  if (input.customerIntent === 'wifi_channel_diagnostics' && (input.stepIntent === 'router_reboot' || input.stepIntent === 'wifi_credentials_change')) {
+    return 'Entendi que o pedido e diagnosticar o Wi-Fi/canais antes de qualquer alteracao. Vou pausar esta etapa para usar primeiro as ferramentas de analise.';
+  }
+  if (input.customerIntent === 'wifi_credentials_change' && input.stepIntent === 'router_reboot') {
+    return 'Entendi que o pedido e alterar dados do Wi-Fi, nao reiniciar o roteador. Vou pausar este caminho para coletar os novos dados e confirmar antes de qualquer mudanca.';
+  }
+  return null;
+}
+
+function shouldBlockToolForCustomerIntent(step: ProcedureStep, customerMessage: string): { blocked: boolean; response?: string; customerIntent?: CustomerToolIntent; stepIntent?: CustomerToolIntent } {
+  const customerIntent = inferCustomerToolIntent(customerMessage);
+  const stepIntent = semanticIntentForToolStep(step);
+  const mismatchResponse = buildToolIntentMismatchResponse({ step, customerIntent, stepIntent });
+  if (mismatchResponse) {
+    return { blocked: true, response: mismatchResponse, customerIntent, stepIntent };
+  }
+
+  if (step.requiresExplicitCustomerRequest && stepIntent !== 'unknown' && customerIntent !== stepIntent) {
+    return {
+      blocked: true,
+      response: 'Para evitar executar uma ferramenta sensivel fora do pedido atual, vou pausar esta etapa e confirmar o objetivo antes de continuar.',
+      customerIntent,
+      stepIntent,
+    };
+  }
+
+  return { blocked: false, customerIntent, stepIntent };
+}
+
+function hasRepeatedStepWithoutProgress(context: ProcedureExecutionContext, step: ProcedureStep): boolean {
+  if (step.type === 'gather_data') return false;
+  const recent = context.stepHistory.slice(-6).filter((record) => record.stepId === step.id);
+  if (recent.length < 3) return false;
+  const hasSuccessfulToolOutput = getToolResultsForStep(context, step.id).some((result) => result.status === 'success');
+  if (hasSuccessfulToolOutput) return false;
+  return recent.every((record) => record.status === 'waiting' || record.status === 'waiting_tool' || record.status === 'error');
+}
+
 function matchDecisionToBranch(
   branches: ProcedureBranch[] | undefined,
   decision: string | null | undefined,
@@ -601,6 +698,20 @@ function executeToolCallStep(
       output: {
         skipped: true,
         reason: 'close_chat bloqueado porque a mensagem atual nao pediu encerramento.',
+      },
+    };
+  }
+
+  const intentGate = shouldBlockToolForCustomerIntent(step, customerMessage);
+  if (intentGate.blocked) {
+    return {
+      status: 'complete',
+      response: intentGate.response,
+      output: {
+        toolIntentBlocked: true,
+        toolName: step.toolName,
+        customerIntent: intentGate.customerIntent,
+        stepIntent: intentGate.stepIntent,
       },
     };
   }
@@ -972,6 +1083,32 @@ export async function advanceProcedure(input: {
       context.status = 'completed';
       context.completedAt = new Date().toISOString();
       break;
+    }
+
+    if (hasRepeatedStepWithoutProgress(context, currentStep)) {
+      const now = new Date().toISOString();
+      context.status = 'completed';
+      context.completedAt = now;
+      context.stepHistory.push({
+        stepId: currentStep.id,
+        stepLabel: currentStep.label,
+        startedAt: now,
+        completedAt: now,
+        status: 'skipped',
+        output: {
+          loopBreaker: true,
+          reason: 'A mesma etapa repetiu sem progresso suficiente.',
+        },
+      });
+      await saveProcedureExecution(context);
+      return {
+        handled: true,
+        response: 'Para evitar repetir a mesma etapa sem avancar, vou pausar este procedimento automatico e reavaliar seu pedido pelo caminho correto.',
+        actions,
+        status: 'completed',
+        executedSteps,
+        completionReason: 'Loop breaker acionado.',
+      };
     }
 
     stepsExecuted++;

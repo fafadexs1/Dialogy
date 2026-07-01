@@ -535,7 +535,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
             {message.content && (
                 <p
                     className={cn(
-                        "whitespace-pre-wrap rounded-xl px-3 py-2 text-sm leading-relaxed shadow-sm",
+                        "whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm leading-relaxed shadow-sm [overflow-wrap:anywhere]",
                         message.from_me
                             ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
                             : "border border-slate-200/80 bg-white text-slate-800 dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100"
@@ -737,7 +737,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
             <div className="min-w-0">
                 {message.content?.trim() && (
                     <p
-                        className="text-sm whitespace-pre-wrap"
+                        className="whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]"
                         dangerouslySetInnerHTML={{ __html: formatWhatsappText(message.content, { isOutgoing: isFromMe }) }}
                     />
                 )}
@@ -773,14 +773,14 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                         className={`group flex items-start gap-3 ${isFromMe ? 'flex-row-reverse' : 'flex-row'}`}
                     >
                         <Avatar className="h-8 w-8 shrink-0 border border-slate-200/80 bg-white shadow-sm dark:border-white/10 dark:bg-[#0B0B10]">
-                            <AvatarImage src={senderAvatar} alt={senderName} data-ai-hint="person" />
+                            <AvatarImage fallbackOnBlank src={senderAvatar} alt={senderName} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-600 text-xs font-medium dark:bg-zinc-900 dark:text-zinc-300">{senderInitial}</AvatarFallback>
                         </Avatar>
                         <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
                             <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                                 <div
                                     className={cn(
-                                        "relative max-w-[85%] break-words md:max-w-lg",
+                                        "relative max-w-[85%] break-words [overflow-wrap:anywhere] md:max-w-lg",
                                         !isVisualMediaMessage && "rounded-[22px] p-3 shadow-sm md:rounded-2xl md:p-3 md:shadow-lg",
                                         isDeleted
                                             ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'

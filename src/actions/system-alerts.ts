@@ -1,8 +1,15 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { GlobalAlertSchema, globalAlertDefaultConfig, type GlobalAlertConfig } from '@/lib/system-alerts';
+import {
+    GLOBAL_ALERT_REALTIME_EVENT,
+    GLOBAL_ALERT_REALTIME_TOPIC,
+    GlobalAlertSchema,
+    globalAlertDefaultConfig,
+    type GlobalAlertConfig,
+} from '@/lib/system-alerts';
 import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache';
 
 const ALERT_KEY = 'global_inbox_alert';
@@ -28,6 +35,19 @@ function parseAlertConfig(raw: unknown): GlobalAlertConfig {
 async function checkSuperAdmin(userId: string): Promise<boolean> {
     const result = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
     return result.rows[0]?.is_superadmin === true;
+}
+
+async function broadcastGlobalAlert(alert: GlobalAlertConfig): Promise<void> {
+    try {
+        await getSupabaseAdmin()
+            .channel(GLOBAL_ALERT_REALTIME_TOPIC)
+            .httpSend(GLOBAL_ALERT_REALTIME_EVENT, {
+                alert,
+                updatedAt: new Date().toISOString(),
+            });
+    } catch (error) {
+        console.error('[GLOBAL_ALERT] Failed to broadcast alert update:', error);
+    }
 }
 
 const getGlobalAlertCached = unstable_cache(
@@ -90,6 +110,7 @@ export async function saveGlobalAlertAction(config: GlobalAlertConfig): Promise<
         revalidatePath('/superadmin/alerts');
         revalidatePath('/inbox', 'layout');
         revalidateTag('global-alert', 'default' as any);
+        await broadcastGlobalAlert(parsedConfig.data);
         return { success: true };
     } catch (error: any) {
         console.error('[SAVE_GLOBAL_ALERT] Error:', error);

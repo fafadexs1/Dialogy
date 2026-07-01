@@ -1,7 +1,10 @@
 import { db } from '@/lib/db';
 import type { Chat, Contact } from '@/lib/types';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { processAutopilotForChat } from '@/services/autopilot-service';
 import { runAutopilotLearningCycle } from '@/services/autopilot/learning-cycle';
+import { handoffAutopilotFailureToHuman } from '@/services/autopilot/runtime/failure-handoff';
+import { isUncertainProviderDeliveryError } from '@/services/autopilot/runtime/provider-delivery';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 import type {
@@ -70,6 +73,7 @@ async function loadChatForAutopilot(chatId: string): Promise<Chat | null> {
 }
 
 const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
+  evolution_webhook_process: undefined,
   ai_document_ingest: async (job) => {
     const payload = job.payload as AiDocumentIngestPayload;
     if (!payload.workspaceId || !payload.documentId || !payload.documentName || !payload.content) {
@@ -102,13 +106,35 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       return;
     }
 
-    await processAutopilotForChat(
-      payload.workspaceId,
-      chat,
-      payload.lastMessageContent || '',
-      payload.instanceName,
-      payload.messageId
-    );
+    try {
+      await processAutopilotForChat(
+        payload.workspaceId,
+        chat,
+        payload.lastMessageContent || '',
+        payload.instanceName,
+        payload.messageId
+      );
+    } catch (error) {
+      if (
+        isUncertainProviderDeliveryError(error)
+        && chat.assigned_system_agent_id
+      ) {
+        await handoffAutopilotFailureToHuman({
+          workspaceId: payload.workspaceId,
+          chatId: payload.chatId,
+          systemAgentId: chat.assigned_system_agent_id,
+          sourceMessageId: payload.messageId,
+          failedToolNames: [],
+          reason: 'uncertain_provider_delivery',
+        });
+        console.error(
+          `[AI_QUEUE] Provider delivery became uncertain for chat ${payload.chatId}. `
+          + 'Automatic retry was blocked and the chat returned to the human queue.',
+        );
+        return;
+      }
+      throw error;
+    }
   },
   ai_autopilot_learning_cycle: async (job) => {
     const payload = job.payload as AiAutopilotLearningCyclePayload;
@@ -161,4 +187,166 @@ export async function handleAiQueueJob(job: QueueJobRecord): Promise<void> {
   }
 
   await handler(job);
+}
+
+type AiQueueFailureDependencies = {
+  database?: Pick<typeof db, 'connect'>;
+  broadcastChat?: typeof broadcastHydratedChatUpdate;
+};
+
+export function isFinalAiQueueAttempt(job: QueueJobRecord): boolean {
+  const attempts = Number(job.attempts);
+  const maxAttempts = Number(job.max_attempts);
+  return Number.isFinite(attempts)
+    && Number.isFinite(maxAttempts)
+    && maxAttempts > 0
+    && attempts >= maxAttempts;
+}
+
+export async function handleAiQueueJobFailure(
+  job: QueueJobRecord,
+  error: unknown,
+  dependencies: AiQueueFailureDependencies = {},
+): Promise<void> {
+  if (job.type !== 'ai_autopilot_process' || !isFinalAiQueueAttempt(job)) {
+    return;
+  }
+
+  const payload = job.payload as AiAutopilotProcessPayload;
+  if (!payload?.workspaceId || !payload.chatId || !payload.messageId) {
+    return;
+  }
+
+  const database = dependencies.database || db;
+  const broadcastChat = dependencies.broadcastChat || broadcastHydratedChatUpdate;
+  const client = await database.connect();
+  let escalated = false;
+  try {
+    await client.query('BEGIN');
+    const sourceState = await client.query(
+      `WITH source_message AS (
+         SELECT created_at
+         FROM messages
+         WHERE id = $1
+           AND workspace_id = $2
+           AND chat_id = $3
+           AND from_me = false
+         LIMIT 1
+       )
+       SELECT
+         EXISTS(SELECT 1 FROM source_message) AS source_exists,
+         EXISTS(
+           SELECT 1
+           FROM messages m
+           JOIN source_message source ON true
+           WHERE m.chat_id = $3
+             AND m.from_me = false
+             AND m.id <> $1
+             AND m.created_at >= source.created_at
+         ) AS superseded,
+         EXISTS(
+           SELECT 1
+           FROM orchestrator_runs run
+           WHERE run.workspace_id = $2
+             AND run.chat_id = $3
+             AND run.source_message_id = $1
+             AND run.status IN ('success', 'fallback', 'skipped')
+             AND COALESCE(run.metadata->>'responseSent', 'false') = 'true'
+         ) AS completed`,
+      [payload.messageId, payload.workspaceId, payload.chatId],
+    );
+    const state = sourceState.rows[0];
+    if (!state?.source_exists || state.superseded || state.completed) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    const chatState = await client.query(
+      `SELECT assigned_system_agent_id
+       FROM chats
+       WHERE id = $1
+         AND workspace_id = $2
+         AND is_autopilot_active = true
+         AND agent_id IS NULL
+         AND status <> 'encerrados'
+       FOR UPDATE`,
+      [payload.chatId, payload.workspaceId],
+    );
+    const systemAgentId = chatState.rows[0]?.assigned_system_agent_id;
+    if (!systemAgentId) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    await client.query(
+      `UPDATE chats
+       SET agent_id = NULL,
+           assigned_system_agent_id = NULL,
+           is_autopilot_active = false,
+           copilot_mode = 'off',
+           status = 'gerais',
+           assigned_at = NULL,
+           updated_at = clock_timestamp()
+       WHERE id = $1
+         AND workspace_id = $2`,
+      [payload.chatId, payload.workspaceId],
+    );
+
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await client.query(
+      `INSERT INTO messages (
+         workspace_id,
+         chat_id,
+         type,
+         content,
+         from_me,
+         api_message_status,
+         metadata,
+         is_read,
+         sender_system_agent_id,
+         created_at
+       )
+       SELECT $1, $2, 'text', $3, true, 'internal', $4::jsonb, true, $5, clock_timestamp()
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM messages existing
+         WHERE existing.workspace_id = $1
+           AND existing.chat_id = $2
+           AND existing.metadata->>'event' = 'autopilot_dead_letter'
+           AND existing.metadata->>'sourceMessageId' = $6
+       )`,
+      [
+        payload.workspaceId,
+        payload.chatId,
+        'O agente de IA esgotou as tentativas deste turno. O atendimento foi devolvido para a fila humana.',
+        JSON.stringify({
+          isInternalNote: true,
+          isAiAnalysis: true,
+          analysisKind: 'routing_context',
+          sentBy: 'system_agent',
+          event: 'autopilot_dead_letter',
+          sourceMessageId: payload.messageId,
+          queueJobId: job.id,
+          queueAttempts: job.attempts,
+          queueError: errorMessage.slice(0, 2000),
+        }),
+        systemAgentId,
+        payload.messageId,
+      ],
+    );
+    await client.query('COMMIT');
+    escalated = true;
+  } catch (failureHandlerError) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw failureHandlerError;
+  } finally {
+    client.release();
+  }
+
+  if (escalated) {
+    await broadcastChat(payload.workspaceId, payload.chatId);
+    console.error(
+      `[AI_QUEUE] Autopilot job ${job.id} exhausted ${job.attempts}/${job.max_attempts} attempts. Chat ${payload.chatId} returned to human queue.`,
+    );
+  }
 }

@@ -671,10 +671,22 @@ export async function createWhatsappTemplate(
     try {
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
-        await fetchEvolutionAPI(`/template/add/${instanceName}`, apiConfig, {
+        const requestOptions = {
             method: 'POST',
             body: JSON.stringify(payload)
-        });
+        };
+
+        try {
+            await fetchEvolutionAPI(`/template/create/${instanceName}`, apiConfig, requestOptions);
+        } catch (error: any) {
+            const message = error?.message || '';
+            if (!message.includes('Evolution API Error: 404')) {
+                throw error;
+            }
+
+            console.warn(`[EVO_ACTION_CREATE_TEMPLATE] /template/create unavailable for ${instanceName}; retrying legacy /template/add endpoint.`);
+            await fetchEvolutionAPI(`/template/add/${instanceName}`, apiConfig, requestOptions);
+        }
         return { success: true };
     } catch (error: any) {
         console.error('[EVO_ACTION_CREATE_TEMPLATE] Error:', error);

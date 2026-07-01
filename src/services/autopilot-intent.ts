@@ -416,6 +416,28 @@ function detectIntent(customerMessage: string, chatHistory = ''): DetectedIntent
   const shortFollowUpIntent = inferShortFollowUpIntent(normalized, normalizedHistory);
   if (shortFollowUpIntent) return shortFollowUpIntent;
 
+  const mentionsWifi = /\b(wifi|wi fi|wi-fi|ssid|roteador|router|modem|rede)\b/.test(normalized);
+  const mentionsCredentials = /\b(usuario|login|senha|password|credencia|ssid|nome da rede|acesso)\b/.test(normalized);
+  const requestsCredentialChange = /\b(trocar|mudar|alterar|atualizar|nova|novo|change|update)\b/.test(normalized);
+  if (mentionsWifi && mentionsCredentials && requestsCredentialChange) {
+    return {
+      intent: 'change_request',
+      confidence: 0.94,
+      reason: 'Cliente pediu explicitamente alteracao de credenciais do Wi-Fi.',
+    };
+  }
+  if (
+    mentionsWifi &&
+    mentionsCredentials &&
+    /\b(esqueci|recuperar|consultar|verificar|qual|quais|mostrar|informe|informar|passa|acesso)\b/.test(normalized)
+  ) {
+    return {
+      intent: 'troubleshooting',
+      confidence: 0.94,
+      reason: 'Cliente pediu consulta ou recuperacao das credenciais atuais do Wi-Fi.',
+    };
+  }
+
   if (hasClinicalTriageSignal(customerMessage)) {
     return {
       intent: 'support_request',

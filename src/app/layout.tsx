@@ -3,6 +3,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 
 import { getServerLocale } from '@/i18n/server';
+import { I18nProvider } from '@/i18n/i18n-provider';
 import { buildRootMetadata } from '@/lib/seo/metadata';
 import { JsonLd, getOrganizationSchema, getWebSiteSchema } from '@/lib/seo/schema';
 
@@ -38,7 +39,9 @@ export default async function RootLayout({
       <body className="h-full font-body antialiased" suppressHydrationWarning>
         <JsonLd id="dialogy-organization-schema" data={organizationSchema} />
         <JsonLd id="dialogy-website-schema" data={websiteSchema} />
-        {children}
+        <I18nProvider initialLocale={locale}>
+          {children}
+        </I18nProvider>
       </body>
     </html>
   );

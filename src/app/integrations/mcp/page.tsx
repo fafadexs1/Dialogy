@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Plus, RefreshCw, Save, Trash2, Wrench } from 'lucide-react';
+import { Activity, ArrowLeft, Loader2, Plus, RefreshCw, Save, Trash2, Wrench } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import {
   deleteMcpServerAction,
   getMcpServersAction,
   syncMcpServerToolsAction,
+  testMcpServerConnectionAction,
   upsertMcpServerAction,
 } from '@/actions/mcp';
 import type { McpServerConfig, McpServerTransport } from '@/services/mcp/types';
@@ -33,6 +34,7 @@ export default function McpIntegrationPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -168,6 +170,25 @@ export default function McpIntegrationPage() {
     await loadServers();
   };
 
+  const testServer = async (serverId: string) => {
+    if (!workspaceId) return;
+    setTestingId(serverId);
+    try {
+      const result = await testMcpServerConnectionAction(workspaceId, serverId);
+      if (!result.success) {
+        toast({ title: 'MCP indisponivel', description: result.error, variant: 'destructive' });
+      } else {
+        toast({
+          title: 'MCP conectado',
+          description: `${result.toolCount || 0} tool(s), ${result.latencyMs || 0} ms.`,
+        });
+      }
+      await loadServers();
+    } finally {
+      setTestingId(null);
+    }
+  };
+
   return (
     <div className="flex h-full min-w-0 flex-col gap-6 bg-background px-4 py-4 sm:px-6 lg:px-8">
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
@@ -215,6 +236,11 @@ export default function McpIntegrationPage() {
                   <div className="flex flex-wrap gap-2">
                     <Badge variant={server.isActive ? 'default' : 'secondary'}>{server.isActive ? 'Ativo' : 'Inativo'}</Badge>
                     <Badge variant="outline">{server.transport}</Badge>
+                    {server.healthStatus && server.healthStatus !== 'unknown' && (
+                      <Badge variant={server.healthStatus === 'healthy' ? 'default' : 'destructive'}>
+                        {server.healthStatus === 'healthy' ? 'Conectado' : 'Indisponivel'}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -222,6 +248,12 @@ export default function McpIntegrationPage() {
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>{server.tools?.length || 0} tool(s)</span>
                   {server.syncedAt && <span>Sincronizado em {new Date(server.syncedAt).toLocaleString()}</span>}
+                  {server.healthCheckedAt && (
+                    <span>
+                      Testado em {new Date(server.healthCheckedAt).toLocaleString()}
+                      {server.healthLatencyMs != null ? ` (${server.healthLatencyMs} ms)` : ''}
+                    </span>
+                  )}
                 </div>
                 {server.lastError && (
                   <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
@@ -241,6 +273,10 @@ export default function McpIntegrationPage() {
                   <Button onClick={() => syncServer(server.id)} disabled={syncingId === server.id} className="rounded-full">
                     {syncingId === server.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Sincronizar tools
+                  </Button>
+                  <Button onClick={() => testServer(server.id)} disabled={testingId === server.id} variant="outline" className="rounded-full">
+                    {testingId === server.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Activity className="mr-2 h-4 w-4" />}
+                    Testar conexao
                   </Button>
                   <Button onClick={() => deleteServer(server.id)} variant="destructive" className="rounded-full">
                     <Trash2 className="mr-2 h-4 w-4" />

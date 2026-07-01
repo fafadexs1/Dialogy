@@ -25,7 +25,7 @@ const shortCloseRequestPattern = new RegExp(
   `\\b(?:pode|favor|por favor|quero|queria|poderia|consegue|so|só)?\\s*${CLOSE_VERB_PATTERN}\\b(?!\\s+${BUSINESS_OBJECT_PATTERN})`
 );
 
-const doneHerePattern = /\b(?:era|e|eh)\s+so\s+isso\b|\bnao\s+(?:preciso|quero)\s+de\s+mais\s+nada\b/;
+const doneHerePattern = /\b(?:era|e|eh)\s+so\s+isso\b|\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b/;
 
 export function isConversationCloseRequest(message: string): boolean {
   const normalized = normalizeCloseText(message);
@@ -48,6 +48,16 @@ export function isConversationCloseRequest(message: string): boolean {
     explicitConversationClosePattern.test(normalized) ||
     shortCloseRequestPattern.test(normalized) ||
     doneHerePattern.test(normalized)
+  );
+}
+
+export function isPotentialConversationCloseRequest(message: string): boolean {
+  const normalized = normalizeCloseText(message);
+  if (!normalized || normalized.length > 320) return false;
+  return (
+    /\b(encerr|finaliz|fech|deslig|termin|acabar|fim|tchau)\w*/.test(normalized) ||
+    /\b(?:era|e|eh)\s+so\s+isso\b/.test(normalized) ||
+    /\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b/.test(normalized)
   );
 }
 

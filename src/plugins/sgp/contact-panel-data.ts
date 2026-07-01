@@ -21,6 +21,7 @@ type SGPSupportContractSnapshot = {
     geoLocation: string | null;
     login: string | null;
     mac: string | null;
+    serial: string | null;
     connectedAt: string | null;
     contractDate: string | null;
 };
@@ -410,6 +411,7 @@ function buildSupportContractSnapshot(rawContract: any): SGPSupportContractSnaps
         geoLocation: normalizeText(rawContract?.contrato_endereco_ll) || normalizeText(rawContract?.endereco_ll),
         login: normalizeText(rawContract?.servico_login) || normalizeText(rawContract?.rad_username),
         mac: normalizeText(rawContract?.servico_mac) || normalizeText(rawContract?.rad_mac),
+        serial: normalizeText(rawContract?.servico_onu_serial),
         connectedAt: normalizeText(rawContract?.rad_dataconexao),
         contractDate: normalizeText(rawContract?.contrato_cadastro),
     };
@@ -423,6 +425,7 @@ function getSupportContractSnapshotScore(snapshot: SGPSupportContractSnapshot): 
         snapshot.delegatedIpv6 ? 100 : 0,
         snapshot.connectedAt ? 50 : 0,
         snapshot.mac ? 25 : 0,
+        snapshot.serial ? 100 : 0,
         snapshot.login ? 10 : 0,
     ].reduce((total, score) => total + score, 0);
 }
@@ -450,6 +453,7 @@ function mergeSupportContractSnapshots(
         geoLocation: preferred.geoLocation || fallback.geoLocation,
         login: preferred.login || fallback.login,
         mac: preferred.mac || fallback.mac,
+        serial: preferred.serial || fallback.serial,
         connectedAt: preferred.connectedAt || fallback.connectedAt,
         contractDate: preferred.contractDate || fallback.contractDate,
     };
@@ -527,7 +531,7 @@ function buildContractDetails(
     const delegatedIpv6 = supportContract?.delegatedIpv6 || null;
     const mac = normalizeText(primaryService?.mac) || supportContract?.mac || null;
     const login = normalizeText(primaryService?.login) || supportContract?.login || null;
-    const serial = normalizeText(primaryService?.onu?.serial);
+    const serial = normalizeText(primaryService?.onu?.serial) || supportContract?.serial || null;
     const cto = supportContract?.cto || null;
     const detailParts = [
         ip ? `IPv4: ${ip}` : null,

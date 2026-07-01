@@ -16,6 +16,7 @@ import type {
   AiDocumentIngestPayload,
   AiTaskPayload,
   AnalyticsEventPayload,
+  EvolutionWebhookProcessPayload,
   MarketingAutoClosePayload,
   NotificationPayload,
   QueueAutoClosePayload,
@@ -80,6 +81,10 @@ function toSafeJobIdPart(value: unknown) {
 
 function getJobId(type: QueueJobType, payload: QueueJobPayload) {
   switch (type) {
+    case 'evolution_webhook_process':
+      return `evolution_webhook_process__${toSafeJobIdPart(
+        (payload as EvolutionWebhookProcessPayload).eventId
+      )}`;
     case 'whatsapp_send':
       return `whatsapp_send__${toSafeJobIdPart((payload as WhatsappSendPayload).messageId)}`;
     case 'webhook_outbound':
@@ -145,6 +150,8 @@ export function shouldEnqueueJob(type: QueueJobType): boolean {
 
 function getDefaultMaxAttemptsForType(type: QueueJobType) {
   switch (type) {
+    case 'evolution_webhook_process':
+      return 5;
     case 'whatsapp_send':
       return 1;
     case 'ai_document_ingest':
@@ -168,7 +175,9 @@ export async function enqueueJob(
 
   const runAt = options?.runAt;
   const delay = runAt ? Math.max(runAt.getTime() - Date.now(), 0) : 0;
-  const attempts = getQueueMaxAttempts(options?.maxAttempts ?? getDefaultMaxAttemptsForType(type));
+  const attempts = type === 'whatsapp_send'
+    ? 1
+    : getQueueMaxAttempts(options?.maxAttempts ?? getDefaultMaxAttemptsForType(type));
 
   const job = await getDialogyQueue(type).add(type, payload, {
     jobId: getJobId(type, payload),
@@ -186,6 +195,13 @@ export async function enqueueJob(
 
 export async function enqueueWhatsappSend(payload: WhatsappSendPayload, options?: EnqueueOptions) {
   return enqueueJob('whatsapp_send', payload, options);
+}
+
+export async function enqueueEvolutionWebhookProcess(
+  payload: EvolutionWebhookProcessPayload,
+  options?: EnqueueOptions,
+) {
+  return enqueueJob('evolution_webhook_process', payload, options);
 }
 
 export async function enqueueWebhookOutbound(payload: WebhookOutboundPayload, options?: EnqueueOptions) {
@@ -240,6 +256,7 @@ export async function enqueueAiTask(payload: AiTaskPayload, options?: EnqueueOpt
 export async function processQueueOnce() {
   if (
     !shouldEnqueueJob('whatsapp_send') &&
+    !shouldEnqueueJob('evolution_webhook_process') &&
     !shouldEnqueueJob('webhook_outbound') &&
     !shouldEnqueueJob('queue_auto_close') &&
     !shouldEnqueueJob('marketing_auto_close')

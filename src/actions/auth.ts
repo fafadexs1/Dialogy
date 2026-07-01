@@ -6,6 +6,8 @@ import { withDebug } from '@/lib/observability/logger';
 import { applyReferralToUser } from '@/lib/referrals-server';
 import { redirect } from 'next/navigation';
 import type { User } from '@/lib/types';
+import { headers } from 'next/headers';
+import { getLoginErrorMessage } from '@/lib/auth/login-errors';
 
 export const login = withDebug(
   'login',
@@ -24,7 +26,7 @@ export const login = withDebug(
 
     if (error) {
       console.error('[LOGIN_ACTION] Erro:', error);
-      return { success: false, message: 'Credenciais invalidas. Verifique seu e-mail e senha.' };
+      return { success: false, message: getLoginErrorMessage(error.code, error.message) };
     }
 
     // if (redirectTo && redirectTo.startsWith('/')) {
@@ -44,7 +46,7 @@ export const register = withDebug(
   async function register(
     prevState: any,
     formData: FormData
-  ): Promise<{ success: boolean; message: string | null; user: User | null }> {
+  ): Promise<{ success: boolean; message: string | null; user: User | null; requiresEmailConfirmation: boolean }> {
     const supabase = await createClient();
 
     const firstName = formData.get('name') as string;
@@ -55,7 +57,7 @@ export const register = withDebug(
     const referralCode = formData.get('referralCode') as string | null;
 
     if (!firstName || !lastName || !email || !password || !phone) {
-      return { success: false, message: "Todos os campos sao obrigatorios.", user: null };
+      return { success: false, message: "Todos os campos sao obrigatorios.", user: null, requiresEmailConfirmation: false };
     }
 
     const fullName = `${firstName} ${lastName}`;
@@ -66,7 +68,7 @@ export const register = withDebug(
         email,
         password,
         options: {
-          // emailRedirectTo is not needed if we are not requiring email verification
+          emailRedirectTo: `${(await headers()).get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/confirm?next=/inbox`,
           data: {
             full_name: fullName,
             avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
@@ -122,10 +124,23 @@ export const register = withDebug(
       };
 
       // On success, simply return a success state. The client will handle the redirect.
-      return { success: true, message: null, user };
+      const requiresEmailConfirmation = !data.session;
+      return {
+        success: true,
+        message: requiresEmailConfirmation
+          ? 'Enviamos um link de ativação para seu e-mail. Abra o link para liberar a conta.'
+          : null,
+        user,
+        requiresEmailConfirmation,
+      };
     } catch (error: any) {
       console.error('[REGISTER_ACTION] Erro no registro:', error);
-      return { success: false, message: error.message || "Ocorreu um erro durante o registro.", user: null };
+      return {
+        success: false,
+        message: error.message || "Ocorreu um erro durante o registro.",
+        user: null,
+        requiresEmailConfirmation: false,
+      };
     }
   },
   {

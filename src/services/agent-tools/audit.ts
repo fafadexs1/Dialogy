@@ -1,6 +1,17 @@
 import { db } from '@/lib/db';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
+import { fingerprintAuditedToolOperation } from './action-fingerprint';
 import { redactSensitiveLogValue } from '@/lib/observability/redaction';
+
+export function buildAuditedAgentToolInput(input: AgentToolAction): unknown {
+  const redactedInput = redactSensitiveLogValue(input);
+  return redactedInput && typeof redactedInput === 'object' && !Array.isArray(redactedInput)
+    ? {
+        ...redactedInput as Record<string, unknown>,
+        operationFingerprint: fingerprintAuditedToolOperation(input),
+      }
+    : redactedInput;
+}
 
 export async function auditAgentToolExecution(
   context: AgentToolRuntimeContext,
@@ -8,6 +19,8 @@ export async function auditAgentToolExecution(
   inputOverride?: AgentToolAction
 ) {
   try {
+    const rawInput = inputOverride || result.input;
+    const auditInput = buildAuditedAgentToolInput(rawInput);
     await db.query(
       `INSERT INTO agent_tool_executions (
         workspace_id,
@@ -28,7 +41,7 @@ export async function auditAgentToolExecution(
         context.autopilotConfig.id,
         result.toolName,
         result.status,
-        JSON.stringify(redactSensitiveLogValue(inputOverride || result.input)),
+        JSON.stringify(auditInput),
         result.output ? JSON.stringify(redactSensitiveLogValue(result.output)) : null,
         result.error || null,
       ]

@@ -322,6 +322,24 @@ function auditDisconnectedNodes(
   }
 }
 
+/**
+ * Auto-repair tool nodes that participate in cycles but lack maxAttempts or
+ * errorHandles.  This covers flows saved before the generation-time defaults
+ * were added, ensuring the publication gate no longer blocks them.
+ */
+function repairToolNodeCycleBounds(graph: AutopilotFlowGraph) {
+  for (const node of graph.nodes) {
+    if (node.kind !== 'tool') continue;
+    if (!node.config) node.config = {};
+    if (typeof node.config.maxAttempts !== 'number') {
+      node.config.maxAttempts = 3;
+    }
+    if (!node.config.errorHandles || node.config.errorHandles.length === 0) {
+      node.config.errorHandles = ['error'];
+    }
+  }
+}
+
 function auditUnboundedCycles(
   graph: AutopilotFlowGraph,
   issues: AutopilotFlowAuditIssue[],
@@ -916,6 +934,7 @@ export function auditAutopilotFlowGraph(graph: AutopilotFlowGraph | null | undef
     auditCollectNode(node, issues);
   }
   auditDisconnectedNodes(normalizedGraph, issues);
+  repairToolNodeCycleBounds(normalizedGraph);
   auditUnboundedCycles(normalizedGraph, issues);
   const simulations = simulateAutopilotFlowBeforePublish(normalizedGraph);
   for (const simulation of simulations) {

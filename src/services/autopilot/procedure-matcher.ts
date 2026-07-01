@@ -74,6 +74,75 @@ function hasRequiredDomainEvidence(documentName: string, customerMessage: string
   return true;
 }
 
+function graphSearchText(graph: ProcedureGraph): string {
+  return normalizeText([
+    graph.documentName,
+    ...(graph.triggerKeywords || []),
+    ...graph.steps.flatMap((step) => [
+      step.label,
+      step.toolName || '',
+      step.semanticIntent || '',
+      step.promptTemplate || '',
+      step.responseTemplate || '',
+      step.decisionPrompt || '',
+      ...(step.branches || []).map((branch) => branch.condition),
+    ]),
+  ].join(' '));
+}
+
+function isCloseRequest(normalizedMessage: string): boolean {
+  if (/\b(nao|não)\s+(recuperei|resolveu|funcionou|finalizou|terminou)\b/.test(normalizedMessage)) {
+    return false;
+  }
+  if (/\b(quero|preciso|me passa|consultar|ver|verificar|senha|usuario|ssid|wifi|wi fi|credenciais|problema|pendencia)\b/.test(normalizedMessage)) {
+    return false;
+  }
+  return /\b(encerrar|finalizar|fechar atendimento|pode fechar|pode encerrar|nada mais|nao preciso de mais nada|não preciso de mais nada|obrigado|obrigada|valeu|tchau)\b/.test(normalizedMessage);
+}
+
+function isCloseProcedure(graph: ProcedureGraph, searchText: string): boolean {
+  return /\b(encerramento|encerrar atendimento|finalizacao|finalizar atendimento|close_chat)\b/.test(searchText)
+    || graph.steps.some((step) => step.toolName === 'close_chat');
+}
+
+type CustomerProcedureNeed =
+  | 'wifi_credentials_lookup'
+  | 'wifi_credentials_change'
+  | 'wifi_channel_diagnostics'
+  | 'router_reboot'
+  | null;
+
+function inferCustomerProcedureNeed(customerMessage: string): CustomerProcedureNeed {
+  const text = normalizeText(customerMessage);
+  const mentionsWifi = /\b(wi[\s-]?fi|wifi|ssid|senha|usuario|credencia|nome da rede|rede sem fio)\w*/.test(text);
+  const wantsChange = /\b(trocar|mudar|alterar|atualizar|definir|configurar|nova|novo)\w*/.test(text);
+  const wantsLookup = /\b(ver|verificar|consultar|saber|mostrar|recuperar|esqueci|qual|quais|usuario|senha|ssid|nome da rede|credencia)\w*/.test(text);
+  const wantsDiagnostics = /\b(canal|canais|redes ao redor|vizin|interferencia|lento|lentidao|oscila|queda|sinal fraco|analisar)\w*/.test(text);
+  const wantsReboot = /\b(reiniciar|reinicie|reboot|resetar|desligar e ligar)\w*/.test(text);
+
+  if (mentionsWifi && wantsChange) return 'wifi_credentials_change';
+  if (mentionsWifi && wantsDiagnostics) return 'wifi_channel_diagnostics';
+  if (wantsReboot) return 'router_reboot';
+  if (mentionsWifi && wantsLookup) return 'wifi_credentials_lookup';
+  return null;
+}
+
+function graphSupportsCustomerNeed(graphText: string, need: CustomerProcedureNeed): boolean {
+  switch (need) {
+    case 'wifi_credentials_lookup':
+      return /\b(get_wifi_view|refresh_wifi_summary|wifi_credentials_lookup|consultar wi fi|consultar wifi|senha|usuario|ssid|credencia|nome da rede)\b/.test(graphText);
+    case 'wifi_credentials_change':
+      return /\b(change_wifi_credentials|wifi_credentials_change|trocar|mudar|alterar)\b/.test(graphText)
+        && /\b(wifi|wi fi|ssid|senha|nome da rede|credencia)\b/.test(graphText);
+    case 'wifi_channel_diagnostics':
+      return /\b(scan_wifi_neighbors|get_wifi_scan_cached|wifi_channel_diagnostics|canal|canais|redes ao redor|vizin|interferencia|lentidao|lento)\b/.test(graphText);
+    case 'router_reboot':
+      return /\b(reboot_router|router_reboot|reiniciar|reboot|resetar)\b/.test(graphText);
+    default:
+      return false;
+  }
+}
+
 /**
  * Given the resolved intent, the customer message, and the list of compiled
  * procedures, return the best match (if any).
@@ -90,6 +159,8 @@ export function matchProcedure(input: {
   compiledProcedures: ProcedureGraph[];
 }): ProcedureMatchResult | null {
   const { intent, customerMessage, compiledProcedures } = input;
+  const normalizedMessage = normalizeText(customerMessage);
+  const customerNeed = inferCustomerProcedureNeed(customerMessage);
 
   if (!compiledProcedures || compiledProcedures.length === 0) return null;
 
@@ -97,6 +168,10 @@ export function matchProcedure(input: {
 
   for (const graph of compiledProcedures) {
     if (!hasRequiredDomainEvidence(graph.documentName, customerMessage)) {
+      continue;
+    }
+    const searchText = graphSearchText(graph);
+    if (isCloseProcedure(graph, searchText) && !isCloseRequest(normalizedMessage)) {
       continue;
     }
 
@@ -134,7 +209,8 @@ export function matchProcedure(input: {
       .filter((w) => w.length >= 4 && w !== 'para' && w !== 'como' && w !== 'suporte' && w !== 'atendimento' && w !== 'tecnico');
 
     const msgWords = normalizeText(customerMessage)
-      .split(/[\s\-/,.:;!?()]+/);
+      .split(/[\s\-/,.:;!?()]+/)
+      .filter((word) => word.length >= 3);
 
     let titleWordHits = 0;
     for (const dw of docWords) {
@@ -148,6 +224,25 @@ export function matchProcedure(input: {
     if (titleWordHits > 0) {
       score += titleWordHits * 2;
       reasons.push(`${titleWordHits} title word hit(s)`);
+    }
+
+    if (customerNeed && graphSupportsCustomerNeed(searchText, customerNeed)) {
+      score += 8;
+      reasons.push(`supports ${customerNeed}`);
+    }
+
+    const isVisualFlow = graph.metadata?.source === 'visual_flow';
+    const hasExplicitIntentMatch = intentMatch && intent !== 'unknown';
+    const hasExplicitNeedMatch = Boolean(
+      customerNeed && graphSupportsCustomerNeed(searchText, customerNeed),
+    );
+    if (
+      isVisualFlow &&
+      !hasExplicitIntentMatch &&
+      !hasExplicitNeedMatch &&
+      score < 6
+    ) {
+      continue;
     }
 
     if (score >= 2) {

@@ -57,6 +57,7 @@ import {
     Pencil,
     SpellCheck2,
     Activity,
+    Signature,
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { createClient } from '@/lib/supabase/client';
@@ -148,6 +149,7 @@ type TextSendJob = {
     messageId: string;
     content: string;
     isInternalNote: boolean;
+    skipUserSignature: boolean;
     metadata: MessageMetadata;
     startedAt: number;
 };
@@ -465,6 +467,7 @@ export default function ChatPanel({
             } else {
                 setNewMessage('');
             }
+            setSkipUserSignature(false);
             chatRef.current = chat?.id;
         }
     }, [chat?.id, setDraft]); // Minimal deps — refs handle freshness
@@ -480,6 +483,7 @@ export default function ChatPanel({
 
     const [isAiAgentActive, setIsAiAgentActive] = useState(chat?.is_autopilot_active ?? false);
     const [isInternalNote, setIsInternalNote] = useState(false);
+    const [skipUserSignature, setSkipUserSignature] = useState(false);
     const [isToolExecutionsOpen, setIsToolExecutionsOpen] = useState(false);
     const [toolExecutionNow, setToolExecutionNow] = useState(() => Date.now());
     const autopilotSwitchTouchedRef = useRef(false);
@@ -1241,7 +1245,9 @@ export default function ChatPanel({
             try {
                 const result = job.isInternalNote
                     ? await sendInternalNoteAction(job.chatId, job.content, tabId, job.messageId)
-                    : await guardedSendAgentMessage(job.chatId, job.content, tabId, job.messageId);
+                    : await guardedSendAgentMessage(job.chatId, job.content, tabId, job.messageId, {
+                        skipUserSignature: job.skipUserSignature,
+                    });
 
                 if (!result.success) {
                     throw new Error(result.error || 'Falha ao enviar mensagem.');
@@ -1323,7 +1329,9 @@ export default function ChatPanel({
             if (!result.success) {
                 const errorText = result.error || 'Falha ao reenviar mensagem.';
                 if (errorText.toLowerCase().includes('nao encontrada')) {
-                    const fallback = await guardedSendAgentMessage(message.chat_id, message.content, tabId, message.id);
+                    const fallback = await guardedSendAgentMessage(message.chat_id, message.content, tabId, message.id, {
+                        skipUserSignature: message.metadata?.skipUserSignature === true,
+                    });
                     if (!fallback.success) {
                         throw new Error(fallback.error || 'Falha ao reenviar mensagem.');
                     }
@@ -1381,7 +1389,11 @@ export default function ChatPanel({
 
             const now = new Date();
             const optimisticId = uuidv4();
-            const metadata: MessageMetadata = isInternalNote ? { isInternalNote: true } : {};
+            const skipSignatureForSend = !isInternalNote && skipUserSignature;
+            const metadata: MessageMetadata = {
+                ...(isInternalNote ? { isInternalNote: true } : {}),
+                ...(skipSignatureForSend ? { skipUserSignature: true } : {}),
+            };
 
             const optimisticMessage: Message = {
                 id: optimisticId,
@@ -1424,6 +1436,7 @@ export default function ChatPanel({
 
             setNewMessage('');
             setMediaFiles([]);
+            setSkipUserSignature(false);
             if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 
             setDraft(chat.id, '');
@@ -1432,6 +1445,7 @@ export default function ChatPanel({
                 messageId: optimisticId,
                 content: currentMessageText,
                 isInternalNote,
+                skipUserSignature: skipSignatureForSend,
                 metadata,
                 startedAt: performance.now(),
             });
@@ -1453,6 +1467,7 @@ export default function ChatPanel({
         lastSendDraftRef.current = { text: currentMessageText, media: currentMediaFiles, isNote: isInternalNote };
         setNewMessage('');
         setMediaFiles([]);
+        setSkipUserSignature(false);
         if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
         setDraft(chatId, '');
 
@@ -1946,7 +1961,7 @@ export default function ChatPanel({
 
 
     return (
-        <div className="flex-1 flex flex-col min-w-0 relative h-full bg-transparent">
+        <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
             <ToolExecutionsSheet
                 open={isToolExecutionsOpen}
                 onOpenChange={setIsToolExecutionsOpen}
@@ -1964,7 +1979,7 @@ export default function ChatPanel({
                     )}
                     <motion.div layoutId={`avatar-morph-${chat.id}`}>
                         <Avatar className="h-10 w-10 border border-slate-200/80 bg-white ring-1 ring-slate-200/70 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.22)] dark:border-white/10 dark:bg-[#0B0B10] dark:ring-2 dark:ring-black/40 dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.9)]">
-                            <AvatarImage src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
+                            <AvatarImage fallbackOnBlank src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                     </motion.div>
@@ -2460,7 +2475,7 @@ export default function ChatPanel({
 
             {
                 isChatOpen ? (
-                    <footer className="p-2 md:p-4 bg-transparent z-20 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-[calc(1rem+env(safe-area-inset-bottom))] transition-[padding] data-[state=open]:p-0">
+                    <footer className="z-20 max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain bg-transparent p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] data-[state=open]:p-0">
                         {showShortcutSuggestions && filteredShortcuts.length > 0 && (
                             <div className="mb-2 p-2 border border-border rounded-xl bg-popover/90 backdrop-blur-md max-h-40 overflow-y-auto shadow-xl">
                                 {filteredShortcuts.map(shortcut => (
@@ -2545,7 +2560,7 @@ export default function ChatPanel({
                             </div>
                         )}
 
-                        <div className="space-y-4">
+                        <div className="space-y-2.5 md:space-y-3">
                             <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown}>
                                 <input type="hidden" name="chatId" value={chat.id} />
 
@@ -2662,7 +2677,7 @@ export default function ChatPanel({
                                     </div>
 
                                     {/* Bottom Toolbar */}
-                                    <div className="flex items-center justify-between px-3 pb-3 pt-1">
+                                    <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
                                         {/* Left Action Buttons */}
                                         <div className="flex items-center gap-1">
                                             <button
@@ -2698,6 +2713,31 @@ export default function ChatPanel({
                                                 <StickyNote className="h-4 w-4" />
                                                 <span className="hidden sm:inline">{isInternalNote ? 'Remover nota' : 'Nota interna'}</span>
                                             </button>
+
+                                            {!isInternalNote && (
+                                                <TooltipProvider delayDuration={150}>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <button
+                                                                type="button"
+                                                                className={cn(
+                                                                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors",
+                                                                    skipUserSignature
+                                                                        ? "bg-red-500/15 text-red-600 hover:bg-red-500/20 dark:text-red-300"
+                                                                        : "text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
+                                                                )}
+                                                                onClick={() => setSkipUserSignature((value) => !value)}
+                                                                disabled={isAiTyping}
+                                                                aria-label="Remover Assinatura"
+                                                                aria-pressed={skipUserSignature}
+                                                            >
+                                                                <Signature className="h-4 w-4" />
+                                                            </button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="top">Remover Assinatura</TooltipContent>
+                                                    </Tooltip>
+                                                </TooltipProvider>
+                                            )}
 
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>

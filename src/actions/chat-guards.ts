@@ -103,13 +103,25 @@ export async function guardedTransferChat(input: { chatId: string; teamId?: stri
   }
 }
 
-export async function guardedSendAgentMessage(chatId: string, content: string, tabId?: string | null, optimisticId?: string) {
+export async function guardedSendAgentMessage(
+  chatId: string,
+  content: string,
+  tabId?: string | null,
+  optimisticId?: string,
+  options?: { skipUserSignature?: boolean }
+) {
   const currentUser = await getCurrentUser();
   if (!currentUser?.id) {
     return { success: false, error: 'Usuario nao autenticado.' };
   }
 
-  const parsed = sendAgentMessageSchema.safeParse({ chatId, content, tabId, optimisticId });
+  const parsed = sendAgentMessageSchema.safeParse({
+    chatId,
+    content,
+    tabId,
+    optimisticId,
+    skipUserSignature: options?.skipUserSignature,
+  });
   if (!parsed.success) {
     return { success: false, error: 'Mensagem invalida.' };
   }
@@ -120,7 +132,14 @@ export async function guardedSendAgentMessage(chatId: string, content: string, t
   }
 
   try {
-    const result = await sendAgentMessageAction(chatId, content, tabId ?? null, optimisticId);
+    const result = await sendAgentMessageAction(
+      chatId,
+      content,
+      tabId ?? null,
+      optimisticId,
+      undefined,
+      { skipUserSignature: options?.skipUserSignature === true }
+    );
     if (result.success) {
       await logAction({
         workspaceId: currentUser.activeWorkspaceId,

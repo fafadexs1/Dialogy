@@ -23,4 +23,5 @@ export const sendAgentMessageSchema = z.object({
   content: z.string().min(1),
   tabId: z.string().optional().nullable(),
   optimisticId: z.string().optional(),
+  skipUserSignature: z.boolean().optional(),
 });

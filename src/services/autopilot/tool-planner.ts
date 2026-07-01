@@ -112,6 +112,76 @@ function validatePayload(action: AgentToolAction): string | null {
   return null;
 }
 
+type CustomerToolIntent =
+  | 'wifi_credentials_lookup'
+  | 'wifi_credentials_change'
+  | 'wifi_channel_diagnostics'
+  | 'router_reboot'
+  | 'unknown';
+
+function inferCustomerToolIntent(customerMessage: string): CustomerToolIntent {
+  const normalized = normalizeText(customerMessage);
+  const mentionsWifi = /\b(wi fi|wifi|ssid|rede|senha|usuario|credencia)\w*/.test(normalized);
+  const wantsChange = /\b(trocar|mudar|alterar|atualizar|nova|novo|configurar)\w*/.test(normalized);
+  if (/\b(reiniciar|reinicie|reboot|resetar|desligar e ligar)\w*/.test(normalized)) {
+    return 'router_reboot';
+  }
+  if (mentionsWifi && wantsChange) return 'wifi_credentials_change';
+  if (mentionsWifi && /\b(canal|canais|redes ao redor|vizin|interferencia|lento|lentidao|oscila|queda|sinal fraco|analisar)\w*/.test(normalized)) {
+    return 'wifi_channel_diagnostics';
+  }
+  if (mentionsWifi && /\b(ver|verificar|consultar|saber|mostrar|recuperar|esqueci|qual|usuario|senha|ssid|nome da rede|credencia)\w*/.test(normalized)) {
+    return 'wifi_credentials_lookup';
+  }
+  return 'unknown';
+}
+
+function inferActionToolIntent(action: AgentToolAction, catalog: AgentToolCatalogItem[]): CustomerToolIntent {
+  const requestedToolName = resolveRequestedToolName(action) || action.type;
+  const catalogItem = catalog.find((tool) => tool.name === requestedToolName);
+  const normalized = normalizeText([
+    requestedToolName,
+    action.reason || '',
+    catalogItem?.description || '',
+    catalogItem?.inputSchema ? JSON.stringify(catalogItem.inputSchema) : '',
+  ].join(' '));
+  if (/\b(reboot_router|reboot|reiniciar|resetar)\b/.test(normalized)) return 'router_reboot';
+  if (/\b(change_wifi_credentials|trocar|mudar|alterar|credentials)\b/.test(normalized) && /\b(wifi|wi fi|ssid|senha|rede)\b/.test(normalized)) {
+    return 'wifi_credentials_change';
+  }
+  if (/\b(scan_wifi_neighbors|get_wifi_scan_cached|canal|canais|interferencia|redes ao redor|vizin|lento|lentidao)\b/.test(normalized)) {
+    return 'wifi_channel_diagnostics';
+  }
+  if (/\b(get_wifi_view|refresh_wifi_summary|ssid|senha|usuario|credencia|nome da rede)\b/.test(normalized)) {
+    return 'wifi_credentials_lookup';
+  }
+  return 'unknown';
+}
+
+function toolIntentMismatchReason(input: {
+  action: AgentToolAction;
+  customerMessage: string;
+  toolCatalog: AgentToolCatalogItem[];
+}): string | null {
+  const customerIntent = inferCustomerToolIntent(input.customerMessage);
+  const actionIntent = inferActionToolIntent(input.action, input.toolCatalog);
+  if (customerIntent === 'unknown' || actionIntent === 'unknown' || customerIntent === actionIntent) return null;
+  const requestedToolName = resolveRequestedToolName(input.action) || input.action.type;
+  if (customerIntent === 'wifi_credentials_lookup' && actionIntent === 'router_reboot') {
+    return `Ferramenta ${requestedToolName} bloqueada: cliente pediu consulta de usuario/senha/SSID do Wi-Fi, nao reboot.`;
+  }
+  if (customerIntent === 'wifi_credentials_lookup' && actionIntent === 'wifi_credentials_change') {
+    return `Ferramenta ${requestedToolName} bloqueada: cliente pediu consulta de Wi-Fi atual, nao troca de credenciais.`;
+  }
+  if (customerIntent === 'wifi_channel_diagnostics' && (actionIntent === 'router_reboot' || actionIntent === 'wifi_credentials_change')) {
+    return `Ferramenta ${requestedToolName} bloqueada: diagnostico de canais/interferencia exige leitura/analise antes de side effect.`;
+  }
+  if (customerIntent === 'wifi_credentials_change' && actionIntent === 'router_reboot') {
+    return `Ferramenta ${requestedToolName} bloqueada: cliente pediu troca de Wi-Fi, nao reinicio do roteador.`;
+  }
+  return null;
+}
+
 function toPlannerRejectCode(code: ToolCapabilityGateCode): ToolPlannerRejectedAction['code'] {
   return code === 'allowed' ? 'unknown_tool' : code;
 }
@@ -227,6 +297,20 @@ export function planAutopilotTools(input: {
   const isInformationalIntent = INFORMATIONAL_INTENTS.has(input.intentResolution.intent);
 
   for (const action of input.actions) {
+    const mismatchReason = toolIntentMismatchReason({
+      action,
+      customerMessage: input.customerMessage,
+      toolCatalog: input.toolCatalog,
+    });
+    if (mismatchReason) {
+      rejectedActions.push({
+        action,
+        code: 'intent_not_allowed',
+        reason: mismatchReason,
+      });
+      continue;
+    }
+
     if (isInformationalIntent && action.type !== 'crm_update_contact_custom_fields') {
       rejectedActions.push({
         action,

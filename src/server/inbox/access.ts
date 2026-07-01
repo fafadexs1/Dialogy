@@ -1,22 +1,14 @@
 import 'server-only';
 
 import { db } from '@/lib/db';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 export type InboxAccessResult =
   | { ok: true }
   | { ok: false; error: string };
 
 export async function hasWorkspaceAccess(userId: string, workspaceId: string): Promise<boolean> {
-  const res = await db.query(
-    `SELECT 1
-     FROM user_workspace_roles
-     WHERE user_id = $1
-       AND workspace_id = $2
-     LIMIT 1`,
-    [userId, workspaceId]
-  );
-
-  return (res.rowCount ?? 0) > 0;
+  return hasWorkspacePermission(userId, workspaceId, 'inbox:access');
 }
 
 export async function requireWorkspaceAccess(
@@ -36,18 +28,9 @@ export async function requireWorkspaceAccess(
 }
 
 export async function hasChatAccess(userId: string, chatId: string): Promise<boolean> {
-  const res = await db.query(
-    `SELECT 1
-     FROM chats c
-     JOIN user_workspace_roles uwr
-       ON uwr.workspace_id = c.workspace_id
-      AND uwr.user_id = $2
-     WHERE c.id = $1
-     LIMIT 1`,
-    [chatId, userId]
-  );
-
-  return (res.rowCount ?? 0) > 0;
+  const result = await db.query('SELECT workspace_id FROM chats WHERE id = $1', [chatId]);
+  const workspaceId = result.rows[0]?.workspace_id;
+  return Boolean(workspaceId) && hasWorkspacePermission(userId, workspaceId, 'inbox:access');
 }
 
 export async function requireChatAccess(

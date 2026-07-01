@@ -144,6 +144,42 @@ async function loadContactCustomFields(event: AutomationEvent): Promise<Record<s
     }, {});
 }
 
+async function getContactIdsForCustomFieldWrite(event: AutomationEvent): Promise<string[]> {
+    const res = await db.query(
+        `
+        WITH target_contact AS (
+            SELECT id, workspace_id, phone_number_jid, phone_canonical
+            FROM contacts
+            WHERE id = $1
+              AND workspace_id = $2
+            LIMIT 1
+        )
+        SELECT DISTINCT
+            c.id,
+            CASE WHEN c.id = $1 THEN 0 ELSE 1 END AS sort_order
+        FROM contacts c
+        JOIN target_contact tc
+          ON tc.workspace_id = c.workspace_id
+        WHERE c.id = tc.id
+           OR (
+             tc.phone_canonical IS NOT NULL
+             AND c.phone_canonical IS NOT NULL
+             AND c.phone_canonical = tc.phone_canonical
+           )
+           OR (
+             NULLIF(tc.phone_number_jid, '') IS NOT NULL
+             AND NULLIF(c.phone_number_jid, '') IS NOT NULL
+             AND c.phone_number_jid = tc.phone_number_jid
+           )
+        ORDER BY sort_order, c.id
+        `,
+        [event.contactId, event.workspaceId]
+    );
+
+    const contactIds = res.rows.map((row) => String(row.id)).filter(Boolean);
+    return contactIds.length > 0 ? contactIds : [event.contactId];
+}
+
 function getValueByPath(source: any, path: string): unknown {
     if (!source) return undefined;
     const keys = path.split('.');
@@ -465,17 +501,20 @@ async function executeUpdateCustomField(event: AutomationEvent, config: Record<s
     const fieldValue = config.field_value;
 
     if (!fieldId) return;
+    const contactIds = await getContactIdsForCustomFieldWrite(event);
 
     await db.query(
-        'DELETE FROM contact_custom_field_values WHERE contact_id = $1 AND field_id = $2',
-        [event.contactId, fieldId]
+        'DELETE FROM contact_custom_field_values WHERE contact_id = ANY($1::uuid[]) AND field_id = $2',
+        [contactIds, fieldId]
     );
 
     if (fieldValue) {
-        await db.query(
-            'INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)',
-            [event.contactId, fieldId, fieldValue]
-        );
+        for (const contactId of contactIds) {
+            await db.query(
+                'INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)',
+                [contactId, fieldId, fieldValue]
+            );
+        }
     }
 }
 

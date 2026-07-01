@@ -9,6 +9,8 @@ import { retrieveHybridSupportContext, type KnowledgeRetrievalStrategy } from '@
 import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 import { runAgentTools } from '@/services/agent-tools/runtime';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
+import { fingerprintToolAction } from '@/services/agent-tools/action-fingerprint';
+import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { extractKnowledgeToolProcedures, formatKnowledgeToolProcedures } from '@/services/agent-tools/knowledge-procedures';
@@ -65,6 +67,7 @@ import {
     resolveFlowFormGuidance,
 } from '@/services/autopilot/flow-routing';
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
+import { isPotentialConversationCloseRequest } from '@/services/autopilot/close-intent';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
@@ -86,7 +89,20 @@ import {
     PROCEDURE_SLIM_LIMITS,
 } from '@/services/autopilot/procedure-prompt-slim';
 import { sendMultiBlockResponse } from '@/services/autopilot/runtime/message-sender';
+import { isProviderDeliveryError } from '@/services/autopilot/runtime/provider-delivery';
+import type { AutopilotResponseTrace } from '@/services/autopilot/runtime/response-delivery';
+import {
+    assertAutopilotSourceMessageCurrent,
+    AutopilotSourceSupersededError,
+    isAutopilotSourceMessageStillCurrent,
+} from '@/services/autopilot/runtime/stale-source-guard';
+import { handoffAutopilotFailureToHuman } from '@/services/autopilot/runtime/failure-handoff';
 import { hasSentFlowNodeMessage, logIntelligentAttendantResponse } from '@/services/autopilot/runtime/response-log';
+import {
+    acquireAutopilotChatLease,
+    AutopilotChatLeaseTimeoutError,
+    hasCompletedAutopilotSourceMessage,
+} from '@/services/autopilot/runtime/chat-lease';
 import {
     filterAlreadyExecutedActions,
     filterImplicitTransferActions,
@@ -94,6 +110,10 @@ import {
     mergeAgentActions,
     normalizeAgentActions,
 } from '@/services/autopilot/runtime/action-utils';
+import {
+    completeProcedureToolReuse,
+    planProcedureToolReuse,
+} from '@/services/autopilot/runtime/procedure-tool-reuse';
 import {
     buildMcpResponseFromToolResults,
     buildRecentToolMemoryContext,
@@ -104,13 +124,42 @@ import {
 } from '@/services/autopilot/runtime/tool-memory';
 import { getAutopilotConfigService } from '@/services/autopilot/runtime/config-service';
 import { executeTriggeredWebhookRule } from '@/services/autopilot/runtime/webhook-rules';
-import { compileAutopilotTurnPolicy, resolveAllowedKnowledgeDocumentIds, type AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
-import { getAutopilotConversationState, resolveConfirmedPendingAction, saveAutopilotTurnState } from '@/services/autopilot/flow-state-store';
+import {
+    authorizeAutopilotTurnPlanTools,
+    compileAutopilotTurnPolicy,
+    resolveAllowedKnowledgeDocumentIds,
+    type AutopilotTurnPolicy,
+} from '@/services/autopilot/turn-policy';
+import { analyzeAutopilotToolCoverage } from '@/services/autopilot/tool-coverage';
+import {
+    completeAgentToolRun,
+    planAgentToolRun,
+} from '@/services/autopilot/runtime/tool-run-ledger';
+import {
+    consumeConfirmedPendingAction,
+    consumePendingActionCancellation,
+    consumeSupersededPendingAction,
+    getAutopilotConversationState,
+    saveAutopilotTurnState,
+    setPendingToolConfirmation,
+} from '@/services/autopilot/flow-state-store';
 import { mapAgentToolActionsToResources } from '@/services/resource-mapper/agent-tool-actions';
 import type { SlotExtractionResult } from '@/services/autopilot/slots';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
 import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
 import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
+import {
+    buildAutopilotTurnPlan,
+    buildAutopilotTurnPlanCustomerResponse,
+    buildAutopilotTurnPlanFollowUpActions,
+    buildAutopilotTurnPlanRecoveryActions,
+    hasRequiredAutopilotTurnPlanFailure,
+    hasSatisfiedAutopilotTurnPlan,
+    inferAutopilotCustomerNeed,
+    isTerminalAutopilotTurnPlan,
+    shouldBypassKnowledgeForOperationalTurn,
+    shouldPrioritizeAutopilotTurnPlan,
+} from '@/services/autopilot/turn-plan';
 
 function compileRuntimeProcedures(input: {
     config: AutopilotConfig;
@@ -143,44 +192,47 @@ async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames
 
     const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools
         .filter((tool) => enabledToolSet.has(tool.qualifiedName))
-        .map((tool) => ({
-            name: tool.qualifiedName as any,
-            version: 'mcp',
-            description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
-            class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
-            riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
-            sideEffect: tool.annotations?.destructiveHint ? 'high' : tool.annotations?.readOnlyHint ? 'none' : 'medium',
-            idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
-            timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
-            maxAttempts: 1,
-            requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
-            customerVisible: true,
-            allowedIntents: [
-                'purchase_inquiry',
-                'catalog_request',
-                'pricing_request',
-                'promotion_request',
-                'availability_request',
-                'billing_or_payment',
-                'scheduling_request',
-                'order_or_request_status',
-                'support_request',
-                'troubleshooting',
-                'change_request',
-                'return_or_refund',
-                'cancellation_request',
-                'document_request',
-                'complaint',
-            ],
-            requiredSlots: [],
-            fallbackAction: 'handoff',
-            source: 'mcp',
-            enabledByDefault: false,
-            serverId: tool.serverId,
-            serverName: tool.serverName,
-            inputSchema: tool.inputSchema || null,
-            outputSchema: tool.outputSchema || null,
-        }));
+        .map((tool) => {
+            const safety = classifyMcpToolSafety(tool.qualifiedName, tool);
+            return {
+                name: tool.qualifiedName as any,
+                version: 'mcp',
+                description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
+                class: safety.class,
+                riskLevel: safety.riskLevel,
+                sideEffect: safety.sideEffect,
+                idempotent: safety.idempotent,
+                timeoutMs: resolveMcpToolTimeoutMs(),
+                maxAttempts: 1,
+                requiresHumanApproval: safety.requiresHumanApproval,
+                customerVisible: true,
+                allowedIntents: [
+                    'purchase_inquiry',
+                    'catalog_request',
+                    'pricing_request',
+                    'promotion_request',
+                    'availability_request',
+                    'billing_or_payment',
+                    'scheduling_request',
+                    'order_or_request_status',
+                    'support_request',
+                    'troubleshooting',
+                    'change_request',
+                    'return_or_refund',
+                    'cancellation_request',
+                    'document_request',
+                    'complaint',
+                ],
+                requiredSlots: [],
+                fallbackAction: 'handoff',
+                source: 'mcp',
+                enabledByDefault: false,
+                serverId: tool.serverId,
+                serverName: tool.serverName,
+                inputSchema: tool.inputSchema || null,
+                outputSchema: tool.outputSchema || null,
+            };
+        });
 
     return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
 }
@@ -197,8 +249,7 @@ function shouldRunCloseIntentGate(input: {
 }) {
     const message = input.customerMessage.trim();
     if (!input.enabledToolNames.includes('close_chat')) return false;
-    if (!message || message.length > 320) return false;
-    return true;
+    return isPotentialConversationCloseRequest(message);
 }
 
 async function loadWorkflowSlotMappings(workspaceId: string): Promise<WorkflowSlotMappings> {
@@ -545,45 +596,6 @@ async function insertAgentToolStatusMessage(input: {
     }
 }
 
-async function isAutopilotSourceMessageStillCurrent(input: {
-    chatId: string;
-    sourceMessageId?: string | null;
-}): Promise<boolean> {
-    if (!input.sourceMessageId) return true;
-
-    try {
-        const { rows } = await db.query(
-            `WITH source_message AS (
-                SELECT id, created_at
-                FROM messages
-                WHERE id = $1
-                  AND chat_id = $2
-                  AND from_me = false
-                LIMIT 1
-             ),
-             newer_customer_message AS (
-                SELECT 1
-                FROM messages m
-                JOIN source_message sm ON true
-                WHERE m.chat_id = $2
-                  AND m.from_me = false
-                  AND m.created_at > sm.created_at
-                  AND m.id <> sm.id
-                LIMIT 1
-             )
-             SELECT
-                EXISTS(SELECT 1 FROM source_message) AS source_exists,
-                EXISTS(SELECT 1 FROM newer_customer_message) AS has_newer_customer_message`,
-            [input.sourceMessageId, input.chatId]
-        );
-        const row = rows[0];
-        return Boolean(row?.source_exists) && !Boolean(row?.has_newer_customer_message);
-    } catch (error) {
-        console.error('[AUTOPILOT_STALE_GUARD] Failed to verify source message:', error);
-        return false;
-    }
-}
-
 async function buildMediaAnalysisContext(input: {
     workspaceId: string;
     chatId: string;
@@ -665,7 +677,9 @@ async function runRequestedAgentTools(input: {
     actions: unknown;
     chatHistory?: string;
     slotExtraction?: SlotExtractionResult | null;
+    confirmedActionFingerprint?: string | null;
     orchestratorRunId?: string | null;
+    sourceMessageId: string | null | undefined;
 }): Promise<AgentToolExecutionResult[]> {
     const normalizedActions = normalizeAgentActions(input.actions);
     if (normalizedActions.length === 0) return [];
@@ -688,6 +702,7 @@ async function runRequestedAgentTools(input: {
             autopilotConfig: input.autopilotConfig,
             turnPolicy: input.turnPolicy,
             customerMessage: input.customerMessage,
+            confirmedActionFingerprint: input.confirmedActionFingerprint ?? null,
             orchestratorRunId: input.orchestratorRunId ?? null,
         },
         resourceMapped.actions
@@ -706,10 +721,16 @@ async function runRequestedAgentToolsWithStatus(input: {
     actions: unknown;
     chatHistory?: string;
     slotExtraction?: SlotExtractionResult | null;
+    confirmedActionFingerprint?: string | null;
     orchestratorRunId?: string | null;
+    sourceMessageId: string | null | undefined;
 }): Promise<AgentToolExecutionResult[]> {
     const normalizedActions = normalizeAgentActions(input.actions);
     if (normalizedActions.length === 0) return [];
+    await assertAutopilotSourceMessageCurrent({
+        chatId: input.chat.id,
+        sourceMessageId: input.sourceMessageId,
+    });
     const resourceMapped = await mapAgentToolActionsToResources({
         workspaceId: input.workspaceId,
         customerMessage: input.customerMessage,
@@ -718,9 +739,15 @@ async function runRequestedAgentToolsWithStatus(input: {
         slotExtraction: input.slotExtraction,
         actions: normalizedActions,
     });
-    const actionsToRun = resourceMapped.actions;
+    const toolRunPlan = planAgentToolRun(input.orchestratorRunId, resourceMapped.actions);
+    const actionsToRun = toolRunPlan.actionsToExecute;
+    const reusedCount = toolRunPlan.entries.filter((entry) => entry.kind === 'reuse').length;
 
-    console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${input.chat.id} planned_tools=${actionsToRun.length} tools=[${actionsToRun.map((a) => a.type === 'mcp_call_tool' ? String(a.payload?.toolName || a.type) : a.type).join(',')}]`);
+    console.log(`[ORCHESTRATOR_TOOL_FEEDBACK] chat=${input.chat.id} planned_tools=${resourceMapped.actions.length} execute=${actionsToRun.length} reused=${reusedCount} tools=[${actionsToRun.map((a) => a.type === 'mcp_call_tool' ? String(a.payload?.toolName || a.type) : a.type).join(',')}]`);
+
+    if (actionsToRun.length === 0) {
+        return completeAgentToolRun(toolRunPlan, []);
+    }
 
     const toolRuns = actionsToRun.map((action) => ({
         action,
@@ -764,7 +791,7 @@ async function runRequestedAgentToolsWithStatus(input: {
         });
     }
 
-    return results;
+    return completeAgentToolRun(toolRunPlan, results);
 }
 
 function resolveActionToolName(action: AgentToolAction) {
@@ -779,6 +806,8 @@ async function sendToolFailureFollowUp(input: {
     instanceName?: string;
     toolResults: AgentToolExecutionResult[];
     previousResponse?: string | null;
+    responseTrace?: AutopilotResponseTrace;
+    deliveryKey?: string;
 }): Promise<string | null> {
     const failureResponse = buildToolFailureResponse(
         input.toolResults,
@@ -792,7 +821,11 @@ async function sendToolFailureFollowUp(input: {
         formattedResponse,
         input.systemAgentId,
         true,
-        input.instanceName
+        input.instanceName,
+        null,
+        input.responseTrace
+            ? { ...input.responseTrace, deliveryKey: input.deliveryKey || 'tool-failure' }
+            : undefined
     );
     return formattedResponse;
 }
@@ -838,6 +871,36 @@ export async function processAutopilotForChat(
             ...chat,
             id: resolvedChatId,
         };
+    }
+
+    const chatLease = await acquireAutopilotChatLease({
+        workspaceId,
+        chatId: chat.id,
+        sourceMessageId,
+    });
+    if (chatLease.status === 'superseded') {
+        console.log(
+            `[AUTOPILOT_CHAT_LEASE] Mensagem ${sourceMessageId || 'sem-id'} do chat ${chat.id} foi substituida por uma mensagem mais recente enquanto aguardava processamento.`,
+        );
+        return;
+    }
+    if (chatLease.status === 'timeout') {
+        console.error(
+            `[AUTOPILOT_CHAT_LEASE] Tempo limite de ${chatLease.waitedMs}ms aguardando processamento exclusivo do chat ${chat.id}.`,
+        );
+        throw new AutopilotChatLeaseTimeoutError(chat.id, chatLease.waitedMs);
+    }
+
+    try {
+    if (await hasCompletedAutopilotSourceMessage({
+        workspaceId,
+        chatId: chat.id,
+        sourceMessageId,
+    })) {
+        console.log(
+            `[AUTOPILOT_CHAT_LEASE] Mensagem ${sourceMessageId || 'sem-id'} do chat ${chat.id} ja possui resposta persistida. Ignorando execucao duplicada.`,
+        );
+        return;
     }
 
     console.log(`[AUTOPILOT_SERVICE] Verificando autopilot para chat ${chat.id}`);
@@ -952,6 +1015,11 @@ export async function processAutopilotForChat(
         },
     });
     const orchestratorTimings: Record<string, number> = {};
+    const responseTrace: AutopilotResponseTrace = {
+        workspaceId,
+        sourceMessageId: sourceMessageId ?? null,
+        orchestratorRunId: orchestratorRun.id,
+    };
 
     const messagesRes = await db.query(
         `SELECT content, from_me, sender_user_id
@@ -1001,6 +1069,7 @@ export async function processAutopilotForChat(
     ].filter(Boolean).join('\n');
     const staticKnowledgeDocuments = autopilotConfig.knowledge_base_documents || [];
     let enabledToolNames = resolveEnabledToolNames(autopilotConfig);
+    const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId, enabledToolNames);
     const crmCustomFields = await loadContactCustomFieldsForAutopilot({
         workspaceId,
         contactId: chat.contact?.id || (chat as { contact_id?: string | null }).contact_id,
@@ -1035,6 +1104,17 @@ export async function processAutopilotForChat(
         console.error('[AUTOPILOT_SERVICE] Failed to fetch integration key:', error);
     }
 
+    const earlyCustomerNeed = inferAutopilotCustomerNeed(
+        enrichedLastMessageContent || '',
+        chatHistoryForAI,
+    );
+    const deterministicOperationalTurn = shouldBypassKnowledgeForOperationalTurn({
+        customerNeed: earlyCustomerNeed,
+        enabledToolNames,
+        customerMessage: enrichedLastMessageContent || '',
+        chatHistory: chatHistoryForAI,
+        toolCatalog: runtimeToolCatalog,
+    });
     let intentResolution = resolveAutopilotIntent({
         customerMessage: enrichedLastMessageContent || '',
         chatHistory: chatHistoryForAI,
@@ -1042,7 +1122,7 @@ export async function processAutopilotForChat(
     });
     const deterministicIntentResolution = intentResolution;
 
-    if (shouldUseAiIntentClassifier({
+    if (!deterministicOperationalTurn && shouldUseAiIntentClassifier({
         intent: deterministicIntentResolution.intent,
         confidence: deterministicIntentResolution.confidence,
     })) {
@@ -1149,12 +1229,66 @@ export async function processAutopilotForChat(
     }).catch((error) => {
         console.warn('[AUTOPILOT_FLOW_STATE] Failed to persist active node:', error);
     });
-    const confirmedPendingAction = resolveConfirmedPendingAction({
-        state: persistedFlowState,
-        message: enrichedLastMessageContent || '',
-        allowedToolNames: turnPolicy.allowedToolNames,
-    });
-    if (confirmedPendingAction && currentCopilotMode === 'auto') {
+    const pendingActionSuperseded = currentCopilotMode === 'auto'
+        ? await consumeSupersededPendingAction({
+            state: persistedFlowState,
+            message: enrichedLastMessageContent || '',
+        }).catch((error) => {
+            console.warn('[AUTOPILOT_FLOW_STATE] Failed to supersede pending action:', error);
+            return false;
+        })
+        : false;
+    if (pendingActionSuperseded) {
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'pending_confirmation_superseded',
+            status: 'success',
+            payload: {
+                reason: 'customer_sent_new_request_before_confirmation',
+            },
+        });
+    }
+    const pendingActionCancelled = currentCopilotMode === 'auto'
+        ? await consumePendingActionCancellation({
+            state: persistedFlowState,
+            message: enrichedLastMessageContent || '',
+        }).catch((error) => {
+            console.warn('[AUTOPILOT_FLOW_STATE] Failed to cancel pending action:', error);
+            return false;
+        })
+        : false;
+    if (pendingActionCancelled) {
+        await sendMultiBlockResponse(
+            chat.id,
+            'Tudo bem. A acao pendente foi cancelada e nao sera executada.',
+            assignedSystemAgentId,
+            true,
+            instanceName,
+            null,
+            responseTrace,
+        );
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: 'success',
+            timings: orchestratorTimings,
+            metadata: {
+                pendingActionCancelled: true,
+                responseSent: true,
+            },
+        });
+        return;
+    }
+    const confirmedPendingAction = currentCopilotMode === 'auto'
+        ? await consumeConfirmedPendingAction({
+            state: persistedFlowState,
+            message: enrichedLastMessageContent || '',
+            allowedToolNames: turnPolicy.allowedToolNames,
+        }).catch((error) => {
+            console.warn('[AUTOPILOT_FLOW_STATE] Failed to consume confirmed action:', error);
+            return null;
+        })
+        : null;
+    if (confirmedPendingAction) {
         const confirmedResults = await runRequestedAgentToolsWithStatus({
             workspaceId,
             chat,
@@ -1165,7 +1299,9 @@ export async function processAutopilotForChat(
             turnPolicy,
             customerMessage: enrichedLastMessageContent || '',
             actions: [confirmedPendingAction],
+            confirmedActionFingerprint: fingerprintToolAction(confirmedPendingAction),
             orchestratorRunId: orchestratorRun.id,
+            sourceMessageId,
         });
         const confirmedResponse = buildMcpCustomerResponseFromToolResults(confirmedResults)
             || buildMcpResponseFromToolResults(confirmedResults)
@@ -1174,7 +1310,15 @@ export async function processAutopilotForChat(
             || (confirmedResults.some((result) => result.status === 'success')
                 ? 'Pronto, a acao confirmada foi executada com sucesso.'
                 : 'Nao consegui executar a acao confirmada. Vou encaminhar o contexto para atendimento humano.');
-        await sendMultiBlockResponse(chat.id, confirmedResponse, assignedSystemAgentId, true, instanceName);
+        await sendMultiBlockResponse(
+            chat.id,
+            confirmedResponse,
+            assignedSystemAgentId,
+            true,
+            instanceName,
+            null,
+            responseTrace,
+        );
         await finishOrchestratorRun({
             run: orchestratorRun,
             status: confirmedResults.some((result) => result.status === 'success') ? 'success' : 'fallback',
@@ -1182,6 +1326,7 @@ export async function processAutopilotForChat(
             metadata: {
                 confirmedPendingAction: resolveActionToolName(confirmedPendingAction),
                 toolCount: confirmedResults.length,
+                responseSent: true,
             },
         });
         return;
@@ -1391,7 +1536,9 @@ export async function processAutopilotForChat(
                 finalResponse,
                 assignedSystemAgentId,
                 true,
-                instanceName
+                instanceName,
+                null,
+                responseTrace
             ),
             { responseLength: finalResponse.length, skippedLlm: true }
         );
@@ -1411,8 +1558,9 @@ export async function processAutopilotForChat(
                 customerMessage: enrichedLastMessageContent || '',
                 actions: deterministicRouting.actions,
                 orchestratorRunId: orchestratorRun.id,
+                sourceMessageId,
             }),
-            { requestedActions: deterministicRouting.actions.map((action) => action.type), skippedLlm: true }
+            { requestedActions: deterministicRouting.actions.map(resolveActionToolName), skippedLlm: true }
         );
         orchestratorTimings.tool_ms = toolsStage.durationMs;
         const toolResults = toolsStage.value;
@@ -1422,6 +1570,7 @@ export async function processAutopilotForChat(
             instanceName,
             toolResults,
             previousResponse: finalResponse,
+            responseTrace,
         });
 
         await logIntelligentAttendantResponse({
@@ -1468,7 +1617,11 @@ export async function processAutopilotForChat(
     }> = [];
 
     try {
-        if (enrichedLastMessageContent && enrichedLastMessageContent.trim().length > 3) {
+        if (
+            enrichedLastMessageContent &&
+            enrichedLastMessageContent.trim().length > 3 &&
+            !deterministicOperationalTurn
+        ) {
             console.log(`[AUTOPILOT_RAG] Searching hybrid context for: "${enrichedLastMessageContent.substring(0, 50)}..."`);
             const ragStage = await timeOrchestratorStage(
                 orchestratorRun,
@@ -1536,6 +1689,16 @@ export async function processAutopilotForChat(
                     workflowId: intentResolution.workflowId,
                 },
             });
+        } else if (deterministicOperationalTurn) {
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'rag_retrieval',
+                status: 'skipped',
+                payload: {
+                    reason: 'deterministic_operational_turn',
+                    customerNeed: earlyCustomerNeed,
+                },
+            });
         }
     } catch (ragError) {
         console.error('[AUTOPILOT_RAG] Error during retrieval:', ragError);
@@ -1560,7 +1723,6 @@ export async function processAutopilotForChat(
         });
     }
 
-    const runtimeToolCatalog = await listRuntimeAgentToolCatalog(workspaceId, enabledToolNames);
     const activeToolSelectionScore = await loadLatestActiveToolSelectionScoreWeights({
         workspaceId,
         agentId: assignedSystemAgentId,
@@ -1584,12 +1746,17 @@ export async function processAutopilotForChat(
             },
         });
     }
+    const recentToolMemoryNames = [...new Set([
+        'sgp_fetch_contact_panel_data',
+        'sgp_fetch_contracts',
+        ...turnPolicy.globallyEnabledToolNames,
+    ])];
     let recentToolResults = await loadRecentToolResultsForAutopilot({
         workspaceId,
         chatId: chat.id,
-        toolNames: ['sgp_fetch_contact_panel_data', 'sgp_fetch_contracts'],
+        toolNames: recentToolMemoryNames,
         maxAgeMinutes: 30,
-        limit: 3,
+        limit: Math.max(12, Math.min(40, recentToolMemoryNames.length * 3)),
     });
     const recentScopedContractId = getScopedContractIdFromToolResults(recentToolResults);
     if (recentScopedContractId) {
@@ -1717,7 +1884,7 @@ export async function processAutopilotForChat(
         intent: intentResolution.intent,
         confidence: intentResolution.confidence,
         executionMode: workflowPlan.executionMode,
-        plannedActions: workflowPlan.actions.map((action) => action.type),
+        plannedActions: workflowPlan.actions.map(resolveActionToolName),
         missingSlots: workflowPlan.missingSlots,
         enabledToolNames,
         hasCustomerIdentifier: Boolean(workflowPlan.slotExtraction.slots.customer_identifier),
@@ -1736,7 +1903,7 @@ export async function processAutopilotForChat(
                         intentReason: intentResolution.reason,
                         deterministicExecutionMode: workflowPlan.executionMode,
                         deterministicMissingSlots: workflowPlan.missingSlots,
-                        deterministicPlannedTools: workflowPlan.actions.map((action) => action.type),
+                        deterministicPlannedTools: workflowPlan.actions.map(resolveActionToolName),
                         agentName: autopilotConfig.name,
                         agentKnowledgeBase: autopilotConfig.knowledge_base || '',
                         knowledgeDocuments: scopedStaticKnowledgeDocuments,
@@ -1756,7 +1923,7 @@ export async function processAutopilotForChat(
                 {
                     intent: intentResolution.intent,
                     deterministicExecutionMode: workflowPlan.executionMode,
-                    deterministicPlannedTools: workflowPlan.actions.map((action) => action.type),
+                    deterministicPlannedTools: workflowPlan.actions.map(resolveActionToolName),
                     model: process.env.AI_WORKFLOW_CLASSIFIER_MODEL || resolvedAiModel.model,
                 }
             );
@@ -1790,7 +1957,7 @@ export async function processAutopilotForChat(
                 payload: {
                     decision: aiWorkflowDecision,
                     appliedExecutionMode: workflowPlan.executionMode,
-                    appliedActions: workflowPlan.actions.map((action) => action.type),
+                    appliedActions: workflowPlan.actions.map(resolveActionToolName),
                 },
             });
         } catch (error) {
@@ -1816,6 +1983,101 @@ export async function processAutopilotForChat(
         recentToolResults,
         enrichedLastMessageContent || ''
     );
+    const toolCoverage = analyzeAutopilotToolCoverage({
+        graph: autopilotConfig.flow_graph,
+        enabledToolNames: turnPolicy.globallyEnabledToolNames,
+        toolCatalog: runtimeToolCatalog,
+    });
+    const initialTurnPlanAuthorization = authorizeAutopilotTurnPlanTools(
+        turnPolicy,
+        [],
+        toolCoverage.safeFallbackToolNames,
+    );
+    const turnPlanEnabledToolNames = initialTurnPlanAuthorization.planningToolNames;
+    const turnPlan = buildAutopilotTurnPlan({
+        customerMessage: enrichedLastMessageContent || '',
+        chatHistory: chatHistoryForAI,
+        intentResolution,
+        slotExtraction: workflowPlan.slotExtraction,
+        enabledToolNames: turnPlanEnabledToolNames,
+        allowedToolNames: turnPolicy.allowedToolNames,
+        toolCatalog: runtimeToolCatalog,
+        recentToolResults,
+    });
+    const turnPlanToolNames = [...new Set([
+        ...turnPlan.requiredToolNames,
+        ...turnPlan.preResponseActions.map(resolveActionToolName),
+    ])].filter((toolName) => turnPlanEnabledToolNames.includes(toolName));
+    const turnPlanAuthorization = authorizeAutopilotTurnPlanTools(
+        turnPolicy,
+        turnPlanToolNames,
+        toolCoverage.safeFallbackToolNames,
+    );
+    const turnPlanMissingAllowedToolNames = turnPlanAuthorization.widenedToolNames;
+    if (turnPlanMissingAllowedToolNames.length > 0) {
+        turnPolicy.allowedToolNames = turnPlanAuthorization.allowedToolNames;
+        turnPolicy.reason = `${turnPolicy.reason}+turn_plan_required_tools`;
+    }
+    if (turnPlan.responseOverride) {
+        workflowPlan = {
+            ...workflowPlan,
+            executionMode: 'direct_response',
+            response: turnPlan.responseOverride,
+            actions: [],
+            missingSlots: turnPlan.missingSlots,
+            handledByWorkflow: true,
+            reason: `Turn Plan: ${turnPlan.reasons.join(', ') || turnPlan.customerNeed}`,
+            metadata: {
+                ...workflowPlan.metadata,
+                turnPlan,
+            },
+        };
+    } else if (turnPlan.preResponseActions.length > 0) {
+        workflowPlan = {
+            ...workflowPlan,
+            executionMode: 'pre_response_tools',
+            actions: mergeAgentActions(turnPlan.preResponseActions, workflowPlan.actions),
+            handledByWorkflow: true,
+            reason: `Turn Plan: ${turnPlan.reasons.join(', ') || turnPlan.customerNeed}`,
+            metadata: {
+                ...workflowPlan.metadata,
+                turnPlan,
+            },
+        };
+    } else {
+        workflowPlan = {
+            ...workflowPlan,
+            metadata: {
+                ...workflowPlan.metadata,
+                turnPlan,
+            },
+        };
+    }
+    await recordOrchestratorEvent({
+        run: orchestratorRun,
+        kind: 'turn_plan',
+        status: turnPlan.responseOverride || turnPlan.preResponseActions.length > 0 ? 'success' : 'skipped',
+        payload: {
+            customerNeed: turnPlan.customerNeed,
+            expectedNextAction: turnPlan.expectedNextAction,
+            requiredToolNames: turnPlan.requiredToolNames,
+            forbiddenToolNames: turnPlan.forbiddenToolNames,
+            missingSlots: turnPlan.missingSlots,
+            missingInputFields: turnPlan.missingInputFields,
+            preResponseActions: turnPlan.preResponseActions.map(resolveActionToolName),
+            widenedAllowedToolNames: turnPlanMissingAllowedToolNames,
+            blockedToolNames: turnPlanAuthorization.blockedToolNames,
+            toolCoverage: {
+                status: toolCoverage.status,
+                coverageRatio: toolCoverage.coverageRatio,
+                safeFallbackToolNames: toolCoverage.safeFallbackToolNames,
+                branchRequiredToolNames: toolCoverage.branchRequiredToolNames,
+                unknownEnabledToolNames: toolCoverage.unknownEnabledToolNames,
+            },
+            reasons: turnPlan.reasons,
+            metadata: turnPlan.metadata,
+        },
+    });
     const workflowPrearmSignal = deriveToolPrearmSignal({
         intentResolution,
         missingSlots: workflowPlan.missingSlots,
@@ -1877,19 +2139,22 @@ export async function processAutopilotForChat(
         ? []
         : workflowPlan.actions;
     const activePEC = await getActiveProcedureExecution(chat.id);
+    const shouldPrioritizeTurnPlan = shouldPrioritizeAutopilotTurnPlan(turnPlan);
     const entryFlowMessageNode = resolveEntryDeterministicFlowMessage(autopilotConfig);
-    const shouldSendEntryFlowMessage = entryFlowMessageNode
+    const shouldSendEntryFlowMessage = entryFlowMessageNode && !shouldPrioritizeTurnPlan
         ? !activePEC && !(await hasSentFlowNodeMessage({
             configId: autopilotConfig.id,
             chatId: chat.id,
             nodeId: entryFlowMessageNode.nodeId,
         }))
         : false;
-    const deterministicFlowMessageNode = shouldSendEntryFlowMessage
-        ? entryFlowMessageNode
-        : activePEC
-            ? null
-            : resolveDeterministicFlowMessage(autopilotConfig, activeFlowIntentScope);
+    const deterministicFlowMessageNode = shouldPrioritizeTurnPlan
+        ? null
+        : shouldSendEntryFlowMessage
+            ? entryFlowMessageNode
+            : activePEC
+                ? null
+                : resolveDeterministicFlowMessage(autopilotConfig, activeFlowIntentScope);
     const deterministicFlowMessage = deterministicFlowMessageNode
         ? renderDeterministicFlowMessage(autopilotConfig, deterministicFlowMessageNode.message, {
             customerMessage: enrichedLastMessageContent || '',
@@ -2001,7 +2266,9 @@ export async function processAutopilotForChat(
                 deterministicFlowMessage,
                 assignedSystemAgentId,
                 true,
-                instanceName
+                instanceName,
+                null,
+                responseTrace
             ),
             { responseLength: deterministicFlowMessage.length, deterministicFlowMessage: true }
         );
@@ -2197,7 +2464,9 @@ export async function processAutopilotForChat(
                 finalResponse,
                 assignedSystemAgentId,
                 true,
-                instanceName
+                instanceName,
+                null,
+                responseTrace
             ),
             { responseLength: finalResponse.length, reusedToolMemory: true }
         );
@@ -2247,6 +2516,33 @@ export async function processAutopilotForChat(
 
     if (workflowPlan.executionMode === 'direct_response' && workflowPlan.response) {
         let finalResponse = formatCustomerFacingAiResponse(workflowPlan.response);
+        if (
+            currentCopilotMode === 'auto'
+            && turnPlan.expectedNextAction === 'require_confirmation'
+            && turnPlan.confirmationAction
+        ) {
+            try {
+                await setPendingToolConfirmation({
+                    chatId: chat.id,
+                    workspaceId,
+                    autopilotConfigId: autopilotConfig.id,
+                    activeNodeId: turnPolicy.activeNodeId,
+                    action: turnPlan.confirmationAction,
+                });
+                await recordOrchestratorEvent({
+                    run: orchestratorRun,
+                    kind: 'pending_confirmation_staged',
+                    status: 'success',
+                    payload: {
+                        toolName: resolveActionToolName(turnPlan.confirmationAction),
+                        source: 'turn_plan',
+                    },
+                });
+            } catch (error) {
+                console.error('[AUTOPILOT_TURN_PLAN] Failed to persist pending confirmation:', error);
+                finalResponse = 'Nao consegui preparar esta acao com seguranca agora. Nenhuma alteracao foi executada.';
+            }
+        }
 
         if (currentCopilotMode === 'suggest') {
             const { getSupabaseAdmin } = await import('@/lib/supabase');
@@ -2395,7 +2691,9 @@ export async function processAutopilotForChat(
                 finalResponse,
                 assignedSystemAgentId,
                 true,
-                instanceName
+                instanceName,
+                null,
+                responseTrace
             ),
             { responseLength: finalResponse.length, workflowEngine: true }
         );
@@ -2417,6 +2715,7 @@ export async function processAutopilotForChat(
                     customerMessage: enrichedLastMessageContent || '',
                     actions: validatedWorkflowActions,
                     orchestratorRunId: orchestratorRun.id,
+                    sourceMessageId,
                 }),
                 {
                     requestedActions: validatedWorkflowActions.map((action) => action.type),
@@ -2432,6 +2731,7 @@ export async function processAutopilotForChat(
                 instanceName,
                 toolResults,
                 previousResponse: finalResponse,
+                responseTrace,
             });
         }
 
@@ -2515,6 +2815,7 @@ export async function processAutopilotForChat(
                 customerMessage: enrichedLastMessageContent || '',
                 actions: workflowPlan.actions,
                 orchestratorRunId: orchestratorRun.id,
+                sourceMessageId,
             }),
             {
                 requestedActions: workflowPlan.actions.map((action) => action.type),
@@ -2524,7 +2825,485 @@ export async function processAutopilotForChat(
         );
         orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
         passThroughToolResults = toolsStage.value;
+        const postToolTurnPlan = buildAutopilotTurnPlan({
+            customerMessage: enrichedLastMessageContent || '',
+            chatHistory: chatHistoryForAI,
+            intentResolution,
+            slotExtraction: workflowPlan.slotExtraction,
+            enabledToolNames: turnPlanEnabledToolNames,
+            allowedToolNames: turnPolicy.allowedToolNames,
+            toolCatalog: runtimeToolCatalog,
+            recentToolResults: [...recentToolResults, ...passThroughToolResults],
+        });
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'turn_plan_post_tool',
+            status: isTerminalAutopilotTurnPlan(postToolTurnPlan)
+                ? 'success'
+                : postToolTurnPlan.preResponseActions.length > 0
+                    ? 'success'
+                    : 'skipped',
+            payload: {
+                customerNeed: postToolTurnPlan.customerNeed,
+                expectedNextAction: postToolTurnPlan.expectedNextAction,
+                requiredToolNames: postToolTurnPlan.requiredToolNames,
+                forbiddenToolNames: postToolTurnPlan.forbiddenToolNames,
+                preResponseActions: postToolTurnPlan.preResponseActions.map(resolveActionToolName),
+                terminal: isTerminalAutopilotTurnPlan(postToolTurnPlan),
+                reasons: postToolTurnPlan.reasons,
+            },
+        });
+
+        if (isTerminalAutopilotTurnPlan(postToolTurnPlan) && postToolTurnPlan.responseOverride) {
+            let finalResponse = formatCustomerFacingAiResponse(postToolTurnPlan.responseOverride);
+            if (
+                currentCopilotMode === 'auto'
+                && postToolTurnPlan.expectedNextAction === 'require_confirmation'
+                && postToolTurnPlan.confirmationAction
+            ) {
+                try {
+                    await setPendingToolConfirmation({
+                        chatId: chat.id,
+                        workspaceId,
+                        autopilotConfigId: autopilotConfig.id,
+                        activeNodeId: turnPolicy.activeNodeId,
+                        action: postToolTurnPlan.confirmationAction,
+                    });
+                    await recordOrchestratorEvent({
+                        run: orchestratorRun,
+                        kind: 'pending_confirmation_staged',
+                        status: 'success',
+                        payload: {
+                            toolName: resolveActionToolName(postToolTurnPlan.confirmationAction),
+                            source: 'turn_plan_post_tool',
+                        },
+                    });
+                } catch (error) {
+                    console.error('[AUTOPILOT_TURN_PLAN] Failed to persist post-tool confirmation:', error);
+                    finalResponse = 'Nao consegui preparar esta acao com seguranca agora. Nenhuma alteracao foi executada.';
+                }
+            }
+
+            if (currentCopilotMode === 'suggest') {
+                const { getSupabaseAdmin } = await import('@/lib/supabase');
+                const supabase = getSupabaseAdmin();
+                await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
+                    suggestion: finalResponse,
+                    chatId: chat.id,
+                    configName: autopilotConfig.name,
+                });
+            } else {
+                const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+                    chatId: chat.id,
+                    sourceMessageId: sourceMessageId ?? null,
+                });
+                if (!sourceMessageStillCurrent) {
+                    await finishOrchestratorRun({
+                        run: orchestratorRun,
+                        status: 'skipped',
+                        timings: orchestratorTimings,
+                        intent: intentResolution.intent,
+                        confidenceScore: intentResolution.confidence,
+                        metadata: {
+                            responseSent: false,
+                            staleSourceMessage: true,
+                            terminalPostToolTurnPlan: true,
+                        },
+                    });
+                    return;
+                }
+
+                const sendStage = await timeOrchestratorStage(
+                    orchestratorRun,
+                    'message_send',
+                    () => sendMultiBlockResponse(
+                        chat.id,
+                        finalResponse,
+                        assignedSystemAgentId,
+                        true,
+                        instanceName,
+                        null,
+                        responseTrace,
+                    ),
+                    {
+                        responseLength: finalResponse.length,
+                        terminalPostToolTurnPlan: true,
+                    },
+                );
+                orchestratorTimings.send_ms = sendStage.durationMs;
+            }
+
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'turn_plan_post_tool_terminal',
+                status: 'success',
+                payload: {
+                    customerNeed: postToolTurnPlan.customerNeed,
+                    expectedNextAction: postToolTurnPlan.expectedNextAction,
+                    reasons: postToolTurnPlan.reasons,
+                    procedureRuntimeSuppressed: true,
+                    toolCount: passThroughToolResults.length,
+                },
+            });
+            await logIntelligentAttendantResponse({
+                configId: autopilotConfig.id,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                modelName: 'turn-plan',
+                customerMessage: enrichedLastMessageContent || '',
+                response: finalResponse,
+                status: currentCopilotMode === 'suggest' ? 'suggested' : 'sent',
+                triggeredRule: null,
+                metadata: {
+                    terminalPostToolTurnPlan: true,
+                    procedureRuntimeSuppressed: true,
+                    customerNeed: postToolTurnPlan.customerNeed,
+                    expectedNextAction: postToolTurnPlan.expectedNextAction,
+                    reasons: postToolTurnPlan.reasons,
+                    resultToolNames: passThroughToolResults.map((result) => result.toolName),
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'success',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceLevel: 'deterministic',
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    responseSent: currentCopilotMode !== 'suggest',
+                    suggestionOnly: currentCopilotMode === 'suggest',
+                    terminalPostToolTurnPlan: true,
+                    procedureRuntimeSuppressed: true,
+                    customerNeed: postToolTurnPlan.customerNeed,
+                    toolCount: passThroughToolResults.length,
+                },
+            });
+            return;
+        }
+
+        const effectiveTurnPlan = postToolTurnPlan;
+        const turnPlanFollowUpActions = buildAutopilotTurnPlanFollowUpActions({
+            turnPlan: effectiveTurnPlan,
+            customerMessage: enrichedLastMessageContent || '',
+            enabledToolNames: turnPlanEnabledToolNames,
+            allowedToolNames: turnPolicy.allowedToolNames,
+            toolCatalog: runtimeToolCatalog,
+            toolResults: passThroughToolResults,
+        });
+        if (turnPlanFollowUpActions.length > 0) {
+            const followUpStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'tool_execution',
+                () => runRequestedAgentToolsWithStatus({
+                    workspaceId,
+                    chat,
+                    contact: sanitizedContact,
+                    systemAgentId: assignedSystemAgentId,
+                    systemAgentName: assignedSystemAgentName,
+                    autopilotConfig,
+                    turnPolicy,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: turnPlanFollowUpActions,
+                    orchestratorRunId: orchestratorRun.id,
+                    sourceMessageId,
+                }),
+                {
+                    requestedActions: turnPlanFollowUpActions.map(resolveActionToolName),
+                    turnPlanFollowUp: true,
+                    beforeResponse: true,
+                }
+            );
+            orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + followUpStage.durationMs;
+            passThroughToolResults = [...passThroughToolResults, ...followUpStage.value];
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'turn_plan_follow_up',
+                status: followUpStage.value.some((result) => result.status === 'success') ? 'success' : 'fallback',
+                durationMs: followUpStage.durationMs,
+                payload: {
+                    requestedActions: turnPlanFollowUpActions.map(resolveActionToolName),
+                    resultToolNames: followUpStage.value.map((result) => result.toolName),
+                },
+            });
+        }
+        const turnPlanRecoveryActions = buildAutopilotTurnPlanRecoveryActions({
+            turnPlan: effectiveTurnPlan,
+            customerMessage: enrichedLastMessageContent || '',
+            enabledToolNames,
+            allowedToolNames: turnPolicy.allowedToolNames,
+            toolCatalog: runtimeToolCatalog,
+            toolResults: passThroughToolResults,
+        });
+        if (turnPlanRecoveryActions.length > 0) {
+            const recoveryToolNames = turnPlanRecoveryActions.map(resolveActionToolName);
+            const recoveryAuthorization = authorizeAutopilotTurnPlanTools(
+                turnPolicy,
+                recoveryToolNames,
+                toolCoverage.safeFallbackToolNames,
+            );
+            if (recoveryAuthorization.widenedToolNames.length > 0) {
+                turnPolicy.allowedToolNames = recoveryAuthorization.allowedToolNames;
+                turnPolicy.reason = `${turnPolicy.reason}+turn_plan_recovery_tools`;
+            }
+            const recoveryStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'tool_execution',
+                () => runRequestedAgentToolsWithStatus({
+                    workspaceId,
+                    chat,
+                    contact: sanitizedContact,
+                    systemAgentId: assignedSystemAgentId,
+                    systemAgentName: assignedSystemAgentName,
+                    autopilotConfig,
+                    turnPolicy,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: turnPlanRecoveryActions,
+                    orchestratorRunId: orchestratorRun.id,
+                    sourceMessageId,
+                }),
+                {
+                    requestedActions: recoveryToolNames,
+                    turnPlanRecovery: true,
+                    beforeResponse: true,
+                },
+            );
+            orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + recoveryStage.durationMs;
+            passThroughToolResults = [...passThroughToolResults, ...recoveryStage.value];
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'turn_plan_tool_recovery',
+                status: recoveryStage.value.some((result) => result.status === 'success') ? 'success' : 'fallback',
+                durationMs: recoveryStage.durationMs,
+                payload: {
+                    requestedActions: recoveryToolNames,
+                    resultToolNames: recoveryStage.value.map((result) => result.toolName),
+                    reason: 'live_wifi_scan_failed_use_read_only_cache',
+                },
+            });
+        }
         recentToolResults = [...recentToolResults, ...passThroughToolResults];
+        if (
+            currentCopilotMode === 'auto' &&
+            hasRequiredAutopilotTurnPlanFailure(effectiveTurnPlan, passThroughToolResults)
+        ) {
+            const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
+                chatId: chat.id,
+                sourceMessageId: sourceMessageId ?? null,
+            });
+            if (!sourceMessageStillCurrent) {
+                await finishOrchestratorRun({
+                    run: orchestratorRun,
+                    status: 'skipped',
+                    timings: orchestratorTimings,
+                    intent: intentResolution.intent,
+                    confidenceScore: intentResolution.confidence,
+                    metadata: {
+                        responseSent: false,
+                        staleSourceMessage: true,
+                        requiredTurnPlanToolFailure: true,
+                    },
+                });
+                return;
+            }
+
+            const failureStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'message_send',
+                () => sendToolFailureFollowUp({
+                    chatId: chat.id,
+                    systemAgentId: assignedSystemAgentId,
+                    instanceName,
+                    toolResults: passThroughToolResults,
+                    responseTrace,
+                    deliveryKey: 'primary',
+                }),
+                {
+                    requiredTurnPlanToolFailure: true,
+                    failedToolNames: passThroughToolResults
+                        .filter((result) => result.status !== 'success')
+                        .map((result) => result.toolName),
+                },
+            );
+            orchestratorTimings.send_ms = failureStage.durationMs;
+            const finalResponse = failureStage.value
+                || 'Nao consegui concluir a consulta automatica agora. Nossa equipe vai acompanhar por aqui.';
+            const failedToolNames = passThroughToolResults
+                .filter((result) => result.status !== 'success')
+                .map((result) => result.toolName);
+            const handoffTriggered = await handoffAutopilotFailureToHuman({
+                workspaceId,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                sourceMessageId,
+                failedToolNames,
+                reason: 'required_tool_failure',
+            });
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'required_tool_failure_terminal',
+                status: 'fallback',
+                payload: {
+                    requiredToolNames: effectiveTurnPlan.requiredToolNames,
+                    failedToolNames,
+                    handoffTriggered,
+                },
+            });
+            await logIntelligentAttendantResponse({
+                configId: autopilotConfig.id,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                modelName: 'turn-plan',
+                customerMessage: enrichedLastMessageContent || '',
+                response: finalResponse,
+                status: 'sent',
+                triggeredRule: null,
+                metadata: {
+                    requiredTurnPlanToolFailure: true,
+                    handoffTriggered,
+                    turnPlan: effectiveTurnPlan,
+                    toolResults: passThroughToolResults,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'fallback',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceLevel: 'low',
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    responseSent: true,
+                    requiredTurnPlanToolFailure: true,
+                    handoffTriggered,
+                    toolCount: passThroughToolResults.length,
+                    failedToolNames,
+                },
+            });
+            return;
+        }
+        const completedTurnPlanResponse = hasSatisfiedAutopilotTurnPlan(
+            effectiveTurnPlan,
+            passThroughToolResults,
+        )
+            ? buildAutopilotTurnPlanCustomerResponse({
+                turnPlan: effectiveTurnPlan,
+                toolResults: passThroughToolResults,
+            })
+            : null;
+        if (completedTurnPlanResponse) {
+            let finalResponse = formatCustomerFacingAiResponse(completedTurnPlanResponse);
+            const completedToolActions = passThroughToolResults.map((result) => result.input);
+            const responseValidator = validateAutopilotResponse({
+                response: finalResponse,
+                fallbackReply: autopilotConfig.default_fallback_reply || '',
+                customerMessage: enrichedLastMessageContent || '',
+                chatHistory: chatHistoryForAI,
+                continuationRequiredSlots: [],
+                intentResolution,
+                slotExtraction: workflowPlan.slotExtraction,
+                plannedActions: completedToolActions,
+                toolResults: passThroughToolResults,
+                enabledToolNames,
+                availableTeams,
+                contact: sanitizedContact,
+                knowledgeCoverage,
+                source: 'workflow_tools',
+                systemAgentName: assignedSystemAgentName,
+            });
+            if (responseValidator.decision !== 'approve') {
+                finalResponse = formatCustomerFacingAiResponse(responseValidator.response);
+            }
+
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'turn_plan_completion',
+                status: 'success',
+                payload: {
+                    customerNeed: effectiveTurnPlan.customerNeed,
+                    expectedNextAction: 'respond_from_tool_result',
+                    requiredToolNames: effectiveTurnPlan.requiredToolNames,
+                    resultToolNames: passThroughToolResults.map((result) => result.toolName),
+                    responseValidator: responseValidator.metadata,
+                    suppressedValidatorActions: responseValidator.actions.map(resolveActionToolName),
+                },
+            });
+
+            const sendStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'message_send',
+                () => sendMultiBlockResponse(
+                    chat.id,
+                    finalResponse,
+                    assignedSystemAgentId,
+                    true,
+                    instanceName,
+                    null,
+                    responseTrace,
+                ),
+                {
+                    responseLength: finalResponse.length,
+                    completedTurnPlan: true,
+                    customerNeed: effectiveTurnPlan.customerNeed,
+                },
+            );
+            orchestratorTimings.send_ms = sendStage.durationMs;
+
+            await logIntelligentAttendantResponse({
+                configId: autopilotConfig.id,
+                chatId: chat.id,
+                systemAgentId: assignedSystemAgentId,
+                modelName: 'turn-plan',
+                customerMessage: enrichedLastMessageContent || '',
+                response: finalResponse,
+                status: 'sent',
+                triggeredRule: null,
+                metadata: {
+                    completedTurnPlan: true,
+                    turnPlan: effectiveTurnPlan,
+                    toolResults: passThroughToolResults,
+                    responseValidator: responseValidator.metadata,
+                    suppressedValidatorActions: responseValidator.actions.map(resolveActionToolName),
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'success',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceLevel: 'deterministic',
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    responseSent: true,
+                    completedTurnPlan: true,
+                    customerNeed: effectiveTurnPlan.customerNeed,
+                    toolCount: passThroughToolResults.length,
+                    requiredToolNames: effectiveTurnPlan.requiredToolNames,
+                    toolResults: passThroughToolResults,
+                    responseValidator: responseValidator.metadata,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            return;
+        }
+        const passThroughContinuationContext = buildToolContinuationContext(passThroughToolResults);
+        if (passThroughContinuationContext) {
+            relevantHistory = [
+                relevantHistory,
+                passThroughContinuationContext,
+            ].filter(Boolean).join('\n\n');
+        }
 
         // Prevent the static pre_response_tools return by switching to continue_llm
         workflowPlan.executionMode = 'continue_llm';
@@ -2584,6 +3363,7 @@ export async function processAutopilotForChat(
                 customerMessage: enrichedLastMessageContent || '',
                 actions: workflowPlan.actions,
                 orchestratorRunId: orchestratorRun.id,
+                sourceMessageId,
             }),
             {
                 requestedActions: workflowPlan.actions.map((action) => action.type),
@@ -2593,6 +3373,111 @@ export async function processAutopilotForChat(
         );
         orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + toolsStage.durationMs;
         let toolResults = toolsStage.value;
+        const turnPlanFollowUpActions = buildAutopilotTurnPlanFollowUpActions({
+            turnPlan,
+            customerMessage: enrichedLastMessageContent || '',
+            enabledToolNames: turnPlanEnabledToolNames,
+            allowedToolNames: turnPolicy.allowedToolNames,
+            toolCatalog: runtimeToolCatalog,
+            toolResults,
+        });
+        if (turnPlanFollowUpActions.length > 0) {
+            const followUpStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'tool_execution',
+                () => runRequestedAgentToolsWithStatus({
+                    workspaceId,
+                    chat,
+                    contact: sanitizedContact,
+                    systemAgentId: assignedSystemAgentId,
+                    systemAgentName: assignedSystemAgentName,
+                    autopilotConfig,
+                    turnPolicy,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: turnPlanFollowUpActions,
+                    orchestratorRunId: orchestratorRun.id,
+                    sourceMessageId,
+                }),
+                {
+                    requestedActions: turnPlanFollowUpActions.map(resolveActionToolName),
+                    turnPlanFollowUp: true,
+                    beforeResponse: true,
+                }
+            );
+            orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + followUpStage.durationMs;
+            toolResults = [...toolResults, ...followUpStage.value];
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'turn_plan_follow_up',
+                status: followUpStage.value.some((result) => result.status === 'success') ? 'success' : 'fallback',
+                durationMs: followUpStage.durationMs,
+                payload: {
+                    requestedActions: turnPlanFollowUpActions.map(resolveActionToolName),
+                    resultToolNames: followUpStage.value.map((result) => result.toolName),
+                },
+            });
+        }
+        const turnPlanRecoveryActions = buildAutopilotTurnPlanRecoveryActions({
+            turnPlan,
+            customerMessage: enrichedLastMessageContent || '',
+            enabledToolNames,
+            allowedToolNames: turnPolicy.allowedToolNames,
+            toolCatalog: runtimeToolCatalog,
+            toolResults: [...recentToolResults, ...toolResults],
+        });
+        if (turnPlanRecoveryActions.length > 0) {
+            const recoveryToolNames = turnPlanRecoveryActions.map(resolveActionToolName);
+            const recoveryAuthorization = authorizeAutopilotTurnPlanTools(
+                turnPolicy,
+                recoveryToolNames,
+                toolCoverage.safeFallbackToolNames,
+            );
+            if (recoveryAuthorization.widenedToolNames.length > 0) {
+                turnPolicy.allowedToolNames = recoveryAuthorization.allowedToolNames;
+                turnPolicy.reason = `${turnPolicy.reason}+turn_plan_recovery_tools`;
+            }
+            const recoveryStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'tool_execution',
+                () => runRequestedAgentToolsWithStatus({
+                    workspaceId,
+                    chat,
+                    contact: sanitizedContact,
+                    systemAgentId: assignedSystemAgentId,
+                    systemAgentName: assignedSystemAgentName,
+                    autopilotConfig,
+                    turnPolicy,
+                    customerMessage: enrichedLastMessageContent || '',
+                    actions: turnPlanRecoveryActions,
+                    orchestratorRunId: orchestratorRun.id,
+                    sourceMessageId,
+                }),
+                {
+                    requestedActions: recoveryToolNames,
+                    turnPlanRecovery: true,
+                    beforeResponse: true,
+                },
+            );
+            orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + recoveryStage.durationMs;
+            toolResults = [...toolResults, ...recoveryStage.value];
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'turn_plan_tool_recovery',
+                status: recoveryStage.value.some((result) => result.status === 'success') ? 'success' : 'fallback',
+                durationMs: recoveryStage.durationMs,
+                payload: {
+                    requestedActions: recoveryToolNames,
+                    resultToolNames: recoveryStage.value.map((result) => result.toolName),
+                    reason: 'live_wifi_scan_failed_use_read_only_cache',
+                },
+            });
+        }
+        const turnPlanResponse = buildAutopilotTurnPlanCustomerResponse({
+            turnPlan,
+            toolResults,
+        });
+        const mcpResponse = buildMcpCustomerResponseFromToolResults(toolResults) ||
+            buildMcpResponseFromToolResults(toolResults);
         const sgpResponse = buildSgpResponseFromToolResults(
             toolResults,
             focusedOperationalContext
@@ -2602,6 +3487,8 @@ export async function processAutopilotForChat(
             'Vou consultar o sistema para verificar status, cadastro, fatura ou contrato.'
         );
         let finalResponse = formatCustomerFacingAiResponse(
+            turnPlanResponse ||
+            mcpResponse ||
             sgpResponse ||
             toolFailureResponse ||
             autopilotConfig.default_fallback_reply?.trim() ||
@@ -2647,7 +3534,9 @@ export async function processAutopilotForChat(
                 finalResponse,
                 assignedSystemAgentId,
                 true,
-                instanceName
+                instanceName,
+                null,
+                responseTrace
             ),
             { responseLength: finalResponse.length, workflowEngine: true }
         );
@@ -2668,6 +3557,7 @@ export async function processAutopilotForChat(
                     customerMessage: enrichedLastMessageContent || '',
                     actions: responseValidator.actions,
                     orchestratorRunId: orchestratorRun.id,
+                    sourceMessageId,
                 }),
                 {
                     requestedActions: responseValidator.actions.map((action) => action.type),
@@ -2683,6 +3573,7 @@ export async function processAutopilotForChat(
                 instanceName,
                 toolResults: validatorToolsStage.value,
                 previousResponse: finalResponse,
+                responseTrace,
             });
         }
 
@@ -3041,7 +3932,7 @@ export async function processAutopilotForChat(
                     procedureRuntimeSource,
                     procedureGraphId: procedureGraph?.id || null,
                     procedureStepLabel: currentProcedureStep?.label || null,
-                    procedureActions: procedureActionsForLedger.map((action) => action.type),
+                    procedureActions: procedureActionsForLedger.map(resolveActionToolName),
                 },
             });
             await recordAgentDecisionLedger(procedureAgentDecision.ledgerEntry);
@@ -3096,30 +3987,55 @@ export async function processAutopilotForChat(
                         enrichedLastMessageContent || '',
                     ].filter(Boolean).join('\n'),
                 });
-                procedureExecutedActions.push(...preToolActions.map((action) => action.type));
+                procedureExecutedActions.push(...preToolActions.map(resolveActionToolName));
 
-                const preToolStage = await timeOrchestratorStage(
-                    orchestratorRun,
-                    'tool_execution',
-                    () => runRequestedAgentToolsWithStatus({
-                        workspaceId,
-                        chat,
-                        contact: sanitizedContact,
-                        systemAgentId: assignedSystemAgentId,
-                        systemAgentName: assignedSystemAgentName,
-                        autopilotConfig,
-                        turnPolicy,
-                        customerMessage: enrichedLastMessageContent || '',
-                        actions: preToolActions,
-                        orchestratorRunId: orchestratorRun?.id,
-                    }),
-                    {
-                        procedureRuntime: true,
-                        requestedActions: preToolActions.map((action) => action.type),
-                    }
+                const procedureReusePlan = planProcedureToolReuse({
+                    actions: preToolActions,
+                    currentTurnResults: passThroughToolResults,
+                    toolCatalog: runtimeToolCatalog,
+                });
+                let executedPreToolResults: AgentToolExecutionResult[] = [];
+                if (procedureReusePlan.actionsToExecute.length > 0) {
+                    const preToolStage = await timeOrchestratorStage(
+                        orchestratorRun,
+                        'tool_execution',
+                        () => runRequestedAgentToolsWithStatus({
+                            workspaceId,
+                            chat,
+                            contact: sanitizedContact,
+                            systemAgentId: assignedSystemAgentId,
+                            systemAgentName: assignedSystemAgentName,
+                            autopilotConfig,
+                            turnPolicy,
+                            customerMessage: enrichedLastMessageContent || '',
+                            actions: procedureReusePlan.actionsToExecute,
+                            orchestratorRunId: orchestratorRun?.id,
+                            sourceMessageId,
+                        }),
+                        {
+                            procedureRuntime: true,
+                            requestedActions: procedureReusePlan.actionsToExecute.map(resolveActionToolName),
+                            reusedActions: procedureReusePlan.reusedToolNames,
+                        }
+                    );
+                    orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + preToolStage.durationMs;
+                    executedPreToolResults = preToolStage.value;
+                }
+                if (procedureReusePlan.reusedToolNames.length > 0) {
+                    await recordOrchestratorEvent({
+                        run: orchestratorRun,
+                        kind: 'procedure_tool_reuse',
+                        status: 'success',
+                        payload: {
+                            toolNames: procedureReusePlan.reusedToolNames,
+                            source: 'current_turn',
+                        },
+                    });
+                }
+                const preToolResults = completeProcedureToolReuse(
+                    procedureReusePlan,
+                    executedPreToolResults,
                 );
-                orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + preToolStage.durationMs;
-                const preToolResults = preToolStage.value;
                 procedureToolResults.push(...preToolResults);
 
                 if (preToolResults.length > 0) {
@@ -3230,7 +4146,15 @@ export async function processAutopilotForChat(
                             configName: autopilotConfig.name,
                     });
                 } else {
-                    await sendMultiBlockResponse(chat.id, finalResponse, assignedSystemAgentId, true, instanceName);
+                    await sendMultiBlockResponse(
+                        chat.id,
+                        finalResponse,
+                        assignedSystemAgentId,
+                        true,
+                        instanceName,
+                        null,
+                        responseTrace,
+                    );
                 }
 
                 await logIntelligentAttendantResponse({
@@ -3700,6 +4624,7 @@ export async function processAutopilotForChat(
                             customerMessage: enrichedLastMessageContent || '',
                             actions: preResponseActions,
                             orchestratorRunId: orchestratorRun.id,
+                            sourceMessageId,
                         }),
                         { requestedActions: preResponseActions.map((action) => action.type), beforeResponse: true }
                     );
@@ -3729,6 +4654,7 @@ export async function processAutopilotForChat(
                                 customerMessage: enrichedLastMessageContent || '',
                                 actions: [deterministicProcedureAction],
                                 orchestratorRunId: orchestratorRun.id,
+                                sourceMessageId,
                             }),
                             {
                                 requestedActions: [deterministicProcedureAction.type],
@@ -3809,6 +4735,7 @@ export async function processAutopilotForChat(
                                         customerMessage: enrichedLastMessageContent || '',
                                         actions: continuationActions,
                                         orchestratorRunId: orchestratorRun.id,
+                                        sourceMessageId,
                                     }),
                                     {
                                         requestedActions: continuationActions.map((action) => action.type),
@@ -3978,7 +4905,8 @@ export async function processAutopilotForChat(
                         agentId,
                         true,
                         instanceName,
-                        aiMessageBlocks
+                        aiMessageBlocks,
+                        responseTrace
                     ),
                     { responseLength: finalResponse.length }
                 );
@@ -3997,6 +4925,7 @@ export async function processAutopilotForChat(
                         customerMessage: enrichedLastMessageContent || '',
                         actions: finalPostResponseActions,
                         orchestratorRunId: orchestratorRun.id,
+                        sourceMessageId,
                     }),
                     { requestedActions: finalPostResponseActions.map((action) => action.type), afterResponse: true }
                 );
@@ -4008,6 +4937,7 @@ export async function processAutopilotForChat(
                     instanceName,
                     toolResults: toolsStage.value,
                     previousResponse: finalResponse,
+                    responseTrace,
                 });
                 await logIntelligentAttendantResponse({
                     configId: autopilotConfig.id,
@@ -4137,6 +5067,7 @@ export async function processAutopilotForChat(
                         customerMessage: enrichedLastMessageContent || '',
                         actions: fallbackActions,
                         orchestratorRunId: orchestratorRun.id,
+                        sourceMessageId,
                     }),
                     { requestedActions: fallbackActions.map((action) => action.type), noLlmResponse: true }
                 )).value
@@ -4157,7 +5088,9 @@ export async function processAutopilotForChat(
                         emptyResponseFallback,
                         assignedSystemAgentId,
                         true,
-                        instanceName
+                        instanceName,
+                        null,
+                        responseTrace
                     ),
                     { responseLength: emptyResponseFallback.length, fallbackReason: 'empty_llm_response' }
                 );
@@ -4204,9 +5137,31 @@ export async function processAutopilotForChat(
             });
         }
     } catch (error) {
+        if (error instanceof AutopilotSourceSupersededError) {
+            console.log(
+                `[AUTOPILOT_STALE_GUARD] Mensagem ${sourceMessageId || 'sem-id'} do chat ${chat.id} foi substituida durante o processamento.`,
+            );
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: 'skipped',
+                timings: orchestratorTimings,
+                intent: intentResolution.intent,
+                confidenceScore: intentResolution.confidence,
+                metadata: {
+                    responseSent: false,
+                    staleSourceMessage: true,
+                    staleGuardCode: error.code,
+                    intent: intentResolution.intent,
+                    workflowId: intentResolution.workflowId,
+                    ragStrategy,
+                    knowledgeCoverage,
+                },
+            });
+            return;
+        }
         console.error('[AUTOPILOT_SERVICE] Erro ao processar:', error);
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (currentCopilotMode === 'auto') {
+        if (currentCopilotMode === 'auto' && !isProviderDeliveryError(error)) {
             const fallbackReason = errorMessage.includes('llm response timed out')
                 ? 'llm_timeout'
                 : 'autopilot_processing_error';
@@ -4223,7 +5178,12 @@ export async function processAutopilotForChat(
                         automaticFallback,
                         assignedSystemAgentId,
                         true,
-                        instanceName
+                        instanceName,
+                        null,
+                        {
+                            ...responseTrace,
+                            deliveryKey: 'runtime-fallback',
+                        }
                     ),
                     { responseLength: automaticFallback.length, fallbackReason }
                 );
@@ -4304,8 +5264,14 @@ export async function processAutopilotForChat(
                 knowledgeCoverage,
             },
         });
+        throw error instanceof Error ? error : new Error(errorMessage);
     }
     } finally {
         await broadcastAiProcessing(chat.id, 'ai_processing_stop');
+    }
+    } finally {
+        await chatLease.release().catch((error) => {
+            console.error(`[AUTOPILOT_CHAT_LEASE] Falha ao liberar lease do chat ${chat.id}:`, error);
+        });
     }
 }

@@ -5,6 +5,11 @@ export type EvolutionApiClientConfig = {
   api_key: string;
 };
 
+function getEvolutionApiTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.EVOLUTION_API_TIMEOUT_MS || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30_000;
+}
+
 export async function fetchEvolutionAPI(
   endpoint: string,
   apiConfig: EvolutionApiClientConfig,
@@ -20,14 +25,22 @@ export async function fetchEvolutionAPI(
   const url = `${baseUrl}${endpoint}`;
 
   try {
-    const response = await resilientFetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: apiConfig.api_key,
-        ...options.headers,
+    const response = await resilientFetch(
+      url,
+      {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: apiConfig.api_key,
+          ...options.headers,
+        },
       },
-    });
+      {
+        timeoutMs: getEvolutionApiTimeoutMs(),
+        idempotent: options.method === 'GET' || options.method === 'HEAD',
+        serviceKey: `evolution:${baseUrl}`,
+      },
+    );
 
     if (!response.ok) {
       const errorBody = await response.text();

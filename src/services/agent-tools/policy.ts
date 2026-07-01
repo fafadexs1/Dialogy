@@ -3,6 +3,8 @@ import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext
 import { getMcpWorkspaceConfig } from '@/services/mcp/store';
 import { parseQualifiedMcpToolName } from '@/services/mcp/client';
 import type { McpToolConfig } from '@/services/mcp/types';
+import { fingerprintToolAction } from './action-fingerprint';
+import { classifyMcpToolSafety } from '@/services/mcp/tool-safety';
 
 export type AgentToolPolicyRisk = 'low' | 'medium' | 'high';
 
@@ -26,23 +28,6 @@ function requestedToolName(action: AgentToolAction): string {
   return action.type === 'mcp_call_tool'
     ? String(action.payload?.toolName || '').trim()
     : action.type;
-}
-
-function classifyMcpTool(toolName: string, tool?: McpToolConfig | null): AgentToolPolicyRisk {
-  if (tool?.annotations?.destructiveHint) return 'high';
-  if (tool?.annotations?.readOnlyHint) return 'low';
-
-  const normalized = normalize(`${toolName} ${tool?.title || ''} ${tool?.description || ''}`);
-  if (/\b(reboot|restart|reinici|reset|delete|remove|cancel|terminate|factory|erase|drop)\b/.test(normalized)) {
-    return 'high';
-  }
-  if (/\b(get|find|list|view|read|fetch|search|lookup|status|summary|consult|consulta|localiz|verific)\b/.test(normalized)) {
-    return 'low';
-  }
-  if (/\b(change|update|alter|troca|senha|password|credential|write|create|send|apply)\b/.test(normalized)) {
-    return 'medium';
-  }
-  return 'medium';
 }
 
 function confirmationTerms(toolName: string): RegExp {
@@ -75,20 +60,6 @@ function hasMatchingRecentConfirmationRequest(
   const normalized = normalize(latestAgentMessage.content);
   const asksForConfirmation = /\b(posso|confirme|confirmar|confirmacao|autoriza|autorizacao|prosseguir|agora)\b/.test(normalized);
   return asksForConfirmation && confirmationTerms(toolName).test(normalized);
-}
-
-function hasExplicitConfirmation(
-  customerMessage: string,
-  toolName: string,
-  recentMessages?: AgentToolRuntimeContext['recentCustomerVisibleMessages'],
-): boolean {
-  const normalized = normalize(customerMessage);
-  const affirmative = /\b(sim|confirmo|autorizo|autorizado|pode|pode sim|ok|okay|prosseguir|prossiga|faca|faz|quero)\b/.test(normalized);
-  if (!affirmative) return false;
-  if (confirmationTerms(toolName).test(normalized)) return true;
-
-  return isShortAffirmativeConfirmation(customerMessage) &&
-    hasMatchingRecentConfirmationRequest(recentMessages, toolName);
 }
 
 function policyReject(riskLevel: AgentToolPolicyRisk, code: string, reason: string): AgentToolPolicyDecision {
@@ -162,7 +133,7 @@ export async function evaluateAgentToolPolicy(input: {
   const definition = getAgentToolDefinition(input.action.type);
   const mcpTool = await resolveMcpTool(input.context, input.action);
   const riskLevel = input.action.type === 'mcp_call_tool'
-    ? classifyMcpTool(toolName, mcpTool)
+    ? classifyMcpToolSafety(toolName, mcpTool).riskLevel
     : definition?.riskLevel || 'medium';
 
   const failedDependency = (input.previousResults || [])
@@ -179,12 +150,11 @@ export async function evaluateAgentToolPolicy(input: {
   if (actionContextRejection) return actionContextRejection;
 
   if (requiresExplicitConfirmation(input.action, definition, riskLevel) &&
-      !hasExplicitConfirmation(
-        input.context.customerMessage,
-        toolName,
-        input.context.recentCustomerVisibleMessages,
-      )) {
-    if (isShortAffirmativeConfirmation(input.context.customerMessage)) {
+      input.context.confirmedActionFingerprint !== fingerprintToolAction(input.action)) {
+    if (
+      isShortAffirmativeConfirmation(input.context.customerMessage) &&
+      !hasMatchingRecentConfirmationRequest(input.context.recentCustomerVisibleMessages, toolName)
+    ) {
       return policyReject(
         riskLevel,
         'confirmation_context_missing',

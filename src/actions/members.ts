@@ -7,13 +7,7 @@ import type { Role, WorkspaceMember } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
-
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    const res = await db.query(`
-        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
-    `, [userId, workspaceId]);
-    return (res.rowCount || 0) > 0;
-}
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 export async function getWorkspaceMembers(workspaceId: string): Promise<{ members: WorkspaceMember[], error?: string }> {
     const supabase = await createClient();
@@ -21,7 +15,7 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{ member
     if (!user) return { members: [], error: "Usuário não autenticado." };
 
     // Check if the user has permission to view members
-    if (!await hasPermission(user.id, workspaceId, 'members:view')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'members:view')) {
         return { members: [], error: "Acesso não autorizado." };
     }
 
@@ -78,7 +72,7 @@ export async function removeMemberAction(memberId: string, workspaceId: string):
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, workspaceId, 'members:remove')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'members:remove')) {
         return { success: false, error: "Você não tem permissão para remover membros." };
     }
 
@@ -120,7 +114,7 @@ export async function updateMemberRoleAction(
         return { success: false, error: "Dados insuficientes para atualizar a função." };
     }
 
-    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para alterar funções de membros." };
     }
 

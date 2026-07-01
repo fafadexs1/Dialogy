@@ -3,6 +3,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { MenuToggleIcon } from '@/components/ui/menu-toggle-icon';
+import { LanguageToggle } from '@/components/ui/language-toggle';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { BrandMark } from '@/components/landing/BrandMark';
@@ -130,6 +131,7 @@ export function Header() {
 
 				{/* Right: Auth Actions */}
 				<div className="flex flex-1 items-center justify-end gap-4">
+					<LanguageToggle />
 					<div className="hidden items-center gap-4 lg:flex">
 						<Link href="/login" className="text-sm font-medium text-white/70 hover:text-white transition-colors">
 							Login

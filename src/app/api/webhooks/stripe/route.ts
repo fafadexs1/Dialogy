@@ -23,6 +23,14 @@ function normalizeStripeStatus(status?: string | null) {
     return normalized || 'inactive';
 }
 
+function getInvoiceSubscriptionId(invoice: any): string | null {
+    const subscription =
+        invoice?.subscription ??
+        invoice?.parent?.subscription_details?.subscription ??
+        null;
+    return typeof subscription === 'string' ? subscription : subscription?.id || null;
+}
+
 async function updateBillingStatusBySubscriptionId(subscriptionId: string | null | undefined, status: string) {
     if (!subscriptionId) {
         return null;
@@ -158,6 +166,10 @@ export async function POST(req: NextRequest) {
                 const workspaceId = session.metadata?.workspaceId;
                 const planId = session.metadata?.planId;
                 const subscriptionId = session.subscription as string | null;
+                const customerId =
+                    typeof session.customer === 'string'
+                        ? session.customer
+                        : session.customer?.id || null;
 
                 logToFile(`Checkout Session Completed: ID=${session.id}, Metadata=${JSON.stringify(session.metadata)}`);
 
@@ -173,15 +185,16 @@ export async function POST(req: NextRequest) {
 
                     await db.query(
                         `
-                            INSERT INTO billing_info (workspace_id, plan, status, stripe_subscription_id, updated_at)
-                            VALUES ($1, $2, $3, $4, NOW())
+                            INSERT INTO billing_info (workspace_id, plan, status, stripe_customer_id, stripe_subscription_id, updated_at)
+                            VALUES ($1, $2, $3, $4, $5, NOW())
                             ON CONFLICT (workspace_id) DO UPDATE
                             SET plan = $2,
                                 status = $3,
-                                stripe_subscription_id = $4,
+                                stripe_customer_id = COALESCE($4, billing_info.stripe_customer_id),
+                                stripe_subscription_id = $5,
                                 updated_at = NOW()
                         `,
-                        [workspaceId, planId, billingStatus, subscriptionId]
+                        [workspaceId, planId, billingStatus, customerId, subscriptionId]
                     );
 
                     await db.query(
@@ -210,27 +223,49 @@ export async function POST(req: NextRequest) {
                     (await updateBillingStatusBySubscriptionId(subscription.id, mappedStatus)) ||
                     workspaceId;
 
+                const planId = subscription.metadata?.planId;
+                if (resolvedWorkspaceId && planId) {
+                    const planType = planId as PlanType;
+                    const monthlyChats = Number(subscription.metadata?.monthlyChats || 0) || undefined;
+                    await db.query(
+                        `UPDATE billing_info
+                         SET plan = $1, status = $2, updated_at = NOW()
+                         WHERE workspace_id = $3`,
+                        [planId, mappedStatus, resolvedWorkspaceId]
+                    );
+                    await db.query(
+                        `UPDATE workspaces
+                         SET custom_limits = $1, updated_at = NOW()
+                         WHERE id = $2`,
+                        [JSON.stringify(buildPlanLimits(planType, monthlyChats)), resolvedWorkspaceId]
+                    );
+                }
+
                 logToFile(`Subscription ${subscription.id} updated to ${mappedStatus} for workspace ${resolvedWorkspaceId}`);
                 break;
             }
 
+            case 'invoice.paid':
             case 'invoice.payment_succeeded':
-            case 'invoice.payment_failed': {
+            case 'invoice.payment_failed':
+            case 'invoice.marked_uncollectible': {
                 const invoice = event.data.object as any;
-                const subscriptionId =
-                    typeof invoice.subscription === 'string'
-                        ? invoice.subscription
-                        : invoice.subscription?.id;
+                const subscriptionId = getInvoiceSubscriptionId(invoice);
                 const customerId =
                     typeof invoice.customer === 'string'
                         ? invoice.customer
                         : invoice.customer?.id;
-                const invoiceStatus = event.type === 'invoice.payment_succeeded' ? 'active' : 'past_due';
+                const invoiceStatus =
+                    event.type === 'invoice.payment_succeeded' || event.type === 'invoice.paid'
+                        ? 'active'
+                        : event.type === 'invoice.marked_uncollectible'
+                            ? 'unpaid'
+                            : 'past_due';
 
                 resolvedWorkspaceId =
                     (await updateBillingStatusBySubscriptionId(subscriptionId, invoiceStatus)) ||
                     (await resolveWorkspaceByStripeCustomer(customerId, invoiceStatus, subscriptionId));
-                if (event.type === 'invoice.payment_succeeded') {
+                if (event.type === 'invoice.payment_succeeded' || event.type === 'invoice.paid') {
                     const referralResult = await recordReferralBonusForInvoice(invoice, resolvedWorkspaceId);
                     logToFile(`Referral ledger result for invoice ${invoice.id}: ${JSON.stringify(referralResult)}`);
                 }

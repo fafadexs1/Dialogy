@@ -31,14 +31,21 @@ import { buildRagLabCases, summarizeRagLabResults, type RagLabCaseResult, type R
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { filterKnowledgeDocumentsForScope, resolveActiveFlowIntentScope } from '@/services/autopilot/flow-routing';
 import { isAllowedAutopilotModel, resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
-import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
+import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
+import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
 import { normalizeGoogleAiModelId } from '@/lib/ai-models';
 import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-rewrite';
 import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
 import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
 import { resolveAllowedKnowledgeDocumentIds } from '@/services/autopilot/turn-policy';
 import { auditAutopilotFlowGraph, summarizeFlowAuditIssues } from '@/services/autopilot/flow-audit';
+import {
+    analyzeAutopilotToolCoverage,
+    isAutopilotToolCoveragePublishBlocked,
+    summarizeAutopilotToolCoverageBlockers,
+} from '@/services/autopilot/tool-coverage';
+import { selectFlowBuilderTools } from '@/services/autopilot/flow-builder-tool-scope';
 import { migrateAutopilotFlowGraphToV2 } from '@/services/autopilot/flow-v2';
 import { detectAndPersistCausalPatternsForWorkspace } from '@/services/autopilot/causal-patterns';
 import { reviewCausalPattern, type CausalPatternReviewDecision } from '@/services/autopilot/causal-pattern-review';
@@ -67,11 +74,11 @@ import {
 } from '@/services/autopilot/causal-pattern-apply';
 import { normalizeToolSelectionScoreWeights, recordAgentScoreHistory } from '@/services/autopilot/score-history';
 import { importEcosystemPatternForWorkspace } from '@/services/autopilot/ecosystem-patterns';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
-    const res = await db.query('SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]);
-    return (res.rowCount ?? 0) > 0;
+    return hasWorkspacePermission(userId, workspaceId, 'automations:manage');
 }
 
 async function ensureAutopilotToolColumns(): Promise<void> {
@@ -609,7 +616,7 @@ export async function improveAutopilotKnowledgeDocument(
 
     try {
         const configRes = await db.query(
-            `SELECT id, workspace_id, gemini_api_key
+            `SELECT id, workspace_id, gemini_api_key, enabled_tool_names
              FROM autopilot_configs
              WHERE id = $1
              LIMIT 1`,
@@ -727,6 +734,37 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
     }
 }
 
+async function listWorkspaceAgentToolCatalog(workspaceId: string): Promise<AgentToolCatalogItem[]> {
+    const mcpTools = await listMcpToolsForWorkspace(workspaceId);
+    const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools.map((tool) => {
+        const safety = classifyMcpToolSafety(tool.qualifiedName, tool);
+        return {
+            name: tool.qualifiedName as AgentToolCatalogItem['name'],
+            version: 'mcp',
+            description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
+            class: safety.class,
+            riskLevel: safety.riskLevel,
+            sideEffect: safety.sideEffect,
+            idempotent: safety.idempotent,
+            timeoutMs: resolveMcpToolTimeoutMs(),
+            maxAttempts: 1,
+            requiresHumanApproval: safety.requiresHumanApproval,
+            customerVisible: true,
+            allowedIntents: [],
+            requiredSlots: [],
+            fallbackAction: 'handoff',
+            source: 'mcp',
+            enabledByDefault: false,
+            serverId: tool.serverId,
+            serverName: tool.serverName,
+            inputSchema: tool.inputSchema || null,
+            outputSchema: tool.outputSchema || null,
+        };
+    });
+
+    return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
+}
+
 export async function getAgentToolCatalogAction(workspaceId: string) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -738,31 +776,7 @@ export async function getAgentToolCatalogAction(workspaceId: string) {
         return { tools: [], error: 'Acesso nÃ£o autorizado.' };
     }
 
-    const mcpTools = await listMcpToolsForWorkspace(workspaceId);
-    const mcpCatalogItems = mcpTools.map((tool) => ({
-        name: tool.qualifiedName as any,
-        version: 'mcp',
-        description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
-        class: tool.annotations?.readOnlyHint ? 'read_only' as const : 'retrieval' as const,
-        riskLevel: tool.annotations?.destructiveHint ? 'high' as const : 'medium' as const,
-        sideEffect: tool.annotations?.destructiveHint ? 'high' as const : tool.annotations?.readOnlyHint ? 'none' as const : 'medium' as const,
-        idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
-        timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
-        maxAttempts: 1,
-        requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
-        customerVisible: true,
-        allowedIntents: [],
-        requiredSlots: [],
-        fallbackAction: 'handoff' as const,
-        source: 'mcp' as const,
-        enabledByDefault: false,
-        serverId: tool.serverId,
-        serverName: tool.serverName,
-        inputSchema: tool.inputSchema || null,
-        outputSchema: null,
-    }));
-
-    return { tools: [...listAgentToolCatalogItems(), ...mcpCatalogItems] };
+    return { tools: await listWorkspaceAgentToolCatalog(workspaceId) };
 }
 
 export async function generateAutopilotFlowWithAi(input: {
@@ -770,6 +784,7 @@ export async function generateAutopilotFlowWithAi(input: {
     conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
     currentGraph?: AutopilotFlowGraph | null;
     currentSystemPrompt?: string | null;
+    enabledToolNames?: string[] | null;
     model?: string | null;
 }): Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }> {
     const supabase = await createClient();
@@ -778,7 +793,7 @@ export async function generateAutopilotFlowWithAi(input: {
 
     try {
         const configRes = await db.query(
-            `SELECT id, workspace_id, gemini_api_key
+            `SELECT id, workspace_id, gemini_api_key, enabled_tool_names
              FROM autopilot_configs
              WHERE id = $1
              LIMIT 1`,
@@ -804,6 +819,11 @@ export async function generateAutopilotFlowWithAi(input: {
             getAgentToolCatalogAction(workspaceId),
         ]);
         if (catalog.error) return { proposal: null, error: catalog.error };
+        const scopedTools = selectFlowBuilderTools({
+            catalog: catalog.tools,
+            requestedEnabledToolNames: input.enabledToolNames,
+            persistedEnabledToolNames: config.enabled_tool_names,
+        });
 
         let targetModel = runtime.model;
         if (input.model) {
@@ -815,7 +835,7 @@ export async function generateAutopilotFlowWithAi(input: {
             conversation,
             currentGraph: input.currentGraph || null,
             currentSystemPrompt: input.currentSystemPrompt || '',
-            tools: catalog.tools,
+            tools: scopedTools,
             model: targetModel,
             apiKey: config.gemini_api_key || runtime.workspaceGeminiApiKey,
         });
@@ -1357,6 +1377,20 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 success: false,
                 error: summarizeFlowAuditIssues(flowAudit.issues)
                     || 'Fluxo possui problemas criticos antes de publicar.',
+            };
+        }
+        const toolCatalog = await listWorkspaceAgentToolCatalog(currentWorkspaceId);
+        const toolCoverage = analyzeAutopilotToolCoverage({
+            graph: snapshot.flow_graph,
+            enabledToolNames: snapshot.enabled_tool_names,
+            toolCatalog,
+        });
+        if (isAutopilotToolCoveragePublishBlocked(toolCoverage)) {
+            await client.query('ROLLBACK');
+            return {
+                success: false,
+                error: summarizeAutopilotToolCoverageBlockers(toolCoverage)
+                    || 'Fluxo possui ferramentas habilitadas sem branch seguro.',
             };
         }
 

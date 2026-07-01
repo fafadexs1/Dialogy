@@ -7,22 +7,16 @@ import type { SystemAgent } from '@/lib/types';
 import { randomBytes } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 const DEFAULT_SYSTEM_AGENT_AVATAR_URL = '/integration-fallback.svg';
-
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    // For now, let's assume any logged in user can manage agents.
-    // Replace with actual permission check later.
-    const res = await db.query(`SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2`, [userId, workspaceId]);
-    return (res.rowCount || 0) > 0;
-}
 
 export async function getSystemAgents(workspaceId: string): Promise<{ agents: SystemAgent[] | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { agents: null, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'automations:manage')) {
         return { agents: null, error: "Acesso não autorizado." };
     }
 
@@ -55,7 +49,7 @@ export async function createSystemAgent(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'automations:manage')) {
         return { success: false, error: "Você não tem permissão para criar agentes." };
     }
 
@@ -149,7 +143,7 @@ export async function updateSystemAgent(
         if ((agentRes.rowCount || 0) === 0) return { success: false, error: 'Agente não encontrado.' };
         const workspaceId = agentRes.rows[0].workspace_id;
 
-        if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
+        if (!await hasWorkspacePermission(user.id, workspaceId, 'automations:manage')) {
             return { success: false, error: "Você não tem permissão para editar agentes." };
         }
 
@@ -239,7 +233,7 @@ export async function deleteSystemAgent(agentId: string): Promise<{ success: boo
         if ((agentRes.rowCount || 0) === 0) return { success: false, error: 'Agente não encontrado.' };
         const workspaceId = agentRes.rows[0].workspace_id;
 
-        if (!await hasPermission(user.id, workspaceId, 'automations:manage')) {
+        if (!await hasWorkspacePermission(user.id, workspaceId, 'automations:manage')) {
             return { success: false, error: "Você não tem permissão para remover agentes." };
         }
 

@@ -6,14 +6,14 @@ import { getPlan, PlanType, PlanLimits, normalizePlanLimits } from '@/lib/plans'
  * The workspace cannot create new chats, connect channels, or use any paid features.
  * They can still LOG IN and VIEW existing data, but cannot operate.
  */
-const BLOCKED_STATUSES = ['canceled', 'cancelled', 'unpaid', 'incomplete_expired'];
+const BLOCKED_STATUSES = ['past_due', 'canceled', 'cancelled', 'unpaid', 'incomplete_expired', 'paused'];
 
 /**
  * Billing statuses that are in a grace period — the customer still has FULL access
  * to their current plan, but will be blocked if payment is not resolved.
  * Stripe typically retries 3 times over ~7 days before canceling.
  */
-const GRACE_STATUSES = ['past_due', 'incomplete'];
+const GRACE_STATUSES = ['incomplete'];
 
 /**
  * Frozen limits: used when a workspace is blocked due to non-payment.
@@ -79,14 +79,14 @@ const FROZEN_LIMITS: PlanLimits = {
     api: false,
 };
 
-export type BillingStatus = 'active' | 'trialing' | 'past_due' | 'canceled' | 'unpaid' | 'incomplete' | 'incomplete_expired' | 'inactive' | null;
+export type BillingStatus = 'active' | 'trialing' | 'past_due' | 'canceled' | 'unpaid' | 'incomplete' | 'incomplete_expired' | 'paused' | 'inactive' | null;
 
 export function isBillingBlocked(status: BillingStatus): boolean {
-    return BLOCKED_STATUSES.includes(status || '');
+    return BLOCKED_STATUSES.includes((status || '').toLowerCase());
 }
 
 export function isBillingGrace(status: BillingStatus): boolean {
-    return GRACE_STATUSES.includes(status || '');
+    return GRACE_STATUSES.includes((status || '').toLowerCase());
 }
 
 export async function getWorkspaceBillingStatus(workspaceId: string): Promise<BillingStatus> {

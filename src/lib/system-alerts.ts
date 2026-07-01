@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+export const GLOBAL_ALERT_REALTIME_TOPIC = 'system:global-alert';
+export const GLOBAL_ALERT_REALTIME_EVENT = 'global_alert_changed';
+export const GLOBAL_ALERT_BROWSER_CHANNEL = 'dialogy:global-alert';
+export const GLOBAL_ALERT_BROWSER_STORAGE_KEY = 'dialogy:global-alert:update';
+
 const AlertLinkSchema = z.string().trim().max(2048, 'O link do comunicado e muito longo.').refine((value) => {
     if (!value) return true;
     if (value.startsWith('/')) return true;

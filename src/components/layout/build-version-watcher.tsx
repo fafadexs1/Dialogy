@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { useToast } from '@/hooks/use-toast';
 
 const CHANNEL_NAME = 'dialogy-build-sync';
 const STORAGE_KEY = 'dialogy-build-id';
@@ -13,13 +15,24 @@ function getCurrentBuildId(): string {
 }
 
 export function BuildVersionWatcher() {
+  const { toast } = useToast();
+  const router = useRouter();
   const currentBuildIdRef = useRef<string>(getCurrentBuildId());
-  const reloadTriggeredRef = useRef(false);
+  const updateNotifiedRef = useRef(false);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const softRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const triggerReload = useCallback((reason: string, serverBuildId?: string) => {
-    if (reloadTriggeredRef.current) return;
-    reloadTriggeredRef.current = true;
+  const queueSoftRefresh = useCallback(() => {
+    if (softRefreshTimeoutRef.current) return;
+    softRefreshTimeoutRef.current = setTimeout(() => {
+      softRefreshTimeoutRef.current = null;
+      router.refresh();
+    }, 750);
+  }, [router]);
+
+  const notifyUpdateAvailable = useCallback((reason: string, serverBuildId?: string) => {
+    if (updateNotifiedRef.current) return;
+    updateNotifiedRef.current = true;
     try {
       if (serverBuildId) {
         localStorage.setItem(STORAGE_KEY, serverBuildId);
@@ -28,13 +41,26 @@ export function BuildVersionWatcher() {
       /* ignore storage failures */
     }
     if (channelRef.current) {
-      channelRef.current.postMessage({ type: 'BUILD_RELOAD', buildId: serverBuildId, reason });
+      channelRef.current.postMessage({ type: 'BUILD_UPDATE_AVAILABLE', buildId: serverBuildId, reason });
     }
-    window.location.reload();
+    queueSoftRefresh();
+
+    toast({
+      title: 'Dialogy sincronizando',
+      description: 'Detectamos uma atualizacao. A tela sera sincronizada em segundo plano, sem recarregar a pagina.',
+    });
+  }, [queueSoftRefresh, toast]);
+
+  useEffect(() => {
+    return () => {
+      if (softRefreshTimeoutRef.current) {
+        clearTimeout(softRefreshTimeoutRef.current);
+      }
+    };
   }, []);
 
   const checkBuild = useCallback(async () => {
-    if (reloadTriggeredRef.current) return;
+    if (updateNotifiedRef.current) return;
     try {
       const res = await fetch('/api/build-id', {
         method: 'GET',
@@ -42,11 +68,18 @@ export function BuildVersionWatcher() {
         headers: { 'x-dialogy-build-check': '1' },
       });
 
-      const serverBuildId = res.headers.get('x-build-id') || (await res.clone().json()).buildId;
+      let serverBuildId = res.headers.get('x-build-id');
+      if (!serverBuildId) {
+        try {
+          serverBuildId = (await res.clone().json())?.buildId;
+        } catch {
+          serverBuildId = null;
+        }
+      }
       if (!serverBuildId) return;
 
       if (serverBuildId !== currentBuildIdRef.current) {
-        triggerReload('build-mismatch', serverBuildId);
+        notifyUpdateAvailable('build-mismatch', serverBuildId);
         return;
       }
 
@@ -55,18 +88,19 @@ export function BuildVersionWatcher() {
     } catch (err) {
       console.debug('[BUILD_WATCHER] Failed to check build id', err);
     }
-  }, [triggerReload]);
+  }, [notifyUpdateAvailable]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     channelRef.current = new BroadcastChannel(CHANNEL_NAME);
     channelRef.current.onmessage = (event) => {
       const { data } = event;
-      if (data?.type === 'BUILD_RELOAD' && data.buildId !== currentBuildIdRef.current) {
-        triggerReload('peer-signal', data.buildId);
-      }
-      if (data?.type === 'BUILD_UPDATE' && data.buildId && data.buildId !== currentBuildIdRef.current) {
-        triggerReload('peer-update', data.buildId);
+      if (
+        ['BUILD_RELOAD', 'BUILD_UPDATE', 'BUILD_UPDATE_AVAILABLE'].includes(data?.type)
+        && data.buildId
+        && data.buildId !== currentBuildIdRef.current
+      ) {
+        notifyUpdateAvailable('peer-signal', data.buildId);
       }
     };
 
@@ -74,14 +108,14 @@ export function BuildVersionWatcher() {
       channelRef.current?.close();
       channelRef.current = null;
     };
-  }, [triggerReload]);
+  }, [notifyUpdateAvailable]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored && stored !== currentBuildIdRef.current) {
-        triggerReload('stored-mismatch', stored);
+        notifyUpdateAvailable('stored-mismatch', stored);
         return;
       }
     } catch {
@@ -106,19 +140,19 @@ export function BuildVersionWatcher() {
       window.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onFocus);
     };
-  }, [checkBuild, triggerReload]);
+  }, [checkBuild, notifyUpdateAvailable]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const originalFetch = window.fetch;
     window.fetch = async (...args) => {
       const response = await originalFetch(...args);
-      if (reloadTriggeredRef.current) return response;
+      if (updateNotifiedRef.current) return response;
 
       const url = typeof args[0] === 'string' ? args[0] : ('url' in args[0] ? (args[0] as Request).url : args[0].toString());
       const headerBuildId = response.headers.get('x-build-id');
       if (headerBuildId && headerBuildId !== currentBuildIdRef.current) {
-        triggerReload('header-mismatch', headerBuildId);
+        notifyUpdateAvailable('header-mismatch', headerBuildId);
         return response;
       }
 
@@ -133,7 +167,7 @@ export function BuildVersionWatcher() {
     return () => {
       window.fetch = originalFetch;
     };
-  }, [triggerReload]);
+  }, [notifyUpdateAvailable]);
 
   return null;
 }

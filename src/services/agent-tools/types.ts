@@ -57,6 +57,7 @@ export type AgentToolAction =
       reason?: string | null;
       payload?: {
         contractId?: string | null;
+        customerIdentifier?: string | null;
       } | null;
     }
   | {
@@ -103,6 +104,7 @@ export type AgentToolRuntimeContext = {
     fromMe: boolean;
     content: string;
   }>;
+  confirmedActionFingerprint?: string | null;
   orchestratorRunId?: string | null;
 };
 

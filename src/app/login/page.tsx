@@ -12,6 +12,7 @@ interface LoginPageProps {
   searchParams: Promise<{
     registered?: string;
     error?: string;
+    activation_error?: string;
     next?: string;
   }>;
 }
@@ -30,6 +31,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   }
 
   const isRegistered = resolvedSearchParams?.registered === 'true';
+  const activationError = resolvedSearchParams?.activation_error === 'invalid_or_expired';
 
   return (
     <SignInPage className="dark">
@@ -61,6 +63,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             {isRegistered && (
               <div className="mb-6 animate-in slide-in-from-top-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm font-medium text-emerald-400 fade-in">
                 {t("Conta criada com sucesso! Fa\u00e7a login para continuar.")}
+              </div>
+            )}
+            {activationError && (
+              <div className="mb-6 animate-in slide-in-from-top-2 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm font-medium text-red-400 fade-in">
+                {t("Link de ativação inválido ou expirado. Solicite um novo cadastro ou tente entrar novamente.")}
               </div>
             )}
 

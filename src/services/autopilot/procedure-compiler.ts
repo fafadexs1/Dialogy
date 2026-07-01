@@ -164,6 +164,12 @@ type SentenceSegment = {
   inferredType: ProcedureStepType;
 };
 
+type ProcedureDocumentSection = {
+  title: string;
+  content: string;
+  index: number;
+};
+
 function splitIntoSegments(
   content: string,
   toolLookup: Map<string, AgentToolCatalogItem>,
@@ -228,6 +234,128 @@ function splitIntoSegments(
   return segments;
 }
 
+function stripAccents(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizedContentText(value: string): string {
+  return stripAccents(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9@:_\-\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isLikelySectionHeading(line: string): boolean {
+  const trimmed = line.trim().replace(/^#{1,6}\s*/, '').replace(/[:：]\s*$/, '');
+  if (trimmed.length < 3 || trimmed.length > 90) return false;
+  if (/@[a-zA-Z0-9_.:\-]+/.test(trimmed)) return false;
+  if (/[.!?]\s*$/.test(trimmed)) return false;
+  const ascii = stripAccents(trimmed);
+  const letters = ascii.replace(/[^A-Za-z]/g, '');
+  if (letters.length < 3) return false;
+  const uppercaseLetters = letters.replace(/[^A-Z]/g, '');
+  const upperRatio = uppercaseLetters.length / letters.length;
+  return line.trim().startsWith('#') || upperRatio >= 0.65 || /^[0-9]+[\).\-\s]+[A-Z]/.test(trimmed);
+}
+
+function splitIntoSections(content: string): ProcedureDocumentSection[] {
+  const lines = content.replace(/\r\n?/g, '\n').split('\n');
+  const sections: ProcedureDocumentSection[] = [];
+  let currentTitle: string | null = null;
+  let currentLines: string[] = [];
+
+  const flush = () => {
+    const body = currentLines.join('\n').trim();
+    if (currentTitle && body.length > 0) {
+      sections.push({
+        title: currentTitle,
+        content: body,
+        index: sections.length,
+      });
+    }
+    currentLines = [];
+  };
+
+  for (const line of lines) {
+    if (isLikelySectionHeading(line)) {
+      flush();
+      currentTitle = line.trim().replace(/^#{1,6}\s*/, '').replace(/[:：]\s*$/, '');
+      continue;
+    }
+    currentLines.push(line);
+  }
+  flush();
+  return sections.filter((section) => section.content.length > 10);
+}
+
+function inferToolSemanticIntent(toolName: string | null | undefined, text: string): string | undefined {
+  const normalized = normalizedContentText(`${toolName || ''} ${text}`);
+  if (/\b(reboot_router|reboot|reiniciar|resetar)\b/.test(normalized)) return 'router_reboot';
+  if (/\b(change_wifi_credentials|trocar|mudar|alterar)\b/.test(normalized) && /\b(wifi|wi fi|ssid|senha|rede)\b/.test(normalized)) {
+    return 'wifi_credentials_change';
+  }
+  if (/\b(scan_wifi_neighbors|get_wifi_scan_cached|canal|canais|vizin|interferencia|redes ao redor|lentidao|lento)\b/.test(normalized)) {
+    return 'wifi_channel_diagnostics';
+  }
+  if (/\b(get_wifi_view|refresh_wifi_summary|wifi|wi fi|ssid|senha|usuario|credencia)\b/.test(normalized)) {
+    return 'wifi_credentials_lookup';
+  }
+  if (/\b(sgp_fetch_contact_panel_data|sgp_fetch_contracts|contrato|cliente|cpf|cnpj)\b/.test(normalized)) {
+    return 'customer_contract_lookup';
+  }
+  return undefined;
+}
+
+function forbiddenCustomerIntentsForTool(toolName: string | null | undefined, text: string): string[] {
+  const semanticIntent = inferToolSemanticIntent(toolName, text);
+  if (semanticIntent === 'router_reboot') {
+    return ['wifi_credentials_lookup', 'wifi_credentials_change', 'wifi_channel_diagnostics'];
+  }
+  if (semanticIntent === 'wifi_credentials_change') {
+    return ['wifi_credentials_lookup', 'router_reboot'];
+  }
+  return [];
+}
+
+function sectionTriggerDescription(section: ProcedureDocumentSection): string {
+  const normalized = normalizedContentText(`${section.title}\n${section.content}`);
+  if (/\b(reiniciar|reboot|resetar|reboot_router)\b/.test(normalized)) {
+    return `${section.title}: use somente quando o cliente pedir explicitamente reinicio, reboot ou reset do roteador ou modem.`;
+  }
+  if (/\b(trocar|mudar|alterar|change_wifi_credentials)\b/.test(normalized) && /\b(wifi|wi fi|senha|ssid|nome da rede|credenciais)\b/.test(normalized)) {
+    return `${section.title}: use quando o cliente pedir troca de nome, SSID ou senha do Wi-Fi. Exige novos valores e confirmacao.`;
+  }
+  if (/\b(canal|canais|scan_wifi_neighbors|get_wifi_scan_cached|redes ao redor|vizin|interferencia|lentidao|lento)\b/.test(normalized)) {
+    return `${section.title}: use quando o cliente pedir diagnostico de Wi-Fi lento, canais, interferencia ou redes ao redor.`;
+  }
+  if (/\b(get_wifi_view|refresh_wifi_summary|consultar|senha|usuario|ssid|credenciais|esqueci|nome da rede)\b/.test(normalized)) {
+    return `${section.title}: use quando o cliente quiser consultar usuario, senha, SSID, nome da rede ou dados atuais do Wi-Fi. Nao reinicie roteador.`;
+  }
+  return `${section.title}: use quando a mensagem do cliente combinar com este objetivo e nao com outra secao mais especifica.`;
+}
+
+function renameSectionSteps(
+  steps: ProcedureStep[],
+  nextOrder: { value: number },
+  firstStepIdByOldId: Map<string, string>,
+): ProcedureStep[] {
+  const idMap = new Map<string, { id: string; order: number }>();
+  for (const step of steps) {
+    const order = nextOrder.value++;
+    idMap.set(step.id, { id: `step_${order}`, order });
+  }
+  for (const [oldId, mapped] of idMap.entries()) {
+    firstStepIdByOldId.set(oldId, mapped.id);
+  }
+  return steps.map((step) => ({
+    ...step,
+    id: idMap.get(step.id)?.id || `step_${nextOrder.value++}`,
+    order: idMap.get(step.id)?.order || nextOrder.value,
+    nextStepId: step.nextStepId ? idMap.get(step.nextStepId)?.id || null : null,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Step Builder
 // ---------------------------------------------------------------------------
@@ -260,6 +388,11 @@ function buildStepsFromSegments(segments: SentenceSegment[]): ProcedureStep[] {
       order: i + 1,
       type: segment.inferredType,
       label: segment.text.slice(0, 200),
+      semanticIntent: inferToolSemanticIntent(segment.resolvedToolName, segment.text),
+      forbiddenCustomerIntents: forbiddenCustomerIntentsForTool(segment.resolvedToolName, segment.text),
+      requiresExplicitCustomerRequest: Boolean(segment.resolvedToolName && /reboot_router|change_wifi_credentials/i.test(segment.resolvedToolName)),
+      requiresConfirmation: Boolean(segment.resolvedToolName && /reboot_router|change_wifi_credentials/i.test(segment.resolvedToolName)),
+      sideEffect: segment.resolvedToolName && /reboot_router|change_wifi_credentials/i.test(segment.resolvedToolName) ? 'high' : undefined,
       nextStepId,
       maxRetries: segment.inferredType === 'tool_call' ? 2 : 1,
     };
@@ -345,6 +478,65 @@ function enrichSteps(steps: ProcedureStep[], content: string): ProcedureStep[] {
   return enriched;
 }
 
+function buildSectionedSteps(input: {
+  content: string;
+  toolLookup: Map<string, AgentToolCatalogItem>;
+}): { steps: ProcedureStep[]; sections: ProcedureDocumentSection[] } | null {
+  const sections = splitIntoSections(input.content)
+    .map((section) => ({
+      section,
+      segments: splitIntoSegments(section.content, input.toolLookup),
+    }))
+    .filter((item) => item.segments.some((segment) => segment.resolvedToolName));
+
+  if (sections.length < 2) return null;
+
+  const steps: ProcedureStep[] = [];
+  const decisionStep: ProcedureStep = {
+    id: 'step_1',
+    order: 1,
+    type: 'decide',
+    label: 'Classificar objetivo operacional do procedimento antes de executar ferramentas',
+    decisionPrompt: [
+      'Escolha exatamente uma secao com base no pedido atual do cliente.',
+      'Nunca escolha reboot para pedido de usuario, senha, SSID ou nome de rede Wi-Fi.',
+      'Nunca escolha troca de credenciais sem pedido explicito de troca e novos valores/confirmacao.',
+    ].join(' '),
+    branches: [],
+    maxRetries: 1,
+  };
+  steps.push(decisionStep);
+
+  const nextOrder = { value: 2 };
+  const compiledSections: ProcedureDocumentSection[] = [];
+
+  for (const item of sections) {
+    const rawSteps = buildStepsFromSegments(item.segments);
+    const enrichedSteps = enrichSteps(rawSteps, item.section.content);
+    if (enrichedSteps.length === 0) continue;
+    const firstStepIdByOldId = new Map<string, string>();
+    const renamedSteps = renameSectionSteps(enrichedSteps, nextOrder, firstStepIdByOldId)
+      .map((step) => ({
+        ...step,
+        label: `${item.section.title}: ${step.label}`.slice(0, 220),
+        semanticIntent: step.semanticIntent || inferToolSemanticIntent(step.toolName, `${item.section.title}\n${step.label}`),
+        forbiddenCustomerIntents: step.forbiddenCustomerIntents?.length
+          ? step.forbiddenCustomerIntents
+          : forbiddenCustomerIntentsForTool(step.toolName, `${item.section.title}\n${step.label}`),
+      }));
+    if (renamedSteps.length === 0) continue;
+    decisionStep.branches?.push({
+      condition: sectionTriggerDescription(item.section),
+      nextStepId: renamedSteps[0].id,
+    });
+    steps.push(...renamedSteps);
+    compiledSections.push(item.section);
+  }
+
+  if ((decisionStep.branches || []).length < 2) return null;
+  return { steps, sections: compiledSections };
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -390,8 +582,9 @@ export function compileProcedureFromDocument(input: {
     }
   }
 
-  const rawSteps = buildStepsFromSegments(segments);
-  const steps = enrichSteps(rawSteps, content);
+  const sectioned = buildSectionedSteps({ content, toolLookup });
+  const rawSteps = sectioned ? [] : buildStepsFromSegments(segments);
+  const steps = sectioned ? sectioned.steps : enrichSteps(rawSteps, content);
 
   if (steps.length === 0) {
     return {
@@ -415,6 +608,11 @@ export function compileProcedureFromDocument(input: {
       totalSegments: segments.length,
       actionableSegments: steps.length,
       toolMentions: resolvedTools.map((s) => s.resolvedToolName),
+      sectionAware: Boolean(sectioned),
+      sections: sectioned?.sections.map((section) => ({
+        title: section.title,
+        index: section.index,
+      })) || undefined,
     },
   };
 

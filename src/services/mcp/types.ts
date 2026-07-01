@@ -13,6 +13,9 @@ export type McpServerConfig = {
   isActive: boolean;
   syncedAt?: string | null;
   lastError?: string | null;
+  healthStatus?: 'healthy' | 'unreachable' | 'unknown';
+  healthCheckedAt?: string | null;
+  healthLatencyMs?: number | null;
   tools?: McpToolConfig[];
 };
 

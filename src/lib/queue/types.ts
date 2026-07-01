@@ -1,4 +1,5 @@
 export type QueueJobType =
+  | 'evolution_webhook_process'
   | 'whatsapp_send'
   | 'webhook_outbound'
   | 'queue_auto_close'
@@ -27,6 +28,10 @@ export type WhatsappSendPayload = {
   senderId?: string;
   senderType?: 'user' | 'system_agent';
   tabId?: string | null;
+};
+
+export type EvolutionWebhookProcessPayload = {
+  eventId: string;
 };
 
 export type WebhookOutboundPayload = {
@@ -105,6 +110,7 @@ export type AiTaskPayload = {
 };
 
 export type QueueJobPayload =
+  | EvolutionWebhookProcessPayload
   | WhatsappSendPayload
   | WebhookOutboundPayload
   | QueueAutoClosePayload

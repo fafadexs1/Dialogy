@@ -6,6 +6,8 @@ import * as ts from "typescript";
 const cwd = process.cwd();
 const appRoot = path.join(cwd, "src", "app");
 const componentsRoot = path.join(cwd, "src", "components");
+const libRoot = path.join(cwd, "src", "lib");
+const actionsRoot = path.join(cwd, "src", "actions");
 const messagePath = path.join(cwd, "src", "i18n", "messages", "en-US.json");
 const defaultLocalePath = path.join(cwd, "src", "i18n", "messages", "pt-BR.json");
 
@@ -24,9 +26,56 @@ const allowObjectProps = new Set([
 ]);
 
 const allowAttrNames = new Set(["placeholder", "title", "aria-label", "alt", "label"]);
-const disallowAttrNames = new Set(["className", "id", "htmlFor", "href", "src", "value", "key", "variant"]);
+const disallowAttrNames = new Set([
+  "className",
+  "id",
+  "htmlFor",
+  "href",
+  "src",
+  "value",
+  "key",
+  "variant",
+  "type",
+  "target",
+  "rel",
+  "method",
+  "action",
+  "lang",
+  "dir",
+  "initial",
+  "animate",
+  "exit",
+  "transition",
+  "layoutId",
+  "colors",
+  "animationSpeed",
+  "containerClassName",
+  "dotSize",
+  "align",
+  "side",
+  "size",
+  "width",
+  "height",
+  "stroke",
+  "fill",
+  "points",
+  "cx",
+  "cy",
+  "r",
+  "rx",
+  "ry",
+  "d",
+  "viewBox",
+  "strokeWidth",
+  "strokeLinecap",
+  "strokeLinejoin",
+  "x1",
+  "y1",
+  "x2",
+  "y2"
+]);
 const portuguesePattern =
-  /(nao|não|voce|você|selecione|salvar|excluir|encerrar|mensagem|conversa|contato|instancia|instância|carregando|erro|sucesso|configuracao|configuração|fatura|campanha|workspace|perfil|senha|equipe|whatsapp|instagram|facebook|convite|plano|integracao|integração|relatorio|relatório|fechar|abrir|buscar|vitrine|pedido|entrega|descricao|descrição|titulo|título|subtitulo|subtítulo|publicar|cancelar|voltar|proximo|próximo|anterior|todos|nenhum|agora|cliente|contatos|mensagens|conectado|desconectar|gerenciar|criar|novo|nova|atendimento|atalho|fila|template|conectar|dados|notificacoes|notificações|membros|seguranca|segurança|cobranca|cobrança|idioma|integracoes|integrações|privacidade|termos|convite|bot|agente)/i;
+  /(nao|não|voce|você|selecione|salvar|excluir|encerrar|encerrado|encerrados|mensagem|conversa|contato|instancia|instância|carregando|erro|sucesso|configuracao|configuração|fatura|campanha|workspace|perfil|senha|equipe|whatsapp|instagram|facebook|convite|plano|integracao|integração|relatorio|relatório|fechar|abrir|buscar|vitrine|pedido|entrega|descricao|descrição|titulo|título|subtitulo|subtítulo|publicar|cancelar|voltar|proximo|próximo|anterior|todos|nenhum|agora|cliente|contatos|mensagens|conectado|desconectar|gerenciar|criar|novo|nova|atendimento|atendendo|atendimentos|atendente|atendentes|abertos|fechado|fechados|finalizar|finalizado|finalizados|canal|canais|transferido|transferir|humano|operador|rascunho|histórico|filtros|filtro|pesquisar|selecionar|remover|adicionar|meus|minhas|meu|minha|atalho|fila|template|conectar|dados|notificacoes|notificações|membros|seguranca|segurança|cobranca|cobrança|idioma|integracoes|integrações|privacidade|termos|convite|bot|agente|orquestre|suporte|falar|vendas|venda|precos|preco|preço|preços|jornada|fiel|essencial|profissional|operacao|operação|operações|gratis|grátis|fidelidade|limites|limite|mensal|historico|cancele|momento|sobre|resumo|operacional|triagem|comercial|oi|primeiro|etapa|vagas|parceiros|indique|seguro|chance|fechamento|focar|apenas|invisivel|invisível|milhares|leads|qualifique|resolvido|velocidade|duvida|dúvida|financeiro|inteligente|ecossistema|mensageria|utilitarios|alta|escala)/i;
 const tokenPattern = /\{\{[^}]+\}\}|\{[A-Za-z0-9_]+\}|%s/g;
 
 const isDryRun = process.argv.includes("--dry-run");
@@ -122,49 +171,39 @@ function shouldKeepString(node) {
 
   if (ts.isJsxAttribute(parent)) {
     const attrName = parent.name.text;
-    if (disallowAttrNames.has(attrName)) {
+    if (disallowAttrNames.has(attrName) || attrName.startsWith("aria-") && attrName !== "aria-label") {
       return false;
     }
 
-    return allowAttrNames.has(attrName);
+    return true;
   }
 
   if (ts.isPropertyAssignment(parent)) {
     const propName = getPropertyName(parent.name);
-    return propName ? allowObjectProps.has(propName) : false;
-  }
-
-  if (ts.isCallExpression(parent) && parent.expression.getText().includes("toast")) {
+    if (propName && (propName === "id" || propName === "key" || propName === "variant" || propName === "className")) {
+      return false;
+    }
     return true;
   }
 
-  if (
-    ts.isConditionalExpression(parent) ||
-    ts.isBinaryExpression(parent) ||
-    ts.isArrayLiteralExpression(parent) ||
-    ts.isReturnStatement(parent) ||
-    ts.isJsxExpression(parent)
-  ) {
-    let current = node.parent;
-    while (current) {
-      if (ts.isJsxAttribute(current)) {
-        const attrName = current.name.text;
-        return !disallowAttrNames.has(attrName);
-      }
-
-      if (ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) || ts.isJsxFragment(current)) {
-        return true;
-      }
-
-      if (ts.isFunctionLike(current) || ts.isSourceFile(current)) {
-        break;
-      }
-
-      current = current.parent;
+  if (ts.isVariableDeclaration(parent)) {
+    const varName = getPropertyName(parent.name);
+    if (varName && /(id|key|variant|url|path|src|href|className)/i.test(varName)) {
+      return false;
     }
   }
 
-  return false;
+  // Traversal to make sure we are not nested in any disallowed JsxAttribute
+  let current = node.parent;
+  while (current) {
+    if (ts.isJsxAttribute(current)) {
+      const attrName = current.name.text;
+      return !disallowAttrNames.has(attrName);
+    }
+    current = current.parent;
+  }
+
+  return true;
 }
 
 function extractStringsFromSource(filePath, source) {
@@ -200,7 +239,12 @@ function extractStringsFromSource(filePath, source) {
 }
 
 async function collectCandidateStrings() {
-  const files = [...(await listSourceFiles(appRoot)), ...(await listSourceFiles(componentsRoot))];
+  const files = [
+    ...(await listSourceFiles(appRoot)),
+    ...(await listSourceFiles(componentsRoot)),
+    ...(await listSourceFiles(libRoot)),
+    ...(await listSourceFiles(actionsRoot)),
+  ];
   const found = new Set();
 
   for (const filePath of files) {

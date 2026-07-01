@@ -40,10 +40,19 @@ export function buildCountQuery(workspaceId: string, criteria?: CriteriaGroup, s
     };
 }
 
-export function buildSegmentQuery(workspaceId: string, criteria?: CriteriaGroup, search?: string, limit = 50, offset = 0) {
+export function buildSegmentQuery(
+    workspaceId: string,
+    criteria?: CriteriaGroup,
+    search?: string,
+    limit: number | null = 50,
+    offset = 0
+) {
     const { whereClause, values } = buildWhereClause(workspaceId, criteria, search);
     const lastActivityExpression = buildLastActivityExpression('c');
     const dedupeKeyExpression = buildContactDedupeKeyExpression('c');
+    const paginationClause = limit === null
+        ? ''
+        : `LIMIT $${values.length + 1} OFFSET $${values.length + 2}`;
 
     const query = `
         WITH ranked_contacts AS (
@@ -67,12 +76,59 @@ export function buildSegmentQuery(workspaceId: string, criteria?: CriteriaGroup,
         FROM ranked_contacts
         WHERE rn = 1
         ORDER BY last_activity DESC NULLS LAST, created_at DESC NULLS LAST
-        LIMIT $${values.length + 1} OFFSET $${values.length + 2}
+        ${paginationClause}
     `;
 
     return {
         text: query,
-        values: [...values, limit, offset]
+        values: limit === null ? values : [...values, limit, offset]
+    };
+}
+
+export function buildSegmentAudienceQuery(workspaceId: string, criteria?: CriteriaGroup) {
+    const { whereClause, values } = buildWhereClause(workspaceId, criteria);
+    const dedupeKeyExpression = buildContactDedupeKeyExpression('c');
+    const lastActivityExpression = buildLastActivityExpression('c');
+
+    return {
+        text: `
+            WITH ranked_contacts AS (
+                SELECT
+                    c.id,
+                    c.name,
+                    c.email,
+                    c.phone,
+                    c.phone_number_jid,
+                    c.phone_canonical,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ${dedupeKeyExpression}
+                        ORDER BY ${lastActivityExpression} DESC NULLS LAST,
+                                 c.created_at DESC NULLS LAST,
+                                 c.id DESC
+                    ) AS rn
+                FROM contacts c
+                WHERE ${whereClause}
+            )
+            SELECT id, name, email, phone, phone_number_jid, phone_canonical
+            FROM ranked_contacts
+            WHERE rn = 1
+        `,
+        values,
+    };
+}
+
+export function combineSegmentCriteria(criteriaList: CriteriaGroup[]): CriteriaGroup | undefined {
+    const validCriteria = criteriaList.filter(
+        criteria => criteria && Array.isArray(criteria.conditions)
+    );
+
+    if (validCriteria.length === 0) return undefined;
+    if (validCriteria.some(criteria => criteria.conditions.length === 0)) return undefined;
+    if (validCriteria.length === 1) return validCriteria[0];
+
+    return {
+        operator: 'OR',
+        conditions: validCriteria,
     };
 }
 

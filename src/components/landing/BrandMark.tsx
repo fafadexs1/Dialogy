@@ -1,6 +1,6 @@
 'use client';
 
-import { MessageCircleMore } from 'lucide-react';
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 
 interface BrandMarkProps {
@@ -10,10 +10,15 @@ interface BrandMarkProps {
 
 export function BrandMark({ className, labelClassName }: BrandMarkProps) {
     return (
-        <div className={cn('inline-flex items-center gap-2', className)}>
-            <span className={cn('text-xl font-bold tracking-tighter text-white', labelClassName)}>
-                Dialogy
-            </span>
+        <div className={cn('inline-flex items-center', className)}>
+            <Image
+                src="/logo.png"
+                alt="Dialogy"
+                width={112}
+                height={29}
+                priority
+                className={cn('h-[25px] w-auto object-contain', labelClassName)}
+            />
         </div>
     );
 }

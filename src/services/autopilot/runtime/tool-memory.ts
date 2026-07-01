@@ -1,13 +1,108 @@
 import { db } from '@/lib/db';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 
+const CUSTOMER_FIELD_LABELS: Record<string, string> = {
+  id: 'ID',
+  name: 'Nome',
+  title: 'Titulo',
+  description: 'Descricao',
+  status: 'Status',
+  price: 'Preco',
+  amount: 'Valor',
+  availability: 'Disponibilidade',
+  available: 'Disponivel',
+  stock: 'Estoque',
+  date: 'Data',
+  time: 'Horario',
+  protocol: 'Protocolo',
+  order_id: 'Pedido',
+  request_id: 'Solicitacao',
+  package_code: 'Codigo do pacote',
+  pickup_window: 'Janela de coleta',
+  tracking_code: 'Codigo de rastreio',
+  updated_at: 'Atualizado em',
+  ssid: 'Rede Wi-Fi',
+  username: 'Usuario',
+  password: 'Senha',
+};
+
+function customerFieldLabel(key: string): string {
+  return CUSTOMER_FIELD_LABELS[key] || key
+    .replace(/[_-]+/g, ' ')
+    .replace(/^\w/, (character) => character.toUpperCase());
+}
+
+function customerPrimitive(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'boolean') return value ? 'sim' : 'nao';
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function customerRecordLine(value: unknown): string | null {
+  const primitive = customerPrimitive(value);
+  if (primitive) return primitive;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const parts = Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !/\b(raw|stack|command_id|access_token|secret|internal)\b/i.test(key))
+    .map(([key, nested]) => {
+      const text = customerPrimitive(nested);
+      return text ? `${customerFieldLabel(key)}: ${text}` : null;
+    })
+    .filter((part): part is string => Boolean(part))
+    .slice(0, 8);
+  return parts.length > 0 ? parts.join(' - ') : null;
+}
+
+export function formatMcpStructuredOutputForCustomer(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return customerPrimitive(value);
+  const record = value as Record<string, unknown>;
+  const preferredArrays = [
+    'items',
+    'products',
+    'services',
+    'plans',
+    'results',
+    'availability',
+    'slots',
+    'documents',
+  ];
+  const list = Array.isArray(value)
+    ? value
+    : preferredArrays.map((key) => record[key]).find(Array.isArray)
+      || Object.values(record).find(Array.isArray);
+  if (Array.isArray(list)) {
+    const lines = list
+      .slice(0, 8)
+      .map(customerRecordLine)
+      .filter((line): line is string => Boolean(line));
+    return lines.length > 0
+      ? ['Consultei as informacoes solicitadas:', ...lines.map((line) => `- ${line}`)].join('\n')
+      : null;
+  }
+
+  const lines = Object.entries(record)
+    .filter(([key]) => !/\b(raw|stack|command_id|access_token|secret|internal)\b/i.test(key))
+    .map(([key, nested]) => {
+      const primitive = customerPrimitive(nested);
+      if (primitive) return `${customerFieldLabel(key)}: ${primitive}`;
+      const nestedLine = customerRecordLine(nested);
+      return nestedLine ? `${customerFieldLabel(key)}: ${nestedLine}` : null;
+    })
+    .filter((line): line is string => Boolean(line))
+    .slice(0, 10);
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
 export function buildMcpResponseFromToolResults(results: AgentToolExecutionResult[]): string | null {
   const mcpResult = results.find((result) => result.toolName.startsWith('mcp:') && result.status === 'success');
   const output = mcpResult?.output as any;
   if (!output) return null;
 
   if (output.structuredContent && typeof output.structuredContent === 'object') {
-    return JSON.stringify(output.structuredContent, null, 2).slice(0, 1800);
+    return formatMcpStructuredOutputForCustomer(output.structuredContent)?.slice(0, 1800) || null;
   }
 
   const textParts = Array.isArray(output.content)
@@ -20,7 +115,14 @@ export function buildMcpResponseFromToolResults(results: AgentToolExecutionResul
       .filter(Boolean)
     : [];
 
-  return textParts.join('\n\n').trim().slice(0, 1800) || null;
+  const text = textParts.join('\n\n').trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return formatMcpStructuredOutputForCustomer(parsed)?.slice(0, 1800) || null;
+  } catch {
+    return text.slice(0, 1800);
+  }
 }
 
 export function compactToolOutputForContinuation(result: AgentToolExecutionResult): Record<string, unknown> {
@@ -106,26 +208,30 @@ export async function loadRecentToolResultsForAutopilot(input: {
   if (input.toolNames.length === 0) return [];
 
   const maxAgeMinutes = Math.max(1, Math.min(input.maxAgeMinutes || 30, 180));
-  const limit = Math.max(1, Math.min(input.limit || 3, 10));
+  const limit = Math.max(1, Math.min(input.limit || 3, 40));
 
   try {
     const { rows } = await db.query(
       `SELECT tool_name, status, input, output, error
-       FROM public.agent_tool_executions
-       WHERE workspace_id = $1
-         AND chat_id = $2
-         AND tool_name = ANY($3::text[])
-         AND status = 'success'
-         AND output IS NOT NULL
-         AND created_at >= NOW() - ($4::int * interval '1 minute')
-       ORDER BY created_at DESC
-       LIMIT $5`,
+       FROM (
+         SELECT tool_name, status, input, output, error, created_at
+         FROM public.agent_tool_executions
+         WHERE workspace_id = $1
+           AND chat_id = $2
+           AND tool_name = ANY($3::text[])
+           AND status IN ('success', 'error', 'rejected')
+           AND (output IS NOT NULL OR error IS NOT NULL)
+           AND created_at >= NOW() - ($4::int * interval '1 minute')
+         ORDER BY created_at DESC
+         LIMIT $5
+       ) recent_tool_results
+       ORDER BY created_at ASC`,
       [input.workspaceId, input.chatId, input.toolNames, maxAgeMinutes, limit],
     );
 
     return rows.map((row: any): AgentToolExecutionResult => ({
       toolName: String(row.tool_name || '') as AgentToolExecutionResult['toolName'],
-      status: (row.status === 'success' ? 'success' : row.status) as AgentToolExecutionResult['status'],
+      status: (['success', 'error', 'rejected'].includes(String(row.status)) ? row.status : 'error') as AgentToolExecutionResult['status'],
       input: (parseJsonRecord(row.input) || {
         type: String(row.tool_name || ''),
         payload: {},

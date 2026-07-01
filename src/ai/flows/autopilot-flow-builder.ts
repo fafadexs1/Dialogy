@@ -102,8 +102,8 @@ const ArchitectureFlowNodeSchema = z.object({
   kind: ArchitectureFlowNodeKindSchema,
   title: z.string().min(1),
   subtitle: z.string(),
-  x: z.number(),
-  y: z.number(),
+  x: z.number().optional(),
+  y: z.number().optional(),
   referenceId: z.string().optional(),
   variableName: z.string().optional(),
   intent: FlowIntentSchema.optional(),
@@ -143,6 +143,8 @@ const ArchitectureFlowBuilderOutputSchema = z.object({
   edges: z.array(FlowEdgeSchema).max(0),
 });
 
+type ArchitectureFlowBuilderOutput = z.infer<typeof ArchitectureFlowBuilderOutputSchema>;
+
 type SanitizableFlowBuilderNode = Omit<z.infer<typeof FlowNodeSchema>, 'kind'> & {
   kind: AutopilotFlowNodeKind;
 };
@@ -167,6 +169,8 @@ type FlowBuilderEnrichment = z.infer<typeof FlowBuilderEnrichmentSchema>;
 const FlowBuilderTopologySchema = z.object({
   edges: z.array(FlowEdgeSchema).max(256),
 });
+
+type FlowBuilderTopology = z.infer<typeof FlowBuilderTopologySchema>;
 
 const FlowBuilderToolSelectionSchema = z.object({
   tools: z.array(z.object({
@@ -347,7 +351,7 @@ const architectureJsonSchema = {
             },
           },
         },
-        required: ['id', 'kind', 'title', 'subtitle', 'x', 'y'],
+        required: ['id', 'kind', 'title', 'subtitle'],
         additionalProperties: false,
       },
     },
@@ -480,6 +484,13 @@ function cleanPromptText(value: string | undefined, maxLength: number) {
   return cleanText(value, maxLength)
     .replace(/@referenceId\s*:\s*@?([a-zA-Z0-9_:-]+)/gi, '@$1')
     .replace(/@referenceId\s+@?([a-zA-Z0-9_:-]+)/gi, '@$1');
+}
+
+function defaultFlowNodePosition(index: number) {
+  return {
+    x: 120 + (index % 4) * 260,
+    y: 120 + Math.floor(index / 4) * 220,
+  };
 }
 
 function normalizeReferenceKey(value: string) {
@@ -629,12 +640,15 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
       || (kind === 'sub_agent'
         ? `Atenda especificamente esta etapa: "${cleanText(node.title, 100) || 'sub-agente'}". ${cleanText(node.subtitle, 140)}`
         : undefined);
+    const fallbackPosition = defaultFlowNodePosition(index);
+    const x = Number.isFinite(node.x) ? node.x : fallbackPosition.x;
+    const y = Number.isFinite(node.y) ? node.y : fallbackPosition.y;
     return [{
       id,
       kind,
       title: cleanText(node.title, 100) || 'Bloco',
       subtitle: cleanText(node.subtitle, 140),
-      position: { x: Math.round(node.x), y: Math.round(node.y) },
+      position: { x: Math.round(x), y: Math.round(y) },
       ...(node.kind === 'tool' ? { toolName: node.toolName } : {}),
       config: {
         instructions,
@@ -646,8 +660,12 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
         inputSchema: node.inputSchema,
         outputSchema: node.outputSchema,
         successHandles: (node.successHandles || []).map((handle) => normalizeId(handle, '')).filter(Boolean),
-        errorHandles: (node.errorHandles || []).map((handle) => normalizeId(handle, '')).filter(Boolean),
-        maxAttempts: typeof node.maxAttempts === 'number' ? Math.max(1, Math.min(12, Math.round(node.maxAttempts))) : undefined,
+        errorHandles: kind === 'tool'
+          ? Array.from(new Set([...(node.errorHandles || []).map((handle) => normalizeId(handle, '')).filter(Boolean), 'error']))
+          : (node.errorHandles || []).map((handle) => normalizeId(handle, '')).filter(Boolean),
+        maxAttempts: typeof node.maxAttempts === 'number'
+          ? Math.max(1, Math.min(12, Math.round(node.maxAttempts)))
+          : (kind === 'tool' ? 3 : undefined),
         requiredKnowledgeCoverage: node.requiredKnowledgeCoverage,
         ...(kind === 'sub_agent' ? {
           customIntentLabel: cleanText(node.customIntentLabel, 180) || cleanText(node.title, 100),
@@ -735,7 +753,7 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
           // Heuristic repair: search for any node in the graph matching the route ID/label
           const rId = normalizeId(route.id, '').toLowerCase();
           const rLabel = (route.label || '').toLowerCase();
-          
+
           if (rId.includes('plano') || rLabel.includes('plano')) {
             const match = nodes.find((n) => n.id.includes('plano') || n.title.toLowerCase().includes('plano'));
             if (match) target = match.id;
@@ -745,6 +763,34 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
           } else if (rId.includes('humano') || rLabel.includes('humano') || rId.includes('atendente')) {
             const match = nodes.find((n) => n.id.includes('transbordo') || n.id.includes('humano') || n.kind === 'handoff');
             if (match) target = match.id;
+          }
+        }
+        const currentTarget = target ? nodes.find((candidate) => candidate.id === target) : undefined;
+        if (!currentTarget || !isSafeFallbackKind(currentTarget.kind) || !canConnect(node.kind, currentTarget.kind)) {
+          const routeText = normalizeSearchText(`${route.id || ''} ${route.label || ''} ${route.description || ''}`);
+          const routeId = normalizeId(route.id || '', '');
+          const fallbackId = normalizeId((node.config as any).fallbackRouteId || '', '');
+          const isFallbackRoute = routeId === fallbackId
+            || /^(fallback|outro|esclarecer|esclarecimento|fora_do_escopo|baixa_confianca)$/.test(routeId)
+            || /\b(fallback|fora do procedimento|fora do escopo|mudanca de assunto|baixa confianca)\b/.test(routeText);
+          if (isFallbackRoute) {
+            target = undefined;
+          } else {
+            const candidates = nodes.filter((candidate) => (
+              candidate.id !== node.id
+              && isSafeFallbackKind(candidate.kind)
+              && canConnect(node.kind, candidate.kind)
+            ));
+            const byKind = (kind: V2FlowNodeKind) => candidates.find((candidate) => candidate.kind === kind)?.id;
+            if (/\b(humano|atendente|transfer|handoff|equipe|especialista)\b/.test(routeText)) {
+              target = byKind('handoff') || byKind('sub_agent') || byKind('message') || byKind('end');
+            } else if (/\b(colet|dados|cadastro|nome|telefone|email|cpf|cnpj|documento|endereco|data|horario|agend|orcamento|lead|contratar|comprar)\b/.test(routeText)) {
+              target = byKind('collect') || byKind('sub_agent') || byKind('message') || byKind('end');
+            } else if (/\b(encerr|finaliz|conclu|obrigad|fim|tchau)\b/.test(routeText)) {
+              target = byKind('end') || byKind('message') || byKind('sub_agent');
+            } else {
+              target = byKind('sub_agent') || byKind('message') || byKind('collect') || byKind('end') || byKind('handoff');
+            }
           }
         }
         return {
@@ -908,6 +954,22 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
   };
 }
 
+function summarizeToolCatalogForPrompt(tools: AgentToolCatalogItem[]) {
+  if (tools.length === 0) {
+    return 'Nenhuma ferramenta habilitada para este agente.';
+  }
+  return tools.map((tool) => ({
+    name: tool.name,
+    source: tool.source,
+    description: tool.description,
+    class: tool.class,
+    riskLevel: tool.riskLevel,
+    sideEffect: tool.sideEffect,
+    requiresHumanApproval: tool.requiresHumanApproval,
+    inputSchema: tool.inputSchema || null,
+  }));
+}
+
 function buildPrompt(input: {
   conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
   currentGraph?: AutopilotFlowGraph | null;
@@ -937,6 +999,8 @@ Regras obrigatorias de Arquitetura Avancada:
 - Use 'handoff' para transferencia humana e 'end' para encerramento claro.
 - Nao crie sub-agentes 'intent' em fluxos novos. Sub-agentes agora sao blocos 'sub_agent'. Etapas sequenciais desta task devem ser collect, decision, knowledge, sub_agent, handoff ou end.
 - Nao crie blocos kind tool nesta etapa. A selecao de ferramentas ocorrera depois, consultando o catalogo completo.
+- Mesmo sem criar blocos tool nesta task, leve em conta as ferramentas habilitadas para desenhar decisoes e sub-agentes que permitam usa-las corretamente depois.
+- Ferramentas MCP habilitadas aparecem sempre com nome qualificado real mcp:<server_id>:<tool_name>. Nunca trate uma MCP como "mcp_call_tool" no planejamento do flow.
 - Retorne edges vazio. Uma segunda task especializada fara as ligacoes.
 - Inclua ao menos um bloco knowledge por padrao e conecte a base ao sub_agent que precisa desses fatos. Omita knowledge somente quando o usuario pedir explicitamente um agente sem RAG ou sem base de conhecimento.
 - Cada bloco deve ter referenceId unico. Para citar um bloco use exatamente @ seguido pelo valor de referenceId, por exemplo @consulta_planos. Nunca escreva o texto literal "@referenceId:".
@@ -950,6 +1014,9 @@ ${JSON.stringify(input.currentGraph || null, null, 2)}
 
 Prompt system atual:
 ${input.currentSystemPrompt || '(vazio)'}
+
+Ferramentas habilitadas para este agente:
+${JSON.stringify(summarizeToolCatalogForPrompt(input.tools), null, 2)}
 
 Conversa com o usuario:
 ${input.conversation.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join('\n\n')}`;
@@ -1063,6 +1130,7 @@ function applyFlowBuilderEnrichment(architecture: FlowBuilderOutput, enrichment:
 function buildToolSelectionPrompt(input: {
   architecture: FlowBuilderOutput;
   tools: AgentToolCatalogItem[];
+  relevanceMap: ToolRelevanceEntry[];
 }) {
   const tools = input.tools.map((tool) => ({
     name: tool.name,
@@ -1083,15 +1151,21 @@ Regras:
 - Retorne tools vazio quando nenhuma ferramenta for necessaria.
 - Nunca adicione ferramenta apenas porque ela existe no catalogo.
 - Use somente toolName exato do catalogo.
+- MCP deve ser selecionada pelo nome qualificado real do catalogo, por exemplo mcp:<server_id>:get_wifi_view. Nunca retorne "mcp_call_tool" como toolName.
 - attachToNodeId deve apontar para o passo imediatamente anterior a execucao da ferramenta. Em flows v2, prefira collect, sub_agent ou message conforme a sequencia operacional.
 - Para cada tool escolhida, explique quando executar, quando nao executar, dados obrigatorios e montagem do payload.
 - Encerramento real exige close_chat. Transferencia humana exige transfer_chat. Consultas externas exigem a tool de leitura adequada.
 - Coleta ou atualizacao de dados persistentes do contato exige a ferramenta de CRM adequada quando ela existir no catalogo.
 - Preservacao de contexto operacional para equipe humana exige add_internal_note quando ela existir no catalogo.
+- Para Wi-Fi: consultar usuario/senha/SSID deve usar ferramenta de consulta de Wi-Fi, nao reboot. Reboot so quando o cliente pedir reinicio explicitamente. Troca de senha/nome exige novos valores e confirmacao.
+- Para diagnostico de canais/interferencia/redes ao redor, priorize ferramentas de scan/cache/listagem/topologia antes de qualquer side effect.
 - Nao invente ferramenta e nao duplique a mesma tool no mesmo agente.
 
 Flow apos tasks 1, 2 e 3:
 ${JSON.stringify(input.architecture, null, 2)}
+
+Mapa deterministico de relevancia das ferramentas habilitadas:
+${formatToolRelevanceMap(input.relevanceMap)}
 
 Catalogo completo Dialogy + MCP:
 ${JSON.stringify(tools, null, 2)}`;
@@ -1123,6 +1197,8 @@ export function applyToolSelection(
       toolName: selected.toolName,
       instructions: selected.instructions,
       referenceId: id.replace(/-/g, '_'),
+      maxAttempts: 3,
+      errorHandles: ['error'],
     });
     selectedEdges.push({ source: target.id, target: id });
   }
@@ -1135,6 +1211,1458 @@ export function applyToolSelection(
 
 function normalizeSearchText(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+type ToolRelevanceIntent =
+  | 'customer_contract_lookup'
+  | 'wifi_credentials_lookup'
+  | 'wifi_credentials_change'
+  | 'wifi_channel_diagnostics'
+  | 'router_reboot'
+  | 'order_status_lookup'
+  | 'billing_lookup'
+  | 'payment_pix_generation'
+  | 'payment_promise'
+  | 'support_ticket_creation'
+  | 'catalog_lookup'
+  | 'pricing_lookup'
+  | 'availability_lookup'
+  | 'scheduling_lookup'
+  | 'document_lookup'
+  | 'external_read'
+  | 'external_action'
+  | 'human_handoff'
+  | 'close_conversation'
+  | 'internal_note'
+  | 'crm_update';
+
+type ToolRelevanceEntry = {
+  toolName: string;
+  intents: ToolRelevanceIntent[];
+  score: number;
+  reason: string;
+  source: AgentToolCatalogItem['source'];
+  sideEffect: AgentToolCatalogItem['sideEffect'];
+  riskLevel: AgentToolCatalogItem['riskLevel'];
+  description: string;
+};
+
+function toolText(tool: AgentToolCatalogItem) {
+  return normalizeSearchText([
+    tool.name,
+    tool.description,
+    tool.serverName || '',
+    tool.inputSchema ? JSON.stringify(tool.inputSchema) : '',
+    tool.outputSchema ? JSON.stringify(tool.outputSchema) : '',
+  ].join(' '));
+}
+
+function inferRequestedToolIntents(searchText: string): Set<ToolRelevanceIntent> {
+  const intents = new Set<ToolRelevanceIntent>();
+  const mentionsWifi = /\b(wi[\s-]?fi|wifi|ssid|rede|senha|usuario|usu[aá]rio|credencia)\w*/.test(searchText);
+  const wantsChange = /\b(trocar|mudar|alterar|atualizar|definir|configurar|nova|novo)\w*/.test(searchText);
+  const wantsLookup = /\b(ver|verificar|consultar|saber|mostrar|recuperar|esqueci|qual|quais)\w*/.test(searchText)
+    || /\b(usuario e senha|senha atual|ssid atual|nome da rede atual|credenciais? atuais?)\b/.test(searchText);
+  const wantsChannelDiagnostics = /\b(canal|canais|redes ao redor|vizin|interferencia|interfer[eê]ncia|lento|lentidao|lentid[aã]o|oscila|queda|sinal fraco|analisar)\w*/.test(searchText);
+  const wantsReboot = /\b(reiniciar|reinicie|reboot|resetar|desligar e ligar|roteador|modem)\w*/.test(searchText)
+    && /\b(reiniciar|reinicie|reboot|resetar|desligar e ligar)\w*/.test(searchText);
+
+  if (mentionsWifi && wantsChange) intents.add('wifi_credentials_change');
+  if (mentionsWifi && wantsLookup) intents.add('wifi_credentials_lookup');
+  if (mentionsWifi && wantsChannelDiagnostics) intents.add('wifi_channel_diagnostics');
+  if (wantsReboot) intents.add('router_reboot');
+  if (/\b(cpf|cnpj|contrato|cliente|assinante|roteador|ip|conexao|conex[aã]o|wi[\s-]?fi|wifi)\b/.test(searchText)) {
+    intents.add('customer_contract_lookup');
+  }
+  if (/\b(humano|atendente|transferir|transferencia|especialista|equipe)\w*/.test(searchText)) intents.add('human_handoff');
+  if (/\b(encerrar|finalizar|fechar atendimento|tchau|obrigad)\w*/.test(searchText)) intents.add('close_conversation');
+  if (/\b(nota interna|registrar contexto|preservar contexto|resumo interno)\b/.test(searchText)) intents.add('internal_note');
+  if (/\b(crm|cadastro|campo customizado|salvar dado|atualizar contato)\w*/.test(searchText)) intents.add('crm_update');
+  if (/\b(status|andamento|rastre|tracking|previsao|previs[aÃ£]o|pedido|order|entrega|shipment|protocolo|solicitacao|solicita[cÃ§][aÃ£]o|ticket|chamado)\w*/.test(searchText)) intents.add('order_status_lookup');
+  if (/\b(fatura|boleto|segunda via|2a via|pagamento|mensalidade|debito|d[eÃ©]bito|cobranca|cobran[cÃ§]a|vencimento)\w*/.test(searchText)) intents.add('billing_lookup');
+  if (/\b(pix|qr code|copia e cola)\w*/.test(searchText) && /\b(gerar|emitir|enviar|codigo|c[oÃ³]digo)\w*/.test(searchText)) intents.add('payment_pix_generation');
+  if (/\b(promessa|prometer|negociar|acordo|renegociar)\w*/.test(searchText) && /\b(pagamento|pagar|fatura|boleto)\w*/.test(searchText)) intents.add('payment_promise');
+  if (/\b(abrir|criar|registrar)\w*/.test(searchText) && /\b(chamado|ticket|os|ordem de servi[cÃ§]o|suporte)\w*/.test(searchText)) intents.add('support_ticket_creation');
+  if (/\b(catalogo|cat[aÃ¡]logo|cardapio|card[aÃ¡]pio|produtos?|servicos?|servi[cÃ§]os?|planos?|menu|opcoes|op[cÃ§][oÃµ]es)\w*/.test(searchText)) intents.add('catalog_lookup');
+  if (/\b(preco|pre[cÃ§]o|valor|cotacao|cota[cÃ§][aÃ£]o|orcamento|or[cÃ§]amento|quanto custa|mensalidade)\w*/.test(searchText)) intents.add('pricing_lookup');
+  if (/\b(disponivel|disponibilidade|estoque|tem vaga|tem horario|tem hor[aÃ¡]rio|agenda disponivel|entrega disponivel)\w*/.test(searchText)) intents.add('availability_lookup');
+  if (/\b(agendar|marcar|remarcar|desmarcar|agenda|horario|hor[aÃ¡]rio|consulta|visita|instalacao|instala[cÃ§][aÃ£]o)\w*/.test(searchText)) intents.add('scheduling_lookup');
+  if (/\b(documento|contrato|comprovante|nota fiscal|nf|termo|segunda via|2a via|declaracao|declara[cÃ§][aÃ£]o)\w*/.test(searchText)) intents.add('document_lookup');
+  if (/\b(consultar|verificar|buscar|checar|conferir|validar|sistema|api|mcp|externo|painel)\w*/.test(searchText)) intents.add('external_read');
+  return intents;
+}
+
+const SEARCH_STOP_WORDS = new Set([
+  'para', 'como', 'quando', 'onde', 'qual', 'quais', 'quero', 'preciso', 'pode', 'cliente',
+  'atendimento', 'agente', 'fluxo', 'dialogy', 'sistema', 'dados', 'usar', 'deve', 'depois',
+  'pelo', 'pela', 'pelos', 'pelas', 'com', 'sem', 'sobre', 'entre', 'criar', 'crie', 'monte',
+  'numero', 'codigo', 'motivo', 'informado', 'informada',
+]);
+
+function overlapScore(toolSearchText: string, requestSearchText: string): number {
+  const tokens = requestSearchText.match(/[a-z0-9_]{4,}/g) || [];
+  const uniqueTokens = [...new Set(tokens)].filter((token) => !SEARCH_STOP_WORDS.has(token));
+  const matches = uniqueTokens.filter((token) => toolSearchText.includes(token));
+  return Math.min(6, matches.length);
+}
+
+type ExternalActionCategory =
+  | 'schedule'
+  | 'cancel'
+  | 'refund'
+  | 'change'
+  | 'create'
+  | 'delete'
+  | 'approve'
+  | 'activate'
+  | 'document'
+  | 'purchase'
+  | 'support';
+
+function externalActionCategories(textValue: string): Set<ExternalActionCategory> {
+  const text = normalizeSearchText(textValue).replace(/[_-]+/g, ' ');
+  const categories = new Set<ExternalActionCategory>();
+  if (/\b(schedul|book|reserv|reschedul|agend|marc|remarc)\w*/.test(text)) categories.add('schedule');
+  if (/\b(cancel|terminat|suspend|encerr)\w*/.test(text)) categories.add('cancel');
+  if (/\b(refund|return|reverse|estorn|reembols|devolv)\w*/.test(text)) categories.add('refund');
+  if (/\b(updat|chang|edit|replac|alter|atualiz|troc|mud)\w*/.test(text)) categories.add('change');
+  if (/\b(creat|register|open|submit|cri|cadastr|registr|abr|envi)\w*/.test(text)) categories.add('create');
+  if (/\b(delet|remov|clear|exclu|apag|limp)\w*/.test(text)) categories.add('delete');
+  if (/\b(approv|authoriz|accept|aprov|autoriz|aceit)\w*/.test(text)) categories.add('approve');
+  if (/\b(activat|enabl|disabl|deactivat|ativ|habilit|desabilit|desativ)\w*/.test(text)) categories.add('activate');
+  if (/\b(issu|generat|send|emit|ger|envi)\w*.{0,32}\b(document|certificat|invoice|receipt|documento|certificado|nota|comprovante)\w*/.test(text)) categories.add('document');
+  if (
+    /\b(buy|purchas|checkout|compr|contrat|assin)\w*/.test(text) ||
+    /\b(creat|place|make|cri|faz|realiz)\w*.{0,24}\b(order|pedido)\w*/.test(text)
+  ) {
+    categories.add('purchase');
+  }
+  if (
+    /\b(reboot|restart|reset|reinici)\w*/.test(text) ||
+    /\b(open|creat|register|abr|cri|registr)\w*.{0,24}\b(ticket|support|chamado|suporte)\w*/.test(text)
+  ) {
+    categories.add('support');
+  }
+  return categories;
+}
+
+function requestsExternalAction(text: string): boolean {
+  return externalActionCategories(text).size > 0;
+}
+
+function isReadOnlyExternalTool(tool: AgentToolCatalogItem) {
+  return (
+    tool.source === 'mcp' ||
+    tool.class === 'read_only' ||
+    tool.class === 'retrieval'
+  ) && tool.sideEffect === 'none';
+}
+
+function scoreToolForIntent(
+  tool: AgentToolCatalogItem,
+  requestedIntent: ToolRelevanceIntent,
+  requestSearchText: string,
+): number {
+  const text = toolText(tool);
+  const lastNamePart = normalizeSearchText(tool.name.split(':').at(-1) || tool.name);
+
+  switch (requestedIntent) {
+    case 'customer_contract_lookup':
+      if (tool.name === 'sgp_fetch_contact_panel_data') return 10;
+      if (tool.name === 'sgp_fetch_contracts') return 8;
+      if (/\b(find_router_by_ip|get_router|router|contrato|cliente|assinante|sgp|panel|contract)\b/.test(text)) return 5;
+      return 0;
+    case 'wifi_credentials_lookup':
+      if (/\b(get_wifi_view|wifi_view|consultar wifi|senha|ssid|credencia|nome da rede|password)\b/.test(text)) return 10;
+      if (/\b(refresh_wifi_summary|wifi_summary)\b/.test(text)) return 7;
+      return 0;
+    case 'wifi_credentials_change':
+      if (/\b(change_wifi_credentials|trocar.*wifi|alterar.*wifi|senha|ssid|credentials)\b/.test(text)) return 10;
+      return 0;
+    case 'wifi_channel_diagnostics':
+      if (/\b(scan_wifi_neighbors|wifi_neighbors|redes ao redor|neighbors|canal|channel|interferencia)\b/.test(text)) return 10;
+      if (/\b(get_wifi_scan_cached|wifi_scan|scan cached)\b/.test(text)) return 8;
+      if (/\b(list_connected_devices|connected devices|dispositivos conectados|get_router|mesh|topology|topologia)\b/.test(text)) return 5;
+      return 0;
+    case 'router_reboot':
+      return /\b(reboot_router|reiniciar|reboot)\b/.test(text) || lastNamePart === 'reboot_router' ? 10 : 0;
+    case 'order_status_lookup':
+      if (/\b(get_order_status|order_status|track_order|tracking|shipment_status|get_ticket_status|get_request_status|status_pedido|rastreio|pedido|protocolo|ticket|chamado)\b/.test(text)) return 10;
+      if (tool.allowedIntents.includes('order_or_request_status') && /\b(status|andamento|pedido|protocolo|solicitacao|ticket|chamado|entrega)\b/.test(text)) return 7;
+      return 0;
+    case 'billing_lookup':
+      if (tool.name === 'sgp_fetch_contact_panel_data') return 9;
+      if (tool.name === 'sgp_fetch_contracts') return 6;
+      if (isReadOnlyExternalTool(tool) && /\b(fatura|boleto|invoice|billing|payment|pagamento|debito|cobranca|mensalidade|vencimento)\b/.test(text)) return 9;
+      return 0;
+    case 'payment_pix_generation':
+      if (tool.name === 'sgp_generate_invoice_pix') return 10;
+      return /\b(generate.*pix|pix|qr code|payment link|codigo de pagamento)\b/.test(text) ? 9 : 0;
+    case 'payment_promise':
+      if (tool.name === 'sgp_create_payment_promise') return 10;
+      return /\b(payment_promise|promessa|acordo|renegociar|promise)\b/.test(text) ? 9 : 0;
+    case 'support_ticket_creation':
+      return /\b(open_support_ticket|create_ticket|abrir chamado|criar chamado|ordem de servico|service order|support ticket)\b/.test(text) ? 8 : 0;
+    case 'catalog_lookup':
+      return isReadOnlyExternalTool(tool) && /\b(catalog|catalogo|cat[aÃ¡]logo|cardapio|produto|product|servico|service|plano|menu)\b/.test(text) ? 8 : 0;
+    case 'pricing_lookup':
+      return isReadOnlyExternalTool(tool) && /\b(price|pricing|preco\w*|pre[cÃ§]o\w*|valor|cotacao|orcamento|quote|mensalidade)\b/.test(text) ? 8 : 0;
+    case 'availability_lookup':
+      return isReadOnlyExternalTool(tool) && /\b(availability|disponibilidade|estoque|stock|slot|agenda|vaga|horario|hor[aÃ¡]rio)\b/.test(text) ? 8 : 0;
+    case 'scheduling_lookup':
+      return isReadOnlyExternalTool(tool) && /\b(schedule|appointment|agenda|agendar|marcar|remarcar|visita|consulta|instalacao|instala[cÃ§][aÃ£]o)\b/.test(text) ? 8 : 0;
+    case 'document_lookup':
+      return isReadOnlyExternalTool(tool) && /\b(document|documento|contrato|comprovante|nota fiscal|invoice|declaracao|declara[cÃ§][aÃ£]o|termo)\b/.test(text) ? 8 : 0;
+    case 'external_read':
+      if (!isReadOnlyExternalTool(tool)) return 0;
+      return overlapScore(text, requestSearchText) >= 3 ? 5 + overlapScore(text, requestSearchText) : 0;
+    case 'external_action': {
+      if (tool.source !== 'mcp' || tool.sideEffect === 'none') return 0;
+      const requestCategories = externalActionCategories(requestSearchText);
+      const toolCategories = externalActionCategories(text);
+      const categoryMatches = [...requestCategories].filter((category) => toolCategories.has(category));
+      const overlap = overlapScore(text, requestSearchText);
+      if (categoryMatches.length > 0 && overlap >= 1) {
+        return 8 + Math.min(4, categoryMatches.length * 2) + overlap;
+      }
+      return overlap >= 3 ? 6 + overlap : 0;
+    }
+    case 'human_handoff':
+      return tool.name === 'transfer_chat' ? 10 : 0;
+    case 'close_conversation':
+      return tool.name === 'close_chat' ? 10 : 0;
+    case 'internal_note':
+      return tool.name === 'add_internal_note' ? 10 : 0;
+    case 'crm_update':
+      return tool.name === 'crm_update_contact_custom_fields' ? 10 : 0;
+    default:
+      return 0;
+  }
+}
+
+function sideEffectExplicitlyRequested(intent: ToolRelevanceIntent) {
+  return [
+    'router_reboot',
+    'wifi_credentials_change',
+    'payment_pix_generation',
+    'payment_promise',
+    'support_ticket_creation',
+    'human_handoff',
+    'close_conversation',
+    'internal_note',
+    'crm_update',
+    'external_action',
+  ].includes(intent);
+}
+
+function isUnsafeToolForRequestedIntents(tool: AgentToolCatalogItem, requestedIntents: Set<ToolRelevanceIntent>) {
+  const text = toolText(tool);
+  if (/\b(bloqueada para ia|bloqueado para ia|blocked for ai|ai blocked)\b/.test(text)) {
+    return true;
+  }
+  if (
+    requestedIntents.has('wifi_credentials_lookup')
+    && !requestedIntents.has('router_reboot')
+    && /\b(reboot_router|reboot|reiniciar)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (
+    requestedIntents.has('wifi_credentials_lookup') &&
+    !requestedIntents.has('wifi_credentials_change') &&
+    /\b(change_wifi_credentials|trocar.*wifi|alterar.*wifi|credentials)\b/.test(text)
+  ) {
+    return true;
+  }
+  const onlyReadIntents = [...requestedIntents].every((intent) => !sideEffectExplicitlyRequested(intent));
+  if (onlyReadIntents && tool.sideEffect === 'high') return true;
+  return false;
+}
+
+export function buildToolRelevanceMap(input: {
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+  architecture?: FlowBuilderOutput | null;
+  currentSystemPrompt?: string | null;
+  tools: AgentToolCatalogItem[];
+}): ToolRelevanceEntry[] {
+  const requestSearchText = normalizeSearchText([
+    input.currentSystemPrompt || '',
+    input.conversation.map((message) => message.content).join('\n'),
+  ].join('\n'));
+  const searchText = normalizeSearchText([
+    input.currentSystemPrompt || '',
+    input.conversation.map((message) => message.content).join('\n'),
+    input.architecture?.summary || '',
+    input.architecture?.procedureManifest || '',
+    input.architecture?.systemPrompt || '',
+    ...(input.architecture?.nodes || []).flatMap((node) => [
+      node.title,
+      node.subtitle,
+      node.instructions || '',
+      node.message || '',
+      ...(node.routes || []).flatMap((route) => [route.label, route.description, ...(route.examples || [])]),
+    ]),
+  ].join('\n'));
+  // Generated architecture text may describe safety branches that the user did not request.
+  // Never let model-generated text authorize a mutating capability.
+  const requestedIntents = inferRequestedToolIntents(requestSearchText);
+  if (requestsExternalAction(requestSearchText)) {
+    requestedIntents.add('external_action');
+  }
+  if (requestedIntents.size === 0) return [];
+
+  const entries: ToolRelevanceEntry[] = [];
+  for (const tool of input.tools) {
+    if (isUnsafeToolForRequestedIntents(tool, requestedIntents)) continue;
+    const matched: ToolRelevanceIntent[] = [];
+    let score = 0;
+    for (const intent of requestedIntents) {
+      const intentScore = scoreToolForIntent(
+        tool,
+        intent,
+        intent === 'external_action' ? requestSearchText : searchText,
+      );
+      if (intentScore > 0) {
+        matched.push(intent);
+        score += intentScore;
+      }
+    }
+    if (score <= 0) continue;
+    const hasExplicitSideEffectIntent = matched.some(sideEffectExplicitlyRequested);
+    const safeScore = tool.sideEffect === 'high' && !hasExplicitSideEffectIntent
+      ? Math.min(score, 4)
+      : score;
+    if (safeScore < 5) continue;
+    entries.push({
+      toolName: tool.name,
+      intents: matched,
+      score: safeScore,
+      reason: `Relevante para ${matched.join(', ')} usando nome, descricao e schema da ferramenta.`,
+      source: tool.source,
+      sideEffect: tool.sideEffect,
+      riskLevel: tool.riskLevel,
+      description: tool.description,
+    });
+  }
+
+  return entries
+    .sort((left, right) => right.score - left.score || left.toolName.localeCompare(right.toolName))
+    .slice(0, 18);
+}
+
+function formatToolRelevanceMap(entries: ToolRelevanceEntry[]) {
+  if (entries.length === 0) return 'Nenhuma ferramenta habilitada parece necessaria para este pedido.';
+  return entries.map((entry) => (
+    `- ${entry.toolName} | intents=${entry.intents.join(',')} | score=${entry.score} | sideEffect=${entry.sideEffect} | risco=${entry.riskLevel} | ${entry.reason} Descricao: ${entry.description}`
+  )).join('\n');
+}
+
+function findBestAttachNode(flow: FlowBuilderOutput, entry: ToolRelevanceEntry): FlowBuilderOutput['nodes'][number] | null {
+  const text = normalizeSearchText(`${entry.toolName} ${entry.intents.join(' ')} ${entry.description}`);
+  const candidates = flow.nodes.filter((node) => ['sub_agent', 'collect', 'message'].includes(node.kind));
+  if (candidates.length === 0) return null;
+  const qualifiedToolName = normalizeSearchText(entry.toolName);
+  const dedicatedCandidates = candidates.filter((node) => (
+    normalizeSearchText(`${node.title} ${node.subtitle} ${node.instructions || ''}`).includes(qualifiedToolName)
+  ));
+  if (dedicatedCandidates.length > 0) {
+    if (entry.sideEffect !== 'none') {
+      return dedicatedCandidates.find((node) => node.kind === 'message')
+        || dedicatedCandidates.find((node) => node.kind === 'collect')
+        || dedicatedCandidates[0];
+    }
+    return dedicatedCandidates.find((node) => node.kind === 'collect')
+      || dedicatedCandidates.find((node) => node.kind === 'message')
+      || dedicatedCandidates[0];
+  }
+  if (entry.intents.includes('customer_contract_lookup')) {
+    return candidates.find((node) => node.kind === 'collect') || candidates.find((node) => node.kind === 'sub_agent') || candidates[0];
+  }
+  if (entry.intents.some((intent) => [
+    'order_status_lookup',
+    'billing_lookup',
+    'document_lookup',
+    'availability_lookup',
+    'scheduling_lookup',
+  ].includes(intent))) {
+    return candidates.find((node) => node.kind === 'collect') || candidates.find((node) => node.kind === 'sub_agent') || candidates[0];
+  }
+  if (/\b(change|trocar|credentials|senha|ssid)\b/.test(text)) {
+    return candidates.find((node) => normalizeSearchText(`${node.title} ${node.subtitle}`).match(/\b(wifi|wi fi|senha|credencia|trocar|alterar)\b/))
+      || candidates.find((node) => node.kind === 'sub_agent')
+      || candidates[0];
+  }
+  return candidates.find((node) => node.kind === 'sub_agent') || candidates[0];
+}
+
+function toolTitleFromEntry(entry: ToolRelevanceEntry) {
+  if (entry.intents.includes('wifi_credentials_lookup')) return 'Consultar Wi-Fi atual';
+  if (entry.intents.includes('wifi_channel_diagnostics')) return 'Diagnosticar canais Wi-Fi';
+  if (entry.intents.includes('wifi_credentials_change')) return 'Trocar credenciais Wi-Fi';
+  if (entry.intents.includes('router_reboot')) return 'Reiniciar roteador';
+  if (entry.intents.includes('customer_contract_lookup')) return 'Validar cliente e contrato';
+  if (entry.intents.includes('order_status_lookup')) return 'Consultar status';
+  if (entry.intents.includes('billing_lookup')) return 'Consultar financeiro';
+  if (entry.intents.includes('payment_pix_generation')) return 'Gerar PIX';
+  if (entry.intents.includes('payment_promise')) return 'Registrar promessa';
+  if (entry.intents.includes('support_ticket_creation')) return 'Registrar chamado';
+  if (entry.intents.includes('catalog_lookup')) return 'Consultar catalogo';
+  if (entry.intents.includes('pricing_lookup')) return 'Consultar precos';
+  if (entry.intents.includes('availability_lookup')) return 'Consultar disponibilidade';
+  if (entry.intents.includes('scheduling_lookup')) return 'Consultar agenda';
+  if (entry.intents.includes('document_lookup')) return 'Consultar documento';
+  if (entry.intents.includes('external_read')) return 'Consulta externa';
+  return entry.toolName.split(':').at(-1) || entry.toolName;
+}
+
+export function ensureToolRelevanceCoverage(
+  architecture: FlowBuilderOutput,
+  tools: AgentToolCatalogItem[],
+  relevanceMap: ToolRelevanceEntry[],
+): FlowBuilderOutput {
+  if (relevanceMap.length === 0) return architecture;
+  const availableTools = new Map<string, AgentToolCatalogItem>(tools.map((tool) => [tool.name, tool]));
+  const nodes = [...architecture.nodes];
+  const edges = [...architecture.edges];
+  const existingToolNames = new Set(nodes.filter((node) => node.kind === 'tool').map((node) => node.toolName).filter(Boolean));
+
+  for (const entry of relevanceMap) {
+    const tool = availableTools.get(entry.toolName);
+    if (!tool || existingToolNames.has(entry.toolName)) continue;
+    const attachTo = findBestAttachNode({ ...architecture, nodes }, entry);
+    if (!attachTo) continue;
+    const id = `tool-${normalizeId(entry.toolName, 'acao')}`;
+    const toolNode: FlowBuilderOutput['nodes'][number] = {
+      id,
+      kind: 'tool',
+      title: toolTitleFromEntry(entry),
+      subtitle: tool.source === 'mcp' ? `MCP qualificada: ${tool.name}` : tool.description,
+      x: attachTo.x + 300,
+      y: attachTo.y + 160 + (nodes.filter((node) => node.kind === 'tool').length * 130),
+      toolName: tool.name,
+      instructions: [
+        `Ferramenta real: ${tool.name}. Nunca referencie esta MCP como mcp_call_tool no planejamento; mcp_call_tool e apenas detalhe interno do executor.`,
+        `Criterio de uso: ${entry.reason}`,
+        `Descricao/schema: ${tool.description}`,
+        tool.sideEffect === 'high'
+          ? 'Tem side effect alto: exige pedido explicito, confirmacao clara do cliente e nunca deve ser usada em teste destrutivo sem autorizacao.'
+          : 'Use somente apos validar dados necessarios e mantenha a resposta alinhada ao pedido atual do cliente.',
+      ].join(' '),
+      referenceId: id.replace(/-/g, '_'),
+      inputSchema: tool.inputSchema || undefined,
+      outputSchema: tool.outputSchema || undefined,
+      maxAttempts: tool.maxAttempts || 1,
+      errorHandles: ['error'],
+    };
+    nodes.push(toolNode);
+    existingToolNames.add(entry.toolName);
+    const isDedicatedCapability = attachTo.id.startsWith('cap-');
+    if (isDedicatedCapability) {
+      for (let edgeIndex = edges.length - 1; edgeIndex >= 0; edgeIndex -= 1) {
+        if (edges[edgeIndex].source === attachTo.id && !edges[edgeIndex].routeId) {
+          edges.splice(edgeIndex, 1);
+        }
+      }
+    }
+    if (!edges.some((edge) => edge.source === attachTo.id && edge.target === toolNode.id)) {
+      edges.push({ source: attachTo.id, target: toolNode.id });
+    }
+    if (isDedicatedCapability) {
+      const principal = nodes.find((node) => node.kind === 'sub_agent');
+      if (principal && !edges.some((edge) => edge.source === toolNode.id && edge.target === principal.id)) {
+        edges.push({ source: toolNode.id, target: principal.id });
+      }
+    }
+  }
+
+  return { ...architecture, nodes, edges };
+}
+
+type WifiBranchDefinition = {
+  routeId: string;
+  intent: Extract<
+    ToolRelevanceIntent,
+    'wifi_credentials_lookup' | 'wifi_channel_diagnostics' | 'wifi_credentials_change' | 'router_reboot'
+  >;
+  slug: string;
+  title: string;
+  collectTitle: string;
+};
+
+const WIFI_BRANCH_DEFINITIONS: WifiBranchDefinition[] = [
+  {
+    routeId: 'consultar_wifi',
+    intent: 'wifi_credentials_lookup',
+    slug: 'consulta',
+    title: 'Responder credenciais Wi-Fi',
+    collectTitle: 'Validar cliente para consultar Wi-Fi',
+  },
+  {
+    routeId: 'diagnosticar_wifi',
+    intent: 'wifi_channel_diagnostics',
+    slug: 'diagnostico',
+    title: 'Responder diagnostico Wi-Fi',
+    collectTitle: 'Validar cliente para diagnosticar Wi-Fi',
+  },
+  {
+    routeId: 'trocar_wifi',
+    intent: 'wifi_credentials_change',
+    slug: 'troca',
+    title: 'Confirmar resultado da troca de Wi-Fi',
+    collectTitle: 'Coletar e confirmar nova configuracao Wi-Fi',
+  },
+  {
+    routeId: 'reiniciar_roteador',
+    intent: 'router_reboot',
+    slug: 'reboot',
+    title: 'Confirmar resultado do reboot',
+    collectTitle: 'Validar cliente e confirmar reboot',
+  },
+];
+
+function uniqueFormFields(
+  fields: NonNullable<ArchitectureFlowBuilderOutput['nodes'][number]['formFields']>,
+) {
+  const seen = new Set<string>();
+  return fields.filter((field) => {
+    const key = String(field.fieldKey || field.id).trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function wifiBranchFields(
+  definition: WifiBranchDefinition,
+  branchTools: AgentToolCatalogItem[],
+): NonNullable<ArchitectureFlowBuilderOutput['nodes'][number]['formFields']> {
+  const customerIdentifier = {
+    id: `wifi-${definition.slug}-customer-identifier`,
+    label: 'CPF, CNPJ ou contrato',
+    fieldKey: 'customer_identifier',
+    type: 'document' as const,
+    required: true,
+    aliases: ['cpf', 'cnpj', 'contrato', 'codigo do cliente'],
+  };
+  const schemaFields = branchTools.flatMap((tool) => fallbackCapabilityFormFields(tool));
+
+  if (definition.intent === 'wifi_credentials_change') {
+    return uniqueFormFields([
+      customerIdentifier,
+      ...schemaFields,
+      {
+        id: 'wifi-change-requested-value',
+        label: 'Novo nome ou nova senha solicitada',
+        fieldKey: 'wifi_requested_change',
+        type: 'text',
+        required: true,
+        aliases: ['novo nome', 'nova senha', 'ssid', 'password'],
+      },
+      {
+        id: 'wifi-change-confirmation',
+        label: 'Confirmacao explicita da alteracao',
+        fieldKey: 'wifi_change_confirmation',
+        type: 'text',
+        required: true,
+        aliases: ['confirmo', 'pode alterar', 'autorizo'],
+      },
+    ]);
+  }
+  if (definition.intent === 'router_reboot') {
+    return uniqueFormFields([
+      customerIdentifier,
+      ...schemaFields,
+      {
+        id: 'wifi-reboot-confirmation',
+        label: 'Confirmacao explicita do reboot',
+        fieldKey: 'router_reboot_confirmation',
+        type: 'text',
+        required: true,
+        aliases: ['confirmo', 'pode reiniciar', 'autorizo'],
+      },
+    ]);
+  }
+  if (definition.intent === 'wifi_channel_diagnostics') {
+    return uniqueFormFields([
+      customerIdentifier,
+      ...schemaFields,
+      {
+        id: 'wifi-diagnostic-symptom',
+        label: 'Sintoma observado',
+        fieldKey: 'wifi_symptom',
+        type: 'text',
+        required: false,
+        aliases: ['lentidao', 'queda', 'oscilacao', 'interferencia'],
+      },
+    ]);
+  }
+  return uniqueFormFields([customerIdentifier, ...schemaFields]);
+}
+
+function wifiToolOrder(toolName: string) {
+  const normalized = normalizeSearchText(toolName);
+  if (/sgp|contract|customer|cliente/.test(normalized)) return 10;
+  if (/get_router|router_view/.test(normalized)) return 20;
+  if (/list_connected|connected_devices/.test(normalized)) return 30;
+  if (/scan_wifi_neighbors|scan_neighbors/.test(normalized)) return 40;
+  if (/get_wifi_scan_cached|scan_cached|cached_scan/.test(normalized)) return 50;
+  return 60;
+}
+
+export function ensureWifiBranchIsolation(
+  architecture: FlowBuilderOutput,
+  tools: AgentToolCatalogItem[],
+  relevanceMap: ToolRelevanceEntry[],
+): FlowBuilderOutput {
+  const decision = architecture.nodes.find((node) => (
+    node.kind === 'decision'
+    && WIFI_BRANCH_DEFINITIONS.some((definition) => node.routes?.some((route) => route.id === definition.routeId))
+  ));
+  if (!decision) return architecture;
+
+  const activeDefinitions = WIFI_BRANCH_DEFINITIONS.filter((definition) => (
+    decision.routes?.some((route) => route.id === definition.routeId)
+  ));
+  const toolByName = new Map(tools.map((tool) => [String(tool.name), tool]));
+  const specializedWifiIntents = new Set<ToolRelevanceIntent>(
+    WIFI_BRANCH_DEFINITIONS.map((definition) => definition.intent),
+  );
+  const dominantWifiIntent = (entry: ToolRelevanceEntry) => {
+    const tool = toolByName.get(entry.toolName);
+    const name = normalizeSearchText(entry.toolName.split(':').at(-1) || entry.toolName);
+    const text = normalizeSearchText(`${entry.toolName} ${tool?.description || entry.description}`);
+    if (/^(reboot_router|reboot|restart_router)/.test(name)) return 'router_reboot' as const;
+    if (/^(change_wifi_credentials|update_wifi_credentials|set_wifi_credentials)/.test(name)) {
+      return 'wifi_credentials_change' as const;
+    }
+    if (/^(get_wifi_view|wifi_view|refresh_wifi_summary|wifi_summary)/.test(name)) {
+      return 'wifi_credentials_lookup' as const;
+    }
+    if (/(scan|neighbor|channel|connected|device|get_router|mesh|topolog|queue_get|find_router)/.test(name)) {
+      return 'wifi_channel_diagnostics' as const;
+    }
+    if (/\b(reboot_router|reboot|reiniciar)\w*/.test(text)) return 'router_reboot' as const;
+    if (/\b(change_wifi_credentials|update_wifi_credentials|trocar.*wifi|alterar.*wifi)\w*/.test(text)) {
+      return 'wifi_credentials_change' as const;
+    }
+    if (/\b(get_wifi_view|wifi_view|refresh_wifi_summary|wifi_summary)\w*/.test(text)) {
+      return 'wifi_credentials_lookup' as const;
+    }
+    if (/\b(scan|neighbor|channel|canal|connected|device|router|mesh|topolog|queue_get|find_router)\w*/.test(text)) {
+      return 'wifi_channel_diagnostics' as const;
+    }
+    const matched = entry.intents.filter((intent) => specializedWifiIntents.has(intent));
+    return matched.length === 1 ? matched[0] : null;
+  };
+  const isContractValidationEntry = (entry: ToolRelevanceEntry) => (
+    (
+      entry.toolName === 'sgp_fetch_contact_panel_data'
+      || entry.toolName === 'sgp_fetch_contracts'
+      || entry.intents.includes('customer_contract_lookup')
+    )
+    && !dominantWifiIntent(entry)
+    && !entry.intents.some((intent) => specializedWifiIntents.has(intent))
+  );
+  const wifiEntries = relevanceMap.filter((entry) => (
+    isContractValidationEntry(entry)
+    || activeDefinitions.some((definition) => dominantWifiIntent(entry) === definition.intent)
+  ));
+  const wifiToolNames = new Set(wifiEntries.map((entry) => entry.toolName));
+  const obsoleteNodeIds = new Set(
+    architecture.nodes
+      .filter((node) => (
+        node.id === 'validar-cliente'
+        || node.id === 'coleta-credenciais-wifi'
+        || node.id === 'confirmar-reboot'
+        || node.id.startsWith('wifi-branch-')
+        || (node.kind === 'tool' && Boolean(node.toolName && wifiToolNames.has(node.toolName)))
+      ))
+      .map((node) => node.id),
+  );
+  const nodes = architecture.nodes.filter((node) => !obsoleteNodeIds.has(node.id));
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const principal = nodes.find((node) => node.kind === 'sub_agent');
+  const end = nodes.find((node) => node.kind === 'end');
+  const knowledgeNodes = nodes.filter((node) => node.kind === 'knowledge');
+  const activeRouteIds = new Set(activeDefinitions.map((definition) => definition.routeId));
+  const edges = architecture.edges.filter((edge) => (
+    !obsoleteNodeIds.has(edge.source)
+    && !obsoleteNodeIds.has(edge.target)
+    && !(edge.source === decision.id && Boolean(edge.routeId && activeRouteIds.has(edge.routeId)))
+  ));
+  const edgeKeys = new Set(edges.map((edge) => `${edge.source}:${edge.target}:${edge.routeId || ''}`));
+  const addEdge = (source: string, target: string, routeId?: string) => {
+    const sourceNode = nodeById.get(source);
+    const targetNode = nodeById.get(target);
+    const key = `${source}:${target}:${routeId || ''}`;
+    if (!sourceNode || !targetNode || source === target || edgeKeys.has(key) || !canConnect(sourceNode.kind, targetNode.kind)) {
+      return;
+    }
+    edgeKeys.add(key);
+    edges.push({ source, target, ...(routeId ? { routeId } : {}) });
+  };
+  const nextRoutes = (decision.routes || []).map((route) => ({ ...route }));
+
+  for (const [branchIndex, definition] of activeDefinitions.entries()) {
+    const branchEntries = wifiEntries
+      .filter((entry) => (
+        isContractValidationEntry(entry)
+        || dominantWifiIntent(entry) === definition.intent
+      ))
+      .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.toolName === entry.toolName) === index)
+      .sort((left, right) => (
+        wifiToolOrder(left.toolName) - wifiToolOrder(right.toolName)
+        || right.score - left.score
+        || left.toolName.localeCompare(right.toolName)
+      ));
+    const branchTools = branchEntries
+      .map((entry) => toolByName.get(entry.toolName))
+      .filter((tool): tool is AgentToolCatalogItem => Boolean(tool));
+    const collectId = `wifi-branch-${definition.slug}-collect`;
+    const responseId = `wifi-branch-${definition.slug}-response`;
+    const y = 220 + branchIndex * 300;
+    const collectNode: FlowBuilderOutput['nodes'][number] = {
+      id: collectId,
+      kind: 'collect',
+      title: definition.collectTitle,
+      subtitle: definition.intent === 'wifi_credentials_change' || definition.intent === 'router_reboot'
+        ? 'Side effect permitido somente com pedido e confirmacao explicitos'
+        : 'Validacao isolada para esta intencao',
+      x: 760,
+      y,
+      referenceId: collectId.replace(/-/g, '_'),
+      formMode: 'ai',
+      formFields: wifiBranchFields(definition, branchTools),
+      instructions: definition.intent === 'wifi_credentials_change'
+        ? 'Colete somente a mudanca solicitada e a confirmacao explicita. Nunca trate uma consulta de senha como pedido de alteracao.'
+        : definition.intent === 'router_reboot'
+          ? 'Exija pedido e confirmacao explicitos para reboot. Nunca use este branch para consultar credenciais ou diagnosticar canal.'
+          : 'Valide o cliente e contrato sem pedir novamente dados ja confirmados no atendimento.',
+    };
+    const responseNode: FlowBuilderOutput['nodes'][number] = {
+      id: responseId,
+      kind: 'sub_agent',
+      title: definition.title,
+      subtitle: 'Responder somente com resultados deste branch',
+      x: 1500,
+      y,
+      referenceId: responseId.replace(/-/g, '_'),
+      requiredKnowledgeCoverage: 'low',
+      instructions: [
+        `Intencao exclusiva deste branch: ${definition.intent}.`,
+        'Use somente resultados das ferramentas conectadas neste caminho.',
+        'Nao execute nem proponha ferramentas de outro branch.',
+        definition.intent === 'wifi_credentials_lookup'
+          ? 'Entregue as credenciais confirmadas; nunca reinicie nem altere o roteador.'
+          : definition.intent === 'wifi_channel_diagnostics'
+            ? 'Analise evidencia real de canais, interferencia e dispositivos antes de recomendar; nao altere configuracao.'
+            : 'Relate o resultado real da acao confirmada e nunca alegue sucesso sem retorno da ferramenta.',
+      ].join(' '),
+    };
+    nodes.push(collectNode, responseNode);
+    nodeById.set(collectId, collectNode);
+    nodeById.set(responseId, responseNode);
+    const route = nextRoutes.find((candidate) => candidate.id === definition.routeId);
+    if (route) route.targetNodeId = collectId;
+    addEdge(decision.id, collectId, definition.routeId);
+
+    let previousId = collectId;
+    for (const [toolIndex, entry] of branchEntries.entries()) {
+      const tool = toolByName.get(entry.toolName);
+      if (!tool) continue;
+      const toolId = `wifi-branch-${definition.slug}-tool-${toolIndex + 1}-${normalizeId(tool.name, 'tool')}`;
+      const toolNode: FlowBuilderOutput['nodes'][number] = {
+        id: toolId,
+        kind: 'tool',
+        title: toolTitleFromEntry(entry),
+        subtitle: tool.source === 'mcp' ? `MCP qualificada: ${tool.name}` : tool.description,
+        x: 1020 + toolIndex * 260,
+        y,
+        toolName: tool.name,
+        referenceId: toolId.replace(/-/g, '_'),
+        inputSchema: tool.inputSchema || undefined,
+        outputSchema: tool.outputSchema || undefined,
+        maxAttempts: tool.maxAttempts || 1,
+        errorHandles: ['error'],
+        instructions: [
+          toolInstructions(tool),
+          `Branch autorizado: ${definition.intent}.`,
+          `Nome de planejamento e log: ${tool.name}.`,
+          'Para MCP, mcp_call_tool e apenas detalhe interno e nunca substitui o nome qualificado.',
+        ].join(' '),
+      };
+      nodes.push(toolNode);
+      nodeById.set(toolId, toolNode);
+      addEdge(previousId, toolId);
+      previousId = toolId;
+
+      if (toolIndex < branchEntries.length - 1) {
+        const bridgeId = `wifi-branch-${definition.slug}-bridge-${toolIndex + 1}`;
+        const bridgeNode: FlowBuilderOutput['nodes'][number] = {
+          id: bridgeId,
+          kind: 'message',
+          title: `Validar resultado ${toolIndex + 1}`,
+          subtitle: 'Avancar somente com retorno util ou fallback seguro',
+          x: 1150 + toolIndex * 260,
+          y: y + 130,
+          referenceId: bridgeId.replace(/-/g, '_'),
+          message: 'Estou validando as informacoes antes de continuar.',
+          instructions: 'Nao repita a ferramenta anterior sem novo dado. Se ela falhou, siga somente para um fallback read-only compativel ou responda com a limitacao real.',
+        };
+        nodes.push(bridgeNode);
+        nodeById.set(bridgeId, bridgeNode);
+        addEdge(previousId, bridgeId);
+        previousId = bridgeId;
+      }
+    }
+    addEdge(previousId, responseId);
+    if (end) addEdge(responseId, end.id);
+    for (const knowledgeNode of knowledgeNodes) addEdge(knowledgeNode.id, responseId);
+  }
+
+  const updatedDecision = {
+    ...decision,
+    routes: nextRoutes,
+  };
+  const updatedNodes = nodes.map((node) => node.id === decision.id ? updatedDecision : node);
+  nodeById.set(decision.id, updatedDecision);
+  if (principal && end) addEdge(principal.id, end.id);
+
+  return { ...architecture, nodes: updatedNodes, edges };
+}
+
+function normalizeArchitectureOutput(architecture: ArchitectureFlowBuilderOutput): FlowBuilderOutput {
+  return {
+    ...architecture,
+    nodes: architecture.nodes.map((node, index): FlowBuilderOutput['nodes'][number] => {
+      const fallbackPosition = defaultFlowNodePosition(index);
+      return {
+        ...node,
+        x: Number.isFinite(node.x) ? node.x as number : fallbackPosition.x,
+        y: Number.isFinite(node.y) ? node.y as number : fallbackPosition.y,
+      };
+    }),
+    edges: [],
+  };
+}
+
+function fallbackSystemPrompt(input: {
+  currentSystemPrompt?: string | null;
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+}) {
+  const basePrompt = cleanPromptText(input.currentSystemPrompt || '', 7600)
+    || `Voce e um atendente Dialogy V2. Siga o fluxo conectado, use somente dados confirmados, consulte knowledge quando houver e transfira para humano quando o pedido exigir. Pedido original: ${cleanText(input.conversation.map((message) => message.content).join(' '), 900)}`;
+  const safetyPrompt = [
+    'Regras operacionais obrigatorias do fallback:',
+    '- Quando usar MCP, raciocine e registre a ferramenta real pelo nome qualificado mcp:<server_id>:<tool_name>; mcp_call_tool e apenas detalhe interno de execucao.',
+    '- Se o cliente pedir usuario, senha, SSID ou credenciais do Wi-Fi, valide cliente/contrato e consulte a ferramenta de visualizacao de Wi-Fi disponivel, como get_wifi_view. Nunca reinicie o roteador para esse pedido.',
+    '- Diagnostico de Wi-Fi lento/canal deve consultar scan/cache/redes ao redor/dispositivos/roteador quando houver ferramentas habilitadas e responder com analise antes de qualquer acao sensivel.',
+    '- Trocar nome/senha do Wi-Fi e reiniciar roteador exigem pedido explicito, novos valores quando aplicavel e confirmacao clara. Em testes reais, nao altere nome nem senha do Wi-Fi.',
+    '- Se uma etapa ou ferramenta nao bater com a intencao atual do cliente, pare e faca uma pergunta curta de esclarecimento.',
+  ].join('\n');
+  return cleanPromptText(`${basePrompt}\n\n${safetyPrompt}`, 9000);
+}
+
+type FallbackCapabilitySpec = {
+  entry: ToolRelevanceEntry;
+  tool: AgentToolCatalogItem;
+  slug: string;
+  routeId: string;
+  collectNodeId: string | null;
+  confirmationNodeId: string | null;
+  formFields: NonNullable<ArchitectureFlowBuilderOutput['nodes'][number]['formFields']>;
+};
+
+function fallbackSchemaFieldType(
+  propertyName: string,
+  property: Record<string, unknown>,
+): 'text' | 'name' | 'phone' | 'email' | 'document' | 'date' | 'time' | 'address' | 'number' | 'boolean' {
+  const text = normalizeSearchText([
+    propertyName,
+    property.title,
+    property.description,
+    property.format,
+  ].filter(Boolean).join(' ')).replace(/[_-]+/g, ' ');
+  const type = Array.isArray(property.type) ? property.type[0] : property.type;
+  if (type === 'boolean') return 'boolean';
+  if (type === 'integer' || type === 'number') return 'number';
+  if (property.format === 'email' || /\bemail|e mail\b/.test(text)) return 'email';
+  if (property.format === 'date' || /\bdate|data|dia\b/.test(text)) return 'date';
+  if (property.format === 'time' || /\btime|hora|horario|periodo\b/.test(text)) return 'time';
+  if (/\bphone|telefone|celular|whatsapp\b/.test(text)) return 'phone';
+  if (/\bcpf|cnpj|document|documento|customer id|client id\b/.test(text)) return 'document';
+  if (/\baddress|endereco|cep|street|rua\b/.test(text)) return 'address';
+  if (/\bname|nome|responsavel|titular\b/.test(text)) return 'name';
+  return 'text';
+}
+
+function fallbackCapabilityFormFields(
+  tool: AgentToolCatalogItem,
+): NonNullable<ArchitectureFlowBuilderOutput['nodes'][number]['formFields']> {
+  const schema = tool.inputSchema as Record<string, unknown> | null | undefined;
+  const properties = schema?.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties)
+    ? schema.properties as Record<string, Record<string, unknown>>
+    : {};
+  const required = new Set([
+    ...(Array.isArray(schema?.required) ? schema.required.map(String) : []),
+    ...tool.requiredSlots.map(String),
+  ]);
+
+  return [...required]
+    .slice(0, 16)
+    .map((propertyName) => {
+      const property = properties[propertyName] || {};
+      const label = cleanText(
+        String(property.title || property.description || propertyName).replace(/[_-]+/g, ' '),
+        120,
+      );
+      return {
+        id: normalizeId(`campo-${propertyName}`, 'campo'),
+        label,
+        fieldKey: propertyName,
+        type: fallbackSchemaFieldType(propertyName, property),
+        required: true,
+        aliases: Array.from(new Set([
+          propertyName,
+          propertyName.replace(/[_-]+/g, ' '),
+          label,
+        ].map((value) => cleanText(value, 80)).filter(Boolean))).slice(0, 6),
+      };
+    });
+}
+
+function buildFallbackCapabilitySpecs(input: {
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+  currentSystemPrompt?: string | null;
+  tools: AgentToolCatalogItem[];
+}): FallbackCapabilitySpec[] {
+  const specializedIntents = new Set<ToolRelevanceIntent>([
+    'customer_contract_lookup',
+    'wifi_credentials_lookup',
+    'wifi_credentials_change',
+    'wifi_channel_diagnostics',
+    'router_reboot',
+    'order_status_lookup',
+    'billing_lookup',
+    'payment_pix_generation',
+    'payment_promise',
+    'support_ticket_creation',
+    'catalog_lookup',
+    'pricing_lookup',
+    'availability_lookup',
+    'scheduling_lookup',
+    'document_lookup',
+    'human_handoff',
+    'close_conversation',
+    'internal_note',
+    'crm_update',
+  ]);
+  const relevance = buildToolRelevanceMap({
+    conversation: input.conversation,
+    currentSystemPrompt: input.currentSystemPrompt,
+    tools: input.tools,
+  });
+  const toolByName = new Map<string, AgentToolCatalogItem>(
+    input.tools.map((tool) => [String(tool.name), tool]),
+  );
+
+  return relevance
+    .filter((entry) => (
+      entry.source === 'mcp' &&
+      (
+        entry.intents.includes('external_action') ||
+        (
+          entry.intents.includes('external_read') &&
+          !entry.intents.some((intent) => specializedIntents.has(intent))
+        )
+      )
+    ))
+    .slice(0, 6)
+    .map((entry): FallbackCapabilitySpec | null => {
+      const tool = toolByName.get(entry.toolName);
+      if (!tool) return null;
+      const slug = normalizeId(entry.toolName.replace(/^mcp:/, ''), 'capacidade').replace(/_/g, '-');
+      const formFields = fallbackCapabilityFormFields(tool);
+      return {
+        entry,
+        tool,
+        slug,
+        routeId: `cap_${slug}`,
+        collectNodeId: formFields.length > 0 ? `cap-coletar-${slug}` : null,
+        confirmationNodeId: tool.sideEffect !== 'none' ? `cap-confirmar-${slug}` : null,
+        formFields,
+      };
+    })
+    .filter((spec): spec is FallbackCapabilitySpec => Boolean(spec));
+}
+
+export function buildFallbackArchitecture(input: {
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+  currentSystemPrompt?: string | null;
+  tools?: AgentToolCatalogItem[];
+}, _error: unknown): ArchitectureFlowBuilderOutput {
+  const requestText = input.conversation.map((message) => message.content).join('\n');
+  const normalizedRequest = normalizeSearchText(requestText);
+  const requestedIntents = inferRequestedToolIntents(normalizedRequest);
+  const isWifiSupportFlow = requestedIntents.has('wifi_credentials_lookup')
+    || requestedIntents.has('wifi_credentials_change')
+    || requestedIntents.has('wifi_channel_diagnostics')
+    || requestedIntents.has('router_reboot')
+    || /\b(wi[\s-]?fi|wifi|ssid|senha|usuario|credencia|roteador|modem|canal|interferencia|lentidao|lento)\w*/.test(normalizedRequest);
+  const isOrderStatusFlow = requestedIntents.has('order_status_lookup');
+  const isBillingFlow = requestedIntents.has('billing_lookup')
+    || requestedIntents.has('payment_pix_generation')
+    || requestedIntents.has('payment_promise');
+  const isSchedulingFlow = requestedIntents.has('scheduling_lookup');
+  const isDocumentFlow = requestedIntents.has('document_lookup');
+  const isCommercialLookupFlow = requestedIntents.has('catalog_lookup')
+    || requestedIntents.has('pricing_lookup')
+    || requestedIntents.has('availability_lookup');
+  const needsOrderIdentifier = isOrderStatusFlow;
+  const needsScheduleCollection = isSchedulingFlow;
+  const needsCustomerValidation = isWifiSupportFlow
+    || requestedIntents.has('customer_contract_lookup')
+    || isBillingFlow
+    || isDocumentFlow;
+  const needsGenericCollection = /\b(nome|telefone|email|cpf|cnpj|documento|endereco|endere[cç]o|data|horario|agend|orcamento|or[cç]amento|pedido|cadastro|lead|contratar|comprar)\b/.test(normalizedRequest);
+  const needsCollection = needsCustomerValidation || needsOrderIdentifier || needsScheduleCollection || needsGenericCollection;
+  const includeHandoff = /\b(humano|atendente|transfer|equipe|suporte|especialista|vendedor)\b/.test(normalizedRequest) || true;
+  const capabilitySpecs = isWifiSupportFlow
+    ? []
+    : buildFallbackCapabilitySpecs({
+        conversation: input.conversation,
+        currentSystemPrompt: input.currentSystemPrompt,
+        tools: input.tools || [],
+      });
+  const decisionRoutes: NonNullable<ArchitectureFlowBuilderOutput['nodes'][number]['routes']> = isWifiSupportFlow
+    ? [
+      {
+        id: 'consultar_wifi',
+        label: 'Consultar Wi-Fi atual',
+        description: 'Cliente pediu usuario, senha, SSID, nome da rede ou credenciais atuais do Wi-Fi.',
+        examples: ['Esqueci a senha do Wi-Fi', 'Qual o usuario e senha?', 'Me passa o nome da rede'],
+        targetNodeId: needsCustomerValidation ? 'validar-cliente' : 'agente-principal',
+      },
+      {
+        id: 'diagnosticar_wifi',
+        label: 'Diagnosticar Wi-Fi lento',
+        description: 'Cliente relata lentidao, oscilacao, queda, interferencia, canal ruim ou redes ao redor.',
+        examples: ['Meu Wi-Fi esta lento', 'Analisa os canais', 'Tem muita rede ao redor?'],
+        targetNodeId: needsCustomerValidation ? 'validar-cliente' : 'agente-principal',
+      },
+      {
+        id: 'trocar_wifi',
+        label: 'Trocar nome ou senha',
+        description: 'Cliente pediu explicitamente alteracao de SSID, nome da rede ou senha do Wi-Fi.',
+        examples: ['Quero trocar a senha', 'Muda o nome da rede', 'Coloca uma senha nova'],
+        targetNodeId: 'coleta-credenciais-wifi',
+      },
+      {
+        id: 'reiniciar_roteador',
+        label: 'Reiniciar roteador',
+        description: 'Cliente pediu explicitamente reboot/reinicio do roteador ou modem.',
+        examples: ['Pode reiniciar o roteador', 'Reinicia meu modem', 'Faz um reboot'],
+        targetNodeId: 'confirmar-reboot',
+      },
+      ...(includeHandoff ? [{
+        id: 'humano',
+        label: 'Atendente humano',
+        description: 'Cliente pediu humano, caso sensivel ou baixa confianca apos tentativa segura.',
+        examples: ['Quero falar com atendente', 'Me transfere', 'Preciso de um humano'],
+        targetNodeId: 'transferencia-humana',
+      }] : []),
+      {
+        id: 'fallback',
+        label: 'Esclarecer intencao',
+        description: 'Pedido ambiguo, fora do procedimento de Wi-Fi ou baixa confianca.',
+        examples: ['Nao era isso', 'Tenho outro assunto'],
+        targetNodeId: 'agente-principal',
+      },
+    ]
+    : [
+      ...capabilitySpecs.map((spec) => ({
+        id: spec.routeId,
+        label: toolTitleFromEntry(spec.entry).replace(/[_-]+/g, ' '),
+        description: `Executar a capacidade real ${spec.tool.name} somente quando o pedido corresponder a: ${spec.tool.description}`,
+        examples: input.conversation
+          .filter((message) => message.role === 'user')
+          .map((message) => cleanText(message.content, 180))
+          .filter(Boolean)
+          .slice(-2),
+        targetNodeId: spec.collectNodeId || spec.confirmationNodeId || 'agente-principal',
+      })),
+      ...(isOrderStatusFlow ? [{
+        id: 'status_pedido',
+        label: 'Status de pedido ou protocolo',
+        description: 'Cliente quer consultar andamento, rastreio, previsao ou situacao de pedido, protocolo, ticket ou chamado.',
+        examples: ['Qual o status do meu pedido?', 'Rastrear pedido AB1234', 'Como esta meu protocolo?'],
+        targetNodeId: 'coleta-pedido',
+      }] : []),
+      ...(isBillingFlow ? [{
+        id: 'financeiro',
+        label: 'Financeiro',
+        description: 'Cliente pediu boleto, fatura, vencimento, PIX, debito ou promessa de pagamento.',
+        examples: ['Preciso da segunda via', 'Gerar PIX da fatura', 'Quero negociar pagamento'],
+        targetNodeId: needsCustomerValidation ? 'validar-cliente' : 'agente-principal',
+      }] : []),
+      ...(isSchedulingFlow ? [{
+        id: 'agendamento',
+        label: 'Agendamento',
+        description: 'Cliente quer agendar, marcar, remarcar ou consultar horarios disponiveis.',
+        examples: ['Quero agendar uma visita', 'Tem horario amanha?', 'Remarcar consulta'],
+        targetNodeId: 'coleta-agendamento',
+      }] : []),
+      ...(isCommercialLookupFlow ? [{
+        id: 'consulta_comercial',
+        label: 'Catalogo, preco ou disponibilidade',
+        description: 'Cliente pediu catalogo, produtos, servicos, valores, estoque ou disponibilidade.',
+        examples: ['Quais produtos voces tem?', 'Qual o preco?', 'Tem em estoque?'],
+        targetNodeId: 'agente-principal',
+      }] : []),
+      {
+        id: 'coleta_dados',
+        label: 'Coletar dados',
+        description: 'Cliente quer seguir com atendimento, orcamento, compra, cadastro ou agendamento.',
+        examples: ['Quero contratar', 'Quero fazer um orcamento', 'Quero agendar'],
+        targetNodeId: needsCollection ? 'coleta-dados' : 'agente-principal',
+      },
+      {
+        id: 'duvida_suporte',
+        label: 'Duvida ou suporte',
+        description: 'Cliente fez uma pergunta, pediu orientacao, detalhes ou suporte.',
+        examples: ['Tenho uma duvida', 'Como funciona?', 'Preciso de ajuda'],
+        targetNodeId: 'agente-principal',
+      },
+      ...(includeHandoff ? [{
+        id: 'humano',
+        label: 'Atendente humano',
+        description: 'Cliente pediu humano, negociacao sensivel ou caso que exige equipe.',
+        examples: ['Quero falar com atendente', 'Me transfere', 'Preciso de um humano'],
+        targetNodeId: 'transferencia-humana',
+      }] : []),
+      {
+        id: 'fallback',
+        label: 'Esclarecer intencao',
+        description: 'Baixa confianca, mudanca de assunto ou intencao fora do procedimento.',
+        examples: ['Nao era isso', 'Tenho outro assunto'],
+        targetNodeId: 'agente-principal',
+      },
+    ];
+  const nodes: ArchitectureFlowBuilderOutput['nodes'] = [
+    {
+      id: 'inicio',
+      kind: 'start',
+      title: 'Início do atendimento',
+      subtitle: 'Entrada segura do fluxo',
+      referenceId: 'inicio',
+    },
+    {
+      id: 'boas-vindas',
+      kind: 'message',
+      title: 'Boas-vindas e triagem',
+      subtitle: 'Apresentar o atendimento e entender o objetivo do cliente',
+      referenceId: 'boas_vindas',
+    },
+    {
+      id: 'triagem',
+      kind: 'decision',
+      title: 'Triagem inteligente',
+      subtitle: isWifiSupportFlow
+        ? 'Separar consulta Wi-Fi, diagnostico, troca, reboot e humano'
+        : 'Classificar intencao, baixa confianca e pedido humano',
+      referenceId: 'triagem',
+      switchMode: 'ai',
+      confidenceThreshold: 0.8,
+      fallbackRouteId: 'fallback',
+      routes: decisionRoutes,
+    },
+    ...(needsCustomerValidation ? [{
+      id: 'validar-cliente',
+      kind: 'collect' as const,
+      title: 'Validar cliente e contrato',
+      subtitle: isWifiSupportFlow
+        ? 'Confirmar identificador minimo antes de consultar dados do roteador'
+        : 'Confirmar identificador minimo antes de consultar dados sensiveis',
+      referenceId: 'validar_cliente',
+      formMode: 'ai' as const,
+      formFields: [
+        { id: 'cpf_cnpj_contrato', label: 'CPF, CNPJ ou contrato', fieldKey: 'customer_identifier', type: 'text' as const, required: true, aliases: ['cpf', 'cnpj', 'contrato', 'codigo do cliente'] },
+      ],
+    }] : []),
+    ...(isWifiSupportFlow ? [{
+      id: 'coleta-credenciais-wifi',
+      kind: 'collect' as const,
+      title: 'Coletar nova configuracao Wi-Fi',
+      subtitle: 'Somente para pedido explicito de troca; nao executar alteracao em teste real',
+      referenceId: 'coleta_credenciais_wifi',
+      formMode: 'ai' as const,
+      formFields: [
+        { id: 'novo_ssid', label: 'Novo nome da rede', fieldKey: 'wifi_ssid', type: 'text' as const, required: false, aliases: ['ssid', 'nome da rede', 'rede'] },
+        { id: 'nova_senha_wifi', label: 'Nova senha do Wi-Fi', fieldKey: 'wifi_password', type: 'text' as const, required: false, aliases: ['senha', 'senha nova', 'password'] },
+        { id: 'confirmacao_alteracao', label: 'Confirmacao explicita', fieldKey: 'wifi_change_confirmation', type: 'text' as const, required: true, aliases: ['confirmo', 'pode alterar', 'autorizo'] },
+      ],
+    }, {
+      id: 'confirmar-reboot',
+      kind: 'message' as const,
+      title: 'Confirmar reboot',
+      subtitle: 'Reboot so pode seguir com pedido explicito e confirmacao clara',
+      referenceId: 'confirmar_reboot',
+    }] : []),
+    ...(needsOrderIdentifier ? [{
+      id: 'coleta-pedido',
+      kind: 'collect' as const,
+      title: 'Coletar pedido ou protocolo',
+      subtitle: 'Identificador necessario para consulta externa precisa',
+      referenceId: 'coleta_pedido',
+      formMode: 'ai' as const,
+      formFields: [
+        { id: 'pedido_protocolo', label: 'Pedido, protocolo, ticket ou chamado', fieldKey: 'order_or_request_id', type: 'text' as const, required: true, aliases: ['pedido', 'protocolo', 'ticket', 'chamado', 'rastreio'] },
+      ],
+    }] : []),
+    ...(needsScheduleCollection ? [{
+      id: 'coleta-agendamento',
+      kind: 'collect' as const,
+      title: 'Coletar dados de agendamento',
+      subtitle: 'Preferencia de data, horario e objetivo',
+      referenceId: 'coleta_agendamento',
+      formMode: 'ai' as const,
+      formFields: [
+        { id: 'data_preferida', label: 'Data preferida', fieldKey: 'date', type: 'date' as const, required: false, aliases: ['data', 'dia', 'quando'] },
+        { id: 'horario_preferido', label: 'Horario preferido', fieldKey: 'time', type: 'time' as const, required: false, aliases: ['horario', 'hora', 'periodo'] },
+        { id: 'objetivo_agendamento', label: 'Objetivo do agendamento', fieldKey: 'objetivo', type: 'text' as const, required: true, aliases: ['motivo', 'servico', 'assunto'] },
+      ],
+    }] : []),
+    ...(needsCollection && !needsCustomerValidation && !needsOrderIdentifier && !needsScheduleCollection ? [{
+      id: 'coleta-dados',
+      kind: 'collect' as const,
+      title: 'Coleta de dados essenciais',
+      subtitle: 'Confirmar dados minimos antes de avancar',
+      referenceId: 'coleta_dados',
+      formMode: 'ai' as const,
+      formFields: [
+        { id: 'nome', label: 'Nome', fieldKey: 'nome', type: 'name' as const, required: true, aliases: ['nome', 'como se chama'] },
+        { id: 'telefone', label: 'Telefone', fieldKey: 'telefone', type: 'phone' as const, required: false, aliases: ['telefone', 'whatsapp', 'celular'] },
+        { id: 'objetivo', label: 'Objetivo', fieldKey: 'objetivo', type: 'text' as const, required: true, aliases: ['objetivo', 'necessidade', 'pedido'] },
+      ],
+    }] : []),
+    ...capabilitySpecs.flatMap((spec): ArchitectureFlowBuilderOutput['nodes'] => {
+      const capabilityNodes: ArchitectureFlowBuilderOutput['nodes'] = [];
+      if (spec.collectNodeId) {
+        capabilityNodes.push({
+          id: spec.collectNodeId,
+          kind: 'collect',
+          title: `Dados para ${toolTitleFromEntry(spec.entry).replace(/[_-]+/g, ' ')}`,
+          subtitle: `Campos obrigatorios do schema de ${spec.tool.name}`,
+          referenceId: normalizeReferenceKey(spec.collectNodeId),
+          formMode: 'ai',
+          formFields: spec.formFields,
+          requiredSlots: spec.formFields.map((field) => String(field.fieldKey || field.id)),
+        });
+      }
+      if (spec.confirmationNodeId) {
+        capabilityNodes.push({
+          id: spec.confirmationNodeId,
+          kind: 'message',
+          title: `Confirmar ${toolTitleFromEntry(spec.entry).replace(/[_-]+/g, ' ')}`,
+          subtitle: `Confirmacao explicita vinculada aos argumentos de ${spec.tool.name}`,
+          referenceId: normalizeReferenceKey(spec.confirmationNodeId),
+        });
+      }
+      return capabilityNodes;
+    }),
+    {
+      id: 'base-conhecimento',
+      kind: 'knowledge',
+      title: 'Base de conhecimento',
+      subtitle: isWifiSupportFlow
+        ? 'Consultar politicas de validacao, contrato, Wi-Fi e ferramentas habilitadas'
+        : 'Consultar politicas, produtos, servicos e contexto salvo',
+      referenceId: 'base_conhecimento',
+      requiredKnowledgeCoverage: 'medium',
+    },
+    {
+      id: 'agente-principal',
+      kind: 'sub_agent',
+      title: isWifiSupportFlow ? 'Atendimento Wi-Fi seguro' : 'Agente principal',
+      subtitle: isWifiSupportFlow
+        ? 'Usar ferramenta coerente com a intencao atual e bloquear acoes fora do pedido'
+        : 'Responder com grounding, clareza e proximo passo',
+      referenceId: 'agente_principal',
+      requiredKnowledgeCoverage: 'low',
+    },
+    {
+      id: 'encerramento',
+      kind: 'end',
+      title: 'Encerramento',
+      subtitle: 'Finalizar quando o objetivo estiver concluído',
+      referenceId: 'encerramento',
+    },
+    ...(includeHandoff ? [{
+      id: 'transferencia-humana',
+      kind: 'handoff' as const,
+      title: 'Transferencia humana',
+      subtitle: 'Encaminhar para a equipe quando necessario',
+      referenceId: 'transferencia_humana',
+    }] : []),
+  ];
+  const fallbackGoal = cleanText(requestText, 1500) || 'atendimento geral';
+  const summary = isWifiSupportFlow
+    ? 'Fluxo de Wi-Fi montado pelo modo deterministico com validacao de cliente, consulta, diagnostico e protecao contra acoes sensiveis.'
+    : 'Fluxo operacional montado pelo modo deterministico com triagem, coleta segura, base de conhecimento, atendimento e transferencia quando necessario.';
+
+  return {
+    summary,
+    procedureManifest: [
+      'Modo deterministico de alta disponibilidade ativado; a proposta permanece capability-aware e foi validada localmente.',
+      `Objetivo inferido do pedido: ${fallbackGoal}.`,
+      isWifiSupportFlow
+        ? 'Procedimento Wi-Fi: validar cliente/contrato antes de consultar dados, usar MCP qualificada quando disponivel, nunca tratar MCP como mcp_call_tool no planejamento, bloquear reboot em consulta de senha, exigir confirmacao para reboot/troca e nao alterar SSID/senha em teste real.'
+        : 'Procedimento geral: classificar intencao, coletar apenas dados necessarios, consultar knowledge, responder com proximo passo claro e transferir quando a confianca for baixa ou o cliente pedir humano.',
+    ].join(' '),
+    systemPrompt: fallbackSystemPrompt(input),
+    nodes: nodes.map((node, index) => ({ ...node, ...defaultFlowNodePosition(index) })),
+    edges: [],
+  };
+}
+
+function isAllowedDecisionTarget(target: FlowBuilderOutput['nodes'][number] | undefined) {
+  return Boolean(target && isSafeFallbackKind(target.kind));
+}
+
+function findDecisionRouteTarget(
+  flow: FlowBuilderOutput,
+  decision: FlowBuilderOutput['nodes'][number],
+  route: NonNullable<FlowBuilderOutput['nodes'][number]['routes']>[number],
+) {
+  const routeText = normalizeSearchText(`${route.id} ${route.label} ${route.description} ${(route.examples || []).join(' ')}`);
+  const candidates = flow.nodes.filter((node) => (
+    node.id !== decision.id
+    && isAllowedDecisionTarget(node)
+    && canConnect(decision.kind, node.kind)
+  ));
+  const byKind = (kind: V2FlowNodeKind) => candidates.find((node) => node.kind === kind)?.id;
+  if (/\b(humano|atendente|transfer|handoff|equipe|especialista)\b/.test(routeText)) {
+    return byKind('handoff') || byKind('sub_agent') || byKind('message') || byKind('end');
+  }
+  if (/\b(colet|dados|cadastro|nome|telefone|email|cpf|cnpj|documento|endereco|data|horario|agend|orcamento|lead|contratar|comprar)\b/.test(routeText)) {
+    return byKind('collect') || byKind('sub_agent') || byKind('message') || byKind('end');
+  }
+  if (/\b(encerr|finaliz|conclu|obrigad|fim|tchau)\b/.test(routeText)) {
+    return byKind('end') || byKind('message') || byKind('sub_agent');
+  }
+  return byKind('sub_agent') || byKind('message') || byKind('collect') || byKind('end') || byKind('handoff');
+}
+
+function repairDecisionRouteTargets(flow: FlowBuilderOutput): FlowBuilderOutput {
+  const nodeById = new Map(flow.nodes.map((node) => [node.id, node]));
+  return {
+    ...flow,
+    nodes: flow.nodes.map((node) => {
+      if (node.kind !== 'decision' || !node.routes?.length) return node;
+      const routes = node.routes.map((route) => {
+        const currentTarget = route.targetNodeId ? nodeById.get(route.targetNodeId) : undefined;
+        const safeCurrentTarget = isAllowedDecisionTarget(currentTarget) && currentTarget && canConnect(node.kind, currentTarget.kind);
+        const routeText = normalizeSearchText(`${route.id} ${route.label} ${route.description} ${(route.examples || []).join(' ')}`);
+        const routeId = normalizeId(route.id, '');
+        const fallbackId = normalizeId(node.fallbackRouteId || '', '');
+        const isFallbackRoute = routeId === fallbackId
+          || /^(fallback|outro|esclarecer|esclarecimento|fora_do_escopo|baixa_confianca)$/.test(routeId)
+          || /\b(fallback|fora do procedimento|fora do escopo|mudanca de assunto|baixa confianca)\b/.test(routeText);
+        const targetNodeId = safeCurrentTarget
+          ? currentTarget.id
+          : (isFallbackRoute ? undefined : findDecisionRouteTarget(flow, node, route));
+        return {
+          ...route,
+          targetNodeId,
+        };
+      });
+      const fallbackRouteId = node.fallbackRouteId && routes.some((route) => route.id === node.fallbackRouteId)
+        ? node.fallbackRouteId
+        : (routes.find((route) => normalizeId(route.id, '') === 'fallback')?.id || routes[0]?.id);
+      return {
+        ...node,
+        fallbackRouteId,
+        routes,
+      };
+    }),
+  };
+}
+
+function buildDeterministicTopology(flow: FlowBuilderOutput): FlowBuilderTopology {
+  const repairedFlow = repairDecisionRouteTargets(flow);
+  const nodeById = new Map(repairedFlow.nodes.map((node) => [node.id, node]));
+  const edges: FlowBuilderTopology['edges'] = [];
+  const seen = new Set<string>();
+  const addEdge = (sourceId: string | undefined, targetId: string | undefined, routeId?: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const source = nodeById.get(sourceId);
+    const target = nodeById.get(targetId);
+    const key = `${sourceId}:${targetId}:${routeId || ''}`;
+    if (!source || !target || seen.has(key) || !canConnect(source.kind, target.kind)) return;
+    seen.add(key);
+    edges.push({ source: sourceId, target: targetId, ...(routeId ? { routeId } : {}) });
+  };
+
+  const mainNodes = repairedFlow.nodes.filter((node) => node.kind !== 'knowledge' && node.kind !== 'tool');
+  const orderedMainNodes = [
+    ...mainNodes.filter((node) => node.kind === 'start'),
+    ...mainNodes.filter((node) => node.kind !== 'start'),
+  ];
+
+  for (let index = 0; index < orderedMainNodes.length; index += 1) {
+    const node = orderedMainNodes[index];
+    if (node.kind === 'decision') {
+      for (const route of node.routes || []) {
+        addEdge(node.id, route.targetNodeId, route.id);
+      }
+      continue;
+    }
+    if (node.kind === 'end' || node.kind === 'handoff') continue;
+    const next = orderedMainNodes.slice(index + 1).find((candidate) => canConnect(node.kind, candidate.kind));
+    addEdge(node.id, next?.id);
+  }
+
+  const firstAgent = repairedFlow.nodes.find((node) => node.kind === 'sub_agent');
+  for (const knowledgeNode of repairedFlow.nodes.filter((node) => node.kind === 'knowledge')) {
+    const nextAgent = repairedFlow.nodes.find((node) => node.kind === 'sub_agent' && node.y >= knowledgeNode.y) || firstAgent;
+    addEdge(knowledgeNode.id, nextAgent?.id);
+  }
+
+  return { edges };
+}
+
+function buildDeterministicEnrichment(input: {
+  flow: FlowBuilderOutput;
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+  currentSystemPrompt?: string | null;
+}): FlowBuilderEnrichment {
+  const relatedById = new Map<string, string[]>();
+  const nodeById = new Map(input.flow.nodes.map((node) => [node.id, node]));
+  for (const edge of input.flow.edges) {
+    const source = nodeById.get(edge.source);
+    const target = nodeById.get(edge.target);
+    if (!source || !target) continue;
+    relatedById.set(source.id, [...(relatedById.get(source.id) || []), target.title]);
+    relatedById.set(target.id, [...(relatedById.get(target.id) || []), source.title]);
+  }
+
+  return {
+    systemPrompt: fallbackSystemPrompt(input),
+    nodes: input.flow.nodes.map((node) => ({
+      id: node.id,
+      instructions: cleanPromptText(node.instructions, 2400)
+        || defaultNodeInstructions(node, relatedById.get(node.id) || []),
+      message: cleanPromptText(node.message, 2400)
+        || defaultNodeMessage({ kind: node.kind, title: node.title, subtitle: node.subtitle }),
+    })),
+  };
+}
+
+function warnFlowBuilderFallback(stage: string, error: unknown) {
+  console.warn(
+    `[AUTOPILOT_FLOW_BUILDER_AI] Falling back to deterministic ${stage} after stage failure:`,
+    error,
+  );
 }
 
 function toolInstructions(tool: AgentToolCatalogItem) {
@@ -1207,6 +2735,8 @@ export function ensureOperationalCoverage(
         toolName,
         instructions: toolInstructions(tool),
         referenceId: id.replace(/-/g, '_'),
+        maxAttempts: tool.maxAttempts || 3,
+        errorHandles: ['error'],
       };
       nodes.push(toolNode);
     }
@@ -1304,6 +2834,35 @@ function positiveIntEnv(name: string, fallback: number) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+export function buildDeterministicFallbackProposal(input: {
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+  currentSystemPrompt?: string | null;
+  tools: AgentToolCatalogItem[];
+}, error: unknown): AutopilotFlowAiProposal {
+  let output = repairDecisionRouteTargets(
+    normalizeArchitectureOutput(buildFallbackArchitecture(input, error)),
+  );
+  output = {
+    ...output,
+    edges: buildDeterministicTopology(output).edges,
+  };
+  output = applyFlowBuilderEnrichment(output, buildDeterministicEnrichment({
+    flow: output,
+    conversation: input.conversation,
+    currentSystemPrompt: input.currentSystemPrompt,
+  }));
+  const relevanceMap = buildToolRelevanceMap({
+    conversation: input.conversation,
+    architecture: output,
+    currentSystemPrompt: input.currentSystemPrompt,
+    tools: input.tools,
+  });
+  output = ensureToolRelevanceCoverage(output, input.tools, relevanceMap);
+  output = repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools));
+  output = ensureWifiBranchIsolation(output, input.tools, relevanceMap);
+  return sanitizeAutopilotFlowProposal(output, input.tools);
+}
+
 const FLOW_BUILDER_TIMEOUT_MS = positiveIntEnv('AI_FLOW_BUILDER_TIMEOUT_MS', 600000);
 const FLOW_BUILDER_MAX_TOKENS = positiveIntEnv('AI_FLOW_BUILDER_MAX_TOKENS', 32000);
 const FLOW_BUILDER_RETRY_ATTEMPTS = Math.max(
@@ -1317,7 +2876,7 @@ function errorMessage(error: unknown) {
 
 function isRetryableFlowBuilderError(error: unknown) {
   const message = errorMessage(error).toLowerCase();
-  return /timed out|timeout|invalid json|truncated|does not match|schema|parse|malformed|unexpected/.test(message);
+  return /timed out|timeout|fetch failed|network request failed|econnreset|econnrefused|etimedout|socket|und_err|invalid json|truncated|does not match|schema|parse|malformed|unexpected/.test(message);
 }
 
 function retryPrompt(userPrompt: string, error: unknown) {
@@ -1401,34 +2960,43 @@ export async function generateAutopilotFlowProposal(input: {
   model: string;
   apiKey?: string;
 }) {
-  const architecture = await runFlowBuilderStage({
-    model: input.model,
-    apiKey: input.apiKey,
-    schema: ArchitectureFlowBuilderOutputSchema,
-    schemaName: 'dialogy_autopilot_flow_builder_architecture',
-    jsonSchema: architectureJsonSchema,
-    systemPrompt: 'Execute a task 1: ordene blocos funcionais compactos, sem tools e sem edges. Retorne somente JSON valido.',
-    userPrompt: buildPrompt(input),
-    defaultRunner: defaultPrompt,
-    maxTokens: FLOW_BUILDER_MAX_TOKENS,
-  });
-  let output: FlowBuilderOutput = {
-    ...architecture,
-    nodes: architecture.nodes as FlowBuilderOutput['nodes'],
-    edges: [],
-  };
-  const topology = await runFlowBuilderStage({
-    model: input.model,
-    apiKey: input.apiKey,
-    schema: FlowBuilderTopologySchema,
-    schemaName: 'dialogy_autopilot_flow_builder_topology',
-    jsonSchema: topologyJsonSchema,
-    systemPrompt: 'Execute a task 2: ligue blocos existentes na ordem operacional. Retorne somente JSON valido.',
-    userPrompt: buildTopologyPrompt(output),
-    defaultRunner: defaultTopologyPrompt,
-  });
-  output = { ...output, edges: topology.edges };
-  const enrichment = await runFlowBuilderStage({
+  let architecture: ArchitectureFlowBuilderOutput;
+  try {
+    architecture = await runFlowBuilderStage({
+      model: input.model,
+      apiKey: input.apiKey,
+      schema: ArchitectureFlowBuilderOutputSchema,
+      schemaName: 'dialogy_autopilot_flow_builder_architecture',
+      jsonSchema: architectureJsonSchema,
+      systemPrompt: 'Execute a task 1: ordene blocos funcionais compactos, sem tools e sem edges. Retorne somente JSON valido.',
+      userPrompt: buildPrompt(input),
+      defaultRunner: defaultPrompt,
+      maxTokens: FLOW_BUILDER_MAX_TOKENS,
+    });
+  } catch (error) {
+    warnFlowBuilderFallback('architecture', error);
+    return buildDeterministicFallbackProposal(input, error);
+  }
+
+  let output = repairDecisionRouteTargets(normalizeArchitectureOutput(architecture));
+  try {
+    const topology = await runFlowBuilderStage({
+      model: input.model,
+      apiKey: input.apiKey,
+      schema: FlowBuilderTopologySchema,
+      schemaName: 'dialogy_autopilot_flow_builder_topology',
+      jsonSchema: topologyJsonSchema,
+      systemPrompt: 'Execute a task 2: ligue blocos existentes na ordem operacional. Retorne somente JSON valido.',
+      userPrompt: buildTopologyPrompt(output),
+      defaultRunner: defaultTopologyPrompt,
+    });
+    output = repairDecisionRouteTargets({ ...output, edges: topology.edges });
+  } catch (error) {
+    warnFlowBuilderFallback('topology', error);
+    output = repairDecisionRouteTargets({ ...output, edges: buildDeterministicTopology(output).edges });
+  }
+  try {
+    const enrichment = await runFlowBuilderStage({
     model: input.model,
     apiKey: input.apiKey,
     schema: FlowBuilderEnrichmentSchema,
@@ -1443,20 +3011,47 @@ export async function generateAutopilotFlowProposal(input: {
     }),
     defaultRunner: defaultEnrichmentPrompt,
   });
-  output = applyFlowBuilderEnrichment(output, enrichment);
-  const toolSelection = await runFlowBuilderStage({
+    output = applyFlowBuilderEnrichment(output, enrichment);
+  } catch (error) {
+    warnFlowBuilderFallback('enrichment', error);
+    output = applyFlowBuilderEnrichment(output, buildDeterministicEnrichment({
+      flow: output,
+      conversation: input.conversation,
+      currentSystemPrompt: input.currentSystemPrompt,
+    }));
+  }
+  const toolRelevanceMap = buildToolRelevanceMap({
+    conversation: input.conversation,
+    architecture: output,
+    currentSystemPrompt: input.currentSystemPrompt,
+    tools: input.tools,
+  });
+  try {
+    const toolSelection = await runFlowBuilderStage({
     model: input.model,
     apiKey: input.apiKey,
     schema: FlowBuilderToolSelectionSchema,
     schemaName: 'dialogy_autopilot_flow_builder_tools',
     jsonSchema: toolSelectionJsonSchema,
     systemPrompt: 'Execute as tasks 4 e 5: consulte todo o catalogo e escolha apenas tools necessarias. Retorne somente JSON valido.',
-    userPrompt: buildToolSelectionPrompt({ architecture: output, tools: input.tools }),
+    userPrompt: buildToolSelectionPrompt({ architecture: output, tools: input.tools, relevanceMap: toolRelevanceMap }),
     defaultRunner: defaultToolSelectionPrompt,
   });
-  output = applyToolSelection(output, toolSelection, input.tools);
-  output = ensureOperationalCoverage(output, input.tools);
-  const validation = await runFlowBuilderStage({
+    output = applyToolSelection(output, toolSelection, input.tools);
+  } catch (error) {
+    warnFlowBuilderFallback('tool selection', error);
+    output = applyToolSelection(output, { tools: [] }, input.tools);
+  }
+  output = ensureToolRelevanceCoverage(output, input.tools, toolRelevanceMap);
+  output = repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools));
+  const deterministicTopology = buildDeterministicTopology(output);
+  if (deterministicTopology.edges.length > output.edges.length) {
+    output = { ...output, edges: deterministicTopology.edges };
+  }
+  output = ensureWifiBranchIsolation(output, input.tools, toolRelevanceMap);
+
+  try {
+    const validation = await runFlowBuilderStage({
     model: input.model,
     apiKey: input.apiKey,
     schema: FlowBuilderValidationSchema,
@@ -1466,7 +3061,18 @@ export async function generateAutopilotFlowProposal(input: {
     userPrompt: buildValidationPrompt(output),
     defaultRunner: defaultValidationPrompt,
   });
-  output = applyValidationEdges(output, validation);
-  output = ensureOperationalCoverage(output, input.tools);
-  return sanitizeAutopilotFlowProposal(output, input.tools);
+    output = applyValidationEdges(output, validation);
+  } catch (error) {
+    warnFlowBuilderFallback('validation', error);
+    output = applyValidationEdges(output, { valid: true, issues: [], missingEdges: [] });
+  }
+  output = ensureToolRelevanceCoverage(output, input.tools, toolRelevanceMap);
+  output = repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools));
+  output = ensureWifiBranchIsolation(output, input.tools, toolRelevanceMap);
+  try {
+    return sanitizeAutopilotFlowProposal(output, input.tools);
+  } catch (error) {
+    warnFlowBuilderFallback('final sanitization', error);
+    return buildDeterministicFallbackProposal(input, error);
+  }
 }

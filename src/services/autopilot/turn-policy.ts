@@ -15,6 +15,13 @@ export type AutopilotTurnPolicy = {
   reason: string;
 };
 
+export type AutopilotTurnPlanToolAuthorization = {
+  planningToolNames: string[];
+  allowedToolNames: string[];
+  widenedToolNames: string[];
+  blockedToolNames: string[];
+};
+
 function unique(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -31,15 +38,45 @@ function resolveActiveNode(
 ) {
   if (intentScope?.nodeId) return intentScope.nodeId;
   if (findNode(graph, persistedActiveNodeId)) return persistedActiveNodeId ?? null;
-  return graph?.nodes.find((node) => node.kind === "assistant")?.id ?? null;
+  return graph?.nodes.find((node) => node.kind === "assistant")?.id
+    ?? graph?.nodes.find((node) => node.kind === "sub_agent")?.id
+    ?? null;
 }
 
 function principalNodeId(graph: AutopilotFlowGraph | null | undefined) {
-  return graph?.nodes.find((node) => node.kind === "assistant")?.id ?? null;
+  return graph?.nodes.find((node) => node.kind === "assistant")?.id
+    ?? graph?.nodes.find((node) => node.kind === "sub_agent")?.id
+    ?? null;
 }
 
 function effectiveToolNodeIds(graph: AutopilotFlowGraph, activeNodeId: string | null) {
   const principalId = principalNodeId(graph);
+  const activeNode = findNode(graph, activeNodeId);
+  if (
+    activeNode
+    && activeNode.id !== principalId
+    && ['collect', 'message', 'tool'].includes(activeNode.kind)
+  ) {
+    const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+    const connectedIds = new Set<string>();
+    const visited = new Set<string>();
+    const queue = [activeNode.id];
+    while (queue.length > 0 && visited.size <= graph.nodes.length) {
+      const currentId = queue.shift()!;
+      if (visited.has(currentId)) continue;
+      visited.add(currentId);
+      for (const edge of graph.edges) {
+        if (edge.source !== currentId || visited.has(edge.target)) continue;
+        const target = nodeById.get(edge.target);
+        if (!target) continue;
+        if (target.kind === 'tool') connectedIds.add(target.id);
+        if (!['sub_agent', 'handoff', 'end', 'decision'].includes(target.kind)) {
+          queue.push(target.id);
+        }
+      }
+    }
+    return connectedIds;
+  }
   const allowedSourceIds = new Set([principalId, activeNodeId].filter((nodeId): nodeId is string => Boolean(nodeId)));
   const connectedIds = new Set<string>();
   if (allowedSourceIds.size === 0) return connectedIds;
@@ -90,6 +127,35 @@ function includeCompanionTools(input: {
   return input.scopedToolNames.concat(
     [...allowed].filter((name) => !input.scopedToolNames.includes(name)),
   );
+}
+
+export function authorizeAutopilotTurnPlanTools(
+  policy: AutopilotTurnPolicy,
+  requiredToolNames: string[] = [],
+  safeFallbackToolNames: string[] = [],
+): AutopilotTurnPlanToolAuthorization {
+  const globallyEnabled = new Set(policy.globallyEnabledToolNames);
+  const planningToolNames = policy.toolMode === 'deny'
+    ? []
+    : unique([
+      ...policy.allowedToolNames,
+      ...safeFallbackToolNames.filter(
+        (toolName) => globallyEnabled.size === 0 || globallyEnabled.has(toolName),
+      ),
+    ]);
+  const planningScope = new Set(planningToolNames);
+  const required = unique(requiredToolNames);
+  const widenedToolNames = required.filter(
+    (toolName) => planningScope.has(toolName) && !policy.allowedToolNames.includes(toolName),
+  );
+  const blockedToolNames = required.filter((toolName) => !planningScope.has(toolName));
+
+  return {
+    planningToolNames,
+    allowedToolNames: unique([...policy.allowedToolNames, ...widenedToolNames]),
+    widenedToolNames,
+    blockedToolNames,
+  };
 }
 
 export function resolveAllowedKnowledgeDocumentIds(input: {

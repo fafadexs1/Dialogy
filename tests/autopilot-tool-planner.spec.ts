@@ -240,6 +240,53 @@ describe('autopilot tool planner', () => {
     expect(result.promiseValidation.repairReason).toBe('promise_handoff');
   });
 
+  it('rejects MCP reboot when the customer asks for Wi-Fi credentials lookup', () => {
+    const rebootTool: AgentToolCatalogItem = {
+      name: 'mcp:router:reboot_router' as any,
+      version: 'mcp',
+      description: 'Reinicia o roteador do assinante.',
+      class: 'write_non_idempotent',
+      riskLevel: 'high',
+      sideEffect: 'high',
+      idempotent: false,
+      timeoutMs: 8000,
+      maxAttempts: 1,
+      requiresHumanApproval: false,
+      customerVisible: true,
+      allowedIntents: ['troubleshooting'],
+      requiredSlots: [],
+      fallbackAction: 'handoff',
+      source: 'mcp',
+      enabledByDefault: false,
+      serverId: 'router',
+      serverName: 'Router',
+      inputSchema: null,
+      outputSchema: null,
+    };
+
+    const result = runPlanner({
+      message: 'Esqueci o usuario e senha do Wi-Fi, pode verificar?',
+      enabledToolNames: ['mcp:router:reboot_router'],
+      toolCatalog: [...listAgentToolCatalogItems(), rebootTool],
+      actions: [
+        {
+          type: 'mcp_call_tool',
+          reason: 'Reiniciar roteador',
+          payload: {
+            toolName: 'mcp:router:reboot_router',
+            arguments: {},
+          },
+        },
+      ],
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.rejectedActions[0]).toMatchObject({
+      code: 'intent_not_allowed',
+    });
+    expect(result.rejectedActions[0].reason).toContain('consulta de usuario/senha/SSID');
+  });
+
   it('rejects MCP tools that require human approval', () => {
     const destructiveMcpTool: AgentToolCatalogItem = {
       name: 'mcp:server:delete_account' as any,

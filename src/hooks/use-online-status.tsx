@@ -54,13 +54,14 @@ function buildUserSnapshot(user: User | null | undefined): string {
 }
 
 export const PresenceProvider = ({ children, initialUser = null }: { children: ReactNode, initialUser?: User | null }) => {
-  const { user: authUser, isLoading: isAuthLoading } = useAuth();
+  const { user: authUser, session, isLoading: isAuthLoading } = useAuth();
   const [localUser, setLocalUser] = useState<User | null>(initialUser);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [presenceBootstrapDone, setPresenceBootstrapDone] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'reconnecting' | 'offline'>('connected');
   const supabase = useMemo(() => createClient(), []);
+  const accessToken = session?.access_token ?? null;
 
   useEffect(() => {
     setLocalUser((prev) => {
@@ -388,7 +389,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
   const channelRef = useRef<any>(null);
 
   useEffect(() => {
-    if (isAuthLoading || !localUser?.activeWorkspaceId || !localUser.id || !presenceBootstrapDone) return;
+    if (isAuthLoading || !localUser?.activeWorkspaceId || !localUser.id || !presenceBootstrapDone || !accessToken) return;
 
     // Decoupled: Fetch online agents immediately to show the list ASAP
     refreshOnlineAgents();
@@ -434,36 +435,17 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       channelRef.current = null;
     }
 
-    const channel = supabase.channel(`db-presence-${localUser.activeWorkspaceId}`)
+    supabase.realtime.setAuth(accessToken);
+
+    const channel = supabase.channel(`workspace:${localUser.activeWorkspaceId}:presence`, {
+      config: {
+        private: true,
+      },
+    })
       .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_workspace_presence',
-          filter: `workspace_id=eq.${localUser.activeWorkspaceId}`,
-        },
-        (payload) => {
-          const newData = payload.new as any;
-          const oldData = payload.old as any;
-          const workspaceId = newData?.workspace_id || oldData?.workspace_id;
-
-          if (workspaceId && workspaceId !== localUser.activeWorkspaceId) {
-            return;
-          }
-
-          // Optimization: Ignore heartbeat updates (only last_seen changed)
-          // We only trigger a refresh if the user matches our workspace AND:
-          // 1. It's an INSERT (new user online)
-          // 2. It's a DELETE (user went offline)
-          // 3. It's an UPDATE where 'is_online' changed
-          if (payload.eventType === 'UPDATE') {
-            if (newData.is_online === oldData.is_online) {
-              return;
-            }
-          }
-
-          // Immediately refresh - Realtime already handles the push, just sync state
+        'broadcast',
+        { event: 'presence_changed' },
+        () => {
           refreshOnlineAgents();
         }
       )
@@ -501,7 +483,7 @@ export const PresenceProvider = ({ children, initialUser = null }: { children: R
       // Presence is not forced offline on cleanup because BFCache and internal navigation
       // may tear down effects without meaning the operator actually went away.
     };
-  }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence, refreshOnlineAgents, presenceBootstrapDone, supabase, isAuthLoading]);
+  }, [localUser?.activeWorkspaceId, localUser?.id, updateServerPresence, refreshOnlineAgents, presenceBootstrapDone, supabase, isAuthLoading, accessToken]);
 
   useEffect(() => {
     if (!localUser?.id || !localUser.activeWorkspaceId) return;

@@ -203,6 +203,12 @@ export type MessageMetadata = {
   agentToolInput?: unknown;
   agentToolOutput?: unknown;
   agentToolError?: string | null;
+  autopilotSourceMessageId?: string;
+  autopilotOrchestratorRunId?: string;
+  autopilotResponseDeliveryId?: string;
+  autopilotResponseDeliveryKey?: string;
+  autopilotResponseBlockIndex?: number;
+  autopilotResponseBlockCount?: number;
   customerMessage?: string;
   analysisKind?: 'transcription' | 'visual_summary' | 'video_summary' | 'media_summary' | 'routing_context';
   sourceMessageId?: string;
@@ -228,6 +234,7 @@ export type MessageMetadata = {
   campaignRecipientId?: string;
   isTemplate?: boolean;
   templateName?: string;
+  skipUserSignature?: boolean;
   templateComponents?: Array<{
     type?: string;
     sub_type?: string;
@@ -682,6 +689,7 @@ export interface AutopilotFlowNode {
     confidenceThreshold?: number;
     fallbackRouteId?: string;
     routes?: AutopilotFlowSwitchRoute[];
+    legacyNodeKind?: AutopilotFlowNodeKind;
   };
 }
 

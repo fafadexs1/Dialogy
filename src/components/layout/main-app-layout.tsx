@@ -10,8 +10,19 @@ import React from 'react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { useAuth } from '@/providers/auth-provider';
 import { useTheme } from '@/providers/theme-provider';
+import Link from 'next/link';
+import { AlertTriangle, CreditCard } from 'lucide-react';
+import type { BillingStatus } from '@/lib/billing-logic';
 
-export function MainAppLayout({ children }: { children: React.ReactNode }) {
+export function MainAppLayout({
+  children,
+  billingStatus,
+  billingBlocked,
+}: {
+  children: React.ReactNode;
+  billingStatus: BillingStatus;
+  billingBlocked: boolean;
+}) {
   const pathname = usePathname();
   const user = useCurrentUser();
   const { user: authUser, isLoading: authLoading } = useAuth();
@@ -52,6 +63,12 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       : (isLightTheme ? 'app-shell-light' : '')
     : '';
   const transitionKey = pathname.split('?')[0];
+  const isBillingRoute = pathname.startsWith('/settings/billing');
+  const billingTitle = billingStatus === 'past_due'
+    ? 'Pagamento vencido'
+    : billingStatus === 'unpaid'
+      ? 'Pagamento não recebido'
+      : 'Plano inativo';
 
   React.useEffect(() => {
     setMounted(true);
@@ -131,16 +148,53 @@ export function MainAppLayout({ children }: { children: React.ReactNode }) {
       <main
         className={cn(
           'min-h-0 min-w-0 flex flex-1 flex-col',
-          isSettingsRoute || isAutopilotEditorRoute ? 'overflow-hidden overscroll-none' : 'overflow-y-auto'
+          isInboxRoute || isSettingsRoute || isAutopilotEditorRoute ? 'overflow-hidden overscroll-none' : 'overflow-y-auto'
         )}
       >
+        {billingBlocked && !isBillingRoute && (
+          <div className="z-50 flex shrink-0 items-center justify-center gap-3 border-b border-amber-400/30 bg-amber-950 px-4 py-2.5 text-sm text-amber-50">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
+            <span><strong>{billingTitle}.</strong> Regularize a assinatura para voltar a operar o workspace.</span>
+            <Link
+              href="/settings/billing"
+              className="rounded-lg bg-amber-300 px-3 py-1 font-semibold text-amber-950 hover:bg-amber-200"
+            >
+              Regularizar
+            </Link>
+          </div>
+        )}
         <div
           className={cn(
-            'flex min-h-0 flex-1 flex-col',
-            (isSettingsRoute || isAutopilotEditorRoute) && 'overflow-hidden overscroll-none'
+            'relative flex min-h-0 flex-1 flex-col',
+            (isInboxRoute || isSettingsRoute || isAutopilotEditorRoute) && 'overflow-hidden overscroll-none'
           )}
         >
-          {children}
+          <div
+            className={cn(
+              'flex min-h-0 flex-1 flex-col',
+              billingBlocked && isInboxRoute && 'pointer-events-none select-none blur-[7px]'
+            )}
+            aria-hidden={billingBlocked && isInboxRoute ? true : undefined}
+          >
+            {children}
+          </div>
+          {billingBlocked && isInboxRoute && (
+            <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6 backdrop-blur-[2px]">
+              <div className="max-w-md rounded-3xl border border-white/15 bg-zinc-950/95 p-7 text-center text-white shadow-2xl">
+                <CreditCard className="mx-auto mb-4 h-10 w-10 text-amber-300" />
+                <h2 className="text-xl font-semibold">{billingTitle}</h2>
+                <p className="mt-2 text-sm leading-6 text-white/65">
+                  As conversas permanecem protegidas, mas o acesso aos chats está suspenso até a regularização do plano.
+                </p>
+                <Link
+                  href="/settings/billing"
+                  className="mt-5 inline-flex rounded-xl bg-amber-300 px-5 py-2.5 text-sm font-semibold text-amber-950 hover:bg-amber-200"
+                >
+                  Ver assinatura
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

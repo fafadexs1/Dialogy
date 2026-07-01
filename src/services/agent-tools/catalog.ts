@@ -1,5 +1,6 @@
 import type { AgentToolName } from './types';
 import type { AutopilotSlotName, UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
+import { resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
 
 export type AgentToolClass =
   | 'read_only'
@@ -36,6 +37,12 @@ export type AgentToolCatalogItem = AgentToolDefinition & {
   serverName?: string;
   inputSchema?: Record<string, unknown> | null;
 };
+
+function boundedTimeoutMs(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(5_000, Math.min(120_000, Math.trunc(parsed)));
+}
 
 const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   transfer_chat: {
@@ -195,7 +202,10 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
     riskLevel: 'low',
     sideEffect: 'none',
     idempotent: true,
-    timeoutMs: 10000,
+    timeoutMs: boundedTimeoutMs(
+      process.env.SGP_CONTACT_PANEL_TOOL_TIMEOUT_MS,
+      30_000,
+    ),
     maxAttempts: 1,
     requiresHumanApproval: false,
     customerVisible: false,
@@ -277,7 +287,7 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
     riskLevel: 'medium',
     sideEffect: 'medium',
     idempotent: false,
-    timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
+    timeoutMs: resolveMcpToolTimeoutMs(),
     maxAttempts: 1,
     requiresHumanApproval: false,
     customerVisible: true,

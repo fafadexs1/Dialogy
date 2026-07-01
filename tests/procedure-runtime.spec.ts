@@ -40,6 +40,20 @@ function closeTool(): AgentToolCatalogItem {
   };
 }
 
+function mcpTool(name: string, description: string): AgentToolCatalogItem {
+  return {
+    ...tool(name as AgentToolCatalogItem['name']),
+    name: name as AgentToolCatalogItem['name'],
+    version: 'mcp',
+    description,
+    source: 'mcp',
+    enabledByDefault: false,
+    serverId: 'router',
+    serverName: 'Router MCP',
+    inputSchema: { type: 'object', properties: {} },
+  };
+}
+
 function contextFor(graph: ProcedureGraph): ProcedureExecutionContext {
   return {
     id: 'exec-1',
@@ -93,6 +107,59 @@ describe('procedure runtime engine', () => {
     });
 
     expect(match?.graph.id).toBe(result.graph?.id);
+  });
+
+  it('prefers Wi-Fi credential lookup over close procedures when the customer asks for username and password', () => {
+    const closeGraph: ProcedureGraph = {
+      id: 'proc-close',
+      documentId: 'doc-close',
+      documentName: 'Encerramento de atendimento tecnico',
+      version: 1,
+      compiledAt: new Date('2026-06-20T02:55:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['reboot'],
+      metadata: {},
+      steps: [
+        {
+          id: 'close',
+          order: 1,
+          type: 'tool_call',
+          label: 'Se usar @close_chat, inclua notes objetivas.',
+          toolName: 'close_chat',
+          nextStepId: null,
+        },
+      ],
+    };
+    const wifiGraph: ProcedureGraph = {
+      id: 'proc-wifi',
+      documentId: 'doc-wifi',
+      documentName: 'Roteador e Wi-Fi - consulta, reboot e troca de senha',
+      version: 1,
+      compiledAt: new Date('2026-06-20T02:55:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['reiniciar', 'status'],
+      metadata: {},
+      steps: [
+        {
+          id: 'wifi',
+          order: 1,
+          type: 'tool_call',
+          label: 'Quando o cliente pedir usuario, senha, SSID ou nome da rede, use get_wifi_view.',
+          toolName: 'mcp:router:get_wifi_view',
+          semanticIntent: 'wifi_credentials_lookup',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const match = matchProcedure({
+      intent: 'troubleshooting',
+      customerMessage: 'Eu quero o usuario e senha do meu Wi-Fi',
+      compiledProcedures: [closeGraph, wifiGraph],
+    });
+
+    expect(match?.graph.id).toBe('proc-wifi');
+    expect(match?.matchReason).toContain('supports wifi_credentials_lookup');
   });
 
   it('waits for a tool result, resumes the same step, validates, and responds with AI resolver', async () => {
@@ -276,6 +343,70 @@ describe('procedure runtime engine', () => {
     });
 
     expect(match).toBeNull();
+  });
+
+  it('does not let a generic visual agent topology hijack an explicit tool request', () => {
+    const graph: ProcedureGraph = {
+      id: 'flow-canary',
+      documentId: 'flow:canary',
+      documentName: 'Fluxo visual: Autopilot Conversation Canary',
+      version: 1,
+      compiledAt: new Date('2026-06-27T19:30:00Z').toISOString(),
+      triggerIntents: ['unknown'],
+      triggerKeywords: [
+        'Agente Canary',
+        'Atendimento principal',
+        'Consultar pedido',
+        'Consulta o status de um pedido sem altera-lo.',
+      ],
+      metadata: { source: 'visual_flow' },
+      steps: [
+        {
+          id: 'agent',
+          order: 1,
+          type: 'respond',
+          label: 'Agente Canary',
+          useLlm: true,
+          nextStepId: 'status',
+        },
+        {
+          id: 'status',
+          order: 2,
+          type: 'tool_call',
+          label: 'Consultar pedido',
+          toolName: 'mcp:canary:get_order_status',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const match = matchProcedure({
+      intent: 'order_or_request_status',
+      customerMessage: 'Qual o status do pedido RACE-9001?',
+      compiledProcedures: [graph],
+    });
+
+    expect(match).toBeNull();
+  });
+
+  it('ignores empty title tokens left by trailing punctuation', () => {
+    const graph: ProcedureGraph = {
+      id: 'unrelated',
+      documentId: 'doc-unrelated',
+      documentName: 'Fluxo visual completamente alheio',
+      version: 1,
+      compiledAt: new Date('2026-06-27T19:30:00Z').toISOString(),
+      triggerIntents: ['unknown'],
+      triggerKeywords: [],
+      metadata: {},
+      steps: [],
+    };
+
+    expect(matchProcedure({
+      intent: 'order_or_request_status',
+      customerMessage: 'Qual o status do pedido RACE-9001?',
+      compiledProcedures: [graph],
+    })).toBeNull();
   });
 
   it('does not select a financial procedure for a connection complaint without financial evidence', () => {
@@ -520,6 +651,104 @@ describe('procedure runtime engine', () => {
     expect(result.actions).toHaveLength(0);
     expect(result.response).toContain('Sera necessario que a equipe responsavel');
     expect(result.response).not.toContain('encaminh');
+  });
+
+  it('compiles mixed Wi-Fi router documents into branches and routes credential lookup away from reboot', async () => {
+    const tools = [
+      tool('sgp_fetch_contact_panel_data'),
+      mcpTool('mcp:router:get_wifi_view', 'Consulta SSID, usuario e senha atuais do Wi-Fi do contrato validado.'),
+      mcpTool('mcp:router:reboot_router', 'Reinicia o roteador do assinante. Operacao com side effect.'),
+      mcpTool('mcp:router:change_wifi_credentials', 'Troca nome SSID e senha do Wi-Fi do roteador.'),
+    ];
+    const document: KnowledgeBaseDocument = {
+      id: 'router-wifi-mixed',
+      name: 'Roteador e Wi-Fi - consulta, reboot e troca de senha',
+      content: [
+        'REINICIAR ROTEADOR',
+        'Use @sgp_fetch_contact_panel_data para validar o cliente e o contrato.',
+        'Execute @mcp:router:reboot_router somente no roteador correto.',
+        '',
+        'CONSULTAR WI-FI',
+        'Quando o cliente pedir usuario, senha, SSID, nome da rede ou disser que esqueceu a senha, use @mcp:router:get_wifi_view.',
+        '',
+        'TROCAR NOME/SENHA DO WI-FI',
+        'Quando o cliente pedir troca de nome ou senha, confirme os novos dados e execute @mcp:router:change_wifi_credentials.',
+      ].join('\n'),
+    };
+
+    const result = compileProcedureFromDocument({
+      document,
+      tools,
+      enabledToolNames: tools.map((item) => item.name),
+    });
+
+    expect(result.success).toBe(true);
+    const graph = result.graph!;
+    expect(graph.metadata.sectionAware).toBe(true);
+    expect(graph.steps[0]).toMatchObject({ type: 'decide' });
+    expect(graph.steps[0].branches?.map((branch) => branch.condition)).toEqual(expect.arrayContaining([
+      expect.stringContaining('CONSULTAR WI-FI'),
+      expect.stringContaining('REINICIAR ROTEADOR'),
+    ]));
+
+    const runtimeContext = contextFor(graph);
+    const advance = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Opa Lucas, esqueci o usuario e senha do Wi-Fi. Voce pode verificar?',
+      decisionResolver: async () => 'REINICIAR ROTEADOR',
+    });
+
+    expect(advance.status).toBe('waiting_tool');
+    expect(advance.actions).toEqual([
+      expect.objectContaining({
+        type: 'mcp_call_tool',
+        payload: expect.objectContaining({
+          toolName: 'mcp:router:get_wifi_view',
+        }),
+      }),
+    ]);
+    expect(advance.actions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        payload: expect.objectContaining({ toolName: 'mcp:router:reboot_router' }),
+      }),
+    ]));
+  });
+
+  it('blocks a stale reboot step when the current customer message asks for Wi-Fi credentials', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-stale-reboot',
+      documentId: 'doc-stale-reboot',
+      documentName: 'Roteador e Wi-Fi',
+      version: 1,
+      compiledAt: new Date('2026-06-19T12:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['wifi', 'roteador'],
+      metadata: {},
+      steps: [
+        {
+          id: 'reboot',
+          order: 1,
+          type: 'tool_call',
+          label: 'Execute reboot_router somente no roteador correto.',
+          toolName: 'mcp:router:reboot_router',
+          semanticIntent: 'router_reboot',
+          requiresExplicitCustomerRequest: true,
+          sideEffect: 'high',
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'Esqueci a senha e o usuario do Wi-Fi',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.actions).toHaveLength(0);
+    expect(result.response).toContain('consultar os dados atuais do Wi-Fi');
   });
 
   it('uses the first available team when a reached handoff step has no explicit destination', async () => {

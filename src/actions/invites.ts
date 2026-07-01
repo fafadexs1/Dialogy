@@ -8,14 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import type { WorkspaceInvite } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
-
-
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    const res = await db.query(`
-        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
-    `, [userId, workspaceId]);
-    return (res.rowCount || 0) > 0;
-}
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 
 export async function createWorkspaceInvite(prevState: any, formData: FormData): Promise<string | null> {
@@ -29,7 +22,7 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
 
     if (!workspaceId || !expiresInSeconds) return "Parâmetros inválidos.";
 
-    if (!await hasPermission(user.id, workspaceId, 'workspace:invites:manage')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:invites:manage')) {
         return "Você não tem permissão para criar convites.";
     }
 
@@ -55,7 +48,7 @@ export async function getWorkspaceInvites(workspaceId: string): Promise<{ invite
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { invites: null, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, workspaceId, 'workspace:invites:manage')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:invites:manage')) {
         return { invites: null, error: "Acesso não autorizado." };
     }
 
@@ -94,7 +87,7 @@ export async function revokeWorkspaceInvite(inviteId: string): Promise<{ success
         if ((inviteRes.rowCount || 0) === 0) return { success: false, error: "Convite não encontrado." };
 
         const { workspace_id } = inviteRes.rows[0];
-        if (!await hasPermission(user.id, workspace_id, 'workspace:invites:manage')) {
+        if (!await hasWorkspacePermission(user.id, workspace_id, 'workspace:invites:manage')) {
             return { success: false, error: "Você não tem permissão para gerenciar convites." };
         }
 

@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AutopilotConfig, Chat, Contact } from '@/lib/types';
 import type { AgentToolRuntimeContext } from '@/services/agent-tools/types';
 import { evaluateAgentToolPolicy } from '@/services/agent-tools/policy';
+import { fingerprintToolAction } from '@/services/agent-tools/action-fingerprint';
 
 vi.mock('@/services/mcp/store', () => ({
+  recordMcpServerHealth: vi.fn(async () => undefined),
   getMcpWorkspaceConfig: vi.fn(async () => ({
     servers: [
       {
@@ -27,6 +29,27 @@ vi.mock('@/services/mcp/store', () => ({
             serverName: 'Routers',
             name: 'reboot_router',
             annotations: { destructiveHint: true },
+          },
+          {
+            qualifiedName: 'mcp:router-server:scan_wifi_neighbors',
+            serverId: 'router-server',
+            serverName: 'Routers',
+            name: 'scan_wifi_neighbors',
+            description: 'Realiza scan das redes Wi-Fi vizinhas e retorna canais e sinal.',
+          },
+          {
+            qualifiedName: 'mcp:router-server:queue_set_parameters',
+            serverId: 'router-server',
+            serverName: 'Routers',
+            name: 'queue_set_parameters',
+            description: 'Enfileira SetParameterValues no roteador.',
+          },
+          {
+            qualifiedName: 'mcp:router-server:clear_pending_commands',
+            serverId: 'router-server',
+            serverName: 'Routers',
+            name: 'clear_pending_commands',
+            description: 'Limpa comandos pendentes do roteador.',
           },
         ],
       },
@@ -79,6 +102,57 @@ describe('agent tool execution policy', () => {
     expect(result).toEqual({ allowed: true, riskLevel: 'low' });
   });
 
+  it('allows annotation-less observational Wi-Fi scans after exact turn-plan authorization', async () => {
+    const toolName = 'mcp:router-server:scan_wifi_neighbors';
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        turnPolicy: {
+          ...context.turnPolicy!,
+          globallyEnabledToolNames: [...context.turnPolicy!.globallyEnabledToolNames, toolName],
+          allowedToolNames: [...context.turnPolicy!.allowedToolNames, toolName],
+        },
+      },
+      action: {
+        type: 'mcp_call_tool',
+        payload: {
+          toolName,
+          arguments: { client_ip: '192.0.2.10' },
+        },
+      },
+    });
+
+    expect(result).toEqual({ allowed: true, riskLevel: 'low' });
+  });
+
+  it.each([
+    'mcp:router-server:queue_set_parameters',
+    'mcp:router-server:clear_pending_commands',
+  ])('classifies annotation-less mutating MCP %s as high risk and requires a persisted confirmation', async (toolName) => {
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'execute agora',
+        turnPolicy: {
+          ...context.turnPolicy!,
+          globallyEnabledToolNames: [...context.turnPolicy!.globallyEnabledToolNames, toolName],
+          allowedToolNames: [...context.turnPolicy!.allowedToolNames, toolName],
+        },
+      },
+      action: {
+        type: 'mcp_call_tool',
+        payload: {
+          toolName,
+          arguments: { client_ip: '192.0.2.10' },
+        },
+      },
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.riskLevel).toBe('high');
+    expect(result.reason).toContain('[tool_policy:confirmation_required]');
+  });
+
   it('blocks find_router_by_ip when the selected contract has no IPv4', async () => {
     const result = await evaluateAgentToolPolicy({
       context,
@@ -112,7 +186,7 @@ describe('agent tool execution policy', () => {
     expect(result.reason).toContain('[tool_policy:confirmation_required]');
   });
 
-  it('allows router reboot after an explicit customer confirmation', async () => {
+  it('stages router reboot even when the first request already contains affirmative wording', async () => {
     const result = await evaluateAgentToolPolicy({
       context: {
         ...context,
@@ -127,10 +201,11 @@ describe('agent tool execution policy', () => {
       },
     });
 
-    expect(result).toEqual({ allowed: true, riskLevel: 'high' });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('[tool_policy:confirmation_required]');
   });
 
-  it('allows a short confirmation after the agent explicitly asks to reboot the router', async () => {
+  it('does not trust a short confirmation without a consumed persisted action', async () => {
     const result = await evaluateAgentToolPolicy({
       context: {
         ...context,
@@ -152,7 +227,45 @@ describe('agent tool execution policy', () => {
       },
     });
 
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('[tool_policy:confirmation_required]');
+  });
+
+  it('allows only the exact action whose persisted fingerprint was consumed', async () => {
+    const action = {
+      type: 'mcp_call_tool' as const,
+      payload: {
+        toolName: 'mcp:router-server:reboot_router',
+        arguments: { client_ip: '192.0.2.10' },
+      },
+    };
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Sim',
+        confirmedActionFingerprint: fingerprintToolAction(action),
+      },
+      action,
+    });
+
     expect(result).toEqual({ allowed: true, riskLevel: 'high' });
+
+    const changedActionResult = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Sim',
+        confirmedActionFingerprint: fingerprintToolAction(action),
+      },
+      action: {
+        ...action,
+        payload: {
+          ...action.payload,
+          arguments: { client_ip: '192.0.2.99' },
+        },
+      },
+    });
+    expect(changedActionResult.allowed).toBe(false);
+    expect(changedActionResult.reason).toContain('[tool_policy:confirmation_');
   });
 
   it('does not bind a short confirmation to an unrelated agent question', async () => {

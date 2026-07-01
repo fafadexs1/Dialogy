@@ -12,6 +12,7 @@ import {
 } from '@/lib/plans-types';
 import { getStripe } from '@/lib/stripe';
 import { createClient } from '@/lib/supabase/server';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 export type BillingOverview = {
     customerId: string | null;
@@ -140,10 +141,11 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
         const stripe = await getStripe();
         const origin = await getRequestOrigin();
         const plan = PLANS[planId];
+        if (!plan.stripePriceId) {
+            return { error: 'O preço Stripe deste plano não está configurado.' };
+        }
         const monthlyChats = plan.limits.monthly_chats;
         const planPrice = getPlanPrice(planId);
-        const unitAmountInCents = Math.round(planPrice * 100);
-        const planLabel = plan.label;
 
         const userResult = await db.query('SELECT last_active_workspace_id FROM users WHERE id = $1', [user.id]);
         const activeWorkspaceId = userResult.rows[0]?.last_active_workspace_id;
@@ -191,16 +193,11 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
                         return { error: 'Assinatura invalida — nenhum item encontrado.' };
                     }
 
-                    await stripe.subscriptions.update(workspace.stripe_subscription_id, {
+                    const updatedSubscription = await stripe.subscriptions.update(workspace.stripe_subscription_id, {
                         items: [
                             {
                                 id: subscriptionItem.id,
-                                price_data: {
-                                    currency: 'brl',
-                                    product: subscriptionItem.price.product as string,
-                                    recurring: { interval: 'month' },
-                                    unit_amount: unitAmountInCents,
-                                },
+                                price: plan.stripePriceId,
                             },
                         ],
                         proration_behavior: 'create_prorations',
@@ -211,11 +208,28 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
                         },
                     });
 
-                    // Update the billing_info in our database
-                    await db.query(
-                        `UPDATE billing_info SET plan_id = $1 WHERE workspace_id = $2`,
-                        [planId, workspace.id]
-                    );
+                    const client = await db.connect();
+                    try {
+                        await client.query('BEGIN');
+                        await client.query(
+                            `UPDATE billing_info
+                             SET plan = $1, status = $2, updated_at = NOW()
+                             WHERE workspace_id = $3`,
+                            [planId, updatedSubscription.status, workspace.id]
+                        );
+                        await client.query(
+                            `UPDATE workspaces
+                             SET custom_limits = $1, updated_at = NOW()
+                             WHERE id = $2`,
+                            [JSON.stringify(plan.limits), workspace.id]
+                        );
+                        await client.query('COMMIT');
+                    } catch (databaseError) {
+                        await client.query('ROLLBACK');
+                        throw databaseError;
+                    } finally {
+                        client.release();
+                    }
 
                     return { success: true, updated: true };
                 }
@@ -250,22 +264,7 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
 
         const session = await stripe.checkout.sessions.create({
             customer: customerId,
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'brl',
-                        product_data: {
-                            name: `Dialogy ${planLabel}`,
-                            description: `Plano ${planLabel} — ${monthlyChats.toLocaleString('pt-BR')} chats/mes, usuarios ilimitados.`,
-                        },
-                        recurring: {
-                            interval: 'month',
-                        },
-                        unit_amount: unitAmountInCents,
-                    },
-                    quantity: 1,
-                },
-            ],
+            line_items: [{ price: plan.stripePriceId, quantity: 1 }],
             mode: 'subscription',
             success_url: `${origin}/settings/billing?success=true&trial_days=${DEFAULT_TRIAL_DAYS}&monthly_chats=${monthlyChats}`,
             cancel_url: `${origin}/pricing?canceled=true`,
@@ -323,6 +322,9 @@ export async function createBillingPortalSessionAction(workspaceId: string) {
     if (!context) {
         return { error: 'Acesso negado ao workspace.' };
     }
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'billing:view')) {
+        return { error: 'Você não tem permissão para visualizar o faturamento.' };
+    }
     if (!context.canManage) {
         return { error: 'Somente o proprietario do workspace pode gerenciar a assinatura.' };
     }
@@ -356,6 +358,9 @@ export async function getBillingOverviewAction(workspaceId: string): Promise<{ o
     const context = await getWorkspaceBillingContext(workspaceId, user.id);
     if (!context) {
         return { error: 'Acesso negado ao workspace.' };
+    }
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'billing:view')) {
+        return { error: 'Você não tem permissão para visualizar o faturamento.' };
     }
 
     const overview: BillingOverview = {
@@ -406,6 +411,9 @@ export async function getBillingHistoryAction(workspaceId: string) {
     const context = await getWorkspaceBillingContext(workspaceId, user.id);
     if (!context) {
         return { error: 'Acesso negado ao workspace.' };
+    }
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'billing:view')) {
+        return { error: 'Você não tem permissão para visualizar o faturamento.' };
     }
 
     if (!context.stripeCustomerId) {

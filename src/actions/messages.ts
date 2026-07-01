@@ -47,6 +47,8 @@ import {
 import { hasRecentWhatsappCustomerReply } from '@/lib/whatsapp/customer-window';
 import { prependIntelligentAttendantSignature } from '@/lib/message-signature';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
+import { isBillingBlocked, type BillingStatus } from '@/lib/billing-logic';
+import { requireChatAccess } from '@/server/inbox/access';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -719,6 +721,18 @@ async function internalSendMessage(
 
         const chatInfo = chatInfoRes.rows[0];
         const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, assigned_system_agent_id: currentSystemAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source, meta_platform } = chatInfo;
+        const billingRes = await client.query(
+            'SELECT status FROM billing_info WHERE workspace_id = $1',
+            [workspaceId]
+        );
+        const billingStatus = (billingRes.rows[0]?.status || null) as BillingStatus;
+        if (isBillingBlocked(billingStatus)) {
+            await client.query('ROLLBACK');
+            return {
+                success: false,
+                error: 'O plano deste workspace está vencido ou inativo. Regularize a assinatura para enviar mensagens.',
+            };
+        }
         const normalizedSource = (source || '').toString().toLowerCase();
         const normalizedMetaPlatform = (meta_platform || '').toString().toLowerCase();
         const isTelegramSource =
@@ -1313,7 +1327,8 @@ export const sendAgentMessageAction = withDebug(
         content: string,
         tabId: string | null,
         messageId?: string,
-        userOverride?: { id: string; email?: string | null; user_metadata?: Record<string, any> }
+        userOverride?: { id: string; email?: string | null; user_metadata?: Record<string, any> },
+        options?: { skipUserSignature?: boolean }
     ): Promise<{ success: boolean; error?: string; message?: Message }> {
         let user = userOverride;
         if (!user) {
@@ -1324,23 +1339,40 @@ export const sendAgentMessageAction = withDebug(
         if (!user) {
             return { success: false, error: 'Usuário não autenticado.' };
         }
+        const access = await requireChatAccess(user.id, chatId);
+        if (!access.ok) {
+            return { success: false, error: access.error };
+        }
 
         await touchUserPresenceFromChat(user.id, chatId, tabId, 'agent_message');
 
         // Fetch user name for signature
+        const skipUserSignature = options?.skipUserSignature === true;
         let contentWithSignature = content;
-        try {
-            const userRes = await db.query('SELECT full_name FROM users WHERE id = $1', [user.id]);
-            const fullName = userRes.rows[0]?.full_name;
-            if (fullName) {
-                const firstName = fullName.trim().split(' ')[0].toUpperCase();
-                contentWithSignature = `*${firstName}*:\n\n${content}`;
+        if (!skipUserSignature) {
+            try {
+                const userRes = await db.query('SELECT full_name FROM users WHERE id = $1', [user.id]);
+                const fullName = userRes.rows[0]?.full_name;
+                if (fullName) {
+                    const firstName = fullName.trim().split(' ')[0].toUpperCase();
+                    contentWithSignature = `*${firstName}*:\n\n${content}`;
+                }
+            } catch (err) {
+                console.error('[SEND_AGENT_MESSAGE] Falha ao obter nome do usuário para assinatura:', err);
             }
-        } catch (err) {
-            console.error('[SEND_AGENT_MESSAGE] Falha ao obter nome do usuário para assinatura:', err);
         }
 
-        return internalSendMessage(chatId, content, user.id, tabId, { optimisticId: messageId }, undefined, messageId, undefined, contentWithSignature);
+        return internalSendMessage(
+            chatId,
+            content,
+            user.id,
+            tabId,
+            { optimisticId: messageId, ...(skipUserSignature ? { skipUserSignature: true } : {}) },
+            undefined,
+            messageId,
+            undefined,
+            skipUserSignature ? content : contentWithSignature
+        );
     },
     {
         contextResolver: (chatId, content) => ({ payload: { chatId, content } })
@@ -1363,6 +1395,10 @@ export const sendInternalNoteAction = withDebug(
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Usuário não autenticado.' };
+        }
+        const access = await requireChatAccess(user.id, chatId);
+        if (!access.ok) {
+            return { success: false, error: access.error };
         }
 
         const client = await db.connect();
@@ -1512,6 +1548,7 @@ export const retryMessageAction = withDebug(
         }
 
         const metadata = messageRow.metadata || {};
+        const skipUserSignature = (metadata as MessageMetadata)?.skipUserSignature === true;
         if ((metadata as MessageMetadata)?.isInternalNote) {
             return { success: false, error: 'Nao e possivel reenviar notas internas.' };
         }
@@ -1544,7 +1581,7 @@ export const retryMessageAction = withDebug(
 
         let apiContent = messageRow.content;
         const isSystemSender = messageRow.sender_system_agent_id || (metadata as MessageMetadata)?.sentBy === 'system_agent';
-        if (!isSystemSender) {
+        if (!isSystemSender && !skipUserSignature) {
             try {
                 const userRes = await db.query('SELECT full_name FROM users WHERE id = $1', [senderId]);
                 const fullName = userRes.rows[0]?.full_name;
@@ -1641,7 +1678,13 @@ export async function sendAutomatedMessageAction(
     isSystemAgent: boolean = false,
     instanceName?: string,
     metadata?: MessageMetadata,
-): Promise<{ success: boolean; error?: string, apiResponse?: any }> {
+): Promise<{
+    success: boolean;
+    error?: string;
+    apiResponse?: any;
+    providerAccepted?: boolean;
+    message?: Message;
+}> {
     chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
     content = await withIntelligentAttendantSignature(content, agentId, isSystemAgent);
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
@@ -1681,7 +1724,7 @@ export async function sendAutomatedMessageAction(
                     senderUserId: isSystemAgent ? null : agentId,
                     senderSystemAgentId: isSystemAgent ? agentId : null,
                 });
-                return { success: true, apiResponse };
+                return { success: true, apiResponse, providerAccepted: true };
             } catch (metaErr) {
                 console.error('[SEND_AUTOMATED_MESSAGE][META]', metaErr);
                 return { success: false, error: formatMetaSendError(metaErr) };

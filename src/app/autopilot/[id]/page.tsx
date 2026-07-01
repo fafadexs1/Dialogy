@@ -66,6 +66,7 @@ import {
   type AutopilotCausalPatternApplicationPreview,
   type AutopilotDecisionInsights,
 } from '@/actions/autopilot';
+import { resolveAppliedProposalToolNames } from '@/services/autopilot/flow-builder-tool-scope';
 import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
   DEFAULT_AUTOPILOT_MODEL,
@@ -1443,12 +1444,16 @@ export default function AutopilotDetailPage() {
           conversation: input.conversation,
           currentGraph: input.currentGraph,
           currentSystemPrompt: input.currentSystemPrompt,
+          enabledToolNames,
           model: aiModel,
         })}
         onApplyAiProposal={(proposal) => {
           setFlowGraph(proposal.flowGraph);
           setKnowledgeBase(proposal.systemPrompt);
-          setEnabledToolNames((current) => Array.from(new Set([...current, ...proposal.enabledToolNames])));
+          setEnabledToolNames(resolveAppliedProposalToolNames({
+            proposalToolNames: proposal.enabledToolNames,
+            catalogToolNames: toolCatalog.map((tool) => tool.name),
+          }));
           toast({
             title: 'Proposta aplicada ao rascunho',
             description: 'Revise o flow, teste o atendimento e salve antes de publicar.',

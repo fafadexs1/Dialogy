@@ -213,7 +213,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspa
                                                 className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-colors text-left group"
                                             >
                                                 <Avatar className="h-10 w-10 border border-white/10">
-                                                    <AvatarImage src={contact.avatar_url} />
+                                                    <AvatarImage fallbackOnBlank src={contact.avatar_url} />
                                                     <AvatarFallback className="bg-zinc-800">{contact.name?.charAt(0) || '?'}</AvatarFallback>
                                                 </Avatar>
                                                 <div className="min-w-0 flex-1">
@@ -265,7 +265,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspa
                                             >
                                                 <div className="flex items-center gap-3">
                                                     <Avatar className="h-10 w-10 border border-white/10">
-                                                        <AvatarImage src={chat.contact.avatar_url} />
+                                                        <AvatarImage fallbackOnBlank src={chat.contact.avatar_url} />
                                                         <AvatarFallback className="bg-zinc-800">{chat.contact.name.charAt(0)}</AvatarFallback>
                                                     </Avatar>
                                                     <div className="min-w-0 flex-1">
@@ -339,7 +339,7 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspa
                                                 <div className="flex items-center justify-between w-full">
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <Avatar className="h-6 w-6 border border-white/10">
-                                                            <AvatarImage src={chatForMessage.contact.avatar_url} />
+                                                            <AvatarImage fallbackOnBlank src={chatForMessage.contact.avatar_url} />
                                                             <AvatarFallback className="bg-zinc-800 text-[10px]">{chatForMessage.contact.name.charAt(0)}</AvatarFallback>
                                                         </Avatar>
                                                         <span className="text-sm font-medium text-white/70 group-hover:text-blue-400 transition-colors truncate">

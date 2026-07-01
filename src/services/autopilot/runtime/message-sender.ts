@@ -1,8 +1,18 @@
 import { sendAutomatedMessageAction } from '@/actions/messages';
-import { db } from '@/lib/db';
 import { formatCustomerFacingAiResponse, splitIntoMessageBlocks } from '@/lib/ai-response-format';
-import { guardRepeatedConfirmationPrompt } from '@/services/autopilot/runtime/repetition-guard';
+import { db } from '@/lib/db';
 import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
+import type { MessageMetadata } from '@/lib/types';
+import { guardRepeatedConfirmationPrompt } from '@/services/autopilot/runtime/repetition-guard';
+import {
+  markAutopilotResponseBlockDelivered,
+  markAutopilotResponseBlockSending,
+  markAutopilotResponseDeliveryError,
+  prepareAutopilotResponseDelivery,
+  type AutopilotResponseTrace,
+} from '@/services/autopilot/runtime/response-delivery';
+import { waitForAutomatedProviderAcceptance } from '@/services/autopilot/runtime/provider-delivery';
+import { assertAutopilotSourceMessageCurrent } from '@/services/autopilot/runtime/stale-source-guard';
 
 function assertAutomatedMessageSent<T extends { success: boolean; error?: string }>(
   result: T,
@@ -13,7 +23,6 @@ function assertAutomatedMessageSent<T extends { success: boolean; error?: string
       `Falha ao enviar resposta automatizada para o chat ${chatId}: ${result.error || 'erro desconhecido'}`,
     );
   }
-
   return result;
 }
 
@@ -25,11 +34,12 @@ async function guardAutomatedMessage(chatId: string, message: string): Promise<s
        WHERE chat_id = $1
          AND from_me = true
          AND COALESCE(api_message_status, '') <> 'internal'
+         AND COALESCE(upper(api_message_status), '') NOT IN ('FAILED', 'ERROR')
          AND COALESCE(content, '') <> ''
          AND created_at >= NOW() - interval '15 minutes'
        ORDER BY created_at DESC
        LIMIT 8`,
-      [chatId]
+      [chatId],
     );
     const guarded = guardRepeatedConfirmationPrompt({
       message,
@@ -37,22 +47,27 @@ async function guardAutomatedMessage(chatId: string, message: string): Promise<s
     });
     if (guarded.action !== 'send') {
       console.warn(`[AUTOPILOT_LOOP_GUARD] chat=${chatId} action=${guarded.action}`);
-      
+
       if (guarded.action === 'suppress' || guarded.message?.includes('pausei esta tentativa')) {
         try {
           const chatRes = await db.query(`SELECT workspace_id FROM chats WHERE id = $1`, [chatId]);
           if (chatRes.rows[0]) {
             await db.query(
               `UPDATE chats SET is_autopilot_active = FALSE WHERE id = $1`,
-              [chatId]
+              [chatId],
             );
             await broadcastChatUpdate(chatRes.rows[0].workspace_id, chatId, {
               is_autopilot_active: false,
             });
-            console.warn(`[AUTOPILOT_LOOP_GUARD] chat=${chatId} pausado automaticamente pelo guard de repetição.`);
+            console.warn(
+              `[AUTOPILOT_LOOP_GUARD] chat=${chatId} pausado automaticamente pelo guard de repeticao.`,
+            );
           }
-        } catch (pauseErr) {
-          console.error('[AUTOPILOT_LOOP_GUARD] Falha ao pausar chat automaticamente:', pauseErr);
+        } catch (pauseError) {
+          console.error(
+            '[AUTOPILOT_LOOP_GUARD] Falha ao pausar chat automaticamente:',
+            pauseError,
+          );
         }
       }
     }
@@ -69,24 +84,35 @@ async function sendGuardedAutomatedMessage(input: {
   agentId: string;
   isSystemAgent: boolean;
   instanceName?: string;
+  metadata?: MessageMetadata;
 }) {
   const message = await guardAutomatedMessage(input.chatId, input.message);
-  if (!message) return { success: true };
+  if (!message) {
+    throw new Error(
+      `Resposta automatizada suprimida pelo guard de repeticao para o chat ${input.chatId}.`,
+    );
+  }
 
-  return sendAutomatedMessageAction(
+  const result = await sendAutomatedMessageAction(
     input.chatId,
     message,
     input.agentId,
     input.isSystemAgent,
-    input.instanceName
+    input.instanceName,
+    input.metadata,
   );
+  await waitForAutomatedProviderAcceptance({
+    result,
+    chatId: input.chatId,
+  });
+  return result;
 }
 
 /**
  * Sends an AI response as one or more separate WhatsApp message bubbles.
  *
- * When `aiMessageBlocks` is provided, each block is sent as its own message.
- * Otherwise, the heuristic `splitIntoMessageBlocks` is applied as a fallback.
+ * A traced response is prepared durably before the first provider call. On a
+ * retry, the original blocks are reused and already-persisted blocks are skipped.
  */
 export async function sendMultiBlockResponse(
   chatId: string,
@@ -95,52 +121,101 @@ export async function sendMultiBlockResponse(
   isSystemAgent: boolean,
   instanceName?: string,
   aiMessageBlocks?: string[] | null,
+  responseTrace?: AutopilotResponseTrace,
 ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
+  await assertAutopilotSourceMessageCurrent({
+    chatId,
+    sourceMessageId: responseTrace?.sourceMessageId,
+  });
+
   const sourceBlocks = (aiMessageBlocks && aiMessageBlocks.length >= 1)
     ? aiMessageBlocks
     : splitIntoMessageBlocks(formattedResponse);
-  const blocks = sourceBlocks
+  let blocks = sourceBlocks
     .map((block) => formatCustomerFacingAiResponse(block))
     .filter((block) => block.trim() !== '');
 
-  if (blocks.length <= 1) {
-    const singleMessage = blocks[0] || formatCustomerFacingAiResponse(formattedResponse);
+  if (blocks.length === 0) {
+    blocks = [formatCustomerFacingAiResponse(formattedResponse)];
+  }
 
-    // Simulação de digitação humana dinâmica (12ms por caractere + 800ms de reação)
-    const typingDelay = Math.min(Math.max((singleMessage.length * 12) + 800, 800), 3000);
-    await new Promise((resolve) => setTimeout(resolve, typingDelay));
-
-    return assertAutomatedMessageSent(
-      await sendGuardedAutomatedMessage({
+  const delivery = responseTrace
+    ? await prepareAutopilotResponseDelivery({
+        trace: responseTrace,
         chatId,
-        message: singleMessage,
-        agentId,
-        isSystemAgent,
-        instanceName,
-      }),
-      chatId,
-    );
+        blocks,
+      })
+    : null;
+  if (delivery) {
+    blocks = delivery.blocks;
+    if (delivery.status === 'sent') {
+      return { success: true };
+    }
   }
 
   let lastResult: { success: boolean; error?: string; apiResponse?: any } = { success: true };
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i];
-
-    // Simulação de digitação humana dinâmica por balão subsequente
-    const baseBuffer = i === 0 ? 800 : 500;
-    const typingDelay = Math.min(Math.max((block.length * 12) + baseBuffer, 600), 2500);
+  for (let index = 0; index < blocks.length; index += 1) {
+    if (delivery?.deliveredBlockIndexes.has(index)) continue;
+    const block = blocks[index];
+    const baseBuffer = index === 0 ? 800 : 500;
+    const maxTypingDelay = blocks.length === 1 ? 3000 : 2500;
+    const minTypingDelay = blocks.length === 1 ? 800 : 600;
+    const typingDelay = Math.min(
+      Math.max((block.length * 12) + baseBuffer, minTypingDelay),
+      maxTypingDelay,
+    );
     await new Promise((resolve) => setTimeout(resolve, typingDelay));
 
-    lastResult = assertAutomatedMessageSent(
-      await sendGuardedAutomatedMessage({
+    const deliveryMetadata: MessageMetadata | undefined = delivery && responseTrace
+      ? {
+          autopilotSourceMessageId: responseTrace.sourceMessageId || undefined,
+          autopilotOrchestratorRunId: responseTrace.orchestratorRunId || undefined,
+          autopilotResponseDeliveryId: delivery.id,
+          autopilotResponseDeliveryKey: responseTrace.deliveryKey || 'primary',
+          autopilotResponseBlockIndex: index,
+          autopilotResponseBlockCount: blocks.length,
+        }
+      : undefined;
+
+    try {
+      if (delivery) {
+        await markAutopilotResponseBlockSending({
+          deliveryId: delivery.id,
+          blockIndex: index,
+        });
+      }
+      lastResult = assertAutomatedMessageSent(
+        await sendGuardedAutomatedMessage({
+          chatId,
+          message: block,
+          agentId,
+          isSystemAgent,
+          instanceName,
+          metadata: deliveryMetadata,
+        }),
         chatId,
-        message: block,
-        agentId,
-        isSystemAgent,
-        instanceName,
-      }),
-      chatId,
-    );
+      );
+      if (delivery) {
+        await markAutopilotResponseBlockDelivered({
+          deliveryId: delivery.id,
+          blockIndex: index,
+          blockCount: blocks.length,
+        });
+      }
+    } catch (error) {
+      if (delivery) {
+        await markAutopilotResponseDeliveryError({
+          deliveryId: delivery.id,
+          error,
+        }).catch((deliveryError) => {
+          console.error(
+            '[AUTOPILOT_RESPONSE_DELIVERY] Failed to persist delivery error:',
+            deliveryError,
+          );
+        });
+      }
+      throw error;
+    }
   }
   return lastResult;
 }

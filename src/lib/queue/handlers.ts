@@ -15,6 +15,7 @@ import type {
   AnalyticsEventPayload,
   NotificationPayload,
   AiTaskPayload,
+  EvolutionWebhookProcessPayload,
 } from './types';
 
 type QueueHandler = (job: QueueJobRecord) => Promise<void>;
@@ -22,6 +23,16 @@ type QueueHandler = (job: QueueJobRecord) => Promise<void>;
 const FINAL_MESSAGE_STATUSES = new Set(['SENT', 'DELIVERY_ACK', 'READ', 'PLAYED', 'DELETED']);
 
 const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
+  evolution_webhook_process: async (job) => {
+    const payload = job.payload as EvolutionWebhookProcessPayload;
+    if (!payload?.eventId) {
+      throw new Error('Invalid evolution_webhook_process payload.');
+    }
+    const { processPersistedEvolutionWebhookEvent } = await import(
+      '@/services/whatsapp/evolution-webhook-handler'
+    );
+    await processPersistedEvolutionWebhookEvent(payload.eventId, job.locked_by || job.id);
+  },
   whatsapp_send: async (job) => {
     const payload = job.payload as WhatsappSendPayload;
     if (!payload?.messageId || !payload.instanceName || !payload.number) {
@@ -238,18 +249,40 @@ export async function handleQueueJobFailure(job: QueueJobRecord, error: unknown)
   const currentStatus = String(row.api_message_status || '').toUpperCase();
   const currentApiMessageId = row.message_id_from_api;
 
-  if (currentApiMessageId || FINAL_MESSAGE_STATUSES.has(currentStatus) || currentStatus === 'SENDING') {
+  if (currentApiMessageId || FINAL_MESSAGE_STATUSES.has(currentStatus)) {
     console.warn(
       `[QUEUE] Not marking whatsapp_send as FAILED for ${payload.messageId}. status=${currentStatus || 'NULL'} apiMessageId=${currentApiMessageId || 'NULL'}`
     );
     return;
   }
 
+  const errorMessage = error instanceof Error ? error.message : String(error);
   await db.query(
     `UPDATE messages
-     SET api_message_status = $1
-     WHERE id = $2`,
-    ['FAILED', payload.messageId]
+     SET api_message_status = $1,
+         metadata = jsonb_set(
+           jsonb_set(
+             COALESCE(metadata, '{}'::jsonb),
+             '{send_error}',
+             to_jsonb($2::text),
+             true
+           ),
+           '{send_error_details}',
+           $3::jsonb,
+           true
+         )
+     WHERE id = $4`,
+    [
+      'FAILED',
+      errorMessage,
+      JSON.stringify({
+        source: 'dialogy_whatsapp_queue',
+        status: 'FAILED',
+        reason: errorMessage,
+        captured_at: new Date().toISOString(),
+      }),
+      payload.messageId,
+    ]
   );
 
   console.error(

@@ -2,8 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import type { CustomFieldDefinition, SelectableOption, Tag, Team, User } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import type { CustomFieldDefinition, SelectableOption, Tag, User } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -43,7 +42,6 @@ import {
     updateWorkspaceConversionFieldConfig,
     deleteCustomFieldDefinition
 } from '@/actions/crm';
-import { getTeams } from '@/actions/teams';
 import { toast } from '@/hooks/use-toast';
 import { PIPELINE_STAGE_CATEGORY } from '@/lib/crm-pipeline';
 
@@ -51,22 +49,19 @@ import { PIPELINE_STAGE_CATEGORY } from '@/lib/crm-pipeline';
 function OptionsManager({
     title,
     options,
-    teams,
     onAdd,
     onRemove,
     onUpdate // Added onUpdate prop
 }: {
     title: string,
     options: Tag[],
-    teams?: Team[],
-    onAdd: (label: string, color: string, isCloseReason: boolean, teamIds: string[]) => Promise<any>,
+    onAdd: (label: string, color: string, isCloseReason: boolean) => Promise<any>,
     onRemove: (id: string) => Promise<any>,
-    onUpdate?: (id: string, label: string, color: string, isCloseReason: boolean, teamIds: string[]) => Promise<any>
+    onUpdate?: (id: string, label: string, color: string, isCloseReason: boolean) => Promise<any>
 }) {
     const [newItemLabel, setNewItemLabel] = useState('');
     const [newItemColor, setNewItemColor] = useState('#cccccc');
     const [isCloseReason, setIsCloseReason] = useState(false);
-    const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [editingItem, setEditingItem] = useState<Tag | null>(null); // State for editing
 
@@ -75,12 +70,10 @@ function OptionsManager({
             setNewItemLabel(editingItem.label);
             setNewItemColor(editingItem.color);
             setIsCloseReason(editingItem.is_close_reason);
-            setSelectedTeamIds(editingItem.team_ids || []);
         } else {
             setNewItemLabel('');
             setNewItemColor('#cccccc');
             setIsCloseReason(false);
-            setSelectedTeamIds([]);
         }
     }, [editingItem]);
 
@@ -95,7 +88,7 @@ function OptionsManager({
         setIsSubmitting(true);
 
         if (editingItem && onUpdate) {
-            const result = await onUpdate(editingItem.id, newItemLabel, newItemColor, isCloseReason, selectedTeamIds);
+            const result = await onUpdate(editingItem.id, newItemLabel, newItemColor, isCloseReason);
             if (result.success) {
                 toast({ title: 'Etiqueta Atualizada!' });
                 setEditingItem(null);
@@ -103,12 +96,11 @@ function OptionsManager({
                 toast({ title: 'Erro ao Atualizar', description: result.error, variant: 'destructive' });
             }
         } else {
-            const result = await onAdd(newItemLabel, newItemColor, isCloseReason, selectedTeamIds);
+            const result = await onAdd(newItemLabel, newItemColor, isCloseReason);
             if (result.success) {
                 setNewItemLabel('');
                 setNewItemColor('#cccccc');
                 setIsCloseReason(false);
-                setSelectedTeamIds([]);
                 toast({ title: 'Etiqueta Adicionada!' })
             } else {
                 toast({ title: 'Erro ao Adicionar', description: result.error, variant: 'destructive' })
@@ -124,15 +116,6 @@ function OptionsManager({
         } else {
             toast({ title: 'Erro ao Remover', description: result.error, variant: 'destructive' })
         }
-    };
-
-    // Toggle team selection
-    const toggleTeam = (teamId: string) => {
-        setSelectedTeamIds(prev =>
-            prev.includes(teamId)
-                ? prev.filter(id => id !== teamId)
-                : [...prev, teamId]
-        );
     };
 
     return (
@@ -170,37 +153,6 @@ function OptionsManager({
                             </div>
                         </div>
                     </div>
-
-                    {/* Team Selection UI */}
-                    {title === "Etiquetas (Tags)" && teams && teams.length > 0 && (
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                                Restringir a Equipes
-                                <span className="text-muted-foreground/50 normal-case lowercase text-[10px] tracking-normal font-medium px-1.5 py-0.5 rounded-md bg-foreground/5">(Opcional - Vazio = Todas)</span>
-                            </Label>
-                            <div className="flex flex-wrap gap-2 pt-1">
-                                {teams.map(team => (
-                                    <label
-                                        key={team.id}
-                                        className={cn(
-                                            "flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-medium cursor-pointer transition-all active:scale-95",
-                                            selectedTeamIds.includes(team.id)
-                                                ? "bg-primary/10 border-primary/30 text-primary shadow-sm"
-                                                : "bg-background/50 border-border/40 text-muted-foreground hover:bg-background/80 hover:text-foreground"
-                                        )}
-                                    >
-                                        <Checkbox
-                                            id={`team-${team.id}`}
-                                            checked={selectedTeamIds.includes(team.id)}
-                                            onCheckedChange={() => toggleTeam(team.id)}
-                                            className="sr-only" // hidden logic
-                                        />
-                                        {team.name}
-                                    </label>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2 border-t border-border/20">
                         {title === "Etiquetas (Tags)" ? (
@@ -268,22 +220,6 @@ function OptionsManager({
                                             </div>
                                             <span className="text-[11px] font-mono text-muted-foreground/60 select-all">ID: {option.id}</span>
 
-                                            {option.team_ids && option.team_ids.length > 0 && teams && (
-                                                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Equipes:</span>
-                                                    <div className="flex flex-wrap gap-1">
-                                                        {option.team_ids.map(tid => {
-                                                            const team = teams.find(t => t.id === tid);
-                                                            if (!team) return null;
-                                                            return (
-                                                                <Badge key={tid} variant="outline" className="h-5 px-1.5 text-[10px] font-medium bg-background border-border/50 text-muted-foreground">
-                                                                    {team.name}
-                                                                </Badge>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1.5 self-end sm:self-center opacity-100 sm:opacity-40 sm:group-hover:opacity-100 transition-opacity">
@@ -319,16 +255,14 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
     const [newFieldPlaceholder, setNewFieldPlaceholder] = useState('');
 
     const [tags, setTags] = useState<Tag[]>([]);
-    const [teams, setTeams] = useState<Team[]>([]);
     const [loading, setLoading] = useState(true);
 
     const fetchAllData = React.useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
         setLoading(true);
-        const [tagsResult, fieldsResult, teamsResult, conversionResult] = await Promise.all([
+        const [tagsResult, fieldsResult, conversionResult] = await Promise.all([
             getTags(user.activeWorkspaceId),
             getCustomFieldDefinitions(user.activeWorkspaceId),
-            getTeams(user.activeWorkspaceId),
             getWorkspaceConversionFieldConfig(user.activeWorkspaceId),
         ]);
 
@@ -337,7 +271,6 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
         }
         const loadedFields = fieldsResult.fields || [];
         if (!fieldsResult.error) setFields(loadedFields);
-        if (!teamsResult.error) setTeams(teamsResult.teams || []);
         if (!conversionResult.error && conversionResult.config) {
             const configFieldId = conversionResult.config.fieldId || '';
             const fieldExists = loadedFields.some(field => field.id === configFieldId);
@@ -354,18 +287,18 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
         }
     }, [user, fetchAllData]);
 
-    const handleAddTag = async (label: string, color: string, isCloseReason: boolean, teamIds: string[]) => {
+    const handleAddTag = async (label: string, color: string, isCloseReason: boolean) => {
         if (!user?.activeWorkspaceId) return { success: false, error: 'Workspace não encontrado' };
-        const result = await createTag(user.activeWorkspaceId, label, color, isCloseReason, teamIds);
+        const result = await createTag(user.activeWorkspaceId, label, color, isCloseReason, []);
         if (result.success) {
             fetchAllData(); // Re-fetch all data
         }
         return result;
     }
 
-    const handleUpdateTag = async (id: string, label: string, color: string, isCloseReason: boolean, teamIds: string[]) => {
+    const handleUpdateTag = async (id: string, label: string, color: string, isCloseReason: boolean) => {
         if (!user?.activeWorkspaceId) return { success: false, error: 'Workspace não encontrado' };
-        const result = await updateTag(id, label, color, isCloseReason, teamIds);
+        const result = await updateTag(id, label, color, isCloseReason, []);
         if (result.success) {
             fetchAllData();
         }
@@ -732,7 +665,6 @@ export function CrmSettings({ children, user }: { children: React.ReactNode, use
                                             <OptionsManager
                                                 title="Etiquetas (Tags)"
                                                 options={tags}
-                                                teams={teams}
                                                 onAdd={handleAddTag}
                                                 onUpdate={handleUpdateTag}
                                                 onRemove={handleRemoveTag}

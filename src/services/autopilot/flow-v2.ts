@@ -93,6 +93,9 @@ function inferDecisionRoutes(node: AutopilotFlowNode) {
 function migrateNodeToV2(node: AutopilotFlowNode): AutopilotFlowNode {
   const kind = normalizeFlowNodeKindToV2(node.kind);
   const config = { ...(node.config || {}) };
+  if (!isV2FlowNodeKind(node.kind) && !config.legacyNodeKind) {
+    config.legacyNodeKind = node.kind;
+  }
 
   if (kind === 'sub_agent') {
     config.useAi = true;
@@ -119,7 +122,7 @@ function migrateNodeToV2(node: AutopilotFlowNode): AutopilotFlowNode {
   }
 
   if (kind === 'collect') {
-    config.formMode = config.formMode || 'ai';
+    config.formMode = config.formMode || (node.kind === 'form' ? 'static' : 'ai');
     config.message = config.message || 'Para seguir, me informe os dados solicitados.';
     config.instructions = config.instructions || 'Colete os slots tipados desta etapa e nao repita dados ja informados.';
   }

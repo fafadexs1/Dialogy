@@ -533,4 +533,188 @@ describe('autopilot flow routing', () => {
       targetNodeId: 'diagnostico',
     });
   });
+
+  it('re-enters the first switch for a strong new intent but preserves an ambiguous active branch reply', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'start', title: 'Inicio', subtitle: '', position: { x: 0, y: 0 } },
+        {
+          id: 'wifi-switch',
+          kind: 'decision',
+          title: 'Triagem Wi-Fi',
+          subtitle: '',
+          position: { x: 180, y: 0 },
+          config: {
+            confidenceThreshold: 0.8,
+            fallbackRouteId: 'fallback',
+            routes: [
+              {
+                id: 'consultar_wifi',
+                label: 'Consultar Wi-Fi atual',
+                description: 'Consultar usuario, senha ou SSID atuais.',
+                targetNodeId: 'lookup-collect',
+              },
+              {
+                id: 'diagnosticar_wifi',
+                label: 'Diagnosticar Wi-Fi lento',
+                description: 'Analisar canais, redes ao redor e interferencia.',
+                targetNodeId: 'diagnostic-collect',
+              },
+              {
+                id: 'fallback',
+                label: 'Esclarecer',
+                description: 'Pedido ambiguo.',
+                targetNodeId: 'fallback-message',
+              },
+            ],
+          },
+        },
+        { id: 'lookup-collect', kind: 'collect', title: 'Validar consulta', subtitle: '', position: { x: 400, y: 0 } },
+        { id: 'lookup-response', kind: 'sub_agent', title: 'Responder consulta', subtitle: '', position: { x: 600, y: 0 } },
+        { id: 'diagnostic-collect', kind: 'collect', title: 'Validar diagnostico', subtitle: '', position: { x: 400, y: 160 } },
+        { id: 'fallback-message', kind: 'message', title: 'Esclarecer', subtitle: '', position: { x: 400, y: 320 } },
+      ],
+      edges: [
+        { id: 'start-switch', source: 'start', target: 'wifi-switch' },
+        { id: 'switch-lookup', source: 'wifi-switch', target: 'lookup-collect', routeId: 'consultar_wifi' },
+        { id: 'lookup-response', source: 'lookup-collect', target: 'lookup-response' },
+      ],
+    });
+
+    expect(resolveFlowSwitchRouteForActivePath({
+      config,
+      activeNodeId: 'lookup-collect',
+      customerMessage: 'Agora meu Wi-Fi esta lento. Analise os canais e as redes ao redor.',
+    })).toMatchObject({
+      routeId: 'diagnosticar_wifi',
+      targetNodeId: 'diagnostic-collect',
+      fallbackUsed: false,
+    });
+    expect(resolveFlowSwitchRouteForActivePath({
+      config,
+      activeNodeId: 'lookup-collect',
+      customerMessage: 'Sim, confirmo.',
+    })).toBeNull();
+  });
+
+  it('routes an explicit Wi-Fi credential lookup above a strict lexical threshold', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'switch-wifi',
+          kind: 'decision',
+          title: 'Triagem Wi-Fi',
+          subtitle: 'Rotas isoladas',
+          position: { x: 0, y: 0 },
+          config: {
+            confidenceThreshold: 0.8,
+            fallbackRouteId: 'fallback',
+            routes: [
+              {
+                id: 'consultar_wifi',
+                label: 'Consultar Wi-Fi atual',
+                description: 'Cliente pediu usuario, senha, SSID ou credenciais atuais do Wi-Fi.',
+                examples: ['Esqueci a senha do Wi-Fi'],
+                targetNodeId: 'validar-consulta',
+              },
+              {
+                id: 'trocar_wifi',
+                label: 'Trocar nome ou senha',
+                description: 'Cliente pediu alteracao de SSID ou senha.',
+                examples: ['Quero trocar a senha'],
+                targetNodeId: 'validar-troca',
+              },
+              {
+                id: 'fallback',
+                label: 'Esclarecer',
+                description: 'Pedido ambiguo.',
+                targetNodeId: 'esclarecer',
+              },
+            ],
+          },
+        },
+        { id: 'validar-consulta', kind: 'collect', title: 'Validar consulta', subtitle: '', position: { x: 200, y: 0 } },
+        { id: 'validar-troca', kind: 'collect', title: 'Validar troca', subtitle: '', position: { x: 200, y: 120 } },
+        { id: 'esclarecer', kind: 'message', title: 'Esclarecer', subtitle: '', position: { x: 200, y: 240 } },
+      ],
+      edges: [],
+    });
+
+    expect(resolveFlowSwitchRoute({
+      config,
+      switchNodeId: 'switch-wifi',
+      customerMessage: 'Esqueci o usuario e a senha do meu Wi-Fi. Meu CPF e 000.000.000-00.',
+    })).toMatchObject({
+      routeId: 'consultar_wifi',
+      targetNodeId: 'validar-consulta',
+      confidence: 0.99,
+      fallbackUsed: false,
+    });
+  });
+
+  it('crosses a migrated legacy intent wrapper to reach the explicit downstream switch', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        { id: 'start', kind: 'trigger', title: 'Inicio', subtitle: '', position: { x: 0, y: 0 } },
+        {
+          id: 'wifi-intent',
+          kind: 'intent',
+          title: 'Atendimento Wi-Fi',
+          subtitle: 'Suporte',
+          position: { x: 150, y: 0 },
+          config: {
+            intent: 'troubleshooting',
+            instructions: 'Resolva problemas de Wi-Fi seguindo o Switch.',
+          },
+        },
+        {
+          id: 'wifi-switch',
+          kind: 'switch',
+          title: 'Classificar Wi-Fi',
+          subtitle: 'Rotas',
+          position: { x: 300, y: 0 },
+          config: {
+            confidenceThreshold: 0.65,
+            fallbackRouteId: 'outro',
+            routes: [
+              {
+                id: 'lentidao_wifi',
+                label: 'Lentidao no Wi-Fi',
+                description: 'Cliente relata internet lenta, travando ou sinal fraco.',
+                examples: ['internet travando', 'wifi lento'],
+                targetNodeId: 'diagnostico',
+              },
+              {
+                id: 'outro',
+                label: 'Outro',
+                description: 'Fallback seguro.',
+                targetNodeId: 'fallback',
+              },
+            ],
+          },
+        },
+        { id: 'diagnostico', kind: 'send_message', title: 'Diagnostico', subtitle: '', position: { x: 500, y: 0 } },
+        { id: 'fallback', kind: 'send_message', title: 'Esclarecer', subtitle: '', position: { x: 500, y: 150 } },
+      ],
+      edges: [
+        { id: 'start-intent', source: 'start', target: 'wifi-intent' },
+        { id: 'intent-switch', source: 'wifi-intent', target: 'wifi-switch' },
+        { id: 'switch-slow', source: 'wifi-switch', target: 'diagnostico', routeId: 'lentidao_wifi' },
+        { id: 'switch-other', source: 'wifi-switch', target: 'fallback', routeId: 'outro' },
+      ],
+    });
+
+    expect(resolveFlowSwitchRouteForActivePath({
+      config,
+      customerMessage: 'Minha internet esta travando muito no Wi-Fi',
+    })).toMatchObject({
+      switchNodeId: 'wifi-switch',
+      routeId: 'lentidao_wifi',
+      targetNodeId: 'diagnostico',
+      fallbackUsed: false,
+    });
+  });
 });

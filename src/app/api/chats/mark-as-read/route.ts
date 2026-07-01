@@ -32,8 +32,22 @@ export async function POST(request: Request) {
 
             const chatAccessRes = await client.query(
                 `
-                SELECT c.workspace_id
+                SELECT
+                    c.workspace_id,
+                    ct.phone_number_jid AS "remoteJid",
+                    lci.instance_name
                 FROM chats c
+                LEFT JOIN contacts ct
+                  ON ct.id = c.contact_id
+                 AND ct.workspace_id = c.workspace_id
+                LEFT JOIN LATERAL (
+                    SELECT m.instance_name
+                    FROM messages m
+                    WHERE m.chat_id = c.id
+                      AND m.instance_name IS NOT NULL
+                    ORDER BY m.created_at DESC, m.id DESC
+                    LIMIT 1
+                ) lci ON TRUE
                 JOIN user_workspace_roles uwr
                   ON uwr.workspace_id = c.workspace_id
                  AND uwr.user_id = $2
@@ -47,6 +61,15 @@ export async function POST(request: Request) {
                 await client.query('ROLLBACK');
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
             }
+            const {
+                workspace_id: workspaceId,
+                remoteJid,
+                instance_name: latestInstanceName,
+            } = chatAccessRes.rows[0] as {
+                workspace_id: string;
+                remoteJid?: string | null;
+                instance_name?: string | null;
+            };
 
             // Wait for concurrent webhook writes instead of skipping locked rows. A skipped row
             // could otherwise remain unread after the client optimistically clears its badge.
@@ -63,7 +86,7 @@ export async function POST(request: Request) {
 
             if (unreadMessages.length === 0) {
                 await client.query('COMMIT');
-                await broadcastChatUpdate(chatAccessRes.rows[0].workspace_id, chatId, {
+                await broadcastChatUpdate(workspaceId, chatId, {
                     unread_count: 0,
                 });
                 return NextResponse.json({ success: true, message: 'No unread messages.' });
@@ -74,34 +97,20 @@ export async function POST(request: Request) {
             console.log(`[MARK_AS_READ_API] ${messageIdsToUpdate.length} messages marked as read in the database for chat ${chatId}.`);
 
             // 3. Secondary Action (Fire and Forget): Send read receipt to WhatsApp API
-            const chatInfoRes = await client.query(
-                `SELECT ct.phone_number_jid as "remoteJid", m.instance_name 
-                 FROM chats c 
-                 JOIN contacts ct on c.contact_id = ct.id 
-                 JOIN messages m on c.id = m.chat_id
-                 WHERE c.id = $1 
-                 AND m.instance_name IS NOT NULL
-                 ORDER BY m.created_at DESC
-                 LIMIT 1`,
-                [chatId]
-            );
-
-            if ((chatInfoRes.rowCount ?? 0) > 0) {
-                const { instance_name: instanceName, remoteJid } = chatInfoRes.rows[0];
-                const workspaceId = chatAccessRes.rows[0].workspace_id as string;
+            if (latestInstanceName && remoteJid) {
                 const messagesToMarkForApi = unreadMessages
                     .map(m => ({ id: m.message_id_from_api, remoteJid, fromMe: false }))
                     .filter(m => m.id);
 
-                if (instanceName && remoteJid && messagesToMarkForApi.length > 0) {
-                    sendReceiptToWhatsApp(instanceName, workspaceId, messagesToMarkForApi).catch(error => {
-                        console.error(`[MARK_AS_READ_API] Non-critical error sending WhatsApp read receipt for instance ${instanceName}:`, error.message);
+                if (messagesToMarkForApi.length > 0) {
+                    sendReceiptToWhatsApp(latestInstanceName, workspaceId, messagesToMarkForApi).catch(error => {
+                        console.error(`[MARK_AS_READ_API] Non-critical error sending WhatsApp read receipt for instance ${latestInstanceName}:`, error.message);
                     });
                 }
             }
 
             await client.query('COMMIT');
-            await broadcastChatUpdate(chatAccessRes.rows[0].workspace_id, chatId, {
+            await broadcastChatUpdate(workspaceId, chatId, {
                 unread_count: 0,
             });
 

@@ -15,17 +15,22 @@ import { SignInPage } from '@/components/ui/sign-in-flow-1';
 
 export default function RegisterPage() {
     const { t } = useI18n();
-    const [registerState, registerAction, isRegisterPending] = useActionState(register, { success: false, message: null, user: null });
+    const [registerState, registerAction, isRegisterPending] = useActionState(register, {
+        success: false,
+        message: null,
+        user: null,
+        requiresEmailConfirmation: false,
+    });
     const router = useRouter();
     const searchParams = useSearchParams();
     const redirectTo = searchParams.get('next');
     const referralCode = normalizeReferralCode(searchParams.get('ref'));
 
     useEffect(() => {
-        if (registerState.success) {
+        if (registerState.success && !registerState.requiresEmailConfirmation) {
             router.push(redirectTo || '/inbox');
         }
-    }, [registerState.success, router, redirectTo]);
+    }, [registerState.success, registerState.requiresEmailConfirmation, router, redirectTo]);
 
     useEffect(() => {
         if (!referralCode) {
@@ -63,11 +68,16 @@ export default function RegisterPage() {
                         </div>
 
                         {registerState.message && (
-                            <div className="mb-6 animate-in rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm font-medium text-red-400 fade-in slide-in-from-top-2">
+                            <div className={`mb-6 animate-in rounded-2xl border p-4 text-sm font-medium fade-in slide-in-from-top-2 ${
+                                registerState.success
+                                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                                    : 'border-red-500/20 bg-red-500/10 text-red-400'
+                            }`}>
                                 {registerState.message}
                             </div>
                         )}
 
+                        {!registerState.requiresEmailConfirmation && (
                         <div className="[&_input]:bg-white/5 [&_input]:border-white/10 [&_input]:text-white [&_label]:text-white/70 [&_button[type=submit]]:bg-white [&_button[type=submit]]:text-black [&_button[type=submit]]:hover:bg-white/90 [&_button.bg-slate-950]:bg-white [&_button.bg-slate-950]:text-black [&_button.bg-slate-950]:hover:bg-white/90 [&_button[variant=outline]]:border-white/10 [&_button[variant=outline]]:bg-white/5 [&_button[variant=outline]]:text-white [&_.text-slate-500]:text-white/50 [&_.text-slate-950]:text-white [&_.bg-slate-200]:bg-white/10 [&_.border-slate-200]:border-white/10 [&_input[type=checkbox]]:border-white/20">
                             <RegisterForm
                                 onRegister={registerAction}
@@ -75,6 +85,7 @@ export default function RegisterPage() {
                                 referralCode={referralCode}
                             />
                         </div>
+                        )}
 
                         <p className="mt-8 text-sm text-white/50">
                             {t('Já tem uma conta?')} {' '}

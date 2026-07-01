@@ -69,7 +69,7 @@ export default function MobileContactPanel({
                     <div className="relative mb-4 group">
                         <div className="absolute -inset-0.5 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur opacity-75 group-hover:opacity-100 transition duration-500"></div>
                         <Avatar className="relative h-24 w-24 border-2 border-slate-200/80 bg-white ring-1 ring-slate-200/70 shadow-2xl dark:border-white/10 dark:bg-[#0B0B10] dark:ring-2 dark:ring-black/30">
-                            <AvatarImage src={contact.avatar_url || undefined} className="object-cover" />
+                            <AvatarImage fallbackOnBlank src={contact.avatar_url || undefined} className="object-cover" />
                             <AvatarFallback className="bg-slate-100 text-2xl font-light text-slate-600 dark:bg-zinc-900 dark:text-zinc-300">
                                 {contact.name?.substring(0, 2).toUpperCase()}
                             </AvatarFallback>

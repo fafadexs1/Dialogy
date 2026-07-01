@@ -250,7 +250,7 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
                                     <div key={agent.user.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors">
                                         <div className="flex items-center gap-3">
                                             <Avatar className="h-8 w-8 border border-border">
-                                                <AvatarImage src={agent.user.avatar} />
+                                                <AvatarImage fallbackOnBlank src={agent.user.avatar} />
                                                 <AvatarFallback className="bg-muted text-foreground">{agent.user.name.charAt(0)}</AvatarFallback>
                                             </Avatar>
                                             <p className="font-medium text-foreground">{agent.user.name}</p>
@@ -273,7 +273,7 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
                                             <div key={agent.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors">
                                                 <div className="flex min-w-0 items-center gap-3">
                                                     <Avatar className="h-8 w-8 border border-border">
-                                                        <AvatarImage src={agent.avatar_url || undefined} />
+                                                        <AvatarImage fallbackOnBlank src={agent.avatar_url || undefined} />
                                                         <AvatarFallback className="bg-muted text-foreground">{agent.name.charAt(0)}</AvatarFallback>
                                                     </Avatar>
                                                     <div className="min-w-0">
@@ -1448,7 +1448,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                 <div className="absolute -inset-2 rounded-full bg-gradient-to-tr from-blue-100/80 to-transparent opacity-0 blur transition duration-500 group-hover:opacity-100 dark:from-transparent dark:group-hover:opacity-0"></div>
                                 <div className="rounded-full border border-slate-200/80 bg-white p-1 shadow-lg backdrop-blur-md dark:border-white/5 dark:bg-black">
                                     <Avatar className="relative h-16 w-16 shrink-0 rounded-full border-2 border-slate-200/80 shadow-2xl sm:h-20 sm:w-20 dark:border-white/10">
-                                        <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
+                                        <AvatarImage fallbackOnBlank src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
                                         <AvatarFallback className="bg-slate-100 text-xl font-bold text-slate-700 sm:text-2xl dark:bg-zinc-900 dark:text-zinc-300">
                                             {contact.name.charAt(0)}
                                         </AvatarFallback>
@@ -1686,7 +1686,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                         <div className="flex items-center gap-2.5 min-w-0">
                                             <div className="relative shrink-0">
                                                 <Avatar className="h-7 w-7 rounded-lg border border-border shadow-lg sm:h-8 sm:w-8">
-                                                    <AvatarImage src={responsible.avatar || undefined} alt={responsible.name} />
+                                                    <AvatarImage fallbackOnBlank src={responsible.avatar || undefined} alt={responsible.name} />
                                                     <AvatarFallback className="bg-zinc-900 text-zinc-300 font-black text-xs">
                                                         {responsible.isAi ? <Cpu className="h-3.5 w-3.5" /> : responsible.name.charAt(0)}
                                                     </AvatarFallback>
@@ -1903,7 +1903,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                                         {sgpData?.customerName || contact?.name || 'Cliente'} - {sgpContracts.length} contrato{sgpContracts.length === 1 ? '' : 's'} no cadastro
                                                     </p>
                                                     {sgpData?.cpfCnpj && (
-                                                        <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-400" title={`CPF/CNPJ ${sgpData.cpfCnpj}`}>
+                                                        <p className="mt-1 break-words text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 [overflow-wrap:anywhere] dark:text-zinc-400" title={`CPF/CNPJ ${sgpData.cpfCnpj}`}>
                                                             CPF/CNPJ {sgpData.cpfCnpj}
                                                         </p>
                                                     )}

@@ -408,8 +408,15 @@ function findMissingLookupSlots(input: {
   intentResolution: AutopilotIntentResolution;
   slotExtraction: SlotExtractionResult;
 }): AutopilotSlotName[] {
+  if (
+    input.intentResolution.intent === 'order_or_request_status' &&
+    !input.slotExtraction.slots.order_or_request_id
+  ) {
+    return ['order_or_request_id'];
+  }
+
   if (input.slotExtraction.slots.customer_identifier) return [];
-  if (['billing_or_payment', 'support_request', 'troubleshooting', 'order_or_request_status', 'document_request'].includes(input.intentResolution.intent)) {
+  if (['billing_or_payment', 'support_request', 'troubleshooting', 'document_request'].includes(input.intentResolution.intent)) {
     return ['customer_identifier'];
   }
   return [];
@@ -654,6 +661,21 @@ export function validateAutopilotResponse(input: {
   }
 
   if (lookupPromise && !plannedLookup && !successfulLookup) {
+    if (asksForCustomerIdentifier(originalResponse) && !input.slotExtraction.slots.customer_identifier) {
+      return {
+        decision: 'approve',
+        response: originalResponse,
+        actions: [],
+        reasons,
+        metadata: {
+          decision: 'approve',
+          reasons,
+          source: input.source,
+          waitingFor: 'customer_identifier',
+        },
+      };
+    }
+
     const missingSlots = findMissingLookupSlots({
       intentResolution: input.intentResolution,
       slotExtraction: input.slotExtraction,

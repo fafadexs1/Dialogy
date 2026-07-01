@@ -9,77 +9,37 @@ import {
 import type { AnalyticsData, AgentPerformance, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import type { ConversionCounterMode, ConversionMetrics, ConversionSettings } from '@/lib/types';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
-// Helper to add agent and team filters to a query
-const addFilters = (
-    query: string,
-    baseParams: any[],
-    { teamId, agentId }: { teamId?: string; agentId?: string }
-): [string, any[]] => {
-    let newQuery = query;
-    const newParams = [...baseParams];
-    let whereConditions: string[] = [];
+type AnalyticsFilters = { teamId?: string; agentId?: string };
 
-    // Check if the base query already has a WHERE clause
-    // We need to be careful about where to insert the new conditions
-    // If there is a GROUP BY or ORDER BY, we must insert before them.
+const UUID_REGEX_SQL = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
 
-    const upperQuery = newQuery.toUpperCase();
-    const groupByIndex = upperQuery.indexOf(' GROUP BY ');
-    const orderByIndex = upperQuery.indexOf(' ORDER BY ');
+function optionalUuid(value: string | undefined): string | null {
+    return value || null;
+}
 
-    let insertionPoint = newQuery.length;
-    if (groupByIndex !== -1) {
-        insertionPoint = groupByIndex;
-    } else if (orderByIndex !== -1 && (groupByIndex === -1 || orderByIndex < groupByIndex)) {
-        insertionPoint = orderByIndex;
+function toNumber(value: unknown): number {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatSeconds(value: unknown): string {
+    const seconds = Math.max(0, Math.floor(toNumber(value)));
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function parseJsonArray<T>(value: unknown): T[] {
+    if (Array.isArray(value)) return value as T[];
+    if (typeof value !== 'string') return [];
+
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed as T[] : [];
+    } catch (_error) {
+        return [];
     }
-
-    const queryBeforeInsertion = newQuery.substring(0, insertionPoint);
-    const queryAfterInsertion = newQuery.substring(insertionPoint);
-
-    const hasWhere = queryBeforeInsertion.toUpperCase().includes(' WHERE ');
-    const whereOrAnd = hasWhere ? ' AND ' : ' WHERE ';
-
-    if (agentId) {
-        whereConditions.push(`c.agent_id = $${newParams.length + 1}`);
-        newParams.push(agentId);
-    } else if (teamId) {
-        // If filtering by team, we need to join with team_members if not already joined
-        // We check queryBeforeInsertion for existing joins
-
-        // We will handle the JOIN injection during reconstruction if needed
-        whereConditions.push(`tm.team_id = $${newParams.length + 1}`);
-        newParams.push(teamId);
-    }
-
-    // Re-construct the query
-    let finalQueryBefore = queryBeforeInsertion;
-
-    if (teamId) {
-        if (!finalQueryBefore.toUpperCase().includes('JOIN TEAM_MEMBERS')) {
-            if (finalQueryBefore.includes('FROM chats c')) {
-                finalQueryBefore = finalQueryBefore.replace('FROM chats c', 'FROM chats c JOIN team_members tm ON c.agent_id = tm.user_id');
-            } else if (finalQueryBefore.includes('FROM FirstMessages')) {
-                // For the CTE, we need to be careful. 
-                // The CTE usually selects from messages m JOIN chats c.
-                // So we can join team_members on c.agent_id
-                if (finalQueryBefore.includes('JOIN chats c ON m.chat_id = c.id')) {
-                    finalQueryBefore = finalQueryBefore.replace('JOIN chats c ON m.chat_id = c.id', 'JOIN chats c ON m.chat_id = c.id JOIN team_members tm ON c.agent_id = tm.user_id');
-                }
-            } else if (finalQueryBefore.includes('JOIN chats c ON m.chat_id = c.id')) {
-                // Handle the CTE case where chats is joined but FROM FirstMessages is not in the before part
-                finalQueryBefore = finalQueryBefore.replace('JOIN chats c ON m.chat_id = c.id', 'JOIN chats c ON m.chat_id = c.id JOIN team_members tm ON c.agent_id = tm.user_id');
-            }
-        }
-    }
-
-    if (whereConditions.length > 0) {
-        finalQueryBefore += whereOrAnd + whereConditions.join(' AND ');
-    }
-
-    return [finalQueryBefore + queryAfterInsertion, newParams];
-};
+}
 
 function normalizeConversionCounterMode(mode: unknown): ConversionCounterMode {
     return mode === 'unique_converted_contacts' ? 'unique_converted_contacts' : 'won_deals';
@@ -90,28 +50,12 @@ async function ensureConversionSchema(): Promise<void> {
 }
 
 async function hasWorkspaceAccess(userId: string, workspaceId: string): Promise<boolean> {
-    const result = await db.query(
-        `SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2 LIMIT 1`,
-        [userId, workspaceId]
-    );
-    return (result.rowCount || 0) > 0;
+    return hasWorkspacePermission(userId, workspaceId, 'analytics:view');
 }
-
-const activeConversationInRangeCondition = `
-    (
-        c.created_at BETWEEN $2 AND $3
-        OR EXISTS (
-            SELECT 1
-            FROM messages period_m
-            WHERE period_m.chat_id = c.id
-              AND period_m.created_at BETWEEN $2 AND $3
-        )
-    )
-`;
 
 export async function getAnalyticsData(
     workspaceId: string,
-    filters: { teamId?: string; agentId?: string },
+    filters: AnalyticsFilters,
     dateRange: { from: string, to: string }
 ): Promise<AnalyticsData | null> {
     const supabase = await createClient();
@@ -119,217 +63,271 @@ export async function getAnalyticsData(
     if (!user) return null;
 
     try {
-        const baseParams: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
-
-        // Total Conversations
-        const [totalConvQuery, totalConvParams] = addFilters(
-            `SELECT COUNT(*) FROM chats c
-             WHERE c.workspace_id = $1
-               AND ${activeConversationInRangeCondition}`,
-            baseParams,
-            filters
-        );
-        const totalConversationsRes = await db.query(totalConvQuery, totalConvParams);
-        const totalConversations = parseInt(totalConversationsRes.rows[0].count, 10);
-
-        // New Contacts (workspace-wide, not filtered by agent/team but by daterange)
-        const newContactsRes = await db.query(
-            "SELECT COUNT(*) FROM contacts WHERE workspace_id = $1 AND created_at BETWEEN $2 AND $3",
-            [workspaceId, dateRange.from, dateRange.to]
-        );
-        const newContacts = parseInt(newContactsRes.rows[0].count, 10);
-
-        // Avg Response Time (Message based)
-        // Calculate the time difference between a customer message (from_me = false) and the NEXT agent message (from_me = true)
-        const avgParams: (string | number | null)[] = [workspaceId, dateRange.from, dateRange.to];
-        let avgAgentFilter = '';
-        let avgTeamFilter = '';
-
-        if (filters.agentId) {
-            avgAgentFilter = `AND c.agent_id = $${avgParams.length + 1}`;
-            avgParams.push(filters.agentId);
-        }
-        if (filters.teamId) {
-            avgTeamFilter = `AND EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = $${avgParams.length + 1} AND tm.user_id = c.agent_id)`;
-            avgParams.push(filters.teamId);
+        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
+            return null;
         }
 
-        const avgResponseQuery = `
-            WITH MessageDiffs AS (
-                SELECT
-                    m.chat_id,
-                    m.created_at,
-                    m.from_me,
-                    LEAD(m.created_at) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_created_at,
-                    LEAD(m.from_me) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_from_me
-                FROM messages m
-                JOIN chats c ON m.chat_id = c.id
+        const analyticsRes = await db.query(
+            `
+            WITH filtered_agents AS MATERIALIZED (
+                SELECT u.id
+                FROM users u
+                JOIN user_workspace_roles uwr ON uwr.user_id = u.id
+                WHERE uwr.workspace_id = $1
+                  AND ($4::uuid IS NULL OR u.id = $4::uuid)
+                  AND (
+                    $5::uuid IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM team_members tm
+                        WHERE tm.user_id = u.id
+                          AND tm.team_id = $5::uuid
+                    )
+                  )
+            ),
+            active_chat_ids AS MATERIALIZED (
+                SELECT c.id
+                FROM chats c
                 WHERE c.workspace_id = $1
+                  AND c.created_at BETWEEN $2 AND $3
+                UNION
+                SELECT m.chat_id AS id
+                FROM messages m
+                WHERE m.workspace_id = $1
                   AND m.created_at BETWEEN $2 AND $3
-                  ${avgAgentFilter}
-                  ${avgTeamFilter}
+            ),
+            scoped_chat_ids AS MATERIALIZED (
+                SELECT ac.id
+                FROM active_chat_ids ac
+                JOIN chats c ON c.id = ac.id
+                WHERE c.workspace_id = $1
+                  AND (
+                    ($4::uuid IS NULL AND $5::uuid IS NULL)
+                    OR (
+                        c.status <> 'encerrados'
+                        AND c.agent_id IN (SELECT id FROM filtered_agents)
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM messages involvement_m
+                        WHERE involvement_m.workspace_id = $1
+                          AND involvement_m.chat_id = c.id
+                          AND involvement_m.created_at BETWEEN $2 AND $3
+                          AND (
+                            (
+                                involvement_m.sender_user_id IN (SELECT id FROM filtered_agents)
+                                AND involvement_m.from_me = TRUE
+                                AND COALESCE(involvement_m.type, '') <> 'system'
+                                AND COALESCE(involvement_m.api_message_status, '') <> 'internal'
+                            )
+                            OR (
+                                CASE
+                                    WHEN involvement_m.metadata->>'to_agent_id' ~* $6
+                                    THEN (involvement_m.metadata->>'to_agent_id')::uuid
+                                END
+                            ) IN (SELECT id FROM filtered_agents)
+                            OR (
+                                CASE
+                                    WHEN involvement_m.metadata->>'closed_by' ~* $6
+                                    THEN (involvement_m.metadata->>'closed_by')::uuid
+                                END
+                            ) IN (SELECT id FROM filtered_agents)
+                          )
+                    )
+                  )
+            ),
+            scoped_chats AS MATERIALIZED (
+                SELECT c.*
+                FROM chats c
+                JOIN scoped_chat_ids sci ON sci.id = c.id
+            ),
+            scoped_messages AS MATERIALIZED (
+                SELECT m.*
+                FROM messages m
+                JOIN scoped_chat_ids sci ON sci.id = m.chat_id
+                WHERE m.workspace_id = $1
+                  AND m.created_at BETWEEN $2 AND $3
+            ),
+            resolved_chat_ids AS MATERIALIZED (
+                SELECT sc.id
+                FROM scoped_chats sc
+                WHERE ($4::uuid IS NULL AND $5::uuid IS NULL)
+                  AND sc.status = 'encerrados'
+                  AND sc.closed_at BETWEEN $2 AND $3
+
+                UNION
+
+                SELECT close_events.chat_id
+                FROM (
+                    SELECT
+                        CASE
+                            WHEN m.metadata->>'closed_by' ~* $6
+                            THEN (m.metadata->>'closed_by')::uuid
+                        END AS closed_by,
+                        m.chat_id
+                    FROM messages m
+                    JOIN scoped_chat_ids sci ON sci.id = m.chat_id
+                    WHERE m.workspace_id = $1
+                      AND m.created_at BETWEEN $2 AND $3
+                      AND m.metadata->>'event' = 'close'
+                ) close_events
+                WHERE ($4::uuid IS NOT NULL OR $5::uuid IS NOT NULL)
+                  AND close_events.closed_by IN (SELECT id FROM filtered_agents)
+
+                UNION
+
+                SELECT sc.id
+                FROM scoped_chats sc
+                WHERE ($4::uuid IS NOT NULL OR $5::uuid IS NOT NULL)
+                  AND sc.status = 'encerrados'
+                  AND sc.closed_at BETWEEN $2 AND $3
+                  AND sc.agent_id IN (SELECT id FROM filtered_agents)
+            ),
+            response_times AS MATERIALIZED (
+                SELECT EXTRACT(EPOCH FROM (ordered_messages.next_created_at - ordered_messages.created_at)) AS seconds
+                FROM (
+                    SELECT
+                        sm.chat_id,
+                        sm.created_at,
+                        sm.from_me,
+                        LEAD(sm.created_at) OVER (PARTITION BY sm.chat_id ORDER BY sm.created_at, sm.id) AS next_created_at,
+                        LEAD(sm.from_me) OVER (PARTITION BY sm.chat_id ORDER BY sm.created_at, sm.id) AS next_from_me,
+                        LEAD(sm.sender_user_id) OVER (PARTITION BY sm.chat_id ORDER BY sm.created_at, sm.id) AS next_sender_user_id,
+                        LEAD(sm.type) OVER (PARTITION BY sm.chat_id ORDER BY sm.created_at, sm.id) AS next_type,
+                        LEAD(sm.api_message_status) OVER (PARTITION BY sm.chat_id ORDER BY sm.created_at, sm.id) AS next_api_message_status
+                    FROM scoped_messages sm
+                ) ordered_messages
+                WHERE ordered_messages.from_me = FALSE
+                  AND ordered_messages.next_from_me = TRUE
+                  AND ordered_messages.next_sender_user_id IS NOT NULL
+                  AND COALESCE(ordered_messages.next_type, '') <> 'system'
+                  AND COALESCE(ordered_messages.next_api_message_status, '') <> 'internal'
+                  AND (
+                    ($4::uuid IS NULL AND $5::uuid IS NULL)
+                    OR ordered_messages.next_sender_user_id IN (SELECT id FROM filtered_agents)
+                  )
+            ),
+            conversations_by_hour AS (
+                SELECT
+                    EXTRACT(HOUR FROM COALESCE(first_activity.first_activity_at, sc.created_at))::int AS hour,
+                    COUNT(*)::int AS count
+                FROM scoped_chats sc
+                LEFT JOIN LATERAL (
+                    SELECT MIN(m.created_at) AS first_activity_at
+                    FROM messages m
+                    WHERE m.chat_id = sc.id
+                      AND m.created_at BETWEEN $2 AND $3
+                ) first_activity ON TRUE
+                GROUP BY 1
+            ),
+            channel_counts AS (
+                SELECT
+                    COALESCE(
+                        NULLIF(meta_conversation_platform.platform_signal, 'unknown'),
+                        NULLIF(meta_contact_platform.platform_signal, 'unknown'),
+                        CASE
+                            WHEN ct.phone_number_jid ILIKE '%@s.whatsapp.net'
+                              OR ct.phone_number_jid ILIKE '%@g.us'
+                              OR ct.phone_number_jid ILIKE '%@lid'
+                            THEN 'whatsapp'
+                            ELSE NULL
+                        END,
+                        NULLIF(last_platform.platform_signal, 'unknown'),
+                        NULLIF(LOWER(NULLIF(to_jsonb(sc)->>'source', '')), 'unknown'),
+                        NULLIF(LOWER(NULLIF(to_jsonb(sc)->>'instance_type', '')), 'unknown'),
+                        'unknown'
+                    ) AS channel_signal,
+                    COUNT(*)::int AS count
+                FROM scoped_chats sc
+                LEFT JOIN contacts ct ON sc.contact_id = ct.id
+                LEFT JOIN LATERAL (
+                    SELECT LOWER(mc.platform::text) AS platform_signal
+                    FROM meta_conversations mc
+                    WHERE mc.chat_id = sc.id
+                    ORDER BY mc.last_message_at DESC NULLS LAST, mc.updated_at DESC NULLS LAST, mc.created_at DESC NULLS LAST
+                    LIMIT 1
+                ) meta_conversation_platform ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT LOWER(COALESCE(
+                        NULLIF(m.platform::text, ''),
+                        NULLIF(m.source_from_api, ''),
+                        NULLIF(m.instance_name, '')
+                    )) AS platform_signal
+                    FROM messages m
+                    WHERE m.chat_id = sc.id
+                      AND COALESCE(
+                        NULLIF(m.platform::text, ''),
+                        NULLIF(m.source_from_api, ''),
+                        NULLIF(m.instance_name, '')
+                      ) IS NOT NULL
+                    ORDER BY m.created_at DESC
+                    LIMIT 1
+                ) last_platform ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT LOWER(mch.type::text) AS platform_signal
+                    FROM meta_contacts mct
+                    JOIN meta_channels mch ON mch.id = mct.channel_id
+                    WHERE mct.contact_id = sc.contact_id
+                    ORDER BY mct.created_at DESC
+                    LIMIT 1
+                ) meta_contact_platform ON TRUE
+                GROUP BY 1
             )
             SELECT
-                EXTRACT(EPOCH FROM AVG(next_created_at - created_at)) as avg_seconds
-            FROM MessageDiffs
-            WHERE from_me = false AND next_from_me = true
-        `;
-
-        const avgFirstResponseTimeRes = await db.query(avgResponseQuery, avgParams);
-        const avgSeconds = parseFloat(avgFirstResponseTimeRes.rows[0]?.avg_seconds);
-
-        let avgFirstResponseTime = '0m 0s';
-        if (!Number.isNaN(avgSeconds)) {
-            const minutes = Math.floor(avgSeconds / 60);
-            const seconds = Math.floor(avgSeconds % 60);
-            avgFirstResponseTime = `${minutes}m ${seconds}s`;
-        }
-
-        // FCR
-        const [fcrQuery, fcrParams] = addFilters(
-            `SELECT COUNT(*) FROM chats c WHERE c.status = 'encerrados' AND c.workspace_id = $1 AND c.closed_at BETWEEN $2 AND $3`,
-            baseParams,
-            filters
+                (SELECT COUNT(*)::int FROM scoped_chats) AS total_conversations,
+                (SELECT COUNT(*)::int FROM contacts WHERE workspace_id = $1 AND created_at BETWEEN $2 AND $3) AS new_contacts,
+                (SELECT COUNT(*)::int FROM resolved_chat_ids) AS resolved_conversations,
+                (SELECT COUNT(*)::int FROM scoped_chats WHERE status <> 'encerrados') AS open_conversations,
+                (
+                    SELECT COUNT(*)::int
+                    FROM scoped_chats
+                    WHERE assigned_system_agent_id IS NOT NULL
+                       OR COALESCE(is_autopilot_active, FALSE) = TRUE
+                ) AS automation_conversations,
+                (SELECT COUNT(*)::int FROM scoped_messages) AS total_messages,
+                (SELECT COUNT(*)::int FROM scoped_messages WHERE from_me = FALSE) AS customer_messages,
+                (SELECT COUNT(*)::int FROM scoped_messages WHERE from_me = TRUE) AS agent_messages,
+                COALESCE(
+                    (SELECT COUNT(*)::numeric FROM scoped_messages)
+                    / NULLIF((SELECT COUNT(*)::numeric FROM scoped_chats), 0),
+                    0
+                ) AS avg_messages_per_conversation,
+                (SELECT AVG(seconds) FROM response_times) AS avg_response_seconds,
+                COALESCE(
+                    (
+                        SELECT jsonb_agg(jsonb_build_object('hour', hour, 'count', count) ORDER BY hour)
+                        FROM conversations_by_hour
+                    ),
+                    '[]'::jsonb
+                ) AS conversations_by_hour,
+                COALESCE(
+                    (
+                        SELECT jsonb_agg(jsonb_build_object('channel_signal', channel_signal, 'count', count) ORDER BY count DESC)
+                        FROM channel_counts
+                    ),
+                    '[]'::jsonb
+                ) AS conversations_by_channel
+            `,
+            [
+                workspaceId,
+                dateRange.from,
+                dateRange.to,
+                optionalUuid(filters.agentId),
+                optionalUuid(filters.teamId),
+                UUID_REGEX_SQL,
+            ]
         );
-        const resolvedRes = await db.query(fcrQuery, fcrParams);
-        const resolvedCount = parseInt(resolvedRes.rows[0].count, 10);
+
+        const row = analyticsRes.rows[0] || {};
+        const totalConversations = toNumber(row.total_conversations);
+        const resolvedCount = toNumber(row.resolved_conversations);
         const firstContactResolutionRate = totalConversations > 0 ? (resolvedCount / totalConversations) * 100 : 0;
 
-        const [openConversationsQuery, openConversationsParams] = addFilters(
-            `SELECT COUNT(*) FROM chats c
-             WHERE c.workspace_id = $1
-               AND ${activeConversationInRangeCondition}
-               AND c.status <> 'encerrados'`,
-            baseParams,
-            filters
-        );
-        const openConversationsRes = await db.query(openConversationsQuery, openConversationsParams);
-        const openConversations = parseInt(openConversationsRes.rows[0].count, 10);
-
-        const [automationConversationsQuery, automationConversationsParams] = addFilters(
-            `SELECT COUNT(*) FROM chats c
-             WHERE c.workspace_id = $1
-               AND ${activeConversationInRangeCondition}
-               AND (
-                    c.assigned_system_agent_id IS NOT NULL
-                    OR LOWER(COALESCE(to_jsonb(c)->>'is_autopilot_active', 'false')) IN ('true', 't', '1')
-               )`,
-            baseParams,
-            filters
-        );
-        const automationConversationsRes = await db.query(automationConversationsQuery, automationConversationsParams);
-        const automationConversations = parseInt(automationConversationsRes.rows[0].count, 10);
-
-        const [messageStatsQuery, messageStatsParams] = addFilters(
-            `SELECT
-                COUNT(m.id)::int AS total_messages,
-                (COUNT(m.id) FILTER (WHERE m.from_me = false))::int AS customer_messages,
-                (COUNT(m.id) FILTER (WHERE m.from_me = true))::int AS agent_messages,
-                COALESCE(COUNT(m.id)::numeric / NULLIF(COUNT(DISTINCT c.id), 0), 0) AS avg_messages_per_conversation
-             FROM messages m
-             JOIN chats c ON m.chat_id = c.id
-             WHERE c.workspace_id = $1
-               AND m.created_at BETWEEN $2 AND $3`,
-            baseParams,
-            filters
-        );
-        const messageStatsRes = await db.query(messageStatsQuery, messageStatsParams);
-        const messageStats = messageStatsRes.rows[0] || {};
-        const totalMessages = Number(messageStats.total_messages || 0);
-        const customerMessages = Number(messageStats.customer_messages || 0);
-        const agentMessages = Number(messageStats.agent_messages || 0);
-        const avgMessagesPerConversation = Number(messageStats.avg_messages_per_conversation || 0);
-
-        // Conversations by Hour
-        const [convByHourQuery, convByHourParams] = addFilters(
-            `SELECT
-                EXTRACT(HOUR FROM COALESCE(period_activity.first_activity_at, c.created_at)) as hour,
-                COUNT(DISTINCT c.id) as count
-             FROM chats c
-             LEFT JOIN LATERAL (
-                SELECT MIN(activity_m.created_at) AS first_activity_at
-                FROM messages activity_m
-                WHERE activity_m.chat_id = c.id
-                  AND activity_m.created_at BETWEEN $2 AND $3
-             ) period_activity ON TRUE
-             WHERE c.workspace_id = $1
-               AND (c.created_at BETWEEN $2 AND $3 OR period_activity.first_activity_at IS NOT NULL)
-             GROUP BY hour
-             ORDER BY hour`,
-            baseParams,
-            filters
-        );
-        const conversationsByHourRes = await db.query(convByHourQuery, convByHourParams);
-        const conversationsByHour = conversationsByHourRes.rows.map(r => ({ hour: `${r.hour}h`, count: parseInt(r.count, 10) }));
-
-        // Channels Distribution
-        // Keep this aligned with the inbox platform heuristics so the chart matches
-        // what the operator sees in the chat list.
-        const [channelsQuery, channelsParams] = addFilters(
-            `SELECT
-                COALESCE(
-                    NULLIF(meta_conversation_platform.platform_signal, 'unknown'),
-                    NULLIF(meta_contact_platform.platform_signal, 'unknown'),
-                    NULLIF(LOWER(NULLIF(to_jsonb(c)->>'meta_platform', '')), 'unknown'),
-                    CASE
-                        WHEN ct.phone_number_jid ILIKE '%@s.whatsapp.net'
-                          OR ct.phone_number_jid ILIKE '%@g.us'
-                          OR ct.phone_number_jid ILIKE '%@lid'
-                        THEN 'whatsapp'
-                        ELSE NULL
-                    END,
-                    NULLIF(last_platform.platform_signal, 'unknown'),
-                    NULLIF(LOWER(NULLIF(to_jsonb(c)->>'source', '')), 'unknown'),
-                    NULLIF(LOWER(NULLIF(to_jsonb(c)->>'instance_type', '')), 'unknown'),
-                    'unknown'
-                ) as channel_signal,
-                COUNT(DISTINCT c.id) as count
-             FROM chats c
-             LEFT JOIN contacts ct ON c.contact_id = ct.id
-             LEFT JOIN LATERAL (
-                SELECT LOWER(mc.platform::text) AS platform_signal
-                FROM meta_conversations mc
-                WHERE mc.chat_id = c.id
-                ORDER BY mc.last_message_at DESC NULLS LAST, mc.updated_at DESC NULLS LAST, mc.created_at DESC NULLS LAST
-                LIMIT 1
-             ) meta_conversation_platform ON TRUE
-             LEFT JOIN LATERAL (
-                SELECT LOWER(COALESCE(
-                    NULLIF(m.platform::text, ''),
-                    NULLIF(m.source_from_api, ''),
-                    NULLIF(m.instance_name, '')
-                )) AS platform_signal
-                FROM messages m
-                WHERE m.chat_id = c.id
-                  AND COALESCE(
-                    NULLIF(m.platform::text, ''),
-                    NULLIF(m.source_from_api, ''),
-                    NULLIF(m.instance_name, '')
-                  ) IS NOT NULL
-                ORDER BY m.created_at DESC
-                LIMIT 1
-             ) last_platform ON TRUE
-             LEFT JOIN LATERAL (
-                SELECT LOWER(mch.type::text) AS platform_signal
-                FROM meta_contacts mct
-                JOIN meta_channels mch ON mch.id = mct.channel_id
-                WHERE mct.contact_id = c.contact_id
-                ORDER BY mct.created_at DESC
-                LIMIT 1
-             ) meta_contact_platform ON TRUE
-             WHERE c.workspace_id = $1
-               AND ${activeConversationInRangeCondition}
-             GROUP BY 1
-             ORDER BY count DESC`,
-            baseParams,
-            filters
-        );
-        const channelsRes = await db.query(channelsQuery, channelsParams);
-
-        const channelTotals = channelsRes.rows.reduce<Map<AnalyticsChannelName, number>>((acc, row) => {
-                const name = normalizeAnalyticsChannel(row.channel_signal);
+        const channelRows = parseJsonArray<{ channel_signal: string | null; count: number | string }>(row.conversations_by_channel);
+        const channelTotals = channelRows.reduce<Map<AnalyticsChannelName, number>>((acc, channel) => {
+                const name = normalizeAnalyticsChannel(channel.channel_signal);
                 const current = acc.get(name) || 0;
-                acc.set(name, current + parseInt(row.count, 10));
+                acc.set(name, current + toNumber(channel.count));
                 return acc;
             }, new Map<AnalyticsChannelName, number>());
 
@@ -343,17 +341,18 @@ export async function getAnalyticsData(
 
         return {
             totalConversations,
-            newContacts,
-            avgFirstResponseTime,
+            newContacts: toNumber(row.new_contacts),
+            avgFirstResponseTime: formatSeconds(row.avg_response_seconds),
             firstContactResolutionRate,
             resolvedConversations: resolvedCount,
-            openConversations,
-            automationConversations,
-            totalMessages,
-            customerMessages,
-            agentMessages,
-            avgMessagesPerConversation,
-            conversationsByHour,
+            openConversations: toNumber(row.open_conversations),
+            automationConversations: toNumber(row.automation_conversations),
+            totalMessages: toNumber(row.total_messages),
+            customerMessages: toNumber(row.customer_messages),
+            agentMessages: toNumber(row.agent_messages),
+            avgMessagesPerConversation: toNumber(row.avg_messages_per_conversation),
+            conversationsByHour: parseJsonArray<{ hour: number | string; count: number | string }>(row.conversations_by_hour)
+                .map((item) => ({ hour: `${item.hour}h`, count: toNumber(item.count) })),
             conversationsByChannel
         };
     } catch (error) {
@@ -561,7 +560,7 @@ export async function getConversionMetrics(
 
 export async function getAgentPerformance(
     workspaceId: string,
-    filters: { teamId?: string },
+    filters: AnalyticsFilters,
     dateRange: { from: string, to: string }
 ): Promise<AgentPerformance[] | null> {
     const supabase = await createClient();
@@ -569,82 +568,203 @@ export async function getAgentPerformance(
     if (!user) return null;
 
     try {
-        const params: (string | number)[] = [workspaceId, dateRange.from, dateRange.to];
-        let teamJoin = '';
-        let teamWhere = '';
-
-        if (filters.teamId) {
-            teamJoin = 'JOIN team_members tm ON u.id = tm.user_id';
-            teamWhere = `AND tm.team_id = $${params.length + 1}`;
-            params.push(filters.teamId);
+        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
+            return null;
         }
 
-        // Complex query to get agent performance including message-based response time
-        // We need to join users -> chats -> messages
         const query = `
-            WITH AgentStats AS (
-                SELECT
-                    c.agent_id,
-                    COUNT(DISTINCT c.id) as total_chats,
-                    COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'encerrados') as resolved_chats
+            WITH active_chat_ids AS MATERIALIZED (
+                SELECT c.id
                 FROM chats c
                 WHERE c.workspace_id = $1
-                  AND ${activeConversationInRangeCondition}
-                  AND c.agent_id IS NOT NULL
-                GROUP BY c.agent_id
+                  AND c.created_at BETWEEN $2 AND $3
+                UNION
+                SELECT m.chat_id AS id
+                FROM messages m
+                WHERE m.workspace_id = $1
+                  AND m.created_at BETWEEN $2 AND $3
             ),
-            MessageResponseTimes AS (
-                SELECT
-                    sub.agent_id,
-                    AVG(EXTRACT(EPOCH FROM (next_created_at - created_at))) as avg_response_seconds
+            period_messages AS MATERIALIZED (
+                SELECT m.*
+                FROM messages m
+                JOIN active_chat_ids ac ON ac.id = m.chat_id
+                WHERE m.workspace_id = $1
+                  AND m.created_at BETWEEN $2 AND $3
+            ),
+            agent_activity AS MATERIALIZED (
+                SELECT m.sender_user_id AS agent_id, m.chat_id
+                FROM period_messages m
+                WHERE m.from_me = TRUE
+                  AND m.sender_user_id IS NOT NULL
+                  AND COALESCE(m.type, '') <> 'system'
+                  AND COALESCE(m.api_message_status, '') <> 'internal'
+
+                UNION
+
+                SELECT m.sender_user_id AS agent_id, m.chat_id
+                FROM period_messages m
+                WHERE m.sender_user_id IS NOT NULL
+                  AND m.type = 'system'
+                  AND (
+                    m.content ILIKE 'Atendimento iniciado por%'
+                    OR m.content ILIKE 'Atendimento reaberto por%'
+                    OR m.content ILIKE 'Atendimento reassumido por%'
+                  )
+
+                UNION
+
+                SELECT transfer_events.agent_id, transfer_events.chat_id
                 FROM (
                     SELECT
-                        m.chat_id,
-                        c.agent_id,
-                        m.created_at,
-                        m.from_me,
-                        LEAD(m.created_at) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_created_at,
-                        LEAD(m.from_me) OVER (PARTITION BY m.chat_id ORDER BY m.created_at) as next_from_me
-                    FROM messages m
-                    JOIN chats c ON m.chat_id = c.id
-                    WHERE c.workspace_id = $1
-                      AND m.created_at BETWEEN $2 AND $3
-                      AND c.agent_id IS NOT NULL
-                ) sub
-                WHERE from_me = false AND next_from_me = true
-                GROUP BY sub.agent_id
+                        CASE
+                            WHEN m.metadata->>'to_agent_id' ~* $6
+                            THEN (m.metadata->>'to_agent_id')::uuid
+                        END AS agent_id,
+                        m.chat_id
+                    FROM period_messages m
+                    WHERE m.metadata->>'event' = 'transfer'
+                ) transfer_events
+                WHERE transfer_events.agent_id IS NOT NULL
+
+                UNION
+
+                SELECT close_events.agent_id, close_events.chat_id
+                FROM (
+                    SELECT
+                        CASE
+                            WHEN m.metadata->>'closed_by' ~* $6
+                            THEN (m.metadata->>'closed_by')::uuid
+                        END AS agent_id,
+                        m.chat_id
+                    FROM period_messages m
+                    WHERE m.metadata->>'event' = 'close'
+                ) close_events
+                WHERE close_events.agent_id IS NOT NULL
+
+                UNION
+
+                SELECT c.agent_id, c.id AS chat_id
+                FROM chats c
+                WHERE c.workspace_id = $1
+                  AND c.agent_id IS NOT NULL
+                  AND c.assigned_at BETWEEN $2 AND $3
+
+                UNION
+
+                SELECT c.agent_id, c.id AS chat_id
+                FROM chats c
+                JOIN active_chat_ids ac ON ac.id = c.id
+                WHERE c.workspace_id = $1
+                  AND c.status <> 'encerrados'
+                  AND c.agent_id IS NOT NULL
+            ),
+            resolved_activity AS MATERIALIZED (
+                SELECT close_events.agent_id, close_events.chat_id
+                FROM (
+                    SELECT
+                        CASE
+                            WHEN m.metadata->>'closed_by' ~* $6
+                            THEN (m.metadata->>'closed_by')::uuid
+                        END AS agent_id,
+                        m.chat_id
+                    FROM period_messages m
+                    WHERE m.metadata->>'event' = 'close'
+                ) close_events
+                WHERE close_events.agent_id IS NOT NULL
+
+                UNION
+
+                SELECT c.agent_id, c.id AS chat_id
+                FROM chats c
+                WHERE c.workspace_id = $1
+                  AND c.agent_id IS NOT NULL
+                  AND c.status = 'encerrados'
+                  AND c.closed_at BETWEEN $2 AND $3
+            ),
+            response_times AS MATERIALIZED (
+                SELECT
+                    ordered_messages.next_sender_user_id AS agent_id,
+                    EXTRACT(EPOCH FROM (ordered_messages.next_created_at - ordered_messages.created_at)) AS seconds
+                FROM (
+                    SELECT
+                        pm.chat_id,
+                        pm.created_at,
+                        pm.from_me,
+                        LEAD(pm.created_at) OVER (PARTITION BY pm.chat_id ORDER BY pm.created_at, pm.id) AS next_created_at,
+                        LEAD(pm.from_me) OVER (PARTITION BY pm.chat_id ORDER BY pm.created_at, pm.id) AS next_from_me,
+                        LEAD(pm.sender_user_id) OVER (PARTITION BY pm.chat_id ORDER BY pm.created_at, pm.id) AS next_sender_user_id,
+                        LEAD(pm.type) OVER (PARTITION BY pm.chat_id ORDER BY pm.created_at, pm.id) AS next_type,
+                        LEAD(pm.api_message_status) OVER (PARTITION BY pm.chat_id ORDER BY pm.created_at, pm.id) AS next_api_message_status
+                    FROM period_messages pm
+                ) ordered_messages
+                WHERE ordered_messages.from_me = FALSE
+                  AND ordered_messages.next_from_me = TRUE
+                  AND ordered_messages.next_sender_user_id IS NOT NULL
+                  AND COALESCE(ordered_messages.next_type, '') <> 'system'
+                  AND COALESCE(ordered_messages.next_api_message_status, '') <> 'internal'
+            ),
+            agent_stats AS (
+                SELECT
+                    aa.agent_id,
+                    COUNT(DISTINCT aa.chat_id)::int AS total_chats
+                FROM agent_activity aa
+                GROUP BY aa.agent_id
+            ),
+            resolved_stats AS (
+                SELECT
+                    ra.agent_id,
+                    COUNT(DISTINCT ra.chat_id)::int AS resolved_chats
+                FROM resolved_activity ra
+                GROUP BY ra.agent_id
+            ),
+            response_stats AS (
+                SELECT
+                    rt.agent_id,
+                    AVG(rt.seconds) AS avg_response_seconds
+                FROM response_times rt
+                GROUP BY rt.agent_id
             )
             SELECT
                 u.id AS agent_id,
                 u.full_name AS agent_name,
                 u.avatar_url,
                 COALESCE(ast.total_chats, 0) as total_chats,
-                COALESCE(ast.resolved_chats, 0) as resolved_chats,
-                mrt.avg_response_seconds
+                COALESCE(rs.resolved_chats, 0) as resolved_chats,
+                rts.avg_response_seconds
             FROM users u
-            LEFT JOIN AgentStats ast ON u.id = ast.agent_id
-            LEFT JOIN MessageResponseTimes mrt ON u.id = mrt.agent_id
-            ${teamJoin}
-            WHERE (ast.total_chats > 0 OR mrt.avg_response_seconds IS NOT NULL)
-            ${teamWhere}
-            ORDER BY total_chats DESC;
+            JOIN user_workspace_roles uwr ON uwr.user_id = u.id AND uwr.workspace_id = $1
+            LEFT JOIN agent_stats ast ON u.id = ast.agent_id
+            LEFT JOIN resolved_stats rs ON u.id = rs.agent_id
+            LEFT JOIN response_stats rts ON u.id = rts.agent_id
+            WHERE ($4::uuid IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM team_members tm
+                    WHERE tm.user_id = u.id
+                      AND tm.team_id = $4::uuid
+                ))
+              AND ($5::uuid IS NULL OR u.id = $5::uuid)
+              AND (ast.total_chats > 0 OR rts.avg_response_seconds IS NOT NULL)
+            ORDER BY total_chats DESC, u.full_name ASC;
         `;
 
-        const res = await db.query(query, params);
+        const res = await db.query(query, [
+            workspaceId,
+            dateRange.from,
+            dateRange.to,
+            optionalUuid(filters.teamId),
+            optionalUuid(filters.agentId),
+            UUID_REGEX_SQL,
+        ]);
 
         const performanceData: AgentPerformance[] = res.rows.map(row => {
-            const avgSeconds = parseFloat(row.avg_response_seconds);
-            const formattedAvg = !Number.isNaN(avgSeconds)
-                ? `${Math.floor(avgSeconds / 60)}m ${Math.floor(avgSeconds % 60)}s`
-                : '0m 0s';
             return {
                 agent_id: row.agent_id,
                 agent_name: row.agent_name,
                 avatar_url: row.avatar_url,
-                total_chats: parseInt(row.total_chats, 10),
-                resolved_chats: parseInt(row.resolved_chats, 10),
-                avg_first_response_time: formattedAvg,
-                avg_rating: (4.5 + Math.random() * 0.4).toFixed(1), // Mocked for now
+                total_chats: toNumber(row.total_chats),
+                resolved_chats: toNumber(row.resolved_chats),
+                avg_first_response_time: formatSeconds(row.avg_response_seconds),
+                avg_rating: null,
             };
         });
 

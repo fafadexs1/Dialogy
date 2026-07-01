@@ -22,6 +22,20 @@ const catalogDocument: KnowledgeBaseDocument = {
 };
 
 describe('autopilot universal intent resolver', () => {
+  it('classifies Wi-Fi credential lookup deterministically without an LLM gate', () => {
+    const lookup = resolveAutopilotIntent({
+      customerMessage: 'Esqueci o usuario e a senha do meu Wi-Fi, pode verificar?',
+      knowledgeDocuments: [],
+    });
+    const change = resolveAutopilotIntent({
+      customerMessage: 'Quero trocar a senha do Wi-Fi por uma nova',
+      knowledgeDocuments: [],
+    });
+
+    expect(lookup).toMatchObject({ intent: 'troubleshooting', confidence: 0.94 });
+    expect(change).toMatchObject({ intent: 'change_request', confidence: 0.94 });
+  });
+
   it('detects legacy ISP plan inquiries without making telecom the core intent', () => {
     const resolution = resolveAutopilotIntent({
       customerMessage: 'Me mostra os planos e valores',

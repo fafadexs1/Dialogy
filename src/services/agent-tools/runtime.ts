@@ -9,7 +9,12 @@ import { runCrmUpdateContactCustomFieldsTool } from './crm-tools';
 import { runSgpTool } from './sgp-tools';
 import { normalizeMcpToolArguments } from './mcp-arguments';
 import { callMcpServerTool, parseQualifiedMcpToolName } from '@/services/mcp/client';
-import { getMcpWorkspaceConfig } from '@/services/mcp/store';
+import { getMcpWorkspaceConfig, recordMcpServerHealth } from '@/services/mcp/store';
+import { classifyMcpToolSafety } from '@/services/mcp/tool-safety';
+import {
+  claimDurableAgentToolExecution,
+  type DurableToolClaim,
+} from '@/services/autopilot/runtime/durable-tool-claim';
 import {
   DEFAULT_ORCHESTRATOR_BUDGET,
   recordOrchestratorToolCall,
@@ -65,7 +70,11 @@ function normalizeSearchText(value: string): string {
 
 function reject(action: AgentToolAction, message: string): AgentToolExecutionResult {
   return {
-    toolName: action.type as any,
+    toolName: (
+      action.type === 'mcp_call_tool'
+        ? String(action.payload?.toolName || action.type)
+        : action.type
+    ) as AgentToolExecutionResult['toolName'],
     status: 'rejected',
     input: action,
     error: message,
@@ -100,6 +109,27 @@ function resolveRequestedToolName(action: AgentToolAction): string {
     return action.payload?.toolName || '';
   }
   return action.type;
+}
+
+async function resolveActionIdempotence(
+  context: AgentToolRuntimeContext,
+  action: AgentToolAction,
+): Promise<boolean> {
+  const definition = getAgentToolDefinition(action.type);
+  if (action.type !== 'mcp_call_tool') return Boolean(definition?.idempotent);
+
+  const qualifiedName = action.payload?.toolName?.trim() || '';
+  const parsed = parseQualifiedMcpToolName(qualifiedName);
+  if (!parsed) return false;
+  try {
+    const config = await getMcpWorkspaceConfig(context.workspaceId);
+    const server = config.servers.find((item) => item.id === parsed.serverId && item.isActive);
+    const tool = server?.tools?.find((item) => item.qualifiedName === qualifiedName);
+    return classifyMcpToolSafety(qualifiedName, tool).idempotent;
+  } catch (error) {
+    console.warn('[AGENT_TOOL_IDEMPOTENCY] Failed to resolve MCP safety:', error);
+    return false;
+  }
 }
 
 async function loadRecentCustomerVisibleMessages(
@@ -761,11 +791,34 @@ async function runMcpCallTool(
       return reject(action, normalizedArguments.error);
     }
 
-    const result = await callMcpServerTool({
-      server,
-      toolName: parsed.toolName,
-      arguments: normalizedArguments.arguments,
-    });
+    const callStartedAt = Date.now();
+    let result: Awaited<ReturnType<typeof callMcpServerTool>>;
+    try {
+      result = await callMcpServerTool({
+        server,
+        toolName: parsed.toolName,
+        arguments: normalizedArguments.arguments,
+      });
+      await recordMcpServerHealth({
+        workspaceId: context.workspaceId,
+        serverId: server.id,
+        status: 'healthy',
+        latencyMs: Date.now() - callStartedAt,
+      }).catch((healthError) => {
+        console.warn('[MCP_HEALTH] Failed to persist healthy status:', healthError);
+      });
+    } catch (error) {
+      await recordMcpServerHealth({
+        workspaceId: context.workspaceId,
+        serverId: server.id,
+        status: 'unreachable',
+        latencyMs: Date.now() - callStartedAt,
+        error: error instanceof Error ? error.message : String(error),
+      }).catch((healthError) => {
+        console.warn('[MCP_HEALTH] Failed to persist unreachable status:', healthError);
+      });
+      throw error;
+    }
 
     const content = (result as any).content || null;
     const textError = Array.isArray(content)
@@ -902,6 +955,40 @@ export async function runAgentTools(
       continue;
     }
 
+    const actionIdempotent = await resolveActionIdempotence(runtimeContext, action);
+    let durableClaim: DurableToolClaim = { kind: 'disabled' };
+    try {
+      durableClaim = await claimDurableAgentToolExecution({
+        workspaceId: runtimeContext.workspaceId,
+        chatId: runtimeContext.chat.id,
+        orchestratorRunId: runtimeContext.orchestratorRunId,
+        action,
+        toolName: requestedToolName,
+        idempotent: actionIdempotent,
+      });
+    } catch (error) {
+      console.error('[AGENT_TOOL_IDEMPOTENCY] Failed to acquire durable execution claim:', error);
+      if (!actionIdempotent) {
+        const result = reject(
+          action,
+          '[tool_idempotency:unavailable] Nao foi possivel garantir execucao unica. A acao foi bloqueada por seguranca.',
+        );
+        await auditToolResult(runtimeContext, result, Date.now() - startedAt);
+        results.push(result);
+        continue;
+      }
+    }
+
+    if (durableClaim.kind === 'reuse') {
+      results.push(durableClaim.result);
+      continue;
+    }
+    if (durableClaim.kind === 'blocked') {
+      await auditToolResult(runtimeContext, durableClaim.result, Date.now() - startedAt);
+      results.push(durableClaim.result);
+      continue;
+    }
+
     let result: AgentToolExecutionResult;
     try {
       result = await withTimeout((async () => {
@@ -916,11 +1003,19 @@ export async function runAgentTools(
       })(), definition.timeoutMs, `agent tool ${definition.name}`);
     } catch (error) {
       result = {
-        toolName: action.type,
+        toolName: requestedToolName as AgentToolExecutionResult['toolName'],
         status: 'error',
         input: action,
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+
+    if (durableClaim.kind === 'execute') {
+      try {
+        await durableClaim.complete(result);
+      } catch (error) {
+        console.error('[AGENT_TOOL_IDEMPOTENCY] Failed to complete durable execution claim:', error);
+      }
     }
 
     if (action.type === 'transfer_chat' && result.status === 'success') {

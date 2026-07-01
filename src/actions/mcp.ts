@@ -83,6 +83,9 @@ export async function upsertMcpServerAction(input: {
       tools: config.servers.find((server) => server.id === id)?.tools || [],
       syncedAt: config.servers.find((server) => server.id === id)?.syncedAt || null,
       lastError: null,
+      healthStatus: config.servers.find((server) => server.id === id)?.healthStatus || 'unknown',
+      healthCheckedAt: config.servers.find((server) => server.id === id)?.healthCheckedAt || null,
+      healthLatencyMs: config.servers.find((server) => server.id === id)?.healthLatencyMs || null,
     };
 
     if (!nextServer.name) {
@@ -126,12 +129,22 @@ export async function syncMcpServerToolsAction(workspaceId: string, serverId: st
   const server = config.servers.find((item) => item.id === serverId);
   if (!server) return { success: false, error: 'Servidor MCP nao encontrado.' };
 
+  const startedAt = Date.now();
+  const checkedAt = new Date().toISOString();
   try {
     const tools = await listMcpServerTools(server);
     await saveMcpWorkspaceConfig(workspaceId, {
       servers: config.servers.map((item) => (
         item.id === serverId
-          ? { ...item, tools, syncedAt: new Date().toISOString(), lastError: null }
+          ? {
+            ...item,
+            tools,
+            syncedAt: checkedAt,
+            lastError: null,
+            healthStatus: 'healthy',
+            healthCheckedAt: checkedAt,
+            healthLatencyMs: Date.now() - startedAt,
+          }
           : item
       )),
     });
@@ -141,9 +154,61 @@ export async function syncMcpServerToolsAction(workspaceId: string, serverId: st
     const message = error instanceof Error ? error.message : String(error);
     await saveMcpWorkspaceConfig(workspaceId, {
       servers: config.servers.map((item) => (
-        item.id === serverId ? { ...item, lastError: message } : item
+        item.id === serverId
+          ? {
+            ...item,
+            lastError: message,
+            healthStatus: 'unreachable',
+            healthCheckedAt: checkedAt,
+            healthLatencyMs: Date.now() - startedAt,
+          }
+          : item
       )),
     });
+    return { success: false, error: message };
+  }
+}
+
+export async function testMcpServerConnectionAction(workspaceId: string, serverId: string) {
+  const auth = await requireWorkspace(workspaceId);
+  if (auth.error) return { success: false, error: auth.error };
+
+  const config = await getMcpWorkspaceConfig(workspaceId);
+  const server = config.servers.find((item) => item.id === serverId);
+  if (!server) return { success: false, error: 'Servidor MCP nao encontrado.' };
+
+  const startedAt = Date.now();
+  const checkedAt = new Date().toISOString();
+  try {
+    const tools = await listMcpServerTools(server);
+    const latencyMs = Date.now() - startedAt;
+    await saveMcpWorkspaceConfig(workspaceId, {
+      servers: config.servers.map((item) => item.id === serverId
+        ? {
+          ...item,
+          healthStatus: 'healthy',
+          healthCheckedAt: checkedAt,
+          healthLatencyMs: latencyMs,
+          lastError: null,
+        }
+        : item),
+    });
+    revalidatePath('/integrations/mcp');
+    return { success: true, latencyMs, toolCount: tools.length };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await saveMcpWorkspaceConfig(workspaceId, {
+      servers: config.servers.map((item) => item.id === serverId
+        ? {
+          ...item,
+          healthStatus: 'unreachable',
+          healthCheckedAt: checkedAt,
+          healthLatencyMs: Date.now() - startedAt,
+          lastError: message,
+        }
+        : item),
+    });
+    revalidatePath('/integrations/mcp');
     return { success: false, error: message };
   }
 }

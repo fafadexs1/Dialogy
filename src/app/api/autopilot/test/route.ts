@@ -12,6 +12,7 @@ import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services
 import type { AgentToolAction } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
+import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
 import { buildAutopilotPlaygroundTrace, type AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
 import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
 import { compileProcedureFromFlowGraph } from '@/services/autopilot/procedure-flow-compiler';
@@ -236,28 +237,31 @@ async function loadPreviewToolCatalog(workspaceId: string, enabledToolNames: str
   const mcpTools = await listMcpToolsForWorkspace(workspaceId).catch(() => []);
   const mcpCatalogItems: AgentToolCatalogItem[] = mcpTools
     .filter((tool) => enabledToolSet.has(tool.qualifiedName))
-    .map((tool) => ({
-      name: tool.qualifiedName as any,
-      version: 'mcp',
-      description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
-      class: tool.annotations?.readOnlyHint ? 'read_only' : 'retrieval',
-      riskLevel: tool.annotations?.destructiveHint ? 'high' : 'medium',
-      sideEffect: tool.annotations?.destructiveHint ? 'high' : tool.annotations?.readOnlyHint ? 'none' : 'medium',
-      idempotent: Boolean(tool.annotations?.idempotentHint || tool.annotations?.readOnlyHint),
-      timeoutMs: Number.parseInt(process.env.AI_ORCHESTRATOR_TOOL_TIMEOUT_MS || '', 10) || 8000,
-      maxAttempts: 1,
-      requiresHumanApproval: Boolean(tool.annotations?.destructiveHint),
-      customerVisible: true,
-      allowedIntents: [],
-      requiredSlots: [],
-      fallbackAction: 'handoff',
-      source: 'mcp',
-      enabledByDefault: false,
-      serverId: tool.serverId,
-      serverName: tool.serverName,
-      inputSchema: tool.inputSchema || null,
-      outputSchema: null,
-    }));
+    .map((tool) => {
+      const safety = classifyMcpToolSafety(tool.qualifiedName, tool);
+      return {
+        name: tool.qualifiedName as any,
+        version: 'mcp',
+        description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
+        class: safety.class,
+        riskLevel: safety.riskLevel,
+        sideEffect: safety.sideEffect,
+        idempotent: safety.idempotent,
+        timeoutMs: resolveMcpToolTimeoutMs(),
+        maxAttempts: 1,
+        requiresHumanApproval: safety.requiresHumanApproval,
+        customerVisible: true,
+        allowedIntents: [],
+        requiredSlots: [],
+        fallbackAction: 'handoff',
+        source: 'mcp',
+        enabledByDefault: false,
+        serverId: tool.serverId,
+        serverName: tool.serverName,
+        inputSchema: tool.inputSchema || null,
+        outputSchema: tool.outputSchema || null,
+      };
+    });
 
   return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
 }
@@ -796,7 +800,11 @@ export async function POST(request: Request) {
               matchScore: procedureMatchScore,
               matchReason: procedureMatchReason,
               executedSteps: procedureResult.executedSteps,
-              actions: procedureResult.actions.map((action) => action.type),
+              actions: procedureResult.actions.map((action) => (
+                action.type === 'mcp_call_tool'
+                  ? String(action.payload?.toolName || action.type)
+                  : action.type
+              )),
               completionReason: procedureResult.completionReason || null,
             };
             (procedureTrace.procedure as any).knowledgeContext = activeProcedure.knowledgeContext || null;

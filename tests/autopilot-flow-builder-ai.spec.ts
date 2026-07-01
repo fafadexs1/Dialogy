@@ -2,11 +2,68 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyToolSelection,
+  buildFallbackArchitecture,
+  buildDeterministicFallbackProposal,
+  ensureToolRelevanceCoverage,
+  buildToolRelevanceMap,
   ensureOperationalCoverage,
   sanitizeAutopilotFlowProposal,
 } from '@/ai/flows/autopilot-flow-builder';
+import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import { auditAutopilotFlowGraph } from '@/services/autopilot/flow-audit';
+
+function mcpTool(name: string, description: string): AgentToolCatalogItem {
+  return {
+    name: name as AgentToolCatalogItem['name'],
+    version: 'mcp',
+    description,
+    class: 'retrieval',
+    riskLevel: 'low',
+    sideEffect: 'none',
+    idempotent: true,
+    timeoutMs: 8000,
+    maxAttempts: 1,
+    requiresHumanApproval: false,
+    customerVisible: true,
+    allowedIntents: ['troubleshooting', 'support_request'],
+    requiredSlots: [],
+    fallbackAction: 'handoff',
+    source: 'mcp',
+    enabledByDefault: false,
+    serverId: 'router',
+    serverName: 'Router MCP',
+    inputSchema: { type: 'object', properties: {} },
+  };
+}
+
+function highRiskMcpTool(name: string, description: string): AgentToolCatalogItem {
+  return {
+    ...mcpTool(name, description),
+    class: 'write_non_idempotent',
+    riskLevel: 'high',
+    sideEffect: 'high',
+    idempotent: false,
+    requiresHumanApproval: true,
+  };
+}
+
+function reachableNodeIds(
+  graph: ReturnType<typeof buildDeterministicFallbackProposal>['flowGraph'],
+  startId: string,
+) {
+  const visited = new Set<string>();
+  const queue = [startId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const edge of graph.edges.filter((candidate) => candidate.source === current)) {
+      if (!visited.has(edge.target)) queue.push(edge.target);
+    }
+  }
+  return visited;
+}
 
 describe('autopilot flow builder AI sanitizer', () => {
   it('keeps catalog tools and removes invented tools and broken edges', () => {
@@ -59,6 +116,21 @@ describe('autopilot flow builder AI sanitizer', () => {
     expect(proposal.flowGraph.nodes.some((node) => node.kind === 'sub_agent')).toBe(true);
     expect(proposal.flowGraph.nodes.some((node) => node.kind === 'assistant')).toBe(false);
     expect(proposal.flowGraph.nodes.every((node) => Boolean(node.config?.instructions?.trim()))).toBe(true);
+  });
+
+  it('fills deterministic positions when the model omits architecture coordinates', () => {
+    const proposal = sanitizeAutopilotFlowProposal({
+      summary: 'Flow sem coordenadas.',
+      systemPrompt: 'Ajude o cliente.',
+      nodes: [
+        { id: 'entrada', kind: 'start', title: 'Entrada', subtitle: 'Inicio' } as any,
+        { id: 'triagem', kind: 'decision', title: 'Triagem', subtitle: 'Rotas' } as any,
+      ],
+      edges: [],
+    } as any, []);
+
+    expect(proposal.flowGraph.nodes[0].position).toEqual({ x: 120, y: 120 });
+    expect(proposal.flowGraph.nodes[1].position).toEqual({ x: 380, y: 120 });
   });
 
   it('repairs decision nodes without a safe fallback for topic shifts and outside-procedure questions', () => {
@@ -320,6 +392,385 @@ describe('autopilot flow builder AI sanitizer', () => {
     ]));
   });
 
+  it('builds a qualified MCP relevance map for Wi-Fi credential lookup without selecting reboot', () => {
+    const tools = [
+      listAgentToolCatalogItems().find((item) => item.name === 'sgp_fetch_contact_panel_data')!,
+      mcpTool('mcp:router:get_wifi_view', 'Consulta SSID, usuario e senha atuais do Wi-Fi.'),
+      mcpTool('mcp:router:reboot_router', 'Reinicia o roteador do assinante.'),
+      mcpTool('mcp:router:scan_wifi_neighbors', 'Analisa redes Wi-Fi ao redor, canais e interferencia.'),
+    ];
+
+    const relevance = buildToolRelevanceMap({
+      conversation: [
+        {
+          role: 'user',
+          content: 'Esqueci o usuario e senha do Wi-Fi. Pode verificar?',
+        },
+      ],
+      tools,
+    });
+
+    expect(relevance.map((item) => item.toolName)).toEqual(expect.arrayContaining([
+      'sgp_fetch_contact_panel_data',
+      'mcp:router:get_wifi_view',
+    ]));
+    expect(relevance.map((item) => item.toolName)).not.toContain('mcp:router:reboot_router');
+    expect(relevance.find((item) => item.toolName === 'mcp:router:get_wifi_view')?.intents)
+      .toContain('wifi_credentials_lookup');
+  });
+
+  it('isolates a deterministic Wi-Fi credential lookup from change and reboot branches', () => {
+    const sgp = listAgentToolCatalogItems().find((item) => item.name === 'sgp_fetch_contact_panel_data')!;
+    const getWifi = mcpTool(
+      'mcp:router:get_wifi_view',
+      'Consulta SSID, usuario e senha atuais do Wi-Fi pelo contrato validado.',
+    );
+    const changeWifi = highRiskMcpTool(
+      'mcp:router:update_wifi_credentials',
+      'Altera nome ou senha do Wi-Fi com confirmacao explicita.',
+    );
+    const reboot = highRiskMcpTool(
+      'mcp:router:reboot_router',
+      'Reinicia o roteador somente com confirmacao explicita.',
+    );
+    const proposal = buildDeterministicFallbackProposal({
+      conversation: [{
+        role: 'user',
+        content: 'Crie um fluxo para quando o cliente esquecer o usuario e senha do Wi-Fi.',
+      }],
+      currentSystemPrompt: null,
+      tools: [sgp, getWifi, changeWifi, reboot],
+    }, new Error('invalid architecture'));
+    const decision = proposal.flowGraph.nodes.find((node) => node.id === 'triagem');
+    const lookupRoute = decision?.config?.routes?.find((route) => route.id === 'consultar_wifi');
+    const reachable = reachableNodeIds(proposal.flowGraph, lookupRoute?.targetNodeId || '');
+    const reachableTools = proposal.flowGraph.nodes
+      .filter((node) => reachable.has(node.id) && node.kind === 'tool')
+      .map((node) => node.toolName);
+
+    expect(reachableTools).toEqual(expect.arrayContaining([
+      'sgp_fetch_contact_panel_data',
+      'mcp:router:get_wifi_view',
+    ]));
+    expect(reachableTools).not.toContain('mcp:router:update_wifi_credentials');
+    expect(reachableTools).not.toContain('mcp:router:reboot_router');
+    expect(
+      proposal.flowGraph.nodes.some((node) => (
+        reachable.has(node.id)
+        && /troca|reboot/i.test(`${node.id} ${node.title}`)
+      )),
+    ).toBe(false);
+    expect(auditAutopilotFlowGraph(proposal.flowGraph).status).toBe('passed');
+  });
+
+  it('keeps every complete Wi-Fi capability on its own deterministic branch', () => {
+    const sgp = listAgentToolCatalogItems().find((item) => item.name === 'sgp_fetch_contact_panel_data')!;
+    const getWifi = mcpTool(
+      'mcp:router:get_wifi_view',
+      'Consulta SSID, usuario e senha atuais do Wi-Fi pelo contrato validado.',
+    );
+    const scan = mcpTool(
+      'mcp:router:scan_wifi_neighbors',
+      'Escaneia redes Wi-Fi ao redor, canais e interferencia.',
+    );
+    const cachedScan = mcpTool(
+      'mcp:router:get_wifi_scan_cached',
+      'Consulta o ultimo scan de canais Wi-Fi em cache.',
+    );
+    const changeWifi = highRiskMcpTool(
+      'mcp:router:update_wifi_credentials',
+      'Altera nome ou senha do Wi-Fi com confirmacao explicita.',
+    );
+    changeWifi.inputSchema = {
+      type: 'object',
+      required: ['contract_id', 'new_password'],
+      properties: {
+        contract_id: { type: 'string' },
+        new_password: { type: 'string' },
+      },
+    };
+    const reboot = highRiskMcpTool(
+      'mcp:router:reboot_router',
+      'Reinicia o roteador pelo contrato somente com confirmacao explicita.',
+    );
+    const proposal = buildDeterministicFallbackProposal({
+      conversation: [{
+        role: 'user',
+        content: [
+          'Monte suporte Wi-Fi completo.',
+          'Consultar usuario e senha atuais.',
+          'Diagnosticar canais, redes ao redor e interferencia.',
+          'Trocar nome ou senha somente com confirmacao.',
+          'Reiniciar roteador somente com confirmacao.',
+          'Sempre validar CPF e contrato.',
+        ].join(' '),
+      }],
+      currentSystemPrompt: null,
+      tools: [sgp, getWifi, scan, cachedScan, changeWifi, reboot],
+    }, new Error('invalid architecture'));
+    const decision = proposal.flowGraph.nodes.find((node) => node.id === 'triagem');
+    const toolNamesByRoute = new Map(
+      ['consultar_wifi', 'diagnosticar_wifi', 'trocar_wifi', 'reiniciar_roteador'].map((routeId) => {
+        const route = decision?.config?.routes?.find((candidate) => candidate.id === routeId);
+        const reachable = reachableNodeIds(proposal.flowGraph, route?.targetNodeId || '');
+        return [
+          routeId,
+          proposal.flowGraph.nodes
+            .filter((node) => reachable.has(node.id) && node.kind === 'tool')
+            .map((node) => node.toolName),
+        ];
+      }),
+    );
+
+    expect(toolNamesByRoute.get('consultar_wifi')).toContain('mcp:router:get_wifi_view');
+    expect(toolNamesByRoute.get('consultar_wifi')).not.toContain('mcp:router:reboot_router');
+    expect(toolNamesByRoute.get('diagnosticar_wifi')).toEqual(expect.arrayContaining([
+      'mcp:router:scan_wifi_neighbors',
+      'mcp:router:get_wifi_scan_cached',
+    ]));
+    expect(toolNamesByRoute.get('diagnosticar_wifi')).not.toContain('mcp:router:update_wifi_credentials');
+    expect(toolNamesByRoute.get('trocar_wifi')).toContain('mcp:router:update_wifi_credentials');
+    expect(toolNamesByRoute.get('trocar_wifi')).not.toContain('mcp:router:reboot_router');
+    expect(toolNamesByRoute.get('reiniciar_roteador')).toContain('mcp:router:reboot_router');
+    expect(toolNamesByRoute.get('reiniciar_roteador')).not.toContain('mcp:router:update_wifi_credentials');
+    expect(auditAutopilotFlowGraph(proposal.flowGraph).status).toBe('passed');
+  });
+
+  it('builds a qualified MCP relevance map for generic order status by description and schema', () => {
+    const tools = [
+      mcpTool('mcp:ecommerce:get_order_status', 'Consulta status, rastreio e previsao de entrega de um pedido pelo numero do pedido.'),
+      highRiskMcpTool('mcp:ecommerce:cancel_order', 'Cancela um pedido e estorna a compra.'),
+      mcpTool('mcp:router:reboot_router', 'Reinicia o roteador do assinante.'),
+    ];
+    tools[0].inputSchema = { type: 'object', properties: { order_id: { type: 'string' } } };
+
+    const relevance = buildToolRelevanceMap({
+      conversation: [
+        {
+          role: 'user',
+          content: 'Preciso consultar o status do pedido AB1234 e o codigo de rastreio.',
+        },
+      ],
+      tools,
+    });
+
+    expect(relevance.map((item) => item.toolName)).toContain('mcp:ecommerce:get_order_status');
+    expect(relevance.find((item) => item.toolName === 'mcp:ecommerce:get_order_status')?.intents)
+      .toContain('order_status_lookup');
+    expect(relevance.map((item) => item.toolName)).not.toContain('mcp:ecommerce:cancel_order');
+    expect(relevance.map((item) => item.toolName)).not.toContain('mcp:router:reboot_router');
+  });
+
+  it('selects read-only commerce MCPs for catalog, pricing and availability while blocking destructive tools', () => {
+    const tools = [
+      mcpTool('mcp:commerce:list_products', 'Lista catalogo de produtos, precos, estoque e disponibilidade.'),
+      highRiskMcpTool('mcp:commerce:refund_order', 'Estorna pagamento, cancela pedido e altera a compra.'),
+    ];
+
+    const relevance = buildToolRelevanceMap({
+      conversation: [
+        {
+          role: 'user',
+          content: 'Monte um fluxo para consultar catalogo, preco e disponibilidade dos produtos.',
+        },
+      ],
+      tools,
+    });
+
+    const catalogTool = relevance.find((item) => item.toolName === 'mcp:commerce:list_products');
+    expect(catalogTool?.intents).toEqual(expect.arrayContaining([
+      'catalog_lookup',
+      'pricing_lookup',
+      'availability_lookup',
+    ]));
+    expect(relevance.map((item) => item.toolName)).not.toContain('mcp:commerce:refund_order');
+  });
+
+  it('selects a custom mutating MCP only when its action and business object match', () => {
+    const approveClaim = highRiskMcpTool(
+      'mcp:insurance:approve_claim',
+      'Aprova um sinistro de seguro pelo claim_id informado.',
+    );
+    approveClaim.inputSchema = {
+      type: 'object',
+      required: ['claim_id', 'approval_reason'],
+      properties: {
+        claim_id: { type: 'string', description: 'Identificador do sinistro' },
+        approval_reason: { type: 'string', description: 'Motivo da aprovacao' },
+      },
+    };
+    const cancelOrder = highRiskMcpTool(
+      'mcp:commerce:cancel_order',
+      'Cancela definitivamente um pedido pelo order_id.',
+    );
+
+    const relevance = buildToolRelevanceMap({
+      conversation: [{
+        role: 'user',
+        content: 'Crie um fluxo para aprovar um sinistro usando claim_id e o motivo da aprovacao.',
+      }],
+      tools: [approveClaim, cancelOrder],
+    });
+
+    expect(relevance.find((entry) => entry.toolName === approveClaim.name)?.intents)
+      .toContain('external_action');
+    expect(relevance.map((entry) => entry.toolName)).not.toContain(cancelOrder.name);
+  });
+
+  it('builds a capability-specific fallback branch from an arbitrary MCP schema', () => {
+    const approveClaim = highRiskMcpTool(
+      'mcp:insurance:approve_claim',
+      'Aprova um sinistro de seguro pelo claim_id informado.',
+    );
+    approveClaim.inputSchema = {
+      type: 'object',
+      required: ['claim_id', 'approval_reason'],
+      properties: {
+        claim_id: { type: 'string', title: 'Numero do sinistro' },
+        approval_reason: { type: 'string', title: 'Motivo da aprovacao' },
+      },
+    };
+    const fallback = buildFallbackArchitecture({
+      conversation: [{
+        role: 'user',
+        content: 'Crie um fluxo para aprovar um sinistro usando claim_id e o motivo da aprovacao.',
+      }],
+      currentSystemPrompt: null,
+      tools: [approveClaim],
+    }, new Error('invalid architecture'));
+
+    const triage = fallback.nodes.find((node) => node.id === 'triagem');
+    const capabilityRoute = triage?.routes?.find((route) => route.id.includes('insurance-approve-claim'));
+    const collect = fallback.nodes.find((node) => node.id.includes('cap-coletar-insurance-approve-claim'));
+    const confirmation = fallback.nodes.find((node) => node.id.includes('cap-confirmar-insurance-approve-claim'));
+
+    expect(capabilityRoute?.targetNodeId).toBe(collect?.id);
+    expect(collect?.kind).toBe('collect');
+    expect(collect?.formFields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fieldKey: 'claim_id', required: true }),
+      expect.objectContaining({ fieldKey: 'approval_reason', required: true }),
+    ]));
+    expect(confirmation?.kind).toBe('message');
+    expect(confirmation?.subtitle).toContain('mcp:insurance:approve_claim');
+  });
+
+  it('compiles a complete deterministic proposal when the architecture model fails', () => {
+    const approveClaim = highRiskMcpTool(
+      'mcp:insurance:approve_claim',
+      'Aprova um sinistro de seguro pelo claim_id informado.',
+    );
+    approveClaim.inputSchema = {
+      type: 'object',
+      required: ['claim_id', 'approval_reason'],
+      properties: {
+        claim_id: { type: 'string', title: 'Numero do sinistro' },
+        approval_reason: { type: 'string', title: 'Motivo da aprovacao' },
+      },
+    };
+
+    const proposal = buildDeterministicFallbackProposal({
+      conversation: [{
+        role: 'user',
+        content: 'Crie um fluxo para aprovar um sinistro usando claim_id e o motivo da aprovacao.',
+      }],
+      currentSystemPrompt: null,
+      tools: [approveClaim],
+    }, new Error('invalid architecture'));
+    const decision = proposal.flowGraph.nodes.find((node) => node.id === 'triagem');
+    const collect = proposal.flowGraph.nodes.find((node) => node.id.includes('cap-coletar-insurance-approve-claim'));
+    const confirmation = proposal.flowGraph.nodes.find((node) => node.id.includes('cap-confirmar-insurance-approve-claim'));
+    const toolNode = proposal.flowGraph.nodes.find((node) => node.toolName === approveClaim.name);
+    const agent = proposal.flowGraph.nodes.find((node) => node.kind === 'sub_agent');
+    const capabilityRoute = decision?.config?.routes?.find((route) => route.id.includes('insurance-approve-claim'));
+    const audit = auditAutopilotFlowGraph(proposal.flowGraph);
+
+    expect(capabilityRoute?.targetNodeId).toBe(collect?.id);
+    expect(proposal.flowGraph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: decision?.id, target: collect?.id, routeId: capabilityRoute?.id }),
+      expect.objectContaining({ source: collect?.id, target: confirmation?.id }),
+      expect.objectContaining({ source: confirmation?.id, target: toolNode?.id }),
+      expect.objectContaining({ source: toolNode?.id, target: agent?.id }),
+    ]));
+    expect(proposal.enabledToolNames).toContain(approveClaim.name);
+    expect(toolNode?.config?.instructions).toContain('mcp:insurance:approve_claim');
+    expect(audit.status).toBe('passed');
+    expect(audit.issues).toEqual([]);
+  });
+
+  it('adds relevant qualified MCP tools to the graph when tool selection omits them', () => {
+    const orderTool = mcpTool(
+      'mcp:ecommerce:get_order_status',
+      'Consulta status, rastreio e previsao de entrega de um pedido pelo numero do pedido.',
+    );
+    const architecture = {
+      summary: 'Consultar status de pedido.',
+      systemPrompt: 'Use @agente para consultar pedido.',
+      nodes: [
+        { id: 'inicio', kind: 'start' as const, title: 'Inicio', subtitle: 'Entrada', x: 120, y: 120 },
+        { id: 'coletar-pedido', kind: 'collect' as const, title: 'Coletar pedido', subtitle: 'Numero do pedido', x: 380, y: 120 },
+        { id: 'agente', kind: 'sub_agent' as const, title: 'Agente de pedidos', subtitle: 'Consulta externa', x: 640, y: 120 },
+      ],
+      edges: [
+        { source: 'inicio', target: 'coletar-pedido' },
+        { source: 'coletar-pedido', target: 'agente' },
+      ],
+    };
+    const relevance = buildToolRelevanceMap({
+      conversation: [{ role: 'user', content: 'Fluxo para status de pedido com rastreio.' }],
+      architecture,
+      tools: [orderTool],
+    });
+
+    const covered = ensureToolRelevanceCoverage(architecture, [orderTool], relevance);
+    const toolNode = covered.nodes.find((node) => node.kind === 'tool' && node.toolName === 'mcp:ecommerce:get_order_status');
+
+    expect(toolNode).toBeDefined();
+    expect(toolNode?.subtitle).toContain('MCP qualificada: mcp:ecommerce:get_order_status');
+    expect(toolNode?.instructions).toContain('Ferramenta real: mcp:ecommerce:get_order_status');
+    expect(covered.edges).toEqual(expect.arrayContaining([
+      { source: 'coletar-pedido', target: toolNode?.id },
+    ]));
+  });
+
+  it('builds deterministic fallback architecture with order/protocol collection instead of generic lead fields', () => {
+    const fallback = buildFallbackArchitecture({
+      conversation: [
+        { role: 'user', content: 'Crie um fluxo para consultar status de pedido e rastreio pelo protocolo.' },
+      ],
+      currentSystemPrompt: null,
+    }, new Error('invalid architecture'));
+
+    const triage = fallback.nodes.find((node) => node.id === 'triagem');
+    const orderRoute = triage?.routes?.find((route) => route.id === 'status_pedido');
+    const orderCollect = fallback.nodes.find((node) => node.id === 'coleta-pedido');
+
+    expect(orderRoute?.targetNodeId).toBe('coleta-pedido');
+    expect(orderCollect?.kind).toBe('collect');
+    expect(orderCollect?.formFields?.map((field) => field.fieldKey)).toContain('order_or_request_id');
+    expect(fallback.nodes.find((node) => node.id === 'coleta-dados')).toBeUndefined();
+  });
+
+  it('builds deterministic fallback architecture with scheduling-specific collection', () => {
+    const fallback = buildFallbackArchitecture({
+      conversation: [
+        { role: 'user', content: 'Crie um fluxo para agendar e remarcar visitas com horario disponivel.' },
+      ],
+      currentSystemPrompt: null,
+    }, new Error('invalid architecture'));
+
+    const triage = fallback.nodes.find((node) => node.id === 'triagem');
+    const schedulingRoute = triage?.routes?.find((route) => route.id === 'agendamento');
+    const schedulingCollect = fallback.nodes.find((node) => node.id === 'coleta-agendamento');
+
+    expect(schedulingRoute?.targetNodeId).toBe('coleta-agendamento');
+    expect(schedulingCollect?.kind).toBe('collect');
+    expect(schedulingCollect?.formFields?.map((field) => field.fieldKey)).toEqual(expect.arrayContaining([
+      'date',
+      'time',
+      'objetivo',
+    ]));
+  });
+
   it('respects an explicit request for a flow without knowledge base', () => {
     const architecture = {
       summary: 'Flow sem base de conhecimento.',
@@ -403,6 +854,59 @@ describe('autopilot flow builder AI sanitizer', () => {
     expect(proposal.flowGraph.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'switch-wifi', target: 'coletar-wifi' }),
       expect.objectContaining({ source: 'switch-wifi', target: fallbackTarget?.id, routeId: 'outro' }),
+    ]));
+  });
+
+  it('repairs decision routes that point to knowledge blocks before creating edges', () => {
+    const proposal = sanitizeAutopilotFlowProposal({
+      summary: 'Flow com rota quebrada para knowledge.',
+      systemPrompt: 'Use @triagem e responda com @agente.',
+      nodes: [
+        { id: 'inicio', kind: 'start', title: 'Inicio', subtitle: 'Entrada', x: 100, y: 100 },
+        {
+          id: 'triagem',
+          kind: 'decision',
+          title: 'Triagem',
+          subtitle: 'Escolher rota',
+          x: 320,
+          y: 100,
+          switchMode: 'ai',
+          fallbackRouteId: 'fallback',
+          routes: [
+            {
+              id: 'duvida',
+              label: 'Duvida',
+              description: 'Cliente tem uma pergunta que depende da base.',
+              targetNodeId: 'base',
+            },
+            {
+              id: 'fallback',
+              label: 'Fallback',
+              description: 'Baixa confianca ou outro assunto.',
+              targetNodeId: 'base',
+            },
+          ],
+        },
+        { id: 'base', kind: 'knowledge', title: 'Base', subtitle: 'RAG', x: 540, y: 100 },
+        { id: 'agente', kind: 'sub_agent', title: 'Agente', subtitle: 'Responder', x: 760, y: 100 },
+      ],
+      edges: [
+        { source: 'inicio', target: 'triagem' },
+        { source: 'triagem', target: 'base', routeId: 'duvida' },
+        { source: 'base', target: 'agente' },
+      ],
+    }, []);
+
+    const triagem = proposal.flowGraph.nodes.find((node) => node.id === 'triagem');
+    const routeTargetId = triagem?.config?.routes?.find((route) => route.id === 'duvida')?.targetNodeId;
+
+    expect(routeTargetId).toBe('agente');
+    expect(proposal.flowGraph.edges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'triagem', target: 'base' }),
+    ]));
+    expect(proposal.flowGraph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'triagem', target: 'agente', routeId: 'duvida' }),
+      expect.objectContaining({ source: 'base', target: 'agente' }),
     ]));
   });
 

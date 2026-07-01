@@ -7,6 +7,7 @@ import type { Role, Permission } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { ensurePermissionsSeed } from '@/lib/permissions-seed';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 const DEFAULT_MEMBER_PERMISSIONS = [
     'crm:view',
@@ -18,14 +19,6 @@ const DEFAULT_MEMBER_PERMISSIONS = [
     'inbox:access',
     'shortcuts:manage'
 ];
-
-// Helper function to check for admin permissions
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    const res = await db.query(`
-        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
-    `, [userId, workspaceId]);
-    return (res.rowCount || 0) > 0;
-}
 
 async function ensureWorkspaceRoles(workspaceId: string) {
     const workspaceRes = await db.query('SELECT owner_id FROM workspaces WHERE id = $1', [workspaceId]);
@@ -103,7 +96,7 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { roles: [], permissions: [], error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, workspaceId, 'permissions:view')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'permissions:view')) {
         return { roles: [], permissions: [], error: "Acesso não autorizado." };
     }
 
@@ -153,7 +146,7 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
         }
         const { workspace_id: workspaceId, name, is_default: isDefault } = roleRes.rows[0];
 
-        if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
+        if (!await hasWorkspacePermission(user.id, workspaceId, 'permissions:edit')) {
             return { success: false, error: "Você não tem permissão para editar papéis." };
         }
 
@@ -189,7 +182,7 @@ export async function createRoleAction(prevState: any, formData: FormData): Prom
         return { success: false, error: "Nome do papel e ID do workspace são obrigatórios." };
     }
 
-    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para criar papéis." };
     }
 
@@ -224,11 +217,14 @@ export async function updateRoleAction(prevState: any, formData: FormData): Prom
         return { success: false, error: "ID do papel, nome e ID do workspace são obrigatórios." };
     }
 
-    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para editar papéis." };
     }
 
-    const roleCheck = await db.query('SELECT name FROM roles WHERE id = $1', [roleId]);
+    const roleCheck = await db.query('SELECT name FROM roles WHERE id = $1 AND workspace_id = $2', [roleId, workspaceId]);
+    if ((roleCheck.rowCount ?? 0) === 0) {
+        return { success: false, error: "Papel não encontrado neste workspace." };
+    }
     if (roleCheck.rows[0]?.name === 'Administrador') {
         return { success: false, error: "Não é possível editar o papel de Administrador." };
     }
@@ -251,12 +247,18 @@ export async function deleteRoleAction(roleId: string, workspaceId: string): Pro
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, workspaceId, 'permissions:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'permissions:edit')) {
         return { success: false, error: "Você não tem permissão para remover papéis." };
     }
 
     try {
-        const roleCheck = await db.query('SELECT name, is_default FROM roles WHERE id = $1', [roleId]);
+        const roleCheck = await db.query(
+            'SELECT name, is_default FROM roles WHERE id = $1 AND workspace_id = $2',
+            [roleId, workspaceId]
+        );
+        if ((roleCheck.rowCount ?? 0) === 0) {
+            return { success: false, error: "Papel não encontrado neste workspace." };
+        }
         if (roleCheck.rows[0]?.name === 'Administrador' || roleCheck.rows[0]?.is_default) {
             return { success: false, error: "Não é possível remover papéis padrão ou o papel de Administrador." };
         }

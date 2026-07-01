@@ -6,21 +6,14 @@ import type { Team, User, BusinessHour, Role, ScheduleException } from '@/lib/ty
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
-
-// Helper function to check for admin permissions
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    const res = await db.query(`
-        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
-    `, [userId, workspaceId]);
-    return (res.rowCount || 0) > 0;
-}
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 export async function getTeams(workspaceId: string): Promise<{ teams: Team[], error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { teams: [], error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, workspaceId, 'teams:view')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:view')) {
         return { teams: [], error: "Acesso não autorizado." };
     }
 
@@ -94,13 +87,22 @@ export async function createTeam(data: { workspaceId: string, name: string, role
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { team: null, error: "Usuário não autenticado." };
 
-    if (!await hasPermission(user.id, data.workspaceId, 'teams:edit')) {
+    if (!await hasWorkspacePermission(user.id, data.workspaceId, 'teams:edit')) {
         return { team: null, error: "Você não tem permissão para criar equipes." };
     }
 
     const client = await db.connect();
     try {
         await client.query('BEGIN');
+
+        const roleRes = await client.query(
+            'SELECT 1 FROM roles WHERE id = $1 AND workspace_id = $2',
+            [data.roleId, data.workspaceId]
+        );
+        if ((roleRes.rowCount ?? 0) === 0) {
+            await client.query('ROLLBACK');
+            return { team: null, error: 'O papel selecionado não pertence a este workspace.' };
+        }
 
         const teamRes = await client.query(
             'INSERT INTO teams (workspace_id, name, role_id, owner_id) VALUES ($1, $2, $3, $4) RETURNING id, name, color, role_id as "roleId", tag_id as "tagId", COALESCE(agent_routing_config, \'{}\'::jsonb) as "agentRoutingConfig"',
@@ -158,11 +160,11 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
+    const teamRes = await db.query('SELECT workspace_id, role_id FROM teams WHERE id = $1', [teamId]);
     if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
 
-    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:edit')) {
         return { success: false, error: "Você não tem permissão para editar equipes." };
     }
 
@@ -170,6 +172,25 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
         const fields = Object.keys(data) as (keyof typeof data)[];
         if (fields.length === 0) {
             return { success: true }; // Nothing to update
+        }
+
+        if (data.roleId) {
+            const roleRes = await db.query(
+                'SELECT 1 FROM roles WHERE id = $1 AND workspace_id = $2',
+                [data.roleId, workspaceId]
+            );
+            if ((roleRes.rowCount ?? 0) === 0) {
+                return { success: false, error: 'O papel selecionado não pertence a este workspace.' };
+            }
+        }
+        if (data.tagId && data.tagId !== 'no-tag') {
+            const tagRes = await db.query(
+                'SELECT 1 FROM tags WHERE id = $1 AND workspace_id = $2',
+                [data.tagId, workspaceId]
+            );
+            if ((tagRes.rowCount ?? 0) === 0) {
+                return { success: false, error: 'A tag selecionada não pertence a este workspace.' };
+            }
         }
 
         // Map JS-style keys to DB-style keys
@@ -210,7 +231,31 @@ export async function updateTeam(teamId: string, data: Partial<Pick<Team, 'name'
 
         const query = `UPDATE teams SET ${setClauses} WHERE id = $${fields.length + 1}`;
 
-        await db.query(query, [...values, teamId]);
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query(query, [...values, teamId]);
+
+            if (data.roleId) {
+                await client.query(
+                    `UPDATE user_workspace_roles uwr
+                     SET role_id = $1
+                     FROM team_members tm
+                     WHERE tm.team_id = $2
+                       AND tm.user_id = uwr.user_id
+                       AND uwr.workspace_id = $3
+                       AND uwr.user_id <> (SELECT owner_id FROM workspaces WHERE id = $3)`,
+                    [data.roleId, teamId, workspaceId]
+                );
+            }
+
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
 
         return { success: true };
     } catch (error) {
@@ -228,7 +273,7 @@ export async function deleteTeam(teamId: string): Promise<{ success: boolean; er
     if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
 
-    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:edit')) {
         return { success: false, error: "Você não tem permissão para remover equipes." };
     }
 
@@ -247,16 +292,46 @@ export async function addTeamMember(teamId: string, userId: string): Promise<{ s
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
+    const teamRes = await db.query('SELECT workspace_id, role_id FROM teams WHERE id = $1', [teamId]);
     if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
 
-    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:edit')) {
         return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
     }
 
     try {
-        await db.query('INSERT INTO team_members (team_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [teamId, userId]);
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+            const memberRes = await client.query(
+                'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2',
+                [userId, workspaceId]
+            );
+            if ((memberRes.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                return { success: false, error: 'O usuário não pertence a este workspace.' };
+            }
+
+            await client.query(
+                'INSERT INTO team_members (team_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [teamId, userId]
+            );
+            await client.query(
+                `UPDATE user_workspace_roles
+                 SET role_id = $1
+                 WHERE user_id = $2
+                   AND workspace_id = $3
+                   AND user_id <> (SELECT owner_id FROM workspaces WHERE id = $3)`,
+                [teamRes.rows[0].role_id, userId, workspaceId]
+            );
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
         return { success: true };
     } catch (error) {
         console.error("Erro ao adicionar membro:", error);
@@ -273,12 +348,48 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
     if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
 
-    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:edit')) {
         return { success: false, error: "Você não tem permissão para gerenciar membros da equipe." };
     }
 
     try {
-        await db.query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [teamId, userId]);
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [teamId, userId]);
+            await client.query(
+                `UPDATE user_workspace_roles uwr
+                 SET role_id = COALESCE(
+                     (
+                         SELECT t.role_id
+                         FROM team_members tm
+                         JOIN teams t ON t.id = tm.team_id
+                         WHERE tm.user_id = $1
+                           AND t.workspace_id = $2
+                         ORDER BY t.name
+                         LIMIT 1
+                     ),
+                     (
+                         SELECT r.id
+                         FROM roles r
+                         WHERE r.workspace_id = $2
+                           AND r.is_default = TRUE
+                         LIMIT 1
+                     ),
+                     uwr.role_id
+                 )
+                 WHERE uwr.user_id = $1
+                   AND uwr.workspace_id = $2
+                   AND uwr.user_id <> (SELECT owner_id FROM workspaces WHERE id = $2)`,
+                [userId, workspaceId]
+            );
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
         return { success: true };
     } catch (error) {
         console.error("Erro ao remover membro:", error);
@@ -295,7 +406,7 @@ export async function updateBusinessHours(teamId: string, businessHourId: string
     if ((teamRes.rowCount || 0) === 0) return { success: false, error: "Equipe não encontrada." };
     const workspaceId = teamRes.rows[0].workspace_id;
 
-    if (!await hasPermission(user.id, workspaceId, 'teams:edit')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:edit')) {
         return { success: false, error: "Você não tem permissão para editar horários." };
     }
 
@@ -329,7 +440,7 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
     if (!user) return { teams: [], error: "Usuário não autenticado." };
 
     // You might want to add a permission check here as well, e.g., 'teams:view'
-    if (!await hasPermission(user.id, workspaceId, 'teams:view')) {
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:view')) {
         return { teams: [], error: "Acesso não autorizado." };
     }
 
@@ -385,7 +496,13 @@ export async function createScheduleException(
     if (!user) return { success: false, error: 'Usuário não autenticado.' };
 
     try {
-        // We should check permissions here too
+        const teamRes = await db.query('SELECT workspace_id FROM teams WHERE id = $1', [teamId]);
+        const workspaceId = teamRes.rows[0]?.workspace_id;
+        if (!workspaceId) return { success: false, error: 'Equipe não encontrada.' };
+        if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:edit')) {
+            return { success: false, error: 'Você não tem permissão para editar horários.' };
+        }
+
         await db.query(
             `INSERT INTO schedule_exceptions (team_id, date, description, is_closed, start_time, end_time)
        VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -411,7 +528,19 @@ export async function deleteScheduleException(exceptionId: string): Promise<{ su
     if (!user) return { success: false, error: 'Usuário não autenticado.' };
 
     try {
-        // We should check permissions here too
+        const exceptionRes = await db.query(
+            `SELECT t.workspace_id
+             FROM schedule_exceptions se
+             JOIN teams t ON t.id = se.team_id
+             WHERE se.id = $1`,
+            [exceptionId]
+        );
+        const workspaceId = exceptionRes.rows[0]?.workspace_id;
+        if (!workspaceId) return { success: false, error: 'Exceção não encontrada.' };
+        if (!await hasWorkspacePermission(user.id, workspaceId, 'teams:edit')) {
+            return { success: false, error: 'Você não tem permissão para editar horários.' };
+        }
+
         await db.query('DELETE FROM schedule_exceptions WHERE id = $1', [exceptionId]);
         return { success: true };
     } catch (error: any) {

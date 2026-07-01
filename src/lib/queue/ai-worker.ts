@@ -1,5 +1,5 @@
 import { DIALOGY_AI_QUEUE_NAME, getAiQueueWorkerConcurrency } from './config';
-import { handleAiQueueJob } from './ai-handlers';
+import { handleAiQueueJob, handleAiQueueJobFailure } from './ai-handlers';
 import { createQueueWorkerRuntime } from './worker-runtime';
 
 export function createAiQueueWorker() {
@@ -13,5 +13,6 @@ export function createAiQueueWorker() {
     concurrency: getAiQueueWorkerConcurrency(),
     workerId,
     processor: handleAiQueueJob,
+    onFailure: handleAiQueueJobFailure,
   });
 }

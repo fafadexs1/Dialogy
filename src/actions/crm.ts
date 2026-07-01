@@ -23,16 +23,10 @@ import {
     buildWhatsappLookupJids,
     normalizeWhatsappJid as normalizeWhatsappContactJid,
 } from '@/lib/whatsapp/contact-identity';
-
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    const res = await db.query(`
-        SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2
-    `, [userId, workspaceId]);
-    return (res.rowCount || 0) > 0;
-}
+import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
 
 
-import { buildCountQuery, buildSegmentQuery, CriteriaGroup } from '@/lib/crm-query-builder';
+import { buildCountQuery, buildSegmentQuery, combineSegmentCriteria, CriteriaGroup } from '@/lib/crm-query-builder';
 import { Segment } from '@/lib/types';
 
 function normalizeWhatsappJid(value?: string | null): string | null {
@@ -57,12 +51,79 @@ function matchesConversionValue(expected: string | null | undefined, candidate: 
     return normalizeComparableValue(expectedText) === normalizeComparableValue(candidateText);
 }
 
+type QueryClient = Pick<typeof db, 'query'>;
+
+async function getContactIdsForCustomFieldSave(
+    client: QueryClient,
+    workspaceId: string,
+    contactId: string
+): Promise<string[]> {
+    const res = await client.query(
+        `
+        WITH target_contact AS (
+            SELECT id, workspace_id, phone_number_jid, phone_canonical
+            FROM contacts
+            WHERE id = $1
+              AND workspace_id = $2
+            LIMIT 1
+        )
+        SELECT DISTINCT
+            c.id,
+            CASE WHEN c.id = $1 THEN 0 ELSE 1 END AS sort_order
+        FROM contacts c
+        JOIN target_contact tc
+          ON tc.workspace_id = c.workspace_id
+        WHERE c.id = tc.id
+           OR (
+             tc.phone_canonical IS NOT NULL
+             AND c.phone_canonical IS NOT NULL
+             AND c.phone_canonical = tc.phone_canonical
+           )
+           OR (
+             NULLIF(tc.phone_number_jid, '') IS NOT NULL
+             AND NULLIF(c.phone_number_jid, '') IS NOT NULL
+             AND c.phone_number_jid = tc.phone_number_jid
+           )
+        ORDER BY sort_order, c.id
+        `,
+        [contactId, workspaceId]
+    );
+
+    const contactIds = res.rows.map((row) => String(row.id)).filter(Boolean);
+    return contactIds.length > 0 ? contactIds : [contactId];
+}
+
+async function replaceContactCustomFieldValues(
+    client: QueryClient,
+    contactIds: string[],
+    customFields: Record<string, string>
+) {
+    if (contactIds.length === 0) return;
+
+    await client.query(
+        'DELETE FROM contact_custom_field_values WHERE contact_id = ANY($1::uuid[])',
+        [contactIds]
+    );
+
+    for (const targetContactId of contactIds) {
+        for (const [fieldId, value] of Object.entries(customFields)) {
+            if (!value) continue;
+
+            await client.query(
+                'INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)',
+                [targetContactId, fieldId, value]
+            );
+        }
+    }
+}
+
 export async function getContacts(
     workspaceId: string,
     params: {
         page?: number;
         limit?: number;
         segmentId?: string;
+        segmentIds?: string[];
         criteria?: CriteriaGroup;
         search?: string;
     } = {}
@@ -78,15 +139,28 @@ export async function getContacts(
     try {
         let criteria = params.criteria;
 
-        // If segmentId provided, fetch criteria from DB
-        if (params.segmentId) {
-            const segmentRes = await db.query('SELECT criteria FROM crm_segments WHERE id = $1 AND workspace_id = $2', [params.segmentId, workspaceId]);
-            if (segmentRes.rows.length > 0) {
-                const segmentCriteria = segmentRes.rows[0].criteria as CriteriaGroup | undefined;
-                criteria = criteria && segmentCriteria
-                    ? { operator: 'AND', conditions: [segmentCriteria, criteria] }
-                    : segmentCriteria || criteria;
+        const requestedSegmentIds = [
+            ...(params.segmentId ? [params.segmentId] : []),
+            ...(params.segmentIds || []),
+        ].filter((segmentId, index, list) => segmentId && list.indexOf(segmentId) === index);
+
+        if (requestedSegmentIds.length > 0) {
+            const segmentRes = await db.query(
+                `SELECT criteria
+                 FROM crm_segments
+                 WHERE workspace_id = $1
+                   AND id = ANY($2::uuid[])`,
+                [workspaceId, requestedSegmentIds]
+            );
+            if (segmentRes.rows.length !== requestedSegmentIds.length) {
+                return { contacts: null, total: 0, error: 'Uma ou mais listas não foram encontradas.' };
             }
+            const segmentCriteria = combineSegmentCriteria(
+                segmentRes.rows.map(row => row.criteria as CriteriaGroup)
+            );
+            criteria = criteria && segmentCriteria
+                ? { operator: 'AND', conditions: [segmentCriteria, criteria] }
+                : segmentCriteria || criteria;
         }
 
         const page = params.page || 1;
@@ -321,6 +395,7 @@ export const saveContactAction = withDebug(
             }
 
             if (!contactId) throw new Error('Falha ao obter o ID do contato.');
+            const customFieldContactIds = await getContactIdsForCustomFieldSave(client, workspaceId, contactId);
 
             // Fetch current custom fields to track changes before updating
             const currentFieldsRes = await client.query(
@@ -350,15 +425,7 @@ export const saveContactAction = withDebug(
             }
 
             // Update custom fields
-            await client.query('DELETE FROM contact_custom_field_values WHERE contact_id = $1', [contactId]);
-            for (const [fieldId, value] of Object.entries(customFields)) {
-                if (value) { // Only save if there's a value
-                    await client.query(
-                        'INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)',
-                        [contactId, fieldId, value]
-                    );
-                }
-            }
+            await replaceContactCustomFieldValues(client, customFieldContactIds, customFields);
 
             // Fetch the updated contact to return to frontend
             const updatedContactRes = await client.query(`

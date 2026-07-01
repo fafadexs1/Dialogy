@@ -504,7 +504,7 @@ export default function AnalyticsPage() {
     setIsLoading(true);
     Promise.all([
       getAnalyticsData(user.activeWorkspaceId, filters, dateRange),
-      getAgentPerformance(user.activeWorkspaceId, { teamId: filters.teamId }, dateRange),
+      getAgentPerformance(user.activeWorkspaceId, filters, dateRange),
       getConversionMetrics(user.activeWorkspaceId, filters, dateRange, conversionCounterMode),
     ])
       .then(([analytics, performance, conversions]) => {

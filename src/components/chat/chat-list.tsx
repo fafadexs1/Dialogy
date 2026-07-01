@@ -744,7 +744,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           isSelected ? "border-primary/55 shadow-[0_0_18px_-8px_rgba(25,245,178,0.75)]" : "border-border/80",
           hasUnread && !isSelected ? "border-blue-500/45" : ""
         )}>
-          <AvatarImage src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || 'Contato'} data-ai-hint="person" />
+          <AvatarImage fallbackOnBlank src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || 'Contato'} data-ai-hint="person" />
           <AvatarFallback className="bg-muted text-muted-foreground">{(chat.contact?.name || '?').charAt(0)}</AvatarFallback>
         </Avatar>
         {(() => {
@@ -983,6 +983,7 @@ interface ChatListProps {
   isForwarding?: boolean;
   selectedForwardingChatIds?: Set<string>;
   onToggleForwardSelection?: (chatId: string) => void;
+  onSelectAllForwarding?: (chatIds: string[]) => void;
   onConfirmForward?: () => void;
   onCancelForward?: () => void;
   onPrefetch?: (chatId: string) => void;
@@ -996,7 +997,7 @@ interface ChatListProps {
 type ChatListTabId = 'robo' | 'gerais' | 'atendimentos' | 'encerrados';
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onSelectAllForwarding, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const visibleOnlineAgents = useMemo(
@@ -1381,6 +1382,18 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     return getBaseChatsForTab(activeTab).filter(filterChatByControls);
   }, [activeTab, getBaseChatsForTab, filterChatByControls, showMarketing]);
 
+  const areAllForwardingChatsSelected = useMemo(
+    () => (
+      filteredChats.length > 0 &&
+      filteredChats.every((chat) => selectedForwardingChatIds?.has(chat.id))
+    ),
+    [filteredChats, selectedForwardingChatIds]
+  );
+
+  const handleSelectAllForwarding = useCallback(() => {
+    onSelectAllForwarding?.(filteredChats.map((chat) => chat.id));
+  }, [filteredChats, onSelectAllForwarding]);
+
   const filteredTeamsBySearch = useMemo(() => {
     const query = teamSearchTerm.trim().toLowerCase();
     if (!query) return teams;
@@ -1670,7 +1683,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               <span className="flex w-full items-center justify-center px-2">
                 <span className="inline-flex max-w-full items-center justify-center gap-1">
                   {isFiltering && ownershipFilter === 'mine' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
-                  <span className="block truncate text-center">Minhas</span>
+                  <span className="block truncate text-center">Meus</span>
                 </span>
               </span>
             </Badge>
@@ -1758,7 +1771,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       onClick={() => setSelectedAgent(agent.user)}
                     >
                       <Avatar className="h-8 w-8 border border-emerald-500/70 shadow-[0_0_0_1px_rgba(16,185,129,0.2)]">
-                        <AvatarImage src={agent.user.avatar} className="object-cover" />
+                        <AvatarImage fallbackOnBlank src={agent.user.avatar} className="object-cover" />
                         <AvatarFallback className="bg-emerald-900 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
                       </Avatar>
                       <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#22C05C] border border-background"></span>
@@ -1769,7 +1782,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] opacity-10" />
                       <div className="flex items-center gap-3 relative z-10">
                         <Avatar className="h-12 w-12 border-2 border-white/10 shadow-lg">
-                          <AvatarImage src={agent.user.avatar} />
+                          <AvatarImage fallbackOnBlank src={agent.user.avatar} />
                           <AvatarFallback className="bg-green-700 text-white font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div>
@@ -1837,7 +1850,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         onClick={() => setSelectedAgent(agent.user)}
                       >
                         <Avatar className="h-7 w-7 border border-border shrink-0">
-                          <AvatarImage src={agent.user.avatar} />
+                          <AvatarImage fallbackOnBlank src={agent.user.avatar} />
                           <AvatarFallback className="text-[10px]">{agent.user.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div className="min-w-0 flex-1">
@@ -2041,6 +2054,17 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               <span className="text-sm text-foreground font-medium">
                 {selectedForwardingChatIds?.size || 0} selecionados
               </span>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto gap-1.5 p-0 text-primary"
+                onClick={handleSelectAllForwarding}
+                disabled={filteredChats.length === 0 || areAllForwardingChatsSelected}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {areAllForwardingChatsSelected ? 'Todos selecionados' : 'Enviar para todos'}
+              </Button>
             </div>
             <div className="flex gap-2">
               <Button

@@ -10,7 +10,12 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { getGlobalAlertAction, saveGlobalAlertAction } from '@/actions/system-alerts';
-import type { GlobalAlertConfig } from '@/lib/system-alerts';
+import {
+    GLOBAL_ALERT_BROWSER_CHANNEL,
+    GLOBAL_ALERT_BROWSER_STORAGE_KEY,
+    GlobalAlertSchema,
+    type GlobalAlertConfig,
+} from '@/lib/system-alerts';
 import { Megaphone, Save, Info, AlertTriangle, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -44,6 +49,23 @@ export default function SuperAdminAlertsPage() {
         try {
             const res = await saveGlobalAlertAction(config);
             if (res.success) {
+                const parsedConfig = GlobalAlertSchema.safeParse(config);
+                if (parsedConfig.success) {
+                    const message = {
+                        alert: parsedConfig.data,
+                        updatedAt: new Date().toISOString(),
+                    };
+                    try {
+                        if ('BroadcastChannel' in window) {
+                            const channel = new BroadcastChannel(GLOBAL_ALERT_BROWSER_CHANNEL);
+                            channel.postMessage(message);
+                            channel.close();
+                        }
+                        localStorage.setItem(GLOBAL_ALERT_BROWSER_STORAGE_KEY, JSON.stringify(message));
+                    } catch (error) {
+                        console.warn('[GLOBAL_ALERT] Failed to notify open tabs:', error);
+                    }
+                }
                 toast({
                     title: 'Comunicado salvo',
                     description: 'O comunicado global foi atualizado com sucesso.',

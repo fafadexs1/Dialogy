@@ -2,6 +2,7 @@
 'use server';
 
 import { db } from '@/lib/db';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import { revalidatePath } from 'next/cache';
 import type { Campaign, CampaignChannel, CampaignDetails, CampaignRecipientDetail, CampaignTemplate } from '@/lib/types';
 import { sendAgentTemplateAction, sendAutomatedMessageAction } from './messages';
@@ -12,6 +13,11 @@ import {
     findOrCreateWhatsappContact,
     normalizeWhatsappJid,
 } from '@/lib/whatsapp/contact-identity';
+import {
+    buildSegmentAudienceQuery,
+    combineSegmentCriteria,
+    type CriteriaGroup,
+} from '@/lib/crm-query-builder';
 
 export type CampaignDeliveryTarget = {
     channel: CampaignChannel;
@@ -70,24 +76,14 @@ function buildTemplateSendComponents(template: CampaignTemplate, contactName: st
     }];
 }
 
-async function hasPermission(userId: string, workspaceId: string, permission: string): Promise<boolean> {
-    const res = await db.query(`
-        SELECT 1
-        FROM user_workspace_roles uwr
-        JOIN role_permissions rp ON uwr.role_id = rp.role_id
-        WHERE uwr.user_id = $1 AND uwr.workspace_id = $2 AND rp.permission_id = $3
-    `, [userId, workspaceId, permission]);
-    // For now, let's assume if they are part of the workspace, they can manage campaigns.
-    // Replace with a real permission like 'campaigns:manage' later.
-    const memberCheck = await db.query('SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]);
-    return (memberCheck.rowCount ?? 0) > 0;
-}
-
 
 export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Campaign[] | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { campaigns: null, error: "Usuário não autenticado." };
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'campaigns:manage')) {
+        return { campaigns: null, error: 'Você não tem permissão para visualizar campanhas.' };
+    }
 
     try {
         const res = await db.query(`
@@ -131,6 +127,9 @@ export async function getCampaignDetails(workspaceId: string, campaignId: string
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { campaign: null, error: 'Usuario nao autenticado.' };
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'campaigns:manage')) {
+        return { campaign: null, error: 'Você não tem permissão para visualizar esta campanha.' };
+    }
 
     try {
         const campaignRes = await db.query(
@@ -219,7 +218,8 @@ export async function createCampaign(
     workspaceId: string,
     delivery: CampaignDeliveryTarget | string,
     message: string,
-    contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[]
+    contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[],
+    segmentIds: string[] = []
 ): Promise<{ campaign: Campaign | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -231,8 +231,9 @@ export async function createCampaign(
     const instanceName = target.instanceName?.trim();
     const metaChannelId = target.metaChannelId?.trim();
     const destinationId = instanceName || metaChannelId;
+    const selectedSegmentIds = [...new Set(segmentIds.filter(Boolean))];
 
-    if (!workspaceId || !destinationId || !message || contactIdentifiers.length === 0) {
+    if (!workspaceId || !destinationId || !message || (contactIdentifiers.length === 0 && selectedSegmentIds.length === 0)) {
         return { campaign: null, error: 'Dados da campanha incompletos.' };
     }
     if (target.channel === 'whatsapp_cloud' && !target.template?.name) {
@@ -240,6 +241,9 @@ export async function createCampaign(
     }
     if (!target.channel.startsWith('whatsapp') && contactIdentifiers.some(contact => contact.id.startsWith('csv-'))) {
         return { campaign: null, error: 'A importacao CSV esta disponivel apenas para campanhas de WhatsApp.' };
+    }
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'campaigns:manage')) {
+        return { campaign: null, error: 'Você não tem permissão para criar campanhas neste workspace.' };
     }
 
     // --- BILLING: Check Campaign Access ---
@@ -322,6 +326,35 @@ export async function createCampaign(
             allContactIdsForCampaign.push(...crmContactIds);
         }
 
+        // Resolve the current members of the selected CRM lists on the server.
+        // This keeps campaigns accurate even when a list contains more contacts
+        // than the browser preview can display.
+        if (selectedSegmentIds.length > 0) {
+            const segmentsRes = await client.query(
+                `SELECT criteria
+                 FROM crm_segments
+                 WHERE workspace_id = $1
+                   AND id = ANY($2::uuid[])`,
+                [workspaceId, selectedSegmentIds]
+            );
+
+            if (segmentsRes.rows.length !== selectedSegmentIds.length) {
+                throw new Error('Uma ou mais listas selecionadas não foram encontradas.');
+            }
+
+            const segmentCriteria = combineSegmentCriteria(
+                segmentsRes.rows.map(row => row.criteria as CriteriaGroup)
+            );
+            const segmentContactsQuery = buildSegmentAudienceQuery(workspaceId, segmentCriteria);
+            const segmentContactsRes = await client.query(
+                segmentContactsQuery.text,
+                segmentContactsQuery.values
+            );
+            allContactIdsForCampaign.push(
+                ...segmentContactsRes.rows.map(row => String(row.id))
+            );
+        }
+
         // Handle CSV contacts: find existing by JID or create new ones
         for (const csvContact of csvContactsData) {
             if (!csvContact.phone_number_jid) continue; // Skip if no number
@@ -341,12 +374,15 @@ export async function createCampaign(
 
         // Remove duplicates and add to recipients table
         const uniqueContactIds = [...new Set(allContactIdsForCampaign)];
-        if (uniqueContactIds.length > 0) {
-            const recipientValues = uniqueContactIds.map(contactId => `('${newCampaign.id}', '${contactId}')`).join(',');
-            await client.query(
-                `INSERT INTO campaign_recipients (campaign_id, contact_id) VALUES ${recipientValues}`
-            );
+        if (uniqueContactIds.length === 0) {
+            throw new Error('As listas e contatos selecionados não possuem destinatários válidos.');
         }
+        await client.query(
+            `INSERT INTO campaign_recipients (campaign_id, contact_id)
+             SELECT $1, recipient_id
+             FROM unnest($2::uuid[]) AS recipient_id`,
+            [newCampaign.id, uniqueContactIds]
+        );
 
 
         await client.query('COMMIT');
@@ -526,7 +562,7 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
         const { workspace_id } = campaignRes.rows[0];
 
         // Permission check
-        if (!await hasPermission(user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
+        if (!await hasWorkspacePermission(user.id, workspace_id, 'campaigns:delete')) {
             return { success: false, error: 'Você não tem permissão para excluir campanhas.' };
         }
 
@@ -563,7 +599,7 @@ export async function deleteCampaigns(campaignIds: string[]): Promise<{ success:
         const { workspace_id } = campaignRes.rows[0];
 
         // Permission check
-        if (!await hasPermission(user.id, workspace_id, 'campaigns:delete')) { // Permission to be defined
+        if (!await hasWorkspacePermission(user.id, workspace_id, 'campaigns:delete')) {
             return { success: false, error: 'Você não tem permissão para excluir campanhas.' };
         }
 

@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import type { Shortcut } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 async function hasAdminPermission(userId: string, workspaceId: string): Promise<boolean> {
     const res = await db.query(`
@@ -22,6 +23,9 @@ export async function getShortcuts(workspaceId: string): Promise<{ shortcuts: Sh
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { shortcuts: null, error: "Usuário não autenticado." };
     const userId = user.id;
+    if (!await hasWorkspacePermission(userId, workspaceId, 'shortcuts:manage')) {
+        return { shortcuts: null, error: 'Você não tem permissão para acessar atalhos.' };
+    }
 
     try {
         // Fetch shortcuts:
@@ -70,6 +74,9 @@ export async function saveShortcut(prevState: any, formData: FormData): Promise<
 
     if (!name || !message || !type || !workspaceId) {
         return { success: false, error: "Todos os campos são obrigatórios." };
+    }
+    if (!await hasWorkspacePermission(userId, workspaceId, 'shortcuts:manage')) {
+        return { success: false, error: 'Você não tem permissão para gerenciar atalhos.' };
     }
 
     if (type === 'team' && !teamId) {
@@ -145,6 +152,9 @@ export async function deleteShortcut(shortcutId: string): Promise<{ success: boo
         if ((shortcutRes.rowCount || 0) === 0) return { success: false, error: "Atalho não encontrado." };
 
         const { user_id: ownerId, workspace_id: workspaceId, type } = shortcutRes.rows[0];
+        if (!await hasWorkspacePermission(userId, workspaceId, 'shortcuts:manage')) {
+            return { success: false, error: 'Você não tem permissão para gerenciar atalhos.' };
+        }
 
         // Permission check: 
         // - Global: Anyone can delete

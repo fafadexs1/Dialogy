@@ -6,6 +6,15 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 import type { McpServerConfig, McpToolConfig } from './types';
+import {
+  beginMcpCircuitRequest,
+  isMcpTransportFailure,
+  McpCircuitOpenError,
+  recordMcpCircuitFailure,
+  recordMcpCircuitSuccess,
+} from './circuit-breaker';
+import { resolveMcpToolTimeoutMs } from './tool-safety';
+import { applyMcpRuntimeEndpointOverride } from './runtime-overrides';
 
 function buildRequestInit(server: McpServerConfig): RequestInit | undefined {
   const headers = Object.fromEntries(
@@ -19,7 +28,9 @@ function buildRequestInit(server: McpServerConfig): RequestInit | undefined {
 }
 
 async function withMcpClient<T>(server: McpServerConfig, task: (client: Client) => Promise<T>): Promise<T> {
+  server = applyMcpRuntimeEndpointOverride(server);
   const client = new Client({ name: 'dialogy', version: '1.0.0' }, { capabilities: {} });
+  let circuitRequestStarted = false;
   const requestInit = buildRequestInit(server);
   const transport = (() => {
     if (server.transport === 'stdio') {
@@ -50,8 +61,41 @@ async function withMcpClient<T>(server: McpServerConfig, task: (client: Client) 
   })();
 
   try {
+    beginMcpCircuitRequest(server);
+    circuitRequestStarted = true;
     await client.connect(transport);
-    return await task(client);
+    const result = await task(client);
+    recordMcpCircuitSuccess(server);
+    return result;
+  } catch (error) {
+    if (circuitRequestStarted) {
+      if (isMcpTransportFailure(error)) {
+        recordMcpCircuitFailure(server);
+      } else {
+        recordMcpCircuitSuccess(server);
+      }
+    }
+    const cause = error && typeof error === 'object' ? (error as any).cause : null;
+    const code = String(cause?.code || (error as any)?.code || '').trim();
+    const address = String(cause?.address || '').trim();
+    const port = cause?.port != null ? String(cause.port) : '';
+    const target = server.transport === 'stdio'
+      ? server.command || server.name
+      : (() => {
+        try {
+          const url = new URL(server.url || '');
+          return `${url.protocol}//${url.host}${url.pathname}`;
+        } catch {
+          return server.name;
+        }
+      })();
+    const detail = [
+      error instanceof Error ? error.message : String(error),
+      error instanceof McpCircuitOpenError ? `retry_after_ms=${error.retryAfterMs}` : '',
+      code,
+      address && port ? `${address}:${port}` : address || port,
+    ].filter(Boolean).join(' | ');
+    throw new Error(`Falha na comunicacao com MCP "${server.name}" em ${target}: ${detail}`);
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -69,7 +113,9 @@ export function parseQualifiedMcpToolName(qualifiedName: string) {
 
 export async function listMcpServerTools(server: McpServerConfig): Promise<McpToolConfig[]> {
   return withMcpClient(server, async (client) => {
-    const result = await client.listTools(undefined, { timeout: 10000 });
+    const result = await client.listTools(undefined, {
+      timeout: Math.min(resolveMcpToolTimeoutMs(), 15000),
+    });
     return (result.tools || []).map((tool) => ({
       qualifiedName: qualifyMcpToolName(server.id, tool.name),
       serverId: server.id,
@@ -96,7 +142,7 @@ export async function callMcpServerTool(input: {
         arguments: input.arguments || {},
       },
       undefined,
-      { timeout: 10000 }
+      { timeout: resolveMcpToolTimeoutMs() }
     );
   });
 }

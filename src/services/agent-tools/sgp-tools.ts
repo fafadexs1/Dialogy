@@ -29,6 +29,28 @@ function onlyDigits(value: unknown): string {
   return String(value ?? '').replace(/\D/g, '');
 }
 
+export function getValidatedSgpContractIds(clients: any[]): Set<string> {
+  return new Set(
+    (Array.isArray(clients) ? clients : [])
+      .flatMap((client: any) => Array.isArray(client?.contratos) ? client.contratos : [])
+      .map((contract: any) => onlyDigits(getContractId(contract)))
+      .filter(Boolean)
+  );
+}
+
+export function filterSupportContractsToValidatedClients(
+  clients: any[],
+  supportContracts: any[]
+): any[] {
+  const validatedContractIds = getValidatedSgpContractIds(clients);
+  return (Array.isArray(supportContracts) ? supportContracts : []).filter((contract: any) => {
+    const contractId = onlyDigits(
+      contract?.contrato_id ?? contract?.contrato ?? contract?.id
+    );
+    return Boolean(contractId) && validatedContractIds.has(contractId);
+  });
+}
+
 function parseMaybeJson(raw: string): unknown {
   if (!raw) return null;
   try {
@@ -180,6 +202,20 @@ export async function runSgpTool(
 
   try {
     const sgp = sgpContext.data;
+    const requestedCustomerIdentifier = action.type === 'sgp_fetch_contact_panel_data'
+      ? onlyDigits(action.payload?.customerIdentifier)
+      : '';
+    if (
+      requestedCustomerIdentifier
+      && requestedCustomerIdentifier !== onlyDigits(sgp.cpf)
+    ) {
+      return {
+        toolName: action.type,
+        status: 'rejected',
+        input: action,
+        error: 'O CPF/CNPJ informado nao corresponde ao identificador cadastrado neste contato.',
+      };
+    }
 
     if (action.type === 'sgp_fetch_contracts') {
       const clients = await fetchSgpClients(sgp);
@@ -204,10 +240,16 @@ export async function runSgpTool(
       if (contractId && !/^\d+$/.test(contractId)) {
         throw new Error('contractId deve conter somente digitos.');
       }
-      const [clients, supportContracts] = await Promise.all([
-        fetchSgpClients(sgp),
-        fetchSupportContracts(sgp, contractId),
-      ]);
+      const clients = await fetchSgpClients(sgp);
+      const validatedContractIds = getValidatedSgpContractIds(clients);
+      const requestedContractFound = !contractId || validatedContractIds.has(onlyDigits(contractId));
+      const rawSupportContracts = requestedContractFound
+        ? await fetchSupportContracts(sgp, contractId)
+        : [];
+      const supportContracts = filterSupportContractsToValidatedClients(
+        clients,
+        rawSupportContracts
+      );
       const data = buildSGPContactPanelData(clients, supportContracts);
       if (!data) throw new Error('Nenhum dado SGP encontrado para este cliente.');
       return {
@@ -223,6 +265,8 @@ export async function runSgpTool(
           overdueInvoices: data.overdueInvoices,
           openInvoices: data.openInvoices,
           invoiceGroups: data.invoiceGroups,
+          requestedContractId: contractId || null,
+          requestedContractFound,
         },
       };
     }

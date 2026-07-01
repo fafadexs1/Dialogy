@@ -104,7 +104,7 @@ export function ForwardMessageDialog({ isOpen, onOpenChange, messageToForward, w
                                         }`}
                                 >
                                     <Avatar className="h-10 w-10 border border-white/10">
-                                        <AvatarImage src={chat.contact.avatar_url} />
+                                        <AvatarImage fallbackOnBlank src={chat.contact.avatar_url} />
                                         <AvatarFallback className="bg-zinc-800 text-white/70">
                                             {chat.contact.name.charAt(0)}
                                         </AvatarFallback>

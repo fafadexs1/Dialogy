@@ -11,6 +11,7 @@ import {
   type PresenceEventSource,
   type PresenceSessionSnapshot,
 } from '@/lib/presence';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { normalizeSupabaseStorageUrl } from '@/lib/storage-url';
 import type { OnlineAgent } from '@/lib/types';
 
@@ -80,6 +81,33 @@ function logPresenceMutation(input: {
       nextRecentActivityAt: input.nextState.recentActivityAt,
     })
   );
+}
+
+async function broadcastPresenceChange(input: {
+  userId: string;
+  workspaceId: string;
+  source: PresenceEventSource;
+  previousState: PresenceProjectionSnapshot;
+  nextState: PresenceProjectionSnapshot;
+}): Promise<void> {
+  if (input.previousState.isOnline === input.nextState.isOnline) {
+    return;
+  }
+
+  try {
+    await getSupabaseAdmin()
+      .channel(`workspace:${input.workspaceId}:presence`)
+      .httpSend('presence_changed', {
+        userId: input.userId,
+        workspaceId: input.workspaceId,
+        source: input.source,
+        previousIsOnline: input.previousState.isOnline,
+        isOnline: input.nextState.isOnline,
+        changedAt: new Date().toISOString(),
+      });
+  } catch (error) {
+    console.error('[PRESENCE] Failed to broadcast presence change:', error);
+  }
 }
 
 async function acquirePresenceLock(client: PoolClient, userId: string, workspaceId: string): Promise<void> {
@@ -344,6 +372,14 @@ async function mutatePresence(options: PresenceMutationOptions): Promise<void> {
       source,
       previousSessionCount,
       nextSessionCount: next.sessionCount,
+      previousState: previousProjection,
+      nextState: nextProjection,
+    });
+
+    await broadcastPresenceChange({
+      userId: options.userId,
+      workspaceId: options.workspaceId,
+      source,
       previousState: previousProjection,
       nextState: nextProjection,
     });

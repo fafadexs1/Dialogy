@@ -24,19 +24,19 @@ export function GlobalAlertBanner({ alert }: { alert: GlobalAlertConfig }) {
     const isExternalLink = hasLink && /^https?:\/\//i.test(alert.linkUrl);
 
     return (
-        <div className={cn("flex w-full items-center justify-center border-b px-4 py-2.5 text-sm font-medium z-50 shrink-0", colorStyles[alert.color])}>
-            <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center">
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="break-words">{alert.message}</span>
+        <div className={cn("z-50 flex max-h-11 min-h-7 w-full shrink-0 items-center justify-center overflow-hidden border-b px-2 py-1 text-[11px] font-medium leading-tight sm:px-3 sm:text-xs md:text-[13px]", colorStyles[alert.color])}>
+            <div className="flex min-w-0 max-w-full items-center justify-center gap-x-1.5 text-center sm:gap-x-2">
+                <Icon className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" />
+                <span className="line-clamp-2 min-w-0 break-words">{alert.message}</span>
                 {hasLink ? (
                     <a
                         href={alert.linkUrl}
                         target={isExternalLink ? '_blank' : undefined}
                         rel={isExternalLink ? 'noopener noreferrer' : undefined}
-                        className="inline-flex items-center gap-1 font-semibold underline underline-offset-4 transition-opacity hover:opacity-80"
+                        className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-semibold underline underline-offset-4 transition-opacity hover:opacity-80"
                     >
                         Saiba mais
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        <ExternalLink className="h-3 w-3 shrink-0 md:h-3.5 md:w-3.5" />
                     </a>
                 ) : null}
             </div>

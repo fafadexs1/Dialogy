@@ -7,6 +7,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Clock3,
+    Download,
     Edit,
     Eye,
     Filter,
@@ -184,6 +185,7 @@ export default function CustomerList({ user }: { user: User }) {
     const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
 
     const [loading, setLoading] = useState(true);
+    const [exportingSegmentId, setExportingSegmentId] = useState<string | null>(null);
     const [refreshKey, setRefreshKey] = useState(0);
     const [isSegmentBuilderOpen, setIsSegmentBuilderOpen] = useState(false);
 
@@ -313,6 +315,44 @@ export default function CustomerList({ user }: { user: User }) {
             toast({ title: 'Erro ao apagar lista', description: res.error, variant: 'destructive' });
         }
         setLoading(false);
+    };
+
+    const handleExportSegment = async (segment: Segment) => {
+        setExportingSegmentId(segment.id);
+        try {
+            const response = await fetch(`/api/crm/segments/${encodeURIComponent(segment.id)}/google-ads`);
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null);
+                throw new Error(payload?.error || 'Falha ao gerar o CSV.');
+            }
+
+            const blob = await response.blob();
+            const disposition = response.headers.get('content-disposition') || '';
+            const filename = disposition.match(/filename="([^"]+)"/i)?.[1] || 'lista-crm-google-ads.csv';
+            const downloadUrl = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = downloadUrl;
+            anchor.download = filename;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(downloadUrl);
+
+            const exportedCount = response.headers.get('x-exported-contacts');
+            const skippedCount = Number(response.headers.get('x-skipped-contacts') || 0);
+            toast({
+                title: 'CSV do Google Ads gerado',
+                description: `${exportedCount || 'Os'} contato(s) exportado(s)${skippedCount > 0 ? `; ${skippedCount} sem e-mail ou telefone foram ignorados.` : '.'}`,
+            });
+        } catch (error) {
+            toast({
+                title: 'Erro ao exportar lista',
+                description: error instanceof Error ? error.message : 'Não foi possível gerar o CSV.',
+                variant: 'destructive',
+            });
+        } finally {
+            setExportingSegmentId(null);
+        }
     };
 
     const handleAction = useCallback(async (action: ContactAction, contact: Contact) => {
@@ -484,6 +524,19 @@ export default function CustomerList({ user }: { user: User }) {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
+                            {selectedSegment && (
+                                <Button
+                                    variant="outline"
+                                    className="h-10 rounded-full border-white/10 bg-white/[0.04] px-4 text-zinc-200 hover:bg-white/10 hover:text-white"
+                                    disabled={exportingSegmentId === selectedSegment.id}
+                                    onClick={() => handleExportSegment(selectedSegment)}
+                                >
+                                    {exportingSegmentId === selectedSegment.id
+                                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        : <Download className="mr-2 h-4 w-4" />}
+                                    Exportar para Google Ads
+                                </Button>
+                            )}
                             <Button
                                 variant="outline"
                                 className="h-10 rounded-full border-emerald-400/25 bg-emerald-400/10 px-4 text-emerald-100 hover:bg-emerald-400/20 hover:text-white"

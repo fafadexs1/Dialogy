@@ -3,13 +3,14 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
-import { getContacts } from '@/actions/crm';
+import { getContacts, getSegments } from '@/actions/crm';
 import { findWhatsappTemplates, getEvolutionApiInstances } from '@/actions/evolution-api';
 import { getTelegramInstances as fetchTelegramInstances } from '@/actions/telegram';
 import { listMetaChannels as fetchMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
-import type { CampaignChannel, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, TelegramBotInstance, User } from '@/lib/types';
+import type { CampaignChannel, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ListFilter } from 'lucide-react';
 
 // ---------------------------------------------------------
 // Constantes e utilitários
@@ -226,6 +227,9 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const [crmContacts, setCrmContacts] = useState<ContactType[]>([]);
   const [visibleCrmContacts, setVisibleCrmContacts] = useState<ContactType[]>([]);
   const [csvContacts, setCsvContacts] = useState<ContactType[]>([]);
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [segmentPreviewContacts, setSegmentPreviewContacts] = useState<ContactType[]>([]);
+  const [segmentTotal, setSegmentTotal] = useState(0);
   const [instances, setInstances] = useState<Omit<EvolutionInstance, 'status' | 'qrCode'>[]>([]);
   const [telegramInstances, setTelegramInstances] = useState<Omit<TelegramBotInstance, 'status'>[]>([]);
   const [metaChannels, setMetaChannels] = useState<MetaChannel[]>([]);
@@ -234,10 +238,12 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
 
   // Loading states
   const [loadingCrm, setLoadingCrm] = useState(true);
+  const [loadingSegmentAudience, setLoadingSegmentAudience] = useState(false);
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [selectedCrmIds, setSelectedCrmIds] = useState<Set<string>>(() => new Set<string>());
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set<string>());
 
   // Fetch initial data
   useEffect(() => {
@@ -261,6 +267,18 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
         toast({ title: 'Erro ao carregar canais', description: 'N\u00e3o foi poss\u00edvel buscar os canais conectados.', variant: 'destructive' });
       })
       .finally(() => setLoadingInstances(false));
+
+    getSegments(user.activeWorkspaceId)
+      .then(result => {
+        setSegments(result.segments || []);
+        if (result.error) {
+          toast({ title: 'Erro ao carregar listas', description: result.error, variant: 'destructive' });
+        }
+      })
+      .catch((error) => {
+        console.error('[NEW_CAMPAIGN] Falha ao buscar listas', error);
+        toast({ title: 'Erro ao carregar listas', description: 'Não foi possível buscar as listas do CRM.', variant: 'destructive' });
+      });
 
   }, [user?.activeWorkspaceId, toast]);
 
@@ -299,6 +317,42 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       window.clearTimeout(timeoutId);
     };
   }, [query, toast, user?.activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!user?.activeWorkspaceId || selectedSegmentIds.size === 0) {
+      setSegmentPreviewContacts([]);
+      setSegmentTotal(0);
+      setLoadingSegmentAudience(false);
+      return;
+    }
+
+    let ignored = false;
+    setLoadingSegmentAudience(true);
+    getContacts(user.activeWorkspaceId, {
+      segmentIds: [...selectedSegmentIds],
+      limit: 50,
+    })
+      .then(result => {
+        if (ignored) return;
+        setSegmentPreviewContacts(result.contacts || []);
+        setSegmentTotal(result.total);
+        if (result.error) {
+          toast({ title: 'Erro ao carregar público', description: result.error, variant: 'destructive' });
+        }
+      })
+      .catch((error) => {
+        if (ignored) return;
+        console.error('[NEW_CAMPAIGN] Falha ao resolver listas', error);
+        toast({ title: 'Erro ao carregar público', description: 'Não foi possível calcular os contatos das listas.', variant: 'destructive' });
+      })
+      .finally(() => {
+        if (!ignored) setLoadingSegmentAudience(false);
+      });
+
+    return () => {
+      ignored = true;
+    };
+  }, [selectedSegmentIds, toast, user?.activeWorkspaceId]);
 
   const channelDestinations = useMemo<CampaignDestination[]>(() => {
     if (deliveryChannel === 'whatsapp_baileys') {
@@ -360,7 +414,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
 
   const filteredCrmContacts = visibleCrmContacts;
 
-  const selectedCount = selectedCrmIds.size + csvContacts.length;
+  const selectedCount = selectedCrmIds.size + segmentTotal + csvContacts.length;
   const canProceed = Boolean(campaignMessage.trim() && destinationId && selectedCount > 0 && (deliveryChannel !== 'whatsapp_cloud' || selectedTemplate));
 
   function toggleSelect(id: string) {
@@ -382,6 +436,14 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
           next.add(contact.id);
         }
       });
+      return next;
+    });
+  }
+
+  function toggleSegment(segmentId: string) {
+    setSelectedSegmentIds(prev => {
+      const next = new Set(prev);
+      next.has(segmentId) ? next.delete(segmentId) : next.add(segmentId);
       return next;
     });
   }
@@ -417,7 +479,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       instanceName: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? undefined : destinationId,
       metaChannelId: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? destinationId : undefined,
       template: selectedTemplate,
-    }, campaignMessage, allContactsToSend);
+    }, campaignMessage, allContactsToSend, [...selectedSegmentIds]);
 
     if (result.error) {
       toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
@@ -564,7 +626,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                   </p>
                 )}
                 <div className="w-full">
-                  <div role="tablist" aria-orientation="horizontal" className="grid w-full grid-cols-2 h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
+                  <div role="tablist" aria-orientation="horizontal" className="grid w-full grid-cols-3 min-h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
                     <button
                       role="tab"
                       aria-selected={tab === "crm"}
@@ -575,6 +637,17 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                       onClick={() => setTab("crm")}
                     >
                       <Icon.Users className="mr-2 h-4 w-4" /> Selecionar do CRM ({selectedCrmIds.size})
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={tab === "lists"}
+                      className={cx(
+                        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all",
+                        tab === "lists" ? "bg-background text-foreground shadow-sm" : ""
+                      )}
+                      onClick={() => setTab("lists")}
+                    >
+                      <ListFilter className="mr-2 h-4 w-4" /> Listas ({selectedSegmentIds.size})
                     </button>
                     <button
                       role="tab"
@@ -642,6 +715,76 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                             )}
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {tab === "lists" && (
+                    <div className="mt-4 space-y-3">
+                      {segments.length === 0 ? (
+                        <div className="flex h-40 flex-col items-center justify-center rounded-md border border-dashed text-center">
+                          <ListFilter className="mb-2 h-6 w-6 text-muted-foreground" />
+                          <p className="text-sm font-medium">Nenhuma lista personalizada criada</p>
+                          <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+                            Crie listas inteligentes no CRM para reutilizá-las como público de campanha.
+                          </p>
+                          <Button className="mt-3" variant="secondary" onClick={() => router.push('/crm')}>
+                            Ir para o CRM
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="overflow-hidden rounded-md border">
+                            <ul className="max-h-52 divide-y overflow-y-auto">
+                              {segments.map(segment => (
+                                <li key={segment.id}>
+                                  <label className="flex cursor-pointer items-center gap-3 p-3 hover:bg-accent/60">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedSegmentIds.has(segment.id)}
+                                      onChange={() => toggleSegment(segment.id)}
+                                      className="h-4 w-4 rounded border-primary"
+                                    />
+                                    <ListFilter className="h-4 w-4 text-muted-foreground" />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-sm font-medium">{segment.name}</span>
+                                      {segment.description && (
+                                        <span className="block truncate text-xs text-muted-foreground">{segment.description}</span>
+                                      )}
+                                    </span>
+                                    {selectedSegmentIds.has(segment.id) && <Icon.Check className="h-4 w-4 text-primary" />}
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>
+                              {selectedSegmentIds.size === 0
+                                ? 'Selecione uma ou mais listas.'
+                                : `${segmentTotal} contato(s) único(s) nas listas selecionadas.`}
+                            </span>
+                            {loadingSegmentAudience && <Icon.Loader2 className="h-4 w-4 animate-spin" />}
+                          </div>
+
+                          {selectedSegmentIds.size > 0 && segmentPreviewContacts.length > 0 && (
+                            <div className="overflow-hidden rounded-md border">
+                              <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">Prévia do público</div>
+                              <ul className="max-h-40 divide-y overflow-y-auto">
+                                {segmentPreviewContacts.map(contact => (
+                                  <li key={contact.id} className="flex items-center gap-3 p-2">
+                                    <Avatar name={contact.name} />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-sm font-medium">{contact.name}</p>
+                                      <p className="truncate text-xs text-muted-foreground">{contact.phone_number_jid || contact.phone || contact.email}</p>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
 

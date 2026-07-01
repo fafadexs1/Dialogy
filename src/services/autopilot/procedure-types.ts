@@ -57,6 +57,11 @@ export type ProcedureStep = {
   label: string;
   visualNodeId?: string;
   visualNodeKind?: string;
+  semanticIntent?: string;
+  forbiddenCustomerIntents?: string[];
+  requiresExplicitCustomerRequest?: boolean;
+  requiresConfirmation?: boolean;
+  sideEffect?: 'none' | 'low' | 'medium' | 'high';
 
   // gather_data
   requiredSlots?: string[];

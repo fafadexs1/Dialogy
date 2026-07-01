@@ -10,6 +10,7 @@ import { Buffer } from 'node:buffer';
 import { ensurePermissionsSeed } from '@/lib/permissions-seed';
 import { updateUserOnlineStatus } from '@/lib/presence-server';
 import { loadResourceMappingProfileText, upsertResourceMappingProfile } from '@/services/resource-mapper/profiles';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 function normalizeWorkspaceVertical(value: FormDataEntryValue | null): string | null {
   if (typeof value !== 'string') return null;
@@ -125,7 +126,7 @@ export async function getResourceMappingProfile(workspaceId: string): Promise<{
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { profileText: '', error: 'Usuario nao autenticado.' };
-  if (!workspaceId || !(await isWorkspaceMember(user.id, workspaceId))) {
+  if (!workspaceId || !(await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:view'))) {
     return { profileText: '', error: 'Voce nao tem acesso a este workspace.' };
   }
 
@@ -146,7 +147,7 @@ export async function updateResourceMappingProfileAction(
   const workspaceId = String(formData.get('workspaceId') || '').trim();
   const aliasesText = String(formData.get('resourceMappingAliases') || '');
   if (!workspaceId) return { success: false, error: 'ID do workspace nao encontrado.' };
-  if (!(await isWorkspaceMember(user.id, workspaceId))) {
+  if (!(await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:edit'))) {
     return { success: false, error: 'Voce nao tem acesso a este workspace.' };
   }
 
@@ -186,7 +187,9 @@ export async function updateWorkspaceAction(
     return { success: false, error: 'ID do workspace não encontrado.' };
   }
 
-  // Futuramente: Adicionar verificação de permissão 'workspace:settings:edit'
+  if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:edit')) {
+    return { success: false, error: 'Você não tem permissão para editar este workspace.' };
+  }
 
   const fieldsToUpdate: { [key: string]: any } = {};
   if (formData.has('workspaceName')) fieldsToUpdate.name = workspaceName;

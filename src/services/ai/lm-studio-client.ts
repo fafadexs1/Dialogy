@@ -38,9 +38,10 @@ async function requestLmStudioCompletion(input: LmStudioCompletionInput): Promis
   const timeoutMs = input.timeoutMs ?? 4000;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const endpoint = `${config.baseUrl}/chat/completions`;
 
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -77,6 +78,18 @@ async function requestLmStudioCompletion(input: LmStudioCompletionInput): Promis
   } catch (error) {
     if (controller.signal.aborted) {
       throw new Error(`LM Studio request timed out after ${timeoutMs}ms.`);
+    }
+    const cause = (error as { cause?: { code?: string; message?: string } })?.cause;
+    if (error instanceof TypeError && /fetch failed/i.test(error.message)) {
+      const causeDetails = [
+        cause?.code,
+        cause?.message,
+      ].filter(Boolean).join(': ');
+      throw new Error(
+        `LM Studio network request failed for ${endpoint}. ` +
+        `Check connectivity from the Dialogy server/container to the LM Studio endpoint.` +
+        (causeDetails ? ` Cause: ${causeDetails}` : '')
+      );
     }
     throw error;
   } finally {
