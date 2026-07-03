@@ -9,6 +9,12 @@ const DOCUMENT_MIN_SIMILARITY = 0.54;
 const CASE_MIN_SIMILARITY = 0.74;
 const RRF_RANK_CONSTANT = 60;
 
+export function isLocalRagQueryEmbeddingEnabled() {
+    const configured = process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED?.trim().toLowerCase();
+    if (configured) return configured === 'true' || configured === '1' || configured === 'yes';
+    return process.env.NODE_ENV !== 'production';
+}
+
 const DOCUMENT_MIN_SIMILARITY_BY_INTENT: Partial<Record<UniversalAutopilotIntent, number>> = {
     pricing_request: 0.54,
     billing_or_payment: 0.58,
@@ -33,9 +39,7 @@ function dedupeDocumentsByContent(matches: KnowledgeBaseDocument[]) {
     const seen = new Set<string>();
     return matches.filter((item) => {
         const key = `${item.name}::${item.content}`;
-        if (seen.has(key)) {
-            return false;
-        }
+        if (seen.has(key)) return false;
         seen.add(key);
         return true;
     });
@@ -129,23 +133,21 @@ export async function retrieveSupportContext(input: {
         };
     }
 
-    const queryVector = await generateDocumentQueryEmbedding(queryText);
-    if (queryVector.length === 0) {
-        return {
-            knowledgeBaseDocuments: [] as KnowledgeBaseDocument[],
-            resolvedCases: [] as ResolvedCasePromptItem[],
-        };
-    }
-
+    const localQueryEmbeddingEnabled = isLocalRagQueryEmbeddingEnabled();
+    const queryVector = localQueryEmbeddingEnabled
+        ? await generateDocumentQueryEmbedding(queryText)
+        : [];
     const minSimilarity = getDocumentMinSimilarity(input.intent);
-    const docMatches = dedupeMatchesByDocumentId(await VectorStore.searchSimilarDocuments({
-        vector: queryVector,
-        workspaceId: input.workspaceId,
-        autopilotConfigId: input.autopilotConfigId ?? null,
-        limit: DOCUMENT_LIMIT * 3,
-        minSimilarity,
-        allowedDocumentIds: input.allowedDocumentIds,
-    })).slice(0, DOCUMENT_LIMIT * 2);
+    const docMatches = queryVector.length > 0
+        ? dedupeMatchesByDocumentId(await VectorStore.searchSimilarDocuments({
+            vector: queryVector,
+            workspaceId: input.workspaceId,
+            autopilotConfigId: input.autopilotConfigId ?? null,
+            limit: DOCUMENT_LIMIT * 3,
+            minSimilarity,
+            allowedDocumentIds: input.allowedDocumentIds,
+        })).slice(0, DOCUMENT_LIMIT * 2)
+        : [];
 
     const keywordMatches = dedupeMatchesByDocumentId(await VectorStore.searchKeywordDocuments({
         query: queryText,
@@ -163,15 +165,16 @@ export async function retrieveSupportContext(input: {
         limit: DOCUMENT_LIMIT * 2,
     });
 
-    const caseMatches = await VectorStore.searchSimilarCaseMemories({
-        vector: queryVector,
-        workspaceId: input.workspaceId,
-        autopilotConfigId: input.autopilotConfigId ?? null,
-        excludeChatId: input.excludeChatId ?? null,
-        limit: CASE_LIMIT,
-        minSimilarity: CASE_MIN_SIMILARITY,
-    });
-
+    const caseMatches = queryVector.length > 0
+        ? await VectorStore.searchSimilarCaseMemories({
+            vector: queryVector,
+            workspaceId: input.workspaceId,
+            autopilotConfigId: input.autopilotConfigId ?? null,
+            excludeChatId: input.excludeChatId ?? null,
+            limit: CASE_LIMIT,
+            minSimilarity: CASE_MIN_SIMILARITY,
+        })
+        : [];
     const finalCaseMatches = caseMatches;
 
     const knowledgeBaseDocuments = dedupeDocumentsByContent(
@@ -206,6 +209,7 @@ export async function retrieveSupportContext(input: {
         resolvedCases: finalCaseMatches.map(formatCaseMatch),
         diagnostics: {
             queryVectorLength: queryVector.length,
+            localQueryEmbeddingEnabled,
             documentMinSimilarity: minSimilarity,
             vectorMatches: docMatches.length,
             keywordMatches: keywordMatches.length,

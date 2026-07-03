@@ -391,8 +391,12 @@ function buildStepsFromSegments(segments: SentenceSegment[]): ProcedureStep[] {
       semanticIntent: inferToolSemanticIntent(segment.resolvedToolName, segment.text),
       forbiddenCustomerIntents: forbiddenCustomerIntentsForTool(segment.resolvedToolName, segment.text),
       requiresExplicitCustomerRequest: Boolean(segment.resolvedToolName && /reboot_router|change_wifi_credentials/i.test(segment.resolvedToolName)),
-      requiresConfirmation: Boolean(segment.resolvedToolName && /reboot_router|change_wifi_credentials/i.test(segment.resolvedToolName)),
-      sideEffect: segment.resolvedToolName && /reboot_router|change_wifi_credentials/i.test(segment.resolvedToolName) ? 'high' : undefined,
+      requiresConfirmation: Boolean(segment.resolvedToolName && /reboot_router|change_wifi_credentials|transfer_chat/i.test(segment.resolvedToolName)),
+      sideEffect: segment.resolvedToolName && /reboot_router|change_wifi_credentials/i.test(segment.resolvedToolName)
+        ? 'high'
+        : segment.resolvedToolName === 'transfer_chat'
+          ? 'medium'
+          : undefined,
       nextStepId,
       maxRetries: segment.inferredType === 'tool_call' ? 2 : 1,
     };

@@ -16,7 +16,7 @@ async function loadEnvironment() {
 }
 
 async function maybePrewarmModels() {
-  const raw = (process.env.AI_PREWARM_MODELS || 'true').trim().toLowerCase();
+  const raw = (process.env.AI_PREWARM_MODELS || 'false').trim().toLowerCase();
   if (raw === 'false' || raw === '0' || raw === 'no') {
     return;
   }

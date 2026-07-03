@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { fingerprintAuditedToolOperation } from '@/services/agent-tools/action-fingerprint';
 import type { AgentToolExecutionResult } from '@/services/agent-tools/types';
+import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import {
   buildAutopilotTurnPlan,
   buildAutopilotTurnPlanCustomerResponse,
@@ -193,6 +194,59 @@ describe('autopilot turn plan', () => {
     )).toBe('wifi_credentials_lookup');
   });
 
+  it.each(['Oi', 'Fala ai galera'])('does not inherit an old operational need for an isolated greeting: %s', (greeting) => {
+    const history = [
+      'Cliente: qual o status do pedido ABCD-1234?',
+      'Atendente: Atendimento transferido para TicketMaster.',
+      'Atendente: Consultei os dados operacionais do cadastro. Contratos encontrados: 20.',
+    ].join('\n');
+
+    expect(inferAutopilotCustomerNeed(greeting, history)).toBe('none');
+
+    const plan = buildAutopilotTurnPlan({
+      customerMessage: greeting,
+      chatHistory: history,
+      intentResolution: resolveAutopilotIntent({ customerMessage: greeting }),
+      slotExtraction: slots(),
+      enabledToolNames: ['sgp_fetch_contact_panel_data', 'transfer_chat', 'add_internal_note'],
+      toolCatalog: catalog,
+    });
+
+    expect(plan.customerNeed).toBe('none');
+    expect(plan.expectedNextAction).toBe('continue_llm');
+    expect(plan.responseOverride).toBeNull();
+    expect(plan.preResponseActions).toEqual([]);
+  });
+
+  it('delegates an explicit conversation close to close_chat instead of planning cancellation or SGP tools', () => {
+    const customerMessage = 'Pode encerrar? USE close_chat';
+    const plan = buildAutopilotTurnPlan({
+      customerMessage,
+      chatHistory: [
+        'Cliente: Quero cancelar o pedido AB1234',
+        'Atendente: Consultei os dados operacionais do cadastro.',
+      ].join('\n'),
+      intentResolution: {
+        ...resolveAutopilotIntent({ customerMessage }),
+        intent: 'cancellation_request',
+      },
+      slotExtraction: slots({ order_or_request_id: 'AB1234' }),
+      enabledToolNames: [
+        'close_chat',
+        'sgp_fetch_contact_panel_data',
+        'mcp:commerce:cancel_order',
+      ],
+      toolCatalog: catalog,
+    });
+
+    expect(plan.customerNeed).toBe('none');
+    expect(plan.expectedNextAction).toBe('continue_llm');
+    expect(plan.requiredToolNames).toEqual([]);
+    expect(plan.preResponseActions).toEqual([]);
+    expect(plan.responseOverride).toBeNull();
+    expect(plan.reasons).toContain('explicit_conversation_close_delegated_to_workflow');
+  });
+
   it('asks for CPF/CNPJ before exposing Wi-Fi credentials', () => {
     const plan = buildAutopilotTurnPlan({
       customerMessage: 'esqueci usuario e senha do wifi',
@@ -294,6 +348,34 @@ describe('autopilot turn plan', () => {
     expect(response).toContain('contrato 123');
     expect(response).toContain('Faturas em aberto: 1');
     expect(response).toContain('R$ 99,90');
+  });
+
+  it('never serializes nested SGP invoice summaries as object Object', () => {
+    const plan = buildAutopilotTurnPlan({
+      customerMessage: '529.982.247-25',
+      chatHistory: [
+        'Cliente: preciso consultar meus contratos',
+        'Atendente: Para consultar com seguranca, me informe o CPF/CNPJ.',
+      ].join('\n'),
+      slotExtraction: slots({ customer_identifier: '52998224725' }),
+      enabledToolNames: ['sgp_fetch_contact_panel_data'],
+      toolCatalog: catalog,
+      recentToolResults: [sgpResultForCpf('52998224725', [{ id: '123', connectionStatus: 'online' }])],
+    });
+    const response = buildAutopilotTurnPlanCustomerResponse({
+      turnPlan: plan,
+      toolResults: [{
+        ...sgpResultForCpf('52998224725', [{ id: '123', connectionStatus: 'online' }]),
+        output: {
+          customerName: 'Cliente Teste',
+          cpfCnpj: '52998224725',
+          contracts: [{ id: '123', connectionStatus: 'online' }],
+          invoiceGroups: [{ summary: { openInvoices: 2, total: 199.8 } }],
+        },
+      }],
+    });
+
+    expect(response).not.toContain('[object Object]');
   });
 
   it('asks for order/protocol number before a generic MCP order status lookup', () => {
@@ -426,6 +508,30 @@ describe('autopilot turn plan', () => {
         },
       },
     ]);
+  });
+
+  it('keeps a commercial plan preference in the LLM path and never substitutes an SGP lookup', () => {
+    const customerMessage = 'Esse de 1000 parece ser perfeito pra mim';
+    const chatHistory = [
+      'Atendente: Conheca os planos de 500, 600, 800 e 1000 mega.',
+      'Cliente: Esse de 1000 parece ser perfeito pra mim',
+      'Atendente: Consultei os dados operacionais. Contratos encontrados: 20.',
+    ].join('\n');
+    const plan = buildAutopilotTurnPlan({
+      customerMessage,
+      chatHistory,
+      intentResolution: resolveAutopilotIntent({ customerMessage, chatHistory }),
+      slotExtraction: slots({ product_or_service_preference: '1000 mega' }),
+      enabledToolNames: ['sgp_fetch_contact_panel_data'],
+      toolCatalog: catalog,
+    });
+
+    expect(plan.customerNeed).toBe('generic_external_lookup');
+    expect(plan.expectedNextAction).toBe('continue_llm');
+    expect(plan.requiredToolNames).toEqual([]);
+    expect(plan.preResponseActions).toEqual([]);
+    expect(plan.responseOverride).toBeNull();
+    expect(plan.metadata.selectedGenericExternalLookupTool).toBeNull();
   });
 
   it('asks for required slots declared by a generic MCP schema before scheduling lookups', () => {

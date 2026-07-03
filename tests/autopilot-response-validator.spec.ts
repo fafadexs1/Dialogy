@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { extractAutopilotSlots } from '@/services/autopilot/slots';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
+import { filterImplicitTransferActions } from '@/services/autopilot/runtime/action-utils';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { Contact, KnowledgeBaseDocument } from '@/lib/types';
@@ -157,6 +158,67 @@ describe('autopilot response validator', () => {
     expect(result.response).toContain('CPF/CNPJ');
   });
 
+  it('replaces a premature CPF request with technical triage on the first troubleshooting turn', () => {
+    const result = validate({
+      message: 'A internet da minha fibra esta toda hora falhando. Voce pode me ajudar?',
+      response: 'Para verificar seu cadastro e o status da conexao, me informe o CPF ou CNPJ do titular.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('troubleshooting_identifier_before_technical_triage');
+    expect(result.response).toContain('todos os seus dispositivos');
+    expect(result.response).not.toContain('CPF');
+    expect(result.actions).toEqual([]);
+  });
+
+  it('allows identity collection after a technical troubleshooting question was answered', () => {
+    const result = validate({
+      message: 'Acontece em todos eles',
+      chatHistory: [
+        'Cliente: Minha internet esta falhando.',
+        'Atendente: A falha acontece em todos os seus dispositivos ou apenas em um deles?',
+      ].join('\n'),
+      response: 'Para verificar seu cadastro e o status da conexao, me informe o CPF ou CNPJ do titular.',
+    });
+
+    expect(result.decision).toBe('approve');
+    expect(result.response).toContain('CPF');
+  });
+
+  it('suppresses an implicit troubleshooting handoff invented by the model', () => {
+    const result = validate({
+      message: 'A internet da minha fibra esta toda hora falhando.',
+      response: 'Nao consigo consultar isso automaticamente com seguranca agora. Vou encaminhar seu atendimento para a equipe Suporte.',
+      enabledToolNames: ['transfer_chat', 'add_internal_note'],
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('implicit_transfer_promise_suppressed');
+    expect(result.response).toContain('todos os seus dispositivos');
+    expect(result.actions).toEqual([]);
+  });
+
+  it('drops implicit transfer actions and their internal note before execution', () => {
+    const actions: AgentToolAction[] = [
+      {
+        type: 'add_internal_note',
+        reason: 'lookup_promise_without_executable_tool',
+        payload: { content: 'Encaminhar para suporte.' },
+      },
+      {
+        type: 'transfer_chat',
+        reason: 'lookup_promise_without_executable_tool',
+        payload: { teamId: team.id },
+      },
+    ];
+
+    expect(filterImplicitTransferActions({
+      actions,
+      customerMessage: 'Minha internet esta falhando',
+      availableTeams: [team],
+    })).toEqual([]);
+  });
+
   it('does not ask for CPF/CNPJ again after a successful lookup', () => {
     const result = validate({
       message: 'minha internet esta caindo',
@@ -174,6 +236,42 @@ describe('autopilot response validator', () => {
     expect(result.decision).toBe('repair');
     expect(result.response).toContain('Ja localizei os dados necessarios');
     expect(result.response).not.toContain('CPF');
+  });
+
+  it('allows the commercial pre-registration flow to collect CPF after an unrelated earlier lookup', () => {
+    const result = validate({
+      message: 'Quero contratar o plano de 1000 mega. Meu endereco e Quadra 12, Lote 13.',
+      response: 'Perfeito, registrei o endereco. Para concluir o pre-cadastro, informe seu CPF ou CNPJ.',
+      toolResults: [
+        {
+          toolName: 'sgp_fetch_contact_panel_data',
+          status: 'success',
+          input: { type: 'sgp_fetch_contact_panel_data', payload: {} },
+          output: { contracts: [{ id: 'old-contract', connectionStatus: 'online' }] },
+        },
+      ],
+    });
+
+    expect(result.decision).toBe('approve');
+    expect(result.response).toContain('informe seu CPF ou CNPJ');
+    expect(result.reasons).not.toContain('customer_identifier_requested_after_successful_lookup');
+  });
+
+  it('advances commercial registration instead of asking bairro and city again', () => {
+    const result = validate({
+      message: 'Quero contratar o plano de 1000 mega. Meu endereco e Quadra 12, Lote 13.',
+      chatHistory: [
+        'Cliente: Meu bairro e Centro em Cidade Ocidental.',
+        'Atendente: Agora me informe o endereco completo com numero.',
+      ].join('\n'),
+      response: 'Perfeito, anotei. Qual e o bairro e cidade, por favor?',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('known_commercial_location_requested_again');
+    expect(result.response).toContain('informe seu CPF ou CNPJ');
+    expect(result.response).not.toContain('bairro');
+    expect(result.response).not.toContain('cidade');
   });
 
   it('handoffs when response promises lookup without tool or missing slot path', () => {
@@ -305,14 +403,15 @@ describe('autopilot response validator', () => {
     expect(result.response).toContain('Nao consegui concluir a consulta');
   });
 
-  it('adds handoff action when response promises transfer without transfer action', () => {
+  it('does not turn a model transfer promise into operational permission', () => {
     const result = validate({
       message: 'Estou com problema no acesso',
       response: 'Vou encaminhar para a equipe responsavel.',
     });
 
-    expect(result.decision).toBe('handoff');
-    expect(result.actions.map((action) => action.type)).toEqual(['add_internal_note', 'transfer_chat']);
+    expect(result.decision).toBe('repair');
+    expect(result.actions).toEqual([]);
+    expect(result.reasons).toContain('implicit_transfer_promise_suppressed');
   });
 
   it('does not auto-transfer self-service when the customer did not ask for a human', () => {
@@ -325,6 +424,19 @@ describe('autopilot response validator', () => {
     expect(result.actions).toEqual([]);
     expect(result.reasons).toContain('self_service_transfer_promise_suppressed');
     expect(result.response).toContain('seguir com seu atendimento por aqui');
+  });
+
+  it('repairs a false lookup promise on a greeting without transferring the chat', () => {
+    const result = validate({
+      message: 'Oi',
+      chatHistory: 'Atendimento transferido para TicketMaster.',
+      response: 'Consigo ajudar com status, mas nao encontrei uma ferramenta habilitada para consultar isso automaticamente. Vou precisar verificar manualmente.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.actions).toEqual([]);
+    expect(result.reasons).toContain('conversational_turn_lookup_promise_suppressed');
+    expect(result.response).toContain('Como posso ajudar');
   });
 
   it('keeps clinical red handoff terminal and does not ask generic slots', () => {
@@ -373,72 +485,8 @@ describe('autopilot response validator', () => {
     expect(result.response).not.toContain('servico');
   });
 
-  it('repairs pediatric blue scheduling handoff into elective scheduling', () => {
-    const result = validate({
-      message: 'Prefiro consulta de tarde.',
-      chatHistory: [
-        'Cliente: Minha filha Laura Silva tem 6 anos, tosse leve e sem febre. Meu telefone e 5561995215930.',
-        'Atendente: Ha quanto tempo ela esta com tosse?',
-        'Cliente: Ela esta bem ativa, comeu e urinou normal.',
-      ].join('\n'),
-      response: 'Nao consigo consultar isso automaticamente com seguranca agora. Vou encaminhar seu atendimento para a equipe Pediatras.',
-    });
 
-    expect(result.decision).toBe('repair');
-    expect(result.reasons).toContain('pediatric_scheduling_handoff_repaired');
-    expect(result.response).toContain('consulta eletiva/de rotina');
-    expect(result.actions).toEqual([]);
-  });
 
-  it('repairs pediatric yellow scheduling handoff into urgent scheduling', () => {
-    const result = validate({
-      message: 'Quero um horario amanha cedo. Meu telefone e 5561995215930.',
-      chatHistory: [
-        'Cliente: Meu filho Davi tem 6 anos, vomitou 3 vezes e esta com diarreia desde cedo.',
-        'Cliente: Ele aceita agua em pequenos goles e urinou duas vezes hoje.',
-        'Cliente: Nao tem boca seca nem olhos fundos.',
-      ].join('\n'),
-      response: 'Vou encaminhar seu atendimento para a equipe Pediatras.',
-    });
-
-    expect(result.decision).toBe('repair');
-    expect(result.reasons).toContain('pediatric_scheduling_handoff_repaired');
-    expect(result.response).toContain('consulta urgente');
-    expect(result.actions).toEqual([]);
-  });
-
-  it('repairs pediatric scheduling handoff even when the current turn is not classified as scheduling', () => {
-    const result = validateAutopilotResponse({
-      response: 'Vou encaminhar seu atendimento para a equipe Pediatras.',
-      fallbackReply: 'Fallback configurado.',
-      customerMessage: 'Tudo bem, pode ser.',
-      chatHistory: [
-        'Cliente: Meu filho Pedro tem 4 anos e esta com febre 38.8 desde anteontem.',
-        'Cliente: Quando a febre baixa ele melhora, bebe agua e fez xixi hoje.',
-        'Cliente: Nao esta com falta de ar, mas esta abatido quando a febre sobe.',
-        'Cliente: Pode ser hoje no periodo da manha. Telefone 5561995215930.',
-      ].join('\n'),
-      intentResolution: resolveAutopilotIntent({ customerMessage: 'Tudo bem, pode ser.' }),
-      slotExtraction: extractAutopilotSlots({
-        customerMessage: 'Tudo bem, pode ser.',
-        chatHistory: '',
-        contact,
-      }),
-      plannedActions: [],
-      toolResults: [],
-      enabledToolNames: ['transfer_chat', 'add_internal_note'],
-      availableTeams: [team],
-      contact,
-      knowledgeCoverage: 'medium',
-      source: 'llm',
-      systemAgentName: 'Dra Roberta',
-    });
-
-    expect(result.decision).toBe('repair');
-    expect(result.reasons).toContain('pediatric_scheduling_handoff_repaired');
-    expect(result.response).toContain('consulta urgente');
-    expect(result.actions).toEqual([]);
-  });
 
   it('repairs intake acknowledgements that do not ask the next required slot', () => {
     const result = validate({

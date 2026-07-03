@@ -98,6 +98,38 @@ function asksForCustomerIdentifier(response: string): boolean {
   );
 }
 
+function asksForLocationAlreadyProvided(response: string, chatHistory?: string | null): boolean {
+  const normalizedResponse = normalizeText(response);
+  const normalizedHistory = normalizeText(chatHistory || '').slice(-2400);
+  const asksForLocation = (
+    /\b(qual|informe|informar|preciso|pode me dizer|pode me informar)\b.{0,100}\b(bairro|cidade)\b/.test(normalizedResponse)
+    || (normalizedResponse.includes('?') && /\bbairro\b/.test(normalizedResponse) && /\bcidade\b/.test(normalizedResponse))
+  );
+  const historyHasLocation = (
+    /\bmeu bairro (?:e|eh|fica|se chama)\b/.test(normalizedHistory)
+    || /\bbairro\b.{0,100}\bcidade\b/.test(normalizedHistory)
+    || /\bcidade\b.{0,100}\bbairro\b/.test(normalizedHistory)
+  );
+  return asksForLocation && historyHasLocation;
+}
+
+function buildCommercialRegistrationContinuation(slotExtraction: SlotExtractionResult): string {
+  const slots = slotExtraction.slots;
+  if (!slots.customer_identifier) {
+    return 'Perfeito, registrei o endereco completo. Para concluir o pre-cadastro, informe seu CPF ou CNPJ.';
+  }
+  if (!slots.name) {
+    return 'Perfeito, registrei o endereco completo. Agora me informe seu nome completo para concluir o pre-cadastro.';
+  }
+  if (!slots.phone) {
+    return 'Perfeito, registrei o endereco completo. Agora me informe o telefone de contato para concluir o pre-cadastro.';
+  }
+  if (!slots.product_or_service_preference) {
+    return 'Perfeito, registrei o endereco completo. Qual plano ou servico voce escolheu para concluir o pre-cadastro?';
+  }
+  return 'Perfeito, registrei o endereco completo e os dados do pre-cadastro estao completos. Posso concluir com essas informacoes?';
+}
+
 function asksForPaymentArtifact(message: string): boolean {
   const normalized = normalizeText(message);
   const asksToSendInvoice = (
@@ -138,68 +170,13 @@ function hasTransferPromise(response: string): boolean {
     /\b(equipe|setor|atendente|humano|responsavel)\b/.test(normalized);
 }
 
-function hasAutomationLimitationForScheduling(response: string): boolean {
-  const normalized = normalizeText(response);
-  return /\b(nao consigo consultar|verificar disponibilidade|consultar disponibilidade|vou encaminhar|vou envolver|atendente humano|equipe pediatras|equipe responsavel)\b/.test(normalized);
+function asksForWifiCredentials(message: string): boolean {
+  const normalized = normalizeText(message);
+  const mentionsWifi = /\b(wi-?fi|wireless|rede)\b/.test(normalized);
+  const mentionsCredential = /\b(ssid|senha|password|usuario|nome da rede|credencia(?:l|is))\b/.test(normalized);
+  return mentionsWifi && mentionsCredential;
 }
 
-function hasSchedulingPreferenceText(text: string): boolean {
-  return /\b(prefiro|pode ser|quero|manha|tarde|noite|hoje|amanha|cedo|rotina|eletiv|urgente|horario|periodo|consulta)\b/.test(normalizeText(text));
-}
-
-function inferPediatricScheduleClass(text: string): 'azul' | 'amarelo' | null {
-  const normalized = normalizeText(text);
-  const hasBlueSignal = (
-    /\b(sem febre|nao tem febre|temperatura normal)\b/.test(normalized) &&
-    /\b(respiracao normal|sem cansaco|nao esta cansad[ao]|sem falta de ar)\b/.test(normalized) &&
-    /\b(ativa|ativo|brincando|comeu|comendo|alimenta|urinando normal|urinou normal|urina normal)\b/.test(normalized)
-  ) || (
-    /\b(tosse leve|coriza clara|espirrando|espirros)\b/.test(normalized) &&
-    /\b(sem febre|respiracao normal|ativa|ativo|brincando|comeu|urinou|urinando)\b/.test(normalized)
-  );
-  if (hasBlueSignal) return 'azul';
-
-  const hasHighFeverValue = /\b(?:38[\s,.]*[5-9]|39(?:[\s,.]*\d)?|4[0-2](?:[\s,.]*\d)?)\b/.test(normalized);
-  const hasPersistentFeverDuration = /\b(36|48|anteontem|dois dias|2 dias|ha dois dias|mais de um dia|persistente)\b/.test(normalized);
-  const hasYellowSignal = (
-    hasHighFeverValue &&
-    hasPersistentFeverDuration
-  ) || (
-    /\b(vomitou|vomito|vomitos|diarreia)\b/.test(normalized) &&
-    /\b(aceita agua|aceitando agua|pequenos goles|urinou|fez xixi|sem olhos fundos|nao tem boca seca|nao tem olhos fundos)\b/.test(normalized)
-  );
-  if (hasYellowSignal) return 'amarelo';
-
-  return null;
-}
-
-function buildPediatricSchedulingRepair(input: {
-  customerMessage: string;
-  chatHistory?: string | null;
-  response: string;
-}): string | null {
-  const context = [
-    input.chatHistory || '',
-    input.customerMessage,
-    input.response,
-  ].filter(Boolean).join('\n');
-  const normalized = normalizeText(context);
-
-  if (!/\b(filh[ao]|crianca|bebe|pediatr|febre|tosse|coriza|vomit|diarreia|respiracao|consulta)\b/.test(normalized)) {
-    return null;
-  }
-  if (!hasSchedulingPreferenceText(context)) return null;
-
-  const scheduleClass = inferPediatricScheduleClass(context);
-  if (scheduleClass === 'azul') {
-    return 'Perfeito. Pelo que voce informou, o quadro segue como leve, entao vamos continuar com o agendamento de uma consulta eletiva/de rotina. Para concluir, qual dia fica melhor?';
-  }
-  if (scheduleClass === 'amarelo') {
-    return 'Perfeito. Pelo que voce informou, o caso precisa de consulta urgente, idealmente hoje ou no maximo amanha. Para concluir, qual horario especifico fica melhor?';
-  }
-
-  return null;
-}
 
 function buildClinicalHandoffRepair(input: {
   customerMessage: string;
@@ -243,6 +220,27 @@ function hasCustomerFacingNextStep(response: string): boolean {
     /\b(qual e|qual seria|quando voce|onde fica|onde voce|como prefere|como deseja|como posso)\b/.test(normalized) ||
     /\b(recomendo|oriento|minha orientacao|a orientacao e|o proximo passo|leve|procure|agende|acesse|clique|preencha|vou encaminhar|encaminhando)\b/.test(normalized)
   );
+}
+
+function hasPriorTechnicalTriageQuestion(chatHistory?: string | null): boolean {
+  const normalized = normalizeText(chatHistory || '');
+  return (
+    /\b(todos|apenas um|somente um)\b.{0,45}\b(dispositivo|celular|computador|aparelho)\b/.test(normalized) ||
+    /\b(luz|led)\b.{0,45}\b(modem|roteador|ont|onu|los|pon)\b/.test(normalized) ||
+    /\b(wi fi|wifi|cabo)\b.{0,45}\b(falha|cai|funciona|conecta)\b/.test(normalized) ||
+    /\b(desde quando|quando comecou|quando acontece)\b/.test(normalized)
+  );
+}
+
+function buildTroubleshootingOpeningQuestion(customerMessage: string): string {
+  const normalized = normalizeText(customerMessage);
+  if (/\b(luz|led|los|pon|vermelh)\w*/.test(normalized)) {
+    return 'Entendi. Essa luz fica vermelha o tempo todo ou apenas quando a conexao cai?';
+  }
+  if (/\b(wi fi|wifi|sem fio|sinal)\b/.test(normalized)) {
+    return 'Entendi. O problema acontece em todos os dispositivos conectados ao Wi-Fi ou apenas em um deles?';
+  }
+  return 'Entendi. A falha acontece em todos os seus dispositivos ou apenas em um deles?';
 }
 
 function hasSlotValue(slots: SlotExtractionResult['slots'], slot: AutopilotSlotName): boolean {
@@ -565,27 +563,6 @@ export function validateAutopilotResponse(input: {
   const lookupPromise = hasExternalLookupPromise(originalResponse);
   const lookupSuccessClaim = hasLookupSuccessClaim(originalResponse);
   const deferredAnswerPromise = hasDeferredAnswerPromise(originalResponse);
-  const pediatricSchedulingRepair = (
-    !hasExplicitHandoffRequest(input.customerMessage) &&
-    (lookupPromise || hasTransferPromise(originalResponse) || hasAutomationLimitationForScheduling(originalResponse))
-  )
-    ? buildPediatricSchedulingRepair({
-        customerMessage: input.customerMessage,
-        chatHistory: input.chatHistory,
-        response: originalResponse,
-      })
-    : null;
-
-  if (pediatricSchedulingRepair) {
-    reasons.push('pediatric_scheduling_handoff_repaired');
-    return {
-      decision: 'repair',
-      response: pediatricSchedulingRepair,
-      actions: [],
-      reasons,
-      metadata: { decision: 'repair', reasons, source: input.source },
-    };
-  }
 
   if (hasPlannedTransfer(input.plannedActions)) {
     const clinicalHandoffRepair = buildClinicalHandoffRepair({
@@ -606,7 +583,26 @@ export function validateAutopilotResponse(input: {
     }
   }
 
-  if (successfulLookup && asksForCustomerIdentifier(originalResponse)) {
+  if (
+    isSelfServiceInformationIntent(input.intentResolution.intent)
+    && input.slotExtraction.slots.address
+    && asksForLocationAlreadyProvided(originalResponse, input.chatHistory)
+  ) {
+    reasons.push('known_commercial_location_requested_again');
+    return {
+      decision: 'repair',
+      response: buildCommercialRegistrationContinuation(input.slotExtraction),
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
+
+  if (
+    successfulLookup
+    && asksForCustomerIdentifier(originalResponse)
+    && !isSelfServiceInformationIntent(input.intentResolution.intent)
+  ) {
     reasons.push('customer_identifier_requested_after_successful_lookup');
     return {
       decision: 'repair',
@@ -660,6 +656,25 @@ export function validateAutopilotResponse(input: {
     };
   }
 
+  if (
+    input.intentResolution.intent === 'troubleshooting' &&
+    asksForCustomerIdentifier(originalResponse) &&
+    !plannedLookup &&
+    !successfulLookup &&
+    !input.slotExtraction.slots.customer_identifier &&
+    !hasPriorTechnicalTriageQuestion(input.chatHistory) &&
+    !asksForWifiCredentials(input.customerMessage)
+  ) {
+    reasons.push('troubleshooting_identifier_before_technical_triage');
+    return {
+      decision: 'repair',
+      response: buildTroubleshootingOpeningQuestion(input.customerMessage),
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
+
   if (lookupPromise && !plannedLookup && !successfulLookup) {
     if (asksForCustomerIdentifier(originalResponse) && !input.slotExtraction.slots.customer_identifier) {
       return {
@@ -688,6 +703,19 @@ export function validateAutopilotResponse(input: {
         actions: [],
         reasons,
         metadata: { decision: 'repair', reasons, missingSlots, source: input.source },
+      };
+    }
+
+    if (input.intentResolution.intent === 'greeting' || input.intentResolution.intent === 'thanks') {
+      reasons.push('conversational_turn_lookup_promise_suppressed');
+      return {
+        decision: 'repair',
+        response: input.intentResolution.intent === 'greeting'
+          ? 'Ola! Como posso ajudar voce hoje?'
+          : 'Por nada! Posso ajudar em mais alguma coisa?',
+        actions: [],
+        reasons,
+        metadata: { decision: 'repair', reasons, source: input.source },
       };
     }
 
@@ -771,6 +799,24 @@ export function validateAutopilotResponse(input: {
     return {
       decision: 'repair',
       response: dynamicRepairMsg,
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
+
+  if (
+    hasTransferPromise(originalResponse) &&
+    !hasPlannedTransfer(input.plannedActions) &&
+    !hasExplicitHandoffRequest(input.customerMessage) &&
+    !failedLookup
+  ) {
+    reasons.push('implicit_transfer_promise_suppressed');
+    return {
+      decision: 'repair',
+      response: input.intentResolution.intent === 'troubleshooting'
+        ? buildTroubleshootingOpeningQuestion(input.customerMessage)
+        : 'Posso continuar o atendimento por aqui. Qual e o proximo ponto que voce quer resolver?',
       actions: [],
       reasons,
       metadata: { decision: 'repair', reasons, source: input.source },

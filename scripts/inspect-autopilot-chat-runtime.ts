@@ -26,6 +26,19 @@ function redactPreview(value: unknown): string {
     .slice(0, 240);
 }
 
+function redactEventPayload(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactEventPayload);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        redactEventPayload(entry),
+      ]),
+    );
+  }
+  return typeof value === 'string' ? redactPreview(value) : value;
+}
+
 function requestedToolName(input: unknown, fallback: unknown): string {
   const action = input && typeof input === 'object' ? input as any : {};
   return action.type === 'mcp_call_tool'
@@ -129,7 +142,7 @@ async function inspectChat(chatId: string) {
         AND chat_id = $2
         AND COALESCE(api_message_status, '') <> 'internal'
       ORDER BY created_at DESC
-      LIMIT 12`,
+      LIMIT 40`,
     [chat.workspace_id, chatId],
   );
   const toolExecutions = await pool.query(
@@ -141,15 +154,48 @@ async function inspectChat(chatId: string) {
       LIMIT 20`,
     [chat.workspace_id, chatId],
   );
+  const responseLogs = await pool.query(
+    `SELECT model_name, input_message, output_message, status, metadata, created_at
+       FROM autopilot_usage_logs
+      WHERE chat_id = $1
+      ORDER BY created_at DESC
+      LIMIT 40`,
+    [chatId],
+  );
   const runs = await pool.query(
     `SELECT id, status, intent, confidence_score, metadata, timings, created_at
        FROM orchestrator_runs
       WHERE workspace_id = $1
         AND chat_id = $2
       ORDER BY created_at DESC
-      LIMIT 10`,
+      LIMIT 60`,
     [chat.workspace_id, chatId],
   );
+  const runIds = runs.rows.map((run) => String(run.id)).filter(Boolean);
+  const events = runIds.length > 0
+    ? await pool.query(
+      `SELECT run_id, kind, status, duration_ms, payload, created_at
+         FROM orchestrator_events
+        WHERE workspace_id = $1
+          AND chat_id = $2
+          AND run_id = ANY($3::uuid[])
+        ORDER BY created_at ASC`,
+      [chat.workspace_id, chatId, runIds],
+    )
+    : { rows: [] };
+  const eventsByRunId = new Map<string, any[]>();
+  for (const event of events.rows) {
+    const runId = String(event.run_id);
+    const current = eventsByRunId.get(runId) || [];
+    current.push({
+      kind: event.kind,
+      status: event.status,
+      durationMs: event.duration_ms,
+      payload: redactEventPayload(event.payload),
+      createdAt: event.created_at,
+    });
+    eventsByRunId.set(runId, current);
+  }
 
   return {
     chatId,
@@ -197,6 +243,14 @@ async function inspectChat(chatId: string) {
       error: redactPreview(execution.error),
       createdAt: execution.created_at,
     })),
+    recentResponseLogs: responseLogs.rows.map((entry) => ({
+      model: entry.model_name,
+      input: redactPreview(entry.input_message),
+      output: redactPreview(entry.output_message),
+      status: entry.status,
+      metadata: redactEventPayload(entry.metadata),
+      createdAt: entry.created_at,
+    })),
     recentRuns: runs.rows.map((run) => ({
       id: run.id,
       status: run.status,
@@ -206,6 +260,7 @@ async function inspectChat(chatId: string) {
       turnPlan: run.metadata?.turnPlan || null,
       timings: run.timings,
       createdAt: run.created_at,
+      events: eventsByRunId.get(String(run.id)) || [],
     })),
   };
 }

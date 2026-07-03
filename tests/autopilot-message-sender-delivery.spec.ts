@@ -153,4 +153,34 @@ describe('autopilot multi-block response delivery', () => {
     expect(mocks.prepareDelivery).not.toHaveBeenCalled();
     expect(mocks.sendAutomatedMessageAction).not.toHaveBeenCalled();
   });
+
+  it('sends a repeated ordinary LLM response without disabling the chat', async () => {
+    const response = 'Ja localizei os dados necessarios. Vou seguir com o atendimento usando as informacoes disponiveis e aviso antes de executar qualquer acao sensivel.';
+    mocks.dbQuery.mockResolvedValue({
+      rows: [{ content: `*RAQUEL (Agente Virtual)*:\n\n${response}` }],
+      rowCount: 1,
+    });
+
+    const sending = sendMultiBlockResponse(
+      'chat-1',
+      response,
+      'agent-1',
+      true,
+      'instance-1',
+    );
+    await vi.runAllTimersAsync();
+    await sending;
+
+    expect(mocks.sendAutomatedMessageAction).toHaveBeenCalledWith(
+      'chat-1',
+      response,
+      'agent-1',
+      true,
+      'instance-1',
+      undefined,
+    );
+    expect(mocks.dbQuery.mock.calls.some(([sql]) => (
+      /UPDATE\s+chats/i.test(String(sql))
+    ))).toBe(false);
+  });
 });

@@ -227,7 +227,7 @@ describe('autopilot tool planner', () => {
     expect(result.rejectedActions[0]).toMatchObject({ code: 'invalid_payload' });
   });
 
-  it('repairs lookup promises with handoff when no executable tool exists', () => {
+  it('does not turn a lookup promise into a handoff without an explicit human request', () => {
     const result = runPlanner({
       message: 'Voce consegue verificar o status do meu pedido?',
       response: 'Vou verificar o status do pedido no sistema.',
@@ -235,9 +235,32 @@ describe('autopilot tool planner', () => {
       actions: [],
     });
 
-    expect(result.responseOverride).toContain('encaminhar');
-    expect(result.actions.map((action) => action.type)).toEqual(['add_internal_note', 'transfer_chat']);
-    expect(result.promiseValidation.repairReason).toBe('promise_handoff');
+    expect(result.responseOverride).toContain('Nao tenho uma ferramenta');
+    expect(result.actions).toEqual([]);
+    expect(result.promiseValidation.repairReason).toBe('promise_without_tool');
+  });
+
+  it('rejects transfer actions proposed without an explicit human request', () => {
+    const result = runPlanner({
+      message: 'Minha internet esta falhando',
+      response: 'Vou encaminhar para a equipe.',
+      actions: [
+        {
+          type: 'add_internal_note',
+          reason: 'Modelo sugeriu encaminhamento',
+          payload: { content: 'Encaminhar para suporte.' },
+        },
+        {
+          type: 'transfer_chat',
+          reason: 'Modelo sugeriu encaminhamento',
+          payload: { teamId: team.id },
+        },
+      ],
+    });
+
+    expect(result.actions).toEqual([]);
+    expect(result.rejectedActions).toHaveLength(2);
+    expect(result.rejectedActions.every((item) => item.code === 'intent_not_allowed')).toBe(true);
   });
 
   it('rejects MCP reboot when the customer asks for Wi-Fi credentials lookup', () => {

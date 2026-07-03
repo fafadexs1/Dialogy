@@ -42,7 +42,8 @@ if (configuredCacheDir) {
 }
 
 const globalForEmbeddings = global as unknown as {
-    embeddingPipelines: Record<string, any> | undefined;
+    embeddingPipelines: Record<string, Promise<any>> | undefined;
+    embeddingQueues: Record<string, Promise<void>> | undefined;
 };
 
 function normalizeWhitespace(text: string) {
@@ -67,25 +68,49 @@ function prepareEmbeddingInput(text: string, type: EmbeddingType, options?: Embe
 }
 
 class EmbeddingService {
-    private static instances: Record<string, any> = globalForEmbeddings.embeddingPipelines || {};
+    private static instances: Record<string, Promise<any>> =
+        globalForEmbeddings.embeddingPipelines ||= {};
+    private static queues: Record<string, Promise<void>> =
+        globalForEmbeddings.embeddingQueues ||= {};
+
+    private static cacheKey(type: EmbeddingType) {
+        const profile = MODELS[type];
+        return `${type}:${profile.modelId}:${profile.dtype || 'default'}`;
+    }
 
     private static async getPipeline(type: EmbeddingType) {
         const profile = MODELS[type];
-        const cacheKey = `${type}:${profile.modelId}:${profile.dtype || 'default'}`;
+        const cacheKey = this.cacheKey(type);
         if (!this.instances[cacheKey]) {
             console.log(`[EmbeddingService] Loading model: ${profile.modelId} (${profile.dtype || 'default'})...`);
-            this.instances[cacheKey] = await pipeline(
+            let loading: Promise<any>;
+            loading = pipeline(
                 'feature-extraction',
                 profile.modelId,
                 profile.dtype ? { dtype: profile.dtype } : undefined,
-            );
-            console.log(`[EmbeddingService] Model loaded: ${profile.modelId}`);
-
-            if (process.env.NODE_ENV !== 'production') {
-                globalForEmbeddings.embeddingPipelines = this.instances;
-            }
+            ).then((loaded) => {
+                console.log(`[EmbeddingService] Model loaded: ${profile.modelId}`);
+                return loaded;
+            }).catch((error) => {
+                if (this.instances[cacheKey] === loading) delete this.instances[cacheKey];
+                throw error;
+            });
+            this.instances[cacheKey] = loading;
         }
         return this.instances[cacheKey];
+    }
+
+    private static async runSerialized<T>(type: EmbeddingType, task: () => Promise<T>): Promise<T> {
+        const cacheKey = this.cacheKey(type);
+        const previous = this.queues[cacheKey] || Promise.resolve();
+        const running = previous.catch(() => undefined).then(task);
+        const settled = running.then(() => undefined, () => undefined);
+        this.queues[cacheKey] = settled;
+        try {
+            return await running;
+        } finally {
+            if (this.queues[cacheKey] === settled) delete this.queues[cacheKey];
+        }
     }
 
     static async generate(text: string, type: EmbeddingType, options?: EmbeddingGenerateOptions): Promise<number[]> {
@@ -95,14 +120,21 @@ class EmbeddingService {
 
             const profile = MODELS[type];
             const extractor = await this.getPipeline(type);
-            const output = await extractor(cleanText, { pooling: profile.pooling, normalize: true });
-            const vector = Array.from(output.data) as number[];
-            if (vector.length !== profile.dimensions) {
-                throw new Error(
-                    `Model ${profile.modelId} returned ${vector.length} dimensions; expected ${profile.dimensions}.`,
-                );
-            }
-            return vector;
+            return await this.runSerialized(type, async () => {
+                let output: any;
+                try {
+                    output = await extractor(cleanText, { pooling: profile.pooling, normalize: true });
+                    const vector = Array.from(output.data) as number[];
+                    if (vector.length !== profile.dimensions) {
+                        throw new Error(
+                            `Model ${profile.modelId} returned ${vector.length} dimensions; expected ${profile.dimensions}.`,
+                        );
+                    }
+                    return vector;
+                } finally {
+                    output?.dispose?.();
+                }
+            });
         } catch (error) {
             console.error(`[EmbeddingService] Error generating embedding for type '${type}':`, error);
             throw error;

@@ -534,6 +534,34 @@ describe('autopilot flow routing', () => {
     });
   });
 
+  it('does not send internal flow instructions as customer-facing entry messages', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'start',
+          kind: 'start',
+          title: 'Inicio',
+          subtitle: 'Entrada',
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: 'welcome',
+          kind: 'message',
+          title: 'Boas-vindas',
+          subtitle: 'Mensagem inicial',
+          position: { x: 0, y: 100 },
+          config: {
+            message: 'Apresentar o atendimento e entender o objetivo do cliente',
+          },
+        },
+      ],
+      edges: [{ id: 'start-welcome', source: 'start', target: 'welcome' }],
+    });
+
+    expect(resolveEntryDeterministicFlowMessage(config)).toBeNull();
+  });
+
   it('re-enters the first switch for a strong new intent but preserves an ambiguous active branch reply', () => {
     const config = configWithFlow({
       version: 1,

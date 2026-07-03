@@ -323,6 +323,32 @@ describe('autopilot flow builder AI sanitizer', () => {
     expect(messageNode?.config?.message).toBe('Mensagem inicial');
   });
 
+  it('uses a customer-facing greeting instead of an architectural subtitle', () => {
+    const proposal = sanitizeAutopilotFlowProposal({
+      summary: 'Flow V2 com saudacao.',
+      systemPrompt: 'Atenda o cliente.',
+      nodes: [
+        { id: 'inicio', kind: 'start', title: 'Inicio', subtitle: 'Entrada', x: 100, y: 100 },
+        {
+          id: 'boas-vindas',
+          kind: 'message',
+          title: 'Boas-vindas e triagem',
+          subtitle: 'Apresentar o atendimento e entender o objetivo do cliente',
+          x: 300,
+          y: 100,
+        },
+        { id: 'agente', kind: 'sub_agent', title: 'Agente', subtitle: 'Responder', x: 500, y: 100 },
+      ],
+      edges: [
+        { source: 'inicio', target: 'boas-vindas' },
+        { source: 'boas-vindas', target: 'agente' },
+      ],
+    }, []);
+
+    expect(proposal.flowGraph.nodes.find((node) => node.id === 'boas-vindas')?.config?.message)
+      .toBe('Ola! Como posso ajudar voce hoje?');
+  });
+
   it('adds only catalog tools explicitly selected after block analysis', () => {
     const architecture = {
       summary: 'Atendimento simples.',

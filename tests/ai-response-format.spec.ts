@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { formatCustomerFacingAiResponse, splitIntoMessageBlocks } from '@/lib/ai-response-format';
 
 describe('AI customer response formatting', () => {
+  it('removes isolated JSON delimiters from customer-facing text', () => {
+    expect(formatCustomerFacingAiResponse('{\n\nOi! Como posso ajudar hoje?\n}'))
+      .toBe('Oi! Como posso ajudar hoje?');
+  });
+
   it('splits long single-block responses into short WhatsApp paragraphs', () => {
     const response = [
       'Excelente escolha! Esse plano de 1000 MEGA com Wi-Fi 6 vai garantir velocidade e estabilidade para seus jogos e home office.',

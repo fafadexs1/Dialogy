@@ -5,6 +5,7 @@ import { parseQualifiedMcpToolName } from '@/services/mcp/client';
 import type { McpToolConfig } from '@/services/mcp/types';
 import { fingerprintToolAction } from './action-fingerprint';
 import { classifyMcpToolSafety } from '@/services/mcp/tool-safety';
+import { isConversationCloseRequest } from '@/services/autopilot/close-intent';
 
 export type AgentToolPolicyRisk = 'low' | 'medium' | 'high';
 
@@ -100,6 +101,13 @@ function validateActionContext(action: AgentToolAction, riskLevel: AgentToolPoli
       return policyReject(riskLevel, 'missing_parameters', 'Transferencia exige uma equipe ou atendente de destino.');
     }
   }
+  if (action.type === 'close_chat' && !isConversationCloseRequest(customerMessage)) {
+    return policyReject(
+      riskLevel,
+      'intent_mismatch',
+      'Encerramento do chat bloqueado sem um pedido explicito para finalizar a conversa atual.',
+    );
+  }
   return null;
 }
 
@@ -149,7 +157,12 @@ export async function evaluateAgentToolPolicy(input: {
   const actionContextRejection = validateActionContext(input.action, riskLevel, input.context.customerMessage);
   if (actionContextRejection) return actionContextRejection;
 
-  if (requiresExplicitConfirmation(input.action, definition, riskLevel) &&
+  const explicitlyAuthorizedConversationClose = (
+    input.action.type === 'close_chat'
+    && isConversationCloseRequest(input.context.customerMessage)
+  );
+  if (!explicitlyAuthorizedConversationClose &&
+      requiresExplicitConfirmation(input.action, definition, riskLevel) &&
       input.context.confirmedActionFingerprint !== fingerprintToolAction(input.action)) {
     if (
       isShortAffirmativeConfirmation(input.context.customerMessage) &&

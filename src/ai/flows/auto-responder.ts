@@ -134,6 +134,10 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('Contexto deterministico de intencao, workflow e cobertura de conhecimento resolvido pelo servidor.'),
+  responseMode: z
+    .enum(['full', 'conversational'])
+    .optional()
+    .describe('Seleciona um prompt compacto para saudacoes e agradecimentos sem necessidade operacional.'),
   model: z.string().optional().describe('The AI model to use for the response.'),
   contact: z.object({
     id: z.string(),
@@ -519,8 +523,39 @@ Regras para messageBlocks:
 Com base na sua persona, nos documentos e na emoção identificada, responda ao cliente.`,
 };
 
+const conversationalPromptConfig: typeof promptConfig = {
+  name: 'autoResponderConversationalPrompt',
+  input: { schema: AgentResponseInputSchema },
+  output: { schema: AgentResponseOutputSchema },
+  prompt: `Voce e o atendente virtual definido pela persona abaixo.
+
+PERSONA:
+{{#if knowledgeBase}}
+{{{knowledgeBase}}}
+{{else}}
+Dialogy, um assistente profissional, cordial e objetivo.
+{{/if}}
+
+INTENCAO ATUAL:
+{{{intentContext}}}
+
+HISTORICO RECENTE:
+{{{chatHistory}}}
+
+MENSAGEM ATUAL:
+{{{customerMessage}}}
+
+Responda em portugues do Brasil, de forma natural e curta.
+- Considere principalmente a mensagem atual. Nao retome pedidos operacionais antigos se o cliente apenas cumprimentou ou agradeceu.
+- Para saudacao, cumprimente e pergunte objetivamente como pode ajudar.
+- Para agradecimento, responda com cordialidade e ofereca ajuda adicional.
+- Nao solicite CPF/CNPJ, nao prometa consulta, nao transfira, nao encerre e nao solicite ferramentas.
+- Retorne uma unica resposta curta. Deixe actions vazio e nao use messageBlocks.`,
+};
+
 // Default prompt with global AI
 const globalPrompt = ai.definePrompt(promptConfig);
+const globalConversationalPrompt = ai.definePrompt(conversationalPromptConfig);
 const STABLE_AUTOPILOT_MODEL_FALLBACKS = [
   DEFAULT_AUTOPILOT_MODEL,
   'googleai/gemini-2.0-flash-lite',
@@ -542,15 +577,21 @@ function getModelCandidates(model: string): string[] {
 async function definePromptForCandidate(input: {
   apiKey: string;
   model: string;
+  responseMode?: 'full' | 'conversational';
 }) {
+  const selectedPromptConfig = input.responseMode === 'conversational'
+    ? conversationalPromptConfig
+    : promptConfig;
   if (isLmStudioModel(input.model)) {
     const lmStudioConfig = await getGlobalLmStudioConfig();
-    return defineLmStudioPrompt(promptConfig, input.model, lmStudioConfig);
+    return defineLmStudioPrompt(selectedPromptConfig, input.model, lmStudioConfig);
   }
 
   const defaultEnvKey = getDefaultGeminiEnvKey();
   if (defaultEnvKey && defaultEnvKey === input.apiKey) {
-    return globalPrompt;
+    return input.responseMode === 'conversational'
+      ? globalConversationalPrompt
+      : globalPrompt;
   }
 
   const { genkit } = require('genkit');
@@ -562,7 +603,7 @@ async function definePromptForCandidate(input: {
     // tools: [makeHttpRequestTool],
   });
 
-  return dynamicAi.definePrompt(promptConfig);
+  return dynamicAi.definePrompt(selectedPromptConfig);
 }
 
 const autoResponderFlow = ai.defineFlow(
@@ -618,6 +659,7 @@ const autoResponderFlow = ai.defineFlow(
             const effectivePrompt = await definePromptForCandidate({
               apiKey: context.apiKey,
               model: context.model,
+              responseMode: promptInput.responseMode || 'full',
             });
             let result: any;
             try {

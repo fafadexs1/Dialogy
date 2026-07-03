@@ -29,6 +29,12 @@ const scenario = String(
   process.argv[5] || process.env.AUTOPILOT_READONLY_REPLAY_SCENARIO || 'wifi_credentials',
 ).trim().toLowerCase();
 if (![
+  'greeting',
+  'catalog_continuation',
+  'commercial_registration_continuation',
+  'generic_troubleshooting',
+  'close_conversation',
+  'transfer_handoff',
   'wifi_credentials',
   'wifi_channel_diagnostics',
   'wifi_branch_switch',
@@ -38,6 +44,14 @@ if (![
 ].includes(scenario)) {
   throw new Error('Unknown readonly replay scenario.');
 }
+const identityFreeScenario = [
+  'greeting',
+  'catalog_continuation',
+  'commercial_registration_continuation',
+  'generic_troubleshooting',
+  'close_conversation',
+  'transfer_handoff',
+].includes(scenario);
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -209,8 +223,10 @@ async function loadSourceContext(client: PoolClient): Promise<SourceContext> {
   if (requestedDocument && ![11, 14].includes(requestedDocument.length)) {
     throw new Error('CPF/CNPJ explicito deve conter 11 ou 14 digitos.');
   }
-  const document = requestedDocument || findDocument(messageResult.rows);
-  if (!document) throw new Error('No CPF/CNPJ was found in the source conversation.');
+  const document = requestedDocument || findDocument(messageResult.rows) || '';
+  if (!document && !identityFreeScenario) {
+    throw new Error('No CPF/CNPJ was found in the source conversation.');
+  }
   const requestedContractId = onlyDigits(
     process.argv[4] || process.env.AUTOPILOT_READONLY_REPLAY_CONTRACT_ID,
   );
@@ -224,7 +240,9 @@ async function loadSourceContext(client: PoolClient): Promise<SourceContext> {
     [row.workspace_id],
   );
   const cpfFieldId = String(sgpIntegration.rows[0]?.config?.cpfFieldId || '').trim();
-  if (!cpfFieldId) throw new Error('Active SGP integration has no cpfFieldId mapping.');
+  if (!cpfFieldId && !identityFreeScenario) {
+    throw new Error('Active SGP integration has no cpfFieldId mapping.');
+  }
 
   const integration = await client.query(
     `SELECT config
@@ -278,19 +296,27 @@ async function loadSourceContext(client: PoolClient): Promise<SourceContext> {
   if (scenario === 'wifi_change_confirmation' && !wifiChangeTool?.qualifiedName) {
     throw new Error('Enabled qualified Wi-Fi change MCP tool not found.');
   }
-  const selectedTool = scenario === 'wifi_channel_diagnostics'
+  const selectedTool = identityFreeScenario
+    ? null
+    : scenario === 'wifi_channel_diagnostics'
     ? wifiDiagnostic
     : scenario === 'reboot_confirmation'
       ? rebootTool
       : scenario === 'wifi_change_confirmation'
         ? wifiChangeTool
         : wifiView;
-  const safety = classifyMcpToolSafety(String(selectedTool?.qualifiedName || ''), selectedTool);
+  const safety = selectedTool
+    ? classifyMcpToolSafety(String(selectedTool.qualifiedName || ''), selectedTool)
+    : null;
   const isSensitiveConfirmationScenario = ['reboot_confirmation', 'wifi_change_confirmation'].includes(scenario);
-  if (!isSensitiveConfirmationScenario && (safety.riskLevel !== 'low' || safety.sideEffect !== 'none')) {
+  if (
+    !identityFreeScenario &&
+    !isSensitiveConfirmationScenario &&
+    (safety?.riskLevel !== 'low' || safety?.sideEffect !== 'none')
+  ) {
     throw new Error('get_wifi_view is not classified as a safe read-only tool.');
   }
-  if (isSensitiveConfirmationScenario && safety.sideEffect === 'none') {
+  if (isSensitiveConfirmationScenario && safety?.sideEffect === 'none') {
     throw new Error('Sensitive confirmation scenario selected a read-only tool.');
   }
 
@@ -368,11 +394,13 @@ async function seedReplay(client: PoolClient, source: SourceContext) {
       source.contactAddress || null,
     ],
   );
-  await client.query(
-    `INSERT INTO contact_custom_field_values (contact_id, field_id, value)
-     VALUES ($1, $2, $3)`,
-    [ids.contact, source.cpfFieldId, source.document],
-  );
+  if (source.cpfFieldId && source.document) {
+    await client.query(
+      `INSERT INTO contact_custom_field_values (contact_id, field_id, value)
+       VALUES ($1, $2, $3)`,
+      [ids.contact, source.cpfFieldId, source.document],
+    );
+  }
   await client.query(
     `INSERT INTO chats (
        id, workspace_id, contact_id, status, is_autopilot_active,
@@ -449,7 +477,9 @@ async function cleanupStaleReplays(client: PoolClient, source: SourceContext) {
 
 async function runReplay(client: PoolClient, source: SourceContext) {
   const selectedQualifiedTools = (
-    scenario === 'wifi_branch_switch'
+    identityFreeScenario
+      ? []
+      : scenario === 'wifi_branch_switch'
       ? [source.qualifiedWifiViewTool, source.qualifiedWifiDiagnosticTool]
       : scenario === 'wifi_channel_diagnostics'
         ? [source.qualifiedWifiDiagnosticTool]
@@ -485,7 +515,86 @@ async function runReplay(client: PoolClient, source: SourceContext) {
     source.contractId ? `Contrato: ${source.contractId}.` : '',
   ].filter(Boolean).join(' ');
   const wifiChangeValueMessage = `Nova senha: ${syntheticWifiPassword}`;
-  const messages = scenario === 'wifi_branch_switch'
+  if (scenario === 'greeting') {
+    await client.query(
+      `INSERT INTO messages (
+         id, workspace_id, chat_id, type, content, from_me, is_read,
+         instance_name, raw_payload, metadata, created_at
+       ) VALUES
+         ($1, $2, $3, 'text', 'Qual o status do pedido ABCD-1234?', false, true, $4,
+          '{}'::jsonb, '{}'::jsonb, clock_timestamp() - interval '3 minutes'),
+         ($5, $2, $3, 'text', 'Atendimento transferido para TicketMaster.', true, true, $4,
+          '{}'::jsonb, '{}'::jsonb, clock_timestamp() - interval '2 minutes')`,
+      [randomUUID(), source.workspaceId, ids.chat, fakeInstanceName, randomUUID()],
+    );
+  }
+  if (scenario === 'catalog_continuation') {
+    await client.query(
+      `INSERT INTO messages (
+         id, workspace_id, chat_id, type, content, from_me, is_read,
+         instance_name, raw_payload, metadata, sender_system_agent_id, created_at
+       ) VALUES
+         ($1, $2, $3, 'text',
+          'Temos os planos de 500, 600, 800 e 1000 mega. O plano de 1000 mega inclui Wi-Fi 6.',
+          true, true, $4, '{}'::jsonb, '{}'::jsonb, $5,
+          clock_timestamp() - interval '2 minutes')`,
+      [randomUUID(), source.workspaceId, ids.chat, fakeInstanceName, ids.agent],
+    );
+  }
+  if (scenario === 'commercial_registration_continuation') {
+    await client.query(
+      `INSERT INTO messages (
+         id, workspace_id, chat_id, type, content, from_me, is_read,
+         instance_name, raw_payload, metadata, sender_system_agent_id, created_at
+       ) VALUES
+         ($1, $2, $3, 'text',
+          'Ja localizei os dados necessarios. Vou seguir com o atendimento usando as informacoes disponiveis e aviso antes de executar qualquer acao sensivel.',
+          true, true, $4, '{}'::jsonb, '{}'::jsonb, $5,
+          clock_timestamp() - interval '4 minutes'),
+         ($6, $2, $3, 'text',
+          'Meu bairro e Centro em Cidade Ocidental. Eu queria esse plano de 1000 MEGA.',
+          false, true, $4, '{}'::jsonb, '{}'::jsonb, NULL,
+          clock_timestamp() - interval '2 minutes'),
+         ($7, $2, $3, 'text',
+          'Agora, para finalizarmos, so preciso que voce me informe seu endereco completo com numero, por favor.',
+          true, true, $4, '{}'::jsonb, '{}'::jsonb, $5,
+          clock_timestamp() - interval '1 minute')`,
+      [
+        randomUUID(),
+        source.workspaceId,
+        ids.chat,
+        fakeInstanceName,
+        ids.agent,
+        randomUUID(),
+        randomUUID(),
+      ],
+    );
+    await client.query(
+      `INSERT INTO agent_tool_executions (
+         workspace_id, chat_id, system_agent_id, autopilot_config_id,
+         tool_name, status, input, output, requires_human_approval, created_at
+       ) VALUES (
+         $1, $2, $3, $4, 'sgp_fetch_contact_panel_data', 'success',
+         '{"type":"sgp_fetch_contact_panel_data","payload":{}}'::jsonb,
+         '{"contracts":[{"id":"historical-contract","connectionStatus":"online"}]}'::jsonb,
+         false, clock_timestamp() - interval '3 minutes'
+       )`,
+      [source.workspaceId, ids.chat, ids.agent, source.configId],
+    );
+  }
+  const messages = scenario === 'greeting'
+    ? ['Fala ai galera']
+    : scenario === 'catalog_continuation'
+      ? ['Esse de 1000 parece ser perfeito pra mim']
+    : scenario === 'commercial_registration_continuation'
+      ? ['Quadra 12, Lote 13. Residencial Morada das Garcas']
+    : scenario === 'generic_troubleshooting'
+      ? ['A internet da minha fibra esta toda hora falhando. Voce pode me ajudar?']
+    : scenario === 'close_conversation'
+      ? ['Pode encerrar? USE close_chat']
+    : scenario === 'transfer_handoff'
+      ? ['Quero falar com um atendente humano']
+    : scenario === 'wifi_branch_switch'
     ? [credentialMessage, diagnosticMessage]
     : scenario === 'wifi_change_confirmation'
       ? [wifiChangeMessage, wifiChangeValueMessage]
@@ -656,6 +765,15 @@ async function runReplay(client: PoolClient, source: SourceContext) {
      LIMIT 1`,
     [ids.chat, source.workspaceId],
   );
+  const procedureExecutions = await client.query(
+    `SELECT procedure_name, status, step_history
+       FROM procedure_executions
+      WHERE workspace_id = $1
+        AND chat_id = $2
+        AND created_at >= $3
+      ORDER BY created_at ASC`,
+    [source.workspaceId, ids.chat, startedAt],
+  );
 
   const audits = executions.rows.map((execution) => ({
     toolName: requestedToolName(execution),
@@ -671,7 +789,9 @@ async function runReplay(client: PoolClient, source: SourceContext) {
     const name = audit.toolName;
     return /\b(reboot|change|set_parameters|clear_pending|import_mesh)\b/i.test(name);
   });
-  const expectedToolName = ['wifi_channel_diagnostics', 'wifi_branch_switch'].includes(scenario)
+  const expectedToolName = identityFreeScenario
+    ? null
+    : ['wifi_channel_diagnostics', 'wifi_branch_switch'].includes(scenario)
     ? source.qualifiedWifiDiagnosticTool
     : scenario === 'reboot_confirmation'
       ? source.qualifiedRebootTool
@@ -700,7 +820,165 @@ async function runReplay(client: PoolClient, source: SourceContext) {
   const secondTurnSnapshot = turnSnapshots[1];
   const firstTurnResponse = String(firstTurnSnapshot?.responseText || '').toLowerCase();
   const secondTurnResponse = String(secondTurnSnapshot?.responseText || '').toLowerCase();
-  const scenarioChecks = scenario === 'contract_mismatch'
+  const scenarioChecks = scenario === 'greeting'
+    ? {
+        llmResponseStarted: hasEvent('llm_response_start'),
+        llmResponseCompleted: events.rows.some(
+          (event) => event.kind === 'llm_response' && event.status === 'success',
+        ),
+        turnPlanContinuesToLlm: events.rows.some(
+          (event) => (
+            event.kind === 'turn_plan'
+            && event.payload?.customerNeed === 'none'
+            && event.payload?.expectedNextAction === 'continue_llm'
+          ),
+        ),
+        noFalseOrderStatusPlan: !events.rows.some(
+          (event) => event.kind === 'turn_plan' && event.payload?.customerNeed === 'order_status_lookup',
+        ),
+        noAutomaticHandoff: (
+          !audits.some((audit) => audit.toolName === 'transfer_chat')
+          && finalChatState.rows[0]?.is_autopilot_active === true
+          && finalChatState.rows[0]?.assigned_system_agent_id === ids.agent
+        ),
+        noSgpLookupForCasualOpening: !audits.some(
+          (audit) => audit.toolName === 'sgp_fetch_contact_panel_data',
+        ),
+        responseDoesNotExposeSgpContracts: !/\b(contratos encontrados|dados operacionais|cliente:\s|contrato\s+\d+|\[object object\])\b/i.test(responseText),
+        responseDoesNotPromiseManualLookup: !/\b(verificar manualmente|equipe comercial)\b/.test(normalizedResponse),
+        noStructuredDelimiterMessageBlock: responseTexts.every(
+          (text) => !/(?:^|:\s*)[{}\[\],]\s*$/.test(text.trim()),
+        ),
+      }
+    : scenario === 'close_conversation'
+    ? {
+        closeChatSucceeded: audits.some(
+          (audit) => audit.toolName === 'close_chat' && audit.status === 'success',
+        ),
+        closeChatExecutedExactlyOnce: audits.filter(
+          (audit) => audit.toolName === 'close_chat',
+        ).length === 1,
+        chatWasActuallyClosed: finalChatState.rows[0]?.status === 'encerrados',
+        dedicatedCloseGateApproved: hasEvent(
+          'close_intent_gate',
+          (payload) => payload.decision?.execute === true,
+        ),
+        noSgpLookupForCloseRequest: !audits.some(
+          (audit) => audit.toolName === 'sgp_fetch_contact_panel_data',
+        ),
+        noCancellationCatalogFallback: !/\b(ferramenta mcp|catalogo de cancelamento|verificar manualmente)\b/i.test(responseText),
+      }
+    : scenario === 'transfer_handoff'
+    ? {
+        transferChatSucceeded: audits.some(
+          (audit) => audit.toolName === 'transfer_chat' && audit.status === 'success',
+        ),
+        transferChatExecutedExactlyOnce: audits.filter(
+          (audit) => audit.toolName === 'transfer_chat',
+        ).length === 1,
+        autopilotReleasedAfterTransfer: (
+          finalChatState.rows[0]?.is_autopilot_active === false
+          && !finalChatState.rows[0]?.assigned_system_agent_id
+        ),
+        noSgpLookupForHumanRequest: !audits.some(
+          (audit) => audit.toolName === 'sgp_fetch_contact_panel_data',
+        ),
+      }
+    : scenario === 'catalog_continuation'
+    ? {
+        llmResponseStarted: hasEvent('llm_response_start'),
+        llmResponseCompleted: events.rows.some(
+          (event) => event.kind === 'llm_response' && event.status === 'success',
+        ),
+        turnPlanContinuesToLlmWithoutTools: events.rows.some(
+          (event) => (
+            event.kind === 'turn_plan'
+            && event.payload?.customerNeed === 'generic_external_lookup'
+            && event.payload?.expectedNextAction === 'continue_llm'
+            && Array.isArray(event.payload?.requiredToolNames)
+            && event.payload.requiredToolNames.length === 0
+            && Array.isArray(event.payload?.preResponseActions)
+            && event.payload.preResponseActions.length === 0
+          ),
+        ),
+        workflowContinuesToLlm: events.rows.some(
+          (event) => (
+            event.kind === 'workflow_plan'
+            && event.payload?.executionMode === 'continue_llm'
+          ),
+        ),
+        noToolWasExecutedBeforeOrAfterLlm: audits.length === 0,
+        noSgpCustomerLookup: !audits.some(
+          (audit) => audit.toolName === 'sgp_fetch_contact_panel_data',
+        ),
+        noDeterministicFlowMessageBypass: !events.rows.some(
+          (event) => (
+            event.kind === 'message_send'
+            && event.payload?.deterministicFlowMessage === true
+          ),
+        ),
+        responseAcknowledgesSelectedPlan: /\b(1000|1\s*giga|plano)\b/i.test(responseText),
+        responseDoesNotExposeOperationalCustomerData: !/\b(contratos encontrados|dados operacionais|cliente:\s|contrato\s+\d+)\b/i.test(responseText),
+      }
+    : scenario === 'commercial_registration_continuation'
+    ? {
+        llmResponseStarted: hasEvent('llm_response_start'),
+        llmResponseCompleted: events.rows.some(
+          (event) => event.kind === 'llm_response' && event.status === 'success',
+        ),
+        workflowContinuesToLlm: events.rows.some(
+          (event) => (
+            event.kind === 'workflow_plan'
+            && event.payload?.executionMode === 'continue_llm'
+          ),
+        ),
+        noToolExecutedForAddressTurn: audits.length === 0,
+        responseAdvancesRegistration: (
+          responseText.includes('?')
+          || /\b(cpf|cnpj|telefone|confirm|pre-cadastro|cadastro|finaliz|concluir|prosseguir)\b/i.test(responseText)
+        ),
+        noGenericLoopRefusal: !/\b(pausei esta tentativa|descreva o pedido com mais detalhes|solicite atendimento humano)\b/i.test(responseText),
+        oldLookupDidNotForceGenericRepair: !/\bja localizei os dados necessarios\b/i.test(responseText),
+        autopilotRemainedActive: (
+          finalChatState.rows[0]?.is_autopilot_active === true
+          && finalChatState.rows[0]?.assigned_system_agent_id === ids.agent
+        ),
+      }
+    : scenario === 'generic_troubleshooting'
+    ? {
+        llmGeneratedCustomerResponse: events.rows.some(
+          (event) => (
+            ['procedure_llm_response', 'llm_response'].includes(event.kind)
+            && event.status === 'success'
+          ),
+        ),
+        didNotSelectOpticalLosProcedure: !procedureExecutions.rows.some(
+          (execution) => /\b(los|loss|luz vermelha)\b/i.test(String(execution.procedure_name || '')),
+        ),
+        diagnosticProcedureDidNotRaceAhead: (
+          procedureExecutions.rows.length === 0
+          || procedureExecutions.rows.some(
+            (execution) => (
+              execution.status === 'waiting_input'
+              && Array.isArray(execution.step_history)
+              && execution.step_history.some((step: any) => step.status === 'waiting')
+            ),
+          )
+        ),
+        noAutomaticHandoffOrInternalNote: !audits.some(
+          (audit) => ['transfer_chat', 'add_internal_note'].includes(audit.toolName),
+        ),
+        autopilotRemainedActive: (
+          finalChatState.rows[0]?.is_autopilot_active === true
+          && finalChatState.rows[0]?.assigned_system_agent_id === ids.agent
+        ),
+        responseIsUsefulDiagnosticQuestion: (
+          responseText.includes('?')
+          && /\b(internet|conexao|fibra|modem|roteador|dispositivo|cabo|luz|queda|falha)\b/i.test(responseText)
+        ),
+        noProcedureOrLoopLeakage: !/\b(procedimento|instrucao operacional|etapa automatica|evitar repetir|pausei esta tentativa)\b/i.test(responseText),
+      }
+    : scenario === 'contract_mismatch'
     ? {
         noMcpAttemptForUnvalidatedContract: mcpAudits.length === 0,
         terminalContractMismatchDetected: terminalContractMismatch,
@@ -810,15 +1088,24 @@ async function runReplay(client: PoolClient, source: SourceContext) {
   const primaryDelivery = primaryDeliveries[0];
   const checks = {
     responsePersisted: Boolean(response.rows[0]),
-    singlePrimaryResponseDelivery: primaryDeliveries.length === messages.length,
+    singlePrimaryResponseDelivery: scenario === 'greeting'
+      ? primaryDeliveries.length >= 1
+      : primaryDeliveries.length === messages.length,
     durableResponseDeliverySent: primaryDeliveries.every((delivery) => delivery.status === 'sent'),
     responseBlocksFullyDelivered: (
       primaryDeliveries.every(
         (delivery) => Number(delivery.next_block_index) === Number(delivery.block_count),
       )
-      && response.rows.length === primaryDeliveries.reduce(
-        (total, delivery) => total + Number(delivery.block_count),
-        0,
+      && (
+        scenario === 'greeting'
+          ? response.rows.length >= primaryDeliveries.reduce(
+              (total, delivery) => total + Number(delivery.block_count),
+              0,
+            )
+          : response.rows.length === primaryDeliveries.reduce(
+              (total, delivery) => total + Number(delivery.block_count),
+              0,
+            )
       )
     ),
     providerAcceptedEveryResponseBlock: (
@@ -827,7 +1114,7 @@ async function runReplay(client: PoolClient, source: SourceContext) {
         (entry) => entry.path === `/message/sendText/${fakeInstanceName}`,
       )
     ),
-    sgpValidationSucceeded: audits.some(
+    sgpValidationSucceeded: identityFreeScenario || audits.some(
       (audit) => audit.toolName === 'sgp_fetch_contact_panel_data' && audit.status === 'success',
     ),
     ...scenarioChecks,
@@ -839,21 +1126,34 @@ async function runReplay(client: PoolClient, source: SourceContext) {
     noPendingConfirmation: sensitiveConfirmationScenario
       ? Boolean(state.rows[0]?.pending_confirmation)
       : !state.rows[0]?.pending_confirmation,
-    deterministicIntentWithoutLlmClassifier: !hasEvent('intent_classifier_ai'),
-    operationalRagWasSkipped: hasEvent(
+    intentClassifierRoutingExpected: scenario === 'greeting'
+      ? hasEvent('intent_classifier_ai')
+      : [
+          'generic_troubleshooting',
+          'catalog_continuation',
+          'commercial_registration_continuation',
+          'close_conversation',
+        ].includes(scenario)
+        ? true
+        : !hasEvent('intent_classifier_ai'),
+    operationalRagWasSkipped: identityFreeScenario || hasEvent(
       'rag_retrieval',
       (payload) => payload.status === 'skipped'
         || payload.reason === 'deterministic_operational_turn',
     ),
-    unrelatedCloseGateWasSkipped: !hasEvent('close_intent_gate'),
+    unrelatedCloseGateWasSkipped: scenario === 'close_conversation'
+      ? true
+      : !hasEvent('close_intent_gate'),
     requiredToolFailureTerminatesSafely: (
-      scenario === 'contract_mismatch'
+      identityFreeScenario
+      || scenario === 'contract_mismatch'
       || sensitiveConfirmationScenario
       || (['wifi_channel_diagnostics', 'wifi_branch_switch'].includes(scenario) ? diagnosticPathSucceeded : expectedToolSucceeded)
       || hasEvent('required_tool_failure_terminal')
     ),
     requiredToolFailureHandsOff: (
-      scenario === 'contract_mismatch'
+      identityFreeScenario
+      || scenario === 'contract_mismatch'
       || sensitiveConfirmationScenario
       || (['wifi_channel_diagnostics', 'wifi_branch_switch'].includes(scenario) ? diagnosticPathSucceeded : expectedToolSucceeded)
       || (

@@ -347,7 +347,7 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
   },
   {
     id: 'complaint_transfer_promise',
-    title: 'Reclamacao vira handoff quando a resposta promete equipe',
+    title: 'Reclamacao nao vira handoff apenas porque a resposta promete equipe',
     vertical: 'sac',
     customerMessage: 'Estou insatisfeito, isso e um absurdo',
     enabledToolNames: ['transfer_chat', 'add_internal_note'],
@@ -355,8 +355,8 @@ export const AUTOPILOT_OFFLINE_EVAL_CASES: AutopilotEvalCase[] = [
     expected: {
       intent: 'complaint',
       workflowExecutionMode: 'continue_llm',
-      validatorDecision: 'handoff',
-      expectedHandoff: true,
+      validatorDecision: 'repair',
+      expectedHandoff: false,
       allowFallback: true,
     },
   },

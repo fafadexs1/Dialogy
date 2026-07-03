@@ -173,7 +173,7 @@ function extractTime(text: string): string | null {
 }
 
 function extractOrderId(text: string): string | null {
-  return text.match(/\b(?:pedido|protocolo|solicitacao|solicitação|os|ordem|chamado|ticket)\s*#?\s*([a-z0-9-]{4,})\b/i)?.[1] || null;
+  return text.match(/\b(?:pedido|protocolo|solicitacao|solicitação|os|ordem|chamado|ticket)\b\s*#?\s*([a-z0-9-]{4,})\b/i)?.[1] || null;
 }
 
 function extractInvoiceId(text: string): string | null {

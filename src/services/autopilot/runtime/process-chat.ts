@@ -67,7 +67,10 @@ import {
     resolveFlowFormGuidance,
 } from '@/services/autopilot/flow-routing';
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
-import { isPotentialConversationCloseRequest } from '@/services/autopilot/close-intent';
+import {
+    isConversationCloseRequest,
+    isPotentialConversationCloseRequest,
+} from '@/services/autopilot/close-intent';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
@@ -98,6 +101,10 @@ import {
 } from '@/services/autopilot/runtime/stale-source-guard';
 import { handoffAutopilotFailureToHuman } from '@/services/autopilot/runtime/failure-handoff';
 import { hasSentFlowNodeMessage, logIntelligentAttendantResponse } from '@/services/autopilot/runtime/response-log';
+import {
+    shouldRunAutopilotKnowledgeRetrieval,
+    shouldSendDeterministicFlowResponse,
+} from '@/services/autopilot/runtime/turn-routing-policy';
 import {
     acquireAutopilotChatLease,
     AutopilotChatLeaseTimeoutError,
@@ -1108,6 +1115,9 @@ export async function processAutopilotForChat(
         enrichedLastMessageContent || '',
         chatHistoryForAI,
     );
+    const explicitConversationCloseRequest = isConversationCloseRequest(
+        enrichedLastMessageContent || '',
+    );
     const deterministicOperationalTurn = shouldBypassKnowledgeForOperationalTurn({
         customerNeed: earlyCustomerNeed,
         enabledToolNames,
@@ -1122,7 +1132,7 @@ export async function processAutopilotForChat(
     });
     const deterministicIntentResolution = intentResolution;
 
-    if (!deterministicOperationalTurn && shouldUseAiIntentClassifier({
+    if (!deterministicOperationalTurn && !explicitConversationCloseRequest && shouldUseAiIntentClassifier({
         intent: deterministicIntentResolution.intent,
         confidence: deterministicIntentResolution.confidence,
     })) {
@@ -1617,11 +1627,11 @@ export async function processAutopilotForChat(
     }> = [];
 
     try {
-        if (
-            enrichedLastMessageContent &&
-            enrichedLastMessageContent.trim().length > 3 &&
-            !deterministicOperationalTurn
-        ) {
+        if (!explicitConversationCloseRequest && shouldRunAutopilotKnowledgeRetrieval({
+            customerMessage: enrichedLastMessageContent,
+            shouldRetrieveKnowledge: intentResolution.shouldRetrieveKnowledge,
+            deterministicOperationalTurn,
+        })) {
             console.log(`[AUTOPILOT_RAG] Searching hybrid context for: "${enrichedLastMessageContent.substring(0, 50)}..."`);
             const ragStage = await timeOrchestratorStage(
                 orchestratorRun,
@@ -1689,13 +1699,15 @@ export async function processAutopilotForChat(
                     workflowId: intentResolution.workflowId,
                 },
             });
-        } else if (deterministicOperationalTurn) {
+        } else if (explicitConversationCloseRequest || deterministicOperationalTurn) {
             await recordOrchestratorEvent({
                 run: orchestratorRun,
                 kind: 'rag_retrieval',
                 status: 'skipped',
                 payload: {
-                    reason: 'deterministic_operational_turn',
+                    reason: explicitConversationCloseRequest
+                        ? 'explicit_conversation_close'
+                        : 'deterministic_operational_turn',
                     customerNeed: earlyCustomerNeed,
                 },
             });
@@ -1988,12 +2000,12 @@ export async function processAutopilotForChat(
         enabledToolNames: turnPolicy.globallyEnabledToolNames,
         toolCatalog: runtimeToolCatalog,
     });
-    const initialTurnPlanAuthorization = authorizeAutopilotTurnPlanTools(
-        turnPolicy,
-        [],
-        toolCoverage.safeFallbackToolNames,
-    );
-    const turnPlanEnabledToolNames = initialTurnPlanAuthorization.planningToolNames;
+    // The deterministic planner must see every globally enabled capability.
+    // The final authorization below still limits execution to the exact tools
+    // required by the detected customer need and preserves explicit deny mode.
+    const turnPlanEnabledToolNames = turnPolicy.toolMode === 'deny'
+        ? []
+        : turnPolicy.globallyEnabledToolNames;
     const turnPlan = buildAutopilotTurnPlan({
         customerMessage: enrichedLastMessageContent || '',
         chatHistory: chatHistoryForAI,
@@ -2140,7 +2152,14 @@ export async function processAutopilotForChat(
         : workflowPlan.actions;
     const activePEC = await getActiveProcedureExecution(chat.id);
     const shouldPrioritizeTurnPlan = shouldPrioritizeAutopilotTurnPlan(turnPlan);
-    const entryFlowMessageNode = resolveEntryDeterministicFlowMessage(autopilotConfig);
+    const canSendDeterministicFlowResponse = shouldSendDeterministicFlowResponse({
+        workflowExecutionMode: workflowPlan.executionMode,
+        workflowHandledByWorkflow: workflowPlan.handledByWorkflow,
+        shouldPrioritizeTurnPlan,
+    });
+    const entryFlowMessageNode = canSendDeterministicFlowResponse
+        ? resolveEntryDeterministicFlowMessage(autopilotConfig)
+        : null;
     const shouldSendEntryFlowMessage = entryFlowMessageNode && !shouldPrioritizeTurnPlan
         ? !activePEC && !(await hasSentFlowNodeMessage({
             configId: autopilotConfig.id,
@@ -2148,7 +2167,7 @@ export async function processAutopilotForChat(
             nodeId: entryFlowMessageNode.nodeId,
         }))
         : false;
-    const deterministicFlowMessageNode = shouldPrioritizeTurnPlan
+    const deterministicFlowMessageNode = !canSendDeterministicFlowResponse
         ? null
         : shouldSendEntryFlowMessage
             ? entryFlowMessageNode
@@ -2187,6 +2206,12 @@ export async function processAutopilotForChat(
         `knowledgeCategories=${intentResolution.knowledgeCategories.join(',') || 'none'}`,
         `reason=${intentResolution.reason}`,
         `flowSubAgent=${activeFlowIntentScope?.title || 'main_agent'}`,
+        intentResolution.intent === 'troubleshooting' && turnPlan.customerNeed === 'none'
+            ? [
+                'troubleshootingOpeningPolicy=acolha o relato e faca primeiro uma pergunta tecnica discriminante sobre alcance do problema, dispositivos, luzes do equipamento ou tipo de conexao.',
+                'Nao solicite CPF/CNPJ no primeiro relato generico e nao prometa consultar cadastro, status ou sistema sem uma action executavel no mesmo turno.',
+            ].join('\n')
+            : '',
         flowReferencesForPrompt,
         flowSwitchGuidanceForPrompt,
         flowFormGuidanceForPrompt,
@@ -3688,6 +3713,16 @@ export async function processAutopilotForChat(
         };
 
         const procedureResponseResolver: ProcedureResponseResolver = async ({ step, prompt, context, toolResults }) => {
+            const startedAt = Date.now();
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'procedure_llm_response_start',
+                payload: {
+                    procedureId: context.procedureId,
+                    stepId: step.id,
+                    model: resolvedAiModel.model,
+                },
+            });
             try {
                 const compactToolResults = compactProcedureToolResults(toolResults);
                 const response = await withTimeout(generateProcedureRuntimeOutput({
@@ -3717,9 +3752,33 @@ export async function processAutopilotForChat(
                     `[PROCEDURE_RUNTIME_SLIM] mode=response chat=${chat.id} ` +
                     `historyChars=${procedureSlimChatHistory.length} toolResultsChars=${JSON.stringify(compactToolResults).length}`,
                 );
+                await recordOrchestratorEvent({
+                    run: orchestratorRun,
+                    kind: 'procedure_llm_response',
+                    status: response?.response ? 'success' : 'fallback',
+                    durationMs: Date.now() - startedAt,
+                    payload: {
+                        procedureId: context.procedureId,
+                        stepId: step.id,
+                        model: resolvedAiModel.model,
+                        hasResponse: Boolean(response?.response),
+                    },
+                });
                 return response?.response || null;
             } catch (error) {
                 console.warn('[PROCEDURE_RUNTIME] Response resolver failed, using template response:', error);
+                await recordOrchestratorEvent({
+                    run: orchestratorRun,
+                    kind: 'procedure_llm_response',
+                    status: 'fallback',
+                    durationMs: Date.now() - startedAt,
+                    payload: {
+                        procedureId: context.procedureId,
+                        stepId: step.id,
+                        model: resolvedAiModel.model,
+                        error: error instanceof Error ? error.message : String(error),
+                    },
+                });
                 return null;
             }
         };
@@ -4239,6 +4298,21 @@ export async function processAutopilotForChat(
     // END PRE GATE — if we reach here, no procedure handled the message
     // ═══════════════════════════════════════════════════════════════════════
 
+    const isConversationalLlmTurn = (
+        ['greeting', 'thanks'].includes(intentResolution.intent)
+        && turnPlan.customerNeed === 'none'
+        && workflowPlan.executionMode === 'continue_llm'
+    );
+    const conversationalChatHistory = chatHistoryForAI
+        .split('\n')
+        .slice(-6)
+        .join('\n')
+        .slice(-1800);
+    const conversationalPersona = scopedKnowledgeBase
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 2400);
+
     try {
         const llmStage = await timeOrchestratorStage(
             orchestratorRun,
@@ -4247,28 +4321,33 @@ export async function processAutopilotForChat(
             config: autopilotConfig,
             chatId: chat.id,
             customerMessage: enrichedLastMessageContent || '',
-            chatHistory: chatHistoryForAI,
-            relevantHistory,
-            rules: activeRules,
-            knowledgeBase: scopedKnowledgeBase,
-            knowledgeBaseDocuments: promptKnowledgeDocuments,
-            workflowKnowledgeDocuments: promptWorkflowKnowledgeDocuments,
-            resolvedCases,
-            fallbackReply: autopilotConfig.default_fallback_reply || '',
+            chatHistory: isConversationalLlmTurn ? conversationalChatHistory : chatHistoryForAI,
+            relevantHistory: isConversationalLlmTurn ? '' : relevantHistory,
+            rules: isConversationalLlmTurn ? [] : activeRules,
+            knowledgeBase: isConversationalLlmTurn ? conversationalPersona : scopedKnowledgeBase,
+            knowledgeBaseDocuments: isConversationalLlmTurn ? [] : promptKnowledgeDocuments,
+            workflowKnowledgeDocuments: isConversationalLlmTurn ? [] : promptWorkflowKnowledgeDocuments,
+            resolvedCases: isConversationalLlmTurn ? [] : resolvedCases,
+            fallbackReply: isConversationalLlmTurn ? '' : autopilotConfig.default_fallback_reply || '',
             escalationPolicy: [
-                autopilotConfig.escalation_policy || '',
+                isConversationalLlmTurn ? '' : autopilotConfig.escalation_policy || '',
                 deterministicRouting.matchedReason
                     ? `Roteamento interno ja identificado pelo servidor: ${deterministicRouting.matchedReason} Responda ao cliente de forma natural informando que o atendimento sera encaminhado.`
                     : '',
             ].filter(Boolean).join('\n\n'),
-            closingPolicy: autopilotConfig.closing_policy || '',
+            closingPolicy: isConversationalLlmTurn ? '' : autopilotConfig.closing_policy || '',
             model: resolvedAiModel.model,
             contact: sanitizedContact,
             workspaceGeminiApiKey,
-            enabledAgentToolsDescription: buildEnabledAgentToolsDescription(enabledToolNames, runtimeToolCatalog, turnPolicy.toolInstructionsByName),
-            enabledAgentToolNames: enabledToolNames,
-            knowledgeToolProcedures,
-            intentContext: intentContextForAI,
+            enabledAgentToolsDescription: isConversationalLlmTurn
+                ? ''
+                : buildEnabledAgentToolsDescription(enabledToolNames, runtimeToolCatalog, turnPolicy.toolInstructionsByName),
+            enabledAgentToolNames: isConversationalLlmTurn ? [] : enabledToolNames,
+            knowledgeToolProcedures: isConversationalLlmTurn ? '' : knowledgeToolProcedures,
+            intentContext: isConversationalLlmTurn
+                ? `intent=${intentResolution.intent}; responda somente ao turno atual`
+                : intentContextForAI,
+            responseMode: isConversationalLlmTurn ? 'conversational' : 'full',
             }), orchestratorRun.budget.maxLlmMs, 'llm response'),
             {
                 model: resolvedAiModel.model,
@@ -4288,7 +4367,9 @@ export async function processAutopilotForChat(
             let finalResponse = result.response;
             let aiMessageBlocks: string[] | null = null;
             if (Array.isArray((result as any).messageBlocks) && (result as any).messageBlocks.length > 0) {
-                const rawBlocks = ((result as any).messageBlocks as string[]).map(b => b.trim()).filter(Boolean);
+                const rawBlocks = ((result as any).messageBlocks as string[])
+                    .map((block) => formatCustomerFacingAiResponse(block))
+                    .filter((block) => Boolean(block) && !/^[{}\[\],]+$/.test(block));
                 if (rawBlocks.length > 0) {
                     const firstBlock = rawBlocks[0];
                     const cleanedResponse = finalResponse.trim();
@@ -5166,8 +5247,12 @@ export async function processAutopilotForChat(
                 ? 'llm_timeout'
                 : 'autopilot_processing_error';
             const automaticFallback = formatCustomerFacingAiResponse(
-                autopilotConfig.default_fallback_reply?.trim() ||
-                'Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.'
+                intentResolution.intent === 'greeting'
+                    ? 'Ola! Como posso ajudar voce hoje?'
+                    : intentResolution.intent === 'thanks'
+                        ? 'Por nada! Posso ajudar em mais alguma coisa?'
+                        : autopilotConfig.default_fallback_reply?.trim() ||
+                            'Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.'
             );
             try {
                 const sendStage = await timeOrchestratorStage(

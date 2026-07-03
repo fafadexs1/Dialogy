@@ -120,8 +120,16 @@ function includeCompanionTools(input: {
   const allowed = new Set(input.scopedToolNames);
   const enabled = new Set(input.globallyEnabledToolNames);
 
+  // Transfer and close are conversation-level capabilities. Their runtime
+  // guards still require an explicit customer request and a valid target.
+  if (enabled.has("transfer_chat")) {
+    allowed.add("transfer_chat");
+  }
   if (allowed.has("transfer_chat") && enabled.has("add_internal_note")) {
     allowed.add("add_internal_note");
+  }
+  if (enabled.has("close_chat")) {
+    allowed.add("close_chat");
   }
 
   return input.scopedToolNames.concat(
@@ -135,6 +143,7 @@ export function authorizeAutopilotTurnPlanTools(
   safeFallbackToolNames: string[] = [],
 ): AutopilotTurnPlanToolAuthorization {
   const globallyEnabled = new Set(policy.globallyEnabledToolNames);
+  const required = unique(requiredToolNames);
   const planningToolNames = policy.toolMode === 'deny'
     ? []
     : unique([
@@ -142,9 +151,9 @@ export function authorizeAutopilotTurnPlanTools(
       ...safeFallbackToolNames.filter(
         (toolName) => globallyEnabled.size === 0 || globallyEnabled.has(toolName),
       ),
+      ...required.filter((toolName) => globallyEnabled.has(toolName)),
     ]);
   const planningScope = new Set(planningToolNames);
-  const required = unique(requiredToolNames);
   const widenedToolNames = required.filter(
     (toolName) => planningScope.has(toolName) && !policy.allowedToolNames.includes(toolName),
   );
@@ -185,10 +194,12 @@ export function compileAutopilotTurnPolicy(input: {
   const scopedToolNames = toolMode === "deny"
     ? []
     : attachedToolNames.filter((name) => enabled.has(name));
-  const allowedToolNames = includeCompanionTools({
-    scopedToolNames,
-    globallyEnabledToolNames,
-  });
+  const allowedToolNames = toolMode === "deny"
+    ? []
+    : includeCompanionTools({
+      scopedToolNames,
+      globallyEnabledToolNames,
+    });
 
   return {
     activeNodeId,

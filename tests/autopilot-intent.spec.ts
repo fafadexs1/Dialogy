@@ -118,6 +118,14 @@ describe('autopilot universal intent resolver', () => {
     expect(handoff.shouldTransfer).toBe(true);
   });
 
+  it('does not turn an explicitly excluded price mention into a pricing request', () => {
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Explique em duas frases o que este agente pode fazer, sem inventar preços.',
+    });
+
+    expect(resolution.intent).not.toBe('pricing_request');
+  });
+
   it('prioritizes pediatric symptom guidance over scheduling keywords', () => {
     const resolution = resolveAutopilotIntent({
       customerMessage: 'Ola, tudo bem? O nome da crianca e Joaquina. Meu bebe de 6 meses esta com febre de 38.5 desde ontem a noite. O que eu devo fazer antes da consulta?',

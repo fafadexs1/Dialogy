@@ -47,7 +47,7 @@ describe('autopilot turn policy', () => {
       intentScope: null,
     });
 
-    expect(policy.allowedToolNames).toEqual(['transfer_chat']);
+    expect(policy.allowedToolNames).toEqual(['transfer_chat', 'close_chat']);
     expect(policy.toolInstructionsByName).toEqual({
       transfer_chat: 'Transfira somente para a equipe solicitada pelo cliente.',
     });
@@ -171,7 +171,7 @@ describe('autopilot turn policy', () => {
     });
 
     expect(policy.activeNodeId).toBe('billing');
-    expect(policy.allowedToolNames).toEqual(['transfer_chat']);
+    expect(policy.allowedToolNames).toEqual(['transfer_chat', 'close_chat']);
     expect(policy.toolInstructionsByName).toEqual({
       transfer_chat: 'Transfira somente quando solicitado.',
     });
@@ -188,6 +188,48 @@ describe('autopilot turn policy', () => {
             { id: 'transfer', kind: 'tool', title: 'Transfer', toolName: 'transfer_chat' },
           ],
           edges: [{ id: 'assistant-transfer', source: 'assistant', target: 'transfer' }],
+        },
+      } as unknown as AutopilotConfig,
+      documents,
+      intentScope: null,
+    });
+
+    expect(policy.allowedToolNames).toEqual(['transfer_chat', 'add_internal_note']);
+  });
+
+  it('keeps a globally enabled close_chat available across active flow branches', () => {
+    const policy = compileAutopilotTurnPolicy({
+      config: {
+        enabled_tool_names: ['close_chat'],
+        tool_mode: 'on_demand',
+        flow_graph: {
+          version: 1,
+          nodes: [
+            { id: 'assistant', kind: 'sub_agent', title: 'Assistant' },
+            { id: 'close', kind: 'tool', title: 'Close', toolName: 'close_chat' },
+          ],
+          edges: [],
+        },
+      } as unknown as AutopilotConfig,
+      documents,
+      intentScope: null,
+    });
+
+    expect(policy.allowedToolNames).toEqual(['close_chat']);
+  });
+
+  it('keeps globally enabled transfer tools available across active flow branches', () => {
+    const policy = compileAutopilotTurnPolicy({
+      config: {
+        enabled_tool_names: ['transfer_chat', 'add_internal_note'],
+        tool_mode: 'on_demand',
+        flow_graph: {
+          version: 1,
+          nodes: [
+            { id: 'assistant', kind: 'sub_agent', title: 'Assistant' },
+            { id: 'transfer', kind: 'tool', title: 'Transfer', toolName: 'transfer_chat' },
+          ],
+          edges: [],
         },
       } as unknown as AutopilotConfig,
       documents,
@@ -309,6 +351,39 @@ describe('autopilot turn policy', () => {
       'mcp:router:scan_wifi_neighbors',
     ]);
     expect(authorization.blockedToolNames).toEqual([]);
+  });
+
+  it('authorizes an exact required globally enabled tool even when the active flow node does not expose it', () => {
+    const policy = compileAutopilotTurnPolicy({
+      config: {
+        enabled_tool_names: [
+          'sgp_fetch_contact_panel_data',
+          'mcp:router:get_wifi_view',
+          'mcp:router:reboot_router',
+        ],
+        tool_mode: 'on_demand',
+        flow_graph: {
+          version: 1,
+          nodes: [
+            { id: 'agent', kind: 'sub_agent', title: 'Agent' },
+            { id: 'wifi', kind: 'tool', title: 'Wi-Fi', toolName: 'mcp:router:get_wifi_view' },
+          ],
+          edges: [],
+        },
+      } as unknown as AutopilotConfig,
+      documents,
+      intentScope: null,
+    });
+
+    const authorization = authorizeAutopilotTurnPlanTools(
+      policy,
+      ['sgp_fetch_contact_panel_data'],
+    );
+
+    expect(authorization.widenedToolNames).toEqual(['sgp_fetch_contact_panel_data']);
+    expect(authorization.allowedToolNames).toEqual(['sgp_fetch_contact_panel_data']);
+    expect(authorization.blockedToolNames).toEqual([]);
+    expect(authorization.planningToolNames).not.toContain('mcp:router:reboot_router');
   });
 
   it('never lets the turn plan bypass an explicit deny mode or a disabled tool', () => {

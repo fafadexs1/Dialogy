@@ -363,4 +363,47 @@ describe('agent tool execution policy', () => {
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('[tool_policy:intent_mismatch]');
   });
+
+  it('executes close_chat immediately when the current customer message explicitly closes the conversation', async () => {
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Pode encerrar? USE close_chat',
+        turnPolicy: {
+          ...context.turnPolicy!,
+          globallyEnabledToolNames: [...context.turnPolicy!.globallyEnabledToolNames, 'close_chat'],
+          allowedToolNames: [...context.turnPolicy!.allowedToolNames, 'close_chat'],
+        },
+      },
+      action: {
+        type: 'close_chat',
+        reason: 'Cliente pediu para encerrar o atendimento.',
+        payload: { sendCloseMessage: false },
+      },
+    });
+
+    expect(result).toEqual({ allowed: true, riskLevel: 'medium' });
+  });
+
+  it('does not treat cancellation of a business service as authorization to close the chat', async () => {
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Quero cancelar meu plano de internet',
+        turnPolicy: {
+          ...context.turnPolicy!,
+          globallyEnabledToolNames: [...context.turnPolicy!.globallyEnabledToolNames, 'close_chat'],
+          allowedToolNames: [...context.turnPolicy!.allowedToolNames, 'close_chat'],
+        },
+      },
+      action: {
+        type: 'close_chat',
+        reason: 'Encerrar atendimento.',
+        payload: { sendCloseMessage: false },
+      },
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('[tool_policy:intent_mismatch]');
+  });
 });

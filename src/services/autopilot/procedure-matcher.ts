@@ -62,6 +62,14 @@ function hasRequiredDomainEvidence(documentName: string, customerMessage: string
   const normalizedName = normalizeText(documentName);
   const normalizedMessage = normalizeText(customerMessage);
 
+  if (/\b(los|loss|luz vermelha|fibra optica)\b/.test(normalizedName)) {
+    const hasExplicitOpticalAlarm =
+      /\b(los|loss)\b/.test(normalizedMessage) ||
+      /\bluz(?:es)?\b.{0,30}\bvermelh\w*\b/.test(normalizedMessage) ||
+      /\b(onu|ont|pon|fibra|modem)\b.{0,40}\b(vermelh\w*|sem sinal|apagad\w*)\b/.test(normalizedMessage) ||
+      /\b(vermelh\w*|sem sinal)\b.{0,40}\b(onu|ont|pon|fibra)\b/.test(normalizedMessage);
+    if (!hasExplicitOpticalAlarm) return false;
+  }
   if (/\b(financeiro|pagamento|boleto|fatura|pix|cobranca)\b/.test(normalizedName)) {
     return /\b(financeiro|pagamento|pagar|boleto|fatura|pix|cobranca|vencimento|negociacao|promessa)\b/.test(normalizedMessage);
   }
@@ -172,6 +180,16 @@ export function matchProcedure(input: {
     }
     const searchText = graphSearchText(graph);
     if (isCloseProcedure(graph, searchText) && !isCloseRequest(normalizedMessage)) {
+      continue;
+    }
+    const isSectionAwareWifiProcedure = (
+      graph.metadata?.sectionAware === true &&
+      /\b(get_wifi_view|scan_wifi_neighbors|get_wifi_scan_cached|change_wifi_credentials|reboot_router)\b/.test(searchText)
+    );
+    if (
+      isSectionAwareWifiProcedure &&
+      (!customerNeed || !graphSupportsCustomerNeed(searchText, customerNeed))
+    ) {
       continue;
     }
 

@@ -4,6 +4,7 @@ import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent
 import type { AutopilotIntentResolution, AutopilotSlotName } from '@/services/autopilot/intent-types';
 import type { SlotExtractionResult } from '@/services/autopilot/slots';
 import { buildWifiChannelAnalysisResponse } from '@/services/autopilot/wifi-channel-analysis';
+import { isConversationCloseRequest } from '@/services/autopilot/close-intent';
 
 export type AutopilotCustomerNeed =
   | 'wifi_credentials_lookup'
@@ -327,7 +328,7 @@ function inferNeedFromText(textValue: string): AutopilotCustomerNeed {
   const asksOrderStatus = (
     /\b(status|rastre|rastrear|acompanhar|andamento|previsao|previsao de entrega|onde esta|cad[eê])\b/.test(text) &&
     /\b(pedido|order|compra|entrega|protocolo|solicitacao|solicitação|ticket|chamado)\b/.test(text)
-  ) || /\b(?:pedido|protocolo|solicitacao|solicitação|ticket|chamado)\s*#?\s*[a-z0-9-]{4,}\b/i.test(text);
+  ) || /\b(?:pedido|protocolo|solicitacao|solicitação|ticket|chamado)\b\s*#?\s*[a-z0-9-]{4,}\b/i.test(text);
 
   if (mentionsWifi && asksChange) return 'wifi_credentials_change';
   if (mentionsWifi && asksCredentials) return 'wifi_credentials_lookup';
@@ -348,6 +349,13 @@ function inferNeedFromText(textValue: string): AutopilotCustomerNeed {
 function isLikelyContinuationMessage(customerMessage: string): boolean {
   const text = normalizeText(customerMessage);
   if (!text) return false;
+  const plainText = text.replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+  if (
+    /^(?:oi+e?|ola|bom dia|boa tarde|boa noite|hey|fala ai(?: galera)?|salve)(?: tudo bem)?$/.test(plainText) ||
+    /^(?:obrigad[oa]|muito obrigad[oa]|valeu|agradeco|grato|grata)$/.test(plainText)
+  ) {
+    return false;
+  }
   const digits = onlyDigits(text);
   if (digits.length === 11 || digits.length === 14) return true;
   if (/\b(cpf|cnpj|documento|titular)\b/.test(text) && digits.length >= 6) return true;
@@ -419,18 +427,32 @@ function keywordOverlapScore(leftText: string, rightText: string): number {
   return Math.min(6, tokens.filter((token) => leftText.includes(token)).length);
 }
 
+type GenericLookupCategory = 'catalog' | 'price' | 'availability' | 'schedule' | 'document';
+
+function genericLookupCategories(textValue: string): Set<GenericLookupCategory> {
+  const text = normalizeText(textValue).replace(/[_-]+/g, ' ');
+  const categories = new Set<GenericLookupCategory>();
+  if (/\b(catalogs?|catalogos?|products?|produtos?|services?|servicos?|plans?|planos?|menus?|list products)\b/.test(text)) categories.add('catalog');
+  if (/\b(prices?|pricing|precos?|valores?|quotes?|cotacoes?|orcamentos?|mensalidades?)\b/.test(text)) categories.add('price');
+  if (/\b(availability|available|disponibilidade|disponiveis?|stocks?|estoques?|slots?|vagas?)\b/.test(text)) categories.add('availability');
+  if (/\b(schedules?|agendar|agenda|calendar|calendars?|appointments?|consultas?|visitas?|horarios?)\b/.test(text)) categories.add('schedule');
+  if (/\b(documents?|documentos?|contracts?|contratos?|invoices?|comprovantes?|notas? fiscais?|declaracoes?)\b/.test(text)) categories.add('document');
+  return categories;
+}
+
 function genericLookupToolScore(tool: AgentToolCatalogItem, requestText: string): number {
   if (!isReadOnlyExternalTool(tool)) return 0;
+  if (tool.name === 'sgp_fetch_contact_panel_data' || tool.name === 'sgp_fetch_contracts') return 0;
   const text = normalizeText(catalogSearchText(tool));
   if (DESTRUCTIVE_TOOL_PATTERNS.some((pattern) => pattern.test(text))) return 0;
 
-  let score = tool.name.startsWith('mcp:') ? 3 : 1;
-  if (GENERIC_EXTERNAL_LOOKUP_PATTERNS.some((pattern) => pattern.test(text))) score += 1;
-  if (/\b(catalog|catalogo|product|produto|service|servico|plan|plano|menu)\b/.test(requestText) && /\b(catalog|catalogo|product|produto|service|servico|plan|plano|menu|list)\b/.test(text)) score += 6;
-  if (/\b(price|pricing|preco|valor|quote|cotacao|orcamento|mensalidade)\b/.test(requestText) && /\b(price|pricing|preco|valor|quote|cotacao|orcamento|mensalidade)\b/.test(text)) score += 6;
-  if (/\b(availability|disponibilidade|disponivel|stock|estoque|agenda|horario|slot|vaga)\b/.test(requestText) && /\b(availability|disponibilidade|disponivel|stock|estoque|agenda|horario|slot|calendar|appointment|vaga)\b/.test(text)) score += 6;
-  if (/\b(schedule|agendar|agenda|consulta|visita|horario)\b/.test(requestText) && /\b(schedule|appointment|agenda|calendar|availability|slot|horario|visita|consulta)\b/.test(text)) score += 6;
-  if (/\b(document|documento|contrato|comprovante|nota fiscal|declaracao)\b/.test(requestText) && /\b(document|documento|contract|contrato|invoice|comprovante|nota fiscal|declaracao)\b/.test(text)) score += 6;
+  const requestCategories = genericLookupCategories(requestText);
+  const toolCategories = genericLookupCategories(text);
+  const matchingCategories = [...requestCategories].filter((category) => toolCategories.has(category));
+  if (matchingCategories.length === 0) return 0;
+
+  let score = 8 + matchingCategories.length * 6;
+  if (tool.name.startsWith('mcp:')) score += 3;
   score += keywordOverlapScore(text, requestText);
   return score;
 }
@@ -1624,8 +1646,14 @@ function buildOperationalSgpResponse(result: AgentToolExecutionResult): string |
 
   const invoiceGroups = Array.isArray(output.invoiceGroups) ? output.invoiceGroups : [];
   for (const group of invoiceGroups.slice(0, 3)) {
-    const summary = String(group?.summary || group?.title || '').trim();
-    if (summary) lines.push(summary);
+    const rawSummary = group?.summary;
+    const rawTitle = group?.title;
+    const summary = typeof rawSummary === 'string' || typeof rawSummary === 'number'
+      ? String(rawSummary).trim()
+      : typeof rawTitle === 'string' || typeof rawTitle === 'number'
+        ? String(rawTitle).trim()
+        : '';
+    if (summary && summary !== '[object Object]') lines.push(summary);
   }
 
   const invoices = Array.isArray(output.invoices) ? output.invoices : [];
@@ -1865,10 +1893,16 @@ export function buildAutopilotTurnPlan(input: {
       ? retryContext.result.input.payload.arguments as Record<string, unknown>
       : null;
   let customerNeed = inferAutopilotCustomerNeed(input.customerMessage, input.chatHistory);
+  const explicitConversationClose = isConversationCloseRequest(input.customerMessage);
+  if (explicitConversationClose) {
+    customerNeed = 'none';
+  }
   if (customerNeed === 'none' && retryTool) {
     customerNeed = inferRetryCustomerNeed(retryTool);
   }
-  const reasons: string[] = [];
+  const reasons: string[] = explicitConversationClose
+    ? ['explicit_conversation_close_delegated_to_workflow']
+    : [];
   const requiredToolNames: string[] = [];
   const forbiddenToolNames: string[] = [];
   let expectedNextAction: AutopilotTurnExpectedAction = 'continue_llm';
@@ -2024,7 +2058,7 @@ export function buildAutopilotTurnPlan(input: {
 
     if (!genericExternalLookupTool) {
       expectedNextAction = 'continue_llm';
-      responseOverride = 'Consigo ajudar com essa consulta, mas nao encontrei uma ferramenta MCP/API read-only habilitada para buscar esse dado automaticamente. Vou precisar verificar manualmente.';
+      responseOverride = null;
       reasons.push('generic_external_lookup_tool_not_enabled');
     } else {
       requiredToolNames.push(String(genericExternalLookupTool.name));

@@ -52,6 +52,14 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
+function stripIsolatedStructuredDelimiters(value: string): string {
+  return value
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .filter((line) => !/^\s*[{}\[\],]\s*$/.test(line))
+    .join('\n');
+}
+
 function formatIsoDatesForCustomer(value: string): string {
   return value
     .replace(
@@ -252,7 +260,7 @@ export function formatCustomerFacingAiResponse(
   response: string,
   maxChars = DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
 ): string {
-  const protectedUrls = protectUrls(expandCompactPlanCatalog(response));
+  const protectedUrls = protectUrls(expandCompactPlanCatalog(stripIsolatedStructuredDelimiters(response)));
   const normalized = normalizeWhitespace(formatIsoDatesForCustomer(protectedUrls.value));
   if (!normalized) return '';
 

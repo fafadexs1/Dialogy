@@ -88,7 +88,12 @@ import { AutopilotReadiness } from '@/components/autopilot/autopilot-readiness';
 import { AutopilotDecisionInsightsPanel } from '@/components/autopilot/autopilot-decision-insights';
 import { AutomationForm } from '@/components/autopilot/automation-form';
 import { AutopilotFlowBuilder, type AgentEditorPanel } from '@/components/autopilot/autopilot-flow-builder';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import type { AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
 import type { RagLabReport } from '@/services/rag/evaluation';
 
@@ -1463,6 +1468,12 @@ export default function AutopilotDetailPage() {
 
       <Dialog open={editorPanel !== null && !inlineEditorPanelName} onOpenChange={(open) => !open && setEditorPanel(null)}>
         <DialogContent className="flex h-[92vh] max-h-[92vh] w-[min(1160px,94vw)] max-w-none flex-col overflow-hidden rounded-[26px] border-white/10 bg-[#111316] p-0 text-slate-100 shadow-2xl">
+          <DialogTitle className="sr-only">
+            {editorPanel === 'playground' ? 'Playground do agente' : 'Painel do agente'}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            Teste e inspecione o agente sem publicar alterações no atendimento real.
+          </DialogDescription>
           {editorPanel === 'playground' && (
             <div className="flex-1 overflow-y-auto p-5 sm:p-7">
               <AutopilotPlayground

@@ -701,6 +701,16 @@ export interface AutopilotFlowEdge {
   targetHandle?: string | null;
   routeId?: string | null;
   label?: string | null;
+  connectionType?:
+    | 'main'
+    | 'model'
+    | 'tool'
+    | 'agent_tool'
+    | 'memory'
+    | 'knowledge'
+    | 'guardrail'
+    | 'error'
+    | 'event';
 }
 
 export interface AutopilotFlowVariable {

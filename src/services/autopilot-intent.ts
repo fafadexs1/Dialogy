@@ -168,6 +168,18 @@ function matchesAny(normalizedText: string, intent: UniversalAutopilotIntent): b
   return (INTENT_KEYWORDS[intent] || []).some((pattern) => pattern.test(normalizedText));
 }
 
+function hasPricingRequest(normalizedText: string): boolean {
+  if (!matchesAny(normalizedText, 'pricing_request')) return false;
+  const pricingTerm = '(?:preco|precos|valor|valores|custo|custos|mensalidade|taxa|tarifa)';
+  const explicitlyExcluded = (
+    new RegExp(`\\b(?:sem|evite)\\b.{0,40}\\b${pricingTerm}\\b`).test(normalizedText)
+    || new RegExp(
+      `\\bnao\\s+(?:invente|inventa|mencione|menciona|fale|fala|informe|informa|mostre|mostra|quero saber|preciso saber)\\b.{0,40}\\b${pricingTerm}\\b`,
+    ).test(normalizedText)
+  );
+  return !explicitlyExcluded;
+}
+
 function isShortMessage(normalizedMessage: string): boolean {
   return normalizedMessage.length <= 48 && normalizedMessage.split(/\s+/).length <= 7;
 }
@@ -448,14 +460,14 @@ function detectIntent(customerMessage: string, chatHistory = ''): DetectedIntent
 
   if (
     matchesAny(normalized, 'catalog_request') &&
-    matchesAny(normalized, 'pricing_request') &&
+    hasPricingRequest(normalized) &&
     /\b(mostra|mostrar|manda|mandar|envia|enviar|quais|todos|todas|lista|catalogo|cardapio|menu)\b/.test(normalized)
   ) {
     return { intent: 'catalog_request', confidence: 0.88, reason: 'Cliente pediu lista/catalogo com valores.' };
   }
 
   if (
-    matchesAny(normalized, 'pricing_request') &&
+    hasPricingRequest(normalized) &&
     !/\b(agendar|marcar|remarcar|desmarcar|agenda|horario|reserva|visita|reuniao)\b/.test(normalized)
   ) {
     return { intent: 'pricing_request', confidence: 0.87, reason: 'Cliente perguntou valores, preco ou custo.' };
@@ -524,7 +536,10 @@ function detectIntent(customerMessage: string, chatHistory = ''): DetectedIntent
   ];
 
   for (const intent of orderedIntents) {
-    if (matchesAny(normalized, intent)) {
+    const matched = intent === 'pricing_request'
+      ? hasPricingRequest(normalized)
+      : matchesAny(normalized, intent);
+    if (matched) {
       return {
         intent,
         confidence: intent === 'human_handoff' ? 0.96 : 0.86,

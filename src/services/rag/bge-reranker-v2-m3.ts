@@ -29,11 +29,12 @@ const globalForReranker = global as unknown as {
     tokenizer: any;
     model: any;
   }>;
+  bgeRerankerV2M3Queue?: Promise<void>;
 };
 
 function isEnabled() {
   const configured = process.env.RAG_BGE_RERANKER_V2_M3_ENABLED?.trim().toLowerCase();
-  return configured !== 'false' && configured !== '0' && configured !== 'no';
+  return configured === 'true' || configured === '1' || configured === 'yes';
 }
 
 function maximumPassageCharacters() {
@@ -71,6 +72,29 @@ async function getReranker() {
   return globalForReranker.bgeRerankerV2M3;
 }
 
+async function runRerankerSerialized<T>(task: () => Promise<T>): Promise<T> {
+  const previous = globalForReranker.bgeRerankerV2M3Queue || Promise.resolve();
+  const running = previous.catch(() => undefined).then(task);
+  const settled = running.then(() => undefined, () => undefined);
+  globalForReranker.bgeRerankerV2M3Queue = settled;
+  try {
+    return await running;
+  } finally {
+    if (globalForReranker.bgeRerankerV2M3Queue === settled) {
+      globalForReranker.bgeRerankerV2M3Queue = undefined;
+    }
+  }
+}
+
+function disposeTensors(value: Record<string, unknown> | null | undefined) {
+  const disposed = new Set<unknown>();
+  for (const tensor of Object.values(value || {})) {
+    if (!tensor || disposed.has(tensor)) continue;
+    disposed.add(tensor);
+    (tensor as { dispose?: () => void }).dispose?.();
+  }
+}
+
 export async function prewarmBgeRerankerV2M3() {
   if (isEnabled()) await getReranker();
 }
@@ -83,22 +107,31 @@ export async function rerankKnowledgeCandidatesWithBgeV2M3(
 
   const startedAt = performance.now();
   const { tokenizer, model } = await getReranker();
-  const modelInputs = tokenizer(
-    candidates.map(() => query),
-    {
-      text_pair: candidates.map(({ document }) => passageForDocument(document)),
-      padding: true,
-      truncation: true,
-    },
-  );
-  const output = await model(modelInputs);
-  const logits = output.logits.tolist() as number[][];
-  const ranked = candidates
-    .map((candidate, index) => ({
-      ...candidate,
-      rerankerScore: Number(logits[index]?.[0] ?? Number.NEGATIVE_INFINITY),
-    }))
-    .sort((left, right) => right.rerankerScore - left.rerankerScore || right.originalScore - left.originalScore);
+  const ranked = await runRerankerSerialized(async () => {
+    let modelInputs: Record<string, unknown> | undefined;
+    let output: Record<string, unknown> | undefined;
+    try {
+      modelInputs = tokenizer(
+        candidates.map(() => query),
+        {
+          text_pair: candidates.map(({ document }) => passageForDocument(document)),
+          padding: true,
+          truncation: true,
+        },
+      );
+      output = await model(modelInputs);
+      const logits = (output as any).logits.tolist() as number[][];
+      return candidates
+        .map((candidate, index) => ({
+          ...candidate,
+          rerankerScore: Number(logits[index]?.[0] ?? Number.NEGATIVE_INFINITY),
+        }))
+        .sort((left, right) => right.rerankerScore - left.rerankerScore || right.originalScore - left.originalScore);
+    } finally {
+      disposeTensors(output);
+      disposeTensors(modelInputs);
+    }
+  });
 
   return {
     documents: ranked,

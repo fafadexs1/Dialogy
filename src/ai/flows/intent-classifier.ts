@@ -113,6 +113,8 @@ export async function classifyAutopilotIntentWithAi(input: AiIntentClassifierInp
     'Se o cliente quer pagar, boleto, fatura ou pix, use billing_or_payment.',
     'Se quer comprar/assinar/contratar, use purchase_inquiry.',
     'Se pede humano explicitamente, use human_handoff.',
+    'Use cancellation_request somente para cancelar contrato, plano, assinatura, servico, pedido ou outro objeto de negocio.',
+    'Pedido para encerrar/finalizar a conversa, chat ou atendimento atual nao e cancellation_request nem human_handoff; use thanks quando for uma despedida/conclusao e unknown nos demais casos. O gate de close_chat decide a ferramenta separadamente.',
     'Responda somente JSON: {"intent":"...","confidence":0.0,"reason":"curto"}.',
     `Intencoes validas: ${UNIVERSAL_INTENTS.join(', ')}`,
     '',

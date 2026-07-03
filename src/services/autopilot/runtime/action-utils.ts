@@ -80,6 +80,24 @@ export function filterImplicitTransferActions(input: {
     return input.actions;
   }
 
+  const isExplicitTransferAction = (action: AgentToolAction) => {
+    if (action.type !== 'transfer_chat') return false;
+    const payload = action.payload && typeof action.payload === 'object'
+      ? action.payload as Record<string, any>
+      : {};
+    const targetTeam = typeof payload.teamId === 'string'
+      ? input.availableTeams.find((team) => team.id === payload.teamId)
+      : null;
+    const teamName = String(payload.teamName || targetTeam?.name || '');
+    return (
+      (targetTeam ? hasExplicitTeamHandoff(input.customerMessage, targetTeam) : false) ||
+      (teamName ? hasExplicitTeamHandoff(input.customerMessage, { name: teamName }) : false)
+    );
+  };
+  const hasImplicitTransferCandidate = input.actions.some((action) => (
+    action.type === 'transfer_chat' && !isExplicitTransferAction(action)
+  ));
+
   return input.actions.filter((action) => {
     if (action.type !== 'transfer_chat' && action.type !== 'add_internal_note') {
       return true;
@@ -95,20 +113,10 @@ export function filterImplicitTransferActions(input: {
     const text = `${teamName} ${reason}`;
 
     if (action.type === 'transfer_chat') {
-      const explicitByTarget = targetTeam ? hasExplicitTeamHandoff(input.customerMessage, targetTeam) : false;
-      const explicitByName = teamName ? hasExplicitTeamHandoff(input.customerMessage, { name: teamName }) : false;
-      if (explicitByTarget || explicitByName) return true;
-      if (isOperationallyUnresolvableTransferReason(reason)) return true;
-
-      return false;
+      return isExplicitTransferAction(action);
     }
 
-    const hasAllowedImplicitTransfer = input.actions.some((candidateAction) => {
-      if (candidateAction.type !== 'transfer_chat') return false;
-      const candidateReason = String(candidateAction.reason || '');
-      return isOperationallyUnresolvableTransferReason(candidateReason);
-    });
-    if (hasAllowedImplicitTransfer) return true;
+    if (hasImplicitTransferCandidate) return false;
     return !/\b(transfer|encaminh|roteamento)\b/i.test(text);
   });
 }

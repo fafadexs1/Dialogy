@@ -1,103 +1,112 @@
-import type { AgentToolAction } from '@/services/agent-tools/types';
+import type { AgentToolAction, AgentToolName } from '@/services/agent-tools/types';
+import { getAgentToolDefinition } from '@/services/agent-tools/catalog';
 import {
   getLmStudioModelId,
   normalizeLmStudioConfig,
   type LmStudioConfig,
 } from '@/services/ai/lm-studio';
 
-const NATIVE_READ_ONLY_TOOL_NAMES = [
-  'sgp_fetch_contracts',
-  'sgp_fetch_contact_panel_data',
-] as const;
+/**
+ * Determines if a tool from the catalog is eligible for native LM Studio
+ * function calling. Only side-effect-free tools are offered. Write/action
+ * tools are handled through the JSON-schema actions path instead.
+ */
+function isNativeToolEligible(name: string): boolean {
+  if (name.startsWith('mcp')) return false;
 
-type NativeReadOnlyToolName = typeof NATIVE_READ_ONLY_TOOL_NAMES[number];
+  const definition = getAgentToolDefinition(name as AgentToolName);
+  if (!definition) return false;
+  if (definition.sideEffect !== 'none') return false;
+  if (definition.requiresHumanApproval) return false;
 
-type LmStudioNativeToolCall = {
-  function?: {
-    name?: unknown;
-    arguments?: unknown;
-  };
-};
+  return true;
+}
 
-const nativeReadOnlyToolDescriptions: Record<NativeReadOnlyToolName, string> = {
-  sgp_fetch_contracts:
-    'Consulta contratos do cliente no SGP. Use somente quando o cliente informou CPF/CNPJ ou quando ele ja estiver salvo no CRM. Nunca invente identificadores, contratos, dados ou resultados. Solicite apenas a execucao; a resposta final deve usar somente o retorno real da ferramenta.',
-  sgp_fetch_contact_panel_data:
-    'Consulta resumo, contratos, conexao e faturas do cliente no SGP. Use somente quando o cliente informou CPF/CNPJ ou quando ele ja estiver salvo no CRM. Informe contractId somente para restringir a consulta a um contrato especifico quando possuir um ID real retornado anteriormente pelo SGP ou informado claramente pelo cliente. Nunca invente identificadores, contratos, faturas, datas, valores, links, diagnosticos ou procedimentos. Solicite apenas a execucao; a resposta final deve usar somente o retorno real da ferramenta.',
-};
-
-function isNativeReadOnlyToolName(value: unknown): value is NativeReadOnlyToolName {
-  return typeof value === 'string'
-    && NATIVE_READ_ONLY_TOOL_NAMES.includes(value as NativeReadOnlyToolName);
+function buildToolParameters(inputSchema?: Record<string, unknown> | null) {
+  if (inputSchema && typeof inputSchema === 'object' && Object.keys(inputSchema.properties || {}).length > 0) {
+    return { ...inputSchema, additionalProperties: false };
+  }
+  return { type: 'object', properties: {}, additionalProperties: false };
 }
 
 export function buildLmStudioNativeTools(enabledToolNames: string[]) {
-  const enabledToolSet = new Set(enabledToolNames);
+  return enabledToolNames
+    .filter(isNativeToolEligible)
+    .map((name) => {
+      const definition = getAgentToolDefinition(name as AgentToolName);
+      if (!definition) return null;
 
-  return NATIVE_READ_ONLY_TOOL_NAMES
-    .filter((name) => enabledToolSet.has(name))
-    .map((name) => ({
-      type: 'function' as const,
-      function: {
-        name,
-        description: nativeReadOnlyToolDescriptions[name],
-        parameters: name === 'sgp_fetch_contact_panel_data'
-          ? {
-              type: 'object',
-              properties: {
-                contractId: {
-                  type: 'string',
-                  description: 'ID real do contrato SGP. Use apenas para restringir a consulta a um contrato especifico.',
-                },
-              },
-              additionalProperties: false,
-            }
-          : {
-              type: 'object',
-              properties: {},
-              additionalProperties: false,
-            },
-      },
-    }));
+      return {
+        type: 'function' as const,
+        function: {
+          name: definition.name,
+          description: definition.description,
+          parameters: buildToolParameters(definition.inputSchema),
+        },
+      };
+    })
+    .filter((tool): tool is NonNullable<typeof tool> => tool !== null);
+}
+
+function sanitizeNativeToolPayload(
+  name: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const definition = getAgentToolDefinition(name as AgentToolName);
+  const properties = definition?.inputSchema
+    && typeof definition.inputSchema === 'object'
+    && definition.inputSchema.properties
+    && typeof definition.inputSchema.properties === 'object'
+      ? definition.inputSchema.properties as Record<string, unknown>
+      : {};
+  const payload = Object.fromEntries(
+    Object.entries(args)
+      .filter(([key]) => Object.prototype.hasOwnProperty.call(properties, key)),
+  );
+  if (
+    name === 'sgp_fetch_contact_panel_data'
+    && payload.contractId != null
+    && !/^\d+$/.test(String(payload.contractId))
+  ) {
+    delete payload.contractId;
+  }
+  return payload;
 }
 
 export function convertLmStudioNativeToolCalls(toolCalls: unknown): AgentToolAction[] {
   if (!Array.isArray(toolCalls)) return [];
 
-  return toolCalls.flatMap((toolCall: LmStudioNativeToolCall) => {
+  return toolCalls.flatMap((toolCall: { function?: { name?: unknown; arguments?: unknown } }) => {
     const name = toolCall?.function?.name;
-    if (!isNativeReadOnlyToolName(name)) return [];
+    if (typeof name !== 'string' || !isNativeToolEligible(name)) return [];
 
-    let payload = {};
-    if (name === 'sgp_fetch_contact_panel_data') {
-      try {
-        const args = typeof toolCall.function?.arguments === 'string'
-          ? JSON.parse(toolCall.function.arguments)
-          : toolCall.function?.arguments;
-        if (args && typeof args.contractId === 'string' && /^\d+$/.test(args.contractId.trim())) {
-          payload = { contractId: args.contractId.trim() };
-        }
-      } catch {
-        // Ignore malformed model-provided arguments.
+    let payload: Record<string, unknown> = {};
+    try {
+      const args = typeof toolCall.function?.arguments === 'string'
+        ? JSON.parse(toolCall.function.arguments)
+        : toolCall.function?.arguments;
+      if (args && typeof args === 'object' && !Array.isArray(args)) {
+        payload = sanitizeNativeToolPayload(name, args as Record<string, unknown>);
       }
+    } catch {
+      // Ignore malformed model-provided arguments.
     }
 
-    // CPF/CNPJ always comes from validated runtime context. Only a numeric
-    // contractId may pass through to narrow the support lookup.
     return [{
       type: name,
       reason: `LM Studio native tool call: ${name}`,
       payload,
-    }];
+    } as AgentToolAction];
   });
 }
 
-export function shouldRequestLmStudioNativeTools(input: {
+export function shouldRequestLmStudioNativeTools(_input: {
   customerMessage: string;
   response?: string | null;
 }): boolean {
-  const text = `${input.customerMessage}\n${input.response || ''}`.toLowerCase();
-  return /\b(fatura|boleto|pix|contrato|financeir|pagamento|sinal|conex[aã]o|internet|cadastro|dados|consult|verific|status)\b/i.test(text);
+  // Let the model decide via tool_choice: 'auto'. Policy and schema checks still
+  // run after the model returns a tool call.
+  return true;
 }
 
 export async function requestLmStudioNativeToolActions(input: {
@@ -133,10 +142,9 @@ export async function requestLmStudioNativeToolActions(input: {
           {
             role: 'system',
             content: [
-              'Decida somente se uma consulta externa de leitura e necessaria para atender o cliente.',
-              'Nunca invente CPF, CNPJ, contrato ou fatura.',
-              'Se faltar identificador, nao chame ferramenta; responda solicitando o dado ausente.',
-              'Nao solicite alteracoes, transferencias ou encerramentos.',
+              'Decida se alguma ferramenta e necessaria para atender a solicitacao do cliente.',
+              'Nunca invente CPF, CNPJ, contrato, fatura ou qualquer identificador.',
+              'Se faltar identificador obrigatorio, nao chame ferramenta; responda solicitando o dado ausente.',
               'Nunca antecipe resultado, link, protocolo, prazo, diagnostico ou procedimento que dependa da ferramenta.',
             ].join(' '),
           },

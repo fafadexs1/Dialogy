@@ -1,7 +1,6 @@
 import { sendAutomatedMessageAction } from '@/actions/messages';
 import { formatCustomerFacingAiResponse, splitIntoMessageBlocks } from '@/lib/ai-response-format';
 import { db } from '@/lib/db';
-import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
 import type { MessageMetadata } from '@/lib/types';
 import { guardRepeatedConfirmationPrompt } from '@/services/autopilot/runtime/repetition-guard';
 import {
@@ -47,29 +46,6 @@ async function guardAutomatedMessage(chatId: string, message: string): Promise<s
     });
     if (guarded.action !== 'send') {
       console.warn(`[AUTOPILOT_LOOP_GUARD] chat=${chatId} action=${guarded.action}`);
-
-      if (guarded.action === 'suppress' || guarded.message?.includes('pausei esta tentativa')) {
-        try {
-          const chatRes = await db.query(`SELECT workspace_id FROM chats WHERE id = $1`, [chatId]);
-          if (chatRes.rows[0]) {
-            await db.query(
-              `UPDATE chats SET is_autopilot_active = FALSE WHERE id = $1`,
-              [chatId],
-            );
-            await broadcastChatUpdate(chatRes.rows[0].workspace_id, chatId, {
-              is_autopilot_active: false,
-            });
-            console.warn(
-              `[AUTOPILOT_LOOP_GUARD] chat=${chatId} pausado automaticamente pelo guard de repeticao.`,
-            );
-          }
-        } catch (pauseError) {
-          console.error(
-            '[AUTOPILOT_LOOP_GUARD] Falha ao pausar chat automaticamente:',
-            pauseError,
-          );
-        }
-      }
     }
     return guarded.message;
   } catch (error) {

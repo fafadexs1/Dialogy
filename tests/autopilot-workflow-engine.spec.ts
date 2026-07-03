@@ -71,6 +71,17 @@ describe('universal autopilot workflow engine', () => {
     expect(planFor({ message: 'Pode encerrar o atendimento' }).actions).toEqual([]);
   });
 
+  it('honors an explicit literal close_chat request without confusing it with service cancellation', () => {
+    const plan = planFor({
+      message: 'Pode encerrar? USE close_chat',
+      enabledToolNames: ['close_chat'],
+    });
+
+    expect(plan.executionMode).toBe('direct_response');
+    expect(plan.actions.map((action) => action.type)).toEqual(['close_chat']);
+    expect(plan.metadata.closeRequested).toBe(true);
+  });
+
   it('honors a close gate approval', () => {
     const plan = planFor({
       message: 'ja deu por aqui',

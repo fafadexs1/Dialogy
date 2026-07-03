@@ -108,7 +108,24 @@ function customerMessageLooksLikeQuestion(value: string): boolean {
 function responseAsksForCustomerInput(value: string): boolean {
   const normalized = normalizeText(value);
   return value.includes('?') ||
-    /\b(me informe|informe|envie|me passe|passa|diga|responda|confirme|qual e|qual seria|quando|onde|como prefere|como deseja|preciso que|por favor|escolha|selecione)\b/.test(normalized);
+    /\b(pergunte|me informe|informe|envie|me passe|passa|diga|responda|confirme|qual e|qual seria|quando|onde|como prefere|como deseja|preciso que|por favor|escolha|selecione)\b/.test(normalized);
+}
+
+function isExplicitAffirmativeMessage(value: string): boolean {
+  return /^(sim|s|sim confirmo|sim pode transferir|sim pode encaminhar|confirmo|confirmado|pode|pode sim|pode transferir|pode encaminhar|autorizo|autorizado|prossiga|ok|okay|certo)$/i
+    .test(normalizeText(value));
+}
+
+function isExplicitTransferCancellation(value: string): boolean {
+  return /^(nao|n|nao quero|melhor nao|deixa|deixa pra la|deixa para la|cancelar|cancela|desisto)$/i
+    .test(normalizeText(value));
+}
+
+function isExplicitHumanHandoffRequest(value: string): boolean {
+  const normalized = normalizeText(value);
+  return /\b(falar|conversar)\s+com\s+(um\s+|uma\s+)?(humano|atendente|pessoa)\b/.test(normalized) ||
+    /\b(quero|preciso|pode|gostaria)\b.{0,35}\b(atendente|humano|pessoa|suporte humano)\b/.test(normalized) ||
+    /\b(me transfere|me encaminha|transferir para|encaminhar para)\b/.test(normalized);
 }
 
 function customerAlreadyProvidedActionableDetails(value: string): boolean {
@@ -533,6 +550,47 @@ async function executeGatherDataStep(
   responseResolver?: ProcedureResponseResolver,
   forceLlmRespond?: boolean,
 ): Promise<StepResult> {
+  const isOpenQuestionCheckpoint = (
+    (step.requiredSlots || []).length === 0 &&
+    Boolean(step.promptTemplate?.trim()) &&
+    responseAsksForCustomerInput(step.promptTemplate || '')
+  );
+  if (isOpenQuestionCheckpoint) {
+    if (!isResuming || !customerMessage.trim()) {
+      const prompt = interpolate(step.promptTemplate || step.label, context);
+      if (forceLlmRespond && responseResolver) {
+        const resolved = await responseResolver({
+          step,
+          context,
+          customerMessage,
+          prompt: [
+            'Transforme a instrucao operacional abaixo em uma unica pergunta curta, natural e empatica para o cliente.',
+            'Nao mencione fluxo, procedimento, documento, etapa, ferramenta ou instrucao interna.',
+            'Nao diga que realizou verificacoes que ainda nao foram feitas.',
+            `Instrucao operacional: ${prompt}`,
+          ].join('\n'),
+          toolResults: getAllToolResults(context),
+        });
+        if (resolved?.trim()) {
+          return {
+            status: 'pause',
+            response: resolved.trim(),
+          };
+        }
+      }
+      return {
+        status: 'pause',
+        response: prompt,
+      };
+    }
+    return {
+      status: 'continue',
+      slotCollected: {
+        [`response_${step.id}`]: customerMessage.trim(),
+      },
+    };
+  }
+
   const missing = missingRequiredSlots(step.requiredSlots, context);
   if (missing.length === 0) {
     return { status: 'continue' };
@@ -686,6 +744,28 @@ function executeToolCallStep(
 ): StepResult {
   if (!step.toolName) {
     return { status: 'error', error: 'Passo de tool_call sem toolName definido.' };
+  }
+
+  if (step.toolName === 'transfer_chat' && step.requiresConfirmation) {
+    const transferAuthorized = (
+      isExplicitHumanHandoffRequest(customerMessage) ||
+      isExplicitAffirmativeMessage(customerMessage)
+    );
+    if (!transferAuthorized) {
+      const cancelled = isExplicitTransferCancellation(customerMessage);
+      return {
+        status: 'complete',
+        response: cancelled
+          ? 'Certo, nao vou transferir o atendimento. Podemos continuar a verificacao por aqui.'
+          : 'Antes de transferir o atendimento, preciso da sua confirmacao explicita. Posso encaminhar para uma pessoa da equipe?',
+        output: {
+          transferBlocked: true,
+          reason: cancelled
+            ? 'customer_declined_transfer'
+            : 'explicit_transfer_confirmation_missing',
+        },
+      };
+    }
   }
 
   if (

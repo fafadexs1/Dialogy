@@ -1,6 +1,7 @@
 import type { Genkit } from 'genkit';
 import { z } from 'zod';
 import { db } from '@/lib/db';
+import { listAgentToolDefinitions } from '@/services/agent-tools/catalog';
 
 export const LM_STUDIO_MODEL_PREFIX = 'lmstudio/';
 export const LM_STUDIO_CONFIG_KEY = 'lm_studio_config';
@@ -12,30 +13,21 @@ export type LmStudioConfig = {
 
 export type LmStudioOutputKind = 'agent' | 'procedure';
 
-const actionSchema = {
-  type: 'object',
-  properties: {
-    type: {
-      type: 'string',
-      enum: [
-        'transfer_chat',
-        'close_chat',
-        'add_internal_note',
-        'crm_update_contact_custom_fields',
-        'sgp_fetch_contracts',
-        'sgp_fetch_contact_panel_data',
-        'sgp_generate_invoice_pix',
-        'sgp_create_payment_promise',
-        'sgp_open_support_ticket',
-        'mcp_call_tool',
-      ],
+function getActionSchema() {
+  return {
+    type: 'object',
+    properties: {
+      type: {
+        type: 'string',
+        enum: listAgentToolDefinitions().map((definition) => definition.name),
+      },
+      reason: { type: 'string' },
+      payload: { type: 'object', additionalProperties: true },
     },
-    reason: { type: 'string' },
-    payload: { type: 'object', additionalProperties: true },
-  },
-  required: ['type', 'reason', 'payload'],
-  additionalProperties: false,
-};
+    required: ['type', 'reason', 'payload'],
+    additionalProperties: false,
+  };
+}
 
 function getLmStudioResponseSchema(outputKind: LmStudioOutputKind) {
   if (outputKind === 'procedure') {
@@ -61,7 +53,7 @@ function getLmStudioResponseSchema(outputKind: LmStudioOutputKind) {
       triggeredRule: { type: 'string' },
       actions: {
         type: 'array',
-        items: actionSchema,
+        items: getActionSchema(),
       },
     },
     required: ['response', 'messageBlocks', 'triggeredRule', 'actions'],
@@ -123,7 +115,7 @@ export function parseLmStudioConfig(value?: string | null): LmStudioConfig {
 export async function getGlobalLmStudioConfig(): Promise<LmStudioConfig> {
   const result = await db.query(
     'SELECT value FROM public.system_settings WHERE key = $1 LIMIT 1',
-    [LM_STUDIO_CONFIG_KEY]
+    [LM_STUDIO_CONFIG_KEY],
   );
   return parseLmStudioConfig(result.rows[0]?.value || null);
 }
@@ -131,7 +123,6 @@ export async function getGlobalLmStudioConfig(): Promise<LmStudioConfig> {
 export function parseLmStudioStructuredText(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'string' || !value.trim()) return null;
 
-  // Remove <think>...</think> reasoning blocks if present (common in thinking/reasoning models)
   let cleaned = value;
   if (value.includes('<think>')) {
     cleaned = value.replace(/<think>[\s\S]*?<\/think>/gi, '');
@@ -140,7 +131,7 @@ export function parseLmStudioStructuredText(value: unknown): Record<string, unkn
   const trimmed = cleaned.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
   const candidates = [fenced, trimmed, trimmed.match(/\{[\s\S]*\}/)?.[0]].filter(
-    (candidate): candidate is string => Boolean(candidate)
+    (candidate): candidate is string => Boolean(candidate),
   );
 
   for (const candidate of candidates) {
@@ -164,11 +155,9 @@ export function getLmStudioMessageText(message?: {
   if (typeof message?.content === 'string' && message.content.trim()) {
     return message.content.trim();
   }
-
   if (typeof message?.reasoning_content === 'string' && message.reasoning_content.trim()) {
     return message.reasoning_content.trim();
   }
-
   return '';
 }
 
@@ -179,30 +168,21 @@ export function tryParseJsonResponse(text: string): {
   actions?: any[] | null;
 } | null {
   if (!text || typeof text !== 'string') return null;
-  
-  // Remove <think>...</think> reasoning blocks if present (common in thinking/reasoning models)
+
   let cleaned = text;
   if (text.includes('<think>')) {
     cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
   }
-  
   const trimmed = cleaned.trim();
 
-  // Guard: never parse error messages as valid responses
   if (/\b(INVALID_ARGUMENT|Schema validation|Parse Error|stack trace|TypeError|SyntaxError)\b/i.test(trimmed)) {
     return null;
   }
 
   const attempts: string[] = [];
-
-  // 1. Try markdown-wrapped JSON: ```json ... ```
-  const mdMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (mdMatch?.[1]) attempts.push(mdMatch[1].trim());
-
-  // 2. Try the raw text as-is (most common: LM Studio returns pure JSON string)
+  const markdownMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (markdownMatch?.[1]) attempts.push(markdownMatch[1].trim());
   attempts.push(trimmed);
-
-  // 3. Try extracting the first JSON object from the text
   const braceMatch = trimmed.match(/\{[\s\S]*\}/);
   if (braceMatch?.[0] && braceMatch[0] !== trimmed) attempts.push(braceMatch[0]);
 
@@ -217,16 +197,17 @@ export function tryParseJsonResponse(text: string): {
           actions: Array.isArray(parsed.actions) ? parsed.actions : [],
         };
       }
-    } catch (_) {}
+    } catch {
+      // Try the next representation.
+    }
   }
 
   return null;
 }
 
-
 export function coerceLmStudioPromptOutput<T extends Record<string, unknown>>(
   output: unknown,
-  text?: unknown
+  text?: unknown,
 ): T | null {
   if (output && typeof output === 'object' && !Array.isArray(output)) {
     return output as T;
@@ -239,7 +220,7 @@ export function defineLmStudioPrompt(
   promptConfig: unknown,
   model: string,
   config: LmStudioConfig,
-  outputKind: LmStudioOutputKind = 'agent'
+  outputKind: LmStudioOutputKind = 'agent',
 ) {
   const { baseUrl: baseURL, apiToken } = normalizeLmStudioConfig(config);
   if (!baseURL) {
@@ -255,8 +236,6 @@ export function defineLmStudioPrompt(
   } = require('@genkit-ai/compat-oai') as typeof import('@genkit-ai/compat-oai');
 
   const defineModel = (ai: Genkit, client: InstanceType<typeof import('openai').OpenAI>) => {
-    // Workaround for @genkit-ai/compat-oai bug: when tool_calls is [] (empty array),
-    // compat-oai evaluates it as truthy and discards the choice's text content.
     const originalCreate = client.chat.completions.create.bind(client.chat.completions);
     client.chat.completions.create = async function (body: any, options?: any) {
       const response = await originalCreate(body, options);
@@ -281,7 +260,6 @@ export function defineLmStudioPrompt(
       client,
       modelRef,
       requestBuilder: (_request, body) => {
-        // LM Studio identifiers may contain slashes. Preserve the complete id.
         body.model = modelId;
         body.response_format = {
           type: 'json_schema',
@@ -309,53 +287,16 @@ export function defineLmStudioPrompt(
 
   const originalSchema = (promptConfig as any)?.output?.schema;
   const isTest = (promptConfig as any)?.name === 'lmStudioTestPrompt';
-
   const originalPrompt = (promptConfig as any)?.prompt;
-  let customPrompt = originalPrompt;
-  if (typeof originalPrompt === 'string' && !isTest) {
-    if (outputKind === 'procedure') {
-      customPrompt = `[MODO DE RACIOCÍNIO / THINKING MODE ATIVO]
-Você deve SEMPRE pensar passo a passo antes de decidir os próximos passos deste procedimento operacional.
-Importante: Você NÃO deve transferir o atendimento para humanos ou encerrar a conversa facilmente. Antes de planejar qualquer transferência (transfer_chat), analise com extrema atenção na sua fase de raciocínio se existem ferramentas habilitadas (@mcp, @sgp) ou instruções operacionais no passo que permitam realizar o diagnóstico, consulta ou restabelecimento do sinal de forma automática. A transferência é estritamente o ÚLTIMO RECURSO e só deve ocorrer se as ferramentas falharem ou não puderem de forma alguma resolver a questão e se a política de escalonamento exigir.
-Para isso, você DEVE escrever todo o seu processo de raciocínio detalhadamente dentro de blocos <think> e </think> na sua saída.
-Depois de fechar a tag </think>, você deve fornecer a decisão e resposta estruturadas exatamente no formato JSON especificado.
-
-Exemplo de estrutura de saída obrigatória:
-<think>
-1. Li as instruções do procedimento: "..."
-2. Avaliei o histórico do chat e as intenções.
-3. Analisei se existem ferramentas habilitadas adequadas antes de cogitar qualquer transferência.
-4. Tomei a decisão operacional.
-</think>
-{"decision": "...", "response": "..."}
-
-Comece agora a pensar e responder:
-
-
-` + originalPrompt;
-    } else {
-      customPrompt = `[MODO DE RACIOCÍNIO / THINKING MODE ATIVO]
-Você deve SEMPRE pensar passo a passo e planejar a sua resposta e ações de forma ultra-precisa antes de responder.
-Importante: Você NÃO deve transferir o atendimento para humanos ou encerrar a conversa facilmente. Antes de sugerir ou planejar a ação de transferência (transfer_chat), analise com extrema atenção na sua fase de raciocínio se existem ferramentas habilitadas ("enabledAgentToolsDescription") que permitam realizar o diagnóstico, consulta ou ação necessária (como consultar faturas, atualizar o CPF, ou reiniciar o roteador). A transferência é estritamente o ÚLTIMO RECURSO, sendo proibida se houver ferramentas adequadas disponíveis ou se o cliente não solicitou explicitamente falar com um atendente humano.
-Para isso, você DEVE escrever todo o seu processo de raciocínio, análise de regras operacionais, checagem de CPF/CNPJ, validações e decisões técnicas detalhadamente dentro de blocos <think> e </think> na sua saída.
-Depois de fechar a tag </think>, você deve fornecer a resposta final estruturada exatamente no formato JSON especificado.
-
-Exemplo de estrutura de saída obrigatória:
-<think>
-1. Analisei a mensagem do cliente.
-2. Identifiquei a intenção operacional.
-3. Verifiquei as ferramentas habilitadas ("enabledAgentToolsDescription") e o catálogo para buscar ações que evitem a transferência para humanos.
-4. Validei regras operacionais e CPF/CNPJ.
-5. Decidi as ações técnicas necessárias e formatei a resposta para o WhatsApp.
-</think>
-{"response": "...", "messageBlocks": ..., "triggeredRule": ..., "actions": [...]}
-
-Comece agora a pensar e responder:
-
-
-` + originalPrompt;
-    }
-  }
+  const customPrompt = typeof originalPrompt === 'string' && !isTest
+    ? [
+        'Analise internamente a mensagem, o historico, as regras e as ferramentas habilitadas.',
+        'Nao exponha raciocinio interno, deliberacao, chain-of-thought ou blocos <think>.',
+        'Nao invente resultados de ferramentas. Solicite uma ferramenta somente quando ela for semanticamente necessaria para o pedido atual.',
+        'Responda somente com o JSON final exigido pelo schema.',
+        originalPrompt,
+      ].join('\n\n')
+    : originalPrompt;
 
   const clonedConfig = {
     ...(promptConfig as Record<string, any>),

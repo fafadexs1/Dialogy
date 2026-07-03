@@ -1,11 +1,12 @@
 import type { Contact } from '@/lib/types';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import type { AgentToolAction } from '@/services/agent-tools/types';
-import type { ToolRouterTeam } from '@/services/agent-tools/router';
+import { shouldHandoffToHuman, type ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName } from './intent-types';
 import type { ToolSelectionScoreWeights } from './score-history';
 import { labelSlotForCustomer, type SlotExtractionResult } from './slots';
 import { evaluateToolCapabilityGate, resolveRequestedToolName, type ToolCapabilityGateCode } from './tool-capability-registry';
+import { hasClinicalRedFlagSignal } from './clinical-triage';
 
 export type ToolPlannerRejectedAction = {
   action: AgentToolAction;
@@ -295,8 +296,29 @@ export function planAutopilotTools(input: {
   const acceptedActions: AgentToolAction[] = [];
   const capabilityDecisions: Array<ReturnType<typeof evaluateToolCapabilityGate>> = [];
   const isInformationalIntent = INFORMATIONAL_INTENTS.has(input.intentResolution.intent);
+  const explicitHumanHandoff = shouldHandoffToHuman(input.customerMessage);
+  const safetyCriticalHandoff = hasClinicalRedFlagSignal(input.customerMessage);
+  const handoffAllowed = explicitHumanHandoff || safetyCriticalHandoff;
+  const hasImplicitTransferCandidate = input.actions.some((action) => (
+    action.type === 'transfer_chat' && !handoffAllowed
+  ));
 
   for (const action of input.actions) {
+    if (
+      !handoffAllowed &&
+      (
+        action.type === 'transfer_chat' ||
+        (action.type === 'add_internal_note' && hasImplicitTransferCandidate)
+      )
+    ) {
+      rejectedActions.push({
+        action,
+        code: 'intent_not_allowed',
+        reason: `Ferramenta ${action.type} bloqueada: a mensagem atual nao pediu atendimento humano.`,
+      });
+      continue;
+    }
+
     const mismatchReason = toolIntentMismatchReason({
       action,
       customerMessage: input.customerMessage,
@@ -369,7 +391,7 @@ export function planAutopilotTools(input: {
       responseOverride = missingSlotResponse(missingSlotRejection.missingSlots);
       repairReason = 'promise_missing_slots';
     } else {
-      const team = input.enabledToolNames.includes('transfer_chat')
+      const team = explicitHumanHandoff && input.enabledToolNames.includes('transfer_chat')
         ? findHandoffTeam({
             intent: input.intentResolution.intent,
             availableTeams: input.availableTeams,
@@ -388,7 +410,9 @@ export function planAutopilotTools(input: {
         responseOverride = `Nao consigo consultar isso automaticamente com seguranca agora. Vou encaminhar seu atendimento para a equipe ${team.name}.`;
         repairReason = 'promise_handoff';
       } else {
-        responseOverride = 'Nao tenho uma ferramenta de consulta habilitada para verificar isso automaticamente agora. Vou evitar te passar uma informacao incerta.';
+        responseOverride = input.intentResolution.intent === 'troubleshooting'
+          ? 'Entendi. A falha acontece em todos os seus dispositivos ou apenas em um deles?'
+          : 'Nao tenho uma ferramenta de consulta habilitada para verificar isso automaticamente agora. Vou evitar te passar uma informacao incerta.';
         repairReason = 'promise_without_tool';
       }
     }

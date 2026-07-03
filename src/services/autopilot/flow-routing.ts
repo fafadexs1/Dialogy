@@ -270,21 +270,11 @@ export function resolveDeterministicFlowMessage(
       .map((edge) => edge.target),
   );
   const messageNode = config.flow_graph.nodes.find((node) => (
-    directTargets.has(node.id) &&
-    (
-      (node.kind === 'message' && Boolean(node.config?.message?.trim())) ||
-      (
-        node.kind === 'collect' &&
-        node.config?.formMode !== 'ai' &&
-        (Boolean(node.config?.message?.trim()) || Boolean(node.config?.formFields?.length))
-      )
-    )
+    directTargets.has(node.id) && deterministicMessageFromNode(node)
   ));
 
   if (!messageNode) return null;
-  const message = messageNode.kind === 'collect'
-    ? renderFormMessage(messageNode)
-    : messageNode.config?.message?.trim();
+  const message = deterministicMessageFromNode(messageNode);
   if (!message) return null;
 
   return {
@@ -296,7 +286,13 @@ export function resolveDeterministicFlowMessage(
 
 function deterministicMessageFromNode(node: AutopilotFlowNode): string | null {
   if (node.kind === 'message') {
-    return node.config?.message?.trim() || null;
+    const message = node.config?.message?.trim() || '';
+    const normalized = normalizeInstructionText(message);
+    const instructionLike = (
+      /^(apresentar|entender|validar|classificar|coletar|analisar|orientar|responder|executar|avaliar)\b/.test(normalized)
+      && !/\b(voce|seu|sua|me informe|por favor)\b/.test(normalized)
+    ) || /\b(objetivo|resultado|etapa|bloco) do cliente\b/.test(normalized);
+    return message && !instructionLike ? message : null;
   }
 
   if (

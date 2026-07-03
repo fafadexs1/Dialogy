@@ -22,7 +22,7 @@ const explicitConversationClosePattern = new RegExp(
 );
 
 const shortCloseRequestPattern = new RegExp(
-  `\\b(?:pode|favor|por favor|quero|queria|poderia|consegue|so|só)?\\s*${CLOSE_VERB_PATTERN}\\b(?!\\s+${BUSINESS_OBJECT_PATTERN})`
+  `\\b(?:pode|favor|por favor|quero|queria|poderia|consegue|so)?\\s*${CLOSE_VERB_PATTERN}\\b(?!\\s+${BUSINESS_OBJECT_PATTERN})`
 );
 
 const doneHerePattern = /\b(?:era|e|eh)\s+so\s+isso\b|\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b/;
@@ -31,6 +31,11 @@ export function isConversationCloseRequest(message: string): boolean {
   const normalized = normalizeCloseText(message);
   if (!normalized) return false;
 
+  if (
+    /\bclose\s+chat\b/.test(normalized) ||
+    /\bferramenta\s+close\b/.test(normalized) ||
+    normalized === 'close'
+  ) return true;
   if (/\b(cancelar|cancelamento|rescindir|suspender)\b/.test(normalized)) return false;
   if (/\bnao\s+(?:encerra|encerrar|finaliza|finalizar|fecha|fechar|desliga|desligar)\b/.test(normalized)) return false;
   if (businessClosePattern.test(normalized)) return false;
@@ -55,7 +60,7 @@ export function isPotentialConversationCloseRequest(message: string): boolean {
   const normalized = normalizeCloseText(message);
   if (!normalized || normalized.length > 320) return false;
   return (
-    /\b(encerr|finaliz|fech|deslig|termin|acabar|fim|tchau)\w*/.test(normalized) ||
+    /\b(encerr|finaliz|fech|deslig|termin|acabar|fim|tchau|close)\w*/.test(normalized) ||
     /\b(?:era|e|eh)\s+so\s+isso\b/.test(normalized) ||
     /\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b/.test(normalized)
   );

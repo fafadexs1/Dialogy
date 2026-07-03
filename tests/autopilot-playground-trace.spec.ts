@@ -96,30 +96,8 @@ describe('autopilot playground trace', () => {
     expect(trace.finalResponse).not.toContain('me informe data e horario');
   });
 
-  it('repairs pediatric procedure scheduling handoffs using chat history', () => {
-    const trace = buildAutopilotPlaygroundTrace({
-      customerMessage: 'Quero um horario amanha cedo. Meu telefone e 5561995215930.',
-      chatHistory: [
-        'Cliente: Meu filho Davi tem 6 anos, vomitou 3 vezes e esta com diarreia desde cedo.',
-        'Cliente: Ele aceita agua em pequenos goles e urinou duas vezes hoje.',
-        'Cliente: Nao tem boca seca nem olhos fundos.',
-      ].join('\n'),
-      knowledgeDocuments: docs,
-      fallbackReply: 'Fallback configurado.',
-      modelResponse: 'Nao consigo consultar isso automaticamente com seguranca agora. Vou encaminhar seu atendimento para a equipe Pediatras.',
-      preferModelResponse: true,
-      systemAgentName: 'Dra Roberta',
-      contact,
-      enabledToolNames: ['transfer_chat', 'add_internal_note'],
-      toolCatalog: listAgentToolCatalogItems(),
-      availableTeams: [supportTeam],
-    });
 
-    expect(trace.validator.decision).toBe('repair');
-    expect(trace.validator.reasons).toContain('pediatric_scheduling_handoff_repaired');
-    expect(trace.finalResponse).toContain('consulta urgente');
-    expect(trace.finalResponse).not.toContain('encaminhar seu atendimento');
-  });
+
 
   it('keeps clinical handoff traces terminal without generic slot prompts', () => {
     const trace = buildAutopilotPlaygroundTrace({

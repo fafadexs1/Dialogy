@@ -570,10 +570,22 @@ function defaultNodeMessage(node: {
   kind: V2FlowNodeKind;
   title: string;
   subtitle: string;
+  legacyKind?: AutopilotFlowNodeKind;
 }): string | undefined {
   switch (node.kind) {
-    case 'message':
-      return node.subtitle?.trim() || node.title?.trim() || 'Mensagem configurada.';
+    case 'message': {
+      if (node.legacyKind && node.legacyKind !== 'message') {
+        return node.subtitle?.trim() || node.title?.trim() || 'Mensagem configurada.';
+      }
+      const context = normalizeSearchText(`${node.title} ${node.subtitle}`);
+      if (/\b(boas[-\s]vindas|bem[-\s]vindo|saudacao|inicio do atendimento)\b/.test(context)) {
+        return 'Ola! Como posso ajudar voce hoje?';
+      }
+      if (/\b(confirmar|confirmacao)\b/.test(context) && /\b(reboot|reiniciar|roteador)\b/.test(context)) {
+        return 'Antes de reiniciar o roteador, preciso da sua confirmacao explicita. Posso prosseguir?';
+      }
+      return undefined;
+    }
     case 'collect':
       return 'Para seguir, me informe os dados solicitados.';
     case 'knowledge':
@@ -653,7 +665,12 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
       config: {
         instructions,
         message: cleanPromptText(node.message, 2400)
-          || defaultNodeMessage({ kind, title: cleanText(node.title, 100) || 'Bloco', subtitle: cleanText(node.subtitle, 140) }),
+          || defaultNodeMessage({
+            kind,
+            title: cleanText(node.title, 100) || 'Bloco',
+            subtitle: cleanText(node.subtitle, 140),
+            legacyKind: node.kind,
+          }),
         referenceId,
         variableName: normalizeId(node.variableName || `resultado-${id}`, `resultado-${id}`).replace(/-/g, '_'),
         requiredSlots: (node.requiredSlots || []).map((slot) => normalizeId(slot, '')).filter(Boolean),

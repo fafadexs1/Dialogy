@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   model: vi.fn(),
   fromTokenizer: vi.fn(),
   fromModel: vi.fn(),
+  disposeInput: vi.fn(),
+  disposeLogits: vi.fn(),
 }));
 
 vi.mock('@huggingface/transformers', () => ({
@@ -17,10 +19,16 @@ import { rerankKnowledgeCandidatesWithBgeV2M3 } from '@/services/rag/bge-reranke
 
 describe('BGE Reranker v2 M3', () => {
   beforeEach(() => {
+    process.env.RAG_BGE_RERANKER_V2_M3_ENABLED = 'true';
     vi.clearAllMocks();
-    mocks.tokenizer.mockReturnValue({ input_ids: [] });
+    mocks.tokenizer.mockReturnValue({
+      input_ids: { dispose: mocks.disposeInput },
+    });
     mocks.model.mockResolvedValue({
-      logits: { tolist: () => [[1], [2], [3], [4], [5], [6], [7]] },
+      logits: {
+        tolist: () => [[1], [2], [3], [4], [5], [6], [7]],
+        dispose: mocks.disposeLogits,
+      },
     });
     mocks.fromTokenizer.mockResolvedValue(mocks.tokenizer);
     mocks.fromModel.mockResolvedValue(mocks.model);
@@ -45,5 +53,7 @@ describe('BGE Reranker v2 M3', () => {
     expect(result?.documents).toHaveLength(7);
     expect(result?.documents[0].document.id).toBe('doc-6');
     expect(result?.diagnostics.candidates).toBe(7);
+    expect(mocks.disposeInput).toHaveBeenCalledOnce();
+    expect(mocks.disposeLogits).toHaveBeenCalledOnce();
   });
 });

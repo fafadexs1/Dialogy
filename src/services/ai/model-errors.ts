@@ -140,7 +140,7 @@ export function classifyAiModelError(error: unknown): AiModelErrorClassification
   }
 
   if (/schema|zod|validation|invalid json|json parse|parse error|malformed/.test(normalized)) {
-    return { code: 'schema_error', retryable: false, message, status };
+    return { code: 'schema_error', retryable: true, message, status };
   }
 
   if (/empty response|no output|missing output|undefined output|model returned no/.test(normalized)) {

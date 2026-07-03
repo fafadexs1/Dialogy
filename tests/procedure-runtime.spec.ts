@@ -462,6 +462,190 @@ describe('procedure runtime engine', () => {
     expect(match).toBeNull();
   });
 
+  it('does not select an optical LOS procedure for generic fiber instability', () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-optical-los',
+      documentId: 'doc-optical-los',
+      documentName: 'Fibra optica - LOS LOSS luz vermelha',
+      version: 1,
+      compiledAt: new Date('2026-07-02T00:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['problema', 'sem sinal'],
+      metadata: {},
+      steps: [
+        {
+          id: 'ask',
+          order: 1,
+          type: 'gather_data',
+          label: 'Pergunte sobre a luz LOS.',
+          promptTemplate: 'A luz LOS esta vermelha?',
+          requiredSlots: [],
+          nextStepId: null,
+        },
+      ],
+    };
+
+    expect(matchProcedure({
+      intent: 'troubleshooting',
+      customerMessage: 'A internet da minha fibra esta falhando toda hora',
+      compiledProcedures: [graph],
+    })).toBeNull();
+
+    expect(matchProcedure({
+      intent: 'troubleshooting',
+      customerMessage: 'A luz LOS da ONU esta vermelha',
+      compiledProcedures: [graph],
+    })?.graph.id).toBe(graph.id);
+  });
+
+  it('pauses an open diagnostic question before advancing to tools', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-diagnostic-question',
+      documentId: 'doc-diagnostic-question',
+      documentName: 'Diagnostico de instabilidade',
+      version: 1,
+      compiledAt: new Date('2026-07-02T00:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['internet'],
+      metadata: {},
+      steps: [
+        {
+          id: 'ask',
+          order: 1,
+          type: 'gather_data',
+          label: 'Pergunte se alguem mexeu no cabo.',
+          promptTemplate: 'Alguem mexeu no cabo de fibra ou na ONU recentemente?',
+          requiredSlots: [],
+          nextStepId: 'note',
+        },
+        {
+          id: 'note',
+          order: 2,
+          type: 'tool_call',
+          label: 'Registre o diagnostico.',
+          toolName: 'add_internal_note',
+          toolPayloadTemplate: {},
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+
+    const firstTurn = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Minha internet esta falhando',
+    });
+
+    expect(firstTurn.status).toBe('waiting_input');
+    expect(firstTurn.response).toBe('Alguem mexeu no cabo de fibra ou na ONU recentemente?');
+    expect(firstTurn.actions).toHaveLength(0);
+    expect(firstTurn.executedSteps).toEqual(['ask']);
+    expect(runtimeContext.currentStepId).toBe('ask');
+
+    const secondTurn = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Nao, ninguem mexeu',
+    });
+
+    expect(secondTurn.status).toBe('waiting_tool');
+    expect(secondTurn.actions.map((action) => action.type)).toEqual(['add_internal_note']);
+    expect(runtimeContext.collectedSlots.response_ask).toBe('Nao, ninguem mexeu');
+  });
+
+  it('uses the response resolver to turn an open procedure instruction into a customer question', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-natural-question',
+      documentId: 'doc-natural-question',
+      documentName: 'Diagnostico natural',
+      version: 1,
+      compiledAt: new Date('2026-07-02T00:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['internet'],
+      metadata: {},
+      steps: [
+        {
+          id: 'ask',
+          order: 1,
+          type: 'gather_data',
+          label: 'Diagnostico interno',
+          promptTemplate: 'Diagnostico interno: pergunte se a conexao cai em todos os dispositivos.',
+          requiredSlots: [],
+          nextStepId: null,
+        },
+      ],
+    };
+    const responseResolver = vi.fn(async ({ prompt }) => {
+      expect(prompt).toContain('uma unica pergunta curta');
+      expect(prompt).toContain('Nao mencione fluxo');
+      return 'A conexao cai em todos os seus dispositivos?';
+    });
+
+    const result = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'Minha internet esta falhando',
+      responseResolver,
+      forceLlmRespond: true,
+    });
+
+    expect(responseResolver).toHaveBeenCalledOnce();
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toBe('A conexao cai em todos os seus dispositivos?');
+    expect(result.actions).toHaveLength(0);
+  });
+
+  it('does not execute a compiled transfer without explicit consent', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-transfer-consent',
+      documentId: 'doc-transfer-consent',
+      documentName: 'Transferencia com consentimento',
+      version: 1,
+      compiledAt: new Date('2026-07-02T00:00:00Z').toISOString(),
+      triggerIntents: ['troubleshooting'],
+      triggerKeywords: ['suporte'],
+      metadata: {},
+      steps: [
+        {
+          id: 'transfer',
+          order: 1,
+          type: 'tool_call',
+          label: 'Com consentimento, use @transfer_chat para o setor Suporte.',
+          toolName: 'transfer_chat',
+          toolPayloadTemplate: {},
+          requiresConfirmation: true,
+          nextStepId: null,
+        },
+      ],
+    };
+
+    const blocked = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'Minha internet esta falhando',
+    });
+    expect(blocked.status).toBe('completed');
+    expect(blocked.actions).toHaveLength(0);
+    expect(blocked.response).toContain('confirmacao explicita');
+
+    const declined = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'Nao quero',
+    });
+    expect(declined.actions).toHaveLength(0);
+    expect(declined.response).toContain('nao vou transferir');
+
+    const confirmed = await advanceProcedure({
+      graph,
+      context: contextFor(graph),
+      customerMessage: 'Sim, pode transferir',
+    });
+    expect(confirmed.status).toBe('waiting_tool');
+    expect(confirmed.actions.map((action) => action.type)).toEqual(['transfer_chat']);
+  });
+
   it('reuses a fresh read-only SGP result passed into a new procedure', async () => {
     const graph: ProcedureGraph = {
       id: 'proc-reuse-sgp',
@@ -713,6 +897,12 @@ describe('procedure runtime engine', () => {
         payload: expect.objectContaining({ toolName: 'mcp:router:reboot_router' }),
       }),
     ]));
+
+    expect(matchProcedure({
+      intent: 'troubleshooting',
+      customerMessage: 'A internet da minha fibra esta toda hora falhando',
+      compiledProcedures: [graph],
+    })).toBeNull();
   });
 
   it('blocks a stale reboot step when the current customer message asks for Wi-Fi credentials', async () => {

@@ -68,6 +68,15 @@ describe('autopilot slot extraction', () => {
     expect(result.slots.order_or_request_id).toBe('ABCD-1234');
   });
 
+  it('does not parse an agent name prefixed with Ticket as an order id', () => {
+    const result = extractAutopilotSlots({
+      customerMessage: 'Oi',
+      chatHistory: 'Atendimento transferido para TicketMaster.',
+    });
+
+    expect(result.slots.order_or_request_id).toBeUndefined();
+  });
+
   it('extracts generic intake slots from message and history', () => {
     const result = extractAutopilotSlots({
       customerMessage: 'Meu telefone e o mesmo que estou falando contigo',

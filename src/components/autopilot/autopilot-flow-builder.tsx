@@ -19,7 +19,6 @@ import {
   type ReactFlowInstance,
   useEdgesState,
   useNodesState,
-  useUpdateNodeInternals,
 } from '@xyflow/react';
 import {
   AlertTriangle,
@@ -81,6 +80,10 @@ import type {
   KnowledgeBaseDocument,
   KnowledgeCollection,
 } from '@/lib/types';
+import type {
+  ConnectionType as WorkflowConnectionType,
+  OperationalNodeState,
+} from '@/services/workflow-runtime/types';
 import { migrateAutopilotFlowGraphToV2 } from '@/services/autopilot/flow-v2';
 import { autoLayoutFlowNodes } from '@/services/autopilot/flow-layout';
 import {
@@ -152,6 +155,7 @@ type AttendantNode = Node<AttendantNodeData, 'attendant'>;
 type AttendantEdgeData = {
   routeId?: string;
   routeLabel?: string;
+  connectionType?: WorkflowConnectionType;
 };
 type AttendantEdge = Edge<AttendantEdgeData>;
 const SWITCH_EDGE_LABEL_BG_PADDING: [number, number] = [6, 3];
@@ -225,6 +229,24 @@ const HANDLE_CLASS_NAMES = {
   skill: '!h-3 !w-3 !border-[#16191d] !bg-red-400',
 };
 
+const OPERATIONAL_STATUS_META: Partial<Record<OperationalNodeState, {
+  label: string;
+  className: string;
+}>> = {
+  queued: { label: 'Na fila', className: 'border-slate-500/30 bg-slate-500/10 text-slate-300' },
+  running: { label: 'Executando', className: 'border-sky-500/35 bg-sky-500/10 text-sky-200' },
+  thinking: { label: 'Pensando', className: 'border-violet-500/35 bg-violet-500/10 text-violet-200' },
+  waiting_tool: { label: 'Aguardando tool', className: 'border-red-500/35 bg-red-500/10 text-red-200' },
+  running_tool: { label: 'Executando tool', className: 'border-red-500/35 bg-red-500/10 text-red-200' },
+  waiting_input: { label: 'Aguardando entrada', className: 'border-amber-500/35 bg-amber-500/10 text-amber-200' },
+  completed: { label: 'Concluído', className: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200' },
+  partially_completed: { label: 'Parcial', className: 'border-amber-500/35 bg-amber-500/10 text-amber-200' },
+  skipped: { label: 'Ignorado', className: 'border-slate-500/30 bg-slate-500/10 text-slate-400' },
+  retrying: { label: 'Tentando novamente', className: 'border-orange-500/35 bg-orange-500/10 text-orange-200' },
+  failed: { label: 'Falhou', className: 'border-red-500/35 bg-red-500/10 text-red-200' },
+  cancelled: { label: 'Cancelado', className: 'border-slate-500/30 bg-slate-500/10 text-slate-400' },
+};
+
 function isAgentNodeKind(kind: NodeKind): boolean {
   return kind === 'sub_agent';
 }
@@ -247,12 +269,9 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
   const isKnowledgeNode = data.kind === 'knowledge';
   const acceptsKnowledge = isAgentNodeKind(data.kind);
   const exposesSkill = isAgentNodeKind(data.kind);
-  const toolHandlePosition = data.toolHandlePosition || Position.Top;
-  const updateNodeInternals = useUpdateNodeInternals();
-
-  useEffect(() => {
-    if (data.kind === 'tool') updateNodeInternals(id);
-  }, [data.kind, id, toolHandlePosition, updateNodeInternals]);
+  const operationalStatus = data.status
+    ? OPERATIONAL_STATUS_META[data.status as OperationalNodeState]
+    : undefined;
 
   return (
     <div
@@ -265,14 +284,17 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
         selected && 'border-sky-400/70 shadow-[0_0_0_1px_rgba(56,189,248,0.3),0_0_30px_rgba(14,165,233,0.2)]'
       )}
     >
-      {!isAttachmentNode && (
-        <Handle id="target-top" type="target" position={Position.Top} className={HANDLE_CLASS_NAMES.vertical} />
-      )}
+      <Handle id="target-top" type="target" position={Position.Top} className={HANDLE_CLASS_NAMES.vertical} />
       {acceptsKnowledge && (
         <Handle id="target-left-knowledge" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.knowledge} />
       )}
       {data.kind === 'tool' && (
-        <Handle id={`target-${toolHandlePosition}-tool`} type="target" position={toolHandlePosition} className={HANDLE_CLASS_NAMES.skill} />
+        <>
+          <Handle id="target-top-tool" type="target" position={Position.Top} className={HANDLE_CLASS_NAMES.skill} />
+          <Handle id="target-right-tool" type="target" position={Position.Right} className={HANDLE_CLASS_NAMES.skill} />
+          <Handle id="target-bottom-tool" type="target" position={Position.Bottom} className={HANDLE_CLASS_NAMES.skill} />
+          <Handle id="target-left-tool" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.skill} />
+        </>
       )}
       <span
         className={cn(
@@ -301,9 +323,17 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
           Confirmacao necessaria
         </span>
       )}
-      {!isAttachmentNode && (
-        <Handle id="source-bottom" type="source" position={Position.Bottom} className={HANDLE_CLASS_NAMES.vertical} />
+      {operationalStatus && (
+        <span
+          className={cn(
+            'absolute -bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[9px] font-medium shadow-lg',
+            operationalStatus.className,
+          )}
+        >
+          {operationalStatus.label}
+        </span>
       )}
+      <Handle id="source-bottom" type="source" position={Position.Bottom} className={HANDLE_CLASS_NAMES.vertical} />
       {isKnowledgeNode && (
         <Handle id="source-right-knowledge" type="source" position={Position.Right} className={HANDLE_CLASS_NAMES.knowledge} />
       )}
@@ -326,9 +356,30 @@ const KNOWLEDGE_TARGET_HANDLE = 'target-left-knowledge';
 const SKILL_SOURCE_HANDLE = 'source-right-skill';
 const SKILL_SOURCE_LEFT_HANDLE = 'source-left-skill';
 const DEFAULT_EDGE_COLOR = '#4485a5';
+const MODEL_EDGE_COLOR = '#a78bfa';
 const KNOWLEDGE_EDGE_COLOR = '#fb923c';
 const SKILL_EDGE_COLOR = '#f87171';
+const MEMORY_EDGE_COLOR = '#c084fc';
+const GUARDRAIL_EDGE_COLOR = '#34d399';
+const ERROR_EDGE_COLOR = '#fb7185';
+const EVENT_EDGE_COLOR = '#22d3ee';
+const AGENT_TOOL_EDGE_COLOR = '#f472b6';
 const SWITCH_EDGE_COLOR = '#f59e0b';
+
+const CONNECTION_TYPE_META: Record<WorkflowConnectionType, {
+  label: string;
+  color: string;
+}> = {
+  main: { label: 'Fluxo', color: DEFAULT_EDGE_COLOR },
+  model: { label: 'Modelo', color: MODEL_EDGE_COLOR },
+  tool: { label: 'Ferramenta', color: SKILL_EDGE_COLOR },
+  agent_tool: { label: 'Agente', color: AGENT_TOOL_EDGE_COLOR },
+  memory: { label: 'Memória', color: MEMORY_EDGE_COLOR },
+  knowledge: { label: 'Conhecimento', color: KNOWLEDGE_EDGE_COLOR },
+  guardrail: { label: 'Guardrail', color: GUARDRAIL_EDGE_COLOR },
+  error: { label: 'Erro', color: ERROR_EDGE_COLOR },
+  event: { label: 'Evento', color: EVENT_EDGE_COLOR },
+};
 
 function toolTargetPosition(source: AttendantNode, target: AttendantNode): Position {
   const dx = source.position.x - target.position.x;
@@ -345,6 +396,7 @@ function connectionVisual(source: AttendantNode, target: AttendantNode): {
   sourceHandle: string;
   targetHandle: string;
   color: string;
+  connectionType: WorkflowConnectionType;
   toolHandlePosition?: Position;
 } {
   const sourceKind = source.data.kind;
@@ -354,6 +406,7 @@ function connectionVisual(source: AttendantNode, target: AttendantNode): {
       sourceHandle: KNOWLEDGE_SOURCE_HANDLE,
       targetHandle: KNOWLEDGE_TARGET_HANDLE,
       color: KNOWLEDGE_EDGE_COLOR,
+      connectionType: 'knowledge',
     };
   }
   if (isAgentNodeKind(sourceKind) && targetKind === 'tool') {
@@ -362,6 +415,7 @@ function connectionVisual(source: AttendantNode, target: AttendantNode): {
       sourceHandle: agentSkillSourceHandle(source, target),
       targetHandle: `target-${targetPosition}-tool`,
       color: SKILL_EDGE_COLOR,
+      connectionType: 'tool',
       toolHandlePosition: targetPosition,
     };
   }
@@ -370,12 +424,14 @@ function connectionVisual(source: AttendantNode, target: AttendantNode): {
       sourceHandle: VERTICAL_SOURCE_HANDLE,
       targetHandle: VERTICAL_TARGET_HANDLE,
       color: SWITCH_EDGE_COLOR,
+      connectionType: 'main',
     };
   }
   return {
     sourceHandle: VERTICAL_SOURCE_HANDLE,
     targetHandle: VERTICAL_TARGET_HANDLE,
     color: DEFAULT_EDGE_COLOR,
+    connectionType: 'main',
   };
 }
 
@@ -634,13 +690,25 @@ function edge(
   id: string,
   source: string,
   target: string,
-  options?: { sourceHandle?: string; targetHandle?: string; color?: string; routeId?: string; routeLabel?: string },
+  options?: {
+    sourceHandle?: string;
+    targetHandle?: string;
+    color?: string;
+    routeId?: string;
+    routeLabel?: string;
+    connectionType?: WorkflowConnectionType;
+  },
 ): AttendantEdge {
   const color = options?.color || DEFAULT_EDGE_COLOR;
-  const routeData = options?.routeId ? {
-    routeId: options.routeId,
-    routeLabel: options.routeLabel || options.routeId,
-  } : undefined;
+  const routeData: AttendantEdgeData = {
+    connectionType: options?.connectionType || 'main',
+    ...(options?.routeId
+      ? {
+          routeId: options.routeId,
+          routeLabel: options.routeLabel || options.routeId,
+        }
+      : {}),
+  };
   return {
     id,
     source,
@@ -650,21 +718,30 @@ function edge(
     type: 'smoothstep',
     animated: false,
     data: routeData,
-    label: routeData?.routeLabel,
-    labelStyle: routeData ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
-    labelBgStyle: routeData ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
-    labelBgPadding: routeData ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
-    labelBgBorderRadius: routeData ? 6 : undefined,
+    label: routeData.routeLabel,
+    labelStyle: routeData.routeId ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
+    labelBgStyle: routeData.routeId ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
+    labelBgPadding: routeData.routeId ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
+    labelBgBorderRadius: routeData.routeId ? 6 : undefined,
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     style: { stroke: color, strokeWidth: 1.6 },
   };
 }
 
-function edgeForNodes(id: string, source: AttendantNode, target: AttendantNode, routeId?: string | null): AttendantEdge {
+function edgeForNodes(
+  id: string,
+  source: AttendantNode,
+  target: AttendantNode,
+  routeId?: string | null,
+  connectionType?: WorkflowConnectionType,
+): AttendantEdge {
   const visual = connectionVisual(source, target);
   const route = findSwitchRouteForEdge(source, target.id, routeId);
+  const resolvedType = connectionType || visual.connectionType;
   return edge(id, source.id, target.id, {
     ...visual,
+    connectionType: resolvedType,
+    color: CONNECTION_TYPE_META[resolvedType].color,
     routeId: route?.id,
     routeLabel: route?.label,
   });
@@ -849,8 +926,11 @@ function restoreFlowGraph(graph: AutopilotFlowGraph) {
     const source = nodeById.get(savedEdge.source);
     const target = nodeById.get(savedEdge.target);
     return source && target
-      ? edgeForNodes(savedEdge.id, source, target, savedEdge.routeId)
-      : edge(savedEdge.id, savedEdge.source, savedEdge.target);
+      ? edgeForNodes(savedEdge.id, source, target, savedEdge.routeId, savedEdge.connectionType)
+      : edge(savedEdge.id, savedEdge.source, savedEdge.target, {
+          connectionType: savedEdge.connectionType || 'main',
+          color: CONNECTION_TYPE_META[savedEdge.connectionType || 'main'].color,
+        });
   });
   nodes = nodes.map((node) => {
     if (node.data.kind !== 'tool') return node;
@@ -889,6 +969,9 @@ function serializeFlowGraph(nodes: AttendantNode[], edges: Edge[], variables: Au
       targetHandle: savedEdge.targetHandle,
       routeId: typeof savedEdge.data?.routeId === 'string' ? savedEdge.data.routeId : undefined,
       label: typeof savedEdge.data?.routeLabel === 'string' ? savedEdge.data.routeLabel : undefined,
+      connectionType: typeof savedEdge.data?.connectionType === 'string'
+        ? savedEdge.data.connectionType as WorkflowConnectionType
+        : undefined,
     })),
     variables,
   };
@@ -1732,6 +1815,12 @@ function EdgeInspector({
   const selectedRouteId = typeof selectedEdge.data?.routeId === 'string'
     ? selectedEdge.data.routeId
     : switchRoutes.find((route) => route.targetNodeId === selectedEdge.target)?.id || '';
+  const connectionType = (
+    typeof selectedEdge.data?.connectionType === 'string'
+      ? selectedEdge.data.connectionType
+      : 'main'
+  ) as WorkflowConnectionType;
+  const connectionMeta = CONNECTION_TYPE_META[connectionType];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1756,6 +1845,15 @@ function EdgeInspector({
           <p className="truncate">{source}</p>
           <p className="my-2 text-sky-400">para</p>
           <p className="truncate">{target}</p>
+        </div>
+        <div className="mt-4 flex items-center justify-between rounded-xl border border-white/10 bg-[#17191c] px-4 py-3">
+          <span className="text-xs text-slate-500">Tipo da conexão</span>
+          <span
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 px-2.5 py-1 text-xs text-slate-200"
+          >
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: connectionMeta.color }} />
+            {connectionMeta.label}
+          </span>
         </div>
         {switchRoutes.length > 0 && (
           <div className="mt-4 space-y-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4">
@@ -1814,6 +1912,30 @@ function publishGateTone(audit: AutopilotFlowAuditResult) {
     className: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15',
     icon: ShieldCheck,
   };
+}
+
+function ConnectionLegend() {
+  const visibleTypes: WorkflowConnectionType[] = [
+    'main',
+    'model',
+    'tool',
+    'agent_tool',
+    'memory',
+    'knowledge',
+    'guardrail',
+    'error',
+    'event',
+  ];
+  return (
+    <div className="pointer-events-none absolute left-7 top-[102px] z-10 hidden max-w-[620px] flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-white/10 bg-[#15181b]/90 px-3 py-2 shadow-lg backdrop-blur lg:flex">
+      {visibleTypes.map((type) => (
+        <span key={type} className="inline-flex items-center gap-1.5 text-[10px] text-slate-400">
+          <span className="h-1.5 w-4 rounded-full" style={{ backgroundColor: CONNECTION_TYPE_META[type].color }} />
+          {CONNECTION_TYPE_META[type].label}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function toolForCoverage(tool: ToolCatalogItem): AgentToolCatalogItem {
@@ -2285,7 +2407,10 @@ export function AutopilotFlowBuilder({
             target.id,
             typeof flowEdge.data?.routeId === 'string' ? flowEdge.data.routeId : undefined,
           );
-          const routeData = route ? { routeId: route.id, routeLabel: route.label } : undefined;
+          const routeData: AttendantEdgeData = {
+            connectionType: visual.connectionType,
+            ...(route ? { routeId: route.id, routeLabel: route.label } : {}),
+          };
           if (
             flowEdge.sourceHandle === visual.sourceHandle &&
             flowEdge.targetHandle === visual.targetHandle &&
@@ -2301,11 +2426,11 @@ export function AutopilotFlowBuilder({
             sourceHandle: visual.sourceHandle,
             targetHandle: visual.targetHandle,
             data: routeData,
-            label: routeData?.routeLabel,
-            labelStyle: routeData ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
-            labelBgStyle: routeData ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
-            labelBgPadding: routeData ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
-            labelBgBorderRadius: routeData ? 6 : undefined,
+            label: routeData.routeLabel,
+            labelStyle: routeData.routeId ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
+            labelBgStyle: routeData.routeId ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
+            labelBgPadding: routeData.routeId ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
+            labelBgBorderRadius: routeData.routeId ? 6 : undefined,
             markerEnd: { type: MarkerType.ArrowClosed, color: visual.color, width: 16, height: 16 },
             style: { ...flowEdge.style, stroke: visual.color, strokeWidth: 1.6 },
           };
@@ -2379,7 +2504,12 @@ export function AutopilotFlowBuilder({
         sourceHandle: visual.sourceHandle,
         targetHandle: visual.targetHandle,
         type: 'smoothstep',
-        data: routeForConnection ? { routeId: routeForConnection.id, routeLabel: routeForConnection.label } : undefined,
+        data: {
+          connectionType: visual.connectionType,
+          ...(routeForConnection
+            ? { routeId: routeForConnection.id, routeLabel: routeForConnection.label }
+            : {}),
+        },
         label: routeForConnection?.label,
         labelStyle: routeForConnection ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
         labelBgStyle: routeForConnection ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
@@ -2521,15 +2651,21 @@ export function AutopilotFlowBuilder({
 
     setEdges((current) => current.map((flowEdge) => {
       if (flowEdge.id !== selectedEdgeId) return flowEdge;
-      const routeData = route ? { routeId: route.id, routeLabel: route.label } : undefined;
+      const existingType = typeof flowEdge.data?.connectionType === 'string'
+        ? flowEdge.data.connectionType as WorkflowConnectionType
+        : 'main';
+      const routeData: AttendantEdgeData = {
+        connectionType: existingType,
+        ...(route ? { routeId: route.id, routeLabel: route.label } : {}),
+      };
       return {
         ...flowEdge,
         data: routeData,
-        label: routeData?.routeLabel,
-        labelStyle: routeData ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
-        labelBgStyle: routeData ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
-        labelBgPadding: routeData ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
-        labelBgBorderRadius: routeData ? 6 : undefined,
+        label: routeData.routeLabel,
+        labelStyle: routeData.routeId ? { fill: '#fbbf24', fontSize: 11, fontWeight: 600 } : undefined,
+        labelBgStyle: routeData.routeId ? { fill: '#17191c', fillOpacity: 0.92 } : undefined,
+        labelBgPadding: routeData.routeId ? SWITCH_EDGE_LABEL_BG_PADDING : undefined,
+        labelBgBorderRadius: routeData.routeId ? 6 : undefined,
       };
     }));
   }, [edges, nodes, selectedEdgeId, setEdges, setNodes]);
@@ -2954,6 +3090,8 @@ export function AutopilotFlowBuilder({
             )}
           </div>
         </header>
+
+        {!inlinePanel && <ConnectionLegend />}
 
         <footer className="pointer-events-none absolute bottom-7 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3">
           <Button

@@ -15,19 +15,19 @@ describe('autopilot confirmation repetition guard', () => {
     });
   });
 
-  it('replaces a repeated confirmation prompt with a single recovery instruction', () => {
+  it('rephrases a repeated confirmation without pausing the conversation', () => {
     const guarded = guardRepeatedConfirmationPrompt({
       message: rebootPrompt,
       recentAutomatedMessages: [`*TICKETMASTER (Agente Virtual)*:\n\n${rebootPrompt}`],
     });
 
     expect(guarded.action).toBe('replace');
-    expect(guarded.message).toContain('pausei esta tentativa');
-    expect(guarded.message).toContain('confirme explicitamente qual acao');
+    expect(guarded.message).toContain('Ainda preciso da sua confirmacao explicita');
+    expect(guarded.message).toContain('confirme qual acao');
     expect(guarded.message).not.toContain('Posso reiniciar seu roteador agora?');
   });
 
-  it('suppresses further repeats after the recovery instruction was already sent', () => {
+  it('keeps asking safely instead of suppressing the response or disabling the agent', () => {
     const recovery = guardRepeatedConfirmationPrompt({
       message: rebootPrompt,
       recentAutomatedMessages: [rebootPrompt],
@@ -37,41 +37,24 @@ describe('autopilot confirmation repetition guard', () => {
       recentAutomatedMessages: [rebootPrompt, recovery.message || ''],
     });
 
-    expect(guarded).toEqual({
-      action: 'suppress',
-      message: null,
-    });
+    expect(guarded.action).toBe('replace');
+    expect(guarded.message).toContain('Ainda preciso da sua confirmacao explicita');
   });
 
-  it('replaces ordinary repeated responses with a generic recovery instruction', () => {
-    const message = 'Aqui estao os dados do seu contrato.';
+  it('does not replace an ordinary repeated LLM response with a refusal message', () => {
+    const message = 'Ja localizei os dados necessarios. Vou seguir com o atendimento usando as informacoes disponiveis e aviso antes de executar qualquer acao sensivel.';
     const guarded = guardRepeatedConfirmationPrompt({
       message,
       recentAutomatedMessages: [`*RAQUEL (Agente Virtual)*:\n\n${message}`],
     });
 
-    expect(guarded.action).toBe('replace');
-    expect(guarded.message).toContain('pausei esta tentativa automatica');
-    expect(guarded.message).not.toContain(message);
-  });
-
-  it('suppresses ordinary repeats after the generic recovery instruction was already sent', () => {
-    const message = 'Estou com uma instabilidade para responder agora. Nossa equipe vai acompanhar por aqui.';
-    const recovery = guardRepeatedConfirmationPrompt({
+    expect(guarded).toEqual({
+      action: 'send',
       message,
-      recentAutomatedMessages: [message],
-    });
-
-    expect(guardRepeatedConfirmationPrompt({
-      message,
-      recentAutomatedMessages: [message, recovery.message || ''],
-    })).toEqual({
-      action: 'suppress',
-      message: null,
     });
   });
 
-  it('replaces long responses that only reformulate the same message', () => {
+  it('lets the LLM continue even when a long answer resembles an earlier one', () => {
     const previousMessage = 'Estou com uma instabilidade para responder agora. Nossa equipe vai acompanhar por aqui enquanto verificamos o atendimento.';
     const reformulatedMessage = 'Estou com uma instabilidade para responder neste momento. Nossa equipe vai acompanhar por aqui enquanto verificamos o atendimento.';
     const guarded = guardRepeatedConfirmationPrompt({
@@ -79,8 +62,10 @@ describe('autopilot confirmation repetition guard', () => {
       recentAutomatedMessages: [previousMessage],
     });
 
-    expect(guarded.action).toBe('replace');
-    expect(guarded.message).toContain('pausei esta tentativa automatica');
+    expect(guarded).toEqual({
+      action: 'send',
+      message: reformulatedMessage,
+    });
   });
 
   it('sends a new ordinary response normally', () => {

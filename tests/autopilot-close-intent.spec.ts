@@ -15,6 +15,8 @@ describe('autopilot close intent', () => {
     'desliga o atendimento',
     'encerre o atendimento',
     'finaliza o chat',
+    'Pode encerrar? USE close_chat',
+    'Usa a ferramenta close',
     'era so isso',
     'nao preciso de mais nada',
   ])('detects conversation close request: %s', (message) => {
@@ -27,6 +29,7 @@ describe('autopilot close intent', () => {
     'quero suspender a assinatura',
     'desligar minha internet',
     'finalizar instalacao',
+    'close my contract',
   ])('does not confuse business cancellation with conversation close: %s', (message) => {
     expect(isConversationCloseRequest(message)).toBe(false);
   });
@@ -46,6 +49,8 @@ describe('autopilot close intent', () => {
     'era so isso',
     'nao quero mais nada',
     'tchau',
+    'USE close_chat',
+    'Usa a ferramenta close',
   ])('keeps close-adjacent messages eligible for deterministic/gated resolution: %s', (message) => {
     expect(isPotentialConversationCloseRequest(message)).toBe(true);
   });
