@@ -1,8 +1,11 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { DEFAULT_AUTOPILOT_MODEL, getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
+import { isOpenAiCompatibleModel, requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';
+import { resolveAiDecisionModel, resolveAiDecisionTimeoutMs } from '@/services/ai/decision-model-config';
+import { getDefaultGeminiEnvKey, resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
 
 const ToolIntentGateInputSchema = z.object({
   customerMessage: z.string(),
@@ -14,6 +17,7 @@ const ToolIntentGateInputSchema = z.object({
   closingPolicy: z.string().optional(),
   model: z.string().optional(),
   apiKey: z.string().optional(),
+  workspaceId: z.string().optional(),
   timeoutMs: z.number().int().positive().optional(),
 });
 
@@ -32,6 +36,22 @@ function cleanModelName(model: string | undefined): string {
   return geminiModel.replace(/^googleai\//, '');
 }
 
+async function resolveApiKeyForModel(input: {
+  model: string;
+  explicitApiKey?: string;
+  workspaceId?: string;
+}): Promise<string> {
+  const provider = getAiModelRuntimeProvider(input.model);
+  const explicitApiKey = input.explicitApiKey?.trim();
+  if (provider === 'googleai' && explicitApiKey) return explicitApiKey;
+
+  const candidates = await resolveAiProviderKeyCandidates({
+    config: { workspace_id: input.workspaceId },
+    workspaceGeminiApiKey: provider === 'googleai' ? explicitApiKey : undefined,
+  });
+  return candidates.find((candidate) => candidate.provider === provider)?.key || '';
+}
+
 function extractJson(text: string): unknown {
   const trimmed = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
   try {
@@ -45,8 +65,12 @@ function extractJson(text: string): unknown {
 
 export async function classifyToolIntent(input: ToolIntentGateInput): Promise<ToolIntentGateOutput> {
   const parsedInput = ToolIntentGateInputSchema.parse(input);
-  const configuredModel = process.env.AI_TOOL_INTENT_GATE_MODEL || parsedInput.model || DEFAULT_AUTOPILOT_MODEL;
-  const apiKey = parsedInput.apiKey?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+  const configuredModel = parsedInput.model || await resolveAiDecisionModel('toolIntentGate', DEFAULT_AUTOPILOT_MODEL);
+  const apiKey = await resolveApiKeyForModel({
+    model: configuredModel,
+    explicitApiKey: parsedInput.apiKey?.trim() || getDefaultGeminiEnvKey(),
+    workspaceId: parsedInput.workspaceId,
+  });
 
   const toolSpecificRules = parsedInput.toolName === 'close_chat'
     ? [
@@ -85,7 +109,7 @@ export async function classifyToolIntent(input: ToolIntentGateInput): Promise<To
     `Mensagem do cliente:\n${parsedInput.customerMessage}`,
   ].filter(Boolean).join('\n');
 
-  const timeoutMs = parsedInput.timeoutMs || 2500;
+  const timeoutMs = parsedInput.timeoutMs || await resolveAiDecisionTimeoutMs('toolIntentGate', 2500);
   if (isLmStudioModel(configuredModel)) {
     try {
       return await requestLmStudioJson({
@@ -110,6 +134,38 @@ export async function classifyToolIntent(input: ToolIntentGateInput): Promise<To
     } catch (error) {
       console.warn('[AI_TOOL_INTENT_GATE] LM Studio failed, rejecting optional tool action:', error);
       return { execute: false, confidence: 'low', reason: 'lmstudio_gate_failed' };
+    }
+  }
+
+  if (isOpenAiCompatibleModel(configuredModel)) {
+    if (!apiKey) {
+      return { execute: false, confidence: 'low', reason: 'missing_api_key' };
+    }
+
+    try {
+      return await requestOpenAiCompatibleJson({
+        model: configuredModel,
+        apiKey,
+        schema: ToolIntentGateOutputSchema,
+        schemaName: 'dialogy_tool_intent_gate',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            execute: { type: 'boolean' },
+            confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+            reason: { type: 'string' },
+          },
+          required: ['execute', 'confidence', 'reason'],
+          additionalProperties: false,
+        },
+        systemPrompt: 'Decida se a ferramenta candidata deve ser executada e responda somente o JSON solicitado.',
+        userPrompt: prompt,
+        timeoutMs,
+        maxTokens: 80,
+      });
+    } catch (error) {
+      console.warn('[AI_TOOL_INTENT_GATE] OpenAI-compatible provider failed, rejecting optional tool action:', error);
+      return { execute: false, confidence: 'low', reason: 'provider_gate_failed' };
     }
   }
 

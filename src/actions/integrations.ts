@@ -3,7 +3,30 @@
 import { revalidatePath, revalidateTag } from 'next/cache';
 
 import { db } from '@/lib/db';
+import {
+  AI_CREDENTIAL_PROVIDERS,
+  getAiCredentialProviderLabel,
+  getDefaultAiCredentialModel,
+  isAiCredentialProvider,
+  normalizeAiCredentialModel,
+  type AiCredentialProvider,
+} from '@/lib/ai-provider-credentials';
 import { ensureWorkspaceIntegrationsTable } from '@/lib/workspace-integrations';
+import {
+  listWorkspaceConfiguredAiModels,
+  loadWorkspaceAiCredentialRecords,
+  type ConfiguredWorkspaceAiModel,
+} from '@/services/ai/workspace-ai-credentials';
+import {
+  testAiProviderConnection,
+  type AiProviderConnectionProvider,
+  type AiProviderHealthResult,
+} from '@/services/ai/provider-health';
+import {
+  getDefaultDeepSeekEnvKey,
+  getDefaultGeminiEnvKey,
+  getDefaultOpenAiEnvKey,
+} from '@/services/ai/provider-keys';
 import { getCurrentUser } from './user';
 
 export type IntegrationConfig<T = any> = {
@@ -89,6 +112,288 @@ export async function getIntegrationConfig(
   }
 }
 
+export type AiProviderConnectionTestResult = AiProviderHealthResult & {
+  keySource: 'current-form' | 'workspace' | 'environment' | 'missing';
+  error?: string;
+};
+
+export type AiProviderCredentialSummary = {
+  provider: AiCredentialProvider;
+  providerLabel: string;
+  model: string;
+  isActive: boolean;
+  hasApiKey: boolean;
+  updatedAt: string | null;
+};
+
+function cleanConfigValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isAiProvider(value: unknown): value is AiProviderConnectionProvider {
+  return isAiCredentialProvider(value);
+}
+
+function defaultModelForProvider(provider: AiProviderConnectionProvider): string {
+  return getDefaultAiCredentialModel(provider);
+}
+
+function envKeyForProvider(provider: AiProviderConnectionProvider): string {
+  if (provider === 'gemini') return getDefaultGeminiEnvKey();
+  if (provider === 'deepseek') return getDefaultDeepSeekEnvKey();
+  return getDefaultOpenAiEnvKey();
+}
+
+async function loadStoredAiProviderConfig(
+  workspaceId: string,
+  provider: AiProviderConnectionProvider,
+): Promise<{ apiKey: string; aiModel: string }> {
+  await ensureWorkspaceIntegrationsTable();
+  const res = await db.query(
+    `
+      SELECT config
+      FROM workspace_integrations
+      WHERE workspace_id = $1
+        AND provider = $2
+        AND is_active = true
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [workspaceId, provider],
+  );
+
+  const config = res.rows[0]?.config || {};
+  return {
+    apiKey: cleanConfigValue(config.apiKey),
+    aiModel: cleanConfigValue(config.aiModel),
+  };
+}
+
+export async function listAiProviderCredentialsAction(
+  workspaceId: string,
+): Promise<{ credentials: AiProviderCredentialSummary[]; error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { credentials: [], error: 'Usuario nao autenticado.' };
+  }
+  if (user.activeWorkspaceId !== workspaceId) {
+    return { credentials: [], error: 'Acesso negado ao workspace.' };
+  }
+
+  try {
+    const records = await loadWorkspaceAiCredentialRecords(workspaceId);
+    return {
+      credentials: records
+        .filter((record) => record.apiKey || record.aiModel)
+        .map((record) => ({
+          provider: record.provider,
+          providerLabel: getAiCredentialProviderLabel(record.provider),
+          model: record.aiModel,
+          isActive: record.isActive,
+          hasApiKey: record.apiKey.length > 0,
+          updatedAt: record.updatedAt,
+        })),
+    };
+  } catch (error) {
+    console.error('[LIST_AI_PROVIDER_CREDENTIALS] Error:', error);
+    return { credentials: [], error: 'Falha ao carregar modelos de IA.' };
+  }
+}
+
+export async function getWorkspaceConfiguredAiModelsAction(
+  workspaceId: string,
+): Promise<{ models: ConfiguredWorkspaceAiModel[]; error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { models: [], error: 'Usuario nao autenticado.' };
+  }
+  if (user.activeWorkspaceId !== workspaceId) {
+    return { models: [], error: 'Acesso negado ao workspace.' };
+  }
+
+  try {
+    return { models: await listWorkspaceConfiguredAiModels(workspaceId) };
+  } catch (error) {
+    console.error('[GET_WORKSPACE_CONFIGURED_AI_MODELS] Error:', error);
+    return { models: [], error: 'Falha ao carregar modelos configurados.' };
+  }
+}
+
+export async function saveAiProviderCredentialAction(input: {
+  workspaceId: string;
+  provider: AiCredentialProvider;
+  apiKey?: string;
+  model?: string;
+  isActive?: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return { success: false, error: 'Usuario nao autenticado.' };
+  }
+  if (user.activeWorkspaceId !== input.workspaceId) {
+    return { success: false, error: 'Acesso negado ao workspace.' };
+  }
+  if (!isAiCredentialProvider(input.provider)) {
+    return { success: false, error: 'Provedor de IA invalido.' };
+  }
+
+  const model = normalizeAiCredentialModel(input.provider, input.model);
+  if (!model) {
+    return { success: false, error: 'Modelo de IA invalido para este provedor.' };
+  }
+
+  try {
+    await ensureWorkspaceIntegrationsTable();
+    const existing = (await loadWorkspaceAiCredentialRecords(input.workspaceId))
+      .find((record) => record.provider === input.provider);
+    const apiKey = cleanConfigValue(input.apiKey) || existing?.apiKey || '';
+    if (!apiKey) {
+      return { success: false, error: 'Informe a chave de API deste modelo.' };
+    }
+
+    await db.query(
+      `
+        INSERT INTO workspace_integrations (workspace_id, provider, config, is_active, updated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (workspace_id, provider)
+        DO UPDATE SET
+          config = $3,
+          is_active = $4,
+          updated_at = NOW()
+      `,
+      [
+        input.workspaceId,
+        input.provider,
+        JSON.stringify({ apiKey, aiModel: model }),
+        input.isActive !== false,
+      ],
+    );
+
+    revalidatePath('/integrations');
+    revalidatePath('/integrations/ai');
+    revalidatePath('/autopilot');
+    return { success: true };
+  } catch (error) {
+    console.error('[SAVE_AI_PROVIDER_CREDENTIAL] Error:', error);
+    return { success: false, error: 'Falha ao salvar modelo de IA.' };
+  }
+}
+
+export async function removeAiProviderCredentialAction(input: {
+  workspaceId: string;
+  provider: AiCredentialProvider;
+}): Promise<{ success: boolean; error?: string }> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return { success: false, error: 'Usuario nao autenticado.' };
+  }
+  if (user.activeWorkspaceId !== input.workspaceId) {
+    return { success: false, error: 'Acesso negado ao workspace.' };
+  }
+  if (!isAiCredentialProvider(input.provider)) {
+    return { success: false, error: 'Provedor de IA invalido.' };
+  }
+
+  try {
+    await ensureWorkspaceIntegrationsTable();
+    await db.query(
+      `
+        DELETE FROM workspace_integrations
+        WHERE workspace_id = $1
+          AND provider = $2
+      `,
+      [input.workspaceId, input.provider],
+    );
+
+    revalidatePath('/integrations');
+    revalidatePath('/integrations/ai');
+    revalidatePath('/autopilot');
+    return { success: true };
+  } catch (error) {
+    console.error('[REMOVE_AI_PROVIDER_CREDENTIAL] Error:', error);
+    return { success: false, error: 'Falha ao remover modelo de IA.' };
+  }
+}
+
+export async function testAiProviderConnectionAction(input: {
+  workspaceId: string;
+  provider: AiProviderConnectionProvider;
+  apiKey?: string;
+  model?: string;
+}): Promise<AiProviderConnectionTestResult> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return {
+      ok: false,
+      provider: isAiProvider(input.provider) ? input.provider : 'gemini',
+      model: input.model || '',
+      runtimeProvider: 'other',
+      durationMs: 0,
+      checkedAt: new Date().toISOString(),
+      message: 'Usuario nao autenticado.',
+      keySource: 'missing',
+      error: 'Usuario nao autenticado.',
+    };
+  }
+
+  if (user.activeWorkspaceId !== input.workspaceId) {
+    return {
+      ok: false,
+      provider: isAiProvider(input.provider) ? input.provider : 'gemini',
+      model: input.model || '',
+      runtimeProvider: 'other',
+      durationMs: 0,
+      checkedAt: new Date().toISOString(),
+      message: 'Acesso negado ao workspace.',
+      keySource: 'missing',
+      error: 'Acesso negado ao workspace.',
+    };
+  }
+
+  if (!isAiProvider(input.provider)) {
+    return {
+      ok: false,
+      provider: 'gemini',
+      model: input.model || '',
+      runtimeProvider: 'other',
+      durationMs: 0,
+      checkedAt: new Date().toISOString(),
+      message: 'Provedor de IA invalido.',
+      keySource: 'missing',
+      error: 'Provedor de IA invalido.',
+    };
+  }
+
+  const storedConfig = await loadStoredAiProviderConfig(input.workspaceId, input.provider);
+  const formKey = cleanConfigValue(input.apiKey);
+  const workspaceKey = storedConfig.apiKey;
+  const environmentKey = envKeyForProvider(input.provider);
+  const apiKey = formKey || workspaceKey || environmentKey;
+  const keySource = formKey
+    ? 'current-form'
+    : workspaceKey
+      ? 'workspace'
+      : environmentKey
+        ? 'environment'
+        : 'missing';
+  const model = cleanConfigValue(input.model) || storedConfig.aiModel || defaultModelForProvider(input.provider);
+
+  const result = await testAiProviderConnection({
+    provider: input.provider,
+    apiKey,
+    model,
+    timeoutMs: 12000,
+  });
+
+  return {
+    ...result,
+    keySource,
+  };
+}
+
 export async function getIntegrations(): Promise<{ integrations: any[]; error?: string }> {
   const user = await getCurrentUser();
   if (!user?.activeWorkspaceId) {
@@ -138,18 +443,22 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
     const telegramCurrentCount = parseInt(telegramCountRes.rows[0].count, 10);
     const evoLimitCheck = await checkLimit(workspaceId, 'whatsapp', evoCurrentCount);
 
+    const activeAiProviderCount = AI_CREDENTIAL_PROVIDERS
+      .filter((provider) => activeProviders.has(provider))
+      .length;
+
     const availableIntegrations = [
       {
-        id: 'gemini',
-        name: 'Google Gemini',
-        description: 'Assistente de IA para resumos e respostas inteligentes.',
-        icon_url: '/icons/gemini.svg',
-        tag: 'IA',
+        id: 'ai-models',
+        name: 'Modelos de IA',
+        description: 'Gerencie Gemini, OpenAI/Codex e DeepSeek em uma unica integracao.',
+        icon_url: '/integration-fallback.svg',
+        tag: activeAiProviderCount > 0 ? `${activeAiProviderCount} ativo(s)` : 'IA',
         tag_type: 'primary',
-        href: '/integrations/gemini',
+        href: '/integrations/ai',
         status: 'active',
-        provider: 'gemini',
-        is_active: activeProviders.has('gemini'),
+        provider: 'ai-models',
+        is_active: activeAiProviderCount > 0,
       },
       {
         id: 'evolution-api',

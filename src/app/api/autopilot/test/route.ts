@@ -305,9 +305,8 @@ function getDefaultGeminiEnvKey(): string {
   return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
 }
 
-function hasRuntimeGeminiKey(config: AutopilotConfig, workspaceRuntime: WorkspaceGeminiRuntime): boolean {
+function hasRuntimeGeminiKey(workspaceRuntime: WorkspaceGeminiRuntime): boolean {
   return Boolean(
-    config.gemini_api_key?.trim() ||
     workspaceRuntime.apiKey ||
     (getDefaultGeminiEnvKey() && getDefaultGeminiEnvKey() !== 'no-key-configured')
   );
@@ -397,7 +396,7 @@ function applyDraftSnapshot(config: AutopilotConfig, snapshot?: AutopilotConfigD
   return {
     ...config,
     name: typeof snapshot.name === 'string' && snapshot.name.trim().length > 0 ? snapshot.name : config.name,
-    gemini_api_key: typeof snapshot.gemini_api_key === 'string' && snapshot.gemini_api_key.length > 0 ? snapshot.gemini_api_key : null,
+    gemini_api_key: null,
     ai_model: typeof snapshot.ai_model === 'string' && snapshot.ai_model.length > 0 ? snapshot.ai_model : config.ai_model,
     transcription_model: typeof snapshot.transcription_model === 'string' && snapshot.transcription_model.length > 0 ? snapshot.transcription_model : config.transcription_model,
     knowledge_base: typeof snapshot.knowledge_base === 'string' && snapshot.knowledge_base.length > 0 ? snapshot.knowledge_base : null,
@@ -822,7 +821,7 @@ export async function POST(request: Request) {
                 requestedModel: resolvedModel.requestedModel || null,
                 modelFallbackUsed: resolvedModel.fallbackUsed,
                 hasWorkspaceGeminiKey: Boolean(workspaceGeminiRuntime.apiKey),
-                hasAgentGeminiKey: Boolean(config.gemini_api_key?.trim()),
+                hasAgentGeminiKey: false,
                 procedureRuntime: true,
               },
             });
@@ -834,7 +833,7 @@ export async function POST(request: Request) {
     }
 
     if (!deterministicFlowMessage && baseTrace.workflow.executionMode === 'continue_llm') {
-      if (!hasRuntimeGeminiKey(config, workspaceGeminiRuntime)) {
+      if (!hasRuntimeGeminiKey(workspaceGeminiRuntime)) {
         return NextResponse.json(
           {
             error: 'IA nao configurada para este teste. Configure uma chave em Integracoes > Gemini ou na chave personalizada do agente.',
@@ -945,7 +944,7 @@ export async function POST(request: Request) {
         requestedModel: resolvedModel.requestedModel || null,
         modelFallbackUsed: resolvedModel.fallbackUsed,
         hasWorkspaceGeminiKey: Boolean(workspaceGeminiRuntime.apiKey),
-        hasAgentGeminiKey: Boolean(config.gemini_api_key?.trim()),
+        hasAgentGeminiKey: false,
       },
     });
   } catch (error) {

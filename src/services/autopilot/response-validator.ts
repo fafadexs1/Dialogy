@@ -3,7 +3,7 @@ import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
 import type { AutopilotIntentResolution, AutopilotSlotName, KnowledgeCoverage } from './intent-types';
 import { labelSlotForCustomer, type SlotExtractionResult } from './slots';
-import { hasConversationCloseClaim } from './close-intent';
+import { hasConversationCloseClaim, isConversationCloseRequest } from './close-intent';
 import { hasExternalLookupPromise } from './tool-planner';
 import { repairTurnContinuation } from './turn-continuation';
 import { buildSgpResponseFromToolResults } from '@/services/autopilot-sgp-response';
@@ -195,7 +195,7 @@ function buildClinicalHandoffRepair(input: {
 
   return [
     'Identifiquei sinais de alerta importantes. Leve a crianca agora mesmo ao pronto-socorro fisico mais proximo.',
-    'Estou transferindo a conversa para nossa equipe humana de plantao para suporte imediato.',
+    'Estou transferindo a conversa para nossa equipe humana responsavel, preservando todo o contexto do atendimento.',
     '',
     '[TRANSFERIR_HUMANO]',
   ].join('\n');
@@ -862,7 +862,10 @@ export function validateAutopilotResponse(input: {
       };
     }
 
-    if (input.enabledToolNames.includes('close_chat')) {
+    if (
+      input.enabledToolNames.includes('close_chat') &&
+      isConversationCloseRequest(input.customerMessage)
+    ) {
       reasons.push('close_promise_without_action');
       return {
         decision: 'repair',
@@ -880,10 +883,16 @@ export function validateAutopilotResponse(input: {
       };
     }
 
-    reasons.push('close_promise_without_tool');
+    reasons.push(
+      isConversationCloseRequest(input.customerMessage)
+        ? 'close_promise_without_tool'
+        : 'implicit_close_promise_suppressed'
+    );
     return {
       decision: 'repair',
-      response: 'Entendido. Nao vou enviar novas mensagens por aqui agora, mas a ferramenta de encerramento nao esta habilitada neste agente.',
+      response: isConversationCloseRequest(input.customerMessage)
+        ? 'Entendido. Se precisar de algo depois, e so chamar.'
+        : 'Conclui esta etapa. Posso ajudar em mais alguma coisa?',
       actions: [],
       reasons,
       metadata: { decision: 'repair', reasons, source: input.source },

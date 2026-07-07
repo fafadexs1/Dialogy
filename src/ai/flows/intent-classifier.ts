@@ -1,10 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { DEFAULT_AUTOPILOT_MODEL, getAiModelRuntimeProvider } from '@/lib/ai-models';
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
+import { isOpenAiCompatibleModel, requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';
+import { resolveAiDecisionModel, resolveAiDecisionTimeoutMs } from '@/services/ai/decision-model-config';
+import { getDefaultGeminiEnvKey, resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
 
 const UNIVERSAL_INTENTS = [
   'greeting',
@@ -48,6 +51,7 @@ const AiIntentClassifierInputSchema = z.object({
   }).optional(),
   model: z.string().optional(),
   apiKey: z.string().optional(),
+  workspaceId: z.string().optional(),
   timeoutMs: z.number().int().positive().optional(),
 });
 
@@ -61,9 +65,25 @@ export type AiIntentClassifierInput = z.input<typeof AiIntentClassifierInputSche
 export type AiIntentClassifierOutput = z.infer<typeof AiIntentClassifierOutputSchema>;
 
 function cleanModelName(model: string | undefined): string {
-  const configured = process.env.AI_INTENT_CLASSIFIER_MODEL || model || DEFAULT_AUTOPILOT_MODEL;
+  const configured = model || DEFAULT_AUTOPILOT_MODEL;
   const geminiModel = configured.startsWith('googleai/') ? configured : DEFAULT_AUTOPILOT_MODEL;
   return geminiModel.replace(/^googleai\//, '');
+}
+
+async function resolveApiKeyForModel(input: {
+  model: string;
+  explicitApiKey?: string;
+  workspaceId?: string;
+}): Promise<string> {
+  const provider = getAiModelRuntimeProvider(input.model);
+  const explicitApiKey = input.explicitApiKey?.trim();
+  if (provider === 'googleai' && explicitApiKey) return explicitApiKey;
+
+  const candidates = await resolveAiProviderKeyCandidates({
+    config: { workspace_id: input.workspaceId },
+    workspaceGeminiApiKey: provider === 'googleai' ? explicitApiKey : undefined,
+  });
+  return candidates.find((candidate) => candidate.provider === provider)?.key || '';
 }
 
 function extractJson(text: string): unknown {
@@ -102,8 +122,12 @@ export function shouldUseAiIntentClassifier(input: {
 
 export async function classifyAutopilotIntentWithAi(input: AiIntentClassifierInput): Promise<AiIntentClassifierOutput> {
   const parsedInput = AiIntentClassifierInputSchema.parse(input);
-  const configuredModel = process.env.AI_INTENT_CLASSIFIER_MODEL || parsedInput.model || DEFAULT_AUTOPILOT_MODEL;
-  const apiKey = parsedInput.apiKey?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+  const configuredModel = parsedInput.model || await resolveAiDecisionModel('intentClassifier', DEFAULT_AUTOPILOT_MODEL);
+  const apiKey = await resolveApiKeyForModel({
+    model: configuredModel,
+    explicitApiKey: parsedInput.apiKey?.trim() || getDefaultGeminiEnvKey(),
+    workspaceId: parsedInput.workspaceId,
+  });
 
   const prompt = [
     'Voce e um classificador barato de intencao para um agente de atendimento.',
@@ -128,7 +152,7 @@ export async function classifyAutopilotIntentWithAi(input: AiIntentClassifierInp
     `Mensagem do cliente:\n${parsedInput.customerMessage}`,
   ].filter(Boolean).join('\n');
 
-  const timeoutMs = parsedInput.timeoutMs || 1800;
+  const timeoutMs = parsedInput.timeoutMs || await resolveAiDecisionTimeoutMs('intentClassifier', 1800);
   if (isLmStudioModel(configuredModel)) {
     try {
       return await requestLmStudioJson({
@@ -156,6 +180,46 @@ export async function classifyAutopilotIntentWithAi(input: AiIntentClassifierInp
         intent: parsedInput.deterministicIntent,
         confidence: parsedInput.deterministicConfidence,
         reason: 'lmstudio_classifier_failed',
+      };
+    }
+  }
+
+  if (isOpenAiCompatibleModel(configuredModel)) {
+    if (!apiKey) {
+      return {
+        intent: parsedInput.deterministicIntent,
+        confidence: parsedInput.deterministicConfidence,
+        reason: 'missing_api_key',
+      };
+    }
+
+    try {
+      return await requestOpenAiCompatibleJson({
+        model: configuredModel,
+        apiKey,
+        schema: AiIntentClassifierOutputSchema,
+        schemaName: 'dialogy_intent_classifier',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            intent: { type: 'string', enum: UNIVERSAL_INTENTS },
+            confidence: { type: 'number' },
+            reason: { type: 'string' },
+          },
+          required: ['intent', 'confidence', 'reason'],
+          additionalProperties: false,
+        },
+        systemPrompt: 'Classifique a intencao de atendimento e responda somente o JSON solicitado.',
+        userPrompt: prompt,
+        timeoutMs,
+        maxTokens: 120,
+      });
+    } catch (error) {
+      console.warn('[AI_INTENT_CLASSIFIER] OpenAI-compatible provider failed, using deterministic intent:', error);
+      return {
+        intent: parsedInput.deterministicIntent,
+        confidence: parsedInput.deterministicConfidence,
+        reason: 'provider_classifier_failed',
       };
     }
   }

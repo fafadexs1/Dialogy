@@ -7,6 +7,7 @@ import type { ToolSelectionScoreWeights } from './score-history';
 import { labelSlotForCustomer, type SlotExtractionResult } from './slots';
 import { evaluateToolCapabilityGate, resolveRequestedToolName, type ToolCapabilityGateCode } from './tool-capability-registry';
 import { hasClinicalRedFlagSignal } from './clinical-triage';
+import { isConversationCloseRequest } from './close-intent';
 
 export type ToolPlannerRejectedAction = {
   action: AgentToolAction;
@@ -88,6 +89,17 @@ function validatePayload(action: AgentToolAction): string | null {
     if (payload.sendCloseMessage != null && typeof payload.sendCloseMessage !== 'boolean') {
       return 'sendCloseMessage do encerramento deve ser booleano ou nulo.';
     }
+  }
+
+  if (action.type === 'transfer_chat') {
+    const payload = action.payload || {};
+    if (!payload.teamId?.trim() && !payload.teamName?.trim() && !payload.agentId?.trim()) {
+      return 'Transferencia exige teamId, teamName ou agentId.';
+    }
+  }
+
+  if (action.type === 'add_internal_note' && !action.payload?.content?.trim()) {
+    return 'Nota interna exige conteudo.';
   }
 
   if (action.type === 'sgp_generate_invoice_pix') {
@@ -283,6 +295,7 @@ function missingSlotResponse(missingSlots: AutopilotSlotName[]): string {
 export function planAutopilotTools(input: {
   response: string | null | undefined;
   customerMessage: string;
+  chatHistory?: string | null;
   intentResolution: AutopilotIntentResolution;
   slotExtraction: SlotExtractionResult;
   actions: AgentToolAction[];
@@ -297,13 +310,53 @@ export function planAutopilotTools(input: {
   const capabilityDecisions: Array<ReturnType<typeof evaluateToolCapabilityGate>> = [];
   const isInformationalIntent = INFORMATIONAL_INTENTS.has(input.intentResolution.intent);
   const explicitHumanHandoff = shouldHandoffToHuman(input.customerMessage);
-  const safetyCriticalHandoff = hasClinicalRedFlagSignal(input.customerMessage);
+  const safetyCriticalHandoff = hasClinicalRedFlagSignal([
+    input.chatHistory || '',
+    input.customerMessage,
+  ].filter(Boolean).join('\n'));
   const handoffAllowed = explicitHumanHandoff || safetyCriticalHandoff;
+  const handoffTeam = handoffAllowed && input.enabledToolNames.includes('transfer_chat')
+    ? findHandoffTeam({
+        intent: input.intentResolution.intent,
+        availableTeams: input.availableTeams,
+      })
+    : null;
   const hasImplicitTransferCandidate = input.actions.some((action) => (
     action.type === 'transfer_chat' && !handoffAllowed
   ));
 
-  for (const action of input.actions) {
+  for (const originalAction of input.actions) {
+    if (
+      originalAction.type === 'close_chat' &&
+      !isConversationCloseRequest(input.customerMessage)
+    ) {
+      rejectedActions.push({
+        action: originalAction,
+        code: 'intent_not_allowed',
+        reason: 'Ferramenta close_chat bloqueada: a mensagem atual nao pediu o encerramento da conversa.',
+      });
+      continue;
+    }
+
+    let action = originalAction;
+    if (
+      action.type === 'transfer_chat' &&
+      !action.payload?.agentId?.trim()
+    ) {
+      const transferPayload = action.payload;
+      const requestedTeam = input.availableTeams.find((team) => (
+        team.id === transferPayload?.teamId ||
+        normalizeText(team.name) === normalizeText(transferPayload?.teamName || '')
+      ));
+      const resolvedTeam = requestedTeam || handoffTeam;
+      if (resolvedTeam) {
+        action = {
+          ...action,
+          payload: { teamId: resolvedTeam.id },
+        };
+      }
+    }
+
     if (
       !handoffAllowed &&
       (
@@ -333,7 +386,18 @@ export function planAutopilotTools(input: {
       continue;
     }
 
-    if (isInformationalIntent && action.type !== 'crm_update_contact_custom_fields') {
+    const allowedInformationalControlAction = (
+      action.type === 'close_chat' &&
+      isConversationCloseRequest(input.customerMessage)
+    ) || (
+      safetyCriticalHandoff &&
+      (action.type === 'transfer_chat' || action.type === 'add_internal_note')
+    );
+    if (
+      isInformationalIntent &&
+      action.type !== 'crm_update_contact_custom_fields' &&
+      !allowedInformationalControlAction
+    ) {
       rejectedActions.push({
         action,
         code: 'intent_not_allowed',
@@ -344,7 +408,12 @@ export function planAutopilotTools(input: {
 
     const capabilityGate = evaluateToolCapabilityGate({
       action,
-      intentResolution: input.intentResolution,
+      intentResolution: (
+        safetyCriticalHandoff &&
+        (action.type === 'transfer_chat' || action.type === 'add_internal_note')
+      )
+        ? { ...input.intentResolution, intent: 'human_handoff' }
+        : input.intentResolution,
       slotExtraction: input.slotExtraction,
       enabledToolNames: input.enabledToolNames,
       toolCatalog: input.toolCatalog,
@@ -378,6 +447,36 @@ export function planAutopilotTools(input: {
     }
 
     acceptedActions.push(action);
+  }
+
+  if (
+    safetyCriticalHandoff &&
+    acceptedActions.some((action) => action.type === 'transfer_chat') &&
+    input.enabledToolNames.includes('add_internal_note') &&
+    !acceptedActions.some((action) => action.type === 'add_internal_note')
+  ) {
+    acceptedActions.push({
+      type: 'add_internal_note',
+      reason: 'Preservar o contexto antes da transferencia clinica prioritaria.',
+      payload: {
+        content: buildInternalNote({
+          contact: input.contact,
+          customerMessage: [
+            input.chatHistory || '',
+            input.customerMessage,
+          ].filter(Boolean).join(' ').slice(-420),
+          reason: 'Sinais clinicos de alerta identificados no historico recente',
+        }),
+      },
+    });
+  }
+  if (safetyCriticalHandoff) {
+    const priority = (action: AgentToolAction) => (
+      action.type === 'add_internal_note' ? 0
+        : action.type === 'transfer_chat' ? 2
+          : 1
+    );
+    acceptedActions.sort((left, right) => priority(left) - priority(right));
   }
 
   const promisedExternalLookup = hasExternalLookupPromise(input.response);
@@ -450,6 +549,11 @@ export function planAutopilotTools(input: {
         hasExecutableLookupTool,
         repairReason,
       },
+      explicitHumanHandoff,
+      safetyCriticalHandoff,
+      handoffTeam: handoffTeam
+        ? { id: handoffTeam.id, name: handoffTeam.name }
+        : null,
     },
   };
 }

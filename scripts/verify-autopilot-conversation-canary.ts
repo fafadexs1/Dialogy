@@ -477,7 +477,7 @@ async function seedSandbox(client: PoolClient) {
 
   const model = process.env.AUTOPILOT_CANARY_MODEL
     || process.env.AI_DEFAULT_MODEL
-    || 'googleai/gemini-2.0-flash';
+    || 'googleai/gemini-2.5-flash-lite';
   await client.query(
     `INSERT INTO autopilot_configs (
        id, workspace_id, user_id, name, ai_model, knowledge_base,

@@ -5,6 +5,7 @@ import { dispatchMessageToWebhooksById } from '@/services/webhook-dispatcher';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import type {
   MarketingAutoClosePayload,
   QueueJobRecord,
@@ -21,6 +22,41 @@ import type {
 type QueueHandler = (job: QueueJobRecord) => Promise<void>;
 
 const FINAL_MESSAGE_STATUSES = new Set(['SENT', 'DELIVERY_ACK', 'READ', 'PLAYED', 'DELETED']);
+
+function cleanString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+async function handleAiTask(payload: AiTaskPayload) {
+  if (payload.task === 'temp_media_delete') {
+    const bucket = cleanString(payload.payload?.bucket);
+    const path = cleanString(payload.payload?.path);
+    if (!bucket || !path) {
+      throw new Error('Invalid temp_media_delete payload.');
+    }
+
+    const { error } = await getSupabaseAdmin().storage.from(bucket).remove([path]);
+    if (error) {
+      throw new Error(`Failed to delete temp media ${bucket}/${path}: ${error.message}`);
+    }
+
+    await logAction({
+      action: 'temp_media_delete',
+      workspaceId: payload.workspaceId,
+      payload: { bucket, path },
+    });
+    return;
+  }
+
+  await logAction({
+    action: 'ai_task',
+    workspaceId: payload.workspaceId,
+    payload: {
+      task: payload.task,
+      ...payload.payload,
+    },
+  });
+}
 
 const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   evolution_webhook_process: async (job) => {
@@ -200,14 +236,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   },
   ai_task: async (job) => {
     const payload = job.payload as AiTaskPayload;
-    await logAction({
-      action: 'ai_task',
-      workspaceId: payload.workspaceId,
-      payload: {
-        task: payload.task,
-        ...payload.payload,
-      },
-    });
+    await handleAiTask(payload);
   },
   ai_document_ingest: undefined,
   ai_autopilot_process: undefined,

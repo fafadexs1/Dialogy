@@ -164,7 +164,7 @@ export const nexusFlowInstances: NexusFlowInstance[] = [
       value: 'Peço desculpas pelo transtorno. Estamos cientes de uma instabilidade temporária e a engenharia já está trabalhando para normalizar o serviço.'
     },
     enabled: true,
-    model: 'googleai/gemini-2.0-flash',
+    model: 'googleai/gemini-2.5-flash-lite',
   },
   {
     id: 'nfi-2',
@@ -175,7 +175,7 @@ export const nexusFlowInstances: NexusFlowInstance[] = [
       value: 'Entendi. Para que eu possa ajudar com sua dúvida financeira, estou transferindo seu atendimento para um especialista do nosso time financeiro, ok?'
     },
     enabled: true,
-    model: 'googleai/gemini-2.0-flash',
+    model: 'googleai/gemini-2.5-flash-lite',
   },
   {
     id: 'nfi-3',
@@ -192,6 +192,6 @@ export const nexusFlowInstances: NexusFlowInstance[] = [
       }
     },
     enabled: false,
-    model: 'googleai/gemini-2.0-flash',
+    model: 'googleai/gemini-2.5-flash-lite',
   },
 ];

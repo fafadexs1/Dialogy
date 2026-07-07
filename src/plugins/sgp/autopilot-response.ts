@@ -939,6 +939,15 @@ export function buildToolFailureResponse(results: AgentToolExecutionResult[], re
   );
   if (policyBlockedAction) {
     if (
+      response.trim() &&
+      (
+        policyBlockedAction.input.type === 'close_chat' ||
+        policyBlockedAction.input.type === 'add_internal_note'
+      )
+    ) {
+      return null;
+    }
+    if (
       policyBlockedAction.input.type === 'mcp_call_tool' &&
       /(?:^|:)find_router_by_ip$/i.test(String(policyBlockedAction.input.payload?.toolName || '')) &&
       policyBlockedAction.error?.includes('[tool_policy:missing_parameters]')

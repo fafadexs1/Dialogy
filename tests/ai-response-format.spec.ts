@@ -69,6 +69,20 @@ describe('AI customer response formatting', () => {
     expect(formatted).not.toContain('1000 MEGAS + 60 CANAIS Wi-Fi 6 R$99,90');
   });
 
+  it('repairs dangling line breaks inside one-plan conversational sentences', () => {
+    const formatted = formatCustomerFacingAiResponse([
+      'Foi um erro meu, peço desculpas! Você tem toda razão. Vou corrigir isso agora. O plano de',
+      '',
+      '1000 MEGA + TV com',
+      'Wi-Fi 6 é',
+      'R$149,90/mês com desconto de pontualidade. Para darmos sequência, preciso de alguns dados: qual seu nome completo e CPF ou CNPJ?',
+    ].join('\n'));
+
+    expect(formatted).toContain('O plano de 1000 MEGA + TV com Wi-Fi 6 é R$149,90/mês');
+    expect(formatted).not.toContain('com\nWi-Fi');
+    expect(formatted).not.toContain('é\nR$149');
+  });
+
   it('preserves WhatsApp spacing for full internet plan catalogs', () => {
     const response = [
       '🚀 *CONHECA NOSSOS PLANOS DE INTERNET FIBRA*',

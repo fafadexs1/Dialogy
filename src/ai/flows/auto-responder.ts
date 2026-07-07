@@ -28,6 +28,16 @@ import {
   getGlobalLmStudioConfig,
   defineLmStudioPrompt,
 } from '@/services/ai/lm-studio';
+import {
+  coerceOpenAiCompatiblePromptOutput,
+  defineOpenAiCompatiblePrompt,
+  isOpenAiCompatibleModel,
+} from '@/services/ai/openai-compatible';
+import {
+  getDefaultGeminiEnvKey,
+  resolveAiProviderKeyCandidates,
+} from '@/services/ai/provider-keys';
+import { shouldPrependPrimaryResponseToMessageBlocks } from '@/services/autopilot/message-blocks';
 
 // Define a schema for a single automation rule
 const ActionSchema = z.union([
@@ -199,7 +209,7 @@ export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
 // We create a new input schema for the Flow that includes the config object.
 const AutoResponderFlowInputSchema = AgentResponseInputSchema.extend({
   config: z.any().describe("The autopilot config object from the database."),
-  workspaceGeminiApiKey: z.string().optional().describe('Workspace-level Gemini key (Integrações > Gemini) used when the agent has no key.'),
+  workspaceGeminiApiKey: z.string().optional().describe('Workspace-level Gemini key from the unified AI models integration.'),
 });
 
 export async function generateAgentResponse(input: z.infer<typeof AutoResponderFlowInputSchema>): Promise<AgentResponseOutput> {
@@ -558,13 +568,15 @@ const globalPrompt = ai.definePrompt(promptConfig);
 const globalConversationalPrompt = ai.definePrompt(conversationalPromptConfig);
 const STABLE_AUTOPILOT_MODEL_FALLBACKS = [
   DEFAULT_AUTOPILOT_MODEL,
-  'googleai/gemini-2.0-flash-lite',
-  'googleai/gemini-1.5-pro',
+  'googleai/gemini-2.5-flash',
+  'codex/gpt-5.3-codex',
+  'openai/gpt-5.5',
+  'openai/gpt-5.4-mini',
+  'deepseek/deepseek-v4-flash',
+  'googleai/gemini-3.1-flash-lite',
+  'googleai/gemini-2.5-flash-lite',
+  'googleai/gemini-2.5-pro',
 ];
-
-function getDefaultGeminiEnvKey(): string {
-  return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
-}
 
 function getModelCandidates(model: string): string[] {
   if (isLmStudioModel(model)) return [model];
@@ -585,6 +597,10 @@ async function definePromptForCandidate(input: {
   if (isLmStudioModel(input.model)) {
     const lmStudioConfig = await getGlobalLmStudioConfig();
     return defineLmStudioPrompt(selectedPromptConfig, input.model, lmStudioConfig);
+  }
+
+  if (isOpenAiCompatibleModel(input.model)) {
+    return defineOpenAiCompatiblePrompt(selectedPromptConfig, input.model, input.apiKey, 'agent');
   }
 
   const defaultEnvKey = getDefaultGeminiEnvKey();
@@ -623,35 +639,28 @@ const autoResponderFlow = ai.defineFlow(
       closingPolicy: input.closingPolicy ?? input.config?.closing_policy ?? '',
     });
 
-    // 1. Resolve Gemini API key (agent -> workspace integration -> env)
-    const configKey = input.config?.gemini_api_key?.trim();
-    const workspaceKey = input.workspaceGeminiApiKey?.trim();
-    const envKey = getDefaultGeminiEnvKey();
+    // 1. Resolve provider API keys. Each key is tagged with its runtime provider.
     const lmStudioConfig = isLmStudioModel(model) ? await getGlobalLmStudioConfig() : null;
     const apiKeyCandidates: AiModelKeyCandidate[] = isLmStudioModel(model)
-      ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio' }]
-      : [
-          { source: 'agent', key: configKey },
-          { source: 'workspace', key: workspaceKey },
-          { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
-        ].filter((candidate): candidate is AiModelKeyCandidate => Boolean(candidate.key));
-    const uniqueApiKeyCandidates = apiKeyCandidates.filter((candidate, index, all) => (
-      all.findIndex((item) => item.key === candidate.key) === index
-    ));
+      ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio', provider: 'lmstudio' }]
+      : await resolveAiProviderKeyCandidates({
+          config: input.config,
+          workspaceGeminiApiKey: input.workspaceGeminiApiKey,
+        });
 
-    if (uniqueApiKeyCandidates.length === 0) {
+    if (apiKeyCandidates.length === 0) {
       console.error('[AUTORESPONDER_FLOW_ERROR] Nenhuma chave de API encontrada (Config, Integrações ou ENV).');
       // Continue to configured fallback reply instead of throwing and leaving auto mode silent.
     }
 
     let output: AgentResponseOutput | null = null;
 
-    if (uniqueApiKeyCandidates.length > 0) {
+    if (apiKeyCandidates.length > 0) {
       try {
         const promptRun = await runAiModelWithFallback({
           label: 'autoResponderFlow',
           modelCandidates: getModelCandidates(model),
-          apiKeyCandidates: uniqueApiKeyCandidates,
+          apiKeyCandidates,
           maxAttemptsPerCandidate: Number.parseInt(process.env.AI_MODEL_MAX_ATTEMPTS || '', 10) || 2,
           retryBaseDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_BASE_DELAY_MS || '', 10) || 250,
           retryMaxDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_MAX_DELAY_MS || '', 10) || 1500,
@@ -703,14 +712,27 @@ const autoResponderFlow = ai.defineFlow(
               }
             }
 
+            if (!finalResult?.output && isOpenAiCompatibleModel(context.model)) {
+              const parsedOutput = coerceOpenAiCompatiblePromptOutput<AgentResponseOutput & Record<string, unknown>>(
+                finalResult?.output,
+                finalResult?.text,
+              );
+              if (parsedOutput?.response) {
+                finalResult = Object.create(finalResult || {});
+                Object.defineProperty(finalResult, 'output', {
+                  value: parsedOutput,
+                  writable: true,
+                  enumerable: true,
+                  configurable: true,
+                });
+              }
+            }
+
             assertAiModelOutput(finalResult?.output, 'Auto responder returned no structured output.');
             return finalResult;
           },
           onAttempt: (event) => {
             if (event.status === 'success') {
-              if (event.keySource !== 'agent' && configKey) {
-                console.warn(`[AUTORESPONDER_FLOW] Gemini key fallback succeeded with ${event.keySource} key.`);
-              }
               if (event.model !== model) {
                 console.warn(`[AUTORESPONDER_FLOW] Model fallback succeeded with "${event.model}" instead of "${model}".`);
               }
@@ -783,7 +805,12 @@ const autoResponderFlow = ai.defineFlow(
           let reconciledBlocks = [...rawBlocks];
           if (!responseContainsBlocks) {
             // If response is distinct from blocks, prepend response as a separate block
-            if (cleanedResponse && !firstBlock.toLowerCase().includes(cleanedResponse.toLowerCase()) && !cleanedResponse.toLowerCase().includes(firstBlock.toLowerCase())) {
+            if (
+              cleanedResponse &&
+              shouldPrependPrimaryResponseToMessageBlocks(cleanedResponse, rawBlocks) &&
+              !firstBlock.toLowerCase().includes(cleanedResponse.toLowerCase()) &&
+              !cleanedResponse.toLowerCase().includes(firstBlock.toLowerCase())
+            ) {
               reconciledBlocks.unshift(cleanedResponse);
             }
           }
@@ -796,7 +823,7 @@ const autoResponderFlow = ai.defineFlow(
             .filter((block) => block.trim() !== '');
 
           // If we reconstructed it, let's make sure outputResponse has the full combined response to be safe
-          if (!responseContainsBlocks && reconciledBlocks.length > 1) {
+          if (reconciledBlocks.length > 1) {
             outputResponse = sanitizedBlocks.join('\n\n');
           }
         }

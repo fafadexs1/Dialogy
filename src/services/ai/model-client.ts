@@ -1,4 +1,8 @@
 import {
+  getAiModelRuntimeProvider,
+  type AiModelRuntimeProvider,
+} from '@/lib/ai-models';
+import {
   AiModelClientError,
   classifyAiModelError,
   type AiModelAttemptSummary,
@@ -8,6 +12,7 @@ import {
 export type AiModelKeyCandidate = {
   source: string;
   key: string;
+  provider?: AiModelRuntimeProvider;
 };
 
 export type AiModelAttemptContext = {
@@ -61,12 +66,23 @@ function uniqueApiKeyCandidates(candidates: AiModelKeyCandidate[]): AiModelKeyCa
   for (const candidate of candidates) {
     const key = candidate.key?.trim();
     const source = candidate.source?.trim() || 'unknown';
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    result.push({ source, key });
+    const provider = candidate.provider || 'other';
+    const signature = `${provider}:${key}`;
+    if (!key || seen.has(signature)) continue;
+    seen.add(signature);
+    result.push({ source, key, provider: candidate.provider });
   }
 
   return result;
+}
+
+function isKeyCompatibleWithModel(candidate: AiModelKeyCandidate, model: string): boolean {
+  if (!candidate.provider) return true;
+  return candidate.provider === getAiModelRuntimeProvider(model);
+}
+
+function keySignature(candidate: AiModelKeyCandidate): string {
+  return `${candidate.provider || 'any'}:${candidate.key}`;
 }
 
 function sleep(ms: number) {
@@ -136,9 +152,20 @@ export async function runAiModelWithFallback<T>(
   }
 
   let lastError: unknown = null;
+  let attemptedCompatiblePair = false;
+  const authFailedKeys = new Set<string>();
 
-  for (const keyCandidate of keys) {
-    for (const model of models) {
+  for (const model of models) {
+    for (const keyCandidate of keys) {
+      const signature = keySignature(keyCandidate);
+      if (authFailedKeys.has(signature)) {
+        continue;
+      }
+      if (!isKeyCompatibleWithModel(keyCandidate, model)) {
+        continue;
+      }
+      attemptedCompatiblePair = true;
+
       for (let attempt = 1; attempt <= maxAttemptsPerCandidate; attempt += 1) {
         const startedAt = Date.now();
 
@@ -179,6 +206,7 @@ export async function runAiModelWithFallback<T>(
 
           if (!classification.retryable || attempt >= maxAttemptsPerCandidate) {
             if (classification.code === 'auth_error') {
+              authFailedKeys.add(signature);
               break;
             }
             break;
@@ -188,6 +216,14 @@ export async function runAiModelWithFallback<T>(
         }
       }
     }
+  }
+
+  if (!attemptedCompatiblePair) {
+    throw new AiModelClientError('No AI API key candidate configured for the selected model provider(s).', {
+      code: 'auth_error',
+      retryable: false,
+      attempts,
+    });
   }
 
   const classification = classifyAiModelError(lastError);

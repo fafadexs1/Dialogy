@@ -1,0 +1,83 @@
+Error [AuthApiError]: Invalid Refresh Token: Refresh Token Not Found
+    at ignore-listed frames {
+  __isAuthError: true,
+  status: 400,
+  code: 'refresh_token_not_found'
+}
+Error [AuthApiError]: Invalid Refresh Token: Refresh Token Not Found
+    at ignore-listed frames {
+  __isAuthError: true,
+  status: 400,
+  code: 'refresh_token_not_found'
+}
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[browser] Detected `scroll-behavior: smooth` on the `<html>` element. To disable smooth scrolling during route transitions, add `data-scroll-behavior="smooth"` to your <html> element. Learn more: https://nextjs.org/docs/messages/missing-data-scroll-behavior (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[LOGIN_ACTION] Erro: Error [AuthApiError]: Invalid login credentials
+    at async login (src\actions\auth.ts:20:23)
+    at async (src\lib\observability\logger.ts:39:13)
+  18 |     const password = formData.get('password') as string;
+  19 |
+> 20 |     const { error } = await supabase.auth.signInWithPassword({
+     |                       ^
+  21 |       email,
+  22 |       password,
+  23 |     }); {
+  __isAuthError: true,
+  status: 400,
+  code: 'invalid_credentials'
+}
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[browser] [REALTIME] Connection lost (CHANNEL_ERROR). Running delta sync recovery. (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[browser] [REALTIME] Connection lost (CHANNEL_ERROR). Running delta sync recovery. (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[browser] [REALTIME] Connection lost (CHANNEL_ERROR). Running delta sync recovery. (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[browser] [REALTIME] Connection lost (CHANNEL_ERROR). Running delta sync recovery. (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_115brz8._.js:2477:13)
+[GET_AUTOPILOT_DECISION_INSIGHTS] Consulta opcional indisponivel (agent_ecosystem_patterns.available): error: column e.fingerprint does not exist
+    at async optionalDecisionInsightQuery (src\actions\autopilot.ts:2342:16)
+    at async getAutopilotDecisionInsights (src\actions\autopilot.ts:2361:142)
+  2340 | ): Promise<T> {
+  2341 |     try {
+> 2342 |         return await query;
+       |                ^
+  2343 |     } catch (error) {
+  2344 |         console.warn(`[GET_AUTOPILOT_DECISION_INSIGHTS] Consulta opcional indisponivel (...
+  2345 |         return { rows: [] } as unknown as T; {
+  length: 111,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '14',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '3665',
+  routine: 'errorMissingColumn'
+}
+[browser] Each child in a list should have a unique "key" prop.
+
+Check the render method of `AutopilotStats`. See https://react.dev/link/warning-keys for more information. 
+    at <unknown> (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:15127:29)
+    at runWithFiberInDEV (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:965:74)
+    at warnForMissingKey (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:15126:17)
+    at warnOnInvalidKey (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:4091:21)
+    at reconcileChildrenArray (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:4129:160)
+    at reconcileChildFibersImpl (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:4236:51)
+    at <unknown> (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:4261:39)
+    at reconcileChildren (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:5898:51)
+    at beginWork (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:6758:1573)
+    at runWithFiberInDEV (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:965:74)
+    at performUnitOfWork (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:9555:97)
+    at workLoopSync (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:9449:40)
+    at renderRootSync (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:9433:13)
+    at performWorkOnRoot (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:9061:186)
+    at performSyncWorkOnRoot (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:10179:316)
+    at processRootScheduleInMicrotask (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:10200:106)
+    at <unknown> (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:10274:158) (file://C:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/.next/dev/static/chunks/node_modules_next_dist_compiled_react-dom_058-ah~._.js:15127:29)

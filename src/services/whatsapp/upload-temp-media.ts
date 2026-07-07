@@ -11,9 +11,10 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'crypto';
 import { resilientFetch } from '@/lib/http/resilient-fetch';
+import { RETRY_MEDIA_RETENTION_MS } from '@/services/messages/temp-media-retention';
 
 const TEMP_MEDIA_BUCKET = 'temp-media';
-const DELETE_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+const DELETE_DELAY_MS = RETRY_MEDIA_RETENTION_MS;
 
 type UploadParams = {
     media: string; // Base64 (with or without data URI) or remote URL
@@ -57,7 +58,7 @@ async function toBufferFromSource(source: string): Promise<Buffer> {
 
 function scheduleTempDeletion(filePath: string) {
     // Best-effort cleanup; não aguardamos o resultado.
-    setTimeout(async () => {
+    const timeout = setTimeout(async () => {
         try {
             const { error } = await getSupabaseAdmin().storage.from(TEMP_MEDIA_BUCKET).remove([filePath]);
             if (error) {
@@ -67,6 +68,9 @@ function scheduleTempDeletion(filePath: string) {
             console.error('[TEMP_MEDIA] Exceção ao apagar arquivo expirado:', error, 'Path:', filePath);
         }
     }, DELETE_DELAY_MS);
+    if (typeof (timeout as any).unref === 'function') {
+        (timeout as any).unref();
+    }
 }
 
 export async function uploadTempMedia({ media, mimetype, fileName }: UploadParams) {

@@ -32,6 +32,9 @@ if (![
   'greeting',
   'catalog_continuation',
   'commercial_registration_continuation',
+  'commercial_completion',
+  'clinical_red_flag_handoff',
+  'contextual_close_reply',
   'generic_troubleshooting',
   'close_conversation',
   'transfer_handoff',
@@ -48,6 +51,9 @@ const identityFreeScenario = [
   'greeting',
   'catalog_continuation',
   'commercial_registration_continuation',
+  'commercial_completion',
+  'clinical_red_flag_handoff',
+  'contextual_close_reply',
   'generic_troubleshooting',
   'close_conversation',
   'transfer_handoff',
@@ -113,6 +119,7 @@ type SourceContext = {
   contactId: string;
   configId: string;
   configUserId: string;
+  agentName: string;
   cpfFieldId: string;
   contactName: string;
   contactEmail: string;
@@ -192,6 +199,7 @@ async function loadSourceContext(client: PoolClient): Promise<SourceContext> {
     `SELECT c.workspace_id, c.contact_id,
             COALESCE(c.autopilot_config_id, sa.autopilot_config_id) AS config_id,
             ac.user_id AS config_user_id, ac.enabled_tool_names,
+            COALESCE(sa.name, ac.name, 'Autopilot Readonly Replay') AS agent_name,
             ct.name AS contact_name, ct.email AS contact_email,
             ct.phone_number_jid, ct.avatar_url, ct.address
        FROM chats c
@@ -325,6 +333,7 @@ async function loadSourceContext(client: PoolClient): Promise<SourceContext> {
     contactId: String(row.contact_id),
     configId: String(row.config_id),
     configUserId: String(row.config_user_id),
+    agentName: String(row.agent_name || 'Autopilot Readonly Replay'),
     cpfFieldId,
     contactName: String(row.contact_name || 'Cliente'),
     contactEmail: String(row.contact_email || ''),
@@ -375,9 +384,16 @@ async function seedReplay(client: PoolClient, source: SourceContext) {
     `INSERT INTO system_agents (
        id, workspace_id, name, token, is_active, created_by_id, type,
        hide_from_chatlist, autopilot_config_id
-     ) VALUES ($1, $2, 'Autopilot Readonly Replay', $3, true, $4,
-       'intelligent_attendant', true, $5)`,
-    [ids.agent, source.workspaceId, `readonly-replay-${runLabel}`, source.configUserId, source.configId],
+     ) VALUES ($1, $2, $3, $4, true, $5,
+       'intelligent_attendant', true, $6)`,
+    [
+      ids.agent,
+      source.workspaceId,
+      source.agentName,
+      `readonly-replay-${runLabel}`,
+      source.configUserId,
+      source.configId,
+    ],
   );
   await client.query(
     `INSERT INTO contacts (
@@ -386,7 +402,7 @@ async function seedReplay(client: PoolClient, source: SourceContext) {
     [
       ids.contact,
       source.workspaceId,
-      'Autopilot Readonly Replay',
+      source.contactName,
       source.contactEmail || null,
       replayPhone,
       `${replayPhone}@s.whatsapp.net`,
@@ -462,7 +478,7 @@ async function cleanupStaleReplays(client: PoolClient, source: SourceContext) {
       WHERE c.workspace_id = $1
         AND c.contact_id = $2
         AND c.autopilot_config_id = $3
-        AND sa.name = 'Autopilot Readonly Replay'
+        AND sa.token LIKE 'readonly-replay-%'
         AND sa.hide_from_chatlist = true
         AND sa.created_at < clock_timestamp() - interval '5 minutes'`,
     [source.workspaceId, source.contactId, source.configId],
@@ -473,6 +489,74 @@ async function cleanupStaleReplays(client: PoolClient, source: SourceContext) {
       agent: String(row.agent_id),
     });
   }
+}
+
+async function seedConversationHistory(
+  client: PoolClient,
+  source: SourceContext,
+  turns: Array<{ content: string; fromMe: boolean }>,
+) {
+  for (const [index, turn] of turns.entries()) {
+    const secondsAgo = (turns.length - index) * 15;
+    await client.query(
+      `INSERT INTO messages (
+         id, workspace_id, chat_id, type, content, from_me, is_read,
+         instance_name, raw_payload, metadata, sender_system_agent_id, created_at
+       ) VALUES (
+         $1, $2, $3, 'text', $4, $5, true,
+         $6, '{}'::jsonb, '{}'::jsonb, $7,
+         clock_timestamp() - ($8::int * interval '1 second')
+       )`,
+      [
+        randomUUID(),
+        source.workspaceId,
+        ids.chat,
+        turn.content,
+        turn.fromMe,
+        fakeInstanceName,
+        turn.fromMe ? ids.agent : null,
+        secondsAgo,
+      ],
+    );
+  }
+}
+
+async function seedSourceHistoryBeforeMessage(
+  client: PoolClient,
+  source: SourceContext,
+  targetMessage: string,
+) {
+  const history = await client.query(
+    `WITH target AS (
+       SELECT created_at
+         FROM messages
+        WHERE workspace_id = $1
+          AND chat_id = $2
+          AND from_me = false
+          AND LOWER(TRIM(content)) = LOWER(TRIM($3))
+        ORDER BY created_at DESC
+        LIMIT 1
+     )
+     SELECT content, from_me
+       FROM messages
+      WHERE workspace_id = $1
+        AND chat_id = $2
+        AND created_at < (SELECT created_at FROM target)
+      ORDER BY created_at DESC
+      LIMIT 20`,
+    [source.workspaceId, sourceChatId, targetMessage],
+  );
+  if (history.rows.length === 0) {
+    throw new Error(`No source history found before replay target: ${targetMessage}`);
+  }
+  await seedConversationHistory(
+    client,
+    source,
+    history.rows.reverse().map((row) => ({
+      content: String(row.content || ''),
+      fromMe: row.from_me === true,
+    })),
+  );
 }
 
 async function runReplay(client: PoolClient, source: SourceContext) {
@@ -582,12 +666,27 @@ async function runReplay(client: PoolClient, source: SourceContext) {
       [source.workspaceId, ids.chat, ids.agent, source.configId],
     );
   }
+  if (scenario === 'commercial_completion') {
+    await seedSourceHistoryBeforeMessage(client, source, 'Pode sim');
+  }
+  if (scenario === 'clinical_red_flag_handoff') {
+    await seedSourceHistoryBeforeMessage(client, source, 'Já te falei hoje as 19h00');
+  }
+  if (scenario === 'contextual_close_reply') {
+    await seedSourceHistoryBeforeMessage(client, source, 'Não, somente!');
+  }
   const messages = scenario === 'greeting'
     ? ['Fala ai galera']
     : scenario === 'catalog_continuation'
       ? ['Esse de 1000 parece ser perfeito pra mim']
     : scenario === 'commercial_registration_continuation'
       ? ['Quadra 12, Lote 13. Residencial Morada das Garcas']
+    : scenario === 'commercial_completion'
+      ? ['Pode sim']
+    : scenario === 'clinical_red_flag_handoff'
+      ? ['Já te falei hoje as 19h00']
+    : scenario === 'contextual_close_reply'
+      ? ['Não, somente!']
     : scenario === 'generic_troubleshooting'
       ? ['A internet da minha fibra esta toda hora falhando. Voce pode me ajudar?']
     : scenario === 'close_conversation'
@@ -631,7 +730,7 @@ async function runReplay(client: PoolClient, source: SourceContext) {
     messages: [],
     contact: {
       id: ids.contact,
-      name: 'Autopilot Readonly Replay',
+      name: source.contactName,
       email: source.contactEmail,
       phone_number_jid: `${replayPhone}@s.whatsapp.net`,
       avatar_url: source.contactAvatar,
@@ -849,6 +948,76 @@ async function runReplay(client: PoolClient, source: SourceContext) {
         noStructuredDelimiterMessageBlock: responseTexts.every(
           (text) => !/(?:^|:\s*)[{}\[\],]\s*$/.test(text.trim()),
         ),
+      }
+    : scenario === 'commercial_completion'
+    ? {
+        llmResponseStarted: hasEvent('llm_response_start'),
+        llmResponseCompleted: events.rows.some(
+          (event) => event.kind === 'llm_response' && event.status === 'success',
+        ),
+        noPrematureCloseExecution: !audits.some(
+          (audit) => audit.toolName === 'close_chat',
+        ),
+        prematureCloseWasRejectedBeforeRuntime: hasEvent(
+          'tool_planner',
+          (payload) => Array.isArray(payload.rejectedActions) && payload.rejectedActions.some(
+            (item: any) => item.tool === 'close_chat' && item.code === 'intent_not_allowed',
+          ),
+        ),
+        chatRemainedOpenAndAssigned: (
+          finalChatState.rows[0]?.status !== 'encerrados'
+          && finalChatState.rows[0]?.is_autopilot_active === true
+          && finalChatState.rows[0]?.assigned_system_agent_id === ids.agent
+        ),
+        responseConfirmsCommercialProgress: /\b(pre-cadastro|cadastro|contratacao|contratação|plano)\b/i.test(responseText),
+        noCustomerVisibleToolFailure: !/\b(nao fiz nenhuma alteracao|não fiz nenhuma alteração|nao consegui encerrar|não consegui encerrar|sistema falhou)\b/i.test(responseText),
+      }
+    : scenario === 'clinical_red_flag_handoff'
+    ? {
+        llmResponseStarted: hasEvent('llm_response_start'),
+        llmResponseCompleted: events.rows.some(
+          (event) => event.kind === 'llm_response' && event.status === 'success',
+        ),
+        clinicalHistoryAuthorizedHandoff: hasEvent(
+          'tool_planner',
+          (payload) => payload.safetyCriticalHandoff === true,
+        ),
+        transferTargetWasHydrated: executions.rows.some(
+          (execution) => (
+            requestedToolName(execution) === 'transfer_chat'
+            && Boolean(execution.input?.payload?.teamId)
+          ),
+        ),
+        internalNoteSucceededBeforeTransfer: (
+          audits.findIndex((audit) => audit.toolName === 'add_internal_note' && audit.status === 'success') >= 0
+          && audits.findIndex((audit) => audit.toolName === 'add_internal_note' && audit.status === 'success')
+            < audits.findIndex((audit) => audit.toolName === 'transfer_chat' && audit.status === 'success')
+        ),
+        transferChatSucceeded: audits.some(
+          (audit) => audit.toolName === 'transfer_chat' && audit.status === 'success',
+        ),
+        autopilotReleasedAfterTransfer: (
+          finalChatState.rows[0]?.is_autopilot_active === false
+          && !finalChatState.rows[0]?.assigned_system_agent_id
+        ),
+        responseIsTerminalAndClinicallySafe: (
+          /\b(pronto-socorro|sinais de alerta|urgencia|urgência)\b/i.test(responseText)
+          && /\b(transfer|encaminh|equipe humana)\b/i.test(responseText)
+        ),
+        noRepeatedTimeQuestion: !/\bqual horario especifico|qual horário específico\b/i.test(responseText),
+        noCustomerVisibleToolFailure: !/\b(nao consegui|não consegui|sistema falhou|faltam dados ou contexto)\b/i.test(responseText),
+      }
+    : scenario === 'contextual_close_reply'
+    ? {
+        closeChatSucceeded: audits.some(
+          (audit) => audit.toolName === 'close_chat' && audit.status === 'success',
+        ),
+        closeChatExecutedExactlyOnce: audits.filter(
+          (audit) => audit.toolName === 'close_chat',
+        ).length === 1,
+        chatWasActuallyClosed: finalChatState.rows[0]?.status === 'encerrados',
+        noRepeatedAnythingElseQuestion: !/\bposso ajudar em mais alguma coisa\b/i.test(responseText),
+        noCustomerVisibleToolFailure: !/\b(nao consegui|não consegui|sistema falhou)\b/i.test(responseText),
       }
     : scenario === 'close_conversation'
     ? {
@@ -1097,7 +1266,7 @@ async function runReplay(client: PoolClient, source: SourceContext) {
         (delivery) => Number(delivery.next_block_index) === Number(delivery.block_count),
       )
       && (
-        scenario === 'greeting'
+        ['greeting', 'clinical_red_flag_handoff'].includes(scenario)
           ? response.rows.length >= primaryDeliveries.reduce(
               (total, delivery) => total + Number(delivery.block_count),
               0,
@@ -1132,6 +1301,9 @@ async function runReplay(client: PoolClient, source: SourceContext) {
           'generic_troubleshooting',
           'catalog_continuation',
           'commercial_registration_continuation',
+          'commercial_completion',
+          'clinical_red_flag_handoff',
+          'contextual_close_reply',
           'close_conversation',
         ].includes(scenario)
         ? true
@@ -1141,7 +1313,7 @@ async function runReplay(client: PoolClient, source: SourceContext) {
       (payload) => payload.status === 'skipped'
         || payload.reason === 'deterministic_operational_turn',
     ),
-    unrelatedCloseGateWasSkipped: scenario === 'close_conversation'
+    unrelatedCloseGateWasSkipped: ['close_conversation', 'contextual_close_reply'].includes(scenario)
       ? true
       : !hasEvent('close_intent_gate'),
     requiredToolFailureTerminatesSafely: (

@@ -52,6 +52,22 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
+function repairDanglingLineBreaks(value: string): string {
+  let repaired = value;
+  const danglingSuffix = String.raw`(?:a|o|as|os|ao|aos|de|do|da|dos|das|com|sem|por|para|pra|e|ou|que|se|em|no|na|nos|nas|é|eh|foi|será|sera|fica|ficou|está|esta|tem|inclui|possui|apenas)`;
+
+  for (let i = 0; i < 4; i += 1) {
+    const next = repaired
+      .replace(new RegExp(String.raw`(^|[^\p{L}\p{N}_])(${danglingSuffix})[ \t]*\n+[ \t]*(?=\S)`, 'giu'), '$1$2 ')
+      .replace(/([^\n.!?:;])\n(?=[a-zà-ÿ])/gu, '$1 ');
+
+    if (next === repaired) break;
+    repaired = next;
+  }
+
+  return repaired;
+}
+
 function stripIsolatedStructuredDelimiters(value: string): string {
   return value
     .replace(/\r\n?/g, '\n')
@@ -261,7 +277,7 @@ export function formatCustomerFacingAiResponse(
   maxChars = DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
 ): string {
   const protectedUrls = protectUrls(expandCompactPlanCatalog(stripIsolatedStructuredDelimiters(response)));
-  const normalized = normalizeWhitespace(formatIsoDatesForCustomer(protectedUrls.value));
+  const normalized = repairDanglingLineBreaks(normalizeWhitespace(formatIsoDatesForCustomer(protectedUrls.value)));
   if (!normalized) return '';
 
   const isCatalog = isStructuredCatalogResponse(normalized) || isPlanOfferResponse(normalized);

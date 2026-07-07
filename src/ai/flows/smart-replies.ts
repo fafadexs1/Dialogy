@@ -64,7 +64,7 @@ export async function generateSmartReplies(input: SmartRepliesInput): Promise<Sm
     ? configRes.rows[0]
     : { id: 'default', ai_model: DEFAULT_AUTOPILOT_MODEL };
   const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
-  const apiKey = config.gemini_api_key || runtimeConfig.apiKey;
+  const apiKey = runtimeConfig.apiKey;
   const requestedModel = config.ai_model || runtimeConfig.aiModel || DEFAULT_AUTOPILOT_MODEL;
   const configuredModel = isLmStudioModel(requestedModel)
     ? requestedModel

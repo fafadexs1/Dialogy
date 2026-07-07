@@ -24,6 +24,15 @@ import {
   getGlobalLmStudioConfig,
   isLmStudioModel,
 } from '@/services/ai/lm-studio';
+import {
+  coerceOpenAiCompatiblePromptOutput,
+  defineOpenAiCompatiblePrompt,
+  isOpenAiCompatibleModel,
+} from '@/services/ai/openai-compatible';
+import {
+  getDefaultGeminiEnvKey,
+  resolveAiProviderKeyCandidates,
+} from '@/services/ai/provider-keys';
 
 const BranchOptionSchema = z.object({
   condition: z.string(),
@@ -136,10 +145,15 @@ Mensagem atual do cliente:
 
 const globalPrompt = ai.definePrompt(promptConfig);
 const PROCEDURE_MODEL_FALLBACKS = [
-  process.env.AI_PROCEDURE_RUNTIME_MODEL || 'googleai/gemini-2.0-flash-lite',
+  process.env.AI_PROCEDURE_RUNTIME_MODEL || 'googleai/gemini-2.5-flash',
   DEFAULT_AUTOPILOT_MODEL,
-  'googleai/gemini-2.0-flash',
-  'googleai/gemini-1.5-pro',
+  'codex/gpt-5.3-codex',
+  'openai/gpt-5.5',
+  'openai/gpt-5.4-mini',
+  'deepseek/deepseek-v4-flash',
+  'googleai/gemini-3.1-flash-lite',
+  'googleai/gemini-2.5-flash-lite',
+  'googleai/gemini-2.5-pro',
 ];
 
 function normalizeRuntimeText(value: string): string {
@@ -262,10 +276,6 @@ function repairPediatricSchedulingFallback(response: string, input: ProcedureRun
   return response;
 }
 
-function getDefaultGeminiEnvKey(): string {
-  return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
-}
-
 function getModelCandidates(model?: string): string[] {
   if (isLmStudioModel(model)) {
     return [model!];
@@ -284,6 +294,10 @@ function definePromptForCandidate(input: {
 }) {
   if (isLmStudioModel(input.model)) {
     return defineLmStudioPrompt(promptConfig, input.model, input.lmStudioConfig || { baseUrl: '', apiToken: '' }, 'procedure');
+  }
+
+  if (isOpenAiCompatibleModel(input.model)) {
+    return defineOpenAiCompatiblePrompt(promptConfig, input.model, input.apiKey, 'procedure');
   }
 
   const defaultEnvKey = getDefaultGeminiEnvKey();
@@ -310,17 +324,13 @@ const procedureRuntimeFlow = ai.defineFlow(
   },
   async (input) => {
     const model = input.model || DEFAULT_AUTOPILOT_MODEL;
-    const configKey = input.config?.gemini_api_key?.trim();
-    const workspaceKey = input.workspaceGeminiApiKey?.trim();
-    const envKey = getDefaultGeminiEnvKey();
     const lmStudioConfig = isLmStudioModel(model) ? await getGlobalLmStudioConfig() : null;
     const apiKeyCandidates: AiModelKeyCandidate[] = isLmStudioModel(model)
-      ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio' }]
-      : [
-          { source: 'agent', key: configKey },
-          { source: 'workspace', key: workspaceKey },
-          { source: 'env', key: envKey && envKey !== 'no-key-configured' ? envKey : '' },
-        ].filter((candidate): candidate is AiModelKeyCandidate => Boolean(candidate.key));
+      ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio', provider: 'lmstudio' }]
+      : await resolveAiProviderKeyCandidates({
+          config: input.config,
+          workspaceGeminiApiKey: input.workspaceGeminiApiKey,
+        });
 
     if (apiKeyCandidates.length === 0) {
       console.error('[PROCEDURE_RUNTIME_SLIM] Nenhuma chave de API encontrada.');
@@ -350,6 +360,21 @@ const procedureRuntimeFlow = ai.defineFlow(
             );
             if (parsedOutput) {
               finalResult = Object.create(result);
+              Object.defineProperty(finalResult, 'output', {
+                value: parsedOutput,
+                writable: true,
+                enumerable: true,
+                configurable: true,
+              });
+            }
+          }
+          if (isOpenAiCompatibleModel(context.model)) {
+            const parsedOutput = coerceOpenAiCompatiblePromptOutput<ProcedureRuntimeOutput & Record<string, unknown>>(
+              finalResult?.output,
+              finalResult?.text
+            );
+            if (parsedOutput) {
+              finalResult = Object.create(finalResult || {});
               Object.defineProperty(finalResult, 'output', {
                 value: parsedOutput,
                 writable: true,

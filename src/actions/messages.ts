@@ -30,6 +30,7 @@ import { buildChatProtocol } from '@/lib/utils';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 import {
     enqueueAiCaseMemoryRefresh,
+    enqueueAiTask,
     enqueueJob,
     enqueueMarketingAutoClose,
     shouldEnqueueJob
@@ -49,6 +50,13 @@ import { prependIntelligentAttendantSignature } from '@/lib/message-signature';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { isBillingBlocked, type BillingStatus } from '@/lib/billing-logic';
 import { requireChatAccess } from '@/server/inbox/access';
+import {
+    buildRetryMediaPayload,
+    extractRetriedMediaResponseDetails,
+    isRetryableMediaMessageType,
+    type RetryMediaPayload,
+} from '@/services/messages/retry-media';
+import { RETRY_MEDIA_RETENTION_MS } from '@/services/messages/temp-media-retention';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -266,14 +274,109 @@ async function scheduleMarketingAutoCloseAsync(chatId: string, workspaceId: stri
 async function cleanupTempMedia(file: MediaFilePayload) {
     if (!file.deleteAfterSend || !file.storageBucket || !file.storagePath) return;
 
+    const runAt = new Date(Date.now() + RETRY_MEDIA_RETENTION_MS);
+    if (shouldEnqueueJob('ai_task')) {
+        try {
+            await enqueueAiTask(
+                {
+                    task: 'temp_media_delete',
+                    payload: {
+                        bucket: file.storageBucket,
+                        path: file.storagePath,
+                    },
+                },
+                {
+                    runAt,
+                    maxAttempts: 3,
+                }
+            );
+            return;
+        } catch (error) {
+            console.error('[SEND_MEDIA_BG] Falha ao agendar remocao de midia temporaria:', error, 'Bucket:', file.storageBucket, 'Path:', file.storagePath);
+        }
+    }
+
+    const timeout = setTimeout(async () => {
+        try {
+            const { error } = await getSupabaseAdmin().storage.from(file.storageBucket!).remove([file.storagePath!]);
+            if (error) {
+                console.error('[SEND_MEDIA_BG] Falha ao remover midia temporaria:', error, 'Bucket:', file.storageBucket, 'Path:', file.storagePath);
+            }
+        } catch (error) {
+            console.error('[SEND_MEDIA_BG] Excecao ao remover midia temporaria:', error, 'Bucket:', file.storageBucket, 'Path:', file.storagePath);
+        }
+    }, RETRY_MEDIA_RETENTION_MS);
+    if (typeof (timeout as any).unref === 'function') {
+        (timeout as any).unref();
+    }
+    return;
+
     try {
-        const { error } = await getSupabaseAdmin().storage.from(file.storageBucket).remove([file.storagePath]);
+        const { error } = await getSupabaseAdmin().storage.from(file.storageBucket!).remove([file.storagePath!]);
         if (error) {
             console.error('[SEND_MEDIA_BG] Falha ao remover mídia temporária:', error, 'Bucket:', file.storageBucket, 'Path:', file.storagePath);
         }
     } catch (error) {
         console.error('[SEND_MEDIA_BG] Exceção ao remover mídia temporária:', error, 'Bucket:', file.storageBucket, 'Path:', file.storagePath);
     }
+}
+
+async function sendRetriedMediaViaEvolution(
+    apiConfig: any,
+    instanceName: string,
+    remoteJid: string,
+    payload: RetryMediaPayload
+) {
+    if (payload.mediatype === 'image') {
+        return sendImageMessage(apiConfig, instanceName, {
+            number: remoteJid,
+            media: payload.mediaUrl,
+            mimetype: payload.mimetype,
+            filename: payload.filename,
+            caption: payload.caption,
+        });
+    }
+
+    if (payload.mediatype === 'video') {
+        return sendVideoMessage(apiConfig, instanceName, {
+            number: remoteJid,
+            media: payload.mediaUrl,
+            mimetype: payload.mimetype,
+            filename: payload.filename,
+            caption: payload.caption,
+        });
+    }
+
+    if (payload.mediatype === 'audio') {
+        if (
+            payload.filename?.startsWith('audio_gravado') ||
+            payload.mimetype.includes('webm') ||
+            payload.mimetype.includes('ogg')
+        ) {
+            return sendAudioMessage(apiConfig, instanceName, {
+                number: remoteJid,
+                audio: payload.mediaUrl,
+                mimetype: payload.mimetype,
+                fileName: payload.filename,
+            });
+        }
+
+        return sendDocumentMessage(apiConfig, instanceName, {
+            number: remoteJid,
+            media: payload.mediaUrl,
+            mimetype: payload.mimetype,
+            filename: payload.filename,
+            caption: payload.caption,
+        });
+    }
+
+    return sendDocumentMessage(apiConfig, instanceName, {
+        number: remoteJid,
+        media: payload.mediaUrl,
+        mimetype: payload.mimetype,
+        filename: payload.filename,
+        caption: payload.caption,
+    });
 }
 
 type MetaSendContext = {
@@ -1194,6 +1297,7 @@ async function internalSendMedia(
 
         for (const item of pendingMessages) {
             const { dbMessage, file } = item;
+            let sendSucceeded = false;
 
             try {
                 let apiResponse: any;
@@ -1279,6 +1383,7 @@ async function internalSendMedia(
                         WHERE id = $2
                     `, [apiResponse?.key?.id, dbMessage.id]);
                 }
+                sendSucceeded = true;
 
             } catch (bgError: any) {
                 console.error(`[SEND_MEDIA_BG] Falha ao enviar ${file.filename}:`, bgError);
@@ -1307,7 +1412,9 @@ async function internalSendMedia(
                     WHERE id = $3
                 `, [errorMessage, JSON.stringify(errorDetails), dbMessage.id]);
             } finally {
-                await cleanupTempMedia(file);
+                if (sendSucceeded) {
+                    await cleanupTempMedia(file);
+                }
             }
         }
     })();
@@ -1506,6 +1613,7 @@ export const retryMessageAction = withDebug(
                 m.chat_id,
                 m.content,
                 m.metadata,
+                m.media_url,
                 m.type,
                 m.from_me,
                 m.api_message_status,
@@ -1543,18 +1651,10 @@ export const retryMessageAction = withDebug(
             return { success: false, error: 'Nao e possivel reenviar mensagens recebidas.' };
         }
 
-        if (messageRow.type !== 'text') {
-            return { success: false, error: 'Reenvio disponivel apenas para mensagens de texto.' };
-        }
-
         const metadata = messageRow.metadata || {};
         const skipUserSignature = (metadata as MessageMetadata)?.skipUserSignature === true;
         if ((metadata as MessageMetadata)?.isInternalNote) {
             return { success: false, error: 'Nao e possivel reenviar notas internas.' };
-        }
-
-        if (!messageRow.content || !messageRow.content.trim()) {
-            return { success: false, error: 'Conteudo da mensagem esta vazio.' };
         }
 
         const membershipRes = await db.query(
@@ -1574,6 +1674,123 @@ export const retryMessageAction = withDebug(
 
         if (!messageRow.phone_number_jid) {
             return { success: false, error: 'Destino nao encontrado para reenviar a mensagem.' };
+        }
+
+        if (isRetryableMediaMessageType(messageRow.type)) {
+            const retryMedia = buildRetryMediaPayload({
+                type: messageRow.type,
+                content: messageRow.content,
+                metadata,
+                mediaUrl: messageRow.media_url,
+            });
+
+            if (!retryMedia.payload) {
+                return { success: false, error: retryMedia.error || 'Midia original nao encontrada para reenvio.' };
+            }
+
+            const telegramCredentials = await getTelegramInstanceCredentials(instanceName, messageRow.workspace_id);
+            if (telegramCredentials || String(messageRow.phone_number_jid).startsWith('telegram:')) {
+                return { success: false, error: 'Reenvio de midia para Telegram ainda nao esta disponivel.' };
+            }
+
+            try {
+                const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId: messageRow.workspace_id });
+                if (!apiConfig) {
+                    return { success: false, error: `Configuracao da API nao encontrada para a instancia ${instanceName}.` };
+                }
+
+                await db.query(
+                    `UPDATE messages
+                     SET api_message_status = 'PENDING',
+                         message_id_from_api = NULL,
+                         metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
+                     WHERE id = $1`,
+                    [messageId]
+                );
+
+                const apiResponse = await sendRetriedMediaViaEvolution(
+                    apiConfig,
+                    instanceName,
+                    messageRow.phone_number_jid,
+                    retryMedia.payload
+                );
+                const responseDetails = extractRetriedMediaResponseDetails(apiResponse, retryMedia.payload.mediatype);
+                const finalMediaUrl = responseDetails.returnedMediaUrl || retryMedia.payload.mediaUrl;
+                const finalMimetype = responseDetails.returnedMimetype || retryMedia.payload.mimetype;
+
+                await db.query(
+                    `UPDATE messages
+                     SET message_id_from_api = $1,
+                         api_message_status = $2,
+                         instance_name = COALESCE(instance_name, $3),
+                         media_url = $4,
+                         metadata = jsonb_set(
+                             jsonb_set(
+                                 jsonb_set(
+                                     COALESCE(metadata, '{}'::jsonb),
+                                     '{mediaUrl}',
+                                     to_jsonb($4::text),
+                                     true
+                                 ),
+                                 '{mimetype}',
+                                 to_jsonb($5::text),
+                                 true
+                             ),
+                             '{fileName}',
+                             to_jsonb($6::text),
+                             true
+                         )
+                     WHERE id = $7`,
+                    [
+                        responseDetails.messageIdFromApi,
+                        'SENT',
+                        instanceName,
+                        finalMediaUrl,
+                        finalMimetype,
+                        retryMedia.payload.filename,
+                        messageId,
+                    ]
+                );
+                return { success: true };
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                const errorDetails = {
+                    source: 'dialogy_retry_media',
+                    status: 'FAILED',
+                    reason: errorMessage,
+                    captured_at: new Date().toISOString(),
+                    raw_data: {
+                        filename: retryMedia.payload.filename,
+                        mimetype: retryMedia.payload.mimetype,
+                        mediatype: retryMedia.payload.mediatype,
+                    },
+                    raw_payload: serializeErrorPayload(error),
+                };
+
+                await db.query(
+                    `UPDATE messages
+                     SET api_message_status = 'FAILED',
+                         metadata = jsonb_set(
+                             jsonb_set(COALESCE(metadata, '{}'::jsonb), '{send_error}', to_jsonb($1::text), true),
+                             '{send_error_details}',
+                             $2::jsonb,
+                             true
+                         )
+                     WHERE id = $3`,
+                    [errorMessage, JSON.stringify(errorDetails), messageId]
+                );
+
+                console.error('[RETRY_MESSAGE] Erro ao reenviar midia:', error);
+                return { success: false, error: 'Falha ao reenviar midia.' };
+            }
+        }
+
+        if (messageRow.type !== 'text') {
+            return { success: false, error: 'Reenvio disponivel apenas para texto, audio, imagem, video ou documento.' };
+        }
+
+        if (!messageRow.content || !messageRow.content.trim()) {
+            return { success: false, error: 'Conteudo da mensagem esta vazio.' };
         }
 
         const senderId = messageRow.sender_user_id || user.id;

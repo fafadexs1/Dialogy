@@ -90,6 +90,7 @@ export type ProcedureStep = {
   responseTemplate?: string;
   useLlm?: boolean;
   requireGrounding?: boolean;
+  returnToMainPrompt?: boolean;
 
   // handoff
   handoffReason?: string;

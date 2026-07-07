@@ -107,7 +107,7 @@ export function classifyAiModelError(error: unknown): AiModelErrorClassification
   if (
     status === 401 ||
     status === 403 ||
-    /api[_\s-]?key[_\s-]?invalid|api key expired|api key not valid|invalid api key|permission_denied|unauthenticated|forbidden/.test(normalized)
+    /api[_\s-]?key[_\s-]?invalid|api key expired|api key not valid|invalid api key|reported as leaked|permission_denied|unauthenticated|forbidden/.test(normalized)
   ) {
     return { code: 'auth_error', retryable: false, message, status };
   }

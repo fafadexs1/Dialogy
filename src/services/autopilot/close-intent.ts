@@ -25,7 +25,9 @@ const shortCloseRequestPattern = new RegExp(
   `\\b(?:pode|favor|por favor|quero|queria|poderia|consegue|so)?\\s*${CLOSE_VERB_PATTERN}\\b(?!\\s+${BUSINESS_OBJECT_PATTERN})`
 );
 
-const doneHerePattern = /\b(?:era|e|eh)\s+so\s+isso\b|\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b/;
+const doneHerePattern =
+  /\b(?:era|e|eh)\s+so\s+isso\b|\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b|\bnao\s+(?:somente|so\s+isso)\b|\bso\s+isso\b/;
+const terminalGoodbyePattern = /^(?:(?:ok|okay|certo|perfeito|show|beleza|blz|tudo certo|deu certo|funcionou|(?:ficou\s+)?resolvido)\s+)?(?:obrigad[ao]|valeu|agradeco|grato|tchau|ate mais|ate logo|por enquanto)(?:\s+(?:mesmo|viu|tudo certo|ate mais|ate logo|por enquanto|obrigad[ao]|valeu))*$/;
 
 export function isConversationCloseRequest(message: string): boolean {
   const normalized = normalizeCloseText(message);
@@ -52,7 +54,8 @@ export function isConversationCloseRequest(message: string): boolean {
   return (
     explicitConversationClosePattern.test(normalized) ||
     shortCloseRequestPattern.test(normalized) ||
-    doneHerePattern.test(normalized)
+    doneHerePattern.test(normalized) ||
+    terminalGoodbyePattern.test(normalized)
   );
 }
 
@@ -62,7 +65,10 @@ export function isPotentialConversationCloseRequest(message: string): boolean {
   return (
     /\b(encerr|finaliz|fech|deslig|termin|acabar|fim|tchau|close)\w*/.test(normalized) ||
     /\b(?:era|e|eh)\s+so\s+isso\b/.test(normalized) ||
-    /\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b/.test(normalized)
+    /\bnao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada\b/.test(normalized) ||
+    /\bnao\s+(?:somente|so\s+isso)\b/.test(normalized) ||
+    /\bso\s+isso\b/.test(normalized) ||
+    terminalGoodbyePattern.test(normalized)
   );
 }
 

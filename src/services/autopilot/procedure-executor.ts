@@ -1042,6 +1042,7 @@ async function executeRespondStep(
   const requiresGrounding = Boolean(step.requireGrounding);
   const isSubAgent = step.useLlm && step.visualNodeKind === 'sub_agent';
   const isQuestionMessage = step.visualNodeKind === 'message' && responseAsksForCustomerInput(templateResponse);
+  const shouldReturnToMain = Boolean(isSubAgent && step.returnToMainPrompt && step.nextStepId);
 
   if (isQuestionMessage && step.nextStepId && customerAlreadyProvidedActionableDetails(customerMessage)) {
     return { status: 'continue', response: null };
@@ -1083,12 +1084,14 @@ async function executeRespondStep(
     return {
       status: isSubAgent ? 'pause' : 'continue',
       response: resolved || templateResponse || null,
+      advanceToNextOnPause: shouldReturnToMain,
     };
   }
 
   return {
     status: isSubAgent ? 'pause' : 'continue',
     response: templateResponse || null,
+    advanceToNextOnPause: shouldReturnToMain,
   };
 }
 

@@ -1254,6 +1254,53 @@ describe('procedure runtime engine', () => {
     expect(runtimeContext.currentStepId).toBe('agent');
   });
 
+  it('lets specialist sub-agents return to the next main-flow step when configured', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-subagent-return',
+      documentId: 'doc-subagent-return',
+      documentName: 'Sub agente especialista',
+      version: 1,
+      compiledAt: new Date('2026-05-12T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['financeiro'],
+      metadata: {},
+      steps: [
+        {
+          id: 'specialist',
+          order: 1,
+          type: 'respond',
+          label: 'Especialista financeiro',
+          visualNodeKind: 'sub_agent',
+          responseTemplate: 'Responda como especialista.',
+          useLlm: true,
+          returnToMainPrompt: true,
+          nextStepId: 'main',
+        },
+        {
+          id: 'main',
+          order: 2,
+          type: 'respond',
+          label: 'Agente principal',
+          responseTemplate: 'Proximo passo.',
+          nextStepId: null,
+        },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+
+    const result = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'preciso de ajuda no financeiro',
+      responseResolver: async () => 'Resposta do especialista.',
+    });
+
+    expect(result.status).toBe('waiting_input');
+    expect(result.response).toBe('Resposta do especialista.');
+    expect(result.executedSteps).toEqual(['specialist']);
+    expect(runtimeContext.currentStepId).toBe('main');
+  });
+
   it('collects custom typed slots by field definition and does not ask them again', async () => {
     const graph: ProcedureGraph = {
       id: 'proc-custom-slots',

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   dbQuery: vi.fn(),
+  storageRemove: vi.fn(),
+  logAction: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -11,7 +13,17 @@ vi.mock('@/lib/db', () => ({
 }));
 
 vi.mock('@/lib/observability/logger', () => ({
-  logAction: vi.fn(),
+  logAction: mocks.logAction,
+}));
+
+vi.mock('@/lib/supabase', () => ({
+  getSupabaseAdmin: () => ({
+    storage: {
+      from: () => ({
+        remove: mocks.storageRemove,
+      }),
+    },
+  }),
 }));
 
 vi.mock('@/services/chat/auto-close', () => ({
@@ -35,12 +47,14 @@ vi.mock('@/lib/whatsapp/evolution-config', () => ({
   getEvolutionApiConfig: vi.fn(),
 }));
 
-import { handleQueueJobFailure } from '@/lib/queue/handlers';
+import { handleQueueJob, handleQueueJobFailure } from '@/lib/queue/handlers';
 import type { QueueJobRecord } from '@/lib/queue/types';
 
 describe('WhatsApp queue failure evidence', () => {
   beforeEach(() => {
     mocks.dbQuery.mockReset();
+    mocks.storageRemove.mockReset();
+    mocks.logAction.mockReset();
   });
 
   it('persists the original transport error while leaving accepted messages untouched', async () => {
@@ -84,5 +98,35 @@ describe('WhatsApp queue failure evidence', () => {
     });
     expect(updateCall[1][3]).toBe('message-1');
     consoleError.mockRestore();
+  });
+
+  it('deletes retry-retained temp media through an ai_task job', async () => {
+    mocks.storageRemove.mockResolvedValueOnce({ error: null });
+    const job: QueueJobRecord = {
+      id: 'temp-media-delete-1',
+      type: 'ai_task',
+      status: 'active',
+      payload: {
+        task: 'temp_media_delete',
+        payload: {
+          bucket: 'temp-media',
+          path: 'audio/audio-1.ogg',
+        },
+      },
+      attempts: 0,
+      max_attempts: 3,
+      run_at: new Date(0).toISOString(),
+    };
+
+    await handleQueueJob(job);
+
+    expect(mocks.storageRemove).toHaveBeenCalledWith(['audio/audio-1.ogg']);
+    expect(mocks.logAction).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'temp_media_delete',
+      payload: {
+        bucket: 'temp-media',
+        path: 'audio/audio-1.ogg',
+      },
+    }));
   });
 });

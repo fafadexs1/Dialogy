@@ -8,20 +8,35 @@ import { findWhatsappTemplates, getEvolutionApiInstances } from '@/actions/evolu
 import { getTelegramInstances as fetchTelegramInstances } from '@/actions/telegram';
 import { listMetaChannels as fetchMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
-import type { CampaignChannel, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
+import { parseCampaignContactsCsv } from '@/lib/campaigns/csv-import';
+import { renderCampaignMessage } from '@/lib/campaigns/personalization';
+import { uploadFileToStorage } from '@/lib/supabase/storage';
+import type { CampaignChannel, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ListFilter } from 'lucide-react';
+import { CalendarClock, Clock3, Gauge, ImageIcon, ListFilter, Music2, ShieldCheck, X } from 'lucide-react';
 
 // ---------------------------------------------------------
 // Constantes e utilitários
 // ---------------------------------------------------------
 const PLACEHOLDER = "{{nome}}";
+const FIRST_NAME_PLACEHOLDER = "{{primeiro_nome}}";
+const GREETING_PLACEHOLDER = "{{Sauda\u00e7\u00e3o}}";
+const PREVIEW_CONTACT_NAME = "Maria Silva";
 const CHANNEL_OPTIONS: Array<{ value: CampaignChannel; label: string; shortLabel: string }> = [
   { value: 'whatsapp_baileys', label: 'WhatsApp conectado', shortLabel: 'WA' },
   { value: 'whatsapp_cloud', label: 'WhatsApp Cloud API', shortLabel: 'WA' },
   { value: 'telegram', label: 'Telegram', shortLabel: 'TG' },
   { value: 'messenger', label: 'Messenger (Facebook)', shortLabel: 'FB' },
   { value: 'instagram', label: 'Instagram Direct', shortLabel: 'IG' },
+];
+const WEEKDAYS = [
+  { value: 1, label: 'Seg' },
+  { value: 2, label: 'Ter' },
+  { value: 3, label: 'Qua' },
+  { value: 4, label: 'Qui' },
+  { value: 5, label: 'Sex' },
+  { value: 6, label: 'Sab' },
+  { value: 0, label: 'Dom' },
 ];
 
 type WhatsappTemplateOption = CampaignTemplate & {
@@ -33,6 +48,13 @@ type WhatsappTemplateOption = CampaignTemplate & {
 type CampaignDestination = {
   id: string;
   label: string;
+};
+
+type CsvImportSummary = {
+  fileName: string;
+  imported: number;
+  invalidRows: number;
+  duplicateRows: number;
 };
 
 async function loadCampaignChannels(workspaceId: string) {
@@ -55,9 +77,11 @@ function templatePreview(template: WhatsappTemplateOption | null) {
   return (body?.text || (template ? `[Template: ${template.name}]` : '')).replace(/\{\{\d+\}\}/g, PLACEHOLDER);
 }
 
-function applyPlaceholder(msg: string, value: string) {
-  if (!msg) return "";
-  return msg.split(PLACEHOLDER).join(value);
+function applyPlaceholder(msg: string) {
+  return renderCampaignMessage(msg, {
+    contactName: PREVIEW_CONTACT_NAME,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
+  });
 }
 
 // ---------------------------------------------------------
@@ -170,13 +194,9 @@ function Textarea({ id, value, onChange, placeholder }: { id: string, value: str
   );
 }
 
-function Input({ id, value, onChange, placeholder, className, ...props }: { id?: string, value: string, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void, placeholder: string, className?: string }) {
+function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      id={id}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
       {...props}
       className={cx(
         "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
@@ -203,7 +223,7 @@ function Avatar({ name }: { name: string }) {
 
 const TEMPLATES = [
   { id: "promo", label: "Promo relâmpago", text: `Olá ${PLACEHOLDER}! ⚡️ Só hoje temos 20% OFF em toda a loja. Responda *SIM* para receber o cupom.` },
-  { id: "boasvindas", label: "Boas-vindas", text: `Oi ${PLACEHOLDER} 👋 Bem-vindo(a)! Eu sou do time de atendimento. Posso te ajudar em algo agora?` },
+  { id: "boasvindas", label: "Boas-vindas", text: `${GREETING_PLACEHOLDER}, ${FIRST_NAME_PLACEHOLDER}! 👋 Bem-vindo(a)! Eu sou do time de atendimento. Posso te ajudar em algo agora?` },
   { id: "cobranca", label: "Cobrança amigável", text: `Olá ${PLACEHOLDER}, tudo bem? Notamos um pagamento pendente. Precisa de ajuda para concluir?` },
 ];
 
@@ -222,6 +242,21 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const [query, setQuery] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const maxChars = 1000;
+  const [mediaAttachment, setMediaAttachment] = useState<CampaignMediaAttachment | null>(null);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [csvImportSummary, setCsvImportSummary] = useState<CsvImportSummary | null>(null);
+  const [scheduleMode, setScheduleMode] = useState<CampaignScheduleConfig['mode']>('immediate');
+  const [scheduleEndAt, setScheduleEndAt] = useState('');
+  const [windowStart, setWindowStart] = useState('09:00');
+  const [windowEnd, setWindowEnd] = useState('18:00');
+  const [allowedWeekdays, setAllowedWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [intervalMode, setIntervalMode] = useState<CampaignScheduleConfig['intervalMode']>('fixed');
+  const [intervalSeconds, setIntervalSeconds] = useState(30);
+  const [minIntervalSeconds, setMinIntervalSeconds] = useState(20);
+  const [maxIntervalSeconds, setMaxIntervalSeconds] = useState(60);
+  const [dailyLimit, setDailyLimit] = useState(250);
+  const [autoPauseFailureRate, setAutoPauseFailureRate] = useState(20);
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
 
   // Data states
   const [crmContacts, setCrmContacts] = useState<ContactType[]>([]);
@@ -386,9 +421,13 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     setDestinationId(null);
     setSelectedTemplateName(null);
     setWhatsappTemplates([]);
+    if (deliveryChannel !== 'whatsapp_baileys') {
+      setMediaAttachment(null);
+    }
     if (deliveryChannel !== 'whatsapp_baileys' && deliveryChannel !== 'whatsapp_cloud') {
       setTab('crm');
       setCsvContacts([]);
+      setCsvImportSummary(null);
     }
   }, [deliveryChannel]);
 
@@ -415,7 +454,23 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const filteredCrmContacts = visibleCrmContacts;
 
   const selectedCount = selectedCrmIds.size + segmentTotal + csvContacts.length;
-  const canProceed = Boolean(campaignMessage.trim() && destinationId && selectedCount > 0 && (deliveryChannel !== 'whatsapp_cloud' || selectedTemplate));
+  const customScheduleIsValid = scheduleMode === 'immediate' || Boolean(
+    scheduleEndAt
+    && windowStart < windowEnd
+    && allowedWeekdays.length > 0
+    && (intervalMode === 'fixed'
+      ? intervalSeconds >= 2
+      : minIntervalSeconds >= 2 && maxIntervalSeconds >= minIntervalSeconds)
+  );
+  const canProceed = Boolean(
+    campaignMessage.trim()
+    && destinationId
+    && selectedCount > 0
+    && consentConfirmed
+    && customScheduleIsValid
+    && !isUploadingMedia
+    && (deliveryChannel !== 'whatsapp_cloud' || selectedTemplate)
+  );
 
   function toggleSelect(id: string) {
     setSelectedCrmIds((prev) => {
@@ -448,17 +503,112 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     });
   }
 
+  async function importCsvFile(file: File) {
+    if (!user?.activeWorkspaceId) return;
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith('.csv') && file.type && !file.type.includes('csv')) {
+      toast({ title: 'Arquivo invalido', description: 'Selecione um arquivo CSV.', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = parseCampaignContactsCsv(text);
+
+      if (parsed.contacts.length === 0) {
+        toast({
+          title: 'Nenhum contato importado',
+          description: parsed.errors[0] || 'Confira se o CSV possui uma coluna de telefone ou WhatsApp.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      setCsvContacts(parsed.contacts.map(contact => ({
+        id: contact.id,
+        workspace_id: user.activeWorkspaceId!,
+        name: contact.name,
+        phone: contact.phone,
+        phone_number_jid: contact.phone_number_jid,
+      } as ContactType)));
+      setCsvImportSummary({
+        fileName: file.name,
+        imported: parsed.contacts.length,
+        invalidRows: parsed.invalidRows,
+        duplicateRows: parsed.duplicateRows,
+      });
+      setTab('csv');
+
+      toast({
+        title: 'CSV importado',
+        description: `${parsed.contacts.length} contato(s) pronto(s) para o disparo.`,
+      });
+    } catch (error) {
+      console.error('[NEW_CAMPAIGN] Falha ao importar CSV', error);
+      toast({ title: 'Erro ao importar CSV', description: 'Nao foi possivel ler este arquivo.', variant: 'destructive' });
+    }
+  }
+
+  function handleCsvInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      void importCsvFile(file);
+    }
+    e.target.value = '';
+  }
+
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
-    // For now, we just add a fake contact to show it works
-    // In a real app, you would parse the CSV here.
-    const newItem = { id: `csv-${Date.now()}`, name: file.name.replace(/\.[^.]+$/, ""), phone_number_jid: `55${Math.floor(Math.random() * 999999999)}@s.whatsapp.net` } as ContactType;
-    setCsvContacts((prev) => [...prev, newItem]);
-    setTab('csv');
+    void importCsvFile(file);
+  }
+
+  async function handleMediaInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !user?.activeWorkspaceId) return;
+
+    const type = file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : null;
+    if (!type) {
+      toast({ title: 'Arquivo invalido', description: 'Selecione uma imagem ou um audio.', variant: 'destructive' });
+      return;
+    }
+
+    const maxSizeMb = type === 'image' ? 16 : 32;
+    if (file.size > maxSizeMb * 1024 * 1024) {
+      toast({ title: 'Arquivo muito grande', description: `O limite para ${type === 'image' ? 'imagem' : 'audio'} e ${maxSizeMb} MB.`, variant: 'destructive' });
+      return;
+    }
+
+    setIsUploadingMedia(true);
+    try {
+      const extension = file.name.split('.').pop()?.replace(/[^a-z0-9]/gi, '').toLowerCase() || (type === 'image' ? 'jpg' : 'mp3');
+      const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
+      const storagePath = `campaign-media/${user.activeWorkspaceId}/${uniqueName}`;
+      const { publicUrl, error } = await uploadFileToStorage(file, 'temp-media', storagePath);
+
+      if (error || !publicUrl) {
+        throw new Error(error || 'Upload sem URL publica.');
+      }
+
+      setMediaAttachment({
+        type,
+        url: publicUrl,
+        mimetype: file.type || (type === 'image' ? 'image/jpeg' : 'audio/mpeg'),
+        filename: file.name,
+        storageBucket: 'temp-media',
+        storagePath,
+      });
+      toast({ title: 'Anexo adicionado', description: `${file.name} sera enviado na campanha.` });
+    } catch (error) {
+      console.error('[NEW_CAMPAIGN] Falha ao subir midia da campanha', error);
+      toast({ title: 'Erro ao enviar anexo', description: error instanceof Error ? error.message : 'Nao foi possivel subir o arquivo.', variant: 'destructive' });
+    } finally {
+      setIsUploadingMedia(false);
+    }
   }
 
   async function handleSendCampaign() {
@@ -466,6 +616,14 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       toast({ title: 'Dados Incompletos', description: 'Selecione o canal, a conta de envio e pelo menos um contato.', variant: 'destructive' });
       return;
     };
+    if (!consentConfirmed) {
+      toast({ title: 'Consentimento necessario', description: 'Confirme que os destinatarios autorizaram o recebimento da campanha.', variant: 'destructive' });
+      return;
+    }
+    if (!customScheduleIsValid) {
+      toast({ title: 'Agendamento incompleto', description: 'Revise a data limite, os dias, a janela e os intervalos.', variant: 'destructive' });
+      return;
+    }
     setIsSubmitting(true);
 
     const selectedFromCrm = crmContacts
@@ -473,18 +631,38 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       .map((c) => ({ id: `crm-${c.id}`, name: c.name, phone_number_jid: c.phone_number_jid }));
 
     const allContactsToSend = [...selectedFromCrm, ...csvContacts.map(c => ({ ...c, id: `csv-${c.id}` }))];
+    const scheduleConfig: CampaignScheduleConfig = {
+      mode: scheduleMode,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
+      endAt: scheduleMode === 'custom' ? new Date(scheduleEndAt).toISOString() : undefined,
+      windowStart,
+      windowEnd,
+      allowedWeekdays,
+      intervalMode,
+      intervalSeconds,
+      minIntervalSeconds,
+      maxIntervalSeconds,
+      dailyLimit: scheduleMode === 'custom' ? dailyLimit : null,
+      maxAttempts: 3,
+      autoPauseFailureRate,
+      autoPauseMinAttempts: 20,
+      consentConfirmed,
+    };
 
     const result = await createCampaign(user.activeWorkspaceId, {
       channel: deliveryChannel,
       instanceName: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? undefined : destinationId,
       metaChannelId: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? destinationId : undefined,
       template: selectedTemplate,
-    }, campaignMessage, allContactsToSend, [...selectedSegmentIds]);
+    }, campaignMessage, allContactsToSend, [...selectedSegmentIds], scheduleConfig, mediaAttachment);
 
     if (result.error) {
       toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
     } else {
-      toast({ title: 'Campanha criada e em andamento!', description: 'O envio foi iniciado em segundo plano. Você será redirecionado.' });
+      toast({
+        title: scheduleMode === 'immediate' ? 'Campanha colocada na fila!' : 'Campanha agendada!',
+        description: 'Os destinatários ficaram persistidos e o worker retomará o envio após reinícios.',
+      });
       router.push('/campaigns');
     }
     setIsSubmitting(false);
@@ -519,7 +697,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
             <span className="h-px w-8 bg-border" />
             <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground/70 text-xs">2</span><span>Público</span></li>
             <span className="h-px w-8 bg-border" />
-            <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground/70 text-xs">3</span><span>Revisão</span></li>
+            <li className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-foreground/70 text-xs">3</span><span>Entrega</span></li>
           </ol>
         </div>
       </header>
@@ -556,10 +734,12 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                     id="message"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
-                    placeholder={`Digite sua mensagem aqui... Use ${PLACEHOLDER} para personalizar com o nome do contato.`}
+                    placeholder={`Digite sua mensagem aqui... Use ${PLACEHOLDER}, ${FIRST_NAME_PLACEHOLDER} ou ${GREETING_PLACEHOLDER}.`}
                   />
                   <div className="flex items-center justify-between text-xs">
-                    <p className="text-muted-foreground">A variável <code className="rounded bg-muted px-1">{PLACEHOLDER}</code> será substituída.</p>
+                    <p className="text-muted-foreground">
+                      Variaveis: <code className="rounded bg-muted px-1">{PLACEHOLDER}</code>, <code className="rounded bg-muted px-1">{FIRST_NAME_PLACEHOLDER}</code>, <code className="rounded bg-muted px-1">{GREETING_PLACEHOLDER}</code>
+                    </p>
                     <span className={cx("tabular-nums", remainingClass)}>{remaining}</span>
                   </div>
                   <div className="flex flex-wrap gap-2 pt-2">
@@ -570,6 +750,60 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                     ))}
                   </div>
                 </div>
+                )}
+                {deliveryChannel === 'whatsapp_baileys' && (
+                  <div className="space-y-3 mt-6 rounded-xl border bg-muted/20 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium leading-none">Anexo opcional</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Adicione uma imagem ou um audio ao disparo. Imagens usam a mensagem como legenda.
+                        </p>
+                      </div>
+                      {mediaAttachment && (
+                        <button
+                          type="button"
+                          onClick={() => setMediaAttachment(null)}
+                          className="rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                          aria-label="Remover anexo"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {mediaAttachment ? (
+                      <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                        {mediaAttachment.type === 'image' ? (
+                          <div className="h-16 w-16 overflow-hidden rounded-md border bg-muted">
+                            <img src={mediaAttachment.url} alt={mediaAttachment.filename} className="h-full w-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="flex h-16 w-16 items-center justify-center rounded-md border bg-muted">
+                            <Music2 className="h-7 w-7 text-muted-foreground" />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{mediaAttachment.filename}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {mediaAttachment.type === 'image' ? 'Imagem' : 'Audio'} pronto para envio
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed bg-background px-4 py-4 text-sm font-medium transition-colors hover:bg-accent/60">
+                        {isUploadingMedia ? <Icon.Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                        {isUploadingMedia ? 'Enviando anexo...' : 'Selecionar imagem ou audio'}
+                        <input
+                          type="file"
+                          accept="image/*,audio/*"
+                          className="hidden"
+                          disabled={isUploadingMedia}
+                          onChange={handleMediaInputChange}
+                        />
+                      </label>
+                    )}
+                  </div>
                 )}
                 <div className="space-y-2 mt-6">
                   <label htmlFor="instance" className="text-sm font-medium leading-none">Conta de envio</label>
@@ -809,17 +1043,284 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                         <p className="text-xs text-muted-foreground">Ou clique para selecionar</p>
                         <input
                           type="file"
-                          accept=".csv"
+                          accept=".csv,text/csv"
                           aria-label="Selecionar arquivo CSV"
                           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                          onChange={handleCsvInputChange}
                         />
                       </div>
                       <p className="mt-2 text-xs text-muted-foreground">Após importar, detectaremos as colunas <code>nome</code> e <code>telefone</code>.</p>
-                      {csvContacts.length > 0 &&
-                        <div className="mt-2 text-xs text-green-600 font-medium">{csvContacts.length} contatos importados do arquivo.</div>
-                      }
+                      {csvImportSummary && (
+                        <div className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
+                          <p className="font-medium text-emerald-700">
+                            {csvImportSummary.imported} contato(s) importado(s) de {csvImportSummary.fileName}
+                          </p>
+                          {(csvImportSummary.invalidRows > 0 || csvImportSummary.duplicateRows > 0) && (
+                            <p className="mt-1 text-muted-foreground">
+                              {csvImportSummary.invalidRows > 0 ? `${csvImportSummary.invalidRows} linha(s) sem telefone valido. ` : ''}
+                              {csvImportSummary.duplicateRows > 0 ? `${csvImportSummary.duplicateRows} duplicata(s) ignorada(s).` : ''}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {csvContacts.length > 0 && (
+                        <div className="mt-3 overflow-hidden rounded-md border">
+                          <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">Prévia do CSV</div>
+                          <ul className="max-h-44 divide-y overflow-y-auto">
+                            {csvContacts.slice(0, 20).map(contact => (
+                              <li key={contact.id} className="flex items-center gap-3 p-2">
+                                <Avatar name={contact.name} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium">{contact.name}</p>
+                                  <p className="truncate text-xs text-muted-foreground">{contact.phone_number_jid}</p>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                          {csvContacts.length > 20 && (
+                            <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+                              Mostrando 20 de {csvContacts.length} contatos.
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <CalendarClock className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-semibold leading-none tracking-tight">3. Entrega da campanha</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Defina quando e em que ritmo a fila persistente será processada.</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-6">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setScheduleMode('immediate')}
+                      className={cx(
+                        "rounded-xl border p-4 text-left transition-colors",
+                        scheduleMode === 'immediate' ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/50"
+                      )}
+                    >
+                      <div className="mb-2 flex items-center gap-2 font-semibold">
+                        <Icon.Send className="h-4 w-4" />
+                        Enviar imediatamente
+                      </div>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Começa assim que o worker encontrar a campanha e distribui os envios com segurança.
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setScheduleMode('custom')}
+                      className={cx(
+                        "rounded-xl border p-4 text-left transition-colors",
+                        scheduleMode === 'custom' ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/50"
+                      )}
+                    >
+                      <div className="mb-2 flex items-center gap-2 font-semibold">
+                        <CalendarClock className="h-4 w-4" />
+                        Envio customizado
+                      </div>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Distribui os destinatários até uma data limite, respeitando dias, horários e volume diário.
+                      </p>
+                    </button>
+                  </div>
+
+                  {scheduleMode === 'custom' && (
+                    <div className="space-y-5 rounded-xl border bg-muted/20 p-4">
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="space-y-2 sm:col-span-1">
+                          <label htmlFor="schedule-end-at" className="text-sm font-medium">Enviar até</label>
+                          <Input
+                            id="schedule-end-at"
+                            type="datetime-local"
+                            value={scheduleEndAt}
+                            onChange={(event) => setScheduleEndAt(event.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label htmlFor="window-start" className="text-sm font-medium">Início da janela</label>
+                          <Input
+                            id="window-start"
+                            type="time"
+                            value={windowStart}
+                            onChange={(event) => setWindowStart(event.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label htmlFor="window-end" className="text-sm font-medium">Fim da janela</label>
+                          <Input
+                            id="window-end"
+                            type="time"
+                            value={windowEnd}
+                            onChange={(event) => setWindowEnd(event.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Dias permitidos</label>
+                        <div className="flex flex-wrap gap-2">
+                          {WEEKDAYS.map(day => {
+                            const active = allowedWeekdays.includes(day.value);
+                            return (
+                              <button
+                                key={day.value}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() => setAllowedWeekdays(current =>
+                                  active ? current.filter(value => value !== day.value) : [...current, day.value]
+                                )}
+                                className={cx(
+                                  "h-9 min-w-11 rounded-md border px-3 text-sm font-medium transition-colors",
+                                  active ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"
+                                )}
+                              >
+                                {day.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Clock3 className="h-4 w-4 text-muted-foreground" />
+                          <label className="text-sm font-medium">Intervalo entre envios</label>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => setIntervalMode('fixed')}
+                            className={cx(
+                              "rounded-lg border px-3 py-2 text-sm font-medium",
+                              intervalMode === 'fixed' ? "border-primary bg-primary/5 text-primary" : "bg-background"
+                            )}
+                          >
+                            Intervalo fixo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIntervalMode('variable')}
+                            className={cx(
+                              "rounded-lg border px-3 py-2 text-sm font-medium",
+                              intervalMode === 'variable' ? "border-primary bg-primary/5 text-primary" : "bg-background"
+                            )}
+                          >
+                            Intervalo variável
+                          </button>
+                        </div>
+                        {intervalMode === 'fixed' ? (
+                          <div className="space-y-2">
+                            <label htmlFor="fixed-interval" className="text-xs text-muted-foreground">Segundos entre cada destinatário</label>
+                            <Input
+                              id="fixed-interval"
+                              type="number"
+                              min={2}
+                              max={86400}
+                              value={intervalSeconds}
+                              onChange={(event) => setIntervalSeconds(Math.max(2, Number(event.target.value) || 2))}
+                            />
+                          </div>
+                        ) : (
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <label htmlFor="min-interval" className="text-xs text-muted-foreground">Mínimo em segundos</label>
+                              <Input
+                                id="min-interval"
+                                type="number"
+                                min={2}
+                                value={minIntervalSeconds}
+                                onChange={(event) => setMinIntervalSeconds(Math.max(2, Number(event.target.value) || 2))}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label htmlFor="max-interval" className="text-xs text-muted-foreground">Máximo em segundos</label>
+                              <Input
+                                id="max-interval"
+                                type="number"
+                                min={minIntervalSeconds}
+                                value={maxIntervalSeconds}
+                                onChange={(event) => setMaxIntervalSeconds(Math.max(minIntervalSeconds, Number(event.target.value) || minIntervalSeconds))}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          No modo variável, a distribuição é determinística e auditável para suavizar a carga do worker.
+                        </p>
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <label htmlFor="daily-limit" className="flex items-center gap-2 text-sm font-medium">
+                            <Gauge className="h-4 w-4 text-muted-foreground" />
+                            Limite diário
+                          </label>
+                          <Input
+                            id="daily-limit"
+                            type="number"
+                            min={1}
+                            max={100000}
+                            value={dailyLimit}
+                            onChange={(event) => setDailyLimit(Math.max(1, Number(event.target.value) || 1))}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label htmlFor="failure-rate" className="flex items-center gap-2 text-sm font-medium">
+                            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                            Pausar com falhas em
+                          </label>
+                          <div className="relative">
+                            <Input
+                              id="failure-rate"
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={autoPauseFailureRate}
+                              onChange={(event) => setAutoPauseFailureRate(Math.min(100, Math.max(1, Number(event.target.value) || 1)))}
+                              className="pr-9"
+                            />
+                            <span className="pointer-events-none absolute right-3 top-2.5 text-sm text-muted-foreground">%</span>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        A pausa automática começa a avaliar após 20 tentativas e protege os envios restantes.
+                      </p>
+                    </div>
+                  )}
+
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                    <input
+                      type="checkbox"
+                      checked={consentConfirmed}
+                      onChange={(event) => setConsentConfirmed(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-primary"
+                    />
+                    <span>
+                      <span className="flex items-center gap-2 text-sm font-semibold">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                        Confirmo o consentimento dos destinatários
+                      </span>
+                      <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                        Contatos marcados como opt-out serão removidos automaticamente antes do agendamento.
+                      </span>
+                    </span>
+                  </label>
                 </div>
               </CardContent>
             </Card>
@@ -842,10 +1343,22 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                     </div>
                   </div>
                   <div className="mt-3 space-y-2">
+                    {mediaAttachment && (
+                      <div className="max-w-[85%] overflow-hidden rounded-2xl rounded-tl-sm bg-emerald-600 text-white shadow">
+                        {mediaAttachment.type === 'image' ? (
+                          <img src={mediaAttachment.url} alt={mediaAttachment.filename} className="max-h-48 w-full object-cover" />
+                        ) : (
+                          <div className="flex items-center gap-2 px-3 py-3 text-sm">
+                            <Music2 className="h-4 w-4" />
+                            <span className="truncate">{mediaAttachment.filename}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-emerald-600 text-white px-3 py-2 text-sm shadow">
-                      {preview.message ? applyPlaceholder(preview.message, "Maria") : "Sua mensagem aparecerá aqui..."}
+                      {preview.message ? applyPlaceholder(preview.message) : "Sua mensagem aparecerá aqui..."}
                     </div>
-                    <p className="text-[10px] text-muted-foreground">Prévia com {PLACEHOLDER} → "Maria"</p>
+                    <p className="text-[10px] text-muted-foreground">Previa com {PREVIEW_CONTACT_NAME}, primeiro nome e saudacao atual.</p>
                   </div>
                 </div>
               </CardContent>
@@ -864,7 +1377,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
             <div className="text-center font-semibold text-primary">{selectedCount} destinatário(s)</div>
             <Button disabled={!canProceed || isSubmitting} onClick={handleSendCampaign}>
               {isSubmitting ? <Icon.Loader2 className="animate-spin" /> : <Icon.Send />}
-              {isSubmitting ? 'Enviando...' : 'Revisar e Enviar Campanha'}
+              {isSubmitting ? 'Criando fila...' : 'Criar campanha'}
             </Button>
           </div>
         </div>

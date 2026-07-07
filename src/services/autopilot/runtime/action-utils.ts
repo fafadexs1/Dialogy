@@ -75,8 +75,9 @@ export function filterImplicitTransferActions(input: {
   customerMessage: string;
   availableTeams: ToolRouterTeam[];
   candidates?: ToolRoutingCandidate[];
+  allowSafetyCriticalHandoff?: boolean;
 }): AgentToolAction[] {
-  if (shouldHandoffToHuman(input.customerMessage)) {
+  if (input.allowSafetyCriticalHandoff || shouldHandoffToHuman(input.customerMessage)) {
     return input.actions;
   }
 
@@ -94,8 +95,13 @@ export function filterImplicitTransferActions(input: {
       (teamName ? hasExplicitTeamHandoff(input.customerMessage, { name: teamName }) : false)
     );
   };
+  const isOperationallyUnresolvableAction = (action: AgentToolAction) => {
+    const payload = action.payload && typeof action.payload === 'object' ? action.payload as Record<string, any> : {};
+    const reason = String(action.reason || payload.reason || payload.content || '');
+    return isOperationallyUnresolvableTransferReason(reason);
+  };
   const hasImplicitTransferCandidate = input.actions.some((action) => (
-    action.type === 'transfer_chat' && !isExplicitTransferAction(action)
+    action.type === 'transfer_chat' && !isExplicitTransferAction(action) && !isOperationallyUnresolvableAction(action)
   ));
 
   return input.actions.filter((action) => {
@@ -113,9 +119,10 @@ export function filterImplicitTransferActions(input: {
     const text = `${teamName} ${reason}`;
 
     if (action.type === 'transfer_chat') {
-      return isExplicitTransferAction(action);
+      return isExplicitTransferAction(action) || isOperationallyUnresolvableAction(action);
     }
 
+    if (isOperationallyUnresolvableAction(action)) return true;
     if (hasImplicitTransferCandidate) return false;
     return !/\b(transfer|encaminh|roteamento)\b/i.test(text);
   });

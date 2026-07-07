@@ -176,6 +176,7 @@ function runOfflineAutopilotEvalCase(evalCase: AutopilotEvalCase): AutopilotEval
   const toolPlanner = planAutopilotTools({
     response: responseBeforePlanner,
     customerMessage: evalCase.customerMessage,
+    chatHistory: evalCase.chatHistory || '',
     intentResolution,
     slotExtraction,
     actions: initialActions,

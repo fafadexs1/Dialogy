@@ -198,7 +198,28 @@ describe('autopilot response validator', () => {
     expect(result.actions).toEqual([]);
   });
 
-  it('drops implicit transfer actions and their internal note before execution', () => {
+  it('drops invented implicit transfer actions and their internal note before execution', () => {
+    const actions: AgentToolAction[] = [
+      {
+        type: 'add_internal_note',
+        reason: 'Modelo sugeriu transferencia sem pedido humano.',
+        payload: { content: 'Encaminhar para suporte.' },
+      },
+      {
+        type: 'transfer_chat',
+        reason: 'Modelo sugeriu transferencia sem pedido humano.',
+        payload: { teamId: team.id },
+      },
+    ];
+
+    expect(filterImplicitTransferActions({
+      actions,
+      customerMessage: 'Minha internet esta falhando',
+      availableTeams: [team],
+    })).toEqual([]);
+  });
+
+  it('keeps operational handoff actions when the validator found no safe executable lookup', () => {
     const actions: AgentToolAction[] = [
       {
         type: 'add_internal_note',
@@ -216,7 +237,29 @@ describe('autopilot response validator', () => {
       actions,
       customerMessage: 'Minha internet esta falhando',
       availableTeams: [team],
-    })).toEqual([]);
+    })).toEqual(actions);
+  });
+
+  it('keeps a safety-critical transfer approved from clinical history', () => {
+    const actions: AgentToolAction[] = [
+      {
+        type: 'add_internal_note',
+        reason: 'Sinais clinicos de alerta.',
+        payload: { content: 'Bebe com febre, boca seca e sem urinar.' },
+      },
+      {
+        type: 'transfer_chat',
+        reason: 'Sinais clinicos de alerta.',
+        payload: { teamId: team.id },
+      },
+    ];
+
+    expect(filterImplicitTransferActions({
+      actions,
+      customerMessage: 'Ja te falei hoje as 19h00',
+      availableTeams: [team],
+      allowSafetyCriticalHandoff: true,
+    })).toEqual(actions);
   });
 
   it('does not ask for CPF/CNPJ again after a successful lookup', () => {
@@ -595,5 +638,18 @@ describe('autopilot response validator', () => {
 
     expect(result.decision).toBe('repair');
     expect(result.actions.map((action) => action.type)).toEqual(['close_chat']);
+  });
+
+  it('does not close the chat when the model invents closure after a task confirmation', () => {
+    const result = validate({
+      message: 'Pode sim',
+      response: 'Pre-cadastro concluido. Vou encerrar nosso atendimento por aqui.',
+      enabledToolNames: ['close_chat', 'add_internal_note'],
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.actions).toEqual([]);
+    expect(result.reasons).toContain('implicit_close_promise_suppressed');
+    expect(result.response).toBe('Conclui esta etapa. Posso ajudar em mais alguma coisa?');
   });
 });

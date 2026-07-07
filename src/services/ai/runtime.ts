@@ -40,6 +40,29 @@ function mapAutopilotConfig(row: any): AutopilotConfig {
     } as AutopilotConfig;
 }
 
+function normalizeWorkspaceIntegrationModel(provider: string, value: unknown): string | undefined {
+    const model = typeof value === 'string' ? value.trim() : '';
+    if (!model) return undefined;
+
+    if (provider === 'gemini') {
+        return normalizeGoogleAiModelId(model) || undefined;
+    }
+
+    if (provider === 'openai') {
+        if (model.startsWith('openai/') || model.startsWith('codex/')) return model;
+        if (model.includes('/')) return undefined;
+        return `openai/${model}`;
+    }
+
+    if (provider === 'deepseek') {
+        if (model.startsWith('deepseek/')) return model;
+        if (model.includes('/')) return undefined;
+        return `deepseek/${model}`;
+    }
+
+    return undefined;
+}
+
 export type WorkspaceAiExecutionContext = {
     autopilotConfig: AutopilotConfig | null;
     workspaceGeminiApiKey?: string;
@@ -88,31 +111,38 @@ export async function resolveWorkspaceAiExecutionContext(
 
     let workspaceGeminiApiKey: string | undefined;
     let workspaceModel: string | undefined;
+    let workspaceGeminiModel: string | undefined;
 
     try {
         const integrationRes = await db.query(
-            `SELECT config
+            `SELECT provider, config
              FROM workspace_integrations
              WHERE workspace_id = $1
-               AND provider = 'gemini'
+               AND provider = ANY($2::text[])
                AND is_active = true
-             LIMIT 1`,
-            [workspaceId]
+             ORDER BY updated_at DESC`,
+            [workspaceId, ['gemini', 'openai', 'deepseek']]
         );
 
-        if ((integrationRes.rowCount ?? 0) > 0) {
-            const config = integrationRes.rows[0].config || {};
-            workspaceGeminiApiKey =
-                typeof config.apiKey === 'string' && config.apiKey.trim().length > 0
-                    ? config.apiKey.trim()
-                    : undefined;
-            workspaceModel =
-                typeof config.aiModel === 'string' && config.aiModel.trim().length > 0
-                    ? normalizeGoogleAiModelId(config.aiModel) || undefined
-                    : undefined;
+        for (const row of integrationRes.rows) {
+            const config = row.config || {};
+            if (row.provider === 'gemini' && !workspaceGeminiApiKey) {
+                workspaceGeminiApiKey =
+                    typeof config.apiKey === 'string' && config.apiKey.trim().length > 0
+                        ? config.apiKey.trim()
+                        : undefined;
+            }
+
+            const normalizedModel = normalizeWorkspaceIntegrationModel(row.provider, config.aiModel);
+            if (row.provider === 'gemini' && normalizedModel && !workspaceGeminiModel) {
+                workspaceGeminiModel = normalizedModel;
+            }
+            if (normalizedModel && !workspaceModel) {
+                workspaceModel = normalizedModel;
+            }
         }
     } catch (error) {
-        console.error('[AI_RUNTIME] Failed to resolve workspace Gemini integration:', error);
+        console.error('[AI_RUNTIME] Failed to resolve workspace AI integrations:', error);
     }
 
     const configuredModel =
@@ -131,7 +161,7 @@ export async function resolveWorkspaceAiExecutionContext(
     return {
         autopilotConfig,
         workspaceGeminiApiKey,
-        workspaceGeminiModel: workspaceModel || DEFAULT_AUTOPILOT_MODEL,
+        workspaceGeminiModel: workspaceGeminiModel || DEFAULT_AUTOPILOT_MODEL,
         model: resolvedModel.model,
     };
 }

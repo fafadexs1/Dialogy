@@ -3,10 +3,15 @@ import { googleAI } from '@genkit-ai/googleai';
 import { z } from 'zod';
 
 import { ai } from '@/ai/genkit';
+import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import type { AutopilotFlowAiProposal, AutopilotFlowGraph, AutopilotFlowNodeKind } from '@/lib/types';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
+import {
+  isOpenAiCompatibleModel,
+  requestOpenAiCompatibleJson,
+} from '@/services/ai/openai-compatible';
 import {
   V2_FLOW_NODE_KINDS,
   normalizeFlowNodeKindToV2,
@@ -2910,6 +2915,36 @@ function flowBuilderStageError(schemaName: string, error: unknown) {
   return new Error(`Falha ao gerar etapa ${schemaName}: ${errorMessage(error)}`);
 }
 
+function defaultEnvKeyForFlowBuilderModel(model: string): string {
+  const provider = getAiModelRuntimeProvider(model);
+  if (provider === 'googleai') {
+    return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
+  }
+  if (provider === 'openai') {
+    return process.env.OPENAI_API_KEY?.trim() || process.env.CODEX_API_KEY?.trim() || '';
+  }
+  if (provider === 'deepseek') {
+    return process.env.DEEPSEEK_API_KEY?.trim() || '';
+  }
+  return '';
+}
+
+function providerLabelForFlowBuilderModel(model: string): string {
+  const provider = getAiModelRuntimeProvider(model);
+  if (provider === 'googleai') return 'Gemini';
+  if (provider === 'openai') return 'OpenAI/Codex';
+  if (provider === 'deepseek') return 'DeepSeek';
+  if (provider === 'lmstudio') return 'LM Studio';
+  return 'IA';
+}
+
+export function resolveFlowBuilderApiKeyForModel(input: {
+  model: string;
+  explicitApiKey?: string | null;
+}): string {
+  return input.explicitApiKey?.trim() || defaultEnvKeyForFlowBuilderModel(input.model);
+}
+
 async function runFlowBuilderStage<TSchema extends z.ZodTypeAny>(input: {
   model: string;
   apiKey?: string;
@@ -2949,9 +2984,53 @@ async function runFlowBuilderStage<TSchema extends z.ZodTypeAny>(input: {
     throw flowBuilderStageError(input.schemaName, lastError);
   }
 
-  const apiKey = input.apiKey?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+  if (isOpenAiCompatibleModel(input.model)) {
+    const apiKey = resolveFlowBuilderApiKeyForModel({
+      model: input.model,
+      explicitApiKey: input.apiKey,
+    });
+    if (!apiKey) {
+      throw new Error(`Chave ${providerLabelForFlowBuilderModel(input.model)} nao configurada para construir o flow.`);
+    }
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= FLOW_BUILDER_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        return await requestOpenAiCompatibleJson({
+          model: input.model,
+          apiKey,
+          schema: input.schema,
+          schemaName: input.schemaName,
+          jsonSchema: input.jsonSchema,
+          systemPrompt: input.systemPrompt,
+          userPrompt: attempt === 1 ? input.userPrompt : retryPrompt(input.userPrompt, lastError),
+          timeoutMs: FLOW_BUILDER_TIMEOUT_MS,
+          maxTokens: input.maxTokens ?? FLOW_BUILDER_MAX_TOKENS,
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt >= FLOW_BUILDER_RETRY_ATTEMPTS || !isRetryableFlowBuilderError(error)) {
+          throw flowBuilderStageError(input.schemaName, error);
+        }
+        console.warn(
+          `[AUTOPILOT_FLOW_BUILDER_AI] Retrying ${input.schemaName} after invalid OpenAI-compatible response:`,
+          error
+        );
+      }
+    }
+    throw flowBuilderStageError(input.schemaName, lastError);
+  }
+
+  if (getAiModelRuntimeProvider(input.model) !== 'googleai') {
+    throw new Error(`Modelo ${input.model} nao suportado para construir flow.`);
+  }
+
+  const apiKey = resolveFlowBuilderApiKeyForModel({
+    model: input.model,
+    explicitApiKey: input.apiKey,
+  });
   if (!apiKey) throw new Error('Chave Gemini nao configurada para construir o flow.');
-  const defaultKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+  const defaultKey = defaultEnvKeyForFlowBuilderModel(input.model);
   const runner: any = apiKey === defaultKey
     ? input.defaultRunner
     : genkit({ plugins: [googleAI({ apiKey })], model: input.model }).definePrompt({

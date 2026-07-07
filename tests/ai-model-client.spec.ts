@@ -34,7 +34,7 @@ describe('AI model client', () => {
 
     const result = await runAiModelWithFallback({
       label: 'test',
-      modelCandidates: ['googleai/gemini-2.0-flash'],
+      modelCandidates: ['googleai/gemini-2.5-flash'],
       apiKeyCandidates: [{ source: 'agent', key: 'agent-key' }],
       maxAttemptsPerCandidate: 2,
       retryBaseDelayMs: 0,
@@ -60,7 +60,7 @@ describe('AI model client', () => {
 
     const result = await runAiModelWithFallback({
       label: 'test',
-      modelCandidates: ['googleai/gemini-2.0-flash'],
+      modelCandidates: ['googleai/gemini-2.5-flash'],
       apiKeyCandidates: [
         { source: 'agent', key: 'bad-key' },
         { source: 'workspace', key: 'good-key' },
@@ -86,7 +86,7 @@ describe('AI model client', () => {
 
     const result = await runAiModelWithFallback({
       label: 'test',
-      modelCandidates: ['googleai/bad-model', 'googleai/gemini-2.0-flash'],
+      modelCandidates: ['googleai/bad-model', 'googleai/gemini-2.5-flash'],
       apiKeyCandidates: [{ source: 'env', key: 'env-key' }],
       maxAttemptsPerCandidate: 1,
       retryBaseDelayMs: 0,
@@ -102,9 +102,112 @@ describe('AI model client', () => {
       },
     });
 
-    expect(result.result).toEqual({ model: 'googleai/gemini-2.0-flash' });
-    expect(result.model).toBe('googleai/gemini-2.0-flash');
-    expect(seenModels).toEqual(['googleai/bad-model', 'googleai/gemini-2.0-flash']);
+    expect(result.result).toEqual({ model: 'googleai/gemini-2.5-flash' });
+    expect(result.model).toBe('googleai/gemini-2.5-flash');
+    expect(seenModels).toEqual(['googleai/bad-model', 'googleai/gemini-2.5-flash']);
+  });
+
+  it('only attempts models with compatible provider keys', async () => {
+    const seenPairs: string[] = [];
+
+    const result = await runAiModelWithFallback({
+      label: 'test',
+      modelCandidates: ['deepseek/deepseek-v4-flash', 'openai/gpt-5.5'],
+      apiKeyCandidates: [
+        { source: 'env-gemini', key: 'gemini-key', provider: 'googleai' },
+        { source: 'env-openai', key: 'openai-key', provider: 'openai' },
+      ],
+      maxAttemptsPerCandidate: 1,
+      retryBaseDelayMs: 0,
+      retryMaxDelayMs: 0,
+      execute: async ({ keySource, model }) => {
+        seenPairs.push(`${keySource}:${model}`);
+        return { model };
+      },
+    });
+
+    expect(result.model).toBe('openai/gpt-5.5');
+    expect(result.keySource).toBe('env-openai');
+    expect(seenPairs).toEqual(['env-openai:openai/gpt-5.5']);
+  });
+
+  it('prioritizes the selected model before fallback provider keys', async () => {
+    const seenPairs: string[] = [];
+
+    const result = await runAiModelWithFallback({
+      label: 'test',
+      modelCandidates: ['deepseek/deepseek-v4-flash', 'googleai/gemini-2.5-flash'],
+      apiKeyCandidates: [
+        { source: 'agent-gemini', key: 'leaked-gemini-key', provider: 'googleai' },
+        { source: 'workspace-deepseek', key: 'deepseek-key', provider: 'deepseek' },
+      ],
+      maxAttemptsPerCandidate: 1,
+      retryBaseDelayMs: 0,
+      retryMaxDelayMs: 0,
+      execute: async ({ keySource, model }) => {
+        seenPairs.push(`${keySource}:${model}`);
+        return { model };
+      },
+    });
+
+    expect(result.model).toBe('deepseek/deepseek-v4-flash');
+    expect(result.keySource).toBe('workspace-deepseek');
+    expect(seenPairs).toEqual(['workspace-deepseek:deepseek/deepseek-v4-flash']);
+  });
+
+  it('does not keep trying an auth-failed key across fallback models', async () => {
+    const seenPairs: string[] = [];
+
+    await expect(runAiModelWithFallback({
+      label: 'test',
+      modelCandidates: ['googleai/gemini-2.5-flash-lite', 'googleai/gemini-2.5-flash'],
+      apiKeyCandidates: [
+        { source: 'agent-gemini', key: 'leaked-gemini-key', provider: 'googleai' },
+      ],
+      maxAttemptsPerCandidate: 1,
+      retryBaseDelayMs: 0,
+      retryMaxDelayMs: 0,
+      execute: async ({ keySource, model }) => {
+        seenPairs.push(`${keySource}:${model}`);
+        throw new Error('Your API key was reported as leaked.');
+      },
+    })).rejects.toMatchObject({
+      code: 'auth_error',
+    });
+
+    expect(seenPairs).toEqual(['agent-gemini:googleai/gemini-2.5-flash-lite']);
+  });
+
+  it('falls back across providers when the selected provider fails', async () => {
+    const seenPairs: string[] = [];
+
+    const result = await runAiModelWithFallback({
+      label: 'test',
+      modelCandidates: ['deepseek/deepseek-v4-flash', 'openai/gpt-5.5'],
+      apiKeyCandidates: [
+        { source: 'env-deepseek', key: 'deepseek-key', provider: 'deepseek' },
+        { source: 'env-openai', key: 'openai-key', provider: 'openai' },
+      ],
+      maxAttemptsPerCandidate: 1,
+      retryBaseDelayMs: 0,
+      retryMaxDelayMs: 0,
+      execute: async ({ keySource, model }) => {
+        seenPairs.push(`${keySource}:${model}`);
+        if (model.startsWith('deepseek/')) {
+          const error = new Error('DeepSeek temporarily unavailable');
+          (error as any).status = 503;
+          throw error;
+        }
+        return { model };
+      },
+    });
+
+    expect(result.model).toBe('openai/gpt-5.5');
+    expect(result.keySource).toBe('env-openai');
+    expect(seenPairs).toEqual([
+      'env-deepseek:deepseek/deepseek-v4-flash',
+      'env-openai:openai/gpt-5.5',
+    ]);
   });
 });
 

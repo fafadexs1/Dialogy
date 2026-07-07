@@ -119,7 +119,7 @@ export function AutopilotReadiness({
     {
       key: 'key',
       label: 'Credencial',
-      detail: hasRuntimeKey ? 'Chave disponivel no agente ou workspace.' : 'Configure uma chave Gemini.',
+      detail: hasRuntimeKey ? 'Chave disponivel em Modelos de IA.' : 'Configure uma chave em Integracoes / Modelos de IA.',
       state: hasRuntimeKey ? 'ready' : 'blocked',
       icon: KeyRound,
     },

@@ -328,6 +328,7 @@ export function compileProcedureFromFlowGraph(input: {
       useLlm: Boolean(node.config?.useAi || node.kind === 'sub_agent'),
       requireGrounding: node.kind === 'sub_agent' || Boolean(node.config?.requiredKnowledgeCoverage),
       requiredKnowledgeCoverage: node.config?.requiredKnowledgeCoverage,
+      returnToMainPrompt: node.kind === 'sub_agent' ? node.config?.returnToMainPrompt === true : undefined,
     };
   };
 

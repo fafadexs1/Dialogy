@@ -377,6 +377,7 @@ describe('procedure flow compiler', () => {
           config: {
             message: 'Responda com acolhimento e base.',
             requiredKnowledgeCoverage: 'medium',
+            returnToMainPrompt: true,
           },
         },
         {
@@ -425,6 +426,7 @@ describe('procedure flow compiler', () => {
     expect(graph.steps.find((step) => step.visualNodeId === 'compose')).toMatchObject({
       type: 'respond',
       requireGrounding: true,
+      returnToMainPrompt: true,
     });
   });
 

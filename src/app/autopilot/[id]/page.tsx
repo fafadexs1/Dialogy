@@ -71,7 +71,6 @@ import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
   DEFAULT_AUTOPILOT_MODEL,
   getAiModelLabel,
-  getAutopilotSelectableModels,
   type AiModelCatalogEntry,
 } from '@/lib/ai-models';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -147,7 +146,7 @@ function normalizeSnapshotForSignature(snapshot: AutopilotConfigDraftSnapshot) {
   return {
     ...snapshot,
     name: snapshot.name || '',
-    gemini_api_key: snapshot.gemini_api_key || null,
+    gemini_api_key: null,
     ai_model: snapshot.ai_model || null,
     transcription_model: snapshot.transcription_model || null,
     knowledge_base: snapshot.knowledge_base || null,
@@ -170,7 +169,7 @@ function buildSnapshotFromConfig(
 ): AutopilotConfigDraftSnapshot {
   return {
     name: config.name || '',
-    gemini_api_key: config.gemini_api_key || null,
+    gemini_api_key: null,
     ai_model: config.ai_model || null,
     transcription_model: config.transcription_model || null,
     knowledge_base: config.knowledge_base || null,
@@ -194,7 +193,7 @@ function normalizeLoadedSnapshot(
 ): AutopilotConfigDraftSnapshot {
   return {
     name: snapshot.name || fallback.name,
-    gemini_api_key: snapshot.gemini_api_key || null,
+    gemini_api_key: null,
     ai_model: snapshot.ai_model || fallback.ai_model,
     transcription_model: snapshot.transcription_model || fallback.transcription_model || null,
     knowledge_base: snapshot.knowledge_base || null,
@@ -296,10 +295,6 @@ function summarizeVersionChanges(
     changes.push(`Ferramentas desabilitadas: ${toolDiff.removed.slice(0, 4).join(', ')}${toolDiff.removed.length > 4 ? ` +${toolDiff.removed.length - 4}` : ''}.`);
   }
 
-  if ((snapshot.gemini_api_key ? 'set' : 'empty') !== (previous.gemini_api_key ? 'set' : 'empty')) {
-    changes.push(snapshot.gemini_api_key ? 'Credencial personalizada adicionada.' : 'Credencial personalizada removida.');
-  }
-
   return changes.length > 0 ? changes : ['Publicacao sem mudancas estruturais detectadas no snapshot.'];
 }
 
@@ -316,6 +311,7 @@ export default function AutopilotDetailPage() {
   const [usageLogs, setUsageLogs] = useState<AutopilotUsageLog[]>([]);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [modelCatalog, setModelCatalog] = useState<AiModelCatalogEntry[]>([]);
+  const [configuredAiModels, setConfiguredAiModels] = useState<AiModelCatalogEntry[]>([]);
   const [toolCatalog, setToolCatalog] = useState<AgentToolCatalogItem[]>([]);
   const [hasGlobalKey, setHasGlobalKey] = useState(false);
   const [workspaceDefaultAiModel, setWorkspaceDefaultAiModel] = useState<string | null>(null);
@@ -326,7 +322,6 @@ export default function AutopilotDetailPage() {
   const [isActive, setIsActive] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
-  const [geminiApiKey, setGeminiApiKey] = useState('');
   const [knowledgeBase, setKnowledgeBase] = useState('');
   const [defaultFallbackReply, setDefaultFallbackReply] = useState('');
   const [escalationPolicy, setEscalationPolicy] = useState('');
@@ -374,8 +369,8 @@ export default function AutopilotDetailPage() {
   }, []);
 
   const selectableModels = useMemo(
-    () => getAutopilotSelectableModels(modelCatalog),
-    [modelCatalog]
+    () => configuredAiModels,
+    [configuredAiModels]
   );
 
   const fetchData = useCallback(async (options?: { showLoading?: boolean }) => {
@@ -403,9 +398,9 @@ export default function AutopilotDetailPage() {
       }
 
       const nextCatalog = catalogData.models || [];
+      const nextConfiguredModels = autopilotData.workspaceConfiguredAiModels || [];
       const nextToolCatalog = toolCatalogData.tools || [];
-      const nextSelectableModels = getAutopilotSelectableModels(nextCatalog);
-      const fallbackModel = nextSelectableModels[0]?.id || DEFAULT_AUTOPILOT_MODEL;
+      const nextSelectableModels = nextConfiguredModels;
       const defaultEnabledToolNames = nextToolCatalog
         .filter((tool) => tool.enabledByDefault)
         .map((tool) => tool.name);
@@ -414,9 +409,8 @@ export default function AutopilotDetailPage() {
         ? normalizeLoadedSnapshot(autopilotData.draft.snapshot, publishedSnapshot)
         : publishedSnapshot;
       const savedModel = loadedSnapshot.ai_model || null;
-      const selectedModel = savedModel && nextSelectableModels.some((model) => model.id === savedModel)
-        ? savedModel
-        : fallbackModel;
+      const fallbackModel = nextSelectableModels[0]?.id || savedModel || DEFAULT_AUTOPILOT_MODEL;
+      const selectedModel = savedModel || fallbackModel;
       const editorSnapshot = {
         ...loadedSnapshot,
         ai_model: selectedModel,
@@ -429,6 +423,7 @@ export default function AutopilotDetailPage() {
       setWorkspaceDefaultAiModel(autopilotData.workspaceDefaultAiModel || null);
       setWorkspaceHasGeminiConfig(Boolean(autopilotData.workspaceHasGeminiConfig));
       setModelCatalog(nextCatalog);
+      setConfiguredAiModels(nextConfiguredModels);
       setToolCatalog(nextToolCatalog);
       setDraftUpdatedAt(autopilotData.draft?.updated_at || null);
       setVersions(autopilotData.versions || []);
@@ -439,7 +434,6 @@ export default function AutopilotDetailPage() {
       setIsActive(Boolean(editorSnapshot.is_active));
       setIsPrivate(Boolean(editorSnapshot.is_private));
       setIsPrimary(Boolean(autopilotData.config.is_primary));
-      setGeminiApiKey(editorSnapshot.gemini_api_key || '');
       setKnowledgeBase(editorSnapshot.knowledge_base || '');
       setDefaultFallbackReply(editorSnapshot.default_fallback_reply || '');
       setEscalationPolicy(editorSnapshot.escalation_policy || '');
@@ -465,7 +459,7 @@ export default function AutopilotDetailPage() {
 
   const currentEditorSnapshot = useMemo<AutopilotConfigDraftSnapshot>(() => ({
     name: agentName,
-    gemini_api_key: geminiApiKey || null,
+    gemini_api_key: null,
     ai_model: aiModel || null,
     transcription_model: config?.transcription_model || null,
     knowledge_base: knowledgeBase || null,
@@ -486,7 +480,6 @@ export default function AutopilotDetailPage() {
     defaultFallbackReply,
     enabledToolNames,
     escalationPolicy,
-    geminiApiKey,
     isActive,
     isPrivate,
     knowledgeBase,
@@ -521,7 +514,6 @@ export default function AutopilotDetailPage() {
     formData.append('configId', config.id);
     formData.append('agentName', agentName);
     formData.append('aiModel', aiModel);
-    formData.append('geminiApiKey', geminiApiKey);
     formData.append('isActive', isActive ? 'on' : 'off');
     formData.append('isPrivate', isPrivate ? 'on' : 'off');
     formData.append('knowledgeBase', knowledgeBase);
@@ -541,7 +533,6 @@ export default function AutopilotDetailPage() {
     defaultFallbackReply,
     enabledToolNames,
     escalationPolicy,
-    geminiApiKey,
     isActive,
     isPrivate,
     knowledgeBase,
@@ -1392,11 +1383,6 @@ export default function AutopilotDetailPage() {
               setIsPrivate={setIsPrivate}
               isPrimary={isPrimary}
               onSetPrimary={handleSetPrimary}
-              geminiApiKey={geminiApiKey}
-              setGeminiApiKey={setGeminiApiKey}
-              hasGlobalKey={hasGlobalKey}
-              workspaceHasGeminiConfig={workspaceHasGeminiConfig}
-              workspaceDefaultAiModel={workspaceDefaultAiModel}
               modelOptions={selectableModels}
               onSave={handleSaveConfig}
               isSaving={isSaving}
@@ -1721,7 +1707,7 @@ export default function AutopilotDetailPage() {
                       </Badge>
                       {workspaceHasGeminiConfig && (
                         <Badge variant="outline" className="rounded-full">
-                          Workspace com padrão Gemini
+                          Workspace com IA configurada
                         </Badge>
                       )}
                     </div>
@@ -1781,7 +1767,7 @@ export default function AutopilotDetailPage() {
                   <Card className="overflow-hidden border border-border bg-card shadow-sm">
                     <CardContent className="grid gap-4 p-6">
                       <div className="rounded-2xl border border-border bg-muted/30 p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Chave global</div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Chave de IA</div>
                         <div className="mt-2 text-sm font-medium text-foreground">
                           {hasGlobalKey || workspaceHasGeminiConfig ? 'Disponível' : 'Não configurada'}
                         </div>
@@ -1920,11 +1906,6 @@ export default function AutopilotDetailPage() {
                 setIsPrivate={setIsPrivate}
                 isPrimary={isPrimary}
                 onSetPrimary={handleSetPrimary}
-                geminiApiKey={geminiApiKey}
-                setGeminiApiKey={setGeminiApiKey}
-                hasGlobalKey={hasGlobalKey}
-                workspaceHasGeminiConfig={workspaceHasGeminiConfig}
-                workspaceDefaultAiModel={workspaceDefaultAiModel}
                 modelOptions={selectableModels}
                 onSave={handleSaveConfig}
                 isSaving={isSaving}
@@ -2052,7 +2033,7 @@ export default function AutopilotDetailPage() {
           <AutopilotReadiness
             aiModel={aiModel}
             modelOptions={selectableModels}
-            hasRuntimeKey={Boolean(geminiApiKey || hasGlobalKey || workspaceHasGeminiConfig)}
+            hasRuntimeKey={Boolean(hasGlobalKey || workspaceHasGeminiConfig)}
             knowledgeBase={knowledgeBase}
             documents={knowledgeDocuments}
             fallbackReply={defaultFallbackReply}

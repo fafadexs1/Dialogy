@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 
 import {
+  getAiDecisionModelConfigAction,
   getAiModelCatalogAction,
   getLmStudioConfigAction,
+  saveAiDecisionModelConfigAction,
   saveAiModelCatalogAction,
   saveLmStudioConfigAction,
   syncLmStudioModelsAction,
@@ -14,8 +16,15 @@ import {
   AiModelCatalogEntry,
   AiModelProvider,
   getAiModelProviderLabel,
+  getAutopilotSelectableModels,
   isAutopilotRuntimeSupportedModel,
 } from '@/lib/ai-models';
+import {
+  AI_DECISION_MODEL_ROLES,
+  DEFAULT_AI_DECISION_MODEL_CONFIG,
+  type AiDecisionModelConfig,
+  type AiDecisionModelRole,
+} from '@/lib/ai-decision-models';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,7 +35,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-const PROVIDERS: AiModelProvider[] = ['googleai', 'lmstudio', 'openai', 'anthropic', 'other'];
+const PROVIDERS: AiModelProvider[] = ['googleai', 'openai', 'codex', 'deepseek', 'lmstudio', 'anthropic', 'other'];
 
 function buildEmptyModel(index: number): AiModelCatalogEntry {
   return {
@@ -41,23 +50,28 @@ function buildEmptyModel(index: number): AiModelCatalogEntry {
 export default function AiModelsSuperadminPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingDecisionModels, setSavingDecisionModels] = useState(false);
   const [savingLmStudio, setSavingLmStudio] = useState(false);
   const [syncingLmStudio, setSyncingLmStudio] = useState(false);
   const [models, setModels] = useState<AiModelCatalogEntry[]>([]);
   const [initialSignature, setInitialSignature] = useState('');
+  const [decisionModels, setDecisionModels] = useState<AiDecisionModelConfig>(DEFAULT_AI_DECISION_MODEL_CONFIG);
+  const [initialDecisionSignature, setInitialDecisionSignature] = useState('');
   const [lmStudioBaseUrl, setLmStudioBaseUrl] = useState('');
   const [lmStudioApiToken, setLmStudioApiToken] = useState('');
   const [initialLmStudioSignature, setInitialLmStudioSignature] = useState('');
 
   useEffect(() => {
-    Promise.all([getAiModelCatalogAction(), getLmStudioConfigAction()])
-      .then(([catalogResult, lmStudioResult]) => {
+    Promise.all([getAiModelCatalogAction(), getLmStudioConfigAction(), getAiDecisionModelConfigAction()])
+      .then(([catalogResult, lmStudioResult, decisionResult]) => {
         if (catalogResult.error) {
           toast({ title: 'Erro ao carregar', description: catalogResult.error, variant: 'destructive' });
           return;
         }
         setModels(catalogResult.models);
         setInitialSignature(JSON.stringify(catalogResult.models));
+        setDecisionModels(decisionResult.config);
+        setInitialDecisionSignature(JSON.stringify(decisionResult.config));
 
         if (!lmStudioResult.error) {
           setLmStudioBaseUrl(lmStudioResult.config.baseUrl);
@@ -69,6 +83,26 @@ export default function AiModelsSuperadminPage() {
   }, []);
 
   const isDirty = useMemo(() => JSON.stringify(models) !== initialSignature, [initialSignature, models]);
+  const isDecisionDirty = useMemo(() => JSON.stringify(decisionModels) !== initialDecisionSignature, [decisionModels, initialDecisionSignature]);
+  const decisionModelOptions = useMemo(() => {
+    const options = getAutopilotSelectableModels(models);
+    const existingIds = new Set(options.map((model) => model.id));
+    const currentModels = AI_DECISION_MODEL_ROLES
+      .map((role) => decisionModels[role.id]?.model)
+      .filter((model): model is string => Boolean(model?.trim()))
+      .filter((model, index, all) => !existingIds.has(model) && all.indexOf(model) === index);
+
+    return [
+      ...options,
+      ...currentModels.map((model): AiModelCatalogEntry => ({
+        id: model,
+        label: `Atual: ${model}`,
+        provider: 'other',
+        description: 'Modelo configurado atualmente, mas fora do catalogo global.',
+        enabled: true,
+      })),
+    ];
+  }, [decisionModels, models]);
   const lmStudioSignature = JSON.stringify({ baseUrl: lmStudioBaseUrl.trim(), apiToken: lmStudioApiToken.trim() });
   const isLmStudioDirty = lmStudioSignature !== initialLmStudioSignature;
 
@@ -90,6 +124,16 @@ export default function AiModelsSuperadminPage() {
 
   const addModel = () => {
     setModels((current) => [...current, buildEmptyModel(current.length + 1)]);
+  };
+
+  const updateDecisionModel = (role: AiDecisionModelRole, updates: Partial<AiDecisionModelConfig[AiDecisionModelRole]>) => {
+    setDecisionModels((current) => ({
+      ...current,
+      [role]: {
+        ...current[role],
+        ...updates,
+      },
+    }));
   };
 
   const handleSave = async () => {
@@ -120,6 +164,22 @@ export default function AiModelsSuperadminPage() {
       toast({ title: 'Catálogo salvo', description: 'Os modelos globais foram atualizados.' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveDecisionModels = async () => {
+    setSavingDecisionModels(true);
+    try {
+      const result = await saveAiDecisionModelConfigAction(decisionModels);
+      if (!result.success) {
+        toast({ title: 'Erro ao salvar modelos de decisao', description: result.error, variant: 'destructive' });
+        return;
+      }
+
+      setInitialDecisionSignature(JSON.stringify(decisionModels));
+      toast({ title: 'Modelos de decisao salvos', description: 'O Autopilot passara a usar estes modelos nos classificadores.' });
+    } finally {
+      setSavingDecisionModels(false);
     }
   };
 
@@ -182,7 +242,7 @@ export default function AiModelsSuperadminPage() {
             <div className="space-y-1">
               <h1 className="text-3xl font-bold tracking-tight text-foreground">Catálogo de Modelos</h1>
               <p className="max-w-3xl text-sm text-muted-foreground">
-                Gerencie quais modelos aparecem no Autopilot. O runtime suporta entradas `googleai/...` e `lmstudio/...`.
+                Gerencie quais modelos aparecem no Autopilot. O runtime suporta entradas `googleai/...`, `openai/...`, `codex/...`, `deepseek/...` e `lmstudio/...`.
                 O endpoint do LM Studio é configurado somente nesta área e não fica disponível para workspaces.
               </p>
             </div>
@@ -206,6 +266,65 @@ export default function AiModelsSuperadminPage() {
           </Button>
         </div>
       </header>
+
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader>
+          <CardTitle>Modelos de decisao do Autopilot</CardTitle>
+          <CardDescription>
+            Escolha os modelos usados pelos classificadores rapidos. Quando salvo aqui, estes valores substituem as variaveis `AI_TOOL_INTENT_GATE_MODEL`, `AI_INTENT_CLASSIFIER_MODEL` e `AI_WORKFLOW_CLASSIFIER_MODEL`.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {AI_DECISION_MODEL_ROLES.map((role) => (
+            <div key={role.id} className="grid gap-4 rounded-lg border border-border bg-muted/20 p-4 lg:grid-cols-12">
+              <div className="space-y-1 lg:col-span-4">
+                <div className="text-sm font-semibold text-foreground">{role.label}</div>
+                <p className="text-xs text-muted-foreground">{role.description}</p>
+              </div>
+
+              <div className="space-y-2 lg:col-span-5">
+                <Label>Modelo</Label>
+                <Select
+                  value={decisionModels[role.id].model}
+                  onValueChange={(value) => updateDecisionModel(role.id, { model: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um modelo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {decisionModelOptions.map((model) => (
+                      <SelectItem key={`${role.id}-${model.id}`} value={model.id}>
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 lg:col-span-3">
+                <Label>Timeout (ms)</Label>
+                <Input
+                  type="number"
+                  min={500}
+                  max={15000}
+                  step={100}
+                  value={decisionModels[role.id].timeoutMs}
+                  onChange={(event) => updateDecisionModel(role.id, {
+                    timeoutMs: Number.parseInt(event.target.value, 10) || role.defaultTimeoutMs,
+                  })}
+                />
+              </div>
+            </div>
+          ))}
+
+          <div className="flex justify-end">
+            <Button onClick={handleSaveDecisionModels} disabled={savingDecisionModels || !isDecisionDirty}>
+              {savingDecisionModels ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              Salvar modelos de decisao
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="border-border bg-card shadow-sm">
         <CardHeader>
@@ -303,7 +422,7 @@ export default function AiModelsSuperadminPage() {
                   <Input
                     value={model.id}
                     onChange={(event) => updateModel(index, { id: event.target.value })}
-                    placeholder={model.provider === 'lmstudio' ? 'Ex: google/gemma-4-e4b' : 'Ex: googleai/gemini-2.0-flash-lite'}
+                    placeholder={model.provider === 'lmstudio' ? 'Ex: google/gemma-4-e4b' : model.provider === 'deepseek' ? 'Ex: deepseek-v4-flash' : model.provider === 'codex' ? 'Ex: gpt-5.3-codex' : model.provider === 'openai' ? 'Ex: gpt-5.5' : 'Ex: googleai/gemini-2.5-flash-lite'}
                     className="font-mono text-xs"
                   />
                 </div>

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_AI_MODEL_CATALOG,
+  getAiModelRuntimeProvider,
   getAiModelLabel,
   getAutopilotSelectableModels,
   getGoogleAiSdkModelName,
+  getWorkspaceProviderSelectableModels,
   getWorkspaceGeminiSelectableModels,
   isAutopilotRuntimeSupportedModel,
   normalizeGoogleAiModelId,
@@ -38,8 +40,8 @@ describe('ai model catalog', () => {
         enabled: true,
       },
       {
-        id: 'googleai/gemini-1.5-pro',
-        label: 'Gemini 1.5 Pro',
+        id: 'googleai/gemini-2.5-pro',
+        label: 'Gemini 2.5 Pro',
         provider: 'googleai',
         enabled: false,
       },
@@ -53,17 +55,19 @@ describe('ai model catalog', () => {
 
     const selectable = getAutopilotSelectableModels(catalog);
 
-    expect(selectable).toHaveLength(2);
+    expect(selectable).toHaveLength(3);
     expect(selectable[0].id).toBe('googleai/gemini-2.5-flash-lite');
-    expect(selectable[1].id).toBe('lmstudio/openai/gpt-oss-20b');
+    expect(selectable[1].id).toBe('openai/gpt-5.2-mini');
+    expect(selectable[2].id).toBe('lmstudio/openai/gpt-oss-20b');
     expect(isAutopilotRuntimeSupportedModel(selectable[0])).toBe(true);
     expect(isAutopilotRuntimeSupportedModel(selectable[1])).toBe(true);
+    expect(isAutopilotRuntimeSupportedModel(selectable[2])).toBe(true);
   });
 
   it('resolves labels from the catalog and gracefully falls back for unknown ids', () => {
-    expect(getAiModelLabel('googleai/gemini-2.0-flash', DEFAULT_AI_MODEL_CATALOG)).toBe('Gemini 2.0 Flash');
+    expect(getAiModelLabel('googleai/gemini-3.1-flash-lite', DEFAULT_AI_MODEL_CATALOG)).toBe('Gemini 3.1 Flash-Lite');
     expect(getAiModelLabel('googleai/custom-preview', DEFAULT_AI_MODEL_CATALOG)).toBe('custom-preview');
-    expect(getAiModelLabel(null, DEFAULT_AI_MODEL_CATALOG)).toBe('Gemini 2.0 Flash');
+    expect(getAiModelLabel(null, DEFAULT_AI_MODEL_CATALOG)).toBe('Gemini 2.5 Flash-Lite');
   });
 
   it('normalizes LM Studio ids entered with the native server model id', () => {
@@ -78,6 +82,40 @@ describe('ai model catalog', () => {
 
     expect(catalog[0].id).toBe('lmstudio/google/gemma-4-e4b');
     expect(getAutopilotSelectableModels(catalog)[0].id).toBe('lmstudio/google/gemma-4-e4b');
+  });
+
+  it('normalizes OpenAI, Codex and DeepSeek ids entered with native model ids', () => {
+    const catalog = parseAiModelCatalog(JSON.stringify([
+      {
+        id: 'gpt-5.5',
+        label: 'GPT 5.5',
+        provider: 'openai',
+        enabled: true,
+      },
+      {
+        id: 'gpt-5.3-codex',
+        label: 'Codex',
+        provider: 'codex',
+        enabled: true,
+      },
+      {
+        id: 'deepseek-v4-flash',
+        label: 'DeepSeek V4 Flash',
+        provider: 'deepseek',
+        enabled: true,
+      },
+    ]));
+
+    expect(catalog.map((entry) => entry.id)).toEqual([
+      'openai/gpt-5.5',
+      'codex/gpt-5.3-codex',
+      'deepseek/deepseek-v4-flash',
+    ]);
+    expect(catalog.map((entry) => getAiModelRuntimeProvider(entry.id))).toEqual([
+      'openai',
+      'openai',
+      'deepseek',
+    ]);
   });
 
   it('normalizes Gemini model ids for workspace auxiliary tasks', () => {
@@ -96,5 +134,16 @@ describe('ai model catalog', () => {
     ]);
 
     expect(models.map((model) => model.id)).toEqual(['googleai/gemini-2.5-flash']);
+  });
+
+  it('lists provider-specific models for workspace AI provider settings', () => {
+    const models = getWorkspaceProviderSelectableModels([
+      { id: 'openai/gpt-5.5', label: 'GPT 5.5', provider: 'openai', enabled: true },
+      { id: 'codex/gpt-5.3-codex', label: 'Codex', provider: 'codex', enabled: true },
+      { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek', provider: 'deepseek', enabled: true },
+      { id: 'googleai/gemini-3.5-flash', label: 'Gemini', provider: 'googleai', enabled: true },
+    ], ['openai', 'codex']);
+
+    expect(models.map((model) => model.id)).toEqual(['openai/gpt-5.5', 'codex/gpt-5.3-codex']);
   });
 });

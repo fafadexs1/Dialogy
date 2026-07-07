@@ -143,6 +143,7 @@ type AttendantNodeData = {
     variableName?: string;
     destination?: string;
     useAi?: boolean;
+    returnToMainPrompt?: boolean;
     knowledgeCollectionIds?: string[];
     switchMode?: 'ai' | 'rules';
     confidenceThreshold?: number;
@@ -249,6 +250,12 @@ const OPERATIONAL_STATUS_META: Partial<Record<OperationalNodeState, {
 
 function isAgentNodeKind(kind: NodeKind): boolean {
   return kind === 'sub_agent';
+}
+
+function isPrimaryAgentNode(node: AttendantNode) {
+  return node.id === 'sub-agent'
+    || node.data.config?.referenceId === 'agente_principal'
+    || node.data.config?.referenceId === 'sub_agente_principal';
 }
 
 function NodeIcon({ kind }: { kind: NodeKind }) {
@@ -850,15 +857,16 @@ function buildInitialGraph(agentName: string) {
       position: { x: 1190, y: 140 },
       data: {
         kind: 'sub_agent',
-        title: agentName || 'Sub-agente principal',
-        subtitle: 'IA V2 grounded',
+        title: agentName || 'Agente principal',
+        subtitle: 'Raiz do atendimento',
         config: {
           instructions: 'Atenda o cliente nesta etapa usando somente slots confirmados, resultados de tools e chunks de knowledge recuperados. Se faltar base, diga que nao encontrou informacao suficiente e siga o proximo passo seguro.',
           message: 'Componha a resposta para o cliente com linguagem natural e segura.',
-          referenceId: 'sub_agente_principal',
-          variableName: 'resposta_sub_agente',
+          referenceId: 'agente_principal',
+          variableName: 'resposta_agente_principal',
           useAi: true,
           requiredKnowledgeCoverage: 'low',
+          returnToMainPrompt: false,
         },
       },
     },
@@ -1503,7 +1511,7 @@ function NodeInspector({
                 : node.data.kind === 'decision'
                   ? 'Objetivo do decisor'
                 : node.data.kind === 'sub_agent'
-                  ? 'System prompt do sub-agente V2'
+                  ? isPrimaryAgentNode(node) ? 'System prompt do agente principal' : 'System prompt do sub-agente'
                   : 'Instrucao'}
             </Label>
             <HighlightedReferenceTextarea
@@ -1529,7 +1537,7 @@ function NodeInspector({
                 : node.data.kind === 'collect'
                   ? 'Introducao da coleta'
                 : node.data.kind === 'sub_agent'
-                  ? 'Instrucao de composicao'
+                  ? isPrimaryAgentNode(node) ? 'Composicao do agente principal' : 'Instrucao de composicao do sub-agente'
                   : 'Mensagem ao cliente'}
             </Label>
             <HighlightedReferenceTextarea
@@ -1642,6 +1650,19 @@ function NodeInspector({
               Adicionar campo
             </Button>
           </div>
+        )}
+
+        {node.data.kind === 'sub_agent' && !isPrimaryAgentNode(node) && (
+          <label className="flex items-center justify-between rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] px-3 py-3">
+            <span>
+              <span className="block text-sm text-slate-200">Voltar ao fluxo principal</span>
+              <span className="block text-[11px] text-slate-500">Depois da resposta do especialista</span>
+            </span>
+            <Switch
+              checked={config.returnToMainPrompt === true}
+              onCheckedChange={(checked) => updateConfig({ returnToMainPrompt: checked })}
+            />
+          </label>
         )}
 
         {node.data.kind === 'handoff' && (
@@ -2358,11 +2379,11 @@ export function AutopilotFlowBuilder({
   }, [agentId, flowGraph]);
 
   useEffect(() => {
-    const nextTitle = agentName || 'Agente IA';
+    const nextTitle = agentName || 'Agente principal';
     setNodes((current) => {
       let changed = false;
       const next = current.map((node) => {
-        if (node.data.kind !== 'sub_agent' || node.data.title === nextTitle) return node;
+        if (node.data.kind !== 'sub_agent' || !isPrimaryAgentNode(node) || node.data.title === nextTitle) return node;
         changed = true;
         return { ...node, data: { ...node.data, title: nextTitle } };
       });
@@ -2780,15 +2801,16 @@ export function AutopilotFlowBuilder({
         },
         sub_agent: {
           kind: 'sub_agent',
-          title: 'Sub-agente',
-          subtitle: 'IA V2 grounded',
+          title: 'Especialista IA',
+          subtitle: 'Sub-agente especialista',
           config: {
-            instructions: 'Responda usando apenas slots confirmados, resultados de tools e chunks de knowledge recuperados.',
-            message: 'Componha uma resposta natural e segura para o cliente.',
+            instructions: 'Atue como um especialista desta rota. Use apenas slots confirmados, resultados de tools e chunks de knowledge recuperados. Ao concluir sua resposta, devolva o contexto para o fluxo principal.',
+            message: 'Componha uma resposta natural, objetiva e segura para o cliente dentro da sua especialidade.',
             requiredKnowledgeCoverage: 'low',
             useAi: true,
-            referenceId: `resposta_ia_${timestamp}`,
-            variableName: `resposta_ia_${timestamp}`,
+            returnToMainPrompt: true,
+            referenceId: `sub_agente_${timestamp}`,
+            variableName: `resposta_sub_agente_${timestamp}`,
           },
         },
         handoff: {
@@ -3200,7 +3222,6 @@ export function AutopilotFlowBuilder({
                 <FlowV2BlockButton kind="collect" title="Collect" subtitle="Slots tipados" icon={<ClipboardList className="h-4 w-4" />} tone="bg-emerald-500/15 text-emerald-300" />
                 <FlowV2BlockButton kind="decision" title="Decision" subtitle="Rotas com fallback" icon={<GitBranch className="h-4 w-4" />} tone="bg-amber-500/15 text-amber-300" />
                 <FlowV2BlockButton kind="knowledge" title="Knowledge" subtitle="Busca RAG" icon={<Database className="h-4 w-4" />} tone="bg-orange-500/15 text-orange-300" />
-                <FlowV2BlockButton kind="sub_agent" title="Sub-agent" subtitle="IA V2 grounded" icon={<Bot className="h-4 w-4" />} tone="bg-cyan-500/15 text-cyan-300" />
                 <FlowV2BlockButton kind="handoff" title="Handoff" subtitle="Humano" icon={<UserRound className="h-4 w-4" />} tone="bg-violet-500/15 text-violet-300" />
                 <FlowV2BlockButton kind="end" title="End" subtitle="Fim da execucao" icon={<CheckCircle2 className="h-4 w-4" />} tone="bg-emerald-500/15 text-emerald-300" />
               </AccordionContent>
@@ -3250,8 +3271,9 @@ export function AutopilotFlowBuilder({
                 <span className="flex items-center gap-3"><GitBranch className="h-4 w-4" /> Rotas e sub-agentes</span>
               </AccordionTrigger>
               <AccordionContent className="border-t border-white/[0.08] pt-3">
+                <FlowV2BlockButton kind="sub_agent" title="Especialista IA" subtitle="Sub-agente com prompt proprio" icon={<Bot className="h-4 w-4" />} tone="bg-cyan-500/15 text-cyan-300" />
                 <p className="px-2 py-2 text-xs leading-5 text-slate-500">
-                  Use os blocos V2 Decision e Sub-agent para novos flows.
+                  O agente principal ja fica no canvas. Use especialistas para rotas especificas.
                 </p>
               </AccordionContent>
             </AccordionItem>

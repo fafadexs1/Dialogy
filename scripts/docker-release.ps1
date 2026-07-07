@@ -79,6 +79,7 @@ function Update-ComposeImages {
     $dialogyUpdated = $false
     $workerUpdated = $false
     $workerAiUpdated = $false
+    $workerCampaignUpdated = $false
 
     foreach ($line in $Lines) {
         if ($line -match '^services:\s*$') {
@@ -112,6 +113,12 @@ function Update-ComposeImages {
             continue
         }
 
+        if ($inServices -and $currentService -eq 'worker-campaign' -and $line -match '^    image:\s*') {
+            $updatedLines.Add("    image: $WorkerImage")
+            $workerCampaignUpdated = $true
+            continue
+        }
+
         $updatedLines.Add($line)
     }
 
@@ -125,6 +132,10 @@ function Update-ComposeImages {
 
     if (!$workerAiUpdated) {
         throw "Nao foi possivel localizar a linha image do servico 'worker-ai' em $composePath"
+    }
+
+    if (!$workerCampaignUpdated) {
+        throw "Nao foi possivel localizar a linha image do servico 'worker-campaign' em $composePath"
     }
 
     return $updatedLines

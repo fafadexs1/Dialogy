@@ -232,7 +232,7 @@ async function seedDatabase(client: PoolClient) {
         is_primary, is_active, is_private, default_fallback_reply, enabled_tool_names,
         flow_graph, knowledge_collections, tool_mode
      ) VALUES (
-        $1, $2, $3, 'Codex UI Switch Agent', 'googleai/gemini-2.0-flash',
+        $1, $2, $3, 'Codex UI Switch Agent', 'googleai/gemini-2.5-flash-lite',
         'Base sintetica para QA visual do switch node.', '[]'::jsonb,
         true, true, false, 'Vou encaminhar seu atendimento para um humano.', '[]'::jsonb,
         $4::jsonb, '[]'::jsonb, 'on_demand'

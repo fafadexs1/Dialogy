@@ -246,7 +246,7 @@ async function seedSandbox(client: PoolClient) {
         is_primary, is_active, is_private, default_fallback_reply, enabled_tool_names,
         flow_graph, knowledge_collections, tool_mode
      ) VALUES (
-        $1, $2, $3, 'Codex E2E Switch Agent', 'googleai/gemini-2.0-flash',
+        $1, $2, $3, 'Codex E2E Switch Agent', 'googleai/gemini-2.5-flash-lite',
         'Base sintetica para validar Switch Wi-Fi.', '[]'::jsonb,
         true, true, false, 'Vou encaminhar seu atendimento para um humano.', '[]'::jsonb,
         $4::jsonb, '[]'::jsonb, 'on_demand'

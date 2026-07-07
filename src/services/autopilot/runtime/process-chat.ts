@@ -21,6 +21,7 @@ import {
     type ToolRouterTeam,
 } from '@/services/agent-tools/router';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
+import { getGlobalAiDecisionModelConfig } from '@/services/ai/decision-model-config';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
 import { classifyToolIntent } from '@/ai/flows/tool-intent-gate';
@@ -1008,6 +1009,7 @@ export async function processAutopilotForChat(
             `[AUTOPILOT_SERVICE] Modelo salvo "${resolvedAiModel.requestedModel}" nao esta habilitado no catalogo global. Usando "${resolvedAiModel.model}" no chat ${chat.id}.`
         );
     }
+    const aiDecisionModels = await getGlobalAiDecisionModelConfig();
 
     const orchestratorRun = await startOrchestratorRun({
         workspaceId,
@@ -1152,17 +1154,18 @@ export async function processAutopilotForChat(
                         knowledgeDocuments: staticKnowledgeDocuments,
                         enabledToolNames,
                         contactSignals: buildIntentClassifierContactSignals(sanitizedContact),
-                        model: process.env.AI_INTENT_CLASSIFIER_MODEL || resolvedAiModel.model,
+                        model: aiDecisionModels.intentClassifier.model,
                         apiKey: workspaceGeminiApiKey,
-                        timeoutMs: Number(process.env.AI_INTENT_CLASSIFIER_TIMEOUT_MS || 1800),
+                        workspaceId,
+                        timeoutMs: aiDecisionModels.intentClassifier.timeoutMs,
                     }),
-                    Number(process.env.AI_INTENT_CLASSIFIER_TIMEOUT_MS || 1800) + 500,
+                    aiDecisionModels.intentClassifier.timeoutMs + 500,
                     'intent classifier'
                 ),
                 {
                     deterministicIntent: deterministicIntentResolution.intent,
                     deterministicConfidence: deterministicIntentResolution.confidence,
-                    model: process.env.AI_INTENT_CLASSIFIER_MODEL || resolvedAiModel.model,
+                    model: aiDecisionModels.intentClassifier.model,
                 }
             );
             orchestratorTimings.intent_classifier_ms = classifierStage.durationMs;
@@ -1392,11 +1395,12 @@ export async function processAutopilotForChat(
                         targetTeamName: candidate.team.name,
                         candidateReason: candidate.reason,
                         escalationPolicy: autopilotConfig.escalation_policy || '',
-                        model: resolvedAiModel.model,
+                        model: aiDecisionModels.toolIntentGate.model,
                         apiKey: workspaceGeminiApiKey,
-                        timeoutMs: Number(process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS || 2500),
+                        workspaceId,
+                        timeoutMs: aiDecisionModels.toolIntentGate.timeoutMs,
                     }),
-                    Number(process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS || 2500) + 500,
+                    aiDecisionModels.toolIntentGate.timeoutMs + 500,
                     'tool intent gate'
                 ),
                 {
@@ -1847,11 +1851,12 @@ export async function processAutopilotForChat(
                         toolName: 'close_chat',
                         candidateReason: 'Mensagem curta ou ambigua pode indicar pedido de encerramento do atendimento.',
                         closingPolicy: autopilotConfig.closing_policy || '',
-                        model: resolvedAiModel.model,
+                        model: aiDecisionModels.toolIntentGate.model,
                         apiKey: workspaceGeminiApiKey,
-                        timeoutMs: Number(process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS || 2500),
+                        workspaceId,
+                        timeoutMs: aiDecisionModels.toolIntentGate.timeoutMs,
                     }),
-                    Number(process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS || 2500) + 500,
+                    aiDecisionModels.toolIntentGate.timeoutMs + 500,
                     'close intent gate'
                 ),
                 { candidateTool: 'close_chat' }
@@ -1925,18 +1930,19 @@ export async function processAutopilotForChat(
                             toolName: result.toolName,
                             status: result.status,
                         })),
-                        model: process.env.AI_WORKFLOW_CLASSIFIER_MODEL || resolvedAiModel.model,
+                        model: aiDecisionModels.workflowClassifier.model,
                         apiKey: workspaceGeminiApiKey,
-                        timeoutMs: Number(process.env.AI_WORKFLOW_CLASSIFIER_TIMEOUT_MS || 1800),
+                        workspaceId,
+                        timeoutMs: aiDecisionModels.workflowClassifier.timeoutMs,
                     }),
-                    Number(process.env.AI_WORKFLOW_CLASSIFIER_TIMEOUT_MS || 1800) + 500,
+                    aiDecisionModels.workflowClassifier.timeoutMs + 500,
                     'workflow classifier'
                 ),
                 {
                     intent: intentResolution.intent,
                     deterministicExecutionMode: workflowPlan.executionMode,
                     deterministicPlannedTools: workflowPlan.actions.map(resolveActionToolName),
-                    model: process.env.AI_WORKFLOW_CLASSIFIER_MODEL || resolvedAiModel.model,
+                    model: aiDecisionModels.workflowClassifier.model,
                 }
             );
             orchestratorTimings.workflow_classifier_ms = workflowClassifierStage.durationMs;
@@ -4564,6 +4570,7 @@ export async function processAutopilotForChat(
                 const toolPlanner = planAutopilotTools({
                     response: finalResponse,
                     customerMessage: enrichedLastMessageContent || '',
+                    chatHistory: chatHistoryForAI,
                     intentResolution,
                     slotExtraction: workflowPlan.slotExtraction,
                     actions: resourceMappedActions.actions,
@@ -4677,6 +4684,7 @@ export async function processAutopilotForChat(
                         customerMessage: enrichedLastMessageContent || '',
                         availableTeams,
                         candidates: deterministicRouting.candidates,
+                        allowSafetyCriticalHandoff: toolPlanner.metadata.safetyCriticalHandoff === true,
                     }),
                     passThroughToolResults
                 );
@@ -5107,6 +5115,7 @@ export async function processAutopilotForChat(
             const emptyResponseToolPlanner = planAutopilotTools({
                 response: null,
                 customerMessage: enrichedLastMessageContent || '',
+                chatHistory: chatHistoryForAI,
                 intentResolution,
                 slotExtraction: workflowPlan.slotExtraction,
                 actions: emptyResponseResourceMappedActions.actions,
@@ -5132,6 +5141,7 @@ export async function processAutopilotForChat(
                 customerMessage: enrichedLastMessageContent || '',
                 availableTeams,
                 candidates: deterministicRouting.candidates,
+                allowSafetyCriticalHandoff: emptyResponseToolPlanner.metadata.safetyCriticalHandoff === true,
             });
             const toolResults = currentCopilotMode === 'auto'
                 ? (await timeOrchestratorStage(

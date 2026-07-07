@@ -34,10 +34,16 @@ import { isAllowedAutopilotModel, resolveAutopilotModelFromCatalog } from '@/ser
 import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
 import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
-import { normalizeGoogleAiModelId } from '@/lib/ai-models';
+import { getAiModelRuntimeProvider, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-rewrite';
 import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
 import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
+import { resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
+import {
+    isWorkspaceConfiguredAiModel,
+    listWorkspaceConfiguredAiModels,
+    type ConfiguredWorkspaceAiModel,
+} from '@/services/ai/workspace-ai-credentials';
 import { resolveAllowedKnowledgeDocumentIds } from '@/services/autopilot/turn-policy';
 import { auditAutopilotFlowGraph, summarizeFlowAuditIssues } from '@/services/autopilot/flow-audit';
 import {
@@ -152,7 +158,7 @@ function readFormBoolean(formData: FormData, field: string, fallback = false): b
 function buildSnapshotFromConfigRow(row: any): AutopilotConfigDraftSnapshot {
     return {
         name: row.name || 'Meu agente de IA',
-        gemini_api_key: row.gemini_api_key || null,
+        gemini_api_key: null,
         ai_model: row.ai_model || null,
         transcription_model: row.transcription_model || null,
         knowledge_base: row.knowledge_base || null,
@@ -180,9 +186,7 @@ function normalizeDraftSnapshot(
         name: typeof snapshot.name === 'string' && snapshot.name.trim().length > 0
             ? snapshot.name
             : fallback.name,
-        gemini_api_key: hasOwn('gemini_api_key')
-            ? (typeof snapshot.gemini_api_key === 'string' && snapshot.gemini_api_key.length > 0 ? snapshot.gemini_api_key : null)
-            : fallback.gemini_api_key,
+        gemini_api_key: null,
         ai_model: hasOwn('ai_model')
             ? (typeof snapshot.ai_model === 'string' && snapshot.ai_model.length > 0 ? snapshot.ai_model : null)
             : fallback.ai_model,
@@ -222,9 +226,10 @@ async function buildSnapshotFromFormData(
     formData: FormData,
     fallback: AutopilotConfigDraftSnapshot,
 ): Promise<AutopilotConfigDraftSnapshot> {
+    const workspaceId = formData.get('workspaceId')?.toString() || '';
     const requestedModel = formData.get('aiModel')?.toString() || fallback.ai_model || '';
-    if (requestedModel && !(await isAllowedAutopilotModel(requestedModel))) {
-        throw new Error('Modelo de IA nao esta habilitado no catalogo global.');
+    if (requestedModel && !(await isAllowedModelForWorkspace(workspaceId, requestedModel))) {
+        throw new Error('Modelo de IA nao esta habilitado no catalogo global ou nas integracoes do workspace.');
     }
 
     let documents = fallback.knowledge_base_documents;
@@ -238,9 +243,7 @@ async function buildSnapshotFromFormData(
 
     return {
         name: formData.get('agentName')?.toString() || fallback.name || 'Meu agente de IA',
-        gemini_api_key: formData.has('geminiApiKey')
-            ? (formData.get('geminiApiKey')?.toString() || null)
-            : fallback.gemini_api_key,
+        gemini_api_key: null,
         ai_model: requestedModel || null,
         transcription_model: fallback.transcription_model || null,
         knowledge_base: formData.has('knowledgeBase')
@@ -636,7 +639,7 @@ export async function improveAutopilotKnowledgeDocument(
         const improved = await improveKnowledgeDocumentForRag({
             document,
             model: runtime.model,
-            apiKey: config.gemini_api_key || runtime.workspaceGeminiApiKey,
+            apiKey: runtime.workspaceGeminiApiKey,
         });
         const requiredTools = Array.from(new Set([
             ...(document.requiredTools || []),
@@ -831,13 +834,22 @@ export async function generateAutopilotFlowWithAi(input: {
             targetModel = resolved.model;
         }
 
+        const apiKeyCandidates = await resolveAiProviderKeyCandidates({
+            config,
+            workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
+        });
+        const targetProvider = getAiModelRuntimeProvider(targetModel);
+        const modelApiKey = apiKeyCandidates.find(candidate => (
+            !candidate.provider || candidate.provider === targetProvider
+        ))?.key;
+
         const proposal = await generateAutopilotFlowProposal({
             conversation,
             currentGraph: input.currentGraph || null,
             currentSystemPrompt: input.currentSystemPrompt || '',
             tools: scopedTools,
             model: targetModel,
-            apiKey: config.gemini_api_key || runtime.workspaceGeminiApiKey,
+            apiKey: modelApiKey,
         });
         return { proposal };
     } catch (error) {
@@ -858,6 +870,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
     versions?: AutopilotConfigVersionSummary[],
     workspace: Workspace | null,
     workspaceDefaultAiModel?: string | null,
+    workspaceConfiguredAiModels?: ConfiguredWorkspaceAiModel[],
     workspaceHasGeminiConfig?: boolean,
     error?: string,
     hasGlobalKey?: boolean
@@ -949,21 +962,15 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             snapshot: normalizeDraftSnapshot(row.snapshot, selectedSnapshot),
         })) as AutopilotConfigVersionSummary[];
 
-        // Fetch Gemini Integration Config
-        const integrationRes = await db.query(`
-            SELECT config, is_active 
-            FROM workspace_integrations 
-            WHERE workspace_id = $1 AND provider = 'gemini'
-        `, [workspaceId]);
-
-        let geminiKeyFromIntegration = null;
-        let aiModelFromIntegration = null;
-
-        if (integrationRes.rows.length > 0 && integrationRes.rows[0].is_active) {
-            const intConfig = integrationRes.rows[0].config;
-            geminiKeyFromIntegration = intConfig.apiKey;
-            aiModelFromIntegration = normalizeGoogleAiModelId(intConfig.aiModel);
-        }
+        const workspaceConfiguredAiModels = await listWorkspaceConfiguredAiModels(workspaceId);
+        const workspaceDefaultAiModel = workspaceConfiguredAiModels[0]?.id || null;
+        const hasGlobalAiKey = !!(
+            process.env.GOOGLE_GENAI_API_KEY ||
+            process.env.GEMINI_API_KEY ||
+            process.env.OPENAI_API_KEY ||
+            process.env.CODEX_API_KEY ||
+            process.env.DEEPSEEK_API_KEY
+        );
 
         return {
             config: selectedConfig,
@@ -972,9 +979,10 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             draft,
             versions,
             workspace,
-            workspaceDefaultAiModel: aiModelFromIntegration,
-            workspaceHasGeminiConfig: Boolean(geminiKeyFromIntegration || aiModelFromIntegration),
-            hasGlobalKey: !!(process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY)
+            workspaceDefaultAiModel,
+            workspaceConfiguredAiModels,
+            workspaceHasGeminiConfig: workspaceConfiguredAiModels.length > 0,
+            hasGlobalKey: hasGlobalAiKey
         };
 
     } catch (error) {
@@ -985,6 +993,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             agents: null,
             workspace: null,
             workspaceDefaultAiModel: null,
+            workspaceConfiguredAiModels: [],
             workspaceHasGeminiConfig: false,
             error: 'Falha ao buscar configurações do banco de dados.',
             hasGlobalKey: false
@@ -1032,14 +1041,10 @@ export async function saveAutopilotConfig(
 
         valueIndex = 3;
 
-        if (formData.has('geminiApiKey')) {
-            setClauses.push(`gemini_api_key = $${valueIndex++}`);
-            values.push(formData.get('geminiApiKey') || null);
-        }
         if (formData.has('aiModel')) {
             const requestedModel = formData.get('aiModel')?.toString() || '';
-            if (!(await isAllowedAutopilotModel(requestedModel))) {
-                return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global.' };
+            if (!(await isAllowedModelForWorkspace(workspaceId, requestedModel))) {
+                return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global ou nas integracoes do workspace.' };
             }
             setClauses.push(`ai_model = $${valueIndex++}`);
             values.push(requestedModel);
@@ -1366,9 +1371,9 @@ export async function publishAutopilotDraft(configId: string): Promise<{
 
         const fallback = buildSnapshotFromConfigRow(configRow);
         const snapshot = normalizeDraftSnapshot(draftRes.rows[0].snapshot, fallback);
-        if (snapshot.ai_model && !(await isAllowedAutopilotModel(snapshot.ai_model))) {
+        if (snapshot.ai_model && !(await isAllowedModelForWorkspace(currentWorkspaceId, snapshot.ai_model))) {
             await client.query('ROLLBACK');
-            return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global.' };
+            return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global ou nas integracoes do workspace.' };
         }
         const flowAudit = auditAutopilotFlowGraph(snapshot.flow_graph);
         if (flowAudit.status === 'failed') {
@@ -1536,9 +1541,9 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
 
         const fallback = buildSnapshotFromConfigRow(configRow);
         const snapshot = normalizeDraftSnapshot(versionRes.rows[0].snapshot, fallback);
-        if (snapshot.ai_model && !(await isAllowedAutopilotModel(snapshot.ai_model))) {
+        if (snapshot.ai_model && !(await isAllowedModelForWorkspace(currentWorkspaceId, snapshot.ai_model))) {
             await client.query('ROLLBACK');
-            return { success: false, error: 'Modelo de IA desta versao nao esta habilitado no catalogo global.' };
+            return { success: false, error: 'Modelo de IA desta versao nao esta habilitado no catalogo global ou nas integracoes do workspace.' };
         }
 
         previousDocs = fallback.knowledge_base_documents;
@@ -2318,6 +2323,15 @@ async function resolveAutopilotConfigWorkspace(configId: string, userId: string)
             ? config.vertical.trim().toLowerCase()
             : null,
     };
+}
+
+async function isAllowedModelForWorkspace(
+    workspaceId: string,
+    model?: string | null,
+): Promise<boolean> {
+    if (!model || model.trim().length === 0) return false;
+    if (await isAllowedAutopilotModel(model)) return true;
+    return isWorkspaceConfiguredAiModel(workspaceId, model);
 }
 
 async function optionalDecisionInsightQuery<T extends { rows: any[] }>(

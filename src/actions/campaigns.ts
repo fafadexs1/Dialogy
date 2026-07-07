@@ -4,12 +4,13 @@
 import { db } from '@/lib/db';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import { revalidatePath } from 'next/cache';
-import type { Campaign, CampaignChannel, CampaignDetails, CampaignRecipientDetail, CampaignTemplate } from '@/lib/types';
+import type { Campaign, CampaignChannel, CampaignDetails, CampaignMediaAttachment, CampaignRecipientDetail, CampaignScheduleConfig, CampaignTemplate } from '@/lib/types';
 import { sendAgentTemplateAction, sendAutomatedMessageAction } from './messages';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
 import {
+    extractWhatsappDigits,
     findOrCreateWhatsappContact,
     normalizeWhatsappJid,
 } from '@/lib/whatsapp/contact-identity';
@@ -18,6 +19,14 @@ import {
     combineSegmentCriteria,
     type CriteriaGroup,
 } from '@/lib/crm-query-builder';
+import {
+    buildCampaignRecipientSchedule,
+    normalizeCampaignScheduleConfig,
+} from '@/services/campaigns/schedule';
+import {
+    buildCampaignTemplateSendComponents,
+    renderCampaignMessage,
+} from '@/lib/campaigns/personalization';
 
 export type CampaignDeliveryTarget = {
     channel: CampaignChannel;
@@ -25,6 +34,45 @@ export type CampaignDeliveryTarget = {
     metaChannelId?: string;
     template?: CampaignTemplate | null;
 };
+
+function normalizeCsvWhatsappIdentity(value?: string | null): string | null {
+    const raw = String(value || '').trim();
+    const digits = extractWhatsappDigits(raw);
+    if (!raw || !digits) return null;
+
+    if (!raw.startsWith('+') && !raw.includes('@') && (digits.length === 10 || digits.length === 11)) {
+        return normalizeWhatsappJid(`55${digits}`);
+    }
+
+    return normalizeWhatsappJid(raw);
+}
+
+function normalizeCampaignMediaAttachment(
+    attachment?: CampaignMediaAttachment | null
+): CampaignMediaAttachment | null {
+    if (!attachment) return null;
+
+    const type = attachment.type === 'audio' ? 'audio' : attachment.type === 'image' ? 'image' : null;
+    const url = String(attachment.url || '').trim();
+    const mimetype = String(attachment.mimetype || '').trim();
+    const filename = String(attachment.filename || '').trim();
+
+    if (!type || !url || !/^https?:\/\//i.test(url) || !mimetype || !filename) {
+        return null;
+    }
+
+    if (type === 'image' && !mimetype.startsWith('image/')) return null;
+    if (type === 'audio' && !mimetype.startsWith('audio/')) return null;
+
+    return {
+        type,
+        url,
+        mimetype,
+        filename,
+        storageBucket: attachment.storageBucket,
+        storagePath: attachment.storagePath,
+    };
+}
 
 function revalidateCampaignsSafely() {
     try {
@@ -47,35 +95,16 @@ async function updateCampaignFinalStatus(campaignId: string): Promise<'completed
     const finalStatus: 'completed' | 'failed' = totals.total > 0 && totals.sent === totals.total
         ? 'completed'
         : 'failed';
-
     await db.query(
         `UPDATE campaigns
          SET status = $1,
-             completed_at = CASE WHEN $1 = 'completed' THEN COALESCE(completed_at, NOW()) ELSE completed_at END
+             completed_at = NOW(),
+             updated_at = NOW()
          WHERE id = $2`,
         [finalStatus, campaignId]
     );
-
     return finalStatus;
 }
-
-function buildTemplateSendComponents(template: CampaignTemplate, contactName: string): any[] {
-    const body = template.components?.find(component => String(component.type).toUpperCase() === 'BODY');
-    const placeholderCount = (String(body?.text || '').match(/\{\{\d+\}\}/g) || []).length;
-
-    if (placeholderCount === 0) {
-        return [];
-    }
-
-    return [{
-        type: 'body',
-        parameters: Array.from({ length: placeholderCount }, () => ({
-            type: 'text',
-            text: contactName,
-        })),
-    }];
-}
-
 
 export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Campaign[] | null, error?: string }> {
     const supabase = await createClient();
@@ -91,6 +120,7 @@ export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Ca
                 c.*,
                 (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id) as total_recipients,
                 (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id AND cr.status = 'sent') as sent_recipients,
+                (SELECT COUNT(*) FROM campaign_recipients cr WHERE cr.campaign_id = c.id AND cr.status IN ('sent', 'failed', 'cancelled')) as processed_recipients,
                 COALESCE(
                     NULLIF(c.delivery_channel, ''),
                     CASE WHEN i.type = 'wa_cloud' THEN 'whatsapp_cloud' ELSE 'whatsapp_baileys' END
@@ -105,14 +135,15 @@ export async function getCampaigns(workspaceId: string): Promise<{ campaigns: Ca
         const campaigns: Campaign[] = res.rows.map(row => {
             const totalRecipients = Number.parseInt(row.total_recipients, 10) || 0;
             const sentRecipients = Number.parseInt(row.sent_recipients, 10) || 0;
-            const progress = totalRecipients > 0 ? (sentRecipients / totalRecipients) * 100 : 0;
+            const processedRecipients = Number.parseInt(row.processed_recipients, 10) || 0;
+            const progress = totalRecipients > 0 ? (processedRecipients / totalRecipients) * 100 : 0;
 
             return {
                 ...row,
                 progress,
                 recipients: totalRecipients,
                 status: totalRecipients > 0 && sentRecipients === totalRecipients ? 'completed' : row.status,
-                deliveredPct: progress,
+                deliveredPct: totalRecipients > 0 ? (sentRecipients / totalRecipients) * 100 : 0,
             };
         });
 
@@ -153,9 +184,13 @@ export async function getCampaignDetails(workspaceId: string, campaignId: string
         const recipientsRes = await db.query(
             `SELECT cr.id,
                     cr.campaign_id,
-                    cr.contact_id,
-                    cr.status,
-                    cr.sent_at,
+                     cr.contact_id,
+                     cr.status,
+                     cr.scheduled_at,
+                     cr.attempt_count,
+                     cr.max_attempts,
+                     cr.last_attempt_at,
+                     cr.sent_at,
                     cr.error_message,
                     ct.name AS contact_name,
                     ct.phone_number_jid,
@@ -166,7 +201,8 @@ export async function getCampaignDetails(workspaceId: string, campaignId: string
              LEFT JOIN LATERAL (
                 SELECT m.id, m.api_message_status
                 FROM messages m
-                WHERE m.metadata ->> 'campaignRecipientId' = cr.id::text
+                WHERE m.id = cr.message_id
+                   OR m.metadata ->> 'campaignRecipientId' = cr.id::text
                 ORDER BY m.created_at DESC
                 LIMIT 1
              ) linked_message ON TRUE
@@ -180,7 +216,12 @@ export async function getCampaignDetails(workspaceId: string, campaignId: string
         const linkedMessages = recipientDetails.filter(recipient => Boolean(recipient.message_id)).length;
         const sent = recipientDetails.filter(recipient => recipient.status === 'sent').length;
         const failed = recipientDetails.filter(recipient => recipient.status === 'failed').length;
-        const pending = recipientDetails.filter(recipient => recipient.status === 'pending').length;
+        const pending = recipientDetails.filter(recipient =>
+            ['waiting', 'scheduled', 'processing'].includes(recipient.status)
+        ).length;
+        const paused = recipientDetails.filter(recipient => recipient.status === 'paused').length;
+        const cancelled = recipientDetails.filter(recipient => recipient.status === 'cancelled').length;
+        const processed = sent + failed + cancelled;
         const deliveryStatuses = new Set(['DELIVERED', 'DELIVERY', 'DELIVERY_ACK', 'READ', 'PLAYED']);
         const readStatuses = new Set(['READ', 'PLAYED']);
         const delivered = recipientDetails.filter(recipient => deliveryStatuses.has(String(recipient.api_message_status || '').toUpperCase())).length;
@@ -191,7 +232,7 @@ export async function getCampaignDetails(workspaceId: string, campaignId: string
             campaign: {
                 ...campaign,
                 recipients: total,
-                progress: total > 0 ? (sent / total) * 100 : 0,
+                progress: total > 0 ? (processed / total) * 100 : 0,
                 deliveredPct: total > 0 ? (delivered / total) * 100 : 0,
                 status: total > 0 && sent === total ? 'completed' : campaign.status,
                 metrics: {
@@ -201,6 +242,8 @@ export async function getCampaignDetails(workspaceId: string, campaignId: string
                     read,
                     failed,
                     pending,
+                    paused,
+                    cancelled,
                     linkedMessages,
                     deliveryRate: total > 0 ? (delivered / total) * 100 : 0,
                     readRate: total > 0 ? (read / total) * 100 : 0,
@@ -219,7 +262,9 @@ export async function createCampaign(
     delivery: CampaignDeliveryTarget | string,
     message: string,
     contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[],
-    segmentIds: string[] = []
+    segmentIds: string[] = [],
+    requestedSchedule?: Partial<CampaignScheduleConfig>,
+    mediaAttachment?: CampaignMediaAttachment | null,
 ): Promise<{ campaign: Campaign | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -232,12 +277,23 @@ export async function createCampaign(
     const metaChannelId = target.metaChannelId?.trim();
     const destinationId = instanceName || metaChannelId;
     const selectedSegmentIds = [...new Set(segmentIds.filter(Boolean))];
+    const scheduleConfig = normalizeCampaignScheduleConfig(requestedSchedule);
+    const normalizedMediaAttachment = normalizeCampaignMediaAttachment(mediaAttachment);
 
     if (!workspaceId || !destinationId || !message || (contactIdentifiers.length === 0 && selectedSegmentIds.length === 0)) {
         return { campaign: null, error: 'Dados da campanha incompletos.' };
     }
+    if (!scheduleConfig.consentConfirmed) {
+        return { campaign: null, error: 'Confirme que os destinatarios consentiram em receber esta campanha.' };
+    }
     if (target.channel === 'whatsapp_cloud' && !target.template?.name) {
         return { campaign: null, error: 'Selecione um template aprovado para a campanha do WhatsApp Cloud.' };
+    }
+    if (mediaAttachment && !normalizedMediaAttachment) {
+        return { campaign: null, error: 'Anexo invalido. Envie uma imagem ou audio com URL publica HTTPS.' };
+    }
+    if (normalizedMediaAttachment && target.channel !== 'whatsapp_baileys') {
+        return { campaign: null, error: 'Anexos de imagem e audio estao disponiveis apenas para WhatsApp conectado.' };
     }
     if (!target.channel.startsWith('whatsapp') && contactIdentifiers.some(contact => contact.id.startsWith('csv-'))) {
         return { campaign: null, error: 'A importacao CSV esta disponivel apenas para campanhas de WhatsApp.' };
@@ -295,18 +351,25 @@ export async function createCampaign(
         const campaignRes = await client.query(
             `INSERT INTO campaigns (
                 workspace_id, created_by_id, name, message, instance_name, status,
-                delivery_channel, destination_id, template_payload
+                delivery_channel, destination_id, template_payload, media_payload, schedule_config,
+                scheduled_end_at, started_at
              )
-             VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8) RETURNING *`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                     CASE WHEN $6 = 'sending' THEN NOW() ELSE NULL END)
+             RETURNING *`,
             [
                 workspaceId,
                 user.id,
                 `Campanha ${new Date().toLocaleString()}`,
                 message,
                 storedInstanceName,
+                scheduleConfig.mode === 'immediate' ? 'sending' : 'scheduled',
                 target.channel,
                 destinationId,
                 target.template ? JSON.stringify(target.template) : null,
+                normalizedMediaAttachment ? JSON.stringify(normalizedMediaAttachment) : null,
+                JSON.stringify(scheduleConfig),
+                scheduleConfig.endAt || null,
             ]
         );
         const newCampaign = campaignRes.rows[0];
@@ -359,7 +422,7 @@ export async function createCampaign(
         for (const csvContact of csvContactsData) {
             if (!csvContact.phone_number_jid) continue; // Skip if no number
 
-            const normalizedJid = normalizeWhatsappJid(csvContact.phone_number_jid);
+            const normalizedJid = normalizeCsvWhatsappIdentity(csvContact.phone_number_jid);
             if (!normalizedJid) continue;
 
             const resolvedContact = await findOrCreateWhatsappContact(client, {
@@ -377,23 +440,64 @@ export async function createCampaign(
         if (uniqueContactIds.length === 0) {
             throw new Error('As listas e contatos selecionados não possuem destinatários válidos.');
         }
+        const eligibleContactsRes = await client.query(
+            `SELECT id
+             FROM contacts
+             WHERE workspace_id = $1
+               AND id = ANY($2::uuid[])
+               AND marketing_opt_out_at IS NULL
+             ORDER BY id`,
+            [workspaceId, uniqueContactIds]
+        );
+        const eligibleContactIds = eligibleContactsRes.rows.map(row => String(row.id));
+        const optedOutCount = uniqueContactIds.length - eligibleContactIds.length;
+        if (eligibleContactIds.length === 0) {
+            throw new Error('Todos os contatos selecionados estao marcados como opt-out.');
+        }
+
+        const recipientSchedule = buildCampaignRecipientSchedule({
+            recipientIds: eligibleContactIds,
+            config: scheduleConfig,
+        });
+
         await client.query(
-            `INSERT INTO campaign_recipients (campaign_id, contact_id)
-             SELECT $1, recipient_id
-             FROM unnest($2::uuid[]) AS recipient_id`,
-            [newCampaign.id, uniqueContactIds]
+            `INSERT INTO campaign_recipients (
+                campaign_id, contact_id, status, scheduled_at, max_attempts
+             )
+             SELECT $1, schedule.contact_id, schedule.status, schedule.scheduled_at, $5
+             FROM unnest($2::uuid[], $3::text[], $4::timestamptz[])
+               AS schedule(contact_id, status, scheduled_at)
+             ON CONFLICT (campaign_id, contact_id) DO NOTHING`,
+            [
+                newCampaign.id,
+                recipientSchedule.map(item => item.recipientId),
+                recipientSchedule.map(item => item.status),
+                recipientSchedule.map(item => item.scheduledAt.toISOString()),
+                scheduleConfig.maxAttempts,
+            ]
+        );
+
+        await client.query(
+            `UPDATE campaigns
+             SET opted_out_count = $1,
+                 updated_at = NOW()
+             WHERE id = $2`,
+            [optedOutCount, newCampaign.id]
         );
 
 
         await client.query('COMMIT');
 
-        // Now, start sending process and wait for it to complete.
-        // We do this in the background to not block the UI response
-        startCampaignSending(newCampaign.id);
-
         revalidatePath('/campaigns');
 
-        return { campaign: newCampaign };
+        return {
+            campaign: {
+                ...newCampaign,
+                opted_out_count: optedOutCount,
+                media_payload: normalizedMediaAttachment,
+                schedule_config: scheduleConfig,
+            },
+        };
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -417,7 +521,7 @@ async function startCampaignSending(campaignId: string) {
                     cam.message, cam.instance_name, cam.workspace_id,
                     cam.created_by_id,
                     COALESCE(NULLIF(cam.delivery_channel, ''), 'whatsapp_baileys') as delivery_channel,
-                    cam.destination_id, cam.template_payload
+                    cam.destination_id, cam.template_payload, cam.schedule_config
              FROM campaign_recipients cr
              JOIN contacts c ON cr.contact_id = c.id
              JOIN campaigns cam ON cr.campaign_id = cam.id
@@ -487,8 +591,12 @@ async function startCampaignSending(campaignId: string) {
                     chatId = newChatRes.rows[0].id;
                 }
 
-                // Personalize message
-                const personalizedMessage = recipient.message.replace(/{{nome}}/gi, recipient.contact_name);
+                const personalizationNow = new Date();
+                const personalizedMessage = renderCampaignMessage(recipient.message, {
+                    contactName: recipient.contact_name,
+                    now: personalizationNow,
+                    timeZone: recipient.schedule_config?.timeZone,
+                });
 
                 const campaignSenderId = recipient.created_by_id;
                 const campaignMetadata = {
@@ -504,7 +612,12 @@ async function startCampaignSending(campaignId: string) {
                         instanceName: instanceName!,
                         name: recipient.template_payload.name,
                         language: recipient.template_payload.language,
-                        components: buildTemplateSendComponents(recipient.template_payload, recipient.contact_name),
+                        components: buildCampaignTemplateSendComponents(recipient.template_payload, {
+                            contactName: recipient.contact_name,
+                            campaignMessage: recipient.message,
+                            now: personalizationNow,
+                            timeZone: recipient.schedule_config?.timeZone,
+                        }),
                         renderedContent: personalizedMessage,
                         metadata: campaignMetadata,
                         senderUserId: campaignSenderId,
@@ -543,6 +656,161 @@ async function startCampaignSending(campaignId: string) {
         console.error(`[CAMPAIGN_WORKER] Erro fatal no worker da campanha ${campaignId}:`, error);
         await updateCampaignFinalStatus(campaignId);
         revalidateCampaignsSafely();
+    }
+}
+
+async function getAuthorizedCampaignWorkspace(campaignId: string): Promise<{
+    userId?: string;
+    workspaceId?: string;
+    error?: string;
+}> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        return { error: 'Usuario nao autenticado.' };
+    }
+    const result = await db.query(
+        'SELECT workspace_id FROM campaigns WHERE id = $1 LIMIT 1',
+        [campaignId]
+    );
+    const workspaceId = result.rows[0]?.workspace_id;
+    if (!workspaceId) {
+        return { error: 'Campanha nao encontrada.' };
+    }
+    if (!await hasWorkspacePermission(user.id, workspaceId, 'campaigns:manage')) {
+        return { error: 'Voce nao tem permissao para gerenciar esta campanha.' };
+    }
+    return { userId: user.id, workspaceId };
+}
+
+export async function pauseCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
+    const access = await getAuthorizedCampaignWorkspace(campaignId);
+    if (access.error) return { success: false, error: access.error };
+
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await client.query(
+            `UPDATE campaigns
+             SET status = 'paused',
+                 paused_at = NOW(),
+                 pause_reason = 'Pausada manualmente.',
+                 updated_at = NOW()
+             WHERE id = $1
+               AND status IN ('scheduled', 'sending')
+             RETURNING id`,
+            [campaignId]
+        );
+        if ((result.rowCount ?? 0) === 0) {
+            throw new Error('A campanha nao esta em um estado que possa ser pausado.');
+        }
+        await client.query(
+            `UPDATE campaign_recipients
+             SET status = 'paused',
+                 locked_at = NULL,
+                 locked_by = NULL,
+                 updated_at = NOW()
+             WHERE campaign_id = $1
+               AND status IN ('waiting', 'scheduled')`,
+            [campaignId]
+        );
+        await client.query('COMMIT');
+        revalidatePath('/campaigns');
+        return { success: true };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        return { success: false, error: error instanceof Error ? error.message : 'Falha ao pausar campanha.' };
+    } finally {
+        client.release();
+    }
+}
+
+export async function resumeCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
+    const access = await getAuthorizedCampaignWorkspace(campaignId);
+    if (access.error) return { success: false, error: access.error };
+
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await client.query(
+            `UPDATE campaigns
+             SET status = CASE
+                   WHEN EXISTS (
+                     SELECT 1 FROM campaign_recipients cr
+                     WHERE cr.campaign_id = campaigns.id
+                       AND cr.scheduled_at <= NOW()
+                   ) THEN 'sending'
+                   ELSE 'scheduled'
+                 END,
+                 paused_at = NULL,
+                 pause_reason = NULL,
+                 updated_at = NOW()
+             WHERE id = $1
+               AND status = 'paused'
+             RETURNING id`,
+            [campaignId]
+        );
+        if ((result.rowCount ?? 0) === 0) {
+            throw new Error('A campanha nao esta pausada.');
+        }
+        await client.query(
+            `UPDATE campaign_recipients
+             SET status = CASE WHEN scheduled_at <= NOW() THEN 'waiting' ELSE 'scheduled' END,
+                 updated_at = NOW()
+             WHERE campaign_id = $1
+               AND status = 'paused'`,
+            [campaignId]
+        );
+        await client.query('COMMIT');
+        revalidatePath('/campaigns');
+        return { success: true };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        return { success: false, error: error instanceof Error ? error.message : 'Falha ao retomar campanha.' };
+    } finally {
+        client.release();
+    }
+}
+
+export async function cancelCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
+    const access = await getAuthorizedCampaignWorkspace(campaignId);
+    if (access.error) return { success: false, error: access.error };
+
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await client.query(
+            `UPDATE campaigns
+             SET status = 'cancelled',
+                 cancelled_at = NOW(),
+                 updated_at = NOW()
+             WHERE id = $1
+               AND status IN ('draft', 'scheduled', 'sending', 'paused')
+             RETURNING id`,
+            [campaignId]
+        );
+        if ((result.rowCount ?? 0) === 0) {
+            throw new Error('A campanha nao esta em um estado que possa ser cancelado.');
+        }
+        await client.query(
+            `UPDATE campaign_recipients
+             SET status = 'cancelled',
+                 cancelled_at = NOW(),
+                 locked_at = NULL,
+                 locked_by = NULL,
+                 updated_at = NOW()
+             WHERE campaign_id = $1
+               AND status IN ('waiting', 'scheduled', 'paused')`,
+            [campaignId]
+        );
+        await client.query('COMMIT');
+        revalidatePath('/campaigns');
+        return { success: true };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        return { success: false, error: error instanceof Error ? error.message : 'Falha ao cancelar campanha.' };
+    } finally {
+        client.release();
     }
 }
 

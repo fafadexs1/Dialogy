@@ -1,0 +1,573 @@
+
+> nextn@0.1.0 dev:next
+> node scripts/dev-with-stripe.cjs --no-stripe
+
+[dev] Forcing Turbopack because DIALOGY_USE_TURBO is enabled.
+[dev] Overriding NEXTAUTH_URL from https://dialogy.klyraai.com.br to http://localhost:9002 for local development.
+[dev] Overriding NEXT_PUBLIC_APP_URL from https://dialogy.klyraai.com.br to http://localhost:9002 for local development.
+[dev] Overriding NEXT_PUBLIC_SITE_URL from https://dialogy.klyraai.com.br to http://localhost:9002 for local development.
+[dev] Stripe CLI autostart disabled by STRIPE_CLI_AUTOSTART.
+[dev] Injected the live Stripe webhook secret into the Next dev process.
+[dev] Starting Next dev server on port 9002.
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:9002
+- Network:       http://192.168.1.8:9002
+- Environments: .env
+✓ Ready in 1006ms
+Next.js config loaded with experimental.serverActions.bodySizeLimit: 100mb
+Skipping custom webpack config in development.
+- Experiments (use with caution):
+  ⨯ lockDistDir
+  · proxyClientMaxBodySize: "100mb"
+  · serverActions
+
+ GET / 200 in 3.0s (next.js: 206ms, proxy.ts: 609ms, application-code: 2.2s)
+ GET /login 200 in 216ms (next.js: 97ms, proxy.ts: 10ms, application-code: 108ms)
+ POST /login 200 in 818ms (next.js: 8ms, proxy.ts: 10ms, application-code: 801ms)
+  └─ ƒ login({"message":"","success":false}, {}) in 768ms src/actions/auth.ts
+[PERF] fetchChats took 301.96ms for limit 10
+[PERF] fetchChats took 306.80ms for limit 200
+ GET /api/build-id 200 in 123ms (next.js: 66ms, proxy.ts: 44ms, application-code: 14ms)
+ GET /api/build-id 200 in 136ms (next.js: 74ms, proxy.ts: 51ms, application-code: 11ms)
+ GET /inbox 200 in 4.5s (next.js: 249ms, proxy.ts: 7ms, application-code: 4.2s)
+ GET /api/media?url=https%3A%2F%2Fsupabase.vps1.klyraai.com.br%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fworkspace-avatars%2Fpublic%2Fe3b476a1-5de8-4744-80b5-a5d23fe15fab-1778131869544.png&kind=image 200 in 1875ms (next.js: 98ms, proxy.ts: 7ms, application-code: 1771ms)
+ POST /inbox 200 in 1487ms (next.js: 19ms, proxy.ts: 21ms, application-code: 1447ms)
+  └─ ƒ getGlobalAlertAction() in 21ms src/actions/system-alerts.ts
+ GET /api/media?url=https%3A%2F%2Fsupabase.vps1.klyraai.com.br%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fphoto_user%2F8fe1f4da-9305-475c-95d1-83bda9f29b22-1778252491695&kind=image 200 in 1859ms (next.js: 14ms, proxy.ts: 15ms, application-code: 1830ms)
+ POST /login 303 in 6.3s (next.js: 10ms, proxy.ts: 7ms, application-code: 6.3s)
+  └─ ƒ login({"message":"E-mail ou senha incorretos.","success":false}, {}) in 207ms src/actions/auth.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"bootstrap","previousSessionCount":0,"nextSessionCount":1,"previousIsOnline":false,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:10:21.976Z","nextLastSeen":"2026-07-07T23:36:39.675Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 2.2s (next.js: 160ms, proxy.ts: 51ms, application-code: 2.0s)
+ POST /inbox 200 in 175ms (next.js: 9ms, proxy.ts: 6ms, application-code: 159ms)
+  └─ ƒ getTags("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 139ms src/actions/crm.ts
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F491872923_2481357095557936_4174351236307101427_n.jpg%3Fccb%3D11-4%26oh%3D01_Q5Aa3AGZz9dFD72L67u8vX33ENtSUYwl4GS226E6q6EIeynN0w%26oe%3D692C4E8D%26_nc_sid%3D5e03e0%26_nc_cat%3D104&kind=image 200 in 94ms (next.js: 4ms, proxy.ts: 7ms, application-code: 83ms)
+ POST /inbox 200 in 85ms (next.js: 7ms, proxy.ts: 7ms, application-code: 71ms)
+  └─ ƒ getTags("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 57ms src/actions/crm.ts
+[PERF] fetchChatsDelta took 45.97ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 168ms (next.js: 7ms, proxy.ts: 8ms, application-code: 153ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 139ms src/actions/chats.ts
+ POST /inbox 200 in 104ms (next.js: 6ms, proxy.ts: 7ms, application-code: 91ms)
+  └─ ƒ getTeams("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 78ms src/actions/teams.ts
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 1296ms (next.js: 1214ms, proxy.ts: 10ms, application-code: 72ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 721ms (next.js: 483ms, proxy.ts: 5ms, application-code: 233ms)
+ POST /inbox 200 in 536ms (next.js: 6ms, proxy.ts: 6ms, application-code: 525ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab", undefined) in 411ms src/actions/autopilot.ts
+ POST /inbox 200 in 87ms (next.js: 7ms, proxy.ts: 7ms, application-code: 73ms)
+  └─ ƒ getShortcuts("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 61ms src/actions/shortcuts.ts
+ POST /inbox 200 in 63ms (next.js: 7ms, proxy.ts: 6ms, application-code: 49ms)
+  └─ ƒ getWorkspaceUsers("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 36ms src/actions/crm.ts
+ POST /inbox 200 in 59ms (next.js: 7ms, proxy.ts: 6ms, application-code: 46ms)
+  └─ ƒ getCustomFieldDefinitions("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 34ms src/actions/crm.ts
+ POST /inbox 200 in 148ms (next.js: 7ms, proxy.ts: 7ms, application-code: 134ms)
+  └─ ƒ getIntegrationConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab", "sgp") in 121ms src/actions/integrations.ts
+ POST /inbox 200 in 86ms (next.js: 6ms, proxy.ts: 6ms, application-code: 74ms)
+  └─ ƒ getTeams("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 62ms src/actions/teams.ts
+[PERF] fetchChats took 76.95ms for limit 10
+[PERF] fetchChats took 107.65ms for limit 200
+ POST /inbox 200 in 223ms (next.js: 6ms, proxy.ts: 5ms, application-code: 212ms)
+  └─ ƒ getInitialChatsData({"ownership":"mine","selectedChatId":null,"workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab"}) in 193ms src/actions/chats.ts
+ POST /inbox 200 in 478ms (next.js: 7ms, proxy.ts: 7ms, application-code: 463ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab", undefined) in 363ms src/actions/autopilot.ts
+ POST /inbox 200 in 98ms (next.js: 7ms, proxy.ts: 8ms, application-code: 82ms)
+  └─ ƒ getShortcuts("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 72ms src/actions/shortcuts.ts
+ POST /inbox 200 in 67ms (next.js: 7ms, proxy.ts: 6ms, application-code: 54ms)
+  └─ ƒ getWorkspaceUsers("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 41ms src/actions/crm.ts
+ POST /inbox 200 in 65ms (next.js: 8ms, proxy.ts: 8ms, application-code: 50ms)
+  └─ ƒ getCustomFieldDefinitions("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 36ms src/actions/crm.ts
+ POST /inbox 200 in 165ms (next.js: 7ms, proxy.ts: 6ms, application-code: 152ms)
+  └─ ƒ getIntegrationConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab", "sgp") in 140ms src/actions/integrations.ts
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F565013701_1586792695637907_5786406797669388574_n.jpg%3Fccb%3D11-4%26oh%3D01_Q5Aa3AFfx_1lojE4uqmJhZdhClTycCt49NveQoVc4LiwXcaASw%26oe%3D693C05E5%26_nc_sid%3D5e03e0%26_nc_cat%3D107&kind=image 200 in 34ms (next.js: 5ms, proxy.ts: 6ms, application-code: 23ms)
+ POST /inbox 200 in 377ms (next.js: 7ms, proxy.ts: 14ms, application-code: 356ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 262ms src/actions/autopilot.ts
+ POST /inbox 200 in 358ms (next.js: 8ms, proxy.ts: 9ms, application-code: 342ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 244ms src/actions/autopilot.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-05-05T21:47:36.575Z',
+  oldestMessageId: '9079dadd-749a-49c2-bea8-fcbb154f5b52'
+}
+ POST /inbox 200 in 271ms (next.js: 8ms, proxy.ts: 8ms, application-code: 255ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"24afa55c-dd66-4fad-999c-027ec9385d21","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 240ms src/actions/chats.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-06-26T19:11:15.000Z',
+  oldestMessageId: '2c6face8-e045-4ba8-9004-fe76df51d7f0'
+}
+ POST /inbox 200 in 276ms (next.js: 7ms, proxy.ts: 8ms, application-code: 260ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"8f6e5d79-326c-4f7c-97ea-cbb718d362d5","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 246ms src/actions/chats.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-06-09T16:11:18.318Z',
+  oldestMessageId: '5bb96c4f-ce39-495b-8ec1-6983b89ca626'
+}
+ POST /inbox 200 in 264ms (next.js: 6ms, proxy.ts: 6ms, application-code: 253ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"5dc5ac96-c2b4-42dd-9a1c-fe544a8dbf42","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 240ms src/actions/chats.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 32,
+  limit: 50,
+  hasMoreHistory: false,
+  oldestMessageDate: '2025-12-06T13:05:33.470Z',
+  oldestMessageId: '98eada74-b23d-4588-a0a3-4e818ac0fb18'
+}
+ POST /inbox 200 in 270ms (next.js: 6ms, proxy.ts: 6ms, application-code: 259ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"aff27aef-3bd7-4e77-9162-2c422e3b2ebf","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 247ms src/actions/chats.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 7,
+  limit: 50,
+  hasMoreHistory: false,
+  oldestMessageDate: '2026-07-07T23:22:33.000Z',
+  oldestMessageId: '80f672b7-5aa5-42dd-bb4b-066e6ff1eef4'
+}
+ POST /inbox 200 in 254ms (next.js: 6ms, proxy.ts: 6ms, application-code: 242ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"1f434e24-11f2-418c-a2f5-e0672afe5501","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 230ms src/actions/chats.ts
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F541528428_4294242567531592_7592517770511361943_n.jpg%3Fccb%3D11-4%26oh%3D01_Q5Aa3AEHD9cqoSFKVwneWnUHShGGRlYPEAsrUI7p4A9UMp5k-g%26oe%3D692D7971%26_nc_sid%3D5e03e0%26_nc_cat%3D103&kind=image 200 in 36ms (next.js: 4ms, proxy.ts: 7ms, application-code: 25ms)
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 7,
+  limit: 50,
+  hasMoreHistory: false,
+  oldestMessageDate: '2026-07-07T23:00:57.000Z',
+  oldestMessageId: 'c11bba58-4543-4324-86bb-7bc1aa53ed85'
+}
+ POST /inbox 200 in 307ms (next.js: 7ms, proxy.ts: 7ms, application-code: 294ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"66bfd70a-005c-48a7-b010-e7d8313040b3","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 282ms src/actions/chats.ts
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F536563511_1809791886597549_1477282616057902627_n.jpg%3Fccb%3D11-4%26oh%3D01_Q5Aa3AEVvZEUnmPwBAaCst1IayaCtlLGE3hnomqbRUhJslQItQ%26oe%3D69397158%26_nc_sid%3D5e03e0%26_nc_cat%3D104&kind=image 200 in 31ms (next.js: 4ms, proxy.ts: 6ms, application-code: 21ms)
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F518908748_1832157337720691_4311148895752333845_n.jpg&kind=image 200 in 32ms (next.js: 4ms, proxy.ts: 7ms, application-code: 22ms)
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F510914487_1074134861360832_7277389887344407100_n.jpg%3Fccb%3D11-4%26oh%3D01_Q5Aa3QF1Rjjr4bYm0uwwlVmt7Db43Nj9evjkB5eH1hrP4-robw%26oe%3D69459978%26_nc_sid%3D5e03e0%26_nc_cat%3D102&kind=image 200 in 31ms (next.js: 4ms, proxy.ts: 7ms, application-code: 20ms)
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-06-05T22:13:23.481Z',
+  oldestMessageId: '1cb1c330-5a48-494c-863a-79da8fce42b5'
+}
+ POST /inbox 200 in 345ms (next.js: 7ms, proxy.ts: 7ms, application-code: 331ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"ad3d40c7-fde9-4bed-89c0-1325ef872872","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 314ms src/actions/chats.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-07-07T01:15:41.723Z',
+  oldestMessageId: 'da246a9b-edc8-496a-ac33-df9d04a307ab'
+}
+ POST /inbox 200 in 323ms (next.js: 8ms, proxy.ts: 7ms, application-code: 308ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"6a485757-601c-4d9e-a09a-1c5fe9c5aca9","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 294ms src/actions/chats.ts
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F491883789_1034273562184707_4303475335132459824_n.jpg&kind=image 200 in 35ms (next.js: 4ms, proxy.ts: 5ms, application-code: 26ms)
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-07-07T21:19:00.000Z',
+  oldestMessageId: 'a162b3c9-181a-4741-bb8e-27a7cc6b8fe5'
+}
+ POST /inbox 200 in 289ms (next.js: 7ms, proxy.ts: 7ms, application-code: 275ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"a0e759de-97e3-4c5a-8747-3fd585519812","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 259ms src/actions/chats.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-06-21T00:12:23.814Z',
+  oldestMessageId: '89e1c2ba-8ee2-4a9f-93a4-604789b7bdf4'
+}
+ POST /inbox 200 in 254ms (next.js: 7ms, proxy.ts: 6ms, application-code: 241ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"13c0c42c-8501-44db-9fac-b719e6c0a7b7","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 227ms src/actions/chats.ts
+[GET_CHAT_MESSAGES_WINDOW] Pagination info: {
+  rowsCount: 50,
+  limit: 50,
+  hasMoreHistory: true,
+  oldestMessageDate: '2026-07-07T23:09:14.000Z',
+  oldestMessageId: '7f2b0518-3f92-4d15-a49a-f0b1e8a34990'
+}
+ POST /inbox 200 in 334ms (next.js: 7ms, proxy.ts: 6ms, application-code: 322ms)
+  └─ ƒ getChatMessagesWindow({"chatId":"0c6fbe8c-d1b5-4ffb-9ef4-63dcb50c74cb","chatOnly":false,"limit":50,"...":"1 item not stringified"}) in 306ms src/actions/chats.ts
+[PERF] fetchChatsDelta took 43.32ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 162ms (next.js: 7ms, proxy.ts: 7ms, application-code: 148ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 134ms src/actions/chats.ts
+ GET /api/build-id 200 in 24ms (next.js: 6ms, proxy.ts: 10ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:36:39.675Z","nextLastSeen":"2026-07-07T23:37:09.479Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 525ms (next.js: 16ms, proxy.ts: 9ms, application-code: 499ms)
+ GET /api/build-id 200 in 23ms (next.js: 3ms, proxy.ts: 8ms, application-code: 11ms)
+ GET /api/build-id 200 in 42ms (next.js: 15ms, proxy.ts: 16ms, application-code: 10ms)
+[PERF] fetchChatsDelta took 50.46ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 317ms (next.js: 33ms, proxy.ts: 16ms, application-code: 269ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 257ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:37:09.479Z","nextLastSeen":"2026-07-07T23:37:13.042Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 374ms (next.js: 7ms, proxy.ts: 17ms, application-code: 351ms)
+[PERF] fetchChats took 180.68ms for limit 10
+[PERF] fetchChats took 308.77ms for limit 200
+ POST /inbox 200 in 427ms (next.js: 8ms, proxy.ts: 6ms, application-code: 413ms)
+  └─ ƒ getInitialChatsData({"ownership":"everyone","selectedChatId":null,"workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab"}) in 391ms src/actions/chats.ts
+ GET /api/media?url=https%3A%2F%2Fpps.whatsapp.net%2Fv%2Ft61.24694-24%2F471841802_1636787590256862_6010145025661425295_n.jpg%3Fccb%3D11-4%26oh%3D01_Q5Aa3AGwHcedm6ovMbFeV_G0JOghgqAC6FgPH88V8KyN4Eb-Yw%26oe%3D694064C3%26_nc_sid%3D5e03e0%26_nc_cat%3D100&kind=image 200 in 64ms (next.js: 3ms, proxy.ts: 6ms, application-code: 54ms)
+[PERF] fetchChats took 71.37ms for limit 10
+[PERF] fetchChats took 115.75ms for limit 200
+ POST /inbox 200 in 228ms (next.js: 7ms, proxy.ts: 6ms, application-code: 215ms)
+  └─ ƒ getInitialChatsData({"ownership":"mine","selectedChatId":null,"workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab"}) in 195ms src/actions/chats.ts
+[PERF] fetchChatsDelta took 51.04ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 184ms (next.js: 8ms, proxy.ts: 7ms, application-code: 168ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 154ms src/actions/chats.ts
+ GET /api/build-id 200 in 27ms (next.js: 5ms, proxy.ts: 13ms, application-code: 9ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:37:13.042Z","nextLastSeen":"2026-07-07T23:37:39.494Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 445ms (next.js: 27ms, proxy.ts: 12ms, application-code: 406ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 80ms (next.js: 21ms, proxy.ts: 7ms, application-code: 52ms)
+ GET /api/build-id 200 in 50ms (next.js: 20ms, proxy.ts: 22ms, application-code: 9ms)
+ GET /api/build-id 200 in 81ms (next.js: 54ms, proxy.ts: 19ms, application-code: 8ms)
+[PERF] fetchChatsDelta took 55.09ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 409ms (next.js: 33ms, proxy.ts: 21ms, application-code: 356ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 344ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"focus","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:37:39.494Z","nextLastSeen":"2026-07-07T23:37:59.743Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 485ms (next.js: 43ms, proxy.ts: 20ms, application-code: 422ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:37:59.743Z","nextLastSeen":"2026-07-07T23:37:59.738Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 774ms (next.js: 12ms, proxy.ts: 24ms, application-code: 737ms)
+[PERF] fetchChatsDelta took 45.94ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 197ms (next.js: 6ms, proxy.ts: 5ms, application-code: 185ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 172ms src/actions/chats.ts
+ GET /api/build-id 200 in 48ms (next.js: 19ms, proxy.ts: 20ms, application-code: 9ms)
+ GET /api/build-id 200 in 77ms (next.js: 50ms, proxy.ts: 19ms, application-code: 9ms)
+[PERF] fetchChatsDelta took 50.50ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 241ms (next.js: 36ms, proxy.ts: 19ms, application-code: 186ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 172ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:37:59.743Z","nextLastSeen":"2026-07-07T23:38:01.682Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 432ms (next.js: 9ms, proxy.ts: 21ms, application-code: 402ms)
+[PERF] fetchChatsDelta took 50.80ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 211ms (next.js: 8ms, proxy.ts: 12ms, application-code: 192ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 180ms src/actions/chats.ts
+ GET /api/build-id 200 in 27ms (next.js: 6ms, proxy.ts: 11ms, application-code: 10ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:38:01.682Z","nextLastSeen":"2026-07-07T23:38:09.485Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 364ms (next.js: 19ms, proxy.ts: 11ms, application-code: 334ms)
+[PERF] fetchChatsDelta took 55.29ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 347ms (next.js: 6ms, proxy.ts: 6ms, application-code: 335ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 323ms src/actions/chats.ts
+ GET /api/build-id 200 in 27ms (next.js: 7ms, proxy.ts: 11ms, application-code: 10ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:38:09.485Z","nextLastSeen":"2026-07-07T23:38:39.501Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 557ms (next.js: 45ms, proxy.ts: 10ms, application-code: 503ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 86ms (next.js: 16ms, proxy.ts: 5ms, application-code: 64ms)
+[PERF] fetchChatsDelta took 58.40ms, 1 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 361ms (next.js: 6ms, proxy.ts: 6ms, application-code: 348ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 335ms src/actions/chats.ts
+ GET /api/favicon?v=1776917361199 307 in 115ms (next.js: 93ms, proxy.ts: 6ms, application-code: 16ms)
+ GET /api/build-id 200 in 53ms (next.js: 22ms, proxy.ts: 23ms, application-code: 9ms)
+ GET /api/build-id 200 in 87ms (next.js: 59ms, proxy.ts: 20ms, application-code: 8ms)
+[PERF] fetchChatsDelta took 62.84ms, 2 changed chats since Tue Jul 07 2026 20:35:55 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 416ms (next.js: 37ms, proxy.ts: 23ms, application-code: 357ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:35:55.615Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 344ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:38:39.501Z","nextLastSeen":"2026-07-07T23:39:01.866Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 594ms (next.js: 16ms, proxy.ts: 23ms, application-code: 554ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"focus","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:39:01.866Z","nextLastSeen":"2026-07-07T23:39:01.913Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 798ms (next.js: 50ms, proxy.ts: 20ms, application-code: 728ms)
+[PERF] fetchChatsDelta took 35.07ms, 1 changed chats since Tue Jul 07 2026 20:39:02 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 231ms (next.js: 8ms, proxy.ts: 7ms, application-code: 215ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:02.911Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 202ms src/actions/chats.ts
+ GET /api/build-id 200 in 17ms (next.js: 4ms, proxy.ts: 5ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:39:01.913Z","nextLastSeen":"2026-07-07T23:39:09.417Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 307ms (next.js: 3ms, proxy.ts: 5ms, application-code: 298ms)
+[PERF] fetchChatsDelta took 62.55ms, 1 changed chats since Tue Jul 07 2026 20:39:02 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 371ms (next.js: 8ms, proxy.ts: 6ms, application-code: 356ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:02.911Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 343ms src/actions/chats.ts
+ GET /api/build-id 200 in 18ms (next.js: 4ms, proxy.ts: 7ms, application-code: 8ms)
+ GET /api/build-id 200 in 47ms (next.js: 28ms, proxy.ts: 13ms, application-code: 7ms)
+[PERF] fetchChatsDelta took 54.54ms, 0 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 298ms (next.js: 16ms, proxy.ts: 14ms, application-code: 268ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 255ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:39:09.417Z","nextLastSeen":"2026-07-07T23:39:32.467Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 455ms (next.js: 6ms, proxy.ts: 14ms, application-code: 435ms)
+[PERF] fetchChatsDelta took 43.17ms, 0 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 150ms (next.js: 7ms, proxy.ts: 6ms, application-code: 137ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 120ms src/actions/chats.ts
+[PERF] fetchChatsDelta took 55.97ms, 0 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 141ms (next.js: 6ms, proxy.ts: 7ms, application-code: 128ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 116ms src/actions/chats.ts
+ GET /api/build-id 200 in 44ms (next.js: 18ms, proxy.ts: 19ms, application-code: 7ms)
+ GET /api/build-id 200 in 61ms (next.js: 41ms, proxy.ts: 13ms, application-code: 7ms)
+[PERF] fetchChatsDelta took 35.88ms, 0 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 170ms (next.js: 31ms, proxy.ts: 19ms, application-code: 121ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 108ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:39:32.467Z","nextLastSeen":"2026-07-07T23:39:34.704Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 297ms (next.js: 8ms, proxy.ts: 20ms, application-code: 269ms)
+[PERF] fetchChatsDelta took 40.69ms, 0 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 156ms (next.js: 12ms, proxy.ts: 9ms, application-code: 134ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 119ms src/actions/chats.ts
+[PERF] fetchChatsDelta took 41.86ms, 0 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 136ms (next.js: 6ms, proxy.ts: 5ms, application-code: 125ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 115ms src/actions/chats.ts
+ GET /api/build-id 200 in 15ms (next.js: 3ms, proxy.ts: 5ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:39:34.704Z","nextLastSeen":"2026-07-07T23:39:39.420Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 300ms (next.js: 3ms, proxy.ts: 6ms, application-code: 290ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 84ms (next.js: 15ms, proxy.ts: 5ms, application-code: 64ms)
+[PERF] fetchChatsDelta took 67.39ms, 0 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 343ms (next.js: 6ms, proxy.ts: 5ms, application-code: 332ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 322ms src/actions/chats.ts
+ GET /api/build-id 200 in 22ms (next.js: 4ms, proxy.ts: 8ms, application-code: 10ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:39:39.420Z","nextLastSeen":"2026-07-07T23:40:09.413Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 434ms (next.js: 4ms, proxy.ts: 6ms, application-code: 425ms)
+[PERF] fetchChatsDelta took 49.88ms, 1 changed chats since Tue Jul 07 2026 20:39:16 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 301ms (next.js: 6ms, proxy.ts: 5ms, application-code: 290ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:39:16.171Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 280ms src/actions/chats.ts
+ GET /api/build-id 200 in 16ms (next.js: 3ms, proxy.ts: 5ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:40:09.413Z","nextLastSeen":"2026-07-07T23:40:39.413Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 523ms (next.js: 3ms, proxy.ts: 5ms, application-code: 515ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 69ms (next.js: 13ms, proxy.ts: 6ms, application-code: 50ms)
+[PERF] fetchChatsDelta took 54.28ms, 1 changed chats since Tue Jul 07 2026 20:40:14 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 284ms (next.js: 6ms, proxy.ts: 5ms, application-code: 273ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:40:14.116Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 262ms src/actions/chats.ts
+ GET /api/build-id 200 in 17ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:40:39.413Z","nextLastSeen":"2026-07-07T23:41:09.416Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 422ms (next.js: 3ms, proxy.ts: 5ms, application-code: 413ms)
+[PERF] fetchChatsDelta took 65.03ms, 2 changed chats since Tue Jul 07 2026 20:40:35 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 307ms (next.js: 6ms, proxy.ts: 5ms, application-code: 295ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:40:35.463Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 282ms src/actions/chats.ts
+ GET /api/build-id 200 in 27ms (next.js: 6ms, proxy.ts: 8ms, application-code: 12ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:41:09.416Z","nextLastSeen":"2026-07-07T23:41:39.408Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 422ms (next.js: 4ms, proxy.ts: 7ms, application-code: 411ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 67ms (next.js: 16ms, proxy.ts: 7ms, application-code: 45ms)
+[PERF] fetchChatsDelta took 62.68ms, 1 changed chats since Tue Jul 07 2026 20:41:19 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 355ms (next.js: 7ms, proxy.ts: 6ms, application-code: 342ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:41:19.724Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 329ms src/actions/chats.ts
+ GET /api/build-id 200 in 17ms (next.js: 3ms, proxy.ts: 5ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:41:39.408Z","nextLastSeen":"2026-07-07T23:42:09.399Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 401ms (next.js: 4ms, proxy.ts: 7ms, application-code: 390ms)
+[PERF] fetchChatsDelta took 53.31ms, 1 changed chats since Tue Jul 07 2026 20:41:51 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 340ms (next.js: 8ms, proxy.ts: 7ms, application-code: 326ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:41:51.456Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 313ms src/actions/chats.ts
+ GET /api/build-id 200 in 24ms (next.js: 5ms, proxy.ts: 8ms, application-code: 10ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:42:09.399Z","nextLastSeen":"2026-07-07T23:42:39.401Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 468ms (next.js: 5ms, proxy.ts: 7ms, application-code: 457ms)
+ GET /api/build-id 200 in 58ms (next.js: 26ms, proxy.ts: 24ms, application-code: 8ms)
+ GET /api/build-id 200 in 96ms (next.js: 68ms, proxy.ts: 21ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:42:39.401Z","nextLastSeen":"2026-07-07T23:42:39.881Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 367ms (next.js: 19ms, proxy.ts: 25ms, application-code: 324ms)
+[PERF] fetchChatsDelta took 52.70ms, 1 changed chats since Tue Jul 07 2026 20:42:18 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 401ms (next.js: 44ms, proxy.ts: 23ms, application-code: 334ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:42:18.386Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 321ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"focus","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:42:39.881Z","nextLastSeen":"2026-07-07T23:42:39.952Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 567ms (next.js: 60ms, proxy.ts: 22ms, application-code: 485ms)
+[PERF] fetchChatsDelta took 38.30ms, 1 changed chats since Tue Jul 07 2026 20:42:41 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 174ms (next.js: 11ms, proxy.ts: 8ms, application-code: 155ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:42:41.282Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 141ms src/actions/chats.ts
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 64ms (next.js: 15ms, proxy.ts: 6ms, application-code: 43ms)
+[PERF] fetchChatsDelta took 38.23ms, 0 changed chats since Tue Jul 07 2026 20:42:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 125ms (next.js: 7ms, proxy.ts: 5ms, application-code: 112ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:42:42.899Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 100ms src/actions/chats.ts
+ GET /api/build-id 200 in 16ms (next.js: 3ms, proxy.ts: 5ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:42:39.952Z","nextLastSeen":"2026-07-07T23:43:09.416Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 446ms (next.js: 3ms, proxy.ts: 6ms, application-code: 438ms)
+[PERF] fetchChatsDelta took 74.21ms, 2 changed chats since Tue Jul 07 2026 20:42:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 385ms (next.js: 6ms, proxy.ts: 6ms, application-code: 373ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:42:42.899Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 362ms src/actions/chats.ts
+ GET /api/build-id 200 in 14ms (next.js: 3ms, proxy.ts: 4ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:43:09.416Z","nextLastSeen":"2026-07-07T23:43:39.412Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 455ms (next.js: 3ms, proxy.ts: 5ms, application-code: 447ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 66ms (next.js: 13ms, proxy.ts: 5ms, application-code: 48ms)
+[PERF] fetchChatsDelta took 52.59ms, 1 changed chats since Tue Jul 07 2026 20:43:17 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 311ms (next.js: 6ms, proxy.ts: 6ms, application-code: 300ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:43:17.084Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 290ms src/actions/chats.ts
+ GET /api/build-id 200 in 18ms (next.js: 5ms, proxy.ts: 7ms, application-code: 6ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:43:39.412Z","nextLastSeen":"2026-07-07T23:44:09.467Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 435ms (next.js: 13ms, proxy.ts: 7ms, application-code: 416ms)
+[PERF] fetchChatsDelta took 56.24ms, 1 changed chats since Tue Jul 07 2026 20:43:25 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 300ms (next.js: 6ms, proxy.ts: 5ms, application-code: 290ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:43:25.711Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 280ms src/actions/chats.ts
+ GET /api/build-id 200 in 16ms (next.js: 3ms, proxy.ts: 6ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:44:09.467Z","nextLastSeen":"2026-07-07T23:44:39.401Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 399ms (next.js: 3ms, proxy.ts: 5ms, application-code: 391ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 82ms (next.js: 16ms, proxy.ts: 8ms, application-code: 58ms)
+[PERF] fetchChatsDelta took 64.31ms, 1 changed chats since Tue Jul 07 2026 20:43:25 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 358ms (next.js: 5ms, proxy.ts: 4ms, application-code: 348ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:43:25.711Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 338ms src/actions/chats.ts
+ GET /api/build-id 200 in 22ms (next.js: 6ms, proxy.ts: 8ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:44:39.401Z","nextLastSeen":"2026-07-07T23:45:09.482Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 448ms (next.js: 15ms, proxy.ts: 7ms, application-code: 426ms)
+[PERF] fetchChatsDelta took 54.19ms, 1 changed chats since Tue Jul 07 2026 20:43:25 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 289ms (next.js: 5ms, proxy.ts: 4ms, application-code: 279ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:43:25.711Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 268ms src/actions/chats.ts
+ GET /api/build-id 200 in 14ms (next.js: 3ms, proxy.ts: 5ms, application-code: 6ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:45:09.482Z","nextLastSeen":"2026-07-07T23:45:39.396Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 416ms (next.js: 4ms, proxy.ts: 6ms, application-code: 406ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 58ms (next.js: 12ms, proxy.ts: 4ms, application-code: 42ms)
+[PERF] fetchChatsDelta took 67.50ms, 2 changed chats since Tue Jul 07 2026 20:43:25 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 353ms (next.js: 5ms, proxy.ts: 4ms, application-code: 343ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:43:25.711Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 333ms src/actions/chats.ts
+ GET /api/build-id 200 in 14ms (next.js: 3ms, proxy.ts: 4ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:45:39.396Z","nextLastSeen":"2026-07-07T23:46:09.402Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 385ms (next.js: 3ms, proxy.ts: 4ms, application-code: 378ms)
+[PERF] fetchChatsDelta took 71.82ms, 1 changed chats since Tue Jul 07 2026 20:45:53 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 355ms (next.js: 5ms, proxy.ts: 5ms, application-code: 345ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:45:53.267Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 335ms src/actions/chats.ts
+ GET /api/build-id 200 in 16ms (next.js: 4ms, proxy.ts: 4ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:46:09.402Z","nextLastSeen":"2026-07-07T23:46:39.420Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 519ms (next.js: 3ms, proxy.ts: 5ms, application-code: 511ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 74ms (next.js: 13ms, proxy.ts: 5ms, application-code: 56ms)
+[PERF] fetchChatsDelta took 52.53ms, 2 changed chats since Tue Jul 07 2026 20:46:24 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 299ms (next.js: 7ms, proxy.ts: 5ms, application-code: 288ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:46:24.718Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 277ms src/actions/chats.ts
+ GET /api/build-id 200 in 14ms (next.js: 3ms, proxy.ts: 4ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:46:39.420Z","nextLastSeen":"2026-07-07T23:47:09.396Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 432ms (next.js: 3ms, proxy.ts: 4ms, application-code: 425ms)
+[PERF] fetchChatsDelta took 71.69ms, 2 changed chats since Tue Jul 07 2026 20:46:52 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 375ms (next.js: 6ms, proxy.ts: 5ms, application-code: 364ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:46:52.381Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 353ms src/actions/chats.ts
+ GET /api/build-id 200 in 16ms (next.js: 3ms, proxy.ts: 5ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:47:09.396Z","nextLastSeen":"2026-07-07T23:47:39.403Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 459ms (next.js: 3ms, proxy.ts: 4ms, application-code: 451ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 58ms (next.js: 12ms, proxy.ts: 6ms, application-code: 40ms)
+[PERF] fetchChatsDelta took 72.01ms, 1 changed chats since Tue Jul 07 2026 20:47:24 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 366ms (next.js: 6ms, proxy.ts: 5ms, application-code: 355ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:47:24.000Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 345ms src/actions/chats.ts
+ GET /api/build-id 200 in 15ms (next.js: 3ms, proxy.ts: 5ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:47:39.403Z","nextLastSeen":"2026-07-07T23:48:09.409Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 447ms (next.js: 3ms, proxy.ts: 4ms, application-code: 440ms)
+[PERF] fetchChatsDelta took 76.50ms, 0 changed chats since Tue Jul 07 2026 20:47:52 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 333ms (next.js: 5ms, proxy.ts: 5ms, application-code: 323ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:47:52.608Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 314ms src/actions/chats.ts
+ GET /api/build-id 200 in 14ms (next.js: 3ms, proxy.ts: 4ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:48:09.409Z","nextLastSeen":"2026-07-07T23:48:39.418Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 528ms (next.js: 3ms, proxy.ts: 6ms, application-code: 518ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 69ms (next.js: 12ms, proxy.ts: 4ms, application-code: 53ms)
+[PERF] fetchChatsDelta took 64.77ms, 0 changed chats since Tue Jul 07 2026 20:47:52 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 321ms (next.js: 5ms, proxy.ts: 5ms, application-code: 311ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:47:52.608Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 301ms src/actions/chats.ts
+[PERF] fetchChatsDelta took 59.85ms, 0 changed chats since Tue Jul 07 2026 20:47:52 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 323ms (next.js: 6ms, proxy.ts: 5ms, application-code: 312ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:47:52.608Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 303ms src/actions/chats.ts
+ GET /api/build-id 200 in 20ms (next.js: 5ms, proxy.ts: 8ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:48:39.418Z","nextLastSeen":"2026-07-07T23:49:29.482Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 440ms (next.js: 14ms, proxy.ts: 7ms, application-code: 419ms)
+ GET /api/build-id 200 in 23ms (next.js: 5ms, proxy.ts: 10ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:49:29.482Z","nextLastSeen":"2026-07-07T23:49:39.946Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 546ms (next.js: 15ms, proxy.ts: 9ms, application-code: 521ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 72ms (next.js: 15ms, proxy.ts: 5ms, application-code: 52ms)
+[PERF] fetchChatsDelta took 65.14ms, 1 changed chats since Tue Jul 07 2026 20:47:52 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 358ms (next.js: 6ms, proxy.ts: 6ms, application-code: 346ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:47:52.608Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 335ms src/actions/chats.ts
+ GET /api/build-id 200 in 13ms (next.js: 3ms, proxy.ts: 4ms, application-code: 6ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:49:39.946Z","nextLastSeen":"2026-07-07T23:50:09.417Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 410ms (next.js: 4ms, proxy.ts: 4ms, application-code: 402ms)
+[PERF] fetchChatsDelta took 61.75ms, 1 changed chats since Tue Jul 07 2026 20:49:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 294ms (next.js: 5ms, proxy.ts: 4ms, application-code: 285ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:49:42.041Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 274ms src/actions/chats.ts
+[PERF] fetchChatsDelta took 63.51ms, 1 changed chats since Tue Jul 07 2026 20:49:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 365ms (next.js: 5ms, proxy.ts: 5ms, application-code: 355ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:49:42.041Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 344ms src/actions/chats.ts
+ GET /api/build-id 200 in 23ms (next.js: 5ms, proxy.ts: 10ms, application-code: 7ms)
+ POST /inbox 200 in 24ms (next.js: 5ms, proxy.ts: 5ms, application-code: 14ms)
+  └─ ƒ getGlobalAlertAction() in 3ms src/actions/system-alerts.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:50:09.417Z","nextLastSeen":"2026-07-07T23:51:29.486Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 453ms (next.js: 14ms, proxy.ts: 10ms, application-code: 429ms)
+[PERF] fetchChatsDelta took 54.99ms, 1 changed chats since Tue Jul 07 2026 20:49:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 300ms (next.js: 5ms, proxy.ts: 6ms, application-code: 289ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:49:42.041Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 279ms src/actions/chats.ts
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 59ms (next.js: 13ms, proxy.ts: 5ms, application-code: 42ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 59ms (next.js: 13ms, proxy.ts: 4ms, application-code: 42ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 57ms (next.js: 12ms, proxy.ts: 5ms, application-code: 40ms)
+ POST /inbox 200 in 24ms (next.js: 6ms, proxy.ts: 5ms, application-code: 13ms)
+  └─ ƒ getGlobalAlertAction() in 3ms src/actions/system-alerts.ts
+[PERF] fetchChatsDelta took 48.77ms, 1 changed chats since Tue Jul 07 2026 20:49:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 293ms (next.js: 5ms, proxy.ts: 5ms, application-code: 282ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:49:42.041Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 272ms src/actions/chats.ts
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 226ms (next.js: 12ms, proxy.ts: 5ms, application-code: 209ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 67ms (next.js: 11ms, proxy.ts: 4ms, application-code: 52ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 64ms (next.js: 13ms, proxy.ts: 4ms, application-code: 46ms)
+ GET /api/build-id 200 in 20ms (next.js: 4ms, proxy.ts: 9ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:51:29.486Z","nextLastSeen":"2026-07-07T23:52:29.490Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 426ms (next.js: 13ms, proxy.ts: 8ms, application-code: 405ms)
+[PERF] fetchChatsDelta took 51.13ms, 1 changed chats since Tue Jul 07 2026 20:49:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 296ms (next.js: 6ms, proxy.ts: 5ms, application-code: 285ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:49:42.041Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 276ms src/actions/chats.ts
+ GET /api/build-id 200 in 18ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/build-id 200 in 51ms (next.js: 18ms, proxy.ts: 26ms, application-code: 7ms)
+ GET /api/build-id 200 in 71ms (next.js: 40ms, proxy.ts: 24ms, application-code: 7ms)
+[PERF] fetchChatsDelta took 72.90ms, 1 changed chats since Tue Jul 07 2026 20:49:42 GMT-0300 (Horário Padrão de Brasília)
+ POST /inbox 200 in 431ms (next.js: 31ms, proxy.ts: 25ms, application-code: 376ms)
+  └─ ƒ syncInboxData({"chatId":null,"lastSyncChats":"2026-07-07T23:49:42.041Z","lastSyncMessages":null,"...":"2 items not stringified"}) in 365ms src/actions/chats.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"visibility","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:52:29.490Z","nextLastSeen":"2026-07-07T23:53:02.726Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 609ms (next.js: 10ms, proxy.ts: 26ms, application-code: 572ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"0ccfd895-6e5c-4e40-acd1-314588f866f6","source":"heartbeat","previousSessionCount":1,"nextSessionCount":1,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:53:02.726Z","nextLastSeen":"2026-07-07T23:53:02.761Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 881ms (next.js: 73ms, proxy.ts: 20ms, application-code: 787ms)
+ GET /autopilot 200 in 386ms (next.js: 154ms, proxy.ts: 7ms, application-code: 225ms)
+ GET /api/build-id 200 in 40ms (next.js: 13ms, proxy.ts: 19ms, application-code: 8ms)
+ GET /api/build-id 200 in 51ms (next.js: 22ms, proxy.ts: 19ms, application-code: 9ms)
+ GET /api/media?url=https%3A%2F%2Fsupabase.vps1.klyraai.com.br%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fworkspace-avatars%2Fpublic%2Fe3b476a1-5de8-4744-80b5-a5d23fe15fab-1778131869544.png&kind=image 200 in 291ms (next.js: 6ms, proxy.ts: 13ms, application-code: 271ms)
+ GET /api/media?url=https%3A%2F%2Fsupabase.vps1.klyraai.com.br%2Fstorage%2Fv1%2Fobject%2Fpublic%2Fphoto_user%2F8fe1f4da-9305-475c-95d1-83bda9f29b22-1778252491695&kind=image 200 in 324ms (next.js: 27ms, proxy.ts: 10ms, application-code: 287ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"bootstrap","previousSessionCount":1,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:53:02.761Z","nextLastSeen":"2026-07-07T23:53:04.636Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 430ms (next.js: 9ms, proxy.ts: 60ms, application-code: 362ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 121ms (next.js: 28ms, proxy.ts: 11ms, application-code: 82ms)
+ POST /autopilot 200 in 65ms (next.js: 7ms, proxy.ts: 7ms, application-code: 51ms)
+  └─ ƒ getAiModelCatalogAction() in 38ms src/actions/ai-models.ts
+ POST /autopilot 200 in 720ms (next.js: 37ms, proxy.ts: 18ms, application-code: 665ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 539ms src/actions/autopilot.ts
+ POST /autopilot 200 in 505ms (next.js: 6ms, proxy.ts: 6ms, application-code: 493ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 400ms src/actions/autopilot.ts
+ POST /autopilot 200 in 71ms (next.js: 5ms, proxy.ts: 8ms, application-code: 57ms)
+  └─ ƒ getAiModelCatalogAction() in 40ms src/actions/ai-models.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"activity","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:53:04.636Z","nextLastSeen":"2026-07-07T23:53:06.344Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 412ms (next.js: 4ms, proxy.ts: 9ms, application-code: 399ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 82ms (next.js: 16ms, proxy.ts: 5ms, application-code: 61ms)
+ GET /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 1147ms (next.js: 1090ms, proxy.ts: 9ms, application-code: 47ms)
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 598ms (next.js: 26ms, proxy.ts: 10ms, application-code: 562ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab", "2801fd91-f14f-46d0-bc45-45e1d8d9f6da") in 473ms src/actions/autopilot.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 78ms (next.js: 11ms, proxy.ts: 6ms, application-code: 62ms)
+  └─ ƒ getAiModelCatalogAction() in 48ms src/actions/ai-models.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 133ms (next.js: 16ms, proxy.ts: 7ms, application-code: 110ms)
+  └─ ƒ getAgentToolCatalogAction("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 95ms src/actions/autopilot.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 227ms (next.js: 9ms, proxy.ts: 6ms, application-code: 213ms)
+  └─ ƒ getAutopilotRagHealth("2801fd91-f14f-46d0-bc45-45e1d8d9f6da") in 201ms src/actions/autopilot.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 459ms (next.js: 9ms, proxy.ts: 6ms, application-code: 445ms)
+  └─ ƒ getAutopilotConfig("e3b476a1-5de8-4744-80b5-a5d23fe15fab", "2801fd91-f14f-46d0-bc45-45e1d8d9f6da") in 367ms src/actions/autopilot.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 72ms (next.js: 15ms, proxy.ts: 6ms, application-code: 50ms)
+  └─ ƒ getAiModelCatalogAction() in 38ms src/actions/ai-models.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 111ms (next.js: 8ms, proxy.ts: 6ms, application-code: 96ms)
+  └─ ƒ getAgentToolCatalogAction("e3b476a1-5de8-4744-80b5-a5d23fe15fab") in 85ms src/actions/autopilot.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 207ms (next.js: 7ms, proxy.ts: 5ms, application-code: 194ms)
+  └─ ƒ getAutopilotRagHealth("2801fd91-f14f-46d0-bc45-45e1d8d9f6da") in 183ms src/actions/autopilot.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 70ms (next.js: 8ms, proxy.ts: 5ms, application-code: 57ms)
+  └─ ƒ getAutopilotUsageLogs("2801fd91-f14f-46d0-bc45-45e1d8d9f6da") in 44ms src/actions/autopilot.ts
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 63ms (next.js: 8ms, proxy.ts: 5ms, application-code: 49ms)
+  └─ ƒ getAutopilotUsageLogs("2801fd91-f14f-46d0-bc45-45e1d8d9f6da") in 37ms src/actions/autopilot.ts
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 69ms (next.js: 14ms, proxy.ts: 6ms, application-code: 49ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 86ms (next.js: 19ms, proxy.ts: 7ms, application-code: 60ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 71ms (next.js: 15ms, proxy.ts: 5ms, application-code: 50ms)
+ GET /api/build-id 200 in 18ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"heartbeat","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:53:06.344Z","nextLastSeen":"2026-07-07T23:53:34.578Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 353ms (next.js: 3ms, proxy.ts: 5ms, application-code: 345ms)
+ POST /autopilot/2801fd91-f14f-46d0-bc45-45e1d8d9f6da 200 in 966ms (next.js: 16ms, proxy.ts: 6ms, application-code: 944ms)
+  └─ ƒ getAutopilotDecisionInsights("2801fd91-f14f-46d0-bc45-45e1d8d9f6da") in 931ms src/actions/autopilot.ts
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"activity","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:53:34.578Z","nextLastSeen":"2026-07-07T23:53:36.786Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 378ms (next.js: 7ms, proxy.ts: 13ms, application-code: 358ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 82ms (next.js: 17ms, proxy.ts: 6ms, application-code: 58ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 200ms (next.js: 15ms, proxy.ts: 6ms, application-code: 179ms)
+ GET /api/build-id 200 in 38ms (next.js: 16ms, proxy.ts: 14ms, application-code: 8ms)
+ GET /api/build-id 200 in 47ms (next.js: 26ms, proxy.ts: 14ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"visibility","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:53:36.786Z","nextLastSeen":"2026-07-07T23:53:50.432Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 323ms (next.js: 8ms, proxy.ts: 17ms, application-code: 298ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 84ms (next.js: 18ms, proxy.ts: 7ms, application-code: 59ms)
+ GET /api/build-id 200 in 20ms (next.js: 5ms, proxy.ts: 8ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"heartbeat","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:53:50.432Z","nextLastSeen":"2026-07-07T23:54:05.470Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 281ms (next.js: 14ms, proxy.ts: 8ms, application-code: 259ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 61ms (next.js: 13ms, proxy.ts: 5ms, application-code: 43ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 54ms (next.js: 11ms, proxy.ts: 4ms, application-code: 38ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 58ms (next.js: 12ms, proxy.ts: 4ms, application-code: 41ms)
+ GET /api/build-id 200 in 21ms (next.js: 5ms, proxy.ts: 8ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"heartbeat","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:54:05.470Z","nextLastSeen":"2026-07-07T23:54:35.472Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 282ms (next.js: 14ms, proxy.ts: 8ms, application-code: 260ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 58ms (next.js: 12ms, proxy.ts: 6ms, application-code: 39ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 77ms (next.js: 14ms, proxy.ts: 6ms, application-code: 57ms)
+ GET /api/build-id 200 in 20ms (next.js: 4ms, proxy.ts: 7ms, application-code: 9ms)
+ GET /api/build-id 200 in 34ms (next.js: 16ms, proxy.ts: 9ms, application-code: 9ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"visibility","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:54:35.472Z","nextLastSeen":"2026-07-07T23:54:51.649Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 303ms (next.js: 6ms, proxy.ts: 11ms, application-code: 286ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 59ms (next.js: 13ms, proxy.ts: 5ms, application-code: 40ms)
+ GET /api/build-id 200 in 21ms (next.js: 5ms, proxy.ts: 8ms, application-code: 7ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"heartbeat","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:54:51.649Z","nextLastSeen":"2026-07-07T23:55:05.479Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 303ms (next.js: 13ms, proxy.ts: 9ms, application-code: 281ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 58ms (next.js: 13ms, proxy.ts: 5ms, application-code: 41ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 59ms (next.js: 11ms, proxy.ts: 4ms, application-code: 44ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 61ms (next.js: 12ms, proxy.ts: 4ms, application-code: 44ms)
+ GET /api/build-id 200 in 22ms (next.js: 5ms, proxy.ts: 8ms, application-code: 9ms)
+[PRESENCE] {"event":"presence_mutation","userId":"8fe1f4da-9305-475c-95d1-83bda9f29b22","workspaceId":"e3b476a1-5de8-4744-80b5-a5d23fe15fab","sessionId":"43f590ee-b47c-4006-924f-81691e548842","source":"heartbeat","previousSessionCount":2,"nextSessionCount":2,"previousIsOnline":true,"nextIsOnline":true,"previousLastSeen":"2026-07-07T23:55:05.479Z","nextLastSeen":"2026-07-07T23:55:35.472Z","previousRecentActivityAt":null,"nextRecentActivityAt":null}
+ POST /api/users/online-status 200 in 296ms (next.js: 15ms, proxy.ts: 8ms, application-code: 273ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 61ms (next.js: 12ms, proxy.ts: 4ms, application-code: 46ms)
+ GET /api/users/online/e3b476a1-5de8-4744-80b5-a5d23fe15fab 200 in 58ms (next.js: 11ms, proxy.ts: 5ms, application-code: 42ms)

@@ -1044,14 +1044,45 @@ export interface Shortcut {
   team_name?: string; // Optional: for displaying the team name
 }
 
-export type CampaignStatus = 'draft' | 'sending' | 'completed' | 'paused' | 'failed';
-export type CampaignRecipientStatus = 'pending' | 'sent' | 'failed';
+export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'paused' | 'cancelled' | 'failed';
+export type CampaignRecipientStatus = 'waiting' | 'scheduled' | 'processing' | 'sent' | 'failed' | 'paused' | 'cancelled';
 export type CampaignChannel = 'whatsapp_baileys' | 'whatsapp_cloud' | 'telegram' | 'messenger' | 'instagram';
 
 export interface CampaignTemplate {
   name: string;
   language: string;
   components: any[];
+}
+
+export type CampaignMediaType = 'image' | 'audio';
+
+export interface CampaignMediaAttachment {
+  type: CampaignMediaType;
+  url: string;
+  mimetype: string;
+  filename: string;
+  storageBucket?: string;
+  storagePath?: string;
+}
+
+export type CampaignIntervalMode = 'fixed' | 'variable';
+
+export interface CampaignScheduleConfig {
+  mode: 'immediate' | 'custom';
+  timeZone: string;
+  endAt?: string;
+  windowStart: string;
+  windowEnd: string;
+  allowedWeekdays: number[];
+  intervalMode: CampaignIntervalMode;
+  intervalSeconds: number;
+  minIntervalSeconds: number;
+  maxIntervalSeconds: number;
+  dailyLimit: number | null;
+  maxAttempts: number;
+  autoPauseFailureRate: number;
+  autoPauseMinAttempts: number;
+  consentConfirmed: boolean;
 }
 
 export interface Campaign {
@@ -1064,9 +1095,16 @@ export interface Campaign {
   channel: CampaignChannel;
   destination_id?: string | null;
   template_payload?: CampaignTemplate | null;
+  media_payload?: CampaignMediaAttachment | null;
   created_at: string;
   started_at?: string;
   completed_at?: string;
+  scheduled_end_at?: string | null;
+  paused_at?: string | null;
+  cancelled_at?: string | null;
+  pause_reason?: string | null;
+  schedule_config?: CampaignScheduleConfig | null;
+  opted_out_count?: number;
   total_recipients?: number;
   sent_recipients?: number;
   progress?: number;
@@ -1080,6 +1118,10 @@ export interface CampaignRecipient {
   campaign_id: string;
   contact_id: string;
   status: CampaignRecipientStatus;
+  scheduled_at?: string | null;
+  attempt_count?: number;
+  max_attempts?: number;
+  last_attempt_at?: string | null;
   sent_at?: string;
   error_message?: string;
 }
@@ -1099,6 +1141,8 @@ export interface CampaignDetails extends Campaign {
     read: number;
     failed: number;
     pending: number;
+    paused: number;
+    cancelled: number;
     linkedMessages: number;
     deliveryRate: number;
     readRate: number;

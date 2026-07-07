@@ -513,7 +513,15 @@ create table if not exists public.campaigns (
   message text not null,
   instance_name text not null,
   status text not null,
+  media_payload jsonb,
+  schedule_config jsonb not null default '{}'::jsonb,
+  scheduled_end_at timestamptz,
+  paused_at timestamptz,
+  cancelled_at timestamptz,
+  pause_reason text,
+  opted_out_count integer not null default 0,
   created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
   started_at timestamptz,
   completed_at timestamptz,
   constraint campaigns_workspace_id_fkey
@@ -528,9 +536,18 @@ create table if not exists public.campaign_recipients (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid not null,
   contact_id uuid not null,
-  status text not null default 'pending',
+  status text not null default 'waiting',
+  scheduled_at timestamptz,
+  attempt_count integer not null default 0,
+  max_attempts integer not null default 3,
+  last_attempt_at timestamptz,
+  locked_at timestamptz,
+  locked_by text,
+  message_id uuid not null default gen_random_uuid(),
+  cancelled_at timestamptz,
   sent_at timestamptz,
   error_message text,
+  updated_at timestamptz not null default timezone('utc', now()),
   constraint campaign_recipients_campaign_id_fkey
     foreign key (campaign_id) references public.campaigns(id) on delete cascade,
   constraint campaign_recipients_contact_id_fkey
@@ -538,6 +555,34 @@ create table if not exists public.campaign_recipients (
 );
 create index if not exists idx_campaign_recipients_campaign on public.campaign_recipients(campaign_id);
 create index if not exists idx_campaign_recipients_contact on public.campaign_recipients(contact_id);
+alter table if exists public.campaigns add column if not exists schedule_config jsonb not null default '{}'::jsonb;
+alter table if exists public.campaigns add column if not exists media_payload jsonb;
+alter table if exists public.campaigns add column if not exists scheduled_end_at timestamptz;
+alter table if exists public.campaigns add column if not exists paused_at timestamptz;
+alter table if exists public.campaigns add column if not exists cancelled_at timestamptz;
+alter table if exists public.campaigns add column if not exists pause_reason text;
+alter table if exists public.campaigns add column if not exists opted_out_count integer not null default 0;
+alter table if exists public.campaigns add column if not exists updated_at timestamptz not null default timezone('utc', now());
+alter table if exists public.campaign_recipients add column if not exists scheduled_at timestamptz;
+alter table if exists public.campaign_recipients add column if not exists attempt_count integer not null default 0;
+alter table if exists public.campaign_recipients add column if not exists max_attempts integer not null default 3;
+alter table if exists public.campaign_recipients add column if not exists last_attempt_at timestamptz;
+alter table if exists public.campaign_recipients add column if not exists locked_at timestamptz;
+alter table if exists public.campaign_recipients add column if not exists locked_by text;
+alter table if exists public.campaign_recipients add column if not exists message_id uuid not null default gen_random_uuid();
+alter table if exists public.campaign_recipients add column if not exists cancelled_at timestamptz;
+alter table if exists public.campaign_recipients add column if not exists updated_at timestamptz not null default timezone('utc', now());
+alter table if exists public.contacts add column if not exists marketing_opt_out_at timestamptz;
+update public.campaign_recipients
+   set scheduled_at = coalesce(scheduled_at, timezone('utc', now())),
+       status = case when status = 'pending' then 'waiting' else status end
+ where scheduled_at is null or status = 'pending';
+create unique index if not exists uq_campaign_recipients_campaign_contact on public.campaign_recipients(campaign_id, contact_id);
+create unique index if not exists uq_campaign_recipients_message on public.campaign_recipients(message_id);
+create index if not exists idx_campaign_recipients_due on public.campaign_recipients(scheduled_at, campaign_id)
+  where status in ('waiting', 'scheduled');
+create index if not exists idx_campaign_recipients_locked on public.campaign_recipients(locked_at)
+  where status = 'processing';
 
 -- Chats
 create table if not exists public.chats (

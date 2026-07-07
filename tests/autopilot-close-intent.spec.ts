@@ -19,6 +19,15 @@ describe('autopilot close intent', () => {
     'Usa a ferramenta close',
     'era so isso',
     'nao preciso de mais nada',
+    'obrigado',
+    'valeu',
+    'deu certo obrigado',
+    'resolvido valeu',
+    'tchau',
+    'ate mais',
+    'Não, somente!',
+    'não, só isso',
+    'só isso',
   ])('detects conversation close request: %s', (message) => {
     expect(isConversationCloseRequest(message)).toBe(true);
   });
@@ -30,6 +39,8 @@ describe('autopilot close intent', () => {
     'desligar minha internet',
     'finalizar instalacao',
     'close my contract',
+    'obrigado, preciso da segunda via do boleto',
+    'valeu, agora quero mudar meu plano',
   ])('does not confuse business cancellation with conversation close: %s', (message) => {
     expect(isConversationCloseRequest(message)).toBe(false);
   });
@@ -48,7 +59,10 @@ describe('autopilot close intent', () => {
     'pode encerrar por aqui?',
     'era so isso',
     'nao quero mais nada',
+    'Não, somente!',
     'tchau',
+    'valeu',
+    'deu certo obrigado',
     'USE close_chat',
     'Usa a ferramenta close',
   ])('keeps close-adjacent messages eligible for deterministic/gated resolution: %s', (message) => {

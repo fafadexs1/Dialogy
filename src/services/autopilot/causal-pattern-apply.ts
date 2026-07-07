@@ -186,7 +186,7 @@ function parseFlowGraph(value: unknown): AutopilotFlowGraph | null {
 function buildSnapshotFromConfigRow(row: ConfigRow): AutopilotConfigDraftSnapshot {
   return {
     name: row.name || 'Meu agente de IA',
-    gemini_api_key: row.gemini_api_key || null,
+    gemini_api_key: null,
     ai_model: row.ai_model || null,
     transcription_model: row.transcription_model || null,
     knowledge_base: row.knowledge_base || null,
@@ -216,9 +216,7 @@ function normalizeDraftSnapshot(
     name: typeof snapshot.name === 'string' && snapshot.name.trim().length > 0
       ? snapshot.name
       : fallback.name,
-    gemini_api_key: hasOwn('gemini_api_key')
-      ? (typeof snapshot.gemini_api_key === 'string' && snapshot.gemini_api_key.length > 0 ? snapshot.gemini_api_key : null)
-      : fallback.gemini_api_key,
+    gemini_api_key: null,
     ai_model: hasOwn('ai_model')
       ? (typeof snapshot.ai_model === 'string' && snapshot.ai_model.length > 0 ? snapshot.ai_model : null)
       : fallback.ai_model,

@@ -1611,7 +1611,7 @@
   "Se ativado, aparece para todos os atendentes.": "If activated, it appears to all agents.",
   "Se desativado, não aparecerá para compra.": "If deactivated, it will not appear for purchase.",
   "Se o valor ficar vazio, qualquer valor preenchido no campo contará como conversão.": "If the value is empty, any value filled in the field will count as a conversion.",
-  "Se vazio, usará o mesmo modelo do agente. Recomendado: gemini-1.5-flash para rapidez.": "If empty, it will use the same model as the agent. Recommended: gemini-1.5-flash for speed.",
+  "Se vazio, usará o mesmo modelo do agente. Recomendado: gemini-3.1-flash-lite para rapidez.": "If empty, it will use the same model as the agent. Recommended: gemini-3.1-flash-lite for speed.",
   "Seção": "Section",
   "Seção do cardápio": "Menu section",
   "Seções": "Sections",

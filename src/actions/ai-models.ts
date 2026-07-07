@@ -9,6 +9,13 @@ import {
   serializeAiModelCatalog,
   SYSTEM_AI_MODEL_CATALOG_KEY,
 } from '@/lib/ai-models';
+import {
+  parseAiDecisionModelConfig,
+  serializeAiDecisionModelConfig,
+  SYSTEM_AI_DECISION_MODELS_KEY,
+  type AiDecisionModelConfig,
+} from '@/lib/ai-decision-models';
+import { getGlobalAiDecisionModelConfig } from '@/services/ai/decision-model-config';
 import { getSystemSettings } from '@/actions/system-settings';
 import { revalidatePath, revalidateTag } from 'next/cache';
 import {
@@ -73,6 +80,46 @@ export async function saveAiModelCatalogAction(models: AiModelCatalogEntry[]): P
   } catch (error) {
     console.error('[SAVE_AI_MODEL_CATALOG] Error:', error);
     return { success: false, error: 'Falha ao salvar catalogo de modelos.' };
+  }
+}
+
+export async function getAiDecisionModelConfigAction(): Promise<{
+  config: AiDecisionModelConfig;
+  error?: string;
+}> {
+  const user = await requireAuthenticatedUser();
+  if (!user || !(await isSuperAdmin(user.id))) {
+    return { config: parseAiDecisionModelConfig(null), error: 'Acesso nao autorizado.' };
+  }
+
+  return { config: await getGlobalAiDecisionModelConfig() };
+}
+
+export async function saveAiDecisionModelConfigAction(config: AiDecisionModelConfig): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  const user = await requireAuthenticatedUser();
+  if (!user || !(await isSuperAdmin(user.id))) {
+    return { success: false, error: 'Acesso nao autorizado.' };
+  }
+
+  try {
+    await db.query(
+      `
+        INSERT INTO system_settings (key, value)
+        VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+      `,
+      [SYSTEM_AI_DECISION_MODELS_KEY, serializeAiDecisionModelConfig(config)]
+    );
+
+    revalidateTag('system-settings', 'default');
+    revalidatePath('/superadmin/ai-models');
+    return { success: true };
+  } catch (error) {
+    console.error('[SAVE_AI_DECISION_MODELS] Error:', error);
+    return { success: false, error: 'Falha ao salvar modelos de decisao.' };
   }
 }
 

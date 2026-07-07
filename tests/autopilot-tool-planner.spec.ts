@@ -22,6 +22,7 @@ const contact: Contact = {
 
 function runPlanner(input: {
   message: string;
+  chatHistory?: string;
   response?: string | null;
   actions: AgentToolAction[];
   enabledToolNames?: string[];
@@ -34,6 +35,7 @@ function runPlanner(input: {
   return planAutopilotTools({
     response: input.response ?? null,
     customerMessage: input.message,
+    chatHistory: input.chatHistory,
     intentResolution,
     slotExtraction: extractAutopilotSlots({
       customerMessage: input.message,
@@ -261,6 +263,95 @@ describe('autopilot tool planner', () => {
     expect(result.actions).toEqual([]);
     expect(result.rejectedActions).toHaveLength(2);
     expect(result.rejectedActions.every((item) => item.code === 'intent_not_allowed')).toBe(true);
+  });
+
+  it('uses clinical red flags from history and hydrates the transfer target selected by the model', () => {
+    const result = runPlanner({
+      message: 'Ja te falei hoje as 19h00',
+      chatHistory: [
+        'Cliente: Minha filha Joaquina e um bebe de 6 meses.',
+        'Cliente: Ela esta com febre de 38,5, cansaco e coriza.',
+        'Cliente: Esta com a boca seca e sem urinar.',
+        'Atendente: Qual horario fica melhor para a consulta urgente?',
+      ].join('\n'),
+      response: 'Vou encaminhar seu atendimento agora mesmo para nossa equipe humana.',
+      intentOverride: {
+        intent: 'scheduling_request',
+        confidence: 0.95,
+        reason: 'Cliente confirmou o horario.',
+      } as any,
+      actions: [
+        {
+          type: 'transfer_chat',
+          reason: 'Sinais de alerta exigem atendimento humano.',
+          payload: {
+            content: 'Joaquina, 6 meses, febre, boca seca e ausencia de urina.',
+          },
+        } as any,
+        {
+          type: 'add_internal_note',
+          reason: 'Preservar contexto clinico.',
+          payload: {
+            content: 'Joaquina, 6 meses, febre, boca seca e ausencia de urina. Horario confirmado: 19h00.',
+          },
+        },
+      ],
+    });
+
+    expect(result.rejectedActions).toEqual([]);
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        type: 'add_internal_note',
+      }),
+      expect.objectContaining({
+        type: 'transfer_chat',
+        payload: { teamId: team.id },
+      }),
+    ]);
+    expect(result.metadata).toMatchObject({
+      safetyCriticalHandoff: true,
+      handoffTeam: { id: team.id, name: team.name },
+    });
+  });
+
+  it('creates a clinical handoff note when the model only requested transfer', () => {
+    const result = runPlanner({
+      message: 'Hoje as 19h00',
+      chatHistory: 'Cliente: Minha bebe de 6 meses esta com febre, boca seca e sem urinar.',
+      response: 'Vou transferir para a equipe humana.',
+      actions: [{
+        type: 'transfer_chat',
+        reason: 'Urgencia clinica.',
+        payload: { teamId: team.id },
+      }],
+    });
+
+    expect(result.actions.map((action) => action.type)).toEqual([
+      'add_internal_note',
+      'transfer_chat',
+    ]);
+    expect((result.actions[0] as any).payload.content).toContain('sem urinar');
+  });
+
+  it('blocks model-generated close_chat when the customer only confirmed a completed task', () => {
+    const result = runPlanner({
+      message: 'Pode sim',
+      response: 'Seu pre-cadastro foi concluido.',
+      enabledToolNames: ['close_chat', 'add_internal_note'],
+      actions: [{
+        type: 'close_chat',
+        reason: 'Pre-cadastro concluido.',
+        payload: { sendCloseMessage: true },
+      }],
+    });
+
+    expect(result.actions).toEqual([]);
+    expect(result.rejectedActions).toEqual([
+      expect.objectContaining({
+        code: 'intent_not_allowed',
+        action: expect.objectContaining({ type: 'close_chat' }),
+      }),
+    ]);
   });
 
   it('rejects MCP reboot when the customer asks for Wi-Fi credentials lookup', () => {

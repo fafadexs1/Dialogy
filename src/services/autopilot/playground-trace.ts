@@ -138,6 +138,7 @@ export function buildAutopilotPlaygroundTrace(input: {
   const toolPlanner = planAutopilotTools({
     response: responseBeforePlanner,
     customerMessage: input.customerMessage,
+    chatHistory: input.chatHistory || '',
     intentResolution,
     slotExtraction: workflowPlan.slotExtraction,
     actions: candidateActions,

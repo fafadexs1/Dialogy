@@ -31,11 +31,6 @@ interface AutopilotSettingsProps {
   setIsPrivate: (privateAgent: boolean) => void;
   isPrimary: boolean;
   onSetPrimary: () => void;
-  geminiApiKey: string;
-  setGeminiApiKey?: (key: string) => void;
-  hasGlobalKey?: boolean;
-  workspaceHasGeminiConfig?: boolean;
-  workspaceDefaultAiModel?: string | null;
   modelOptions: AiModelCatalogEntry[];
   onSave: () => void;
   isSaving: boolean;
@@ -62,18 +57,12 @@ export function AutopilotSettings({
   setIsPrivate,
   isPrimary,
   onSetPrimary,
-  geminiApiKey,
-  setGeminiApiKey,
-  hasGlobalKey = false,
-  workspaceHasGeminiConfig = false,
-  workspaceDefaultAiModel = null,
   modelOptions,
   onSave,
   isSaving,
   onDelete,
   workspace,
 }: AutopilotSettingsProps) {
-  const hasWorkspaceFallback = hasGlobalKey || workspaceHasGeminiConfig;
   const effectiveModelOptions = modelOptions.some((model) => model.id === aiModel)
     ? modelOptions
     : [
@@ -131,11 +120,11 @@ export function AutopilotSettings({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Escolha entre os modelos liberados no superadmin. Se o catálogo mudar, esta lista acompanha sem precisar editar código.
+                  Escolha entre os modelos adicionados em Integracoes / Modelos de IA.
                 </p>
                 {!modelOptions.some((model) => model.id === aiModel) && (
                   <p className="text-xs text-amber-700 dark:text-amber-300">
-                    O modelo atualmente salvo não está mais no catálogo ativo. Você ainda pode visualizar e trocar esse valor antes de salvar.
+                    O modelo atualmente salvo nao esta ativo nas integracoes do workspace. Revise antes de publicar.
                   </p>
                 )}
               </div>
@@ -197,22 +186,6 @@ export function AutopilotSettings({
                   Oriente em quais condições o atendimento pode ser considerado resolvido.
                 </p>
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="gemini-api-key">Chave Gemini personalizada</Label>
-              <Input
-                id="gemini-api-key"
-                type="password"
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey && setGeminiApiKey(e.target.value)}
-                placeholder="Deixe vazio para usar a configuração global do workspace"
-              />
-              <p className="text-xs text-muted-foreground">
-                {hasWorkspaceFallback
-                  ? `Se vazio, o agente herda a configuração global do workspace${workspaceDefaultAiModel ? ` (${getAiModelLabel(workspaceDefaultAiModel, modelOptions)})` : ''}.`
-                  : 'Nenhuma chave global foi encontrada. Preencha uma chave aqui ou configure Integrações > Gemini.'}
-              </p>
             </div>
 
           </div>

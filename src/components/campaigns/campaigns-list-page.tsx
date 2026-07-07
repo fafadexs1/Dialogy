@@ -22,6 +22,9 @@ import {
   MailCheck,
   AlertTriangle,
   Users,
+  PlayCircle,
+  Ban,
+  CalendarClock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +49,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import Link from 'next/link';
-import { getCampaignDetails, getCampaigns, deleteCampaign, deleteCampaigns } from "@/actions/campaigns";
+import { cancelCampaign, getCampaignDetails, getCampaigns, deleteCampaign, deleteCampaigns, pauseCampaign, resumeCampaign } from "@/actions/campaigns";
 import type { Campaign, CampaignDetails } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -71,10 +74,12 @@ function Progress({ value }: { value: number }) {
 function StateBadge({ status }: { status: Campaign['status'] }) {
   const stateMap = {
     completed: { icon: <CheckCircle2 className="h-3.5 w-3.5" />, text: "Envio concluído", className: "bg-emerald-600 hover:bg-emerald-600" },
+    scheduled: { icon: <CalendarClock className="h-3.5 w-3.5" />, text: "Agendada", className: "bg-violet-600 hover:bg-violet-600" },
     sending: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, text: "Enviando", className: "bg-blue-500 hover:bg-blue-500" },
     draft: { icon: <Clock className="h-3.5 w-3.5" />, text: "Rascunho", className: "bg-gray-500 hover:bg-gray-500" },
     paused: { icon: <PauseCircle className="h-3.5 w-3.5" />, text: "Pausada", className: "bg-yellow-500 hover:bg-yellow-500" },
     failed: { icon: <XCircle className="h-3.5 w-3.5" />, text: "Falhou", className: "bg-red-600 hover:bg-red-600" },
+    cancelled: { icon: <Ban className="h-3.5 w-3.5" />, text: "Cancelada", className: "bg-slate-600 hover:bg-slate-600" },
   };
 
   const current = stateMap[status] || stateMap.draft;
@@ -104,6 +109,16 @@ function ChannelPill({ channel }: { channel: Campaign['channel'] }) {
   );
 }
 
+const RECIPIENT_STATUS_LABELS = {
+  waiting: 'Aguardando',
+  scheduled: 'Agendada',
+  processing: 'Enviando',
+  sent: 'Enviada',
+  failed: 'Falhou',
+  paused: 'Pausada',
+  cancelled: 'Cancelada',
+} as const;
+
 // --------- Main component ----------
 export default function CampaignsPageClient({ user: initialUser }: { user: { id: string; activeWorkspaceId: string | null } }) {
   const router = useRouter();
@@ -118,6 +133,7 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [campaignDetails, setCampaignDetails] = useState<CampaignDetails | null>(null);
+  const [campaignActionId, setCampaignActionId] = useState<string | null>(null);
 
   const fetchCampaigns = useCallback(async (silent = false) => {
     if (!user?.activeWorkspaceId) return;
@@ -138,7 +154,7 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
   }, [user, fetchCampaigns]);
 
   useEffect(() => {
-    if (!campaigns.some(campaign => campaign.status === 'sending')) return;
+    if (!campaigns.some(campaign => campaign.status === 'sending' || campaign.status === 'scheduled')) return;
 
     const intervalId = window.setInterval(() => {
       fetchCampaigns(true);
@@ -194,6 +210,36 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
       toast({ title: `${selected.length} campanhas excluídas com sucesso!` });
       fetchCampaigns(); // Re-fetch the list
       setSelected([]);
+    }
+  };
+
+  const handleExecutionAction = async (
+    campaignId: string,
+    action: 'pause' | 'resume' | 'cancel',
+  ) => {
+    setCampaignActionId(campaignId);
+    const result = action === 'pause'
+      ? await pauseCampaign(campaignId)
+      : action === 'resume'
+        ? await resumeCampaign(campaignId)
+        : await cancelCampaign(campaignId);
+    setCampaignActionId(null);
+
+    if (result.error) {
+      toast({ title: 'Não foi possível atualizar a campanha', description: result.error, variant: 'destructive' });
+      return;
+    }
+
+    const title = action === 'pause'
+      ? 'Campanha pausada'
+      : action === 'resume'
+        ? 'Campanha retomada'
+        : 'Campanha cancelada';
+    toast({ title });
+    await fetchCampaigns(true);
+    if (detailsOpen && user?.activeWorkspaceId) {
+      const details = await getCampaignDetails(user.activeWorkspaceId, campaignId);
+      if (details.campaign) setCampaignDetails(details.campaign);
     }
   };
 
@@ -343,7 +389,7 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
                   <div className="col-span-3">Nome</div>
                   <div className="col-span-2">Estado</div>
                   <div className="col-span-2">Destinatários</div>
-                  <div className="col-span-2">Entrega</div>
+                  <div className="col-span-2">Progresso</div>
                   <div className="col-span-2 text-right">Ações</div>
                 </div>
 
@@ -418,6 +464,33 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-44">
+                                  {(c.status === 'sending' || c.status === 'scheduled') && (
+                                    <DropdownMenuItem
+                                      className="gap-2"
+                                      disabled={campaignActionId === c.id}
+                                      onSelect={() => void handleExecutionAction(c.id, 'pause')}
+                                    >
+                                      <PauseCircle className="h-4 w-4" />Pausar
+                                    </DropdownMenuItem>
+                                  )}
+                                  {c.status === 'paused' && (
+                                    <DropdownMenuItem
+                                      className="gap-2"
+                                      disabled={campaignActionId === c.id}
+                                      onSelect={() => void handleExecutionAction(c.id, 'resume')}
+                                    >
+                                      <PlayCircle className="h-4 w-4" />Retomar
+                                    </DropdownMenuItem>
+                                  )}
+                                  {['draft', 'scheduled', 'sending', 'paused'].includes(c.status) && (
+                                    <DropdownMenuItem
+                                      className="gap-2 text-amber-700 focus:text-amber-700"
+                                      disabled={campaignActionId === c.id}
+                                      onSelect={() => void handleExecutionAction(c.id, 'cancel')}
+                                    >
+                                      <Ban className="h-4 w-4" />Cancelar envio
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem className="gap-2" ><Send className="h-4 w-4" />Reenviar</DropdownMenuItem>
                                   <DropdownMenuItem className="gap-2" ><Copy className="h-4 w-4" />Duplicar</DropdownMenuItem>
                                   <AlertDialogTrigger asChild>
@@ -476,6 +549,39 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
                 <DialogDescription>
                   ID {campaignDetails.id.split('-')[0]} | Criada em {format(new Date(campaignDetails.created_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
                 </DialogDescription>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {(campaignDetails.status === 'sending' || campaignDetails.status === 'scheduled') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={campaignActionId === campaignDetails.id}
+                      onClick={() => void handleExecutionAction(campaignDetails.id, 'pause')}
+                    >
+                      <PauseCircle className="mr-2 h-4 w-4" />Pausar
+                    </Button>
+                  )}
+                  {campaignDetails.status === 'paused' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={campaignActionId === campaignDetails.id}
+                      onClick={() => void handleExecutionAction(campaignDetails.id, 'resume')}
+                    >
+                      <PlayCircle className="mr-2 h-4 w-4" />Retomar
+                    </Button>
+                  )}
+                  {['draft', 'scheduled', 'sending', 'paused'].includes(campaignDetails.status) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-amber-700 hover:text-amber-700"
+                      disabled={campaignActionId === campaignDetails.id}
+                      onClick={() => void handleExecutionAction(campaignDetails.id, 'cancel')}
+                    >
+                      <Ban className="mr-2 h-4 w-4" />Cancelar envio
+                    </Button>
+                  )}
+                </div>
               </DialogHeader>
 
               <ScrollArea className="max-h-[calc(90vh-112px)]">
@@ -526,8 +632,17 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
                       <h3 className="mb-3 text-sm font-semibold">Informacoes do envio</h3>
                       <div className="space-y-2 text-sm text-muted-foreground">
                         <p>Conta: <span className="text-foreground">{campaignDetails.destination_id || campaignDetails.instance_name}</span></p>
+                        <p>Modo: <span className="text-foreground">{campaignDetails.schedule_config?.mode === 'custom' ? 'Customizado' : 'Imediato'}</span></p>
+                        {campaignDetails.schedule_config?.mode === 'custom' && (
+                          <>
+                            <p>Janela: <span className="text-foreground">{campaignDetails.schedule_config.windowStart}–{campaignDetails.schedule_config.windowEnd}</span></p>
+                            <p>Data limite: <span className="text-foreground">{campaignDetails.scheduled_end_at ? format(new Date(campaignDetails.scheduled_end_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "-"}</span></p>
+                          </>
+                        )}
                         <p>Inicio: <span className="text-foreground">{campaignDetails.started_at ? format(new Date(campaignDetails.started_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "-"}</span></p>
                         <p>Conclusao: <span className="text-foreground">{campaignDetails.completed_at ? format(new Date(campaignDetails.completed_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "-"}</span></p>
+                        {campaignDetails.pause_reason && <p>Motivo da pausa: <span className="text-foreground">{campaignDetails.pause_reason}</span></p>}
+                        {Boolean(campaignDetails.opted_out_count) && <p>Opt-outs removidos: <span className="text-foreground">{campaignDetails.opted_out_count}</span></p>}
                       </div>
                     </div>
                     <div className="rounded-lg border p-4">
@@ -560,13 +675,19 @@ export default function CampaignsPageClient({ user: initialUser }: { user: { id:
                               <p className="text-xs text-muted-foreground">{recipient.phone_number_jid || "-"}</p>
                             </div>
                             <Badge variant="secondary">
-                              {recipient.status === 'failed' ? "Falhou" : recipient.status === 'sent' ? "Enviada" : "Pendente"}
+                              {RECIPIENT_STATUS_LABELS[recipient.status]}
                             </Badge>
                             <span className="min-w-24 text-right text-xs text-muted-foreground">
                               {receiptLabel}
                             </span>
                             {recipient.error_message && (
                               <p className="text-xs text-red-500 sm:col-span-3">{recipient.error_message}</p>
+                            )}
+                            {recipient.scheduled_at && recipient.status !== 'sent' && (
+                              <p className="text-xs text-muted-foreground sm:col-span-3">
+                                Prevista para {format(new Date(recipient.scheduled_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                                {recipient.attempt_count ? ` · ${recipient.attempt_count}/${recipient.max_attempts || 3} tentativa(s)` : ''}
+                              </p>
                             )}
                           </div>
                         );

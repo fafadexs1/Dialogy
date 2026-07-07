@@ -1,11 +1,14 @@
 // Optional SGP plugin: this classifier is intentionally outside the universal core.
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { DEFAULT_AUTOPILOT_MODEL, getAiModelRuntimeProvider } from '@/lib/ai-models';
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
+import { isOpenAiCompatibleModel, requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';
+import { resolveAiDecisionModel, resolveAiDecisionTimeoutMs } from '@/services/ai/decision-model-config';
+import { getDefaultGeminiEnvKey, resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
 
 const WORKFLOW_TOOL_NAMES = [
   'sgp_fetch_contact_panel_data',
@@ -39,6 +42,7 @@ const AiWorkflowClassifierInputSchema = z.object({
   })).optional(),
   model: z.string().optional(),
   apiKey: z.string().optional(),
+  workspaceId: z.string().optional(),
   timeoutMs: z.number().int().positive().optional(),
 });
 
@@ -54,9 +58,25 @@ export type AiWorkflowClassifierInput = z.input<typeof AiWorkflowClassifierInput
 export type AiWorkflowDecision = z.infer<typeof AiWorkflowClassifierOutputSchema>;
 
 function cleanModelName(model: string | undefined): string {
-  const configured = process.env.AI_WORKFLOW_CLASSIFIER_MODEL || model || DEFAULT_AUTOPILOT_MODEL;
+  const configured = model || DEFAULT_AUTOPILOT_MODEL;
   const geminiModel = configured.startsWith('googleai/') ? configured : DEFAULT_AUTOPILOT_MODEL;
   return geminiModel.replace(/^googleai\//, '');
+}
+
+async function resolveApiKeyForModel(input: {
+  model: string;
+  explicitApiKey?: string;
+  workspaceId?: string;
+}): Promise<string> {
+  const provider = getAiModelRuntimeProvider(input.model);
+  const explicitApiKey = input.explicitApiKey?.trim();
+  if (provider === 'googleai' && explicitApiKey) return explicitApiKey;
+
+  const candidates = await resolveAiProviderKeyCandidates({
+    config: { workspace_id: input.workspaceId },
+    workspaceGeminiApiKey: provider === 'googleai' ? explicitApiKey : undefined,
+  });
+  return candidates.find((candidate) => candidate.provider === provider)?.key || '';
 }
 
 function extractJson(text: string): unknown {
@@ -121,8 +141,12 @@ export function shouldUseAiWorkflowClassifier(input: {
 
 export async function classifyAutopilotWorkflowWithAi(input: AiWorkflowClassifierInput): Promise<AiWorkflowDecision> {
   const parsedInput = AiWorkflowClassifierInputSchema.parse(input);
-  const configuredModel = process.env.AI_WORKFLOW_CLASSIFIER_MODEL || parsedInput.model || DEFAULT_AUTOPILOT_MODEL;
-  const apiKey = parsedInput.apiKey?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+  const configuredModel = parsedInput.model || await resolveAiDecisionModel('workflowClassifier', DEFAULT_AUTOPILOT_MODEL);
+  const apiKey = await resolveApiKeyForModel({
+    model: configuredModel,
+    explicitApiKey: parsedInput.apiKey?.trim() || getDefaultGeminiEnvKey(),
+    workspaceId: parsedInput.workspaceId,
+  });
 
   const enabledWorkflowTools = (parsedInput.enabledToolNames || [])
     .filter((tool) => WORKFLOW_TOOL_NAMES.includes(tool as (typeof WORKFLOW_TOOL_NAMES)[number]));
@@ -154,7 +178,7 @@ export async function classifyAutopilotWorkflowWithAi(input: AiWorkflowClassifie
     `Mensagem do cliente:\n${parsedInput.customerMessage}`,
   ].filter(Boolean).join('\n');
 
-  const timeoutMs = parsedInput.timeoutMs || 1800;
+  const timeoutMs = parsedInput.timeoutMs || await resolveAiDecisionTimeoutMs('workflowClassifier', 1800);
   if (isLmStudioModel(configuredModel)) {
     try {
       return await requestLmStudioJson({
@@ -186,6 +210,52 @@ export async function classifyAutopilotWorkflowWithAi(input: AiWorkflowClassifie
         suggestedTools: [],
         confidence: 0,
         reason: 'lmstudio_classifier_failed',
+      };
+    }
+  }
+
+  if (isOpenAiCompatibleModel(configuredModel)) {
+    if (!apiKey) {
+      return {
+        shouldUseTools: false,
+        needsCustomerIdentifier: false,
+        suggestedTools: [],
+        confidence: 0,
+        reason: 'missing_api_key',
+      };
+    }
+
+    try {
+      return await requestOpenAiCompatibleJson({
+        model: configuredModel,
+        apiKey,
+        schema: AiWorkflowClassifierOutputSchema,
+        schemaName: 'dialogy_workflow_classifier',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            shouldUseTools: { type: 'boolean' },
+            needsCustomerIdentifier: { type: 'boolean' },
+            suggestedTools: { type: 'array', items: { type: 'string', enum: WORKFLOW_TOOL_NAMES } },
+            confidence: { type: 'number' },
+            reason: { type: 'string' },
+          },
+          required: ['shouldUseTools', 'needsCustomerIdentifier', 'suggestedTools', 'confidence', 'reason'],
+          additionalProperties: false,
+        },
+        systemPrompt: 'Classifique o workflow de atendimento e responda somente o JSON solicitado.',
+        userPrompt: prompt,
+        timeoutMs,
+        maxTokens: 180,
+      });
+    } catch (error) {
+      console.warn('[AI_WORKFLOW_CLASSIFIER] OpenAI-compatible provider failed, skipping optional classifier:', error);
+      return {
+        shouldUseTools: false,
+        needsCustomerIdentifier: false,
+        suggestedTools: [],
+        confidence: 0,
+        reason: 'provider_classifier_failed',
       };
     }
   }

@@ -676,6 +676,24 @@ describe('autopilot SGP response guard', () => {
     expect(response).toContain('Nao consegui gerar o PIX');
   });
 
+  it('does not expose a rejected premature close after a valid customer response was sent', () => {
+    const response = buildToolFailureResponse(
+      [{
+        toolName: 'close_chat',
+        status: 'rejected',
+        input: {
+          type: 'close_chat',
+          reason: 'Pre-cadastro concluido.',
+          payload: { sendCloseMessage: true },
+        },
+        error: '[tool_policy:intent_mismatch] Encerramento bloqueado sem pedido explicito.',
+      }],
+      'Seu pre-cadastro foi concluido com sucesso.'
+    );
+
+    expect(response).toBeNull();
+  });
+
   it('forces SGP lookup when router reboot procedure is detected but the model returns no actions', () => {
     const actions = ensureProcedureSgpLookupAction({
       response: 'Vou realizar a reinicializacao do seu roteador agora mesmo.',
