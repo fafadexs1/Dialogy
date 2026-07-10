@@ -12,6 +12,7 @@ import type {
   WorkflowEvent,
   WorkflowExecution,
 } from './types';
+import { redactWorkflowValue } from './events';
 
 type Queryable = Pick<Pool, 'query'>;
 
@@ -114,12 +115,12 @@ export class PostgresWorkflowPersistence implements WorkflowPersistence {
           step.sequence,
           step.attempt,
           step.status,
-          JSON.stringify(step.input || null),
-          JSON.stringify(step.output || null),
-          JSON.stringify(step.stateBefore || null),
-          JSON.stringify(step.statePatch || null),
-          JSON.stringify(step.stateAfter || null),
-          JSON.stringify(step.error || null),
+          JSON.stringify(redactWorkflowValue(step.input || null)),
+          JSON.stringify(redactWorkflowValue(step.output || null)),
+          JSON.stringify(redactWorkflowValue(step.stateBefore || null)),
+          JSON.stringify(redactWorkflowValue(step.statePatch || null)),
+          JSON.stringify(redactWorkflowValue(step.stateAfter || null)),
+          JSON.stringify(redactWorkflowValue(step.error || null)),
           JSON.stringify(result?.metrics || null),
           step.selectedOutput || null,
           step.startedAt,
@@ -159,9 +160,9 @@ export class PostgresWorkflowPersistence implements WorkflowPersistence {
             step.nodeId,
             toolCall.toolName,
             toolCall.purposeSummary || null,
-            JSON.stringify(toolCall.arguments),
-            JSON.stringify(toolCall.output || null),
-            JSON.stringify(toolCall.error || null),
+            JSON.stringify(redactWorkflowValue(toolCall.arguments)),
+            JSON.stringify(redactWorkflowValue(toolCall.output || null)),
+            JSON.stringify(redactWorkflowValue(toolCall.error || null)),
             toolCall.status,
             toolCall.attempt || 1,
             toolCall.idempotencyKey || null,
@@ -176,17 +177,13 @@ export class PostgresWorkflowPersistence implements WorkflowPersistence {
 
   async saveWorkflowDefinition(definition: WorkflowDefinition): Promise<void> {
     const parsed = WorkflowDefinitionSchema.parse(definition);
-    await this.database.query(
+    const result = await this.database.query(
       `INSERT INTO workflow_definitions (
          workflow_id, workflow_version, workspace_id, name, status, definition,
          created_at, updated_at
        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
-       ON CONFLICT (workflow_id, workflow_version) DO UPDATE
-       SET workspace_id = EXCLUDED.workspace_id,
-           name = EXCLUDED.name,
-           status = EXCLUDED.status,
-           definition = EXCLUDED.definition,
-           updated_at = EXCLUDED.updated_at`,
+       ON CONFLICT (workflow_id, workflow_version) DO NOTHING
+       RETURNING workflow_id`,
       [
         parsed.id,
         parsed.version,
@@ -195,6 +192,32 @@ export class PostgresWorkflowPersistence implements WorkflowPersistence {
         parsed.status,
         JSON.stringify(parsed),
         parsed.createdAt,
+        parsed.updatedAt,
+      ],
+    );
+    if (Number(result.rowCount || 0) > 0) return;
+
+    const existing = await this.getWorkflowDefinition(parsed.id, parsed.version);
+    if (!existing) throw new Error(`Workflow definition ${parsed.id}@${parsed.version} could not be persisted.`);
+    if (JSON.stringify(existing) === JSON.stringify(parsed)) return;
+    if (existing.status === 'published' || parsed.status === 'published') {
+      throw new Error(`Published workflow definition ${parsed.id}@${parsed.version} is immutable.`);
+    }
+    await this.database.query(
+      `UPDATE workflow_definitions
+       SET workspace_id = $3,
+           name = $4,
+           status = $5,
+           definition = $6::jsonb,
+           updated_at = $7
+       WHERE workflow_id = $1 AND workflow_version = $2 AND status <> 'published'`,
+      [
+        parsed.id,
+        parsed.version,
+        parsed.workspaceId || null,
+        parsed.name,
+        parsed.status,
+        JSON.stringify(parsed),
         parsed.updatedAt,
       ],
     );

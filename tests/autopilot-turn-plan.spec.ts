@@ -194,6 +194,29 @@ describe('autopilot turn plan', () => {
     )).toBe('wifi_credentials_lookup');
   });
 
+  it('keeps plain commercial interest out of generic MCP action planning', () => {
+    for (const customerMessage of [
+      'Quero contratar internet',
+      'Tenho interesse em assinar fibra',
+      'Gostaria de adquirir esse plano',
+      'Esse plano mesmo ficou bom para mim',
+    ]) {
+      const plan = buildAutopilotTurnPlan({
+        customerMessage,
+        intentResolution: resolveAutopilotIntent({ customerMessage }),
+        slotExtraction: slots(),
+        enabledToolNames: ['mcp:clinic:book_appointment', 'mcp:logistics:schedule_pickup'],
+        toolCatalog: catalog,
+      });
+
+      expect(plan.customerNeed).toBe('none');
+      expect(plan.expectedNextAction).toBe('continue_llm');
+      expect(plan.requiredToolNames).toEqual([]);
+      expect(plan.preResponseActions).toEqual([]);
+      expect(plan.responseOverride).toBeNull();
+    }
+  });
+
   it.each(['Oi', 'Fala ai galera'])('does not inherit an old operational need for an isolated greeting: %s', (greeting) => {
     const history = [
       'Cliente: qual o status do pedido ABCD-1234?',
@@ -526,7 +549,7 @@ describe('autopilot turn plan', () => {
       toolCatalog: catalog,
     });
 
-    expect(plan.customerNeed).toBe('generic_external_lookup');
+    expect(plan.customerNeed).toBe('none');
     expect(plan.expectedNextAction).toBe('continue_llm');
     expect(plan.requiredToolNames).toEqual([]);
     expect(plan.preResponseActions).toEqual([]);

@@ -126,6 +126,8 @@ export function classifyAiModelError(error: unknown): AiModelErrorClassification
   }
 
   if (
+    status === 404 ||
+    /not_found|model[^\n]*not found|model[^\n]*does not exist/.test(normalized) ||
     status === 500 ||
     status === 502 ||
     status === 503 ||

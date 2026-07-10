@@ -42,6 +42,7 @@ type ConfigRow = {
   default_fallback_reply?: string | null;
   escalation_policy?: string | null;
   closing_policy?: string | null;
+  inactivity_timeout_seconds?: number | string | null;
   enabled_tool_names?: unknown;
   flow_graph?: unknown;
 };
@@ -183,6 +184,13 @@ function parseFlowGraph(value: unknown): AutopilotFlowGraph | null {
     : null;
 }
 
+function normalizeInactivityTimeoutSeconds(value: unknown): number | null {
+  const timeout = Number(value);
+  return Number.isFinite(timeout) && timeout > 0
+    ? Math.round(timeout)
+    : null;
+}
+
 function buildSnapshotFromConfigRow(row: ConfigRow): AutopilotConfigDraftSnapshot {
   return {
     name: row.name || 'Meu agente de IA',
@@ -197,6 +205,7 @@ function buildSnapshotFromConfigRow(row: ConfigRow): AutopilotConfigDraftSnapsho
     default_fallback_reply: row.default_fallback_reply || null,
     escalation_policy: row.escalation_policy || null,
     closing_policy: row.closing_policy || null,
+    inactivity_timeout_seconds: normalizeInactivityTimeoutSeconds(row.inactivity_timeout_seconds),
     enabled_tool_names: parseEnabledToolNames(row.enabled_tool_names),
     flow_graph: parseFlowGraph(row.flow_graph),
   };
@@ -243,6 +252,9 @@ function normalizeDraftSnapshot(
     closing_policy: hasOwn('closing_policy')
       ? (typeof snapshot.closing_policy === 'string' && snapshot.closing_policy.length > 0 ? snapshot.closing_policy : null)
       : fallback.closing_policy,
+    inactivity_timeout_seconds: hasOwn('inactivity_timeout_seconds')
+      ? normalizeInactivityTimeoutSeconds(snapshot.inactivity_timeout_seconds)
+      : normalizeInactivityTimeoutSeconds(fallback.inactivity_timeout_seconds),
     enabled_tool_names: Array.isArray(snapshot.enabled_tool_names)
       ? parseEnabledToolNames(snapshot.enabled_tool_names)
       : fallback.enabled_tool_names,
@@ -267,7 +279,18 @@ function stableJson(value: unknown): string {
 }
 
 export function hashCausalPatternDraftSnapshot(snapshot: AutopilotConfigDraftSnapshot): string {
-  return createHash('sha256').update(stableJson(snapshot)).digest('hex');
+  // `inactivity_timeout_seconds` was added after draft application hashes were
+  // already persisted.  Treat an absent, null, zero, or otherwise invalid value
+  // as the same legacy state so those applications can still be reverted.
+  const normalizedTimeout = normalizeInactivityTimeoutSeconds(snapshot.inactivity_timeout_seconds);
+  const legacyCompatibleSnapshot: AutopilotConfigDraftSnapshot = {
+    ...snapshot,
+    ...(normalizedTimeout === null
+      ? { inactivity_timeout_seconds: undefined }
+      : { inactivity_timeout_seconds: normalizedTimeout }),
+  };
+
+  return createHash('sha256').update(stableJson(legacyCompatibleSnapshot)).digest('hex');
 }
 
 function patternTypeLabel(type: string): string {

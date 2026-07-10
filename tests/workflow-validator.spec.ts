@@ -29,6 +29,14 @@ describe('workflow static validator', () => {
     expect(issueCodes(validateWorkflowDefinition(workflow))).toContain('incompatible_connection');
   });
 
+  it('rejects more than one connection from a single-cardinality output', () => {
+    const workflow = linearWorkflow();
+    const secondEnd = workflowNode('output.end', 'second-end');
+    workflow.nodes.push(secondEnd);
+    workflow.connections.push(connect(workflow.nodes[0]!, 'started', secondEnd, 'main', 'main', 'duplicate-output'));
+    expect(issueCodes(validateWorkflowDefinition(workflow))).toContain('output_cardinality_exceeded');
+  });
+
   it('rejects an agent without a model', () => {
     const trigger = workflowNode('trigger.manual', 'trigger');
     const agent = workflowNode('ai.agent', 'agent', {
@@ -222,4 +230,3 @@ describe('workflow static validator', () => {
     expect(validateWorkflowDefinition(workflow).warnings.map((issue) => issue.code)).toContain('unknown_node_type');
   });
 });
-

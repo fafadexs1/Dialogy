@@ -3,9 +3,12 @@ import { googleAI } from '@genkit-ai/googleai';
 import { z } from 'zod';
 
 import { ai } from '@/ai/genkit';
+import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
+import { isOpenAiCompatibleModel, requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';
+import { runAiModelWithFallback, type AiModelKeyCandidate } from '@/services/ai/model-client';
 import { toCanonicalKnowledgeMarkdown } from '@/services/rag/knowledge-document';
 
 const KnowledgeDocumentRewriteSchema = z.object({
@@ -89,10 +92,35 @@ Conteudo:
 
 const defaultPrompt = ai.definePrompt(promptConfig);
 
+const rewriteJsonSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    content: { type: 'string' },
+    summary: { type: 'string' },
+    category: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+    contextRole: { type: 'string', enum: ['fact', 'procedure', 'policy', 'persona'] },
+    canonicalAnswer: { type: 'string' },
+    workflowHints: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+    requiredTools: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+  },
+  required: ['name', 'content', 'summary', 'category', 'tags', 'contextRole', 'canonicalAnswer', 'workflowHints', 'requiredTools'],
+  additionalProperties: false,
+};
+
+const rewriteFallbackModels = [
+  DEFAULT_AUTOPILOT_MODEL,
+  'googleai/gemini-2.5-flash',
+  'openai/gpt-5.4-mini',
+  'deepseek/deepseek-chat',
+];
+
 export async function improveKnowledgeDocumentForRag(input: {
   document: KnowledgeBaseDocument;
   model: string;
   apiKey?: string;
+  apiKeyCandidates?: AiModelKeyCandidate[];
 }): Promise<ImprovedKnowledgeDocument> {
   const toolMentions = Array.from(String(input.document.content || '').matchAll(/@([a-zA-Z0-9_.:-]+)/g))
     .map((match) => `@${match[1]}`)
@@ -104,27 +132,11 @@ export async function improveKnowledgeDocumentForRag(input: {
     toolMentions,
   };
 
-  if (isLmStudioModel(input.model)) {
-    const improved = await requestLmStudioJson({
-      model: input.model,
+  const executeRewrite = async (model: string, apiKey: string) => {
+    const common = {
       schema: KnowledgeDocumentRewriteSchema,
       schemaName: 'dialogy_knowledge_document_rewrite',
-      jsonSchema: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          content: { type: 'string' },
-          summary: { type: 'string' },
-          category: { type: 'string' },
-          tags: { type: 'array', items: { type: 'string' }, maxItems: 12 },
-          contextRole: { type: 'string', enum: ['fact', 'procedure', 'policy', 'persona'] },
-          canonicalAnswer: { type: 'string' },
-          workflowHints: { type: 'array', items: { type: 'string' }, maxItems: 12 },
-          requiredTools: { type: 'array', items: { type: 'string' }, maxItems: 12 },
-        },
-        required: ['name', 'content', 'summary', 'category', 'tags', 'contextRole', 'canonicalAnswer', 'workflowHints', 'requiredTools'],
-        additionalProperties: false,
-      },
+      jsonSchema: rewriteJsonSchema,
       systemPrompt: 'Otimize documentos para RAG. Preserve fatos e tools. Responda somente JSON valido.',
       userPrompt: [
         `Titulo: ${promptInput.name}`,
@@ -134,17 +146,33 @@ export async function improveKnowledgeDocumentForRag(input: {
       ].join('\n\n'),
       timeoutMs: 30000,
       maxTokens: 2400,
-    });
-    return preserveKnowledgeDocumentSource(input.document, improved);
-  }
+    };
 
-  const apiKey = input.apiKey?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) throw new Error('Chave Gemini nao configurada para melhorar o documento.');
-  const defaultKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
-  const prompt = apiKey === defaultKey
+    if (isLmStudioModel(model)) {
+      return requestLmStudioJson({ model, ...common });
+    }
+    if (isOpenAiCompatibleModel(model)) {
+      return requestOpenAiCompatibleJson({ model, apiKey, ...common });
+    }
+
+    const defaultKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+    const prompt = apiKey === defaultKey
     ? defaultPrompt
-    : genkit({ plugins: [googleAI({ apiKey })], model: input.model }).definePrompt(promptConfig);
-  const result = await prompt(promptInput, { model: input.model });
-  if (!result.output) throw new Error('A IA nao retornou um documento estruturado.');
-  return preserveKnowledgeDocumentSource(input.document, KnowledgeDocumentRewriteSchema.parse(result.output));
+    : genkit({ plugins: [googleAI({ apiKey })], model }).definePrompt(promptConfig);
+    const result = await prompt(promptInput, { model });
+    if (!result.output) throw new Error('A IA nao retornou um documento estruturado.');
+    return KnowledgeDocumentRewriteSchema.parse(result.output);
+  };
+
+  const fallbackKeys = input.apiKeyCandidates?.length
+    ? input.apiKeyCandidates
+    : [{ source: 'explicit', key: input.apiKey || '', provider: undefined }];
+  const run = await runAiModelWithFallback({
+    label: 'knowledgeDocumentRewrite',
+    modelCandidates: [input.model, ...rewriteFallbackModels],
+    apiKeyCandidates: fallbackKeys,
+    maxAttemptsPerCandidate: 1,
+    execute: ({ model, apiKey }) => executeRewrite(model, apiKey),
+  });
+  return preserveKnowledgeDocumentSource(input.document, run.result);
 }

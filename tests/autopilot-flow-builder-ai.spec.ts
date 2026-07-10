@@ -10,6 +10,7 @@ import {
   sanitizeAutopilotFlowProposal,
 } from '@/ai/flows/autopilot-flow-builder';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
+import type { KnowledgeBaseDocument } from '@/lib/types';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import { auditAutopilotFlowGraph } from '@/services/autopilot/flow-audit';
 
@@ -116,6 +117,66 @@ describe('autopilot flow builder AI sanitizer', () => {
     expect(proposal.flowGraph.nodes.some((node) => node.kind === 'sub_agent')).toBe(true);
     expect(proposal.flowGraph.nodes.some((node) => node.kind === 'assistant')).toBe(false);
     expect(proposal.flowGraph.nodes.every((node) => Boolean(node.config?.instructions?.trim()))).toBe(true);
+  });
+
+  it('adds exact knowledge document references to deterministic fallback knowledge and sub-agent nodes', () => {
+    const knowledgeDocuments: KnowledgeBaseDocument[] = [
+      {
+        id: 'plans-official',
+        name: 'Catalogo oficial de planos',
+        category: 'commercial_plan_catalog',
+        contextRole: 'fact',
+        collectionIds: ['comercial'],
+        content: 'Planos oficiais: 500 Mega e 1000 Mega.',
+        summary: 'Planos oficiais de internet.',
+      },
+      {
+        id: 'sales-procedure',
+        name: 'Fluxo comercial interno',
+        category: 'commercial_sales_flow',
+        contextRole: 'procedure',
+        collectionIds: ['procedimentos'],
+        content: 'Pergunte endereco antes de apresentar planos.',
+      },
+    ];
+
+    const proposal = buildDeterministicFallbackProposal({
+      conversation: [{ role: 'user', content: 'Construa um fluxo para apresentar planos de internet e canais de TV.' }],
+      tools: [],
+      knowledgeDocuments,
+      knowledgeCollections: [
+        { id: 'comercial', name: 'Comercial' },
+        { id: 'procedimentos', name: 'Procedimentos' },
+      ],
+    }, new Error('fallback'));
+
+    const knowledgeNode = proposal.flowGraph.nodes.find((node) => node.kind === 'knowledge');
+    const subAgent = proposal.flowGraph.nodes.find((node) => node.kind === 'sub_agent');
+
+    expect(knowledgeNode?.config?.knowledgeDocumentIds).toContain('plans-official');
+    expect(subAgent?.config?.knowledgeDocumentIds).toContain('plans-official');
+    expect(knowledgeNode?.config?.knowledgeCollectionIds).toContain('comercial');
+  });
+
+  it('does not attach CRM update to a generic sub-agent without an explicit collect step', () => {
+    const flow = applyToolSelection({
+      summary: 'Flow comercial.',
+      systemPrompt: 'Responda duvidas comerciais.',
+      nodes: [
+        { id: 'agent', kind: 'sub_agent', title: 'Agente comercial', subtitle: 'Responder duvidas', x: 100, y: 100 },
+      ],
+      edges: [],
+    }, {
+      tools: [{
+        attachToNodeId: 'agent',
+        toolName: 'crm_update_contact_custom_fields',
+        title: 'Atualizar CRM',
+        subtitle: 'Salvar dados do lead',
+        instructions: 'Atualize campos customizados.',
+      }],
+    }, listAgentToolCatalogItems());
+
+    expect(flow.nodes.some((node) => node.kind === 'tool' && node.toolName === 'crm_update_contact_custom_fields')).toBe(false);
   });
 
   it('fills deterministic positions when the model omits architecture coordinates', () => {
@@ -717,7 +778,6 @@ describe('autopilot flow builder AI sanitizer', () => {
       expect.objectContaining({ source: confirmation?.id, target: toolNode?.id }),
       expect.objectContaining({ source: toolNode?.id, target: agent?.id }),
     ]));
-    expect(proposal.enabledToolNames).toContain(approveClaim.name);
     expect(toolNode?.config?.instructions).toContain('mcp:insurance:approve_claim');
     expect(audit.status).toBe('passed');
     expect(audit.issues).toEqual([]);

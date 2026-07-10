@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { validateSchema } from 'genkit/schema';
 import { executeAgentNode } from './agent-loop';
 import type { ModelFallbackChain } from './model-adapter';
 import type {
@@ -18,6 +19,7 @@ import {
   materializeValue,
   readPath,
   renderTemplate,
+  stableStringify,
   withTimeout,
 } from './utils';
 
@@ -65,6 +67,10 @@ export class WorkflowNodeHandlerRegistry implements NodeHandlerRegistryContract 
 
   get(nodeType: string): NodeHandler | undefined {
     return this.handlers.get(nodeType);
+  }
+
+  listTypes(): string[] {
+    return [...this.handlers.keys()].sort();
   }
 }
 
@@ -187,6 +193,89 @@ const transformHandler: NodeHandler = {
   },
 };
 
+const ExtractedRecordSchema = z.record(z.unknown());
+
+function modelDependencyContext(input: NodeRuntimeInput): AgentDependencyContext | null {
+  const modelNode = input.attachments.model?.[0];
+  if (!modelNode) return null;
+  return {
+    execution: input.execution,
+    node: input.node,
+    modelNode,
+    toolNodes: input.attachments.tool || [],
+    memoryNode: input.attachments.memory?.[0],
+    knowledgeNodes: input.attachments.knowledge || [],
+    guardrailNodes: input.attachments.guardrail || [],
+  };
+}
+
+function extractHandler(dependencies: WorkflowHandlerDependencies): NodeHandler {
+  return {
+    type: 'data.extract',
+    execute: async (input) => {
+      const dependencyContext = modelDependencyContext(input);
+      if (!dependencyContext || !dependencies.resolveModelChain) {
+        return {
+          status: 'error',
+          error: {
+            code: 'EXTRACT_MODEL_MISSING',
+            message: 'A structured extraction node requires a connected model.',
+            retryable: false,
+          },
+        };
+      }
+      const jsonSchema = isRecord(input.node.config.schema) ? input.node.config.schema : {};
+      const maxAttempts = Math.max(1, Math.min(5, Number(input.node.config.maxAttempts || 2)));
+      const modelChain = await dependencies.resolveModelChain(dependencyContext);
+      let lastValidationErrors: unknown = [];
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const generated = await modelChain.generateStructured({
+          messages: [{
+            role: 'system',
+            content: [
+              'Extraia somente os dados presentes na entrada.',
+              'Não invente valores ausentes.',
+              'Retorne exclusivamente um objeto JSON compatível com o schema fornecido.',
+              `Schema: ${stableStringify(jsonSchema)}`,
+            ].join('\n'),
+          }, {
+            role: 'user',
+            content: stableStringify(input.input),
+          }],
+          schema: ExtractedRecordSchema,
+          schemaName: `workflow_extract_${input.node.id}`,
+          jsonSchema,
+          timeoutMs: Number(dependencyContext.modelNode.config.timeoutMs || 60_000),
+          signal: input.signal,
+        });
+        const validation = validateSchema(generated.output, { jsonSchema });
+        if (validation.valid) {
+          return {
+            status: 'route',
+            selectedOutput: 'success',
+            output: generated.output,
+            statePatch: typeof input.node.config.outputKey === 'string' && input.node.config.outputKey.trim()
+              ? { [input.node.config.outputKey.trim()]: generated.output }
+              : undefined,
+            metrics: {
+              durationMs: 0,
+              model: generated.selected.config.model,
+              modelCalls: attempt,
+            },
+          };
+        }
+        lastValidationErrors = validation.errors || [];
+      }
+      return {
+        status: 'route',
+        selectedOutput: 'invalid_output',
+        output: { valid: false, validationErrors: lastValidationErrors },
+        metrics: { durationMs: 0, modelCalls: maxAttempts },
+      };
+    },
+  };
+}
+
 const templateHandler: NodeHandler = {
   type: 'data.template',
   execute: async (input) => {
@@ -237,6 +326,85 @@ const switchHandler: NodeHandler = {
     };
   },
 };
+
+const AiRouterDecisionSchema = z.object({
+  routeId: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+});
+
+function aiRouterHandler(dependencies: WorkflowHandlerDependencies): NodeHandler {
+  return {
+    type: 'logic.ai_router',
+    execute: async (input) => {
+      const dependencyContext = modelDependencyContext(input);
+      if (!dependencyContext || !dependencies.resolveModelChain) {
+        return {
+          status: 'error',
+          error: {
+            code: 'AI_ROUTER_MODEL_MISSING',
+            message: 'An AI router requires a connected model.',
+            retryable: false,
+          },
+        };
+      }
+      const routes = Array.isArray(input.node.config.routes)
+        ? input.node.config.routes.filter(isRecord).map((route) => ({
+            id: String(route.id || ''),
+            label: String(route.label || route.id || ''),
+            description: String(route.description || ''),
+            examples: Array.isArray(route.examples) ? route.examples.map(String) : [],
+          })).filter((route) => route.id)
+        : [];
+      if (routes.length === 0) {
+        return {
+          status: 'error',
+          error: { code: 'AI_ROUTER_ROUTES_MISSING', message: 'AI router has no configured routes.', retryable: false },
+        };
+      }
+      const modelChain = await dependencies.resolveModelChain(dependencyContext);
+      const generated = await modelChain.generateStructured({
+        messages: [{
+          role: 'system',
+          content: [
+            'Selecione exatamente uma das rotas permitidas para a entrada recebida.',
+            'Não crie novas rotas e não exponha raciocínio interno.',
+            `Rotas: ${stableStringify(routes)}`,
+          ].join('\n'),
+        }, {
+          role: 'user',
+          content: stableStringify(input.input),
+        }],
+        schema: AiRouterDecisionSchema,
+        schemaName: `workflow_router_${input.node.id}`,
+        timeoutMs: Number(dependencyContext.modelNode.config.timeoutMs || 60_000),
+        signal: input.signal,
+      });
+      const allowedRouteIds = new Set(routes.map((route) => route.id));
+      const minimumConfidence = Number(input.node.config.minimumConfidence ?? 0.75);
+      const lowConfidenceOutput = String(input.node.config.lowConfidenceOutput || 'low_confidence');
+      const defaultOutput = String(input.node.config.defaultOutput || 'default');
+      const selectedOutput = generated.output.confidence < minimumConfidence
+        ? lowConfidenceOutput
+        : allowedRouteIds.has(generated.output.routeId)
+          ? generated.output.routeId
+          : defaultOutput;
+      return {
+        status: 'route',
+        selectedOutput,
+        output: {
+          routeId: selectedOutput,
+          proposedRouteId: generated.output.routeId,
+          confidence: generated.output.confidence,
+        },
+        metrics: {
+          durationMs: 0,
+          model: generated.selected.config.model,
+          modelCalls: 1,
+        },
+      };
+    },
+  };
+}
 
 const mergeHandler: NodeHandler = {
   type: 'logic.merge',
@@ -324,17 +492,7 @@ const loopHandler: NodeHandler = {
 };
 
 function buildAgentDependencyContext(input: NodeRuntimeInput): AgentDependencyContext | null {
-  const modelNode = input.attachments.model?.[0];
-  if (!modelNode) return null;
-  return {
-    execution: input.execution,
-    node: input.node,
-    modelNode,
-    toolNodes: input.attachments.tool || [],
-    memoryNode: input.attachments.memory?.[0],
-    knowledgeNodes: input.attachments.knowledge || [],
-    guardrailNodes: input.attachments.guardrail || [],
-  };
+  return modelDependencyContext(input);
 }
 
 function agentHandler(dependencies: WorkflowHandlerDependencies): NodeHandler {
@@ -438,9 +596,11 @@ export function createDefaultNodeHandlerRegistry(
   registry
     .register(setHandler)
     .register(transformHandler)
+    .register(extractHandler(dependencies))
     .register(templateHandler)
     .register(ifHandler)
     .register(switchHandler)
+    .register(aiRouterHandler(dependencies))
     .register(mergeHandler)
     .register(parallelHandler)
     .register(waitHandler)

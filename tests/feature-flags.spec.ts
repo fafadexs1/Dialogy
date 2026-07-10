@@ -42,6 +42,14 @@ describe('evaluateFeatureFlag', () => {
     expect(result.reason).toBe('targeted');
   });
 
+  it('enables flags only for a targeted workspace even if globally disabled', () => {
+    const config = { enabled: false, workspaces: ['workspace-canary'] };
+    expect(evaluateFeatureFlag('flag', config, undefined, { workspaceId: 'workspace-canary' }))
+      .toMatchObject({ enabled: true, reason: 'targeted' });
+    expect(evaluateFeatureFlag('flag', config, undefined, { workspaceId: 'workspace-other' }))
+      .toMatchObject({ enabled: false, reason: 'disabled' });
+  });
+
   it('respects explicit disabled flags', () => {
     const result = evaluateFeatureFlag('flag', { enabled: false }, undefined, {});
     expect(result.enabled).toBe(false);

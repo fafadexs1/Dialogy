@@ -62,9 +62,12 @@ export function createQueueWorkerRuntime(params: {
   });
 
   worker.on('failed', async (job, error) => {
+    const failure = error instanceof Error
+      ? (error.stack || error.message)
+      : error;
     console.error(
       `[QUEUE_WORKER] Failed job ${job?.name}#${job?.id ?? 'unknown'}:`,
-      error instanceof Error ? error.message : error
+      failure
     );
 
     if (!job || !onFailure) {

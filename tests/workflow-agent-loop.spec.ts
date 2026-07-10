@@ -191,6 +191,19 @@ function lookupToolRegistry(executor?: () => Promise<Record<string, unknown>>) {
 }
 
 describe('controlled agent loop', () => {
+  it('routes a request for missing input instead of pausing inside the agent', async () => {
+    const fixture = agentFixture([{
+      type: 'needs_input',
+      question: 'Qual é o número do contrato?',
+      missingFields: ['contractId'],
+    }]);
+    const result = await fixture.run();
+    expect(result.status).toBe('route');
+    expect(result.selectedOutput).toBe('needs_input');
+    expect(result.output?.question).toBe('Qual é o número do contrato?');
+    expect(result.resumeToken).toBeUndefined();
+  });
+
   it('completes without tools', async () => {
     const fixture = agentFixture([{
       type: 'final',
@@ -369,4 +382,3 @@ describe('controlled agent loop', () => {
     expect(result.error?.code).toBe('MAX_AGENT_TURNS_REACHED');
   });
 });
-

@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
-import ContactPanel from '../chat/contact-panel';
 import MobileContactPanel from '../chat/mobile-contact-panel';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
@@ -108,7 +107,7 @@ function DraggableSoundTester({
 
   return ReactDOM.createPortal(
     <div
-      className="fixed z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md cursor-move"
+      className="fixed z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground cursor-move"
       style={{ left: pos.x, top: pos.y }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -128,8 +127,8 @@ function DraggableSoundTester({
 
 function LoadingSkeleton() {
   return (
-    <div className="flex flex-1 w-full min-h-0 h-full bg-background/20 backdrop-blur-md">
-      <div className="flex flex-col w-full shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-md p-4 gap-4">
+    <div className="flex flex-1 w-full min-h-0 h-full bg-background">
+      <div className="flex flex-col w-full shrink-0 min-w-0 max-w-full border-r border-border bg-background p-4 gap-4">
         <Skeleton className="h-12 w-full bg-muted" />
         <Skeleton className="h-10 w-full bg-muted" />
         <Skeleton className="h-10 w-full bg-muted" />
@@ -146,7 +145,7 @@ function LoadingSkeleton() {
 
 function ChatListSkeleton() {
   return (
-    <div className="flex flex-col w-full shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-md p-4 gap-4">
+    <div className="flex flex-col w-full shrink-0 min-w-0 max-w-full border-r border-border bg-background p-4 gap-4">
       <Skeleton className="h-6 w-32 bg-muted" />
       <Skeleton className="h-10 w-full bg-muted" />
       <div className="space-y-2 mt-2">
@@ -205,7 +204,7 @@ function MobileStatCard({
   return (
     <div
       className={cn(
-        'min-w-[150px] flex items-center gap-3 rounded-2xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-md ring-1',
+        'min-w-[150px] flex items-center gap-3 rounded-2xl border border-border bg-background px-3 py-3 ring-1',
         toneStyles.ring
       )}
     >
@@ -1586,7 +1585,7 @@ export default function MobileChatLayout({
         <div className="flex-1 overflow-hidden relative w-full">
           {activeTab === 'chats' && (
             <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
-              <div className="w-full h-full border-r-0 bg-background/58 backdrop-blur-xl">
+              <div className="w-full h-full border-r-0 bg-background">
                 <ChatList
                   chats={chats}
                   selectedChat={enrichedSelectedChat}
@@ -1609,7 +1608,7 @@ export default function MobileChatLayout({
           )}
           {activeTab === 'crm' && (
             <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
-              <div className="rounded-3xl border border-border/60 bg-background/58 p-5 shadow-sm backdrop-blur-md">
+              <div className="rounded-3xl border border-border bg-background p-5">
                 <div className="flex items-center gap-4">
                   <div className="h-12 w-12 rounded-2xl bg-blue-500/15 text-blue-500 flex items-center justify-center">
                     <Users className="h-6 w-6" />
@@ -1653,7 +1652,7 @@ export default function MobileChatLayout({
           )}
           {activeTab === 'settings' && (
             <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
-              <div className="rounded-3xl border border-border/60 bg-background/58 p-5 shadow-sm backdrop-blur-md">
+              <div className="rounded-3xl border border-border bg-background p-5">
                 <div className="flex items-center gap-4">
                   <div className="h-12 w-12 rounded-2xl bg-muted/60 text-foreground flex items-center justify-center">
                     <Settings className="h-6 w-6" />
@@ -1705,7 +1704,7 @@ export default function MobileChatLayout({
 
         {/* Bottom Navigation Bar */}
         <div className="px-6 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1 fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-          <div className="mx-auto grid max-w-[280px] grid-cols-3 gap-1 rounded-2xl border border-border/70 bg-background/80 p-1 shadow-xl shadow-slate-300/30 backdrop-blur-xl pointer-events-auto">
+          <div className="mx-auto grid max-w-[280px] grid-cols-3 gap-1 rounded-2xl border border-border bg-background p-1 pointer-events-auto">
             {mobileTabs.map((tab) => {
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
@@ -1738,7 +1737,7 @@ export default function MobileChatLayout({
 
         {/* Audio logic kept */}
         {needsAudioUnlock && (
-          <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md">
+          <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground">
             <span>Habilite</span>
             <Button size="sm" variant="secondary" onClick={unlockAudio}>Som</Button>
           </div>

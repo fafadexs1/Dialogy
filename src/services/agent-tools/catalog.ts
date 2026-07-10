@@ -321,6 +321,15 @@ export function listAgentToolDefinitions() {
   return Object.values(TOOL_CATALOG);
 }
 
+/**
+ * Tools with no permitted intent are intentionally blocked operations. They
+ * must stay visible to administrators when needed, but never be offered in a
+ * model output schema where choosing one would guarantee a rejection.
+ */
+export function listModelCallableAgentToolDefinitions() {
+  return listAgentToolDefinitions().filter((definition) => definition.allowedIntents.length > 0);
+}
+
 export function listAgentToolCatalogItems(): AgentToolCatalogItem[] {
   return listAgentToolDefinitions()
     .filter((definition) => definition.name !== 'mcp_call_tool')

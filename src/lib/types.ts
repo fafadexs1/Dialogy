@@ -1,6 +1,7 @@
 
 
 import { HTMLInputTypeAttribute } from "react";
+import type { WorkflowDefinition } from '@/services/workflow-runtime/types';
 
 export type InterfaceTheme = 'light' | 'dark' | 'system';
 
@@ -685,6 +686,7 @@ export interface AutopilotFlowNode {
     customIntentLabel?: string;
     returnToMainPrompt?: boolean;
     knowledgeCollectionIds?: string[];
+    knowledgeDocumentIds?: string[];
     switchMode?: 'ai' | 'rules';
     confidenceThreshold?: number;
     fallbackRouteId?: string;
@@ -753,8 +755,14 @@ export interface AutopilotConfig {
   default_fallback_reply: string | null;
   escalation_policy: string | null;
   closing_policy: string | null;
+  inactivity_timeout_seconds?: number | null;
   enabled_tool_names?: string[] | null;
   flow_graph?: AutopilotFlowGraph | null;
+  workflow_runtime_v2_mode?: 'off' | 'shadow' | 'primary' | null;
+  workflow_builder_mode?: 'legacy' | 'native_v2' | null;
+  active_workflow_id?: string | null;
+  active_workflow_version?: string | null;
+  workflow_definition?: WorkflowDefinition | null;
   tool_mode?: "deny" | "on_demand" | "required";
   created_at: string;
   updated_at: string;
@@ -773,8 +781,17 @@ export interface AutopilotConfigDraftSnapshot {
   default_fallback_reply: string | null;
   escalation_policy: string | null;
   closing_policy: string | null;
+  inactivity_timeout_seconds?: number | null;
   enabled_tool_names: string[];
   flow_graph?: AutopilotFlowGraph | null;
+  workflow_runtime_v2_mode?: 'off' | 'shadow' | 'primary' | null;
+  workflow_builder_mode?: 'legacy' | 'native_v2';
+  workflow_definition?: WorkflowDefinition | null;
+  workflow_migration?: {
+    source: 'legacy_flow_graph';
+    sourceHash: string;
+    migratedAt: string;
+  } | null;
 }
 
 export interface AutopilotConfigDraft {

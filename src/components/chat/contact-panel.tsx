@@ -76,7 +76,6 @@ import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import ContactTimeline from '../crm/contact-timeline';
 import DealForm from '../crm/deal-form';
@@ -844,9 +843,7 @@ function SGPDashboardTile({
     };
 
     return (
-        <motion.div
-            whileHover={{ y: -2, transition: { duration: 0.2 } }}
-            whileTap={{ scale: 0.98 }}
+        <div
             onClick={onClick}
             className={cn(
                 "relative flex flex-col gap-2 rounded-2xl border border-slate-200/80 bg-white/50 p-2.5 shadow-sm transition-all hover:bg-white hover:shadow-md dark:border-white/5 dark:bg-zinc-900/50 dark:hover:bg-zinc-900",
@@ -873,7 +870,7 @@ function SGPDashboardTile({
             <div className="mt-0.5 flex-1 overflow-hidden">
                 {children}
             </div>
-        </motion.div>
+        </div>
     );
 }
 
@@ -1314,7 +1311,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
     if (!chat) {
         return (
-            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 border-l border-border/80 bg-background/90 backdrop-blur-xl">
+            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 border-l border-border bg-background">
                 <div className="flex h-16 items-center border-b border-border px-4 xl:px-6">
                     <h3 className="font-semibold text-foreground">Informações de Contato</h3>
                 </div>
@@ -1370,17 +1367,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         : contactDisplayValue;
 
     return (
-        <motion.div
-            initial={{ x: 30, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            className="relative z-10 hidden h-full overflow-x-hidden overflow-y-hidden border-l border-slate-200/80 bg-white shadow-[-20px_0_60px_rgba(15,23,42,0.12)] backdrop-blur-[40px] dark:border-white/5 dark:bg-[#050507] dark:shadow-[-20px_0_60px_rgba(0,0,0,0.8)] lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]"
-        >
-            {/* Background Glows */}
-            <div className="pointer-events-none absolute right-0 top-0 h-[300px] w-[300px] -mr-20 -mt-20 rounded-full bg-blue-200/70 blur-[120px] dark:bg-transparent dark:opacity-0" />
-            <div className="pointer-events-none absolute bottom-0 left-0 h-[200px] w-[200px] -mb-20 -ml-20 rounded-full bg-emerald-100/70 blur-[100px] dark:bg-transparent dark:opacity-0" />
+        <div className="relative z-10 hidden h-full overflow-x-hidden overflow-y-hidden border-l border-slate-200 bg-white dark:border-white/5 dark:bg-[#050507] lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]">
 
             {/* Header */}
-            <div className="sticky top-0 z-20 flex flex-col border-b border-slate-200/80 bg-white px-3 pb-2 pt-3 backdrop-blur-xl dark:border-white/5 dark:bg-[#050507]">
+            <div className="sticky top-0 z-20 flex flex-col border-b border-slate-200 bg-white px-3 pb-2 pt-3 dark:border-white/5 dark:bg-[#050507]">
                 {/* Quick Actions Bar - Icon only */}
                 <div className="flex flex-wrap items-center gap-1 justify-end min-w-0">
                     <TooltipProvider>
@@ -1430,24 +1420,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                 <div className="overflow-x-hidden p-3.5 space-y-3.5 pb-24 sm:p-4 sm:space-y-4">
                     {/* Profile section always visible above tabs */}
                     <div className="relative">
-                        <div className={cn(
-                            "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 blur-[60px] opacity-30 pointer-events-none transition-all duration-700 dark:opacity-10",
-                            resolvedPlatform === 'instagram' ? "bg-pink-500" :
-                                resolvedPlatform === 'messenger' ? "bg-blue-500" :
-                                    resolvedPlatform === 'telegram' ? "bg-sky-500" :
-                                        "bg-green-500"
-                        )} />
-
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{ type: "spring", damping: 20 }}
-                            className="relative flex w-full flex-col items-center text-center overflow-hidden"
-                        >
+                        <div className="relative flex w-full flex-col items-center text-center overflow-hidden">
                             <div className="relative group cursor-pointer" onClick={() => contact.avatar_url && window.open(contact.avatar_url, '_blank')}>
-                                <div className="absolute -inset-2 rounded-full bg-gradient-to-tr from-blue-100/80 to-transparent opacity-0 blur transition duration-500 group-hover:opacity-100 dark:from-transparent dark:group-hover:opacity-0"></div>
-                                <div className="rounded-full border border-slate-200/80 bg-white p-1 shadow-lg backdrop-blur-md dark:border-white/5 dark:bg-black">
-                                    <Avatar className="relative h-16 w-16 shrink-0 rounded-full border-2 border-slate-200/80 shadow-2xl sm:h-20 sm:w-20 dark:border-white/10">
+                                <div className="rounded-full border border-slate-200 bg-white p-1 dark:border-white/5 dark:bg-black">
+                                    <Avatar className="relative h-16 w-16 shrink-0 rounded-full border-2 border-slate-200 sm:h-20 sm:w-20 dark:border-white/10">
                                         <AvatarImage fallbackOnBlank src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
                                         <AvatarFallback className="bg-slate-100 text-xl font-bold text-slate-700 sm:text-2xl dark:bg-zinc-900 dark:text-zinc-300">
                                             {contact.name.charAt(0)}
@@ -1457,15 +1433,15 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                                 <div className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-xl border border-slate-200/80 bg-white shadow-lg transition-transform group-hover:scale-110 sm:h-8 sm:w-8 dark:border-white/5 dark:bg-black">
                                     {resolvedPlatform === 'instagram' ? (
-                                        <Globe className="h-3.5 w-3.5 text-pink-500 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)] sm:h-4 sm:w-4" />
+                                        <Globe className="h-3.5 w-3.5 text-pink-500 sm:h-4 sm:w-4" />
                                     ) : resolvedPlatform === 'messenger' ? (
-                                        <Globe className="h-3.5 w-3.5 text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)] sm:h-4 sm:w-4" />
+                                        <Globe className="h-3.5 w-3.5 text-blue-500 sm:h-4 sm:w-4" />
                                     ) : (
                                         <Smartphone className={cn(
                                             "h-3.5 w-3.5 sm:h-4 sm:w-4",
                                             resolvedPlatform === 'telegram'
-                                                ? "text-sky-500 drop-shadow-[0_0_8px_rgba(14,165,233,0.5)]"
-                                                : "text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]"
+                                                ? "text-sky-500"
+                                                : "text-green-500"
                                         )} />
                                     )}
                                 </div>
@@ -1485,7 +1461,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                             className="flex min-w-0 max-w-[120px] items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-tighter sm:text-[10px]"
                                             title={chat.tag}
                                         >
-                                            <div className="h-1 w-1 rounded-full animate-pulse shrink-0" style={{ backgroundColor: chat.color }} />
+                                            <div className="h-1 w-1 rounded-full shrink-0" style={{ backgroundColor: chat.color }} />
                                             <span className="truncate">{chat.tag}</span>
                                         </div>
                                     )}
@@ -1510,7 +1486,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                     </Dialog>
                                 </div>
                             </div>
-                        </motion.div>
+                        </div>
                     </div>
 
                     {/* ==== TABBED CONTENT ==== */}
@@ -2090,13 +2066,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
 
                                                             {isExpanded && (
                                                                 <div className="animate-in slide-in-from-top-1 px-4 pb-4 duration-300">
-                                                                    <AnimatePresence mode="wait">
+                                                                    <>
                                                                         {selectedSgpCategory === 'financeiro' ? (
-                                                                            <motion.div
+                                                                            <div
                                                                                 key="financeiro-details"
-                                                                                initial={{ opacity: 0, x: 20 }}
-                                                                                animate={{ opacity: 1, x: 0 }}
-                                                                                exit={{ opacity: 0, x: -20 }}
                                                                                 className="space-y-4"
                                                                             >
                                                                                 <div className="flex items-center gap-2 border-b border-slate-100 pb-3 dark:border-zinc-800/50">
@@ -2202,13 +2175,10 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                                                                         </div>
                                                                                     )}
                                                                                 </div>
-                                                                            </motion.div>
+                                                                            </div>
                                                                         ) : (
-                                                                            <motion.div
+                                                                            <div
                                                                                 key="dashboard-grid"
-                                                                                initial={{ opacity: 0, scale: 0.95 }}
-                                                                                animate={{ opacity: 1, scale: 1 }}
-                                                                                exit={{ opacity: 0, scale: 0.95 }}
                                                                                 className="grid grid-cols-2 gap-2 pt-2"
                                                                             >
                                                                                 <SGPDashboardTile 
@@ -2303,9 +2273,9 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                                                                                         )}
                                                                                     </div>
                                                                                 </SGPDashboardTile>
-                                                                            </motion.div>
+                                                                            </div>
                                                                             )}
-                                                                        </AnimatePresence>
+                                                                        </>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -2548,7 +2518,7 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                     }}
                 />
             )}
-        </motion.div>
+        </div>
     );
 }
 

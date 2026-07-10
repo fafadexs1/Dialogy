@@ -37,6 +37,10 @@ import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/t
 import { getAiModelRuntimeProvider, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-rewrite';
 import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
+import {
+    generateNativeWorkflowAiProposal,
+    type NativeWorkflowAiProposal,
+} from '@/services/workflow-runtime/native-ai-builder';
 import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
 import { resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
 import {
@@ -79,8 +83,32 @@ import {
     type CausalPatternDraftApplicationPreview,
 } from '@/services/autopilot/causal-pattern-apply';
 import { normalizeToolSelectionScoreWeights, recordAgentScoreHistory } from '@/services/autopilot/score-history';
+import { shadowCompileAutopilotWorkflowRuntimeV2 } from '@/services/workflow-runtime/autopilot-rollout';
+import {
+    WorkflowDefinitionSchema,
+    createNativeWorkflowTemplate,
+    previewAutopilotNativeMigration,
+    validateWorkflowDefinition,
+    type ModelConfiguration,
+    type NativeWorkflowTemplate,
+    type WorkflowDefinition,
+    WorkflowExecutor,
+    createDefaultNodeHandlerRegistry,
+    hashValue,
+    modelChainForNode,
+    createWorkflowNode,
+    ModelConfigurationSchema,
+    prepareWorkflowBlockTest,
+    createWorkflowBlockTestSideEffectAdapters,
+    type WorkflowBlockTestFixtures,
+} from '@/services/workflow-runtime';
+import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
 import { importEcosystemPatternForWorkspace } from '@/services/autopilot/ecosystem-patterns';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
+import {
+    assertSafeAutopilotWebhookUrl,
+    sanitizeAutopilotRules,
+} from '@/services/autopilot/automation-rules';
 
 
 async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
@@ -155,6 +183,67 @@ function readFormBoolean(formData: FormData, field: string, fallback = false): b
     return normalized === 'true' || normalized === 'on' || normalized === '1';
 }
 
+function normalizeWorkflowRuntimeV2Mode(value: unknown): 'off' | 'shadow' | 'primary' {
+    return value === 'shadow' || value === 'primary' ? value : 'off';
+}
+
+function normalizeWorkflowBuilderMode(value: unknown): 'legacy' | 'native_v2' {
+    // The legacy editor/runtime format is read-only historical data after the
+    // native cutover. Every editable configuration is normalized to V2.
+    void value;
+    return 'native_v2';
+}
+
+function workflowModelConfiguration(modelValue: unknown): ModelConfiguration {
+    const model = typeof modelValue === 'string' && modelValue.trim()
+        ? modelValue.trim()
+        : process.env.DEFAULT_AUTOPILOT_MODEL || 'gemini-2.0-flash';
+    return {
+        provider: getAiModelRuntimeProvider(model),
+        model,
+        temperature: 0.2,
+        maxOutputTokens: 2048,
+        supportsTools: true,
+        supportsStructuredOutput: true,
+        supportsStreaming: true,
+        timeoutMs: 60_000,
+        maxRetries: 2,
+    };
+}
+
+function parseWorkflowDefinition(raw: unknown) {
+    if (!raw) return null;
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const result = WorkflowDefinitionSchema.safeParse(parsed);
+        return result.success ? result.data : null;
+    } catch {
+        return null;
+    }
+}
+
+function normalizeInactivityTimeoutSeconds(value: unknown, fallback: number | null = null): number | null {
+    if (value === null || value === undefined || value === '') return fallback;
+    const parsed = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.min(2_592_000, parsed);
+}
+
+async function resolveApiKeyForModel(input: {
+    config: { workspace_id?: string | null; gemini_api_key?: string | null };
+    workspaceGeminiApiKey?: string | null;
+    model: string;
+}): Promise<string | undefined> {
+    const targetProvider = getAiModelRuntimeProvider(input.model);
+    const apiKeyCandidates = await resolveAiProviderKeyCandidates({
+        config: input.config,
+        workspaceGeminiApiKey: input.workspaceGeminiApiKey,
+    });
+    return apiKeyCandidates.find(candidate => (
+        !candidate.provider || candidate.provider === targetProvider
+    ))?.key;
+}
+
 function buildSnapshotFromConfigRow(row: any): AutopilotConfigDraftSnapshot {
     return {
         name: row.name || 'Meu agente de IA',
@@ -169,8 +258,13 @@ function buildSnapshotFromConfigRow(row: any): AutopilotConfigDraftSnapshot {
         default_fallback_reply: row.default_fallback_reply || null,
         escalation_policy: row.escalation_policy || null,
         closing_policy: row.closing_policy || null,
+        inactivity_timeout_seconds: normalizeInactivityTimeoutSeconds(row.inactivity_timeout_seconds, null),
         enabled_tool_names: normalizeEnabledToolNames(row.enabled_tool_names),
         flow_graph: parseFlowGraph(row.flow_graph),
+        workflow_runtime_v2_mode: normalizeWorkflowRuntimeV2Mode(row.workflow_runtime_v2_mode),
+        workflow_builder_mode: normalizeWorkflowBuilderMode(row.workflow_builder_mode),
+        workflow_definition: null,
+        workflow_migration: null,
     };
 }
 
@@ -213,12 +307,27 @@ function normalizeDraftSnapshot(
         closing_policy: hasOwn('closing_policy')
             ? (typeof snapshot.closing_policy === 'string' && snapshot.closing_policy.length > 0 ? snapshot.closing_policy : null)
             : fallback.closing_policy,
+        inactivity_timeout_seconds: hasOwn('inactivity_timeout_seconds')
+            ? normalizeInactivityTimeoutSeconds(snapshot.inactivity_timeout_seconds, null)
+            : normalizeInactivityTimeoutSeconds(fallback.inactivity_timeout_seconds, null),
         enabled_tool_names: Array.isArray(snapshot.enabled_tool_names)
             ? normalizeEnabledToolNames(snapshot.enabled_tool_names)
             : fallback.enabled_tool_names,
         flow_graph: hasOwn('flow_graph')
             ? parseFlowGraph(snapshot.flow_graph)
             : fallback.flow_graph || null,
+        workflow_runtime_v2_mode: hasOwn('workflow_runtime_v2_mode')
+            ? normalizeWorkflowRuntimeV2Mode(snapshot.workflow_runtime_v2_mode)
+            : normalizeWorkflowRuntimeV2Mode(fallback.workflow_runtime_v2_mode),
+        workflow_builder_mode: hasOwn('workflow_builder_mode')
+            ? normalizeWorkflowBuilderMode(snapshot.workflow_builder_mode)
+            : normalizeWorkflowBuilderMode(fallback.workflow_builder_mode),
+        workflow_definition: hasOwn('workflow_definition')
+            ? parseWorkflowDefinition(snapshot.workflow_definition)
+            : parseWorkflowDefinition(fallback.workflow_definition),
+        workflow_migration: hasOwn('workflow_migration') && snapshot.workflow_migration
+            ? snapshot.workflow_migration
+            : fallback.workflow_migration || null,
     };
 }
 
@@ -262,12 +371,25 @@ async function buildSnapshotFromFormData(
         closing_policy: formData.has('closingPolicy')
             ? (formData.get('closingPolicy')?.toString() || null)
             : fallback.closing_policy,
+        inactivity_timeout_seconds: formData.has('inactivityTimeoutSeconds')
+            ? normalizeInactivityTimeoutSeconds(formData.get('inactivityTimeoutSeconds'), null)
+            : normalizeInactivityTimeoutSeconds(fallback.inactivity_timeout_seconds, null),
         enabled_tool_names: formData.has('enabledToolNames')
             ? normalizeEnabledToolNames(formData.get('enabledToolNames')?.toString() || '[]')
             : fallback.enabled_tool_names,
         flow_graph: formData.has('flowGraph')
             ? parseFlowGraph(formData.get('flowGraph')?.toString() || '')
             : fallback.flow_graph || null,
+        workflow_runtime_v2_mode: formData.has('workflowRuntimeV2Mode')
+            ? normalizeWorkflowRuntimeV2Mode(formData.get('workflowRuntimeV2Mode')?.toString())
+            : normalizeWorkflowRuntimeV2Mode(fallback.workflow_runtime_v2_mode),
+        workflow_builder_mode: formData.has('workflowBuilderMode')
+            ? normalizeWorkflowBuilderMode(formData.get('workflowBuilderMode')?.toString())
+            : normalizeWorkflowBuilderMode(fallback.workflow_builder_mode),
+        workflow_definition: formData.has('workflowDefinition')
+            ? parseWorkflowDefinition(formData.get('workflowDefinition')?.toString())
+            : parseWorkflowDefinition(fallback.workflow_definition),
+        workflow_migration: fallback.workflow_migration || null,
     };
 }
 
@@ -636,10 +758,14 @@ export async function improveAutopilotKnowledgeDocument(
         }
 
         const runtime = await resolveWorkspaceAiExecutionContext(workspaceId, configId);
+        const modelApiKeyCandidates = await resolveAiProviderKeyCandidates({
+            config,
+            workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
+        });
         const improved = await improveKnowledgeDocumentForRag({
             document,
             model: runtime.model,
-            apiKey: runtime.workspaceGeminiApiKey,
+            apiKeyCandidates: modelApiKeyCandidates,
         });
         const requiredTools = Array.from(new Set([
             ...(document.requiredTools || []),
@@ -787,6 +913,8 @@ export async function generateAutopilotFlowWithAi(input: {
     conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
     currentGraph?: AutopilotFlowGraph | null;
     currentSystemPrompt?: string | null;
+    knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+    knowledgeCollections?: KnowledgeCollection[] | null;
     enabledToolNames?: string[] | null;
     model?: string | null;
 }): Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }> {
@@ -796,7 +924,7 @@ export async function generateAutopilotFlowWithAi(input: {
 
     try {
         const configRes = await db.query(
-            `SELECT id, workspace_id, gemini_api_key, enabled_tool_names
+            `SELECT id, workspace_id, gemini_api_key, enabled_tool_names, knowledge_base_documents, knowledge_collections
              FROM autopilot_configs
              WHERE id = $1
              LIMIT 1`,
@@ -834,20 +962,25 @@ export async function generateAutopilotFlowWithAi(input: {
             targetModel = resolved.model;
         }
 
-        const apiKeyCandidates = await resolveAiProviderKeyCandidates({
+        const modelApiKey = await resolveApiKeyForModel({
             config,
             workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
+            model: targetModel,
         });
-        const targetProvider = getAiModelRuntimeProvider(targetModel);
-        const modelApiKey = apiKeyCandidates.find(candidate => (
-            !candidate.provider || candidate.provider === targetProvider
-        ))?.key;
+        const knowledgeDocuments = Array.isArray(input.knowledgeDocuments)
+            ? input.knowledgeDocuments
+            : parseKnowledgeBaseDocuments(config.knowledge_base_documents);
+        const knowledgeCollections = Array.isArray(input.knowledgeCollections)
+            ? input.knowledgeCollections
+            : parseKnowledgeCollections(config.knowledge_collections);
 
         const proposal = await generateAutopilotFlowProposal({
             conversation,
             currentGraph: input.currentGraph || null,
             currentSystemPrompt: input.currentSystemPrompt || '',
             tools: scopedTools,
+            knowledgeDocuments,
+            knowledgeCollections,
             model: targetModel,
             apiKey: modelApiKey,
         });
@@ -858,6 +991,341 @@ export async function generateAutopilotFlowWithAi(input: {
             proposal: null,
             error: error instanceof Error ? error.message : 'Falha ao construir flow com IA.',
         };
+    }
+}
+
+async function loadNativeWorkflowEditContext(configId: string, userId: string) {
+    const configRes = await db.query('SELECT * FROM autopilot_configs WHERE id = $1 LIMIT 1', [configId]);
+    if (configRes.rowCount === 0) throw new Error('Automação não encontrada.');
+    const config = configRes.rows[0];
+    if (!await isWorkspaceMember(userId, String(config.workspace_id))) throw new Error('Acesso não autorizado.');
+    const fallback = buildSnapshotFromConfigRow(config);
+    const draftRes = await db.query(
+        'SELECT snapshot FROM autopilot_config_drafts WHERE config_id = $1 LIMIT 1',
+        [configId],
+    );
+    const snapshot = draftRes.rows[0]
+        ? normalizeDraftSnapshot(draftRes.rows[0].snapshot, fallback)
+        : fallback;
+    if (!snapshot.workflow_definition && config.active_workflow_id && config.active_workflow_version) {
+        snapshot.workflow_definition = await new PostgresWorkflowPersistence(db)
+            .getWorkflowDefinition(config.active_workflow_id, config.active_workflow_version);
+    }
+    return { config, snapshot, workspaceId: String(config.workspace_id) };
+}
+
+async function persistNativeWorkflowDraft(input: {
+    configId: string;
+    workspaceId: string;
+    userId: string;
+    snapshot: AutopilotConfigDraftSnapshot;
+}) {
+    const saved = await db.query(
+        `INSERT INTO autopilot_config_drafts (config_id, workspace_id, user_id, snapshot, updated_at)
+         VALUES ($1, $2, $3, $4::jsonb, timezone('utc', now()))
+         ON CONFLICT (config_id) DO UPDATE
+         SET workspace_id = EXCLUDED.workspace_id,
+             user_id = EXCLUDED.user_id,
+             snapshot = EXCLUDED.snapshot,
+             updated_at = timezone('utc', now())
+         RETURNING updated_at`,
+        [input.configId, input.workspaceId, input.userId, JSON.stringify(input.snapshot)],
+    );
+    revalidatePath(`/autopilot/${input.configId}`);
+    return saved.rows[0]?.updated_at as string | undefined;
+}
+
+export async function previewAutopilotNativeWorkflowMigration(configId: string) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { workflow: null, validation: null, error: 'Usuário não autenticado.' };
+    try {
+        const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(configId, user.id);
+        if (!snapshot.flow_graph) return { workflow: null, validation: null, error: 'O fluxo legado não está configurado.' };
+        const result = previewAutopilotNativeMigration({
+            configId,
+            workspaceId,
+            name: snapshot.name,
+            graph: snapshot.flow_graph,
+            model: workflowModelConfiguration(snapshot.ai_model || config.ai_model),
+            persona: snapshot.knowledge_base,
+            existingDefinition: snapshot.workflow_definition,
+            existingSourceHash: snapshot.workflow_migration?.sourceHash,
+        });
+        return { ...result, error: undefined };
+    } catch (error) {
+        return {
+            workflow: null,
+            validation: null,
+            error: error instanceof Error ? error.message : 'Falha ao preparar migração.',
+        };
+    }
+}
+
+export async function applyAutopilotNativeWorkflowMigration(configId: string) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+    try {
+        const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(configId, user.id);
+        if (!snapshot.flow_graph) return { success: false, error: 'O fluxo legado não está configurado.' };
+        const result = previewAutopilotNativeMigration({
+            configId,
+            workspaceId,
+            name: snapshot.name,
+            graph: snapshot.flow_graph,
+            model: workflowModelConfiguration(snapshot.ai_model || config.ai_model),
+            persona: snapshot.knowledge_base,
+            existingDefinition: snapshot.workflow_definition,
+            existingSourceHash: snapshot.workflow_migration?.sourceHash,
+        });
+        const nextSnapshot: AutopilotConfigDraftSnapshot = {
+            ...snapshot,
+            workflow_builder_mode: 'native_v2',
+            workflow_runtime_v2_mode: 'shadow',
+            workflow_definition: result.workflow,
+            workflow_migration: {
+                source: 'legacy_flow_graph',
+                sourceHash: result.sourceHash,
+                migratedAt: new Date().toISOString(),
+            },
+        };
+        const updatedAt = await persistNativeWorkflowDraft({ configId, workspaceId, userId: user.id, snapshot: nextSnapshot });
+        return { success: true, workflow: result.workflow, validation: result.validation, updatedAt };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Falha ao aplicar migração.' };
+    }
+}
+
+export async function createAutopilotNativeWorkflowDraft(input: {
+    configId: string;
+    template: NativeWorkflowTemplate;
+}) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+    try {
+        const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
+        const workflow = createNativeWorkflowTemplate({
+            configId: input.configId,
+            workspaceId,
+            name: snapshot.name,
+            model: workflowModelConfiguration(snapshot.ai_model || config.ai_model),
+            persona: snapshot.knowledge_base || '',
+            template: input.template,
+        });
+        const nextSnapshot: AutopilotConfigDraftSnapshot = {
+            ...snapshot,
+            workflow_builder_mode: 'native_v2',
+            workflow_runtime_v2_mode: 'shadow',
+            workflow_definition: workflow,
+            workflow_migration: null,
+        };
+        const updatedAt = await persistNativeWorkflowDraft({
+            configId: input.configId,
+            workspaceId,
+            userId: user.id,
+            snapshot: nextSnapshot,
+        });
+        return { success: true, workflow, validation: validateWorkflowDefinition(workflow), updatedAt };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Falha ao criar automação nativa.' };
+    }
+}
+
+export async function generateAutopilotNativeWorkflowWithAi(input: {
+    configId: string;
+    conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+    currentWorkflow?: unknown;
+    enabledToolNames?: string[] | null;
+}): Promise<{ proposal: NativeWorkflowAiProposal | null; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { proposal: null, error: 'Usuario nao autenticado.' };
+    try {
+        const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
+        const conversation = input.conversation
+            .filter((message) => (message.role === 'user' || message.role === 'assistant') && message.content?.trim())
+            .slice(-12)
+            .map((message) => ({ role: message.role, content: message.content.trim().slice(0, 12_000) }));
+        if (!conversation.some((message) => message.role === 'user')) {
+            return { proposal: null, error: 'Descreva a automacao que deseja construir.' };
+        }
+
+        const parsedCurrent = input.currentWorkflow
+            ? WorkflowDefinitionSchema.safeParse(input.currentWorkflow)
+            : { success: true as const, data: snapshot.workflow_definition };
+        if (!parsedCurrent.success) {
+            return { proposal: null, error: 'O workflow atual esta inconsistente. Corrija os erros do canvas antes de pedir alteracoes a IA.' };
+        }
+        const currentWorkflow = parsedCurrent.data || snapshot.workflow_definition || null;
+        const [runtime, catalog] = await Promise.all([
+            resolveWorkspaceAiExecutionContext(workspaceId, input.configId),
+            listWorkspaceAgentToolCatalog(workspaceId),
+        ]);
+        const scopedTools = selectFlowBuilderTools({
+            catalog,
+            requestedEnabledToolNames: input.enabledToolNames,
+            persistedEnabledToolNames: snapshot.enabled_tool_names,
+        });
+        const existingModelNode = currentWorkflow?.nodes.find((node) => node.type === 'ai.model');
+        const existingModel = existingModelNode
+            ? ModelConfigurationSchema.safeParse(existingModelNode.config)
+            : null;
+        const model = existingModel?.success
+            ? existingModel.data
+            : workflowModelConfiguration(snapshot.ai_model || runtime.model || config.ai_model);
+        const modelNode = existingModelNode || createWorkflowNode('ai.model', {
+            id: 'native_ai_builder_model',
+            name: 'Modelo do construtor',
+            position: { x: 0, y: 0 },
+            config: model,
+        });
+        const runtimeConfig: AutopilotConfig = {
+            ...config,
+            id: String(config.id),
+            workspace_id: workspaceId,
+            user_id: String(config.user_id),
+            name: String(config.name || snapshot.name),
+            gemini_api_key: config.gemini_api_key || null,
+            ai_model: config.ai_model || snapshot.ai_model || null,
+            transcription_model: config.transcription_model || null,
+            knowledge_base: config.knowledge_base || null,
+            knowledge_base_documents: parseKnowledgeBaseDocuments(config.knowledge_base_documents),
+            is_primary: Boolean(config.is_primary),
+            is_active: Boolean(config.is_active),
+            is_private: Boolean(config.is_private),
+            default_fallback_reply: config.default_fallback_reply || null,
+            escalation_policy: config.escalation_policy || null,
+            closing_policy: config.closing_policy || null,
+            created_at: new Date(config.created_at || Date.now()).toISOString(),
+            updated_at: new Date(config.updated_at || Date.now()).toISOString(),
+        };
+        const chain = await modelChainForNode({ workspaceId, config: runtimeConfig, modelNode });
+        const proposal = await generateNativeWorkflowAiProposal({
+            configId: input.configId,
+            workspaceId,
+            name: snapshot.name,
+            model,
+            modelChain: chain,
+            conversation,
+            currentWorkflow,
+            tools: scopedTools.map((tool) => ({
+                name: String(tool.name),
+                description: tool.description,
+                source: tool.source,
+                serverId: tool.serverId,
+                riskLevel: tool.riskLevel,
+                requiresHumanApproval: tool.requiresHumanApproval,
+                inputSchema: tool.inputSchema,
+                outputSchema: tool.outputSchema,
+            })),
+            knowledgeDocuments: (snapshot.knowledge_base_documents || []).map((document) => ({
+                id: document.id,
+                name: document.name,
+                collectionIds: document.collectionIds,
+            })),
+            knowledgeCollections: (snapshot.knowledge_collections || []).map((collection) => ({
+                id: collection.id,
+                name: collection.name,
+                description: collection.description || undefined,
+            })),
+        });
+        // This action is preview-only. The caller must explicitly apply the proposal to local draft state.
+        return { proposal };
+    } catch (error) {
+        console.error('[NATIVE_WORKFLOW_AI_BUILDER] Falha ao gerar proposta:', error);
+        return {
+            proposal: null,
+            error: error instanceof Error ? error.message : 'Falha ao construir a automacao com IA.',
+        };
+    }
+}
+
+export async function runAutopilotNativeWorkflowTest(input: {
+    configId: string;
+    customerMessage: string;
+    workflowDefinition?: WorkflowDefinition;
+    startNodeId?: string;
+    fixtures?: WorkflowBlockTestFixtures;
+}) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+    try {
+        const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
+        const requestedWorkflow = input.workflowDefinition
+            ? WorkflowDefinitionSchema.parse(input.workflowDefinition)
+            : snapshot.workflow_definition;
+        if (!requestedWorkflow) return { success: false, error: 'O rascunho nativo não possui workflow.' };
+        const sourceValidation = validateWorkflowDefinition(requestedWorkflow);
+        if (!input.startNodeId && !sourceValidation.valid) return { success: false, error: sourceValidation.errors.map((issue) => issue.message).join(' ') };
+        const timestamp = new Date().toISOString();
+        const standardInput = { customerMessage: input.customerMessage, message: input.customerMessage, text: input.customerMessage };
+        const prepared = input.startNodeId
+            ? prepareWorkflowBlockTest({
+                definition: requestedWorkflow,
+                nodeId: input.startNodeId,
+                fixtures: input.fixtures,
+                input: standardInput,
+                context: { sandbox: true, userId: user.id },
+            })
+            : null;
+        const executableWorkflow = prepared?.workflow || requestedWorkflow;
+        const workflow = WorkflowDefinitionSchema.parse({
+            ...executableWorkflow,
+            id: `autopilot:${input.configId}:sandbox`,
+            workspaceId,
+            version: `draft-${hashValue(executableWorkflow).slice(0, 16)}`,
+            status: 'draft',
+            updatedAt: timestamp,
+        });
+        const validation = validateWorkflowDefinition(workflow);
+        if (!validation.valid) return { success: false, error: validation.errors.map((issue) => issue.message).join(' ') };
+        const runtimeConfig: AutopilotConfig = {
+            ...config,
+            id: String(config.id),
+            workspace_id: workspaceId,
+            user_id: String(config.user_id),
+            name: String(config.name || snapshot.name),
+            gemini_api_key: config.gemini_api_key || null,
+            ai_model: config.ai_model || snapshot.ai_model || null,
+            transcription_model: config.transcription_model || null,
+            knowledge_base: config.knowledge_base || null,
+            knowledge_base_documents: parseKnowledgeBaseDocuments(config.knowledge_base_documents),
+            is_primary: Boolean(config.is_primary),
+            is_active: Boolean(config.is_active),
+            is_private: Boolean(config.is_private),
+            default_fallback_reply: config.default_fallback_reply || null,
+            escalation_policy: config.escalation_policy || null,
+            closing_policy: config.closing_policy || null,
+            created_at: new Date(config.created_at || Date.now()).toISOString(),
+            updated_at: new Date(config.updated_at || Date.now()).toISOString(),
+        };
+        const sandboxSideEffects = createWorkflowBlockTestSideEffectAdapters();
+        const handlers = createDefaultNodeHandlerRegistry({
+            resolveModelChain: async (context) => modelChainForNode({
+                workspaceId,
+                config: runtimeConfig,
+                modelNode: context.modelNode,
+            }),
+            loadMemory: async () => ({ sandbox: true }),
+            retrieveKnowledge: async () => [],
+            applyGuardrails: async (_phase, value) => value,
+            ...sandboxSideEffects.dependencies,
+        });
+        const execution = await new WorkflowExecutor(new PostgresWorkflowPersistence(db), handlers).start({
+            workflow,
+            input: prepared?.startInput.input || standardInput,
+            variables: prepared?.startInput.variables,
+            context: prepared?.startInput.context || { sandbox: true, userId: user.id },
+            sessionId: `sandbox:${user.id}`,
+            conversationId: `sandbox:${input.configId}`,
+            executionId: `sandbox_${uuidv4()}`,
+        }, { workerId: `sandbox_${user.id}` });
+        return { success: true, executionId: execution.executionId, status: execution.status };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Falha ao executar teste.' };
     }
 }
 
@@ -912,6 +1380,10 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
                 is_private: Boolean(row.is_private),
                 default_fallback_reply: row.default_fallback_reply || null,
                 flow_graph: parseFlowGraph(row.flow_graph),
+                workflow_runtime_v2_mode: normalizeWorkflowRuntimeV2Mode(row.workflow_runtime_v2_mode),
+                workflow_builder_mode: normalizeWorkflowBuilderMode(row.workflow_builder_mode),
+                active_workflow_id: row.active_workflow_id || null,
+                active_workflow_version: row.active_workflow_version || null,
             } as AutopilotConfig;
         }).filter(agent => !agent.is_private || agent.user_id === userId); // Show only own private agents or shared ones
 
@@ -941,6 +1413,11 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             [selectedConfig.id]
         );
         const selectedSnapshot = buildSnapshotFromConfigRow(selectedConfig);
+        if (selectedConfig.active_workflow_id && selectedConfig.active_workflow_version) {
+            selectedSnapshot.workflow_definition = await new PostgresWorkflowPersistence(db)
+                .getWorkflowDefinition(selectedConfig.active_workflow_id, selectedConfig.active_workflow_version);
+            selectedConfig.workflow_definition = selectedSnapshot.workflow_definition;
+        }
         const draft = draftRes.rows[0]
             ? {
                 ...draftRes.rows[0],
@@ -952,8 +1429,7 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             `SELECT id, config_id, workspace_id, user_id, version_number, label, snapshot, created_at
              FROM autopilot_config_versions
              WHERE config_id = $1
-             ORDER BY version_number DESC
-             LIMIT 12`,
+             ORDER BY version_number DESC`,
             [selectedConfig.id]
         );
         const versions = versionsRes.rows.map((row) => ({
@@ -1087,6 +1563,10 @@ export async function saveAutopilotConfig(
             setClauses.push(`closing_policy = $${valueIndex++}`);
             values.push(formData.get('closingPolicy') || null);
         }
+        if (formData.has('inactivityTimeoutSeconds')) {
+            setClauses.push(`inactivity_timeout_seconds = $${valueIndex++}`);
+            values.push(normalizeInactivityTimeoutSeconds(formData.get('inactivityTimeoutSeconds'), null));
+        }
         if (formData.has('enabledToolNames')) {
             try {
                 await ensureAutopilotToolColumns();
@@ -1110,6 +1590,14 @@ export async function saveAutopilotConfig(
             const flowGraph = parseFlowGraph(formData.get('flowGraph')?.toString() || '');
             setClauses.push(`flow_graph = $${valueIndex++}`);
             values.push(flowGraph ? JSON.stringify(flowGraph) : null);
+        }
+        if (formData.has('workflowRuntimeV2Mode')) {
+            setClauses.push(`workflow_runtime_v2_mode = $${valueIndex++}`);
+            values.push(normalizeWorkflowRuntimeV2Mode(formData.get('workflowRuntimeV2Mode')?.toString()));
+        }
+        if (formData.has('workflowBuilderMode')) {
+            setClauses.push(`workflow_builder_mode = $${valueIndex++}`);
+            values.push(normalizeWorkflowBuilderMode(formData.get('workflowBuilderMode')?.toString()));
         }
 
         const isPrivate = formData.get('isPrivate');
@@ -1375,28 +1863,44 @@ export async function publishAutopilotDraft(configId: string): Promise<{
             await client.query('ROLLBACK');
             return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global ou nas integracoes do workspace.' };
         }
-        const flowAudit = auditAutopilotFlowGraph(snapshot.flow_graph);
-        if (flowAudit.status === 'failed') {
-            await client.query('ROLLBACK');
-            return {
-                success: false,
-                error: summarizeFlowAuditIssues(flowAudit.issues)
-                    || 'Fluxo possui problemas criticos antes de publicar.',
-            };
-        }
-        const toolCatalog = await listWorkspaceAgentToolCatalog(currentWorkspaceId);
-        const toolCoverage = analyzeAutopilotToolCoverage({
-            graph: snapshot.flow_graph,
-            enabledToolNames: snapshot.enabled_tool_names,
-            toolCatalog,
-        });
-        if (isAutopilotToolCoveragePublishBlocked(toolCoverage)) {
-            await client.query('ROLLBACK');
-            return {
-                success: false,
-                error: summarizeAutopilotToolCoverageBlockers(toolCoverage)
-                    || 'Fluxo possui ferramentas habilitadas sem branch seguro.',
-            };
+        const isNativeWorkflow = snapshot.workflow_builder_mode === 'native_v2';
+        if (isNativeWorkflow) {
+            if (!snapshot.workflow_definition) {
+                await client.query('ROLLBACK');
+                return { success: false, error: 'A automação nativa não possui uma definição de workflow.' };
+            }
+            const nativeValidation = validateWorkflowDefinition(snapshot.workflow_definition);
+            if (!nativeValidation.valid) {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    error: nativeValidation.errors.map((issue) => issue.message).join(' '),
+                };
+            }
+        } else {
+            const flowAudit = auditAutopilotFlowGraph(snapshot.flow_graph);
+            if (flowAudit.status === 'failed') {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    error: summarizeFlowAuditIssues(flowAudit.issues)
+                        || 'Fluxo possui problemas criticos antes de publicar.',
+                };
+            }
+            const toolCatalog = await listWorkspaceAgentToolCatalog(currentWorkspaceId);
+            const toolCoverage = analyzeAutopilotToolCoverage({
+                graph: snapshot.flow_graph,
+                enabledToolNames: snapshot.enabled_tool_names,
+                toolCatalog,
+            });
+            if (isAutopilotToolCoveragePublishBlocked(toolCoverage)) {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    error: summarizeAutopilotToolCoverageBlockers(toolCoverage)
+                        || 'Fluxo possui ferramentas habilitadas sem branch seguro.',
+                };
+            }
         }
 
         previousDocs = fallback.knowledge_base_documents;
@@ -1407,6 +1911,51 @@ export async function publishAutopilotDraft(configId: string): Promise<{
             [configId]
         );
         versionNumber = Number(nextVersionRes.rows[0]?.next_version || 1);
+        let activeWorkflowId = configRow.active_workflow_id || null;
+        let activeWorkflowVersion = configRow.active_workflow_version || null;
+        if (isNativeWorkflow && snapshot.workflow_definition) {
+            const timestamp = new Date().toISOString();
+            const publishedWorkflow = WorkflowDefinitionSchema.parse({
+                ...snapshot.workflow_definition,
+                id: `autopilot:${configId}`,
+                workspaceId: currentWorkspaceId,
+                name: snapshot.name,
+                version: `v${versionNumber}`,
+                status: 'published',
+                updatedAt: timestamp,
+            });
+            const publishedValidation = validateWorkflowDefinition(publishedWorkflow);
+            if (!publishedValidation.valid) {
+                await client.query('ROLLBACK');
+                return { success: false, error: publishedValidation.errors.map((issue) => issue.message).join(' ') };
+            }
+            await new PostgresWorkflowPersistence(client).saveWorkflowDefinition(publishedWorkflow);
+            snapshot.workflow_definition = publishedWorkflow;
+            activeWorkflowId = publishedWorkflow.id;
+            activeWorkflowVersion = publishedWorkflow.version;
+        } else {
+            const workflowRuntimeV2Compile = await shadowCompileAutopilotWorkflowRuntimeV2({
+                config: {
+                    id: configId,
+                    workspace_id: currentWorkspaceId,
+                    name: snapshot.name,
+                    ai_model: snapshot.ai_model,
+                    flow_graph: snapshot.flow_graph,
+                    workflow_runtime_v2_mode: normalizeWorkflowRuntimeV2Mode(snapshot.workflow_runtime_v2_mode),
+                },
+                version: `v${versionNumber}`,
+                userId: user.id,
+                database: client,
+            });
+            if (workflowRuntimeV2Compile.enabled && !workflowRuntimeV2Compile.valid) {
+                console.warn('[WORKFLOW_RUNTIME_V2_SHADOW_COMPILE] Published draft did not compile cleanly:', {
+                    configId,
+                    workspaceId: currentWorkspaceId,
+                    versionNumber,
+                    error: workflowRuntimeV2Compile.error,
+                });
+            }
+        }
 
         await client.query(
             `UPDATE autopilot_configs
@@ -1423,8 +1972,13 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 default_fallback_reply = $12,
                 escalation_policy = $13,
                 closing_policy = $14,
-                enabled_tool_names = $15,
-                flow_graph = $16,
+                inactivity_timeout_seconds = $15,
+                enabled_tool_names = $16,
+                flow_graph = $17,
+                workflow_runtime_v2_mode = $18,
+                workflow_builder_mode = $19,
+                active_workflow_id = $20,
+                active_workflow_version = $21,
                 updated_at = NOW()
              WHERE workspace_id = $1 AND id = $2`,
             [
@@ -1442,8 +1996,13 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 snapshot.default_fallback_reply,
                 snapshot.escalation_policy,
                 snapshot.closing_policy,
+                normalizeInactivityTimeoutSeconds(snapshot.inactivity_timeout_seconds, null),
                 JSON.stringify(snapshot.enabled_tool_names),
                 snapshot.flow_graph ? JSON.stringify(snapshot.flow_graph) : null,
+                normalizeWorkflowRuntimeV2Mode(snapshot.workflow_runtime_v2_mode),
+                normalizeWorkflowBuilderMode(snapshot.workflow_builder_mode),
+                activeWorkflowId,
+                activeWorkflowVersion,
             ]
         );
 
@@ -1555,6 +2114,19 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
         );
         versionNumber = Number(nextVersionRes.rows[0]?.next_version || 1);
 
+        let restoredWorkflowId: string | null = null;
+        let restoredWorkflowVersion: string | null = null;
+        if (snapshot.workflow_builder_mode === 'native_v2' && snapshot.workflow_definition) {
+            const restoredValidation = validateWorkflowDefinition(snapshot.workflow_definition);
+            if (!restoredValidation.valid || snapshot.workflow_definition.status !== 'published') {
+                await client.query('ROLLBACK');
+                return { success: false, error: 'A versão selecionada não possui um workflow nativo publicado válido.' };
+            }
+            await new PostgresWorkflowPersistence(client).saveWorkflowDefinition(snapshot.workflow_definition);
+            restoredWorkflowId = snapshot.workflow_definition.id;
+            restoredWorkflowVersion = snapshot.workflow_definition.version;
+        }
+
         await client.query(
             `UPDATE autopilot_configs
              SET
@@ -1570,8 +2142,13 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
                 default_fallback_reply = $12,
                 escalation_policy = $13,
                 closing_policy = $14,
-                enabled_tool_names = $15,
-                flow_graph = $16,
+                inactivity_timeout_seconds = $15,
+                enabled_tool_names = $16,
+                flow_graph = $17,
+                workflow_runtime_v2_mode = $18,
+                workflow_builder_mode = $19,
+                active_workflow_id = $20,
+                active_workflow_version = $21,
                 updated_at = NOW()
              WHERE workspace_id = $1 AND id = $2`,
             [
@@ -1589,8 +2166,13 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
                 snapshot.default_fallback_reply,
                 snapshot.escalation_policy,
                 snapshot.closing_policy,
+                normalizeInactivityTimeoutSeconds(snapshot.inactivity_timeout_seconds, null),
                 JSON.stringify(snapshot.enabled_tool_names),
                 snapshot.flow_graph ? JSON.stringify(snapshot.flow_graph) : null,
+                normalizeWorkflowRuntimeV2Mode(snapshot.workflow_runtime_v2_mode),
+                normalizeWorkflowBuilderMode(snapshot.workflow_builder_mode),
+                restoredWorkflowId,
+                restoredWorkflowVersion,
             ]
         );
 
@@ -1649,7 +2231,7 @@ export async function createAutopilotAgent(workspaceId: string, name: string, is
     try {
         const countRes = await db.query('SELECT COUNT(*)::int AS total FROM autopilot_configs WHERE workspace_id = $1', [workspaceId]);
         const existingCount = countRes.rows[0]?.total ?? 0;
-        const normalizedName = name?.trim() || `Agente ${existingCount + 1}`;
+        const normalizedName = name?.trim() || `Automação ${existingCount + 1}`;
         const shouldBePrimary = existingCount === 0;
 
         const insertRes = await db.query(
@@ -1739,7 +2321,19 @@ export async function saveAutopilotRule(
             return { success: false, error: 'Dados da regra incompletos.' };
         }
 
-        const actionJson = JSON.stringify(rule.action);
+        const sanitized = sanitizeAutopilotRules([{ ...rule, enabled: true }]);
+        const normalizedRule = sanitized.rules[0];
+        if (!normalizedRule || sanitized.rules.length !== 1) {
+            return {
+                success: false,
+                error: 'A regra possui uma aÃ§Ã£o invÃ¡lida. Webhooks devem usar uma URL HTTPS pÃºblica.',
+            };
+        }
+        if (normalizedRule.action.type === 'webhook') {
+            await assertSafeAutopilotWebhookUrl(normalizedRule.action.url);
+        }
+
+        const actionJson = JSON.stringify(normalizedRule.action);
 
         let savedRuleRes;
         if (rule.id) {
@@ -1747,14 +2341,14 @@ export async function saveAutopilotRule(
             console.log(`[SAVE_AUTOPILOT_RULE] Atualizando regra ID: ${rule.id}`);
             savedRuleRes = await db.query(
                 `UPDATE autopilot_rules SET name = $1, trigger = $2, action = $3 WHERE id = $4 AND config_id = $5 RETURNING id, name, trigger, action, enabled`,
-                [rule.name, rule.trigger, actionJson, rule.id, configId]
+                [normalizedRule.name, normalizedRule.trigger, actionJson, rule.id, configId]
             );
         } else {
             // Create new rule - o ID será gerado pelo banco de dados (gen_random_uuid())
             console.log(`[SAVE_AUTOPILOT_RULE] Criando nova regra para config ID: ${configId}`);
             savedRuleRes = await db.query(
                 `INSERT INTO autopilot_rules (config_id, name, trigger, action) VALUES ($1, $2, $3, $4) RETURNING id, name, trigger, action, enabled`,
-                [configId, rule.name, rule.trigger, actionJson]
+                [configId, normalizedRule.name, normalizedRule.trigger, actionJson]
             );
         }
 

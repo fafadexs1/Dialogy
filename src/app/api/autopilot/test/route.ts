@@ -5,8 +5,9 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { generateProcedureRuntimeOutput } from '@/ai/flows/procedure-runtime';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { DEFAULT_AUTOPILOT_MODEL, getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
+import { resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
 import type { AutopilotConfig, AutopilotConfigDraftSnapshot, KnowledgeBaseDocument, KnowledgeCollection, NexusFlowInstance } from '@/lib/types';
 import { listAgentToolCatalogItems, type AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import type { AgentToolAction } from '@/services/agent-tools/types';
@@ -40,11 +41,19 @@ import {
   renderDeterministicFlowMessage,
   resolveActiveFlowIntentScope,
   resolveDeterministicFlowMessage,
+  resolveEntryDeterministicFlowMessage,
+  resolveFlowSwitchRouteForActivePath,
+  resolveActiveFlowIntentScopeByNodeId,
 } from '@/services/autopilot/flow-routing';
+import {
+  getAutopilotPlaygroundState,
+  saveAutopilotPlaygroundState,
+} from '@/services/autopilot/playground-state-store';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 import { compileAutopilotTurnPolicy, resolveAllowedKnowledgeDocumentIds } from '@/services/autopilot/turn-policy';
 import { migrateAutopilotFlowGraphToV2 } from '@/services/autopilot/flow-v2';
+import { sanitizeAutopilotRules } from '@/services/autopilot/automation-rules';
 
 type PreviewPayload = {
   workspaceId: string;
@@ -301,17 +310,6 @@ async function loadWorkspaceGeminiRuntime(workspaceId: string): Promise<Workspac
   }
 }
 
-function getDefaultGeminiEnvKey(): string {
-  return process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || '';
-}
-
-function hasRuntimeGeminiKey(workspaceRuntime: WorkspaceGeminiRuntime): boolean {
-  return Boolean(
-    workspaceRuntime.apiKey ||
-    (getDefaultGeminiEnvKey() && getDefaultGeminiEnvKey() !== 'no-key-configured')
-  );
-}
-
 function withPreviewTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -495,16 +493,36 @@ export async function POST(request: Request) {
     const resolvedModel = await resolveAutopilotModelFromCatalog(
       config.ai_model || workspaceGeminiRuntime.model || DEFAULT_AUTOPILOT_MODEL,
     );
+    const modelProvider = getAiModelRuntimeProvider(resolvedModel.model);
+    const providerKeyCandidates = await resolveAiProviderKeyCandidates({
+      config,
+      workspaceGeminiApiKey: workspaceGeminiRuntime.apiKey,
+    });
+    const hasConfiguredModelKey = providerKeyCandidates.some((candidate) => (
+      !candidate.provider || candidate.provider === modelProvider
+    ));
 
     const rulesRes = await db.query(
       'SELECT * FROM autopilot_rules WHERE config_id = $1 ORDER BY name',
       [config.id],
     );
 
-    const rules: NexusFlowInstance[] = rulesRes.rows.map((rule) => ({
-      ...rule,
-      action: typeof rule.action === 'string' ? JSON.parse(rule.action) : rule.action,
-    }));
+    const rawRules = rulesRes.rows.map((rule) => {
+      let action = rule.action;
+      if (typeof action === 'string') {
+        try {
+          action = JSON.parse(action);
+        } catch {
+          action = null;
+        }
+      }
+      return { ...rule, action };
+    });
+    const sanitizedRules = sanitizeAutopilotRules(rawRules);
+    if (sanitizedRules.invalid.length > 0) {
+      console.warn('[AUTOPILOT_TEST_API] Ignoring invalid automation rules:', sanitizedRules.invalid);
+    }
+    const rules: NexusFlowInstance[] = sanitizedRules.rules;
     let enabledToolNames = Array.isArray(config.enabled_tool_names)
       ? config.enabled_tool_names
       : listAgentToolCatalogItems().filter((tool) => tool.enabledByDefault).map((tool) => tool.name);
@@ -516,17 +534,52 @@ export async function POST(request: Request) {
       contactName,
       contactEmail,
     });
+    const validProcedureChatId =
+      typeof procedureChatId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(procedureChatId)
+        ? procedureChatId
+        : null;
+
+    const isFirstTurn = !chatHistory || chatHistory.trim().length === 0;
+
+    if (isFirstTurn && validProcedureChatId) {
+      await saveAutopilotPlaygroundState({
+        sessionId: validProcedureChatId,
+        workspaceId,
+        autopilotConfigId: config.id,
+        activeNodeId: null,
+      }).catch(() => null);
+    }
+
+    const persistedFlowState = validProcedureChatId
+      ? await getAutopilotPlaygroundState(validProcedureChatId, workspaceId).catch(() => null)
+      : null;
+
     let previewIntent = resolveAutopilotIntent({
       customerMessage: message,
       chatHistory: chatHistory || '',
       knowledgeDocuments: config.knowledge_base_documents || [],
     });
-    const activeFlowIntentScope = resolveActiveFlowIntentScope(config, previewIntent.intent);
+
+    const switchResolution = resolveFlowSwitchRouteForActivePath({
+      config,
+      customerMessage: message,
+      activeNodeId: persistedFlowState?.activeNodeId,
+    });
+
+    let activeFlowIntentScope = resolveActiveFlowIntentScope(config, previewIntent.intent);
+    if (switchResolution?.targetNodeId) {
+      activeFlowIntentScope = resolveActiveFlowIntentScopeByNodeId(config, switchResolution.targetNodeId);
+    }
+
+    const effectivePersistedActiveNodeId = switchResolution?.targetNodeId || persistedFlowState?.activeNodeId;
+
     const scopedKnowledgeDocuments = filterKnowledgeDocumentsForScope(config, config.knowledge_base_documents, activeFlowIntentScope);
     const turnPolicy = compileAutopilotTurnPolicy({
       config,
       documents: config.knowledge_base_documents || [],
       intentScope: activeFlowIntentScope,
+      persistedActiveNodeId: effectivePersistedActiveNodeId,
     });
     enabledToolNames = turnPolicy.allowedToolNames;
     const toolCatalog = await loadPreviewToolCatalog(workspaceId, enabledToolNames);
@@ -535,7 +588,10 @@ export async function POST(request: Request) {
       documents: config.knowledge_base_documents || [],
       intentScope: activeFlowIntentScope,
     });
-    const deterministicFlowMessageNode = resolveDeterministicFlowMessage(config, activeFlowIntentScope);
+    const entryFlowMessageNode = resolveEntryDeterministicFlowMessage(config);
+    const deterministicFlowMessageNode = (isFirstTurn && entryFlowMessageNode)
+      ? entryFlowMessageNode
+      : resolveDeterministicFlowMessage(config, activeFlowIntentScope);
     const deterministicFlowMessage = deterministicFlowMessageNode
       ? renderDeterministicFlowMessage(config, deterministicFlowMessageNode.message, {
         customerMessage: message,
@@ -592,11 +648,6 @@ export async function POST(request: Request) {
       };
     }
 
-    const validProcedureChatId =
-      typeof procedureChatId === 'string' &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(procedureChatId)
-        ? procedureChatId
-        : null;
     const documentProcedures = compileAllProcedures({
       documents: scopedKnowledgeDocuments,
       tools: toolCatalog,
@@ -833,10 +884,10 @@ export async function POST(request: Request) {
     }
 
     if (!deterministicFlowMessage && baseTrace.workflow.executionMode === 'continue_llm') {
-      if (!hasRuntimeGeminiKey(workspaceGeminiRuntime)) {
+      if (!hasConfiguredModelKey) {
         return NextResponse.json(
           {
-            error: 'IA nao configurada para este teste. Configure uma chave em Integracoes > Gemini ou na chave personalizada do agente.',
+            error: 'IA nao configurada para este teste. Configure uma chave valida para o provedor do modelo selecionado.',
             trace: baseTrace,
           },
           { status: 409 },
@@ -932,6 +983,18 @@ export async function POST(request: Request) {
     };
     (trace as any).ragDiagnostics = ragContext?.diagnostics || null;
 
+    if (validProcedureChatId) {
+      const nextActiveNodeId = deterministicFlowMessageNode?.nodeId || switchResolution?.targetNodeId || turnPolicy.activeNodeId;
+      await saveAutopilotPlaygroundState({
+        sessionId: validProcedureChatId,
+        workspaceId,
+        autopilotConfigId: config.id,
+        activeNodeId: nextActiveNodeId || null,
+      }).catch((err) => {
+        console.warn('[PLAYGROUND_FLOW_STATE] Failed to save turn state:', err);
+      });
+    }
+
     return NextResponse.json({
       success: true,
       result: {
@@ -944,6 +1007,7 @@ export async function POST(request: Request) {
         requestedModel: resolvedModel.requestedModel || null,
         modelFallbackUsed: resolvedModel.fallbackUsed,
         hasWorkspaceGeminiKey: Boolean(workspaceGeminiRuntime.apiKey),
+        hasConfiguredModelKey,
         hasAgentGeminiKey: false,
       },
     });

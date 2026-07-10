@@ -158,7 +158,7 @@ function LocationMessage({ message }: { message: Message }) {
 
     return (
         <a href={linkHref} target={hasLink ? "_blank" : undefined} rel={hasLink ? "noopener noreferrer" : undefined} className="block">
-            <div className="overflow-hidden rounded-2xl border border-border bg-card/50 backdrop-blur-sm hover:border-primary/40 transition-all max-w-[85vw] md:max-w-[320px] shadow-sm dark:border-white/10 dark:bg-white/5 dark:hover:border-blue-400/40 dark:shadow-lg dark:shadow-black/20">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card hover:border-primary/40 transition-colors max-w-[85vw] md:max-w-[320px] dark:border-white/10 dark:bg-[#111318] dark:hover:border-blue-400/40">
                 {thumbnailSrc ? (
                     <div className="relative">
                         <img
@@ -481,7 +481,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                             className="h-full w-full object-cover brightness-[0.82] transition-all duration-300 group-hover:scale-[1.025] group-hover:brightness-[0.72]"
                         />
                         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-                            <div className="rounded-full border border-white/25 bg-black/45 p-3 shadow-lg backdrop-blur-sm transition-transform group-hover:scale-105">
+                            <div className="rounded-full border border-white/25 bg-black/70 p-3">
                                 <PlayCircle className="h-8 w-8 fill-white/15 text-white" />
                             </div>
                         </div>
@@ -490,7 +490,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                                 <Video className="h-3.5 w-3.5" />
                                 Vídeo
                             </span>
-                            <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+                            <span className="rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white/90">
                                 {duration ? formatDuration(duration) : 'Reproduzir'}
                             </span>
                         </div>
@@ -754,7 +754,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                         <div className="w-full border-t border-border/50"></div>
                     </div>
                     <div className="relative flex justify-center">
-                        <span className="bg-muted/80 backdrop-blur-md px-3 py-1 text-xs font-medium text-muted-foreground rounded-full border border-border shadow-sm dark:bg-white/5 dark:text-white/60 dark:border-white/10">{messageDayLabel || message.formattedDate}</span>
+                        <span className="bg-muted px-3 py-1 text-xs font-medium text-muted-foreground rounded-full border border-border dark:bg-[#111318] dark:text-white/60 dark:border-white/10">{messageDayLabel || message.formattedDate}</span>
                     </div>
                 </div>
             )}
@@ -795,8 +795,8 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                 : isVisualMediaMessage
                                                     ? ''
                                                 : (isFromMe
-                                                    ? 'rounded-tr-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_16px_30px_-18px_rgba(59,130,246,0.85)]'
-                                                    : 'rounded-tl-sm border border-slate-200/80 bg-white text-slate-800 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100 dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.85)]')
+                                                    ? 'rounded-tr-sm bg-blue-600 text-white'
+                                                    : 'rounded-tl-sm border border-slate-200 bg-white text-slate-800 dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100')
                                     )}
                                 >
                                     {(isInternalNote || isAiAnalysis || isToolExecution) && (

@@ -3,6 +3,7 @@ type FeatureFlagContext = {
     releaseChannel?: string;
     userId?: string;
     workspaceId?: string;
+    requestId?: string;
 };
 
 type FeatureFlagConfig = {
@@ -10,6 +11,7 @@ type FeatureFlagConfig = {
     startAt?: string;
     releaseChannels?: string[];
     users?: string[];
+    workspaces?: string[];
     rollout?: number;
 };
 
@@ -56,9 +58,15 @@ export function evaluateFeatureFlag(
         }
     }
 
-    // 3. Check targeted users (whitelist overrides disabled state)
+    // 3. Explicit targets are allowlists and override the disabled state. Workspace
+    // targeting is what makes a canary safe in a multi-tenant installation.
     if (effectiveConfig.users && context.userId) {
         if (effectiveConfig.users.includes(context.userId)) {
+            return { enabled: true, reason: 'targeted' };
+        }
+    }
+    if (effectiveConfig.workspaces && context.workspaceId) {
+        if (effectiveConfig.workspaces.includes(context.workspaceId)) {
             return { enabled: true, reason: 'targeted' };
         }
     }

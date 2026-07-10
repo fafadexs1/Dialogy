@@ -92,14 +92,14 @@ export default function AutopilotPage() {
     const privateAgents = agents.filter((agent) => agent.is_private).length;
 
     return [
-      { label: 'Agentes', value: String(agents.length).padStart(2, '0') },
+      { label: 'Automações', value: String(agents.length).padStart(2, '0') },
       { label: 'Ativos', value: String(activeAgents).padStart(2, '0') },
       { label: 'Privados', value: String(privateAgents).padStart(2, '0') },
     ];
   }, [agents]);
 
   const openCreateDialog = useCallback(() => {
-    setNewAgentName(`Agente ${agents.length + 1}`);
+    setNewAgentName(`Automação ${agents.length + 1}`);
     setNewAgentVisibility('public');
     setIsCreateDialogOpen(true);
   }, [agents.length]);
@@ -111,12 +111,12 @@ export default function AutopilotPage() {
     try {
       const result = await createAutopilotAgent(
         user.activeWorkspaceId,
-        newAgentName.trim() || `Agente ${agents.length + 1}`,
+        newAgentName.trim() || `Automação ${agents.length + 1}`,
         newAgentVisibility === 'private'
       );
 
       if (result.success && result.id) {
-        toast({ title: 'Agente criado', description: 'Redirecionando para configuração...' });
+        toast({ title: 'Automação criada', description: 'Escolha um template para começar.' });
         setIsCreateDialogOpen(false);
         router.push(`/autopilot/${result.id}`);
       } else {
@@ -147,18 +147,17 @@ export default function AutopilotPage() {
 
             <div className="space-y-2">
               <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                Seus agentes de IA
+                Suas automações de IA
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                Configure agentes com identidade própria, base de conhecimento e regras operacionais. A interface agora respeita
-                tema, responsividade e o catálogo global de modelos.
+                Monte fluxos com um agente ou uma equipe especializada, conectando modelos, memória, conhecimento, ferramentas e guardrails.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <Button onClick={openCreateDialog} size="lg" className="rounded-full px-6">
                 <Plus className="mr-2 h-4 w-4" />
-                Novo agente
+                Nova automação
               </Button>
               <Badge variant="outline" className="rounded-full px-4 py-2 text-xs">
                 Workspace: {workspace?.name || 'Sem nome'}
@@ -263,14 +262,14 @@ export default function AutopilotPage() {
                 <Bot className="h-10 w-10" />
               </div>
               <div className="space-y-2">
-                <h2 className="text-2xl font-semibold text-foreground">Nenhum agente criado</h2>
+                <h2 className="text-2xl font-semibold text-foreground">Nenhuma automação criada</h2>
                 <p className="text-sm leading-6 text-muted-foreground">
-                  Crie o primeiro agente inteligente para centralizar conhecimento, resposta automática e modo sugestão em uma interface estável.
+                  Crie a primeira automação e escolha entre agente único, equipe roteada ou canvas em branco.
                 </p>
               </div>
               <Button onClick={openCreateDialog} size="lg" className="rounded-full px-8">
                 <Plus className="mr-2 h-4 w-4" />
-                Criar primeiro agente
+                Criar primeira automação
               </Button>
             </CardContent>
           </Card>
@@ -280,15 +279,15 @@ export default function AutopilotPage() {
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl sm:max-w-[520px]">
           <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
-            <DialogTitle className="text-xl text-foreground">Novo agente</DialogTitle>
+            <DialogTitle className="text-xl text-foreground">Nova automação de IA</DialogTitle>
             <DialogDescription>
-              Configure o nome inicial e a visibilidade do agente.
+              Defina o nome e a visibilidade. O template será escolhido no Flowbuilder.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 px-6 py-6">
             <div className="space-y-2">
-              <Label htmlFor="new-agent-name">Nome do agente</Label>
+              <Label htmlFor="new-agent-name">Nome da automação</Label>
               <Input
                 id="new-agent-name"
                 value={newAgentName}

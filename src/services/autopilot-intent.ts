@@ -200,6 +200,28 @@ function isCustomerIdentifierOnly(normalizedMessage: string): boolean {
   );
 }
 
+function isNameOrIdentifierFollowUp(normalizedMessage: string, normalizedHistory: string): boolean {
+  if (isCustomerIdentifierOnly(normalizedMessage)) return true;
+
+  if (!isShortMessage(normalizedMessage) || !normalizedHistory) return false;
+
+  // Let's check if the history asks for an identifier or name
+  if (!hasIdentifierRequestContext(normalizedHistory)) return false;
+
+  // Ensure it's text-only and doesn't contain common intent/conversational words
+  // Support letters, spaces, apostrophes, hyphens, and common Portuguese accents
+  const isTextOnly = /^[\p{L}\s'\-]+$/u.test(normalizedMessage);
+  if (!isTextOnly) return false;
+
+  const words = normalizedMessage.split(/\s+/);
+  if (words.length < 1 || words.length > 6) return false;
+
+  const commonIntentWords = /\b(sim|nao|quero|ajuda|plano|internet|fibra|problema|boleto|cancelar|suporte|preco|valor|custa|tv|canais|velocidade|mega|megas|gostei|interessa|interessante|ver|consultar|falar|humano|atendente)\b/i.test(normalizedMessage);
+  if (commonIntentWords) return false;
+
+  return true;
+}
+
 function isLocationFollowUp(normalizedMessage: string): boolean {
   return (
     /\b(?:moro|resido|fico|estou|sou)\s+(?:no|na|em|do|da)\s+[\p{L}\d][\p{L}\d\s.'-]{2,}$/u.test(normalizedMessage) ||
@@ -246,8 +268,8 @@ function hasPurchaseCommitment(normalizedMessage: string): boolean {
 
 function hasIdentifierRequestContext(normalizedHistory: string): boolean {
   return (
-    /\b(?:cpf|cnpj|documento|identificador|cadastro)\b/.test(normalizedHistory) &&
-    /\b(?:me informe|informe|envie|manda|mandar|preciso|necessario|necessario|para seguir|para continuar|para consultar|para verificar|validar|acessar)\b/.test(normalizedHistory)
+    /\b(?:cpf|cnpj|documento|identificador|cadastro|nome)\b/.test(normalizedHistory) &&
+    /\b(?:me informe|informe|envie|manda|mandar|preciso|necessario|necessaria|para seguir|para continuar|para consultar|para verificar|validar|acessar|digite|digitar)\b/.test(normalizedHistory)
   );
 }
 
@@ -357,14 +379,14 @@ function inferIdentifierContinuationIntent(
     return {
       intent: 'unknown',
       confidence: 0.42,
-      reason: 'Cliente informou CPF/CNPJ como follow-up, mas o historico recente ficou ambiguo.',
+      reason: 'Cliente informou identificador ou nome como follow-up, mas o historico recente ficou ambiguo.',
     };
   }
 
   return {
     intent: best.intent,
     confidence: Math.min(0.92, 0.72 + best.score * 0.04),
-    reason: `Cliente informou CPF/CNPJ como follow-up; mantendo o contexto ativo inferido do historico recente: ${best.intent}.`,
+    reason: `Cliente informou identificador ou nome como follow-up; mantendo o contexto ativo inferido do historico recente: ${best.intent}.`,
   };
 }
 
@@ -420,7 +442,7 @@ function detectIntent(customerMessage: string, chatHistory = ''): DetectedIntent
     return { intent: 'availability_request', confidence: 0.88, reason: 'Cliente informou localizacao como follow-up de disponibilidade.' };
   }
 
-  if (isCustomerIdentifierOnly(normalized)) {
+  if (isNameOrIdentifierFollowUp(normalized, normalizedHistory)) {
     const continuationIntent = inferIdentifierContinuationIntent(normalizedHistory);
     if (continuationIntent) return continuationIntent;
   }

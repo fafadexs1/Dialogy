@@ -16,7 +16,7 @@ export default function Error({
     }, [error]);
 
     return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-4 bg-black/20 backdrop-blur-xl">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-4 bg-background">
             <div className="flex items-center gap-2 text-destructive">
                 <AlertCircle className="h-6 w-6" />
                 <h2 className="text-xl font-bold">Erro no Inbox</h2>

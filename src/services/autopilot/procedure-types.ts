@@ -71,6 +71,7 @@ export type ProcedureStep = {
   // retrieve_knowledge
   knowledgeQueryTemplate?: string;
   knowledgeCollectionIds?: string[];
+  knowledgeDocumentIds?: string[];
   requiredKnowledgeCoverage?: 'high' | 'medium' | 'low' | 'none';
   onLowKnowledge?: 'continue' | 'pause' | 'handoff';
 

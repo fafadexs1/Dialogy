@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import type { AutopilotConfig, KnowledgeBaseDocument, NexusFlowInstance, Workspace } from '@/lib/types';
 import { selectAutopilotConfigForRuntime } from '@/services/autopilot/config-selection';
+import { sanitizeAutopilotRules } from '@/services/autopilot/automation-rules';
 
 export async function getAutopilotConfigService(workspaceId: string, agentId?: string): Promise<{
   config: AutopilotConfig | null,
@@ -55,12 +56,23 @@ export async function getAutopilotConfigService(workspaceId: string, agentId?: s
     }
 
     const rulesRes = await db.query('SELECT * FROM autopilot_rules WHERE config_id = $1 ORDER BY name', [selectedConfig.id]);
-    const rules = rulesRes.rows.map((r) => ({
-      ...r,
-      action: typeof r.action === 'string' ? JSON.parse(r.action) : r.action,
-    }));
+    const parsedRules = rulesRes.rows.map((row) => {
+      let action = row.action;
+      if (typeof action === 'string') {
+        try {
+          action = JSON.parse(action);
+        } catch {
+          action = null;
+        }
+      }
+      return { ...row, action };
+    });
+    const sanitizedRules = sanitizeAutopilotRules(parsedRules);
+    if (sanitizedRules.invalid.length > 0) {
+      console.warn('[AUTOPILOT_RULES] Ignoring invalid automation rules for runtime:', sanitizedRules.invalid);
+    }
 
-    return { config: selectedConfig, rules, agents, workspace, hasGlobalKey: !!process.env.GOOGLE_GENAI_API_KEY };
+    return { config: selectedConfig, rules: sanitizedRules.rules, agents, workspace, hasGlobalKey: !!process.env.GOOGLE_GENAI_API_KEY };
   } catch (error) {
     console.error(`[GET_AUTOPILOT_CONFIG_SERVICE] Erro no workspace ${workspaceId}:`, error);
     return { config: null, rules: null, agents: null, workspace: null, error: 'Falha ao buscar configuracoes do banco de dados.', hasGlobalKey: false };

@@ -2,10 +2,9 @@
 import { v4 as uuidv4 } from 'uuid';
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { LayoutGroup } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
-import ContactPanel from '../chat/contact-panel';
 import { CommandPalette } from '../chat/command-palette';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
@@ -34,6 +33,11 @@ import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
 import { reconcileRealtimeChatAssignment } from '@/lib/realtime/realtime-reconciler';
 import { shouldMarkChatAsRead } from '@/lib/inbox-read-state';
 import { persistChatRead } from '@/lib/inbox-mark-as-read';
+
+const ContactPanel = dynamic(() => import('../chat/contact-panel'), {
+  ssr: false,
+  loading: () => <div className="hidden h-full w-[280px] shrink-0 border-l border-border lg:block xl:w-[340px]" />,
+});
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -139,7 +143,7 @@ function DraggableSoundTester({
 
   return ReactDOM.createPortal(
     <div
-      className="fixed z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md cursor-move"
+      className="fixed z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground cursor-move"
       style={{ left: pos.x, top: pos.y }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -159,8 +163,8 @@ function DraggableSoundTester({
 
 function LoadingSkeleton() {
   return (
-    <div className="flex flex-1 w-full min-h-0 h-full bg-background/20 backdrop-blur-xl">
-      <div className="flex flex-col w-[260px] lg:w-[300px] xl:w-[360px] 2xl:w-[400px] shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4">
+    <div className="flex flex-1 w-full min-h-0 h-full bg-background">
+      <div className="flex flex-col w-[260px] lg:w-[300px] xl:w-[360px] 2xl:w-[400px] shrink-0 min-w-0 max-w-full border-r border-border bg-background p-4 gap-4">
         <Skeleton className="h-12 w-full bg-muted" />
         <Skeleton className="h-10 w-full bg-muted" />
         <Skeleton className="h-10 w-full bg-muted" />
@@ -180,7 +184,7 @@ function LoadingSkeleton() {
         </div>
         <Skeleton className="h-24 w-full bg-muted" />
       </div>
-      <div className="hidden lg:flex lg:flex-col lg:w-[260px] xl:w-[320px] 2xl:w-[380px] lg:flex-shrink-0 border-l border-border bg-background/20 backdrop-blur-xl p-4 gap-4">
+      <div className="hidden lg:flex lg:flex-col lg:w-[260px] xl:w-[320px] 2xl:w-[380px] lg:flex-shrink-0 border-l border-border bg-background p-4 gap-4">
         <Skeleton className="h-16 w-full bg-muted" />
         <Skeleton className="h-24 w-full bg-muted" />
         <Skeleton className="h-32 w-full bg-muted" />
@@ -191,7 +195,7 @@ function LoadingSkeleton() {
 
 function ChatListSkeleton() {
   return (
-    <div className="flex flex-col w-[260px] lg:w-[300px] xl:w-[360px] 2xl:w-[400px] shrink-0 min-w-0 max-w-full border-r border-border bg-background/20 backdrop-blur-xl p-4 gap-4">
+    <div className="flex flex-col w-[260px] lg:w-[300px] xl:w-[360px] 2xl:w-[400px] shrink-0 min-w-0 max-w-full border-r border-border bg-background p-4 gap-4">
       <Skeleton className="h-6 w-32 bg-muted" />
       <Skeleton className="h-10 w-full bg-muted" />
       <div className="space-y-2 mt-2">
@@ -1648,13 +1652,13 @@ export default function CustomerChatLayout({
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-transparent">
 
-      <LayoutGroup>
+      <>
         <div
-          className={`relative z-10 flex h-full w-full overflow-hidden bg-background/45 backdrop-blur-[1.5px] selection:bg-primary/20 ${highContrast ? 'contrast-125 saturate-150' : ''}`}
+          className={`relative z-10 flex h-full w-full overflow-hidden bg-background selection:bg-primary/20 ${highContrast ? 'contrast-125' : ''}`}
           dir={isRTL ? 'rtl' : 'ltr'}
         >
           {needsAudioUnlock && (
-            <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur-md">
+            <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground">
               <span>Habilite o som de novas mensagens</span>
               <Button size="sm" variant="secondary" onClick={unlockAudio}>Habilitar</Button>
             </div>
@@ -1720,7 +1724,7 @@ export default function CustomerChatLayout({
 
         <CommandPalette />
 
-      </LayoutGroup>
+      </>
     </div>
   );
 }

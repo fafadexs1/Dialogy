@@ -58,7 +58,16 @@ export class InMemoryWorkflowPersistence implements WorkflowPersistence {
 
   async saveWorkflowDefinition(definition: WorkflowDefinition): Promise<void> {
     const parsed = WorkflowDefinitionSchema.parse(definition);
-    this.definitions.set(this.definitionKey(parsed.id, parsed.version), clone(parsed));
+    const key = this.definitionKey(parsed.id, parsed.version);
+    const existing = this.definitions.get(key);
+    if (
+      existing
+      && JSON.stringify(existing) !== JSON.stringify(parsed)
+      && (existing.status === 'published' || parsed.status === 'published')
+    ) {
+      throw new Error(`Published workflow definition ${parsed.id}@${parsed.version} is immutable.`);
+    }
+    this.definitions.set(key, clone(parsed));
   }
 
   async getWorkflowDefinition(workflowId: string, version: string): Promise<WorkflowDefinition | null> {
@@ -158,4 +167,3 @@ export class InMemoryWorkflowPersistence implements WorkflowPersistence {
       .map(clone);
   }
 }
-

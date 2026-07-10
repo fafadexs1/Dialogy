@@ -14,10 +14,8 @@ import {
 } from '@/lib/queue';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
-import { processAutopilotForChat } from '@/services/autopilot-service';
 import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
 import { normalizeImageThumbnailSource } from '@/lib/storage-url';
-import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import {
     AmbiguousEvolutionInstanceError,
     getEvolutionApiConfig,
@@ -624,6 +622,7 @@ async function scheduleQueueAutoClose(
                         closedAt,
                     });
                 } else {
+                    const { refreshCaseMemoryForChat } = await import('@/services/rag/case-memory');
                     await refreshCaseMemoryForChat({
                         workspaceId,
                         chatId,
@@ -1258,13 +1257,16 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
                 lastMessageContent: content,
                 instanceName,
             })
-            : processAutopilotForChat(
-                chat.workspace_id,
-                chat,
-                content,
-                instanceName,
-                message.id,
-            );
+            : (async () => {
+                const { processAutopilotForChat } = await import('@/services/autopilot-service');
+                return processAutopilotForChat(
+                    chat.workspace_id,
+                    chat,
+                    content,
+                    instanceName,
+                    message.id,
+                );
+            })();
         tasks.push(autopilotTask);
     } else {
         console.log(`[WEBHOOK_MSG_UPSERT] Autopilot SKIPPED (Inactive) for chat ${chat.id}`);

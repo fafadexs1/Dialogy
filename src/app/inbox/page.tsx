@@ -1,9 +1,6 @@
 
 import { redirect } from 'next/navigation';
-import CustomerChatLayout from '@/components/layout/customer-chat-layout';
-import MobileChatLayout from '@/components/layout/mobile-chat-layout';
-import InboxLoadingShell from '@/components/layout/inbox-loading-shell';
-import ResponsiveLayoutWrapper from '@/components/layout/responsive-layout-wrapper';
+import ResponsiveInboxLayout from '@/components/layout/responsive-inbox-layout';
 import { WorkspaceOnboarding } from '@/components/layout/workspace-onboarding';
 import { getInboxBootstrap } from '@/lib/server/inbox-bootstrap';
 
@@ -21,26 +18,10 @@ export default async function InboxRootPage() {
 
   // Render the chat layout without a pre-selected chat.
   return (
-    <ResponsiveLayoutWrapper
-      desktopLayout={
-        <div className="flex w-full h-full">
-          <CustomerChatLayout
-            initialUser={user}
-            chatId={initialData?.selectedChatId ?? null}
-            initialData={initialData}
-          />
-        </div>
-      }
-      mobileLayout={
-        <div className="flex w-full h-full">
-          <MobileChatLayout
-            initialUser={user}
-            chatId={initialData?.selectedChatId ?? null}
-            initialData={initialData}
-          />
-        </div>
-      }
-      loadingFallback={<InboxLoadingShell />}
+    <ResponsiveInboxLayout
+      initialUser={user}
+      initialChatId={initialData?.selectedChatId ?? null}
+      initialData={initialData}
     />
   )
 }

@@ -1,15 +1,3 @@
-const TEXT_LIKE_EVOLUTION_MESSAGE_TYPES = new Set([
-  'conversation',
-  'extendedTextMessage',
-  'buttonMessage',
-  'buttonsResponseMessage',
-  'templateButtonReplyMessage',
-  'listResponseMessage',
-  'interactiveResponseMessage',
-  'contactMessage',
-  'contactsArrayMessage',
-]);
-
 export type EvolutionInboundDbMessageType =
   | 'text'
   | 'audio'
@@ -118,9 +106,19 @@ export function mapEvolutionInboundMessageTypeToDbType(
   const normalizedType = typeof messageType === 'string' ? messageType.trim() : '';
 
   if (!normalizedType) return 'text';
-  if (TEXT_LIKE_EVOLUTION_MESSAGE_TYPES.has(normalizedType)) return 'text';
 
   switch (normalizedType) {
+    // Standard WhatsApp conversational and interactive payloads are text.
+    case 'conversation':
+    case 'extendedTextMessage':
+    case 'buttonMessage':
+    case 'buttonsResponseMessage':
+    case 'templateButtonReplyMessage':
+    case 'listResponseMessage':
+    case 'interactiveResponseMessage':
+    case 'contactMessage':
+    case 'contactsArrayMessage':
+      return 'text';
     case 'audioMessage':
       return 'audio';
     case 'imageMessage':

@@ -61,10 +61,35 @@ type ScoredDocument = {
 type BaseRetrievalInput = {
   workspaceId: string;
   autopilotConfigId?: string | null;
+  chatId?: string | null;
+  orchestratorRunId?: string | null;
   query: string;
   excludeChatId?: string | null;
   allowedDocumentIds?: string[];
 };
+
+/**
+ * Keep every retrieval source inside the same document boundary. VectorStore
+ * already receives this filter, but static documents are merged locally and
+ * must not be allowed to bypass a flow/procedure knowledge scope.
+ *
+ * `undefined` means unrestricted; an explicit empty array means that the
+ * active flow has no knowledge documents available.
+ */
+function filterDocumentsByAllowedIds(
+  documents: KnowledgeBaseDocument[] | null | undefined,
+  allowedDocumentIds: string[] | undefined,
+): KnowledgeBaseDocument[] {
+  const list = documents || [];
+  if (allowedDocumentIds === undefined) return list;
+
+  const allowed = new Set(
+    allowedDocumentIds
+      .map((documentId) => String(documentId || '').trim())
+      .filter(Boolean),
+  );
+  return list.filter((document) => allowed.has(String(document.id || '').trim()));
+}
 
 function buildCorrectiveRetrievalQuery(query: string, intent?: AutopilotIntentResolution | null): string {
   const normalizedQuery = query.trim();
@@ -350,8 +375,10 @@ async function logRagRetrieval(input: BaseRetrievalInput & {
         selected,
         discarded,
         diagnostics,
-        error
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        error,
+        chat_id,
+        orchestrator_run_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         input.workspaceId,
         input.autopilotConfigId || null,
@@ -363,6 +390,8 @@ async function logRagRetrieval(input: BaseRetrievalInput & {
         JSON.stringify(input.result.discarded),
         JSON.stringify(redactSensitiveLogValue(input.result.diagnostics || {})),
         input.result.error || null,
+        input.chatId || null,
+        input.orchestratorRunId || null,
       ],
     );
   } catch (error) {
@@ -472,19 +501,34 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
   staticDocuments?: KnowledgeBaseDocument[] | null;
   intent?: AutopilotIntentResolution | null;
 }): Promise<HybridKnowledgeRetrievalResult> {
+  const scopedStaticDocuments = filterDocumentsByAllowedIds(
+    input.staticDocuments,
+    input.allowedDocumentIds,
+  );
+  const enforceDocumentScope = <T extends { knowledgeBaseDocuments: KnowledgeBaseDocument[] }>(retrieval: T): T => ({
+    ...retrieval,
+    // Defense in depth: VectorStore applies the filter in SQL, but retain the
+    // boundary if a mocked, cached, or future retrieval source returns a row
+    // outside the active knowledge step.
+    knowledgeBaseDocuments: filterDocumentsByAllowedIds(
+      retrieval.knowledgeBaseDocuments,
+      input.allowedDocumentIds,
+    ),
+  });
+
   try {
     const { retrieveSupportContext } = await import('./retrieval');
-    let vectorRetrieval = await retrieveSupportContext({
+    let vectorRetrieval = enforceDocumentScope(await retrieveSupportContext({
       workspaceId: input.workspaceId,
       autopilotConfigId: input.autopilotConfigId ?? null,
       query: input.query,
       excludeChatId: input.excludeChatId ?? null,
       intent: input.intent ?? null,
       allowedDocumentIds: input.allowedDocumentIds,
-    });
+    }));
     let merged = mergeAndRerankKnowledgeDocuments({
       vectorDocuments: vectorRetrieval.knowledgeBaseDocuments,
-      staticDocuments: input.staticDocuments,
+      staticDocuments: scopedStaticDocuments,
       query: input.query,
       intent: input.intent,
     });
@@ -494,14 +538,14 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       reason: 'initial_retrieval_sufficient',
     };
     if (shouldRetryRetrieval(vectorRetrieval, merged) && correctiveQuery !== input.query.trim()) {
-      const correctiveRetrieval = await retrieveSupportContext({
+      const correctiveRetrieval = enforceDocumentScope(await retrieveSupportContext({
         workspaceId: input.workspaceId,
         autopilotConfigId: input.autopilotConfigId ?? null,
         query: correctiveQuery,
         excludeChatId: input.excludeChatId ?? null,
         intent: input.intent ?? null,
         allowedDocumentIds: input.allowedDocumentIds,
-      });
+      }));
       vectorRetrieval = {
         ...correctiveRetrieval,
         knowledgeBaseDocuments: [
@@ -516,7 +560,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       };
       merged = mergeAndRerankKnowledgeDocuments({
         vectorDocuments: vectorRetrieval.knowledgeBaseDocuments,
-        staticDocuments: input.staticDocuments,
+        staticDocuments: scopedStaticDocuments,
         query: input.query,
         intent: input.intent,
       });
@@ -596,7 +640,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       resolvedCases: vectorRetrieval.resolvedCases,
       retrieved: {
         vectorDocuments: vectorRetrieval.knowledgeBaseDocuments.length,
-        staticDocuments: input.staticDocuments?.length || 0,
+        staticDocuments: scopedStaticDocuments.length,
         resolvedCases: vectorRetrieval.resolvedCases.length,
       },
       diagnostics: {
@@ -614,7 +658,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
   } catch (error) {
     const merged = mergeAndRerankKnowledgeDocuments({
       vectorDocuments: [],
-      staticDocuments: input.staticDocuments,
+      staticDocuments: scopedStaticDocuments,
       query: input.query,
       intent: input.intent,
     });
@@ -628,7 +672,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
       resolvedCases: [],
       retrieved: {
         vectorDocuments: 0,
-        staticDocuments: input.staticDocuments?.length || 0,
+        staticDocuments: scopedStaticDocuments.length,
         resolvedCases: 0,
       },
       fallbackReason: 'vector_retrieval_error',

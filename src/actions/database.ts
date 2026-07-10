@@ -830,8 +830,13 @@ create table if not exists public.autopilot_configs (
   default_fallback_reply text,
   escalation_policy text,
   closing_policy text,
+  inactivity_timeout_seconds integer,
   enabled_tool_names jsonb,
   flow_graph jsonb,
+  workflow_runtime_v2_mode text not null default 'off',
+  workflow_builder_mode text not null default 'native_v2',
+  active_workflow_id text,
+  active_workflow_version text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   constraint autopilot_configs_workspace_id_fkey
@@ -843,10 +848,24 @@ create index if not exists idx_autopilot_configs_workspace_user on public.autopi
 create index if not exists idx_autopilot_configs_workspace on public.autopilot_configs(workspace_id);
 alter table if exists public.autopilot_configs add column if not exists escalation_policy text;
 alter table if exists public.autopilot_configs add column if not exists closing_policy text;
+alter table if exists public.autopilot_configs add column if not exists inactivity_timeout_seconds integer;
 alter table if exists public.autopilot_configs add column if not exists enabled_tool_names jsonb;
 alter table if exists public.autopilot_configs add column if not exists transcription_model text;
 alter table if exists public.autopilot_configs add column if not exists flow_graph jsonb;
 alter table if exists public.autopilot_configs add column if not exists knowledge_collections jsonb;
+alter table if exists public.autopilot_configs add column if not exists workflow_runtime_v2_mode text not null default 'off';
+alter table if exists public.autopilot_configs add column if not exists workflow_builder_mode text not null default 'native_v2';
+alter table if exists public.autopilot_configs add column if not exists active_workflow_id text;
+alter table if exists public.autopilot_configs add column if not exists active_workflow_version text;
+alter table if exists public.autopilot_configs alter column workflow_builder_mode set default 'native_v2';
+alter table if exists public.autopilot_configs drop constraint if exists autopilot_configs_workflow_runtime_v2_mode_check;
+alter table if exists public.autopilot_configs
+  add constraint autopilot_configs_workflow_runtime_v2_mode_check
+  check (workflow_runtime_v2_mode in ('off', 'shadow', 'primary'));
+alter table if exists public.autopilot_configs drop constraint if exists autopilot_configs_workflow_builder_mode_check;
+alter table if exists public.autopilot_configs
+  add constraint autopilot_configs_workflow_builder_mode_check
+  check (workflow_builder_mode in ('legacy', 'native_v2'));
 
 -- Autopilot: rascunhos e versoes
 create table if not exists public.autopilot_config_drafts (

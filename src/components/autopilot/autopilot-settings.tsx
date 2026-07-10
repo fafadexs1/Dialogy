@@ -25,6 +25,10 @@ interface AutopilotSettingsProps {
   setEscalationPolicy: (policy: string) => void;
   closingPolicy: string;
   setClosingPolicy: (policy: string) => void;
+  inactivityTimeoutSeconds: number | null;
+  setInactivityTimeoutSeconds: (seconds: number | null) => void;
+  workflowRuntimeV2ShadowEnabled: boolean;
+  setWorkflowRuntimeV2ShadowEnabled: (enabled: boolean) => void;
   isActive: boolean;
   setIsActive: (active: boolean) => void;
   isPrivate: boolean;
@@ -36,6 +40,7 @@ interface AutopilotSettingsProps {
   isSaving: boolean;
   onDelete: () => void;
   workspace?: Workspace | null;
+  nativeWorkflow?: boolean;
 }
 
 export function AutopilotSettings({
@@ -62,6 +67,7 @@ export function AutopilotSettings({
   isSaving,
   onDelete,
   workspace,
+  nativeWorkflow = false,
 }: AutopilotSettingsProps) {
   const effectiveModelOptions = modelOptions.some((model) => model.id === aiModel)
     ? modelOptions
@@ -86,7 +92,9 @@ export function AutopilotSettings({
             <div className="space-y-1">
               <CardTitle className="text-xl text-foreground">Configurações gerais</CardTitle>
               <CardDescription>
-                Controle identidade, modelo, prompt base e herança de configuração do workspace.
+                {nativeWorkflow
+                  ? 'Controle as políticas globais, o status e o versionamento da automação.'
+                  : 'Controle identidade, modelo, prompt base e herança de configuração do workspace.'}
               </CardDescription>
             </div>
           </div>
@@ -96,7 +104,7 @@ export function AutopilotSettings({
           <div className="grid min-w-0 gap-6">
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="agent-name">Nome do agente</Label>
+                <Label htmlFor="agent-name">{nativeWorkflow ? 'Nome da automação' : 'Nome do agente'}</Label>
                 <Input
                   id="agent-name"
                   value={agentName}
@@ -105,7 +113,7 @@ export function AutopilotSettings({
                 />
               </div>
 
-              <div className="space-y-2">
+              {!nativeWorkflow && <div className="space-y-2">
                 <Label>Modelo de IA</Label>
                 <Select value={aiModel} onValueChange={setAiModel}>
                   <SelectTrigger>
@@ -127,10 +135,10 @@ export function AutopilotSettings({
                     O modelo atualmente salvo nao esta ativo nas integracoes do workspace. Revise antes de publicar.
                   </p>
                 )}
-              </div>
+              </div>}
             </div>
 
-            <div className="space-y-2">
+            {!nativeWorkflow && <div className="space-y-2">
               <Label htmlFor="knowledge-base">Persona do agente</Label>
               <Textarea
                 id="knowledge-base"
@@ -142,7 +150,7 @@ export function AutopilotSettings({
               <p className="text-xs text-muted-foreground">
                 Esse texto funciona como prompt base da operação. Seja específico no tom, política de resposta e critérios de escalonamento.
               </p>
-            </div>
+            </div>}
 
             <div className="space-y-2">
               <Label htmlFor="fallback-reply">Resposta de fallback</Label>
@@ -193,9 +201,11 @@ export function AutopilotSettings({
           <div className="grid gap-4 self-start">
             <div className="rounded-[24px] border border-border bg-muted/30 p-5">
               <div className="mb-4 flex flex-wrap gap-2">
-                <Badge variant="outline" className="rounded-full">
-                  {getAiModelLabel(aiModel, modelOptions)}
-                </Badge>
+                {!nativeWorkflow && (
+                  <Badge variant="outline" className="rounded-full">
+                    {getAiModelLabel(aiModel, modelOptions)}
+                  </Badge>
+                )}
                 <Badge variant="outline" className="rounded-full">
                   {isPrivate ? 'Privado' : 'Público'}
                 </Badge>
@@ -204,7 +214,7 @@ export function AutopilotSettings({
               <div className="grid gap-3">
                 <div className="flex items-center justify-between rounded-2xl border border-border bg-background/80 px-4 py-4">
                   <div className="space-y-1">
-                    <Label className="text-sm font-medium text-foreground">Status do agente</Label>
+                    <Label className="text-sm font-medium text-foreground">{nativeWorkflow ? 'Status da automação' : 'Status do agente'}</Label>
                     <p className="text-xs text-muted-foreground">Pausar interrompe respostas da IA.</p>
                   </div>
                   <Switch checked={isActive} onCheckedChange={setIsActive} />
@@ -213,14 +223,14 @@ export function AutopilotSettings({
                 <div className="flex items-center justify-between rounded-2xl border border-border bg-background/80 px-4 py-4">
                   <div className="space-y-1">
                     <Label className="text-sm font-medium text-foreground">Privacidade</Label>
-                    <p className="text-xs text-muted-foreground">Agentes privados são visíveis só para você.</p>
+                    <p className="text-xs text-muted-foreground">{nativeWorkflow ? 'Automações privadas são visíveis só para você.' : 'Agentes privados são visíveis só para você.'}</p>
                   </div>
                   <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
                 </div>
 
                 <div className="flex items-center justify-between rounded-2xl border border-border bg-background/80 px-4 py-4">
                   <div className="space-y-1">
-                    <Label className="text-sm font-medium text-foreground">Agente principal</Label>
+                    <Label className="text-sm font-medium text-foreground">{nativeWorkflow ? 'Automação padrão' : 'Agente principal'}</Label>
                     <p className="text-xs text-muted-foreground">Usado como padrão quando nenhum outro for definido.</p>
                   </div>
                   <Switch checked={isPrimary} onCheckedChange={(checked) => checked && onSetPrimary()} disabled={isPrimary} />
@@ -262,11 +272,13 @@ export function AutopilotSettings({
             <div className="space-y-1">
               <h3 className="text-base font-semibold text-foreground">Zona de perigo</h3>
               <p className="text-sm text-muted-foreground">
-                A exclusão é permanente e remove o agente, o conhecimento indexado e o histórico operacional associado.
+                {nativeWorkflow
+                  ? 'A exclusão é permanente e remove a automação, suas definições e o histórico operacional associado.'
+                  : 'A exclusão é permanente e remove o agente, o conhecimento indexado e o histórico operacional associado.'}
               </p>
             </div>
             <Button variant="destructive" onClick={onDelete} className="rounded-full px-6">
-              Excluir este agente
+              {nativeWorkflow ? 'Excluir esta automação' : 'Excluir este agente'}
             </Button>
           </CardContent>
         </Card>
@@ -276,7 +288,9 @@ export function AutopilotSettings({
             <div className="space-y-2">
               <h3 className="text-base font-semibold text-foreground">Salvar agora</h3>
               <p className="text-sm text-muted-foreground">
-                Use este atalho ao final do formulário para persistir nome, modelo, prompt e chave personalizada.
+                {nativeWorkflow
+                  ? 'Use este atalho para persistir as configurações globais da automação.'
+                  : 'Use este atalho ao final do formulário para persistir nome, modelo, prompt e chave personalizada.'}
               </p>
             </div>
             <Button onClick={onSave} disabled={isSaving} className="rounded-full">

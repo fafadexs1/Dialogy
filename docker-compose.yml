@@ -103,9 +103,9 @@
   AUTOPILOT_LEARNING_DRY_RUN: ${AUTOPILOT_LEARNING_DRY_RUN:-false}
   AUTOPILOT_LEARNING_SKIP_ECOSYSTEM_PROMOTION: ${AUTOPILOT_LEARNING_SKIP_ECOSYSTEM_PROMOTION:-false}
   AUTOPILOT_LEARNING_SKIP_SCORE_SUGGESTIONS: ${AUTOPILOT_LEARNING_SKIP_SCORE_SUGGESTIONS:-false}
-  AI_PREWARM_MODELS: ${AI_PREWARM_MODELS:-false}
+  AI_PREWARM_MODELS: ${AI_PREWARM_MODELS:-true}
   TRANSFORMERS_CACHE_DIR: ${TRANSFORMERS_CACHE_DIR:-/tmp/dialogy-transformers-cache}
-  RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED: ${RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED:-false}
+  RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED: ${RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED:-true}
   RAG_BGE_RERANKER_V2_M3_ENABLED: ${RAG_BGE_RERANKER_V2_M3_ENABLED:-false}
   RAG_BGE_RERANKER_V2_M3_MAX_PASSAGE_CHARACTERS: ${RAG_BGE_RERANKER_V2_M3_MAX_PASSAGE_CHARACTERS:-1200}
   PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-}
@@ -139,12 +139,33 @@ x-worker-campaign-environment: &worker-campaign-environment
   CAMPAIGN_WORKER_LOCK_MS: ${CAMPAIGN_WORKER_LOCK_MS:-600000}
 
 services:
+  # Docker creates named volumes as root. The application images deliberately run
+  # as uid 1001, so initialise the shared Hugging Face/ONNX cache before either
+  # process can load a local embedding or reranking model.
+  ai-cache-init:
+    image: fafadexs/dialogy-worker-ai:PBE-5.174
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /tmp/dialogy-transformers-cache
+        chown -R 1001:1001 /tmp/dialogy-transformers-cache
+        chmod -R u+rwX,go-rwx /tmp/dialogy-transformers-cache
+    volumes:
+      - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
+
   dialogy:
-    image: fafadexs/dialogy:PBE-5.164
+    image: fafadexs/dialogy:PBE-5.174
     restart: unless-stopped
     init: true
+    depends_on:
+      ai-cache-init:
+        condition: service_completed_successfully
     environment:
       <<: *app-environment
+    volumes:
+      - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
     ports:
       - "9045:9045"
     healthcheck:
@@ -162,7 +183,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PBE-5.164
+    image: fafadexs/dialogy-worker:PBE-5.174
     restart: unless-stopped
     init: true
     depends_on:
@@ -173,18 +194,22 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PBE-5.164
+    image: fafadexs/dialogy-worker-ai:PBE-5.174
     restart: unless-stopped
     init: true
     depends_on:
+      ai-cache-init:
+        condition: service_completed_successfully
       dialogy:
         condition: service_healthy
     environment:
       <<: *worker-ai-environment
+    volumes:
+      - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
     stop_grace_period: 30s
 
   worker-campaign:
-    image: fafadexs/dialogy-worker:PBE-5.164
+    image: fafadexs/dialogy-worker:PBE-5.174
     command: ["node", "dist/worker-campaign.js"]
     restart: unless-stopped
     init: true
@@ -194,3 +219,6 @@ services:
     environment:
       <<: *worker-campaign-environment
     stop_grace_period: 30s
+
+volumes:
+  dialogy-transformers-cache:

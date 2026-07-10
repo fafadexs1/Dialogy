@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-type DebugEvent = {
+export type DebugEvent = {
   id: string;
   sequence: number;
   type: string;
@@ -29,7 +29,7 @@ type DebugEvent = {
   createdAt: string;
 };
 
-type DebugExecution = {
+export type DebugExecution = {
   id: string;
   workflowId: string;
   workflowVersion: string;
@@ -48,7 +48,7 @@ type DebugExecution = {
   finishedAt?: string | null;
 };
 
-type DebugPayload = {
+export type DebugPayload = {
   execution: DebugExecution;
   events: DebugEvent[];
 };
@@ -106,9 +106,15 @@ function JsonPanel({ title, value }: { title: string; value: unknown }) {
 export function WorkflowExecutionDebugger({
   executionId,
   onBack,
+  onSnapshot,
+  onEventSelect,
+  embedded = false,
 }: {
   executionId: string;
   onBack?: () => void;
+  onSnapshot?: (payload: DebugPayload) => void;
+  onEventSelect?: (event: DebugEvent) => void;
+  embedded?: boolean;
 }) {
   const [payload, setPayload] = useState<DebugPayload | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -136,6 +142,10 @@ export function WorkflowExecutionDebugger({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (payload) onSnapshot?.(payload);
+  }, [onSnapshot, payload]);
 
   useEffect(() => {
     if (!payload || ['completed', 'failed', 'cancelled'].includes(payload.execution.status)) return;
@@ -183,7 +193,7 @@ export function WorkflowExecutionDebugger({
 
   if (loading) {
     return (
-      <div className="flex min-h-[520px] items-center justify-center bg-[#101214] text-slate-400">
+      <div className={cn('flex items-center justify-center bg-[#101214] text-slate-400', embedded ? 'h-full min-h-[260px]' : 'min-h-[520px]')}>
         <Loader2 className="mr-3 h-5 w-5 animate-spin text-sky-400" />
         Carregando execução
       </div>
@@ -192,7 +202,7 @@ export function WorkflowExecutionDebugger({
 
   if (error || !payload) {
     return (
-      <div className="flex min-h-[520px] items-center justify-center bg-[#101214] p-8">
+      <div className={cn('flex items-center justify-center bg-[#101214] p-8', embedded ? 'h-full min-h-[260px]' : 'min-h-[520px]')}>
         <div className="max-w-md rounded-2xl border border-red-500/20 bg-red-500/[0.06] p-6 text-center">
           <AlertTriangle className="mx-auto h-6 w-6 text-red-300" />
           <p className="mt-3 text-sm text-red-100">{error || 'Execução indisponível.'}</p>
@@ -207,7 +217,7 @@ export function WorkflowExecutionDebugger({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#101214] text-slate-100">
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] bg-[#131619] px-6 py-4">
+      <header className={cn('flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] bg-[#131619]', embedded ? 'px-4 py-2.5' : 'px-6 py-4')}>
         <div className="flex min-w-0 items-center gap-3">
           {onBack && (
             <Button variant="ghost" size="icon" onClick={onBack} className="rounded-xl border border-white/10">
@@ -216,7 +226,7 @@ export function WorkflowExecutionDebugger({
           )}
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-400">Depurador de execução</p>
-            <h1 className="truncate text-base font-semibold">{payload.execution.workflowId}</h1>
+            {!embedded && <h1 className="truncate text-base font-semibold">{payload.execution.workflowId}</h1>}
             <p className="truncate font-mono text-[10px] text-slate-500">{payload.execution.id}</p>
           </div>
         </div>
@@ -228,16 +238,16 @@ export function WorkflowExecutionDebugger({
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 border-b border-white/[0.08] px-6 py-4 sm:grid-cols-4">
+      <div className={cn('grid grid-cols-2 border-b border-white/[0.08] sm:grid-cols-4', embedded ? 'gap-2 px-4 py-2' : 'gap-3 px-6 py-4')}>
         {[
           ['Passos', payload.execution.counters?.totalSteps || 0],
           ['Modelo', payload.execution.counters?.totalModelCalls || 0],
           ['Tools', payload.execution.counters?.totalToolCalls || 0],
           ['Tokens', payload.execution.counters?.totalTokens || 0],
         ].map(([label, value]) => (
-          <div key={String(label)} className="rounded-xl border border-white/10 bg-[#15181b] px-4 py-3">
+          <div key={String(label)} className={cn('rounded-xl border border-white/10 bg-[#15181b]', embedded ? 'px-3 py-1.5' : 'px-4 py-3')}>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-100">{value}</p>
+            <p className={cn('font-semibold text-slate-100', embedded ? 'text-sm' : 'mt-1 text-lg')}>{value}</p>
           </div>
         ))}
       </div>
@@ -252,7 +262,10 @@ export function WorkflowExecutionDebugger({
                 <button
                   key={event.id}
                   type="button"
-                  onClick={() => setSelectedEventId(event.id)}
+                  onClick={() => {
+                    setSelectedEventId(event.id);
+                    onEventSelect?.(event);
+                  }}
                   className={cn(
                     'grid w-full grid-cols-[72px_34px_minmax(0,1fr)] items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors',
                     selected
@@ -319,4 +332,3 @@ export function WorkflowExecutionDebugger({
     </div>
   );
 }
-

@@ -17,14 +17,26 @@ async function loadEnvironment() {
 
 async function maybePrewarmModels() {
   const raw = (process.env.AI_PREWARM_MODELS || 'false').trim().toLowerCase();
-  if (raw === 'false' || raw === '0' || raw === 'no') {
+  const explicitPrewarm = raw === 'true' || raw === '1' || raw === 'yes';
+  const ragSetting = process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED?.trim().toLowerCase();
+  const semanticRagEnabled = ragSetting
+    ? ragSetting === 'true' || ragSetting === '1' || ragSetting === 'yes'
+    : true;
+
+  if (!explicitPrewarm && !semanticRagEnabled) {
     return;
   }
 
-  console.log('[AI_QUEUE_WORKER] Prewarming embedding models...');
-  await prewarmEmbeddingModels(['doc']);
-  await prewarmBgeRerankerV2M3();
-  console.log('[AI_QUEUE_WORKER] Embedding and BGE Reranker v2 M3 models ready.');
+  console.log('[AI_QUEUE_WORKER] Prewarming embedding models for semantic RAG...');
+  try {
+    await prewarmEmbeddingModels(['doc']);
+    await prewarmBgeRerankerV2M3();
+    console.log('[AI_QUEUE_WORKER] Embedding and BGE Reranker v2 M3 models ready.');
+  } catch (error) {
+    // Keep the AI queue alive even if a model download/cache is temporarily
+    // unavailable. Retrieval will retain its keyword/static degradation path.
+    console.warn('[AI_QUEUE_WORKER] Model prewarm failed; continuing without a warm cache:', error);
+  }
 }
 
 async function main() {

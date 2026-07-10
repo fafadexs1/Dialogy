@@ -145,6 +145,7 @@ type AttendantNodeData = {
     useAi?: boolean;
     returnToMainPrompt?: boolean;
     knowledgeCollectionIds?: string[];
+    knowledgeDocumentIds?: string[];
     switchMode?: 'ai' | 'rules';
     confidenceThreshold?: number;
     fallbackRouteId?: string;
@@ -192,6 +193,8 @@ interface AutopilotFlowBuilderProps {
     conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
     currentGraph: AutopilotFlowGraph;
     currentSystemPrompt: string;
+    knowledgeDocuments?: KnowledgeBaseDocument[];
+    knowledgeCollections?: KnowledgeCollection[];
   }) => Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }>;
   onApplyAiProposal: (proposal: AutopilotFlowAiProposal) => void;
 }
@@ -225,9 +228,9 @@ const NODE_SURFACES: Partial<Record<NodeKind, string>> = {
 };
 
 const HANDLE_CLASS_NAMES = {
-  vertical: '!h-2.5 !w-2.5 !border-[#16191d] !bg-sky-400',
-  knowledge: '!h-3 !w-3 !border-[#16191d] !bg-orange-400',
-  skill: '!h-3 !w-3 !border-[#16191d] !bg-red-400',
+  vertical: '!h-2.5 !w-2.5 !border-[#16191d] !bg-sky-400 opacity-0 transition-opacity group-hover:opacity-100',
+  knowledge: '!h-3 !w-3 !border-[#16191d] !bg-orange-400 opacity-0 transition-opacity group-hover:opacity-100',
+  skill: '!h-3 !w-3 !border-[#16191d] !bg-red-400 opacity-0 transition-opacity group-hover:opacity-100',
 };
 
 const OPERATIONAL_STATUS_META: Partial<Record<OperationalNodeState, {
@@ -276,6 +279,9 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
   const isKnowledgeNode = data.kind === 'knowledge';
   const acceptsKnowledge = isAgentNodeKind(data.kind);
   const exposesSkill = isAgentNodeKind(data.kind);
+  const showMainTarget = data.kind !== 'start' && data.kind !== 'knowledge' && data.kind !== 'tool';
+  const showMainSource = data.kind !== 'end' && data.kind !== 'handoff' && data.kind !== 'knowledge';
+  const toolTargetPosition = data.toolHandlePosition || Position.Left;
   const operationalStatus = data.status
     ? OPERATIONAL_STATUS_META[data.status as OperationalNodeState]
     : undefined;
@@ -291,17 +297,19 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
         selected && 'border-sky-400/70 shadow-[0_0_0_1px_rgba(56,189,248,0.3),0_0_30px_rgba(14,165,233,0.2)]'
       )}
     >
-      <Handle id="target-top" type="target" position={Position.Top} className={HANDLE_CLASS_NAMES.vertical} />
+      {showMainTarget && (
+        <Handle id="target-top" type="target" position={Position.Top} className={HANDLE_CLASS_NAMES.vertical} />
+      )}
       {acceptsKnowledge && (
         <Handle id="target-left-knowledge" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.knowledge} />
       )}
       {data.kind === 'tool' && (
-        <>
-          <Handle id="target-top-tool" type="target" position={Position.Top} className={HANDLE_CLASS_NAMES.skill} />
-          <Handle id="target-right-tool" type="target" position={Position.Right} className={HANDLE_CLASS_NAMES.skill} />
-          <Handle id="target-bottom-tool" type="target" position={Position.Bottom} className={HANDLE_CLASS_NAMES.skill} />
-          <Handle id="target-left-tool" type="target" position={Position.Left} className={HANDLE_CLASS_NAMES.skill} />
-        </>
+        <Handle
+          id={`target-${toolTargetPosition}-tool`}
+          type="target"
+          position={toolTargetPosition}
+          className={HANDLE_CLASS_NAMES.skill}
+        />
       )}
       <span
         className={cn(
@@ -340,7 +348,9 @@ function AttendantNodeCard({ id, data, selected }: NodeProps<AttendantNode>) {
           {operationalStatus.label}
         </span>
       )}
-      <Handle id="source-bottom" type="source" position={Position.Bottom} className={HANDLE_CLASS_NAMES.vertical} />
+      {showMainSource && (
+        <Handle id="source-bottom" type="source" position={Position.Bottom} className={HANDLE_CLASS_NAMES.vertical} />
+      )}
       {isKnowledgeNode && (
         <Handle id="source-right-knowledge" type="source" position={Position.Right} className={HANDLE_CLASS_NAMES.knowledge} />
       )}
@@ -1157,6 +1167,7 @@ function NodeInspector({
   knowledgeAttachment?: {
     targetTitle: string;
     targetKind: 'sub_agent';
+    documentIds: string[];
     collectionNames: string[];
     documents: KnowledgeBaseDocument[];
   } | null;
@@ -1339,7 +1350,9 @@ function NodeInspector({
                   </div>
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Documentos disponiveis</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {knowledgeAttachment.documentIds.length > 0 ? 'Documentos autorizados' : 'Documentos disponiveis'}
+                  </p>
                   <div className="mt-2 max-h-44 space-y-2 overflow-y-auto pr-1">
                     {knowledgeAttachment.documents.slice(0, 8).map((document) => (
                       <div key={document.id} className="rounded-lg border border-white/10 bg-[#17191c] px-3 py-2">
@@ -2348,6 +2361,8 @@ export function AutopilotFlowBuilder({
         conversation: [{ role: 'user', content: repairPrompt }],
         currentGraph: currentFlowGraph,
         currentSystemPrompt: mainSystemPrompt,
+        knowledgeDocuments,
+        knowledgeCollections,
       });
       if (error || !proposal) {
         throw new Error(error || 'Falha ao gerar proposta de reparo');
@@ -2360,7 +2375,7 @@ export function AutopilotFlowBuilder({
     } finally {
       setIsRepairingGate(false);
     }
-  }, [publishAudit, toolCoverage, currentFlowGraph, mainSystemPrompt, onGenerateFlowWithAi, onApplyAiProposal]);
+  }, [publishAudit, toolCoverage, currentFlowGraph, knowledgeCollections, knowledgeDocuments, mainSystemPrompt, onGenerateFlowWithAi, onApplyAiProposal]);
 
   useEffect(() => {
     const currentSignature = JSON.stringify(currentFlowGraph);
@@ -2551,19 +2566,30 @@ export function AutopilotFlowBuilder({
     const targetNode = targetId ? nodes.find((node) => node.id === targetId) : null;
     if (!targetNode || !isAgentNodeKind(targetNode.data.kind)) return null;
 
-    const allowedCollectionIds = targetNode.data.config?.knowledgeCollectionIds?.filter(Boolean) || ['general'];
+    const allowedDocumentIds = Array.from(new Set([
+      ...(selectedNode.data.config?.knowledgeDocumentIds || []),
+      ...(targetNode.data.config?.knowledgeDocumentIds || []),
+    ].filter(Boolean)));
+    const allowedCollectionIds = Array.from(new Set([
+      ...(selectedNode.data.config?.knowledgeCollectionIds || []),
+      ...(targetNode.data.config?.knowledgeCollectionIds || []),
+    ].filter(Boolean)));
     const allowedSet = new Set(allowedCollectionIds);
     const collectionNames = knowledgeCollections
       .filter((collection) => allowedSet.has(collection.id))
       .map((collection) => collection.name);
-    const scopedDocuments = knowledgeDocuments.filter((document) => {
-      const documentCollectionIds = document.collectionIds?.length ? document.collectionIds : ['general'];
-      return documentCollectionIds.some((collectionId) => allowedSet.has(collectionId));
-    });
+    const documentSet = new Set(allowedDocumentIds);
+    const scopedDocuments = allowedDocumentIds.length > 0
+      ? knowledgeDocuments.filter((document) => documentSet.has(document.id))
+      : knowledgeDocuments.filter((document) => {
+          const documentCollectionIds = document.collectionIds?.length ? document.collectionIds : ['general'];
+          return (allowedCollectionIds.length > 0 ? documentCollectionIds.some((collectionId) => allowedSet.has(collectionId)) : true);
+        });
 
     return {
       targetTitle: targetNode.data.title,
       targetKind: 'sub_agent' as const,
+      documentIds: allowedDocumentIds,
       collectionNames,
       documents: scopedDocuments,
     };
@@ -2889,6 +2915,8 @@ export function AutopilotFlowBuilder({
         conversation,
         currentGraph: currentFlowGraph,
         currentSystemPrompt: mainSystemPrompt,
+        knowledgeDocuments,
+        knowledgeCollections,
       });
       if (!result.proposal) {
         setAiBuilderError(result.error || 'Nao foi possivel gerar uma proposta de flow.');
@@ -2909,6 +2937,8 @@ export function AutopilotFlowBuilder({
     aiBuilderMessages,
     currentFlowGraph,
     isGeneratingAiFlow,
+    knowledgeCollections,
+    knowledgeDocuments,
     mainSystemPrompt,
     onGenerateFlowWithAi,
   ]);

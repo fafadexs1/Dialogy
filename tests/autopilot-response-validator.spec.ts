@@ -32,6 +32,7 @@ function validate(input: {
   contactOverride?: Contact;
   knowledgeDocuments?: KnowledgeBaseDocument[];
   systemAgentName?: string;
+  source?: 'workflow_direct' | 'workflow_tools' | 'llm' | 'fallback';
 }) {
   const resolvedContact = input.contactOverride || contact;
   const intentResolution = resolveAutopilotIntent({ customerMessage: input.message });
@@ -55,7 +56,7 @@ function validate(input: {
     contact: resolvedContact,
     knowledgeCoverage: 'medium',
     knowledgeDocuments: input.knowledgeDocuments,
-    source: 'llm',
+    source: input.source || 'llm',
     systemAgentName: input.systemAgentName,
   });
 }
@@ -116,6 +117,71 @@ describe('autopilot response validator', () => {
     });
 
     expect(result.decision).toBe('approve');
+  });
+
+  it('accepts a factual currency value despite harmless spacing differences', () => {
+    const result = validate({
+      message: 'Quanto custa o plano de 500 mega?',
+      response: 'O plano de 500 MEGA custa R$ 99,90.',
+      knowledgeDocuments: [{
+        id: 'plans',
+        name: 'Catalogo de planos',
+        content: '500 MEGA por R$99,90.',
+        contextRole: 'fact',
+      }],
+    });
+
+    expect(result.decision).toBe('approve');
+  });
+
+  it('does not synthesize a supported price by joining separate retrieved documents', () => {
+    const result = validate({
+      message: 'Preciso do documento do contrato',
+      response: 'A taxa do documento e R$99,90.',
+      knowledgeDocuments: [
+        {
+          id: 'fragment-one',
+          name: 'Trecho um',
+          content: 'A taxa do documento e R$',
+          contextRole: 'fact',
+        },
+        {
+          id: 'fragment-two',
+          name: 'Trecho dois',
+          content: '99,90 para outro servico.',
+          contextRole: 'fact',
+        },
+      ],
+    });
+
+    expect(result.decision).toBe('replace_with_fallback');
+    expect(result.reasons).toContain('unsupported_knowledge_facts');
+    expect(result.metadata.unsupportedFacts).toContain('R$99,90');
+  });
+
+  it('repairs a customer-facing tool refusal into the next concrete step', () => {
+    const result = validate({
+      message: 'Meu pedido atrasou e quero saber o andamento.',
+      response: 'Nao e possivel usar essa ferramenta agora e nao tenho certeza da resposta.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('customer_facing_tool_refusal_repaired');
+    expect(result.response).toContain('numero do pedido');
+    expect(result.response).not.toMatch(/ferramenta|certeza/i);
+  });
+
+  it('preserves a deterministic unavailable-integration response instead of treating it as a lookup promise', () => {
+    const response = 'Nao consigo validar com seguranca qual roteador deve ser reiniciado porque a consulta de contrato nao esta habilitada. Vou precisar de verificacao manual.';
+    const result = validate({
+      message: 'Pode reiniciar o roteador? Meu CPF e 123.456.789-09.',
+      response,
+      source: 'workflow_direct',
+      enabledToolNames: ['mcp:network:reboot_router'],
+    });
+
+    expect(result.decision).toBe('approve');
+    expect(result.response).toBe(response);
   });
 
   it('replaces empty responses with configured fallback', () => {

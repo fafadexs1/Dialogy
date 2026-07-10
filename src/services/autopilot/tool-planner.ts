@@ -203,6 +203,15 @@ export function hasExternalLookupPromise(response: string | null | undefined): b
   const normalized = normalizeText(response || '');
   if (!normalized) return false;
 
+  // A deterministic policy can explain that an integration is unavailable.
+  // That is a refusal/escalation, not a promise to perform a lookup; treating
+  // it as one causes the response validator to replace the correct next step.
+  const lookupUnavailable = (
+    /\b(?:nao|não)\s+(?:consigo|posso|tenho|temos)\b.{0,100}\b(?:verificar|consultar|checar|conferir|validar|buscar|olhar|acessar)\b/.test(normalized)
+    || /\b(?:consulta|acesso|integracao|integração|ferramenta)\b.{0,100}\b(?:nao|não)\s+(?:esta|está|foi|e|é)\b.{0,40}\b(?:habilitad|disponivel|configurad)/.test(normalized)
+  );
+  if (lookupUnavailable) return false;
+
   return (
     /\b(vou|irei|vamos|posso|consigo|deixa eu|deixe me|estou|to)\s+(verificar|consultar|checar|conferir|validar|buscar|olhar|acessar)\b/.test(normalized) &&
     /\b(sistema|cadastro|contrato|fatura|boleto|pagamento|pedido|protocolo|status|conexao|sinal|agenda|estoque|disponibilidade|dados)\b/.test(normalized)

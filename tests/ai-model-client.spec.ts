@@ -4,6 +4,15 @@ import { runAiModelWithFallback } from '@/services/ai/model-client';
 import { classifyAiModelError } from '@/services/ai/model-errors';
 
 describe('AI model client', () => {
+  it('classifies a missing configured model as retryable so fallback can continue', () => {
+    expect(classifyAiModelError(new Error(
+      "NOT_FOUND: Model 'deepseek/deepseek-v4-flash' not found",
+    ))).toMatchObject({
+      code: 'model_unavailable',
+      retryable: true,
+    });
+  });
+
   it('classifies invalid API keys as non-retryable auth errors', () => {
     const classification = classifyAiModelError(new Error('API_KEY_INVALID: API key not valid'));
 

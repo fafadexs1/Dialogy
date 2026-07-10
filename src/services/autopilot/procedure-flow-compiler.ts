@@ -289,6 +289,7 @@ export function compileProcedureFromFlowGraph(input: {
         type: 'retrieve_knowledge',
         knowledgeQueryTemplate: node.config?.message || node.config?.instructions || '{{customerMessage}}',
         knowledgeCollectionIds: node.config?.knowledgeCollectionIds?.filter(Boolean),
+        knowledgeDocumentIds: node.config?.knowledgeDocumentIds?.filter(Boolean),
         requiredKnowledgeCoverage: node.config?.requiredKnowledgeCoverage || 'medium',
         onLowKnowledge: /\b(transfer|humano|atendente|equipe)\w*/i.test(node.config?.instructions || '')
           ? 'handoff'

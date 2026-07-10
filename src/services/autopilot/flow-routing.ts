@@ -10,6 +10,7 @@ export type ActiveFlowIntentScope = {
   customIntentLabel?: string;
   systemPrompt: string;
   knowledgeCollectionIds?: string[];
+  knowledgeDocumentIds?: string[];
 };
 
 export type DeterministicFlowMessage = {
@@ -121,6 +122,35 @@ function uniqueReferenceAliases(values: Array<string | null | undefined>): strin
   return Array.from(new Set(values.map((value) => normalizeReferenceId(value || '')).filter(Boolean)));
 }
 
+function uniqueCleanIds(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+function knowledgeScopeForTargetNodes(
+  config: AutopilotConfig,
+  targetNodeIds: Iterable<string | null | undefined>,
+): { knowledgeCollectionIds: string[]; knowledgeDocumentIds: string[] } {
+  const flowGraph = config.flow_graph;
+  if (!flowGraph) return { knowledgeCollectionIds: [], knowledgeDocumentIds: [] };
+  const targetIds = new Set(Array.from(targetNodeIds).filter((nodeId): nodeId is string => Boolean(nodeId)));
+  const nodeById = new Map(flowGraph.nodes.map((node) => [node.id, node]));
+  const sourceKnowledgeNodeIds = new Set(
+    flowGraph.edges
+      .filter((edge) => targetIds.has(edge.target))
+      .map((edge) => edge.source)
+      .filter((nodeId) => nodeById.get(nodeId)?.kind === 'knowledge'),
+  );
+  const scopedNodes = [
+    ...Array.from(targetIds).map((nodeId) => nodeById.get(nodeId)),
+    ...Array.from(sourceKnowledgeNodeIds).map((nodeId) => nodeById.get(nodeId)),
+  ].filter((node): node is AutopilotFlowNode => Boolean(node));
+
+  return {
+    knowledgeCollectionIds: uniqueCleanIds(scopedNodes.flatMap((node) => node.config?.knowledgeCollectionIds || [])),
+    knowledgeDocumentIds: uniqueCleanIds(scopedNodes.flatMap((node) => node.config?.knowledgeDocumentIds || [])),
+  };
+}
+
 function renderFormMessage(node: AutopilotFlowNode): string {
   const intro = node.config?.message?.trim() || 'Para continuar, me envie os dados abaixo:';
   const fields = node.config?.formFields || [];
@@ -167,6 +197,7 @@ export function resolveActiveFlowIntentScope(
   ));
 
   if (!matchedNode) return null;
+  const knowledgeScope = knowledgeScopeForTargetNodes(config, [matchedNode.id]);
 
   return {
     nodeId: matchedNode.id,
@@ -174,7 +205,8 @@ export function resolveActiveFlowIntentScope(
     intent,
     customIntentLabel: matchedNode.config?.customIntentLabel?.trim() || undefined,
     systemPrompt: matchedNode.config?.instructions?.trim() || '',
-    knowledgeCollectionIds: matchedNode.config?.knowledgeCollectionIds?.filter(Boolean),
+    knowledgeCollectionIds: knowledgeScope.knowledgeCollectionIds,
+    knowledgeDocumentIds: knowledgeScope.knowledgeDocumentIds,
   };
 }
 
@@ -184,24 +216,29 @@ export function resolveActiveFlowIntentScopeByNodeId(
 ): ActiveFlowIntentScope | null {
   config = configWithV2FlowGraph(config);
   const node = config.flow_graph?.nodes.find((candidate) => candidate.id === nodeId);
+  const isKnowledgeNode = node?.kind === 'knowledge';
+  const systemPrompt = node?.config?.instructions?.trim()
+    || (node?.kind === 'knowledge' ? node.config?.message?.trim() || '' : '');
   if (
     !node ||
-    !['sub_agent', 'decision'].includes(node.kind) ||
-    !node.config?.instructions?.trim()
+    !['sub_agent', 'decision', 'knowledge'].includes(node.kind) ||
+    (!systemPrompt && !isKnowledgeNode)
   ) {
     return null;
   }
   const routeIntent = node.kind === 'decision'
-    ? node.config.routes?.find((route) => route.intent)?.intent as UniversalAutopilotIntent | undefined
+    ? node.config?.routes?.find((route) => route.intent)?.intent as UniversalAutopilotIntent | undefined
     : undefined;
+  const knowledgeScope = knowledgeScopeForTargetNodes(config, [node.id]);
 
   return {
     nodeId: node.id,
     title: node.title,
-    intent: (node.config.intent as UniversalAutopilotIntent | undefined) || routeIntent || 'unknown',
+    intent: (node.config?.intent as UniversalAutopilotIntent | undefined) || routeIntent || 'unknown',
     customIntentLabel: node.config?.customIntentLabel?.trim() || undefined,
-    systemPrompt: node.config.instructions.trim(),
-    knowledgeCollectionIds: node.config?.knowledgeCollectionIds?.filter(Boolean),
+    systemPrompt,
+    knowledgeCollectionIds: knowledgeScope.knowledgeCollectionIds,
+    knowledgeDocumentIds: knowledgeScope.knowledgeDocumentIds,
   };
 }
 
@@ -226,12 +263,25 @@ export function filterKnowledgeDocumentsForScope(
   const hasAttachedKnowledge = config.flow_graph.edges.some((edge) => (
     targetNodeIds.has(edge.target) && attachedKnowledgeNodeIds.has(edge.source)
   ));
-  if (!hasAttachedKnowledge) return [];
 
-  const allowedIds = scope?.knowledgeCollectionIds;
-  if (!allowedIds || allowedIds.length === 0) return list;
+  const scopeReferences = knowledgeScopeForTargetNodes(config, targetNodeIds);
+  const allowedDocumentIds = uniqueCleanIds([
+    ...(scope?.knowledgeDocumentIds || []),
+    ...scopeReferences.knowledgeDocumentIds,
+  ]);
+  const allowedCollectionIds = uniqueCleanIds([
+    ...(scope?.knowledgeCollectionIds || []),
+    ...scopeReferences.knowledgeCollectionIds,
+  ]);
+  if (!hasAttachedKnowledge && allowedDocumentIds.length === 0 && allowedCollectionIds.length === 0) return [];
 
-  const allowed = new Set(allowedIds);
+  if (allowedDocumentIds.length > 0) {
+    const allowedDocuments = new Set(allowedDocumentIds);
+    return list.filter((document) => allowedDocuments.has(document.id));
+  }
+  if (allowedCollectionIds.length === 0) return list;
+
+  const allowed = new Set(allowedCollectionIds);
   return list.filter((document) => {
     const collectionIds = document.collectionIds?.length ? document.collectionIds : ['general'];
     return collectionIds.some((collectionId) => allowed.has(collectionId));
@@ -385,6 +435,47 @@ function scoreSwitchRoute(message: string, route: AutopilotFlowSwitchRoute): { s
   return { score: Number(score.toFixed(2)), evidence };
 }
 
+function routeSearchText(route: AutopilotFlowSwitchRoute): string {
+  return normalizeInstructionText([
+    route.id,
+    route.label,
+    route.description,
+    ...(route.examples || []),
+  ].join(' '));
+}
+
+function messageLooksLikeQuestionOrDoubt(message: string): boolean {
+  const text = normalizeInstructionText(message);
+  return /[?？]/.test(message)
+    || /\b(qual|quais|como|onde|quando|porque|por que|numero|telefone|contato|link|lista|tem|existe|pode me informar|me informa|duvida|duvidas|nao encontrei|nao achei|nao vi)\b/.test(text);
+}
+
+function routeLooksLikeCollection(route: AutopilotFlowSwitchRoute): boolean {
+  const text = routeSearchText(route);
+  return /\b(colet|dados|cadastro|lead|contratar|assinar|comprar|orcamento|orcamento|sem duvida|sem_duvida|sem duvidas|sem_duvidas)\w*/.test(text);
+}
+
+function routeLooksLikeQuestionHandling(route: AutopilotFlowSwitchRoute): boolean {
+  const text = routeSearchText(route);
+  return /\b(duvida|duvidas|pergunta|suporte|consulta|consultar|catalogo|preco|valor|plano|produto|servico|informacao|informacoes|esclarecer|fallback|fora do escopo|agente principal)\w*/.test(text);
+}
+
+function resolveOperationalFallbackRoute(
+  customerMessage: string,
+  configuredFallback: AutopilotFlowSwitchRoute | null,
+  scoredRoutes: Array<{ route: AutopilotFlowSwitchRoute; score: number; evidence: string[] }>,
+): AutopilotFlowSwitchRoute | null {
+  if (!configuredFallback) return scoredRoutes.at(-1)?.route || null;
+  if (!messageLooksLikeQuestionOrDoubt(customerMessage) || !routeLooksLikeCollection(configuredFallback)) {
+    return configuredFallback;
+  }
+  return scoredRoutes.find((candidate) => (
+    candidate.route.id !== configuredFallback.id
+    && !routeLooksLikeCollection(candidate.route)
+    && routeLooksLikeQuestionHandling(candidate.route)
+  ))?.route || configuredFallback;
+}
+
 export function listFlowSwitchGuidance(config: AutopilotConfig): FlowSwitchGuidance[] {
   config = configWithV2FlowGraph(config);
   const graph = config.flow_graph;
@@ -418,7 +509,8 @@ export function resolveFlowSwitchRoute(input: {
     .map((route) => ({ route, ...scoreSwitchRoute(input.customerMessage, route) }))
     .sort((left, right) => right.score - left.score);
   const best = scoredRoutes[0] || null;
-  const fallbackRoute = guidance.routes.find((route) => route.id === guidance.fallbackRouteId) || guidance.routes.at(-1) || null;
+  const configuredFallbackRoute = guidance.routes.find((route) => route.id === guidance.fallbackRouteId) || guidance.routes.at(-1) || null;
+  const fallbackRoute = resolveOperationalFallbackRoute(input.customerMessage, configuredFallbackRoute, scoredRoutes);
   if (!best && !fallbackRoute) return null;
 
   const accepted = best && best.score >= guidance.confidenceThreshold ? best : null;

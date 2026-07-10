@@ -1,7 +1,7 @@
 import type { Genkit } from 'genkit';
 import { z } from 'zod';
 import { db } from '@/lib/db';
-import { listAgentToolDefinitions } from '@/services/agent-tools/catalog';
+import { listModelCallableAgentToolDefinitions } from '@/services/agent-tools/catalog';
 
 export const LM_STUDIO_MODEL_PREFIX = 'lmstudio/';
 export const LM_STUDIO_CONFIG_KEY = 'lm_studio_config';
@@ -19,7 +19,7 @@ function getActionSchema() {
     properties: {
       type: {
         type: 'string',
-        enum: listAgentToolDefinitions().map((definition) => definition.name),
+        enum: listModelCallableAgentToolDefinitions().map((definition) => definition.name),
       },
       reason: { type: 'string' },
       payload: { type: 'object', additionalProperties: true },

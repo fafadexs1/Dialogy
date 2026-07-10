@@ -77,6 +77,7 @@ function Update-ComposeImages {
     $inServices = $false
     $currentService = $null
     $dialogyUpdated = $false
+    $cacheInitUpdated = $false
     $workerUpdated = $false
     $workerAiUpdated = $false
     $workerCampaignUpdated = $false
@@ -98,6 +99,12 @@ function Update-ComposeImages {
         if ($inServices -and $currentService -eq 'dialogy' -and $line -match '^    image:\s*') {
             $updatedLines.Add("    image: $DialogyImage")
             $dialogyUpdated = $true
+            continue
+        }
+
+        if ($inServices -and $currentService -eq 'ai-cache-init' -and $line -match '^    image:\s*') {
+            $updatedLines.Add("    image: $WorkerAiImage")
+            $cacheInitUpdated = $true
             continue
         }
 
@@ -124,6 +131,10 @@ function Update-ComposeImages {
 
     if (!$dialogyUpdated) {
         throw "Nao foi possivel localizar a linha image do servico 'dialogy' em $composePath"
+    }
+
+    if (!$cacheInitUpdated) {
+        throw "Nao foi possivel localizar a linha image do servico 'ai-cache-init' em $composePath"
     }
 
     if (!$workerUpdated) {

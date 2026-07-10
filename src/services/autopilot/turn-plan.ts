@@ -313,9 +313,31 @@ function asksGenericExternalActionText(text: string): boolean {
   if (asksHow) return false;
 
   return (
-    /\b(quero|preciso|pode|favor|vamos|gostaria de|desejo)\b.{0,48}\b(agendar|marcar|reservar|remarcar|cancelar|alterar|atualizar|trocar|mudar|estornar|reembolsar|devolver|contratar|comprar|enviar|emitir|gerar)\b/.test(text) ||
-    /\b(agende|marque|reserve|remarque|cancele|altere|atualize|troque|mude|estorne|reembolse|devolva|envie|emita|gere)\b/.test(text)
+    /\b(quero|preciso|pode|favor|vamos|gostaria de|desejo)\b.{0,48}\b(agendar|marcar|reservar|remarcar|cancelar|alterar|atualizar|trocar|mudar|estornar|reembolsar|devolver|enviar|emitir|gerar|finalizar\s+(?:compra|pedido)|fechar\s+(?:compra|pedido)|criar\s+pedido|fazer\s+checkout)\b/.test(text) ||
+    /\b(agende|marque|reserve|remarque|cancele|altere|atualize|troque|mude|estorne|reembolse|devolva|envie|emita|gere)\b/.test(text) ||
+    /\b(finalize|feche|crie|registre)\b.{0,24}\b(compra|pedido|checkout)\b/.test(text)
   );
+}
+
+function isCommercialPurchaseFlowText(customerMessage: string, chatHistory?: string | null): boolean {
+  const text = normalizeText(customerMessage);
+  if (!text) return false;
+  if (/\b(consultar|verificar|checar|buscar|status|pedido|protocolo|agendar|marcar|remarcar|cancelar|alterar|trocar|mudar|reembolsar|estornar|emitir|gerar|enviar|reiniciar|reboot|senha|ssid|wifi|wi fi)\b/.test(text)) {
+    return false;
+  }
+
+  const context = normalizeText([chatHistory || '', customerMessage].join('\n'));
+  const hasCommercialContext = /\b(planos?|pacote|internet|fibra|mega|contratar|assinar|comprar|adquirir|mensalidade|instalacao)\b/.test(context);
+  const explicitInterest = (
+    /\b(quero|queria|gostaria|tenho interesse|interesse|desejo|preciso|vou|vamos|podemos|pode)\b.{0,80}\b(contratar|assinar|comprar|adquirir|fechar|seguir|internet|fibra|plano|pacote|mega|servico)\b/.test(text) ||
+    /\b(contratar|assinar|comprar|adquirir)\b/.test(text)
+  );
+  const selectedCommercialOption = hasCommercialContext && (
+    /\b(?:esse|este|essa|esta|o)\b.{0,48}\b(?:mesmo|perfeito|bom|serve|pra mim|para mim|pode ser)\b/.test(text) ||
+    (/\b\d{2,4}\s*mega\b/.test(text) && /\b(esse|este|quero|perfeito|bom|serve|fechar|seguir|pode ser)\b/.test(text))
+  );
+
+  return explicitInterest || selectedCommercialOption;
 }
 
 function inferNeedFromText(textValue: string): AutopilotCustomerNeed {
@@ -1893,6 +1915,31 @@ export function buildAutopilotTurnPlan(input: {
       ? retryContext.result.input.payload.arguments as Record<string, unknown>
       : null;
   let customerNeed = inferAutopilotCustomerNeed(input.customerMessage, input.chatHistory);
+
+  if (customerNeed === 'wifi_credentials_lookup') {
+    const hasRequiredWifiLookupTools = enabledNames.has('sgp_fetch_contact_panel_data') &&
+      input.toolCatalog.some(t => enabledNames.has(t.name) && /get_wifi_view|refresh_wifi_summary/i.test(t.name));
+    if (!hasRequiredWifiLookupTools) {
+      customerNeed = 'none';
+    }
+  } else if (customerNeed === 'wifi_channel_diagnostics') {
+    const hasRequiredWifiDiagTools = enabledNames.has('sgp_fetch_contact_panel_data') &&
+      input.toolCatalog.some(t => enabledNames.has(t.name) && /scan_wifi_neighbors|get_wifi_scan_cached/i.test(t.name));
+    if (!hasRequiredWifiDiagTools) {
+      customerNeed = 'none';
+    }
+  } else if (customerNeed === 'wifi_credentials_change') {
+    const hasChangeTool = input.toolCatalog.some(t => enabledNames.has(t.name) && /change_wifi_credentials/i.test(t.name));
+    if (!hasChangeTool) {
+      customerNeed = 'none';
+    }
+  } else if (customerNeed === 'router_reboot') {
+    const hasRebootTool = input.toolCatalog.some(t => enabledNames.has(t.name) && /reboot_router|reboot/i.test(t.name));
+    if (!hasRebootTool) {
+      customerNeed = 'none';
+    }
+  }
+
   const explicitConversationClose = isConversationCloseRequest(input.customerMessage);
   if (explicitConversationClose) {
     customerNeed = 'none';
@@ -1903,6 +1950,13 @@ export function buildAutopilotTurnPlan(input: {
   const reasons: string[] = explicitConversationClose
     ? ['explicit_conversation_close_delegated_to_workflow']
     : [];
+  if (
+    (input.intentResolution?.intent === 'purchase_inquiry' || isCommercialPurchaseFlowText(input.customerMessage, input.chatHistory)) &&
+    (customerNeed === 'generic_external_action' || customerNeed === 'generic_external_lookup')
+  ) {
+    customerNeed = 'none';
+    reasons.push('purchase_inquiry_uses_commercial_flow_without_generic_mcp_action');
+  }
   const requiredToolNames: string[] = [];
   const forbiddenToolNames: string[] = [];
   let expectedNextAction: AutopilotTurnExpectedAction = 'continue_llm';

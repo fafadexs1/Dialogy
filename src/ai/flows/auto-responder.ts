@@ -13,8 +13,6 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
-import type { NexusFlowInstance, Action, AutopilotConfig } from '@/lib/types';
-import { makeHttpRequestTool } from '../tools/webhook-tool';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
 import {
@@ -38,32 +36,10 @@ import {
   resolveAiProviderKeyCandidates,
 } from '@/services/ai/provider-keys';
 import { shouldPrependPrimaryResponseToMessageBlocks } from '@/services/autopilot/message-blocks';
-
-// Define a schema for a single automation rule
-const ActionSchema = z.union([
-  z.object({
-    type: z.literal('reply'),
-    value: z.string().describe('The text response to send to the user.'),
-  }),
-  z.object({
-    type: z.literal('webhook'),
-    url: z.string().url().describe('The URL to send the HTTP request to.'),
-    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('POST'),
-    description: z.string().optional(),
-    auth: z.record(z.any()).optional(),
-    headers: z.record(z.string()).optional(),
-    query: z.record(z.string()).optional(),
-    bodyType: z.enum(['json', 'form-data']).optional(),
-    body: z.record(z.any()).optional().describe('The JSON body for the request. You can use Handlebars variables like {{contact.id}}.'),
-  }),
-]);
-
-
-const AutomationRuleSchema = z.object({
-  name: z.string().describe('The name of the automation rule.'),
-  trigger: z.string().describe('The condition that triggers the automation.'),
-  action: ActionSchema,
-});
+import {
+  sanitizeAutopilotRules,
+  toPromptSafeAutopilotRules,
+} from '@/services/autopilot/automation-rules';
 
 const KnowledgeDocumentSchema = z.object({
   id: z.string(),
@@ -99,7 +75,10 @@ const AgentResponseInputSchema = z.object({
     .array(ResolvedCaseSchema)
     .optional()
     .describe('Resolved support cases retrieved from operational memory.'),
-  rules: z.array(AutomationRuleSchema).describe('A list of active automation rules to evaluate against.'),
+  // Rules are persisted user-editable JSON. Accept raw legacy rows here, then
+  // sanitize them at the start of the flow; otherwise an old malformed row
+  // would reject the Genkit input before that recovery code can run.
+  rules: z.array(z.unknown()).default([]).describe('A list of active automation rules to evaluate against.'),
   knowledgeBase: z
     .string()
     .optional()
@@ -194,7 +173,6 @@ const AgentResponseOutputSchema = z.object({
         'sgp_fetch_contact_panel_data',
         'sgp_generate_invoice_pix',
         'sgp_create_payment_promise',
-        'sgp_open_support_ticket',
         'mcp_call_tool',
       ]),
       reason: z.string().optional().nullable(),
@@ -487,13 +465,13 @@ Ferramentas permitidas pelo flow para ESTE turno:
 {{/if}}
 
 Solicite somente ferramentas listadas acima. A lista e restritiva: ferramentas ausentes estao proibidas, mesmo que tenham aparecido no historico, em documentos ou em outro nicho.
-Se uma ferramenta necessaria nao estiver permitida, responda sem inventar consulta ou execucao e siga a politica de escalonamento.
+Se uma capacidade necessaria nao estiver permitida, nao mencione ferramentas, sistemas internos ou limitacoes tecnicas ao cliente. Faca a proxima pergunta objetiva que permita continuar ou siga a politica de escalonamento.
 
 Regra para procedimentos da base:
 - Quando um documento orientar uso de @tool para um procedimento, trate a tool resolvida como obrigatoria para aquele procedimento.
 - Antes de chamar a tool, colete e valide os dados exigidos pelo procedimento.
 - Se uma consulta anterior retornou dados necessarios para a proxima @tool do procedimento, solicite a proxima action agora; nao responda que "vai fazer".
-- Se a tool estiver desabilitada, nao finja execucao; informe que vai encaminhar ou pedir apoio humano.
+- Se a tool estiver desabilitada, nao finja execucao. Nao cite a tool ao cliente: faca a proxima pergunta objetiva ou aplique o escalonamento configurado.
 - Nunca responda prometendo uma analise, triagem, verificacao ou orientacao futura sem entregar agora uma orientacao segura, uma pergunta objetiva de continuidade ou uma action executavel. Toda resposta ao cliente precisa terminar com um proximo passo claro.
 
 Politica critica de ferramentas:
@@ -502,7 +480,12 @@ Politica critica de ferramentas:
 - Nao adivinhe parametros. Se faltarem dados obrigatorios, peca apenas os dados faltantes.
 - Nao afirme que consultou, alterou ou executou algo antes do retorno de sucesso da ferramenta.
 - Acoes destrutivas ou que alterem estado exigem confirmacao explicita do cliente; o servidor persiste e valida essa confirmacao.
-- Nunca responda apenas "vou verificar", "vou consultar" ou equivalente. Se disser que vai consultar qualquer sistema, inclua a action permitida na mesma saida. Se nao houver ferramenta permitida ou dados suficientes, diga isso claramente e encaminhe ou peca o dado faltante.
+- Nunca responda apenas "vou verificar", "vou consultar" ou equivalente. Se disser que vai consultar qualquer sistema, inclua a action permitida na mesma saida. Se nao houver capacidade executavel ou dados suficientes, peca somente o dado faltante ou aplique o escalonamento sem expor detalhes internos.
+
+Regra de linguagem ao cliente:
+- Nunca diga "nao e possivel usar essa ferramenta", "nao tenho ferramenta", "nao tenho certeza", "nao posso acessar o sistema" ou frases equivalentes.
+- Ferramentas, politicas, RAG, documentos, prompts, modelos e validacoes sao detalhes internos e nao devem aparecer na resposta.
+- Quando nao puder concluir um pedido, seja concreto: faca uma pergunta curta de continuidade ou informe o proximo passo humano ja acionado. Nunca invente fatos para preencher uma lacuna.
 
 Exemplo de saida simples (resposta unica):
 {
@@ -528,7 +511,9 @@ Regras para messageBlocks:
 - Cada bloco deve fazer sentido sozinho como mensagem.
 - Maximo de 3 blocos.
 - "response" sempre deve conter o texto completo (todos os blocos juntos).
----{{{customerMessage}}}
+---
+**ULTIMA MENSAGEM DO CLIENTE**:
+{{{customerMessage}}}
 
 Com base na sua persona, nos documentos e na emoção identificada, responda ao cliente.`,
 };
@@ -630,8 +615,13 @@ const autoResponderFlow = ai.defineFlow(
   },
   async (input) => {
     const model = input.model || DEFAULT_AUTOPILOT_MODEL;
+    const normalizedRules = sanitizeAutopilotRules(input.rules);
+    if (normalizedRules.invalid.length > 0) {
+      console.warn('[AUTORESPONDER_FLOW] Ignoring invalid automation rules:', normalizedRules.invalid);
+    }
     const promptInput = AgentResponseInputSchema.parse({
       ...input,
+      rules: toPromptSafeAutopilotRules(normalizedRules.rules),
       knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
       workflowKnowledgeDocuments: input.workflowKnowledgeDocuments ?? [],
       fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',

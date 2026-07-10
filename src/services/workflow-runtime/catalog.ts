@@ -10,6 +10,16 @@ export type WorkflowNodeCategory =
   | 'output'
   | 'error';
 
+export type WorkflowNodeAvailability = 'stable' | 'beta' | 'hidden';
+
+export type WorkflowNodeEditorField = {
+  path: string;
+  label: string;
+  control: 'text' | 'textarea' | 'number' | 'boolean' | 'json' | 'string_list' | 'select';
+  description?: string;
+  options?: Array<{ label: string; value: string }>;
+};
+
 export type WorkflowNodeManifest = {
   type: string;
   label: string;
@@ -26,7 +36,77 @@ export type WorkflowNodeManifest = {
   terminal?: boolean;
   sensitive?: boolean;
   requiresErrorRoute?: boolean;
+  availability: WorkflowNodeAvailability;
+  editorFields: WorkflowNodeEditorField[];
+  requiredCapabilities: string[];
 };
+
+type WorkflowNodeManifestInput = Omit<
+  WorkflowNodeManifest,
+  'availability' | 'editorFields' | 'requiredCapabilities'
+> & Partial<Pick<WorkflowNodeManifest, 'availability' | 'editorFields' | 'requiredCapabilities'>>;
+
+export const STABLE_WORKFLOW_NODE_TYPES = new Set([
+  'trigger.received_message',
+  'trigger.manual',
+  'data.set',
+  'data.transform',
+  'data.extract',
+  'data.template',
+  'logic.if',
+  'logic.switch',
+  'logic.ai_router',
+  'logic.wait',
+  'ai.model',
+  'ai.agent',
+  'knowledge.rag_retriever',
+  'memory.session',
+  'tool.internal',
+  'tool.mcp',
+  'guardrail.policy',
+  'output.respond',
+  'output.handoff',
+  'output.end',
+  'error.handler',
+] as const);
+
+const stableWorkflowNodeTypes: ReadonlySet<string> = STABLE_WORKFLOW_NODE_TYPES;
+
+function editorControlFor(value: unknown): WorkflowNodeEditorField['control'] {
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'number') return 'number';
+  if (Array.isArray(value)) return 'string_list';
+  if (value && typeof value === 'object') return 'json';
+  return 'text';
+}
+
+function defaultCapabilitiesFor(type: string): string[] {
+  if (type === 'ai.model') return ['model_provider'];
+  if (type === 'ai.agent') return ['structured_output'];
+  if (type === 'logic.ai_router' || type === 'data.extract') return ['structured_output'];
+  if (type.startsWith('tool.')) return ['tool_runtime'];
+  if (type === 'knowledge.rag_retriever') return ['rag'];
+  if (type.startsWith('memory.')) return ['conversation_state'];
+  if (type === 'output.respond') return ['message_delivery'];
+  if (type === 'output.handoff') return ['human_handoff'];
+  return [];
+}
+
+function defineManifest(input: WorkflowNodeManifestInput): WorkflowNodeManifest {
+  return {
+    ...input,
+    availability: input.availability
+      || (stableWorkflowNodeTypes.has(input.type)
+        ? 'stable'
+        : 'hidden'),
+    editorFields: input.editorFields || Object.entries(input.defaultConfig).map(([path, value]) => ({
+      path,
+      label: path.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' '),
+      control: editorControlFor(value),
+    })),
+    requiredCapabilities: input.requiredCapabilities || defaultCapabilitiesFor(input.type),
+  };
+}
 
 const input = (
   id: string,
@@ -77,7 +157,7 @@ const networkRetryPolicy: RetryPolicy = {
   retryableErrorCodes: ['TIMEOUT', 'RATE_LIMITED', 'NETWORK_ERROR', 'UPSTREAM_UNAVAILABLE'],
 };
 
-export const WORKFLOW_NODE_CATALOG: readonly WorkflowNodeManifest[] = [
+const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
   {
     type: 'trigger.received_message',
     label: 'Mensagem recebida',
@@ -419,6 +499,8 @@ export const WORKFLOW_NODE_CATALOG: readonly WorkflowNodeManifest[] = [
     defaultConfig: {
       name: 'Agente',
       role: '',
+      persona: '',
+      language: 'pt-BR',
       objective: '',
       instructions: [],
       completionCriteria: [],
@@ -769,6 +851,9 @@ export const WORKFLOW_NODE_CATALOG: readonly WorkflowNodeManifest[] = [
   },
 ] as const;
 
+export const WORKFLOW_NODE_CATALOG: readonly WorkflowNodeManifest[] = WORKFLOW_NODE_MANIFEST_INPUTS
+  .map(defineManifest);
+
 const manifestByType = new Map(WORKFLOW_NODE_CATALOG.map((manifest) => [manifest.type, manifest]));
 
 export function getWorkflowNodeManifest(type: string): WorkflowNodeManifest | undefined {
@@ -784,6 +869,10 @@ export function listWorkflowNodeManifests(category?: WorkflowNodeCategory): Work
       outputPorts: manifest.outputPorts.map((port) => ({ ...port })),
       defaultConfig: structuredClone(manifest.defaultConfig),
     }));
+}
+
+export function listStableWorkflowNodeManifests(category?: WorkflowNodeCategory): WorkflowNodeManifest[] {
+  return listWorkflowNodeManifests(category).filter((manifest) => manifest.availability === 'stable');
 }
 
 export function createWorkflowNode(

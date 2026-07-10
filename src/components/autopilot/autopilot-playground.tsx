@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import {
   Bot,
   CheckCircle2,
@@ -268,28 +268,47 @@ function TraceCompareRow({
 }
 
 function ChatTranscript({ messages }: { messages: PlaygroundMessage[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   return (
-    <div className="max-h-[360px] min-h-[220px] overflow-y-auto rounded-2xl border border-border bg-background p-3">
+    <div
+      ref={containerRef}
+      className="flex-1 overflow-y-auto p-4 space-y-4 h-[600px] lg:h-[calc(100vh-280px)] min-h-[450px] bg-slate-50/50 dark:bg-zinc-950/40 rounded-2xl border border-border/80"
+    >
       {messages.length === 0 ? (
-        <div className="flex h-full min-h-[190px] items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
-          Sem mensagens neste chat.
+        <div className="flex h-full min-h-[280px] flex-col items-center justify-center text-center p-6 text-muted-foreground">
+          <Bot className="h-10 w-10 mb-2 text-muted-foreground/60" />
+          <p className="text-sm font-semibold">Inicie uma conversa!</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-[260px]">
+            Envie uma mensagem abaixo para testar as respostas e o comportamento da IA.
+          </p>
         </div>
       ) : (
-        <div className="grid gap-3">
+        <div className="space-y-4">
           {messages.map((chatMessage) => (
             <div
               key={chatMessage.id}
               className={cn(
-                'flex',
+                'flex items-end gap-2',
                 chatMessage.role === 'customer' ? 'justify-end' : 'justify-start'
               )}
             >
+              {chatMessage.role === 'assistant' && (
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 text-[10px] font-bold text-white shadow-sm">
+                  R
+                </div>
+              )}
               <div
                 className={cn(
-                  'max-w-[86%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6',
+                  'max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-6 shadow-sm',
                   chatMessage.role === 'customer'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'border border-border bg-muted/30 text-foreground'
+                    ? 'bg-primary text-primary-foreground rounded-br-none'
+                    : 'border border-border bg-card text-foreground rounded-bl-none'
                 )}
               >
                 {chatMessage.content}
@@ -325,6 +344,7 @@ export function AutopilotPlayground({
   const [contactOptions, setContactOptions] = useState<Contact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
+  const [showIdentityConfig, setShowIdentityConfig] = useState(false);
 
   const storageKey = useMemo(() => (
     workspaceId && agentId ? `dialogy:autopilot-playground:${workspaceId}:${agentId}` : null
@@ -816,188 +836,225 @@ export function AutopilotPlayground({
       </section>
 
       <Dialog open={isChatOpen} onOpenChange={setIsChatOpen}>
-        <DialogContent className="flex h-[90vh] max-h-[90vh] max-w-5xl flex-col overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl">
-          <DialogHeader className="border-b border-border bg-muted/25 px-6 py-5">
-            <div className="flex flex-col gap-4 pr-8 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0">
-                <DialogTitle className="truncate text-xl">{activeSession.title}</DialogTitle>
-                <DialogDescription className="mt-2">Conversa de teste com {activeSession.contactName}.</DialogDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="rounded-full">
-                  {loading ? 'Executando' : trace ? 'Trace pronto' : 'Aguardando teste'}
-                </Badge>
-                <Button type="button" variant="outline" onClick={() => deleteSession(activeSession.id)} className="rounded-full text-destructive hover:text-destructive">
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Apagar chat
-                </Button>
-              </div>
-            </div>
-          </DialogHeader>
-
-          <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-            <div className="grid min-h-0 gap-4">
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
-                <div className="space-y-2">
-                  <Label htmlFor="playground-contact-search">Contato ou numero</Label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="playground-contact-search"
-                      value={contactSearch}
-                      onChange={(event) => setContactSearch(event.target.value)}
-                      placeholder="Buscar no CRM ou digitar numero"
-                      className="pl-9"
-                    />
+        <DialogContent className="flex h-[92vh] max-h-[92vh] max-w-5xl flex-col overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl">
+          <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+            
+            {/* COLUNA DA ESQUERDA: CANVA DE CHAT */}
+            <div className="flex flex-col min-h-0 border-r border-border bg-background">
+              
+              {/* Header do Chat (Estilo Webchat/WhatsApp) */}
+              <div className="flex items-center justify-between border-b border-border bg-muted/10 px-5 py-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 text-sm font-bold text-white shadow-sm">
+                    {activeSession.contactName ? activeSession.contactName.charAt(0).toUpperCase() : 'C'}
                   </div>
-                  <div className="rounded-2xl border border-border bg-background">
-                    <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-                      <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
-                        <Database className="h-3.5 w-3.5" />
-                        <span className="truncate">
-                          {activeSession.contactId ? 'Contato do CRM selecionado' : activeSession.contactPhone ? 'Numero manual selecionado' : 'Selecione uma identidade'}
-                        </span>
-                      </div>
-                      {contactSearch.trim() && (
-                        <Button type="button" variant="ghost" size="sm" onClick={useManualNumber} className="h-7 rounded-full px-2 text-xs">
-                          <Phone className="mr-1.5 h-3.5 w-3.5" />
-                          Usar numero
-                        </Button>
-                      )}
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-foreground truncate">
+                      {activeSession.contactName || 'Cliente Simulado'}
                     </div>
-                    <div className="max-h-44 overflow-y-auto p-2">
-                      {contactsLoading ? (
-                        <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Buscando contatos...
-                        </div>
-                      ) : contactsError ? (
-                        <div className="px-2 py-3 text-sm text-destructive">{contactsError}</div>
-                      ) : contactOptions.length > 0 ? (
-                        <div className="grid gap-1">
-                          {contactOptions.map((contact) => {
-                            const selected = activeSession.contactId === contact.id;
-                            const phone = contact.phone_number_jid || contact.phone || '';
-                            return (
-                              <button
-                                key={contact.id}
-                                type="button"
-                                onClick={() => selectContact(contact)}
-                                className={cn(
-                                  'flex min-w-0 items-center gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-muted/60',
-                                  selected && 'bg-primary/10 text-primary'
-                                )}
-                              >
-                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
-                                  <UserRound className="h-4 w-4" />
-                                </span>
-                                <span className="min-w-0">
-                                  <span className="block truncate text-sm font-medium">{contact.name || phone || 'Contato sem nome'}</span>
-                                  <span className="block truncate text-xs text-muted-foreground">{phone || contact.email || 'Sem telefone'}</span>
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="px-2 py-3 text-sm text-muted-foreground">Nenhum contato encontrado.</div>
-                      )}
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                      Online
                     </div>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Input
-                      value={activeSession.contactName}
-                      onChange={(event) => {
-                        const contactName = event.target.value;
-                        updateActiveSession((session) => ({
-                          ...session,
-                          contactName,
-                          updatedAt: new Date().toISOString(),
-                        }));
-                      }}
-                      placeholder="Nome simulado"
-                    />
-                    <Input
-                      value={activeSession.contactPhone || ''}
-                      onChange={(event) => {
-                        const contactPhone = event.target.value;
-                        updateActiveSession((session) => ({
-                          ...session,
-                          contactId: null,
-                          contactPhone,
-                          updatedAt: new Date().toISOString(),
-                        }));
-                      }}
-                      placeholder="Numero simulado"
-                    />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Status</Label>
-                  <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : trace ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Bot className="h-4 w-4" />}
-                    {loading ? 'Executando' : trace ? 'Trace pronto' : 'Aguardando teste'}
-                  </div>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={clearCurrentChat} disabled={loading || activeSession.messages.length === 0} className="rounded-full h-8 text-xs text-muted-foreground">
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    Limpar Historico
+                  </Button>
                 </div>
               </div>
 
-              <ChatTranscript messages={activeSession.messages} />
+              {/* Corpo do Chat: Histórico de Mensagens */}
+              <div className="flex-1 overflow-hidden p-4 flex flex-col min-h-0">
+                <ChatTranscript messages={activeSession.messages} />
+              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="playground-message">Mensagem do cliente</Label>
-                <Textarea
+              {/* Erros Operacionais caso ocorram */}
+              {error && (
+                <div className="mx-4 mb-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span className="break-words">{error}</span>
+                </div>
+              )}
+
+              {/* Barra de Digitação (Estilo WhatsApp) */}
+              <div className="border-t border-border bg-background p-3 flex items-center gap-2">
+                <Input
                   id="playground-message"
                   value={message}
                   onChange={(event) => setMessage(event.target.value)}
                   onKeyDown={(event) => {
-                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                    if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
                       runPreview();
                     }
                   }}
-                  className="min-h-[92px] resize-y"
-                  placeholder="Digite uma pergunta real do cliente"
+                  className="flex-1 rounded-full border-border/80 focus-visible:ring-1 focus-visible:ring-primary px-4 bg-muted/20 text-sm h-10"
+                  placeholder="Digite uma pergunta simulando o cliente..."
+                  disabled={loading}
                 />
-              </div>
-
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <Button onClick={runPreview} disabled={!canRun || loading} className="rounded-full">
-                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                  Enviar para IA
-                </Button>
-                <Button type="button" variant="outline" onClick={clearCurrentChat} disabled={loading || activeSession.messages.length === 0} className="rounded-full">
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Limpar mensagens
+                <Button onClick={runPreview} disabled={!canRun || loading} size="icon" className="rounded-full shrink-0 h-10 w-10">
+                  {loading ? <Loader2 className="h-4.5 w-4.5 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
 
-              {error && (
-                <div className="flex items-start gap-2 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  {error}
-                </div>
-              )}
             </div>
 
-            <div className="grid content-start gap-3">
+            {/* COLUNA DA DIREITA: CONFIGURAÇÕES E TRACE DE IA */}
+            <div className="flex flex-col min-h-0 overflow-y-auto bg-muted/15 p-5 border-l border-border/30 gap-4">
+              
+              {/* Header do Debug/Painel */}
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Depuracao da IA</h3>
+                  <p className="text-[11px] text-muted-foreground">Analise as decisoes tomadas pelo modelo.</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => deleteSession(activeSession.id)} className="rounded-full h-8 text-[11px] text-destructive hover:bg-destructive/5 hover:text-destructive">
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Apagar Conversa
+                </Button>
+              </div>
+
+              {/* Acordeão / Painel Colapsável de Identidade Simulada */}
+              <div className="rounded-2xl border border-border bg-card p-3.5 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setShowIdentityConfig(!showIdentityConfig)}
+                  className="flex w-full items-center justify-between text-left focus:outline-none bg-transparent"
+                >
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+                    <UserRound className="h-4 w-4 text-primary/70" />
+                    Identidade do Cliente
+                  </span>
+                  <span className="text-xs text-muted-foreground hover:text-foreground">
+                    {showIdentityConfig ? 'Recolher ✕' : 'Expandir ⚙️'}
+                  </span>
+                </button>
+                
+                {showIdentityConfig && (
+                  <div className="mt-3.5 space-y-3.5 border-t border-border/50 pt-3.5">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="playground-contact-search" className="text-xs">Buscar no CRM</Label>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="playground-contact-search"
+                          value={contactSearch}
+                          onChange={(event) => setContactSearch(event.target.value)}
+                          placeholder="Nome ou telefone..."
+                          className="pl-8 text-xs h-8.5 rounded-lg"
+                        />
+                      </div>
+                    </div>
+
+                    {contactSearch.trim() && (
+                      <div className="rounded-xl border border-border bg-muted/20 p-1.5">
+                        <div className="flex items-center justify-between gap-2 px-1.5 py-1">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                            <Database className="h-3 w-3" /> Resultados
+                          </span>
+                          <Button type="button" variant="ghost" size="sm" onClick={useManualNumber} className="h-6 rounded-full px-2 text-[10px]">
+                            <Phone className="mr-1 h-3 w-3" /> Usar digitado
+                          </Button>
+                        </div>
+                        <div className="max-h-32 overflow-y-auto mt-1 space-y-0.5">
+                          {contactsLoading ? (
+                            <div className="flex items-center gap-1.5 px-2 py-2 text-xs text-muted-foreground">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Buscando...
+                            </div>
+                          ) : contactsError ? (
+                            <div className="px-2 py-2 text-xs text-destructive">{contactsError}</div>
+                          ) : contactOptions.length > 0 ? (
+                            contactOptions.map((contact) => {
+                              const selected = activeSession.contactId === contact.id;
+                              const phone = contact.phone_number_jid || contact.phone || '';
+                              return (
+                                <button
+                                  key={contact.id}
+                                  type="button"
+                                  onClick={() => selectContact(contact)}
+                                  className={cn(
+                                    'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/70',
+                                    selected && 'bg-primary/10 text-primary'
+                                  )}
+                                >
+                                  <span className="block truncate text-xs font-medium">{contact.name || phone}</span>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="px-2 py-2 text-xs text-muted-foreground">Nenhum contato encontrado.</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid gap-2 grid-cols-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground">Nome de Teste</Label>
+                        <Input
+                          value={activeSession.contactName}
+                          onChange={(event) => {
+                            const contactName = event.target.value;
+                            updateActiveSession((session) => ({
+                              ...session,
+                              contactName,
+                              updatedAt: new Date().toISOString(),
+                            }));
+                          }}
+                          className="text-xs h-8"
+                          placeholder="Nome simulado"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground">Numero de Teste</Label>
+                        <Input
+                          value={activeSession.contactPhone || ''}
+                          onChange={(event) => {
+                            const contactPhone = event.target.value;
+                            updateActiveSession((session) => ({
+                              ...session,
+                              contactId: null,
+                              contactPhone,
+                              updatedAt: new Date().toISOString(),
+                            }));
+                          }}
+                          className="text-xs h-8"
+                          placeholder="Numero simulado"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Status do Teste */}
+              <div className="flex h-9 items-center gap-2 rounded-xl border border-border/80 bg-background px-3 text-xs text-muted-foreground shadow-sm">
+                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : trace ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Bot className="h-3.5 w-3.5" />}
+                <span className="font-medium">{loading ? 'A IA esta digitando...' : trace ? 'Analise de trace disponivel' : 'Aguardando envio'}</span>
+              </div>
+
+              {/* Comparador de Rascunhos e Traces */}
               {shouldCompare && result?.response && publishedRun && (
                 <div className="grid gap-3">
-                  <ResponsePreview title="Publicado" result={publishedRun.result} />
-                  <ResponsePreview title="Rascunho" result={result} />
+                  <ResponsePreview title="Versao Publicada" result={publishedRun.result} />
+                  <ResponsePreview title="Versao em Rascunho" result={result} />
                 </div>
               )}
 
               {shouldCompare && compareRows.length > 0 && (
-                <div className="rounded-2xl border border-border bg-muted/20 px-4 py-3">
+                <div className="rounded-2xl border border-border bg-card px-4 py-3 shadow-sm">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Comparacao de trace
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                      Comparacao de Versoes
                     </div>
-                    <Badge variant="outline" className="rounded-full text-[10px]">
-                      publicado x rascunho
+                    <Badge variant="outline" className="rounded-full text-[9px] bg-muted/40">
+                      Publicado x Rascunho
                     </Badge>
                   </div>
-                  <div className="grid gap-2">
+                  <div className="grid gap-1.5">
                     {compareRows.map((row) => (
                       <TraceCompareRow key={row.label} label={row.label} published={row.published} draft={row.draft} />
                     ))}
@@ -1005,63 +1062,50 @@ export function AutopilotPlayground({
                 </div>
               )}
 
+              {/* Traces Detalhados da IA */}
               {trace && (
                 <div className="grid gap-3">
                   {trace.procedure && (
-                    <TraceSection title="PRE" value={trace.procedure.active ? trace.procedure.status || 'active' : trace.procedure.enabled ? 'ready' : 'none'}>
+                    <TraceSection title="Procedimento (PRE)" value={trace.procedure.active ? trace.procedure.status || 'active' : trace.procedure.enabled ? 'ready' : 'none'}>
                       <div className="space-y-1">
-                        <div>Procedimentos compilados: {trace.procedure.compiledCount}</div>
-                        <div>Ativo: {trace.procedure.procedureName || 'nenhum'}</div>
+                        <div>Procedimentos carregados: {trace.procedure.compiledCount}</div>
+                        <div className="font-semibold text-foreground">Ativo: {trace.procedure.procedureName || 'nenhum'}</div>
                         <div>Passos: {trace.procedure.executedSteps.join(', ') || 'nenhum'}</div>
-                        <div>Acoes: {trace.procedure.actions.join(', ') || 'nenhuma'}</div>
-                        {trace.procedure.matchReason && <div className="line-clamp-2">Motivo: {trace.procedure.matchReason}</div>}
+                        {trace.procedure.matchReason && <div className="text-[10px] leading-4 mt-1 border-t border-border/40 pt-1">Motivo: {trace.procedure.matchReason}</div>}
                       </div>
                     </TraceSection>
                   )}
 
-                  <TraceSection title="Intent" value={trace.intent.intent}>
+                  <TraceSection title="Intencao Detectada" value={trace.intent.intent}>
                     <div className="space-y-1">
                       <div>Confianca: {(trace.intent.confidence * 100).toFixed(0)}%</div>
-                      <div>Workflow: {trace.intent.workflowId}</div>
-                      <div className="line-clamp-2">Motivo: {trace.intent.reason}</div>
+                      <div>Workflow associado: {trace.intent.workflowId}</div>
+                      <div className="text-[10px] leading-4 mt-1 border-t border-border/40 pt-1">Motivo: {trace.intent.reason}</div>
                     </div>
                   </TraceSection>
 
-                  <TraceSection title="RAG" value={trace.rag.knowledgeCoverage}>
+                  <TraceSection title="RAG (Base de Conhecimento)" value={trace.rag.knowledgeCoverage}>
                     <div className="space-y-1">
-                      <div>Estrategia: {trace.rag.strategy}</div>
+                      <div>Busca: {trace.rag.strategy}</div>
                       {trace.ragDiagnostics && (
-                        <>
-                          <div>Vector matches: {String((trace.ragDiagnostics as any).vectorMatches ?? '0')}</div>
-                          <div>Keyword matches: {String((trace.ragDiagnostics as any).keywordMatches ?? '0')}</div>
-                          <div>Threshold: {String((trace.ragDiagnostics as any).documentMinSimilarity ?? 'padrao')}</div>
-                        </>
+                        <div>Matches: Vetor ({(trace.ragDiagnostics as any).vectorMatches}) | Chave ({(trace.ragDiagnostics as any).keywordMatches})</div>
                       )}
-                      <div>
-                        Docs: {trace.rag.selected.length > 0 ? trace.rag.selected.map((doc) => doc.name).join(', ') : 'nenhum'}
+                      <div className="mt-1 border-t border-border/40 pt-1">
+                        Documentos: {trace.rag.selected.length > 0 ? trace.rag.selected.map((doc) => doc.name).join(', ') : 'nenhum'}
                       </div>
-                      {trace.rag.selected.length > 0 && (
-                        <div className="space-y-1 pt-1">
-                          {trace.rag.selected.slice(0, 4).map((doc) => (
-                            <div key={`${doc.source}-${doc.id}`} className="flex items-center justify-between gap-2 rounded-lg bg-background px-2 py-1">
-                              <span className="min-w-0 truncate">{doc.name}</span>
-                              <span className="shrink-0 text-[10px] uppercase text-muted-foreground">{doc.source} · {doc.score}</span>
-                            </div>
-                          ))}
-                        </div>
+                    </div>
+                  </TraceSection>
+
+                  <TraceSection title="Workflow Executado" value={trace.workflow.executionMode}>
+                    <div className="space-y-1">
+                      <div className="font-medium text-foreground">{trace.workflow.reason}</div>
+                      {trace.workflow.missingSlots.length > 0 && (
+                        <div className="text-destructive font-semibold">Slots ausentes: {trace.workflow.missingSlots.join(', ')}</div>
                       )}
                     </div>
                   </TraceSection>
 
-                  <TraceSection title="Workflow" value={trace.workflow.executionMode}>
-                    <div className="space-y-1">
-                      <div>{trace.workflow.reason}</div>
-                      <div>Slots ausentes: {trace.workflow.missingSlots.join(', ') || 'nenhum'}</div>
-                      <div>Acoes: {trace.workflow.actions.join(', ') || 'nenhuma'}</div>
-                    </div>
-                  </TraceSection>
-
-                  <TraceSection title="Tool planner" value={trace.toolPlanner.repairReason || (trace.toolPlanner.rejectedActions.length ? 'rejected' : 'accepted')}>
+                  <TraceSection title="Planejador de Ferramentas" value={trace.toolPlanner.repairReason || (trace.toolPlanner.rejectedActions.length ? 'rejected' : 'accepted')}>
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <Wrench className="h-3.5 w-3.5" />
@@ -1072,21 +1116,20 @@ export function AutopilotPlayground({
                           Rejeitadas: {trace.toolPlanner.rejectedActions.map((item) => `${item.tool} (${item.code})`).join(', ')}
                         </div>
                       )}
-                      {trace.toolPlanner.promisedExternalLookup && (
-                        <div>Promessa de consulta: {trace.toolPlanner.hasExecutableLookupTool ? 'com tool' : 'sem tool executavel'}</div>
-                      )}
                     </div>
                   </TraceSection>
 
-                  <TraceSection title="Validator" value={trace.validator.decision}>
+                  <TraceSection title="Validador de Resposta" value={trace.validator.decision}>
                     <div className="flex items-start gap-2">
-                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>{trace.validator.reasons.join(', ') || 'Resposta aprovada.'}</span>
+                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                      <span>{trace.validator.reasons.join(', ') || 'Resposta validada com sucesso.'}</span>
                     </div>
                   </TraceSection>
                 </div>
               )}
+
             </div>
+
           </div>
         </DialogContent>
       </Dialog>

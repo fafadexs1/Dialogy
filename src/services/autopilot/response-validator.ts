@@ -397,9 +397,33 @@ function extractSupportedFactTokens(value: string): string[] {
   return Array.from(new Set(patterns.flatMap((pattern) => value.match(pattern) || [])));
 }
 
+function canonicalFactText(value: string): string {
+  return normalizeText(value)
+    // R$99,90 and R$ 99,90 express the same value. The same applies to
+    // "500 MEGA" / "500MEGA" in curated catalog documents.
+    .replace(/\s+/g, '')
+    .replace(/[–—]/g, '-');
+}
+
 function unsupportedKnowledgeFacts(response: string, documents: KnowledgeBaseDocument[]): string[] {
-  const evidence = normalizeText(documents.map((document) => document.content || '').join('\n'));
-  return extractSupportedFactTokens(response).filter((token) => !evidence.includes(normalizeText(token)));
+  // Keep document boundaries intact. Concatenating then removing whitespace can
+  // synthesize a fact across two unrelated chunks (for example "R$" + "99,90").
+  const evidenceByDocument = documents
+    .map((document) => canonicalFactText(document.content || ''))
+    .filter(Boolean);
+  return extractSupportedFactTokens(response).filter((token) => (
+    !evidenceByDocument.some((evidence) => evidence.includes(canonicalFactText(token)))
+  ));
+}
+
+function hasCustomerFacingToolRefusal(response: string): boolean {
+  const normalized = normalizeText(response);
+  return [
+    /\bnao e possivel\b.{0,80}\b(?:ferramenta|tool|sistema|recurso)\b/,
+    /\bnao (?:tenho|posso|consigo)\b.{0,80}\b(?:ferramenta|tool|sistema|acesso|consulta)\b/,
+    /\bsem\s+(?:ferramenta|acesso ao sistema|recurso)\b/,
+    /\bnao tenho certeza\b/,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 function findMissingLookupSlots(input: {
@@ -563,6 +587,32 @@ export function validateAutopilotResponse(input: {
   const lookupPromise = hasExternalLookupPromise(originalResponse);
   const lookupSuccessClaim = hasLookupSuccessClaim(originalResponse);
   const deferredAnswerPromise = hasDeferredAnswerPromise(originalResponse);
+
+  if (
+    input.source === 'llm'
+    && !plannedLookup
+    && !failedLookup
+    && !hasTransferPromise(originalResponse)
+    && hasCustomerFacingToolRefusal(originalResponse)
+  ) {
+    reasons.push('customer_facing_tool_refusal_repaired');
+    return {
+      decision: 'repair',
+      response: buildDeferredPromiseRepair({
+        response: originalResponse,
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
+        continuationRequiredSlots: input.continuationRequiredSlots,
+        intentResolution: input.intentResolution,
+        slotExtraction: input.slotExtraction,
+        contact: input.contact,
+        systemAgentName: input.systemAgentName,
+      }),
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
+  }
 
   if (hasPlannedTransfer(input.plannedActions)) {
     const clinicalHandoffRepair = buildClinicalHandoffRepair({
@@ -728,7 +778,7 @@ export function validateAutopilotResponse(input: {
 
     if (team) {
       reasons.push('lookup_promise_without_executable_tool');
-      const response = `Nao consigo consultar isso automaticamente com seguranca agora. Vou encaminhar seu atendimento para a equipe ${team.name}.`;
+      const response = `Vou encaminhar seu atendimento para a equipe ${team.name}, que dara sequencia a esta solicitacao.`;
       return {
         decision: 'handoff',
         response,
@@ -747,7 +797,16 @@ export function validateAutopilotResponse(input: {
     reasons.push('lookup_promise_without_tool_or_handoff');
     return {
       decision: 'repair',
-      response: 'Nao tenho uma ferramenta de consulta habilitada para verificar isso automaticamente agora. Vou evitar te passar uma informacao incerta.',
+      response: buildDeferredPromiseRepair({
+        response: originalResponse,
+        customerMessage: input.customerMessage,
+        chatHistory: input.chatHistory,
+        continuationRequiredSlots: input.continuationRequiredSlots,
+        intentResolution: input.intentResolution,
+        slotExtraction: input.slotExtraction,
+        contact: input.contact,
+        systemAgentName: input.systemAgentName,
+      }),
       actions: [],
       reasons,
       metadata: { decision: 'repair', reasons, source: input.source },

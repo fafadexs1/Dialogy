@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { generateChatSummaryAction } from '@/actions/ai';
 import { v4 as uuidv4 } from 'uuid';
 import Image from 'next/image';
@@ -104,7 +105,7 @@ import MediaPreview, { type MediaFileType } from './media-preview';
 import { cn, formatWhatsappText, formatMessageDate } from '@/lib/utils';
 import MessageItem from './message-item';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import EmojiPicker, { type EmojiClickData } from 'emoji-picker-react';
+import type { EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioRecorder } from './audio-recorder';
@@ -112,7 +113,6 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
 import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { motion } from 'framer-motion';
 import { useTheme } from '@/providers/theme-provider';
 import { shouldAcceptAiSuggestion } from '@/lib/inbox-ownership';
 
@@ -120,6 +120,11 @@ import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-
 import { Badge } from '../ui/badge';
 import { getChatIdentityDisplayValue, resolveChatPlatform } from '@/lib/chat-platform';
 import { buildToolExecutionItems, isToolExecutionMessage, ToolExecutionsSheet } from './tool-executions-sheet';
+
+const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
+    ssr: false,
+    loading: () => <div className="h-[360px] w-[300px] rounded-xl bg-muted" />,
+});
 
 
 
@@ -354,20 +359,13 @@ function SendMessageButton({
     return (
         <div className="relative">
             {isEnabled && isPrimed && (
-                <motion.span
-                    className="pointer-events-none absolute -inset-1 rounded-full bg-cyan-400/25 blur-[6px]"
-                    animate={{ opacity: [0.2, 0.52, 0.2], scale: [1, 1.08, 1] }}
-                    transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-                />
+                <span className="pointer-events-none absolute -inset-1 rounded-full border border-cyan-400/30" />
             )}
 
             {shouldShowFeedback && (
-                <motion.span
+                <span
                     key={`send-ring-${feedbackKey}`}
                     className="pointer-events-none absolute inset-0 rounded-full border border-cyan-300/70"
-                    initial={{ opacity: 0.75, scale: 0.9 }}
-                    animate={{ opacity: 0, scale: 1.9 }}
-                    transition={{ duration: 0.45, ease: 'easeOut' }}
                 />
             )}
 
@@ -377,7 +375,7 @@ function SendMessageButton({
                 className={cn(
                     "h-9 w-9 rounded-full transition-all duration-200 shrink-0 relative overflow-hidden",
                     isEnabled
-                        ? "bg-gradient-to-br from-blue-500 via-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/25 hover:from-blue-500 hover:via-cyan-400 hover:to-blue-600 hover:shadow-lg hover:shadow-cyan-500/35"
+                        ? "bg-blue-600 text-white hover:bg-blue-500"
                         : "bg-muted text-muted-foreground hover:bg-muted/80"
                 )}
                 disabled={pending || disabled}
@@ -386,32 +384,22 @@ function SendMessageButton({
                 {pending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                    <motion.span
+                    <span
                         key={`send-icon-${feedbackKey || 0}`}
                         className="flex items-center justify-center"
-                        initial={{ x: 0, y: 0, rotate: 0, scale: 1 }}
-                        animate={
-                            shouldShowFeedback
-                                ? { x: [0, 1.5, 0], y: [0, -1.5, 0], rotate: [0, -14, 0], scale: [1, 1.06, 1] }
-                                : { x: 0, y: 0, rotate: 0, scale: 1 }
-                        }
-                        transition={{ duration: 0.34, ease: 'easeOut' }}
                     >
                         <Send className="h-4 w-4" />
-                    </motion.span>
+                    </span>
                 )}
             </Button>
 
             {shouldShowFeedback && (
-                <motion.span
+                <span
                     key={`send-chip-${feedbackKey}`}
                     className="pointer-events-none absolute -top-5 right-0 text-[10px] font-semibold uppercase tracking-wide text-cyan-300"
-                    initial={{ opacity: 0, y: 3 }}
-                    animate={{ opacity: [0, 1, 0], y: [3, -1, -8] }}
-                    transition={{ duration: 0.55, ease: 'easeOut' }}
                 >
                     Enviado
-                </motion.span>
+                </span>
             )}
         </div>
     )
@@ -1919,8 +1907,8 @@ export default function ChatPanel({
     if (!chat) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-transparent min-w-0 p-6">
-                <div className="text-center space-y-4 p-8 rounded-3xl bg-card/40 border border-border backdrop-blur-md shadow-2xl">
-                    <div className="h-20 w-20 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-full flex items-center justify-center mx-auto mb-4 ring-1 ring-border">
+                <div className="text-center space-y-4 p-8 rounded-3xl bg-card border border-border">
+                    <div className="h-20 w-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4 ring-1 ring-border">
                         <MessageSquare className="h-10 w-10 text-primary" />
                     </div>
                     <h2 className="text-2xl font-bold text-foreground">Bem-vindo ao Dialogy</h2>
@@ -1970,19 +1958,19 @@ export default function ChatPanel({
             />
             {/* Header */}
             {/* Header */}
-            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.18)] backdrop-blur-xl md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]/95 dark:shadow-[0_12px_30px_-24px_rgba(0,0,0,0.8)]">
+            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200 bg-white px-3 md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                     {onBack && (
                         <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 mr-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                     )}
-                    <motion.div layoutId={`avatar-morph-${chat.id}`}>
-                        <Avatar className="h-10 w-10 border border-slate-200/80 bg-white ring-1 ring-slate-200/70 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.22)] dark:border-white/10 dark:bg-[#0B0B10] dark:ring-2 dark:ring-black/40 dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.9)]">
+                    <div>
+                        <Avatar className="h-10 w-10 border border-slate-200 bg-white dark:border-white/10 dark:bg-[#0B0B10]">
                             <AvatarImage fallbackOnBlank src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
-                    </motion.div>
+                    </div>
                     <div className="min-w-0 flex-1">
                         <h2 className="flex items-center gap-2 min-w-0 font-semibold text-slate-900 dark:text-white">
                             <span className="truncate">{chat.contact.name}</span>
@@ -2098,7 +2086,7 @@ export default function ChatPanel({
                                     <MoreVertical className="h-5 w-5" />
                                 </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56 bg-popover/95 backdrop-blur-xl border-border">
+                            <DropdownMenuContent align="end" className="w-56 bg-popover border-border">
 
                                 <DropdownMenuItem onClick={() => onToggleContactPanel()}>
                                     <ArrowRightLeft className="mr-2 h-4 w-4" />
@@ -2146,7 +2134,7 @@ export default function ChatPanel({
                                         <MoreVertical className="h-5 w-5" />
                                     </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-56 bg-popover/95 backdrop-blur-xl border-border">
+                                <DropdownMenuContent align="end" className="w-56 bg-popover border-border">
                                     <DropdownMenuItem onClick={() => onToggleContactPanel()}>
                                         <ArrowRightLeft className="mr-2 h-4 w-4" />
                                         <span>Detalhes do Contato</span>
@@ -2251,7 +2239,7 @@ export default function ChatPanel({
                                             className="relative text-slate-500 hover:bg-cyan-500/10 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-300"
                                             onClick={() => setIsToolExecutionsOpen(true)}
                                         >
-                                            <Activity className={cn("h-4 w-4", hasRunningToolExecution && "animate-pulse")} />
+                                            <Activity className={cn("h-4 w-4", hasRunningToolExecution && "text-cyan-500")} />
                                             {toolExecutionEntries.length > 0 && (
                                                 <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-1 text-[10px] font-semibold text-white">
                                                     {toolExecutionEntries.length > 9 ? '9+' : toolExecutionEntries.length}
@@ -2276,13 +2264,13 @@ export default function ChatPanel({
                                                             : "text-slate-500 hover:bg-slate-100 dark:text-zinc-500 dark:hover:bg-white/5"
                                                     )}
                                                 >
-                                                    <Bot className={cn("h-4 w-4", isAiAgentActive && "animate-pulse")} />
+                                                    <Bot className={cn("h-4 w-4", isAiAgentActive && "text-cyan-500")} />
                                                 </Button>
                                             </PopoverTrigger>
                                         </TooltipTrigger>
                                         <TooltipContent><p>Configurações do Agente</p></TooltipContent>
                                     </Tooltip>
-                                    <PopoverContent align="end" className="w-80 p-4 border-border bg-popover/95 backdrop-blur-xl">
+                                    <PopoverContent align="end" className="w-80 p-4 border-border bg-popover">
                                         <div className="space-y-4">
                                             <div className="flex items-center justify-between">
                                                 <div className="space-y-0.5">
@@ -2378,7 +2366,7 @@ export default function ChatPanel({
             <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-[#F3F4F6]/68 dark:bg-black/25">
                 {isLoadingInitialMessages ? (
                     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                        <div className="flex items-center gap-2 rounded-full border border-border bg-background/70 px-4 py-2 shadow-sm backdrop-blur-sm">
+                        <div className="flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             <span>Carregando conversa...</span>
                         </div>
@@ -2412,7 +2400,7 @@ export default function ChatPanel({
                         Header: () => (
                             <div className="h-4 flex justify-center p-2">
                                 {isLoadingOlderMessages && (
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/50 backdrop-blur-sm px-3 py-1 rounded-full border border-border shadow-sm animate-in fade-in zoom-in duration-300">
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background px-3 py-1 rounded-full border border-border">
                                         <Loader2 className="h-3 w-3 animate-spin" />
                                         <span>Carregando histórico...</span>
                                     </div>
@@ -2424,7 +2412,7 @@ export default function ChatPanel({
                                 {isAiTyping && (
                                     <div className="flex items-start gap-3 py-1">
                                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500">
-                                            <Sparkles className="h-4 w-4 animate-pulse" />
+                                            <Sparkles className="h-4 w-4" />
                                         </div>
                                         <div className="rounded-2xl rounded-tl-sm border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm dark:text-emerald-200">
                                             <span>{aiTypingDisplayName} está analisando</span>
@@ -2477,7 +2465,7 @@ export default function ChatPanel({
                 isChatOpen ? (
                     <footer className="z-20 max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain bg-transparent p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] data-[state=open]:p-0">
                         {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                            <div className="mb-2 p-2 border border-border rounded-xl bg-popover/90 backdrop-blur-md max-h-40 overflow-y-auto shadow-xl">
+                            <div className="mb-2 p-2 border border-border rounded-xl bg-popover max-h-40 overflow-y-auto">
                                 {filteredShortcuts.map(shortcut => (
                                     <button
                                         key={shortcut.id}
@@ -2508,9 +2496,9 @@ export default function ChatPanel({
                         {/* AI Copilot Suggestion Bubble */}
                         {aiSuggestion && (
                             <div className="animate-in slide-in-from-bottom-2 duration-300 mb-3">
-                                <div className="bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10 border border-blue-500/30 rounded-2xl p-4 shadow-lg backdrop-blur-sm">
+                                <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4">
                                     <div className="flex items-center gap-2 mb-2">
-                                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                                        <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center">
                                             <Brain className="w-4 h-4 text-white" />
                                         </div>
                                         <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
@@ -2569,33 +2557,22 @@ export default function ChatPanel({
                                     isInternalNote
                                         ? "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-300 dark:border-yellow-700/40"
                                         : "bg-muted/50 border-border dark:border-white/10 dark:bg-black",
-                                    canSendFromComposer && !isInternalNote && "shadow-[0_12px_32px_-20px_rgba(34,211,238,0.45)]",
+                                    canSendFromComposer && !isInternalNote && "border-cyan-500/50",
                                     isSendBurstActive && !isInternalNote && "ring-1 ring-cyan-300/40",
-                                    isAiTyping && !isInternalNote && "ring-1 ring-cyan-400/25 shadow-[0_0_0_1px_rgba(34,211,238,0.12),0_16px_44px_-24px_rgba(6,182,212,0.55)]"
+                                    isAiTyping && !isInternalNote && "ring-1 ring-cyan-400/25"
                                 )}>
                                     {!isInternalNote && canSendFromComposer && (
-                                        <motion.span
-                                            className="pointer-events-none absolute left-6 right-6 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent"
-                                            animate={{ opacity: [0.2, 0.75, 0.2], scaleX: [0.88, 1, 0.88] }}
-                                            transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-                                        />
+                                        <span className="pointer-events-none absolute left-6 right-6 top-0 h-px bg-cyan-300/60" />
                                     )}
 
                                     {isAiTyping && !isInternalNote && (
-                                        <motion.span
-                                            className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
-                                            animate={{ opacity: [0.15, 0.9, 0.15], scaleX: [0.72, 1.04, 0.72] }}
-                                            transition={{ duration: 1.05, repeat: Infinity, ease: 'easeInOut' }}
-                                        />
+                                        <span className="pointer-events-none absolute inset-x-10 top-0 h-px bg-cyan-400" />
                                     )}
 
                                     {Boolean(sendFeedbackKey) && (
-                                        <motion.span
+                                        <span
                                             key={`composer-burst-${sendFeedbackKey}`}
                                             className="pointer-events-none absolute inset-0 rounded-2xl border border-cyan-300/60"
-                                            initial={{ opacity: 0.65, scale: 0.985 }}
-                                            animate={{ opacity: 0, scale: 1.02 }}
-                                            transition={{ duration: 0.42, ease: 'easeOut' }}
                                         />
                                     )}
 
@@ -2621,37 +2598,23 @@ export default function ChatPanel({
                                         {showAiTypingOverlay && (
                                             <div className="absolute inset-0 z-10 px-4 pt-3 pb-2 pointer-events-none select-none">
                                                 <div className="flex items-center gap-2 text-sm font-medium text-cyan-600 dark:text-cyan-300">
-                                                    <Sparkles className="h-4 w-4 animate-pulse" />
+                                                    <Sparkles className="h-4 w-4" />
                                                     <span>{aiTypingDisplayName} está escrevendo uma resposta</span>
                                                     <div className="flex items-center gap-1">
                                                         {[0, 1, 2].map((dot) => (
-                                                            <motion.span
+                                                            <span
                                                                 key={`ai-typing-dot-${dot}`}
                                                                 className="h-1.5 w-1.5 rounded-full bg-current"
-                                                                animate={{ opacity: [0.25, 1, 0.25], y: [0, -2, 0] }}
-                                                                transition={{
-                                                                    duration: 0.9,
-                                                                    repeat: Infinity,
-                                                                    ease: 'easeInOut',
-                                                                    delay: dot * 0.14,
-                                                                }}
                                                             />
                                                         ))}
                                                     </div>
                                                 </div>
                                                 <div className="mt-3 space-y-2">
                                                     {[72, 94, 61].map((width, index) => (
-                                                        <motion.div
+                                                        <div
                                                             key={`ai-typing-line-${index}`}
-                                                            className="h-3 rounded-full bg-gradient-to-r from-cyan-400/10 via-cyan-300/35 to-transparent"
+                                                            className="h-3 rounded-full bg-cyan-300/20"
                                                             style={{ width: `${width}%` }}
-                                                            animate={{ opacity: [0.35, 0.95, 0.35], scaleX: [0.96, 1, 0.96] }}
-                                                            transition={{
-                                                                duration: 1.15,
-                                                                repeat: Infinity,
-                                                                ease: 'easeInOut',
-                                                                delay: index * 0.12,
-                                                            }}
                                                         />
                                                     ))}
                                                 </div>
@@ -2795,7 +2758,7 @@ export default function ChatPanel({
                                                         )}
                                                         aria-label="Configurar IA"
                                                     >
-                                                        <Globe className={cn("h-4 w-4", isAiAgentActive && "animate-pulse")} />
+                                                        <Globe className={cn("h-4 w-4", isAiAgentActive && "text-cyan-500")} />
                                                     </button>
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="start" className="w-72">
@@ -2909,7 +2872,7 @@ export default function ChatPanel({
                         </div>
                     </footer>
                 ) : (
-                    <footer className="p-4 flex-shrink-0 text-center bg-background/60 backdrop-blur-xl border-t border-border/70">
+                    <footer className="p-4 flex-shrink-0 text-center bg-background border-t border-border">
                         <p className='text-sm font-medium text-muted-foreground'>
                             Este atendimento foi encerrado.
                         </p>

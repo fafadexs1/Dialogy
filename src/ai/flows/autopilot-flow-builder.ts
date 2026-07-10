@@ -4,7 +4,13 @@ import { z } from 'zod';
 
 import { ai } from '@/ai/genkit';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
-import type { AutopilotFlowAiProposal, AutopilotFlowGraph, AutopilotFlowNodeKind } from '@/lib/types';
+import type {
+  AutopilotFlowAiProposal,
+  AutopilotFlowGraph,
+  AutopilotFlowNodeKind,
+  KnowledgeBaseDocument,
+  KnowledgeCollection,
+} from '@/lib/types';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
@@ -52,9 +58,10 @@ const FlowNodeSchema = z.object({
   message: z.string().optional(),
   referenceId: z.string().optional(),
   variableName: z.string().optional(),
-  intent: FlowIntentSchema.optional(),
+  intent: z.preprocess((val) => (val === '' ? undefined : val), FlowIntentSchema.optional()),
   customIntentLabel: z.string().optional(),
   knowledgeCollectionIds: z.array(z.string()).max(128).optional(),
+  knowledgeDocumentIds: z.array(z.string()).max(128).optional(),
   requiredSlots: z.array(z.string()).max(32).optional(),
   inputSchema: z.record(z.unknown()).optional(),
   outputSchema: z.record(z.unknown()).optional(),
@@ -70,7 +77,7 @@ const FlowNodeSchema = z.object({
     label: z.string().min(1),
     description: z.string().min(1),
     examples: z.array(z.string()).max(12).optional(),
-    intent: FlowIntentSchema.optional(),
+    intent: z.preprocess((val) => (val === '' ? undefined : val), FlowIntentSchema.optional()),
     requiredSlots: z.array(z.string()).max(32).optional(),
     targetNodeId: z.string().optional(),
   })).max(32).optional(),
@@ -111,9 +118,10 @@ const ArchitectureFlowNodeSchema = z.object({
   y: z.number().optional(),
   referenceId: z.string().optional(),
   variableName: z.string().optional(),
-  intent: FlowIntentSchema.optional(),
+  intent: z.preprocess((val) => (val === '' ? undefined : val), FlowIntentSchema.optional()),
   customIntentLabel: z.string().optional(),
   knowledgeCollectionIds: z.array(z.string()).max(32).optional(),
+  knowledgeDocumentIds: z.array(z.string()).max(32).optional(),
   requiredSlots: z.array(z.string()).max(24).optional(),
   requiredKnowledgeCoverage: z.enum(['high', 'medium', 'low', 'none']).optional(),
   switchMode: z.enum(['ai', 'rules']).optional(),
@@ -124,7 +132,7 @@ const ArchitectureFlowNodeSchema = z.object({
     label: z.string().min(1),
     description: z.string().min(1),
     examples: z.array(z.string()).max(6).optional(),
-    intent: FlowIntentSchema.optional(),
+    intent: z.preprocess((val) => (val === '' ? undefined : val), FlowIntentSchema.optional()),
     requiredSlots: z.array(z.string()).max(24).optional(),
     targetNodeId: z.string().optional(),
   })).max(16).optional(),
@@ -219,6 +227,7 @@ const jsonSchema = {
           intent: { type: 'string', enum: FlowIntentSchema.options },
           customIntentLabel: { type: 'string' },
           knowledgeCollectionIds: { type: 'array', maxItems: 128, items: { type: 'string' } },
+          knowledgeDocumentIds: { type: 'array', maxItems: 128, items: { type: 'string' } },
           requiredSlots: { type: 'array', maxItems: 32, items: { type: 'string' } },
           inputSchema: { type: 'object' },
           outputSchema: { type: 'object' },
@@ -313,6 +322,7 @@ const architectureJsonSchema = {
           intent: { type: 'string', enum: FlowIntentSchema.options },
           customIntentLabel: { type: 'string' },
           knowledgeCollectionIds: { type: 'array', maxItems: 32, items: { type: 'string' } },
+          knowledgeDocumentIds: { type: 'array', maxItems: 32, items: { type: 'string' } },
           requiredSlots: { type: 'array', maxItems: 24, items: { type: 'string' } },
           requiredKnowledgeCoverage: { type: 'string', enum: ['high', 'medium', 'low', 'none'] },
           switchMode: { type: 'string', enum: ['ai', 'rules'] },
@@ -481,6 +491,13 @@ function normalizeId(value: string, fallback: string) {
     .slice(0, 72) || fallback;
 }
 
+function cleanKnowledgeReferenceId(value: string | undefined) {
+  return String(value || '')
+    .trim()
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .slice(0, 160);
+}
+
 function cleanText(value: string | undefined, maxLength: number) {
   return String(value || '').trim().slice(0, maxLength);
 }
@@ -547,27 +564,71 @@ function defaultNodeInstructions(node: {
   title: string;
   subtitle: string;
   toolName?: string;
+  knowledgeCollectionIds?: string[];
+  knowledgeDocumentIds?: string[];
 }, relatedTitles: string[]) {
-  const relation = relatedTitles.length > 0 ? ` Relaciona-se com: ${relatedTitles.join(', ')}.` : '';
+  const relation = relatedTitles.length > 0 ? `\n- Blocos relacionados: ${relatedTitles.join(', ')}.` : '';
+  const knowledgeRefs = [
+    ...(node.knowledgeDocumentIds?.length ? [`documentos: ${node.knowledgeDocumentIds.join(', ')}`] : []),
+    ...(node.knowledgeCollectionIds?.length ? [`colecoes: ${node.knowledgeCollectionIds.join(', ')}`] : []),
+  ];
+  const knowledgeRelation = knowledgeRefs.length > 0
+    ? `\n- Referencias de knowledge permitidas nesta etapa: ${knowledgeRefs.join('; ')}.`
+    : '';
+  const header = `Objetivo do bloco "${node.title}":`;
   switch (node.kind) {
     case 'start':
-      return `Inicie este fluxo quando ocorrer: ${node.title}. Encaminhe para o primeiro passo operacional conectado, sem pular etapas.${relation}`.trim();
+      return `${header}
+- Disparar este fluxo somente quando a conversa corresponder ao escopo do agente.
+- Preparar o contexto inicial com mensagem do cliente, contato, canal e dados ja conhecidos.
+- Encaminhar para o primeiro passo operacional conectado sem pular etapas.${relation}${knowledgeRelation}`.trim();
     case 'message':
-      return `Envie a mensagem configurada e avance para o proximo no conectado somente depois deste passo.${relation}`;
+      return `${header}
+- Enviar exatamente a mensagem configurada para orientar o cliente.
+- Nao consultar ferramentas nem inventar informacoes neste bloco.
+- Avancar para o proximo bloco conectado depois do envio.${relation}${knowledgeRelation}`;
     case 'decision':
-      return `Escolha somente uma das rotas configuradas. Use fallback quando a confianca for baixa ou faltar evidencia.${relation}`;
+      return `${header}
+- Classificar a solicitacao usando apenas mensagem atual, historico curto, slots confirmados e resultados ja disponiveis.
+- Escolher exatamente uma rota configurada e registrar o motivo operacional da escolha.
+- Usar fallback quando a confianca for baixa, quando faltar evidencia ou quando o assunto sair do escopo.
+- Nao executar ferramentas nem responder ao cliente diretamente neste bloco.${relation}${knowledgeRelation}`;
     case 'collect':
-      return `Colete os slots tipados desta etapa, reaproveite dados ja informados e nao repita perguntas ja respondidas.${relation}`;
+      return `${header}
+- Identificar quais dados obrigatorios ainda faltam antes de perguntar.
+- Reaproveitar dados ja informados no contato, historico, slots ou resultados de ferramentas.
+- Fazer uma pergunta por vez, com exemplo de formato quando o campo puder gerar erro.
+- Validar resposta simples antes de avancar e nao repetir pergunta ja respondida.${relation}${knowledgeRelation}`;
     case 'sub_agent':
-      return `Atue como sub-agente V2 especializado nesta etapa. Responda somente dentro do escopo, use slots confirmados, tools e knowledge recuperado, e avance pelo proximo no conectado.${relation}`;
+      return `${header}
+- Atuar como especialista desta etapa, mantendo tom claro, objetivo e util.
+- Responder somente com base em slots confirmados, documentos recuperados e resultados reais de ferramentas.
+- Quando faltar dado, pedir o minimo necessario; quando faltar conhecimento, assumir limite e seguir fallback seguro.
+- Nunca prometer execucao de ferramenta sem resultado confirmado.
+- Encaminhar para o proximo bloco conectado quando a tarefa da etapa estiver concluida.${relation}${knowledgeRelation}`;
     case 'end':
-      return `Finalize a execucao somente quando o objetivo do fluxo tiver sido concluido ou a transferencia humana tiver sido acionada.${relation}`;
+      return `${header}
+- Encerrar somente quando o objetivo do fluxo estiver resolvido, o cliente tiver sido orientado ou a transferencia tiver ocorrido.
+- Nao abrir nova coleta nem chamar ferramentas neste bloco.
+- Registrar uma finalizacao clara e curta para o cliente quando houver mensagem visivel.${relation}${knowledgeRelation}`;
     case 'knowledge':
-      return `Consulte a base de conhecimento para obter informacoes relevantes antes de responder. Use somente fatos recuperados e nao invente dados.${relation}`;
+      return `${header}
+- Consulte a base de conhecimento/RAG usando a duvida atual e o contexto operacional do fluxo.
+- Recuperar apenas trechos relevantes, atuais e aplicaveis ao caso.
+- Entregar ao agente conectado fatos, politicas, limites, links internos ou passos oficiais encontrados.
+- Se a cobertura for baixa, sinalizar explicitamente que a base nao sustenta resposta conclusiva.${relation}${knowledgeRelation}`;
     case 'tool':
-      return `Use a ferramenta ${node.toolName || node.title} somente quando a etapa conectada exigir sua execucao. Monte o payload conforme o schema disponivel e nao execute sem os dados obrigatorios.${relation}`;
+      return `${header}
+- Ferramenta real: ${node.toolName || node.title}.
+- Executar somente quando o bloco anterior tiver dados suficientes e a necessidade corresponder ao escopo da ferramenta.
+- Montar o payload com nomes de campos do schema, sem valores inventados.
+- Nao executar se faltar dado obrigatorio, houver ambiguidade ou a acao exigir confirmacao ainda nao obtida.
+- Em erro, expor limite operacional e seguir rota segura, sem repetir chamada em loop.${relation}${knowledgeRelation}`;
     case 'handoff':
-      return `Transfira o atendimento somente quando o criterio desta etapa estiver atendido.${relation}`;
+      return `${header}
+- Transferir para humano quando a politica desta etapa estiver atendida.
+- Enviar resumo curto com motivo, dados coletados, rota escolhida, tentativas feitas e pendencias.
+- Nao encerrar o atendimento antes de registrar a transferencia.${relation}${knowledgeRelation}`;
   }
 }
 
@@ -588,6 +649,9 @@ function defaultNodeMessage(node: {
       }
       if (/\b(confirmar|confirmacao)\b/.test(context) && /\b(reboot|reiniciar|roteador)\b/.test(context)) {
         return 'Antes de reiniciar o roteador, preciso da sua confirmacao explicita. Posso prosseguir?';
+      }
+      if (/\b(confirmar|confirmacao)\b/.test(context)) {
+        return 'Antes de prosseguir com esta acao, preciso da sua confirmacao explicita. Posso continuar?';
       }
       return undefined;
     }
@@ -653,6 +717,7 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
     while (usedReferenceIds.has(referenceId)) referenceId = `${referenceBase}_${referenceSuffix++}`;
     usedReferenceIds.add(referenceId);
     const knowledgeCollectionIds = node.knowledgeCollectionIds?.map((value) => normalizeId(value, '')).filter(Boolean) || [];
+    const knowledgeDocumentIds = node.knowledgeDocumentIds?.map((value) => cleanKnowledgeReferenceId(value)).filter(Boolean) || [];
     const instructions = cleanPromptText(node.instructions, 2400)
       || (kind === 'sub_agent'
         ? `Atenda especificamente esta etapa: "${cleanText(node.title, 100) || 'sub-agente'}". ${cleanText(node.subtitle, 140)}`
@@ -692,6 +757,7 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
         ...(kind === 'sub_agent' ? {
           customIntentLabel: cleanText(node.customIntentLabel, 180) || cleanText(node.title, 100),
           knowledgeCollectionIds: knowledgeCollectionIds.length > 0 ? knowledgeCollectionIds : undefined,
+          knowledgeDocumentIds: knowledgeDocumentIds.length > 0 ? knowledgeDocumentIds : undefined,
           useAi: true,
           requiredKnowledgeCoverage: node.requiredKnowledgeCoverage || 'low',
         } : {}),
@@ -725,6 +791,7 @@ export function sanitizeAutopilotFlowProposal(output: SanitizableFlowBuilderOutp
         } : {}),
         ...(kind === 'knowledge' ? {
           knowledgeCollectionIds: knowledgeCollectionIds.length > 0 ? knowledgeCollectionIds : undefined,
+          knowledgeDocumentIds: knowledgeDocumentIds.length > 0 ? knowledgeDocumentIds : undefined,
           requiredKnowledgeCoverage: node.requiredKnowledgeCoverage || 'medium',
         } : {}),
       },
@@ -987,9 +1054,133 @@ function summarizeToolCatalogForPrompt(tools: AgentToolCatalogItem[]) {
     class: tool.class,
     riskLevel: tool.riskLevel,
     sideEffect: tool.sideEffect,
+    idempotent: tool.idempotent,
     requiresHumanApproval: tool.requiresHumanApproval,
+    customerVisible: tool.customerVisible,
+    allowedIntents: tool.allowedIntents,
+    requiredSlots: tool.requiredSlots,
+    fallbackAction: tool.fallbackAction,
     inputSchema: tool.inputSchema || null,
   }));
+}
+
+type FlowBuilderKnowledgeInput = {
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  knowledgeCollections?: KnowledgeCollection[] | null;
+};
+
+function activeKnowledgeDocuments(input: FlowBuilderKnowledgeInput): KnowledgeBaseDocument[] {
+  return (input.knowledgeDocuments || [])
+    .filter((document) => document && document.status !== 'archived')
+    .slice(0, 80);
+}
+
+function summarizeKnowledgeCatalogForPrompt(input: FlowBuilderKnowledgeInput) {
+  const collections = (input.knowledgeCollections || [])
+    .slice(0, 40)
+    .map((collection) => ({
+      id: collection.id,
+      name: collection.name,
+      description: collection.description || '',
+    }));
+  const documents = activeKnowledgeDocuments(input)
+    .map((document) => ({
+      id: document.id,
+      name: document.name,
+      category: document.category || '',
+      contextRole: document.contextRole || 'fact',
+      collectionIds: document.collectionIds?.length ? document.collectionIds : ['general'],
+      tags: document.tags || [],
+      summary: cleanText(document.summary || '', 500),
+      canonicalAnswer: cleanText(document.canonicalAnswer || '', 500),
+      workflowHints: document.workflowHints || [],
+      requiredTools: document.requiredTools || [],
+      contentPreview: cleanText(document.content || '', 800),
+    }));
+
+  if (documents.length === 0 && collections.length === 0) {
+    return 'Nenhuma nota, documento ou colecao de knowledge disponivel para este agente.';
+  }
+  return {
+    collections,
+    documents,
+    instruction: 'Use os ids reais em knowledgeDocumentIds e knowledgeCollectionIds. Para perguntas factuais especificas, prefira knowledgeDocumentIds exatos em vez de colecao generica.',
+  };
+}
+
+function selectFallbackKnowledgeReferences(
+  input: FlowBuilderKnowledgeInput,
+  normalizedRequest: string,
+): { documentIds: string[]; collectionIds: string[] } {
+  const documents = activeKnowledgeDocuments(input);
+  const scored = documents
+    .map((document) => {
+      const haystack = normalizeSearchText([
+        document.name,
+        document.category,
+        document.contextRole,
+        ...(document.tags || []),
+        ...(document.workflowHints || []),
+        ...(document.requiredTools || []),
+        document.summary,
+        document.canonicalAnswer,
+        document.content,
+      ].filter(Boolean).join(' '));
+      let score = 0;
+      for (const token of new Set(normalizedRequest.split(/\s+/).filter((value) => value.length >= 4))) {
+        if (haystack.includes(token)) score += 1;
+      }
+      if (/\b(plano|preco|pre[cç]o|mega|internet|catalogo|produto|servico|contratar|assin)\w*/.test(normalizedRequest)
+        && /\b(plano|preco|pre[cç]o|mega|internet|catalogo|produto|servico|contratar|assin)\w*/.test(haystack)) {
+        score += 8;
+      }
+      if (/\b(tv|canal|canais|futebol|streaming)\w*/.test(normalizedRequest)
+        && /\b(tv|canal|canais|futebol|streaming)\w*/.test(haystack)) {
+        score += 8;
+      }
+      if (/\b(endereco|bairro|cidade|cep|disponibilidade|cobertura|viabilidade)\w*/.test(normalizedRequest)
+        && /\b(endereco|bairro|cidade|cep|disponibilidade|cobertura|viabilidade)\w*/.test(haystack)) {
+        score += 6;
+      }
+      if (document.contextRole === 'fact') score += 2;
+      if (document.contextRole === 'procedure') score -= 1;
+      return { document, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+
+  const selectedDocuments = scored.length > 0 ? scored.map((entry) => entry.document) : documents.slice(0, 6);
+  const documentIds = selectedDocuments.map((document) => cleanKnowledgeReferenceId(document.id)).filter(Boolean);
+  const collectionIds = Array.from(new Set(
+    selectedDocuments.flatMap((document) => document.collectionIds?.length ? document.collectionIds : ['general']),
+  )).map((collectionId) => normalizeId(collectionId, '')).filter(Boolean).slice(0, 8);
+  return { documentIds, collectionIds };
+}
+
+function inferKnowledgeReferencesForInput(input: FlowBuilderKnowledgeInput & {
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+}) {
+  const requestText = input.conversation.map((message) => message.content).join('\n');
+  return selectFallbackKnowledgeReferences(input, normalizeSearchText(requestText));
+}
+
+function applyKnowledgeReferenceDefaults(
+  flow: FlowBuilderOutput,
+  references: { documentIds: string[]; collectionIds: string[] },
+): FlowBuilderOutput {
+  if (references.documentIds.length === 0 && references.collectionIds.length === 0) return flow;
+  return {
+    ...flow,
+    nodes: flow.nodes.map((node) => {
+      if (!['knowledge', 'sub_agent'].includes(node.kind)) return node;
+      return {
+        ...node,
+        knowledgeDocumentIds: node.knowledgeDocumentIds?.length ? node.knowledgeDocumentIds : references.documentIds,
+        knowledgeCollectionIds: node.knowledgeCollectionIds?.length ? node.knowledgeCollectionIds : references.collectionIds,
+      };
+    }),
+  };
 }
 
 function buildPrompt(input: {
@@ -997,6 +1188,8 @@ function buildPrompt(input: {
   currentGraph?: AutopilotFlowGraph | null;
   currentSystemPrompt?: string | null;
   tools: AgentToolCatalogItem[];
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  knowledgeCollections?: KnowledgeCollection[] | null;
 }) {
   return `Voce e o arquiteto de flows do Dialogy. Execute somente a task 1: definir e ordenar os blocos funcionais de um atendimento incrivelmente completo e detalhado. NUNCA resuma ou abrevie o pedido do usuario. Siga RIGOROSAMENTE todas as especificacoes para entregar a jornada exata e completa solicitada.
 
@@ -1018,6 +1211,10 @@ Regras obrigatorias de Arquitetura Avancada:
 - Use 'collect' SEMPRE que precisar coletar dados estruturados (ex: nome, telefone, data, motivo, identificador, endereco). Preencha formFields de forma compacta somente no bloco collect, com id/label/type/aliases curtos; defina formMode = 'ai'. Nao use understand para coleta de dados.
 - Use 'message' para enviar avisos, informacoes, cobrancas ou encerramentos, quando nao for necessario compor resposta inteligente.
 - Use 'knowledge' antes de 'sub_agent' sempre que houver fato, instrucao, politica, saude, financeiro, produto, plano, suporte ou recomendacao dependente da base. Configure requiredKnowledgeCoverage.
+- Em blocos 'knowledge' e nos 'sub_agent' que dependem deles, preencha knowledgeDocumentIds com os IDs exatos das notas/documentos que devem ser consultados, e knowledgeCollectionIds apenas quando uma colecao inteira for realmente necessaria.
+- Para catalogo, planos, precos, canais, cobertura, politicas e respostas oficiais, escolha documentos factuais/canonicos do catalogo de knowledge. Nao misture documentos de procedimento interno, persona ou coleta se a pergunta for factual.
+- O titulo/subtitulo do bloco knowledge deve nomear a referencia real usada, por exemplo "Knowledge: Catalogo oficial de planos" ou "Knowledge: Politica de cobertura".
+- Nunca cite documento, nota ou colecao que nao esteja no catalogo de knowledge fornecido.
 - Use 'handoff' para transferencia humana e 'end' para encerramento claro.
 - Nao crie sub-agentes 'intent' em fluxos novos. Sub-agentes agora sao blocos 'sub_agent'. Etapas sequenciais desta task devem ser collect, decision, knowledge, sub_agent, handoff ou end.
 - Nao crie blocos kind tool nesta etapa. A selecao de ferramentas ocorrera depois, consultando o catalogo completo.
@@ -1039,6 +1236,9 @@ ${input.currentSystemPrompt || '(vazio)'}
 
 Ferramentas habilitadas para este agente:
 ${JSON.stringify(summarizeToolCatalogForPrompt(input.tools), null, 2)}
+
+Notas, documentos e colecoes de knowledge disponiveis:
+${JSON.stringify(summarizeKnowledgeCatalogForPrompt(input), null, 2)}
 
 Conversa com o usuario:
 ${input.conversation.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join('\n\n')}`;
@@ -1079,6 +1279,8 @@ function buildEnrichmentPrompt(input: {
       subtitle: node.subtitle,
       incoming,
       outgoing,
+      knowledgeDocumentIds: node.knowledgeDocumentIds || [],
+      knowledgeCollectionIds: node.knowledgeCollectionIds || [],
       tool: tool ? {
         name: tool.name,
         description: tool.description,
@@ -1104,9 +1306,14 @@ Regras obrigatorias:
 - Retorne exatamente um item para cada id recebido. Nunca omita blocos.
 - Cada instructions deve ser especifico para aquele bloco. Nao replique o mesmo texto em blocos diferentes.
 - Considere incoming e outgoing para explicar como o bloco participa do fluxo.
+- Cada instructions deve ter metodo operacional, nao frase solta. Use 4 a 8 bullets objetivos.
+- Todo bloco deve cobrir: objetivo, dados de entrada esperados, criterio de execucao, saida/resultado esperado e fallback/erro quando aplicavel.
+- Texto preguiçoso/generico e proibido: nao use somente "responda o cliente", "colete dados", "consulte a base" ou "execute a ferramenta" sem criterios claros.
+- Escreva como runbook de atendimento: o operador deve entender o que acontece olhando apenas este bloco.
 - Para sub_agent, escreva o system prompt exclusivo do sub-agente V2.
 - Para tool, descreva quando executar, quando nao executar, dados obrigatorios e montagem do payload conforme o schema real.
-- Para knowledge, descreva a consulta RAG e o agente que recebe o contexto.
+- Para knowledge, descreva a consulta RAG, os documentos/colecoes permitidos e o agente que recebe o contexto.
+- Quando task trouxer knowledgeDocumentIds ou knowledgeCollectionIds, cite esses IDs nas instructions e proiba o uso de documentos fora desse escopo.
 - OBRIGATORIO: Para message, voce DEVE preencher o campo "message" com o texto real que sera enviado ao cliente.
 - OBRIGATORIO: Para handoff, preencha "message" com o aviso de transferencia que o cliente recebera.
 - OBRIGATORIO: Para end, preencha "message" com a mensagem final quando houver resposta visivel.
@@ -1134,19 +1341,51 @@ ${input.conversation.map((message) => `${message.role.toUpperCase()}: ${message.
 
 function applyFlowBuilderEnrichment(architecture: FlowBuilderOutput, enrichment: FlowBuilderEnrichment): FlowBuilderOutput {
   const enrichmentById = new Map(enrichment.nodes.map((node) => [node.id, node]));
+  const relatedById = relatedTitlesByNode(architecture);
   return {
     ...architecture,
     systemPrompt: enrichment.systemPrompt,
     nodes: architecture.nodes.map((node) => {
       const enriched = enrichmentById.get(node.id);
       if (!enriched) return node;
+      const enrichedInstructions = cleanPromptText(enriched.instructions, 2400);
       return {
         ...node,
-        instructions: enriched.instructions,
+        instructions: isWeakOperationalInstruction(enrichedInstructions)
+          ? defaultNodeInstructions(node, relatedById.get(node.id) || [])
+          : enrichedInstructions,
         message: enriched.message || node.message,
       };
     }),
   };
+}
+
+function relatedTitlesByNode(flow: FlowBuilderOutput) {
+  const relatedById = new Map<string, string[]>();
+  const nodeById = new Map(flow.nodes.map((node) => [node.id, node]));
+  for (const edge of flow.edges) {
+    const source = nodeById.get(edge.source);
+    const target = nodeById.get(edge.target);
+    if (!source || !target) continue;
+    relatedById.set(source.id, [...(relatedById.get(source.id) || []), target.title]);
+    relatedById.set(target.id, [...(relatedById.get(target.id) || []), source.title]);
+  }
+  return relatedById;
+}
+
+function isWeakOperationalInstruction(value: string) {
+  const text = cleanPromptText(value, 2400);
+  if (text.length < 180) return true;
+  const bulletCount = (text.match(/(?:^|\n)\s*[-*]\s+/g) || []).length;
+  if (bulletCount < 3) return true;
+  const normalized = normalizeSearchText(text);
+  return [
+    /^responda o cliente\.?$/,
+    /^colete dados\.?$/,
+    /^consulte a base\.?$/,
+    /^execute a ferramenta\.?$/,
+    /^siga o fluxo\.?$/,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 function buildToolSelectionPrompt(input: {
@@ -1175,6 +1414,10 @@ Regras:
 - Use somente toolName exato do catalogo.
 - MCP deve ser selecionada pelo nome qualificado real do catalogo, por exemplo mcp:<server_id>:get_wifi_view. Nunca retorne "mcp_call_tool" como toolName.
 - attachToNodeId deve apontar para o passo imediatamente anterior a execucao da ferramenta. Em flows v2, prefira collect, sub_agent ou message conforme a sequencia operacional.
+- Se a ferramenta tiver allowedIntents, use-a somente em rota/etapa compatível com esses intents. Nao force tool fora do intent permitido.
+- Se a ferramenta tiver requiredSlots, ela so pode ser posicionada depois de collect que coleta esses slots ou bloco que declara requiredSlots equivalentes.
+- crm_update_contact_custom_fields so pode ser usada depois de collect com campos que serao persistidos; nao use CRM para simples duvida, catalogo, preco, disponibilidade ou apresentacao de planos.
+- Ferramentas com sideEffect medium/high exigem pedido explicito do cliente ou confirmacao visivel antes da tool.
 - Para cada tool escolhida, explique quando executar, quando nao executar, dados obrigatorios e montagem do payload.
 - Encerramento real exige close_chat. Transferencia humana exige transfer_chat. Consultas externas exigem a tool de leitura adequada.
 - Coleta ou atualizacao de dados persistentes do contato exige a ferramenta de CRM adequada quando ela existir no catalogo.
@@ -1193,12 +1436,23 @@ Catalogo completo Dialogy + MCP:
 ${JSON.stringify(tools, null, 2)}`;
 }
 
+function nodeProvidesRequiredSlots(node: FlowBuilderOutput['nodes'][number], requiredSlots: string[]) {
+  if (requiredSlots.length === 0) return true;
+  const providedSlots = new Set([
+    ...(node.requiredSlots || []),
+    ...((node.formFields || []).flatMap((field) => [field.id, field.fieldKey]).filter(Boolean) as string[]),
+    ...((node.routes || []).flatMap((route) => route.requiredSlots || [])),
+  ].map((slot) => normalizeId(slot, '')));
+  return requiredSlots.every((slot) => providedSlots.has(normalizeId(slot, '')));
+}
+
 export function applyToolSelection(
   architecture: FlowBuilderOutput,
   selection: z.infer<typeof FlowBuilderToolSelectionSchema>,
   tools: AgentToolCatalogItem[],
 ): FlowBuilderOutput {
   const available = new Set<string>(tools.map((tool) => tool.name));
+  const toolByName = new Map<string, AgentToolCatalogItem>(tools.map((tool) => [tool.name, tool]));
   const nodeById = new Map(architecture.nodes.map((node) => [node.id, node]));
   const existingToolNames = new Set(architecture.nodes.filter((node) => node.kind === 'tool').map((node) => node.toolName).filter(Boolean));
   const selectedNodes: FlowBuilderOutput['nodes'] = [];
@@ -1207,6 +1461,10 @@ export function applyToolSelection(
     const target = nodeById.get(selected.attachToNodeId);
     if (!target || !['sub_agent', 'collect', 'message'].includes(target.kind)) continue;
     if (!available.has(selected.toolName) || existingToolNames.has(selected.toolName)) continue;
+    const tool = toolByName.get(selected.toolName);
+    if (!tool) continue;
+    if (tool.name === 'crm_update_contact_custom_fields' && target.kind !== 'collect') continue;
+    if (tool.requiredSlots.length > 0 && !nodeProvidesRequiredSlots(target, tool.requiredSlots)) continue;
     existingToolNames.add(selected.toolName);
     const id = `tool-${normalizeId(selected.toolName, 'acao')}`;
     selectedNodes.push({
@@ -2222,9 +2480,12 @@ export function buildFallbackArchitecture(input: {
   conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
   currentSystemPrompt?: string | null;
   tools?: AgentToolCatalogItem[];
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  knowledgeCollections?: KnowledgeCollection[] | null;
 }, _error: unknown): ArchitectureFlowBuilderOutput {
   const requestText = input.conversation.map((message) => message.content).join('\n');
   const normalizedRequest = normalizeSearchText(requestText);
+  const fallbackKnowledgeReferences = selectFallbackKnowledgeReferences(input, normalizedRequest);
   const requestedIntents = inferRequestedToolIntents(normalizedRequest);
   const isWifiSupportFlow = requestedIntents.has('wifi_credentials_lookup')
     || requestedIntents.has('wifi_credentials_change')
@@ -2495,11 +2756,13 @@ export function buildFallbackArchitecture(input: {
     {
       id: 'base-conhecimento',
       kind: 'knowledge',
-      title: 'Base de conhecimento',
+      title: fallbackKnowledgeReferences.documentIds.length > 0 ? 'Knowledge: referencias oficiais' : 'Base de conhecimento',
       subtitle: isWifiSupportFlow
         ? 'Consultar politicas de validacao, contrato, Wi-Fi e ferramentas habilitadas'
         : 'Consultar politicas, produtos, servicos e contexto salvo',
       referenceId: 'base_conhecimento',
+      knowledgeDocumentIds: fallbackKnowledgeReferences.documentIds.length > 0 ? fallbackKnowledgeReferences.documentIds : undefined,
+      knowledgeCollectionIds: fallbackKnowledgeReferences.collectionIds.length > 0 ? fallbackKnowledgeReferences.collectionIds : undefined,
       requiredKnowledgeCoverage: 'medium',
     },
     {
@@ -2510,6 +2773,8 @@ export function buildFallbackArchitecture(input: {
         ? 'Usar ferramenta coerente com a intencao atual e bloquear acoes fora do pedido'
         : 'Responder com grounding, clareza e proximo passo',
       referenceId: 'agente_principal',
+      knowledgeDocumentIds: fallbackKnowledgeReferences.documentIds.length > 0 ? fallbackKnowledgeReferences.documentIds : undefined,
+      knowledgeCollectionIds: fallbackKnowledgeReferences.collectionIds.length > 0 ? fallbackKnowledgeReferences.collectionIds : undefined,
       requiredKnowledgeCoverage: 'low',
     },
     {
@@ -2689,12 +2954,17 @@ function warnFlowBuilderFallback(stage: string, error: unknown) {
 
 function toolInstructions(tool: AgentToolCatalogItem) {
   const requiredSlots = tool.requiredSlots.length > 0
-    ? ` Dados obrigatorios: ${tool.requiredSlots.join(', ')}.`
+    ? `\n- Dados obrigatorios antes de executar: ${tool.requiredSlots.join(', ')}.`
     : '';
   const approval = tool.requiresHumanApproval
-    ? ' Solicite aprovacao humana antes da execucao.'
+    ? '\n- Exige aprovacao humana antes da execucao.'
     : '';
-  return `Use ${tool.name} somente quando a etapa conectada exigir: ${tool.description} Nao execute fora desse criterio.${requiredSlots}${approval}`;
+  return `Objetivo da ferramenta "${tool.name}":
+- Use somente quando a etapa conectada exigir: ${tool.description}
+- Antes de executar, confirme que a intencao do cliente corresponde a esta ferramenta.
+- Monte o payload apenas com dados confirmados e campos existentes no schema.
+- Nao use fora desse criterio, nao invente resultado e nao repita chamada sem dado novo.${requiredSlots}${approval}
+- Em falha, registre o motivo e siga fallback seguro ou transferencia conforme o fluxo.`;
 }
 
 export function ensureOperationalCoverage(
@@ -2860,10 +3130,14 @@ export function buildDeterministicFallbackProposal(input: {
   conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
   currentSystemPrompt?: string | null;
   tools: AgentToolCatalogItem[];
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  knowledgeCollections?: KnowledgeCollection[] | null;
 }, error: unknown): AutopilotFlowAiProposal {
+  const inferredKnowledgeReferences = inferKnowledgeReferencesForInput(input);
   let output = repairDecisionRouteTargets(
     normalizeArchitectureOutput(buildFallbackArchitecture(input, error)),
   );
+  output = applyKnowledgeReferenceDefaults(output, inferredKnowledgeReferences);
   output = {
     ...output,
     edges: buildDeterministicTopology(output).edges,
@@ -2880,7 +3154,10 @@ export function buildDeterministicFallbackProposal(input: {
     tools: input.tools,
   });
   output = ensureToolRelevanceCoverage(output, input.tools, relevanceMap);
-  output = repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools));
+  output = applyKnowledgeReferenceDefaults(
+    repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools)),
+    inferredKnowledgeReferences,
+  );
   output = ensureWifiBranchIsolation(output, input.tools, relevanceMap);
   return sanitizeAutopilotFlowProposal(output, input.tools);
 }
@@ -3053,9 +3330,12 @@ export async function generateAutopilotFlowProposal(input: {
   currentGraph?: AutopilotFlowGraph | null;
   currentSystemPrompt?: string | null;
   tools: AgentToolCatalogItem[];
+  knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  knowledgeCollections?: KnowledgeCollection[] | null;
   model: string;
   apiKey?: string;
 }) {
+  const inferredKnowledgeReferences = inferKnowledgeReferencesForInput(input);
   let architecture: ArchitectureFlowBuilderOutput;
   try {
     architecture = await runFlowBuilderStage({
@@ -3074,7 +3354,10 @@ export async function generateAutopilotFlowProposal(input: {
     return buildDeterministicFallbackProposal(input, error);
   }
 
-  let output = repairDecisionRouteTargets(normalizeArchitectureOutput(architecture));
+  let output = applyKnowledgeReferenceDefaults(
+    repairDecisionRouteTargets(normalizeArchitectureOutput(architecture)),
+    inferredKnowledgeReferences,
+  );
   try {
     const topology = await runFlowBuilderStage({
       model: input.model,
@@ -3139,7 +3422,10 @@ export async function generateAutopilotFlowProposal(input: {
     output = applyToolSelection(output, { tools: [] }, input.tools);
   }
   output = ensureToolRelevanceCoverage(output, input.tools, toolRelevanceMap);
-  output = repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools));
+  output = applyKnowledgeReferenceDefaults(
+    repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools)),
+    inferredKnowledgeReferences,
+  );
   const deterministicTopology = buildDeterministicTopology(output);
   if (deterministicTopology.edges.length > output.edges.length) {
     output = { ...output, edges: deterministicTopology.edges };
@@ -3163,7 +3449,10 @@ export async function generateAutopilotFlowProposal(input: {
     output = applyValidationEdges(output, { valid: true, issues: [], missingEdges: [] });
   }
   output = ensureToolRelevanceCoverage(output, input.tools, toolRelevanceMap);
-  output = repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools));
+  output = applyKnowledgeReferenceDefaults(
+    repairDecisionRouteTargets(ensureOperationalCoverage(output, input.tools)),
+    inferredKnowledgeReferences,
+  );
   output = ensureWifiBranchIsolation(output, input.tools, toolRelevanceMap);
   try {
     return sanitizeAutopilotFlowProposal(output, input.tools);

@@ -5,6 +5,7 @@ import {
   formatFlowReferencesForPrompt,
   formatFlowSwitchGuidanceForPrompt,
   formatFlowFormGuidanceForPrompt,
+  filterKnowledgeDocumentsForScope,
   renderDeterministicFlowMessage,
   resolveActiveFlowIntentScopeByNodeId,
   resolveFirstFlowSwitchRoute,
@@ -387,6 +388,52 @@ describe('autopilot flow routing', () => {
       systemPrompt: 'Conduza diagnosticos de Wi-Fi.',
       knowledgeCollectionIds: ['wifi'],
     });
+  });
+
+  it('keeps an exact RAG scope when a switch targets a knowledge node', () => {
+    const config = configWithFlow({
+      version: 1,
+      nodes: [
+        {
+          id: 'routing',
+          kind: 'decision',
+          title: 'Roteador',
+          subtitle: 'Rotas',
+          position: { x: 0, y: 0 },
+          config: {
+            routes: [{
+              id: 'plans',
+              label: 'Planos',
+              description: 'Duvidas sobre planos.',
+              targetNodeId: 'plans-knowledge',
+            }],
+          },
+        },
+        {
+          id: 'plans-knowledge',
+          kind: 'knowledge',
+          title: 'Planos oficiais',
+          subtitle: 'Base',
+          position: { x: 200, y: 0 },
+          config: {
+            knowledgeDocumentIds: ['plans-2026'],
+          },
+        },
+      ],
+      edges: [{ id: 'routing-plans', source: 'routing', target: 'plans-knowledge', routeId: 'plans' }],
+    });
+
+    const scope = resolveActiveFlowIntentScopeByNodeId(config, 'plans-knowledge');
+    const documents = filterKnowledgeDocumentsForScope(config, [
+      { id: 'plans-2026', name: 'Planos 2026', content: 'Plano de 1 Giga.' },
+      { id: 'internal-notes', name: 'Notas internas', content: 'Nao usar.' },
+    ], scope);
+
+    expect(scope).toMatchObject({
+      nodeId: 'plans-knowledge',
+      knowledgeDocumentIds: ['plans-2026'],
+    });
+    expect(documents.map((document) => document.id)).toEqual(['plans-2026']);
   });
 
   it('falls back when switch confidence is below threshold', () => {

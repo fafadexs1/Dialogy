@@ -304,6 +304,38 @@ function auditCollectNode(
   }
 }
 
+function auditMessageNode(
+  node: AutopilotFlowNode,
+  issues: AutopilotFlowAuditIssue[],
+) {
+  if (node.kind !== 'message') return;
+  const message = node.config?.message?.trim() || '';
+  if (!message) {
+    addIssue(issues, {
+      severity: 'critical',
+      code: 'message_node_empty_message',
+      nodeId: node.id,
+      message: `Mensagem "${node.title}" precisa conter um texto valido para envio.`,
+    });
+  }
+}
+
+function auditSubAgentNode(
+  node: AutopilotFlowNode,
+  issues: AutopilotFlowAuditIssue[],
+) {
+  if (node.kind !== 'sub_agent') return;
+  const instructions = node.config?.instructions?.trim() || '';
+  if (!instructions) {
+    addIssue(issues, {
+      severity: 'critical',
+      code: 'sub_agent_node_empty_instructions',
+      nodeId: node.id,
+      message: `Sub-agente "${node.title}" precisa declarar instrucoes de comportamento.`,
+    });
+  }
+}
+
 function auditDisconnectedNodes(
   graph: AutopilotFlowGraph,
   issues: AutopilotFlowAuditIssue[],
@@ -932,6 +964,11 @@ export function auditAutopilotFlowGraph(graph: AutopilotFlowGraph | null | undef
       auditSwitchNode(normalizedGraph, node, nodeIds, issues);
     }
     auditCollectNode(node, issues);
+    if (node.kind === 'message') {
+      auditMessageNode(node, issues);
+    } else if (node.kind === 'sub_agent') {
+      auditSubAgentNode(node, issues);
+    }
   }
   auditDisconnectedNodes(normalizedGraph, issues);
   repairToolNodeCycleBounds(normalizedGraph);

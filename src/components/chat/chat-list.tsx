@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
@@ -506,7 +505,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, curren
             />
             {(message.type === 'video' || message.metadata?.mimetype?.startsWith('video/')) && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-sm">
-                <Video className="h-3 w-3 text-white/90 drop-shadow-md" />
+                <Video className="h-3 w-3 text-white/90" />
               </div>
             )}
           </div>
@@ -568,8 +567,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     return chat.messages.filter(m => !isMarketingMessage(m));
   }, [chat.messages, showMarketing]);
   const removeChat = useInboxStore(state => state.removeChat);
-  const drafts = useInboxStore(state => state.drafts);
-  const draft = drafts[chat.id];
+  const draft = useInboxStore(state => state.drafts[chat.id]);
   const draftPreview = useMemo(() => getDraftPreviewText(draft || ''), [draft]);
   const hasDraft = draftPreview.length > 0;
   const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages?.[chat.messages.length - 1];
@@ -671,19 +669,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   };
 
   return (
-    <motion.div
-      layout="position"
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+    <div
       className={cn(
         "relative flex min-h-[106px] cursor-pointer items-start gap-3 overflow-hidden rounded-2xl border px-3.5 py-3.5 transition-all duration-200",
-        "border-border/55 bg-card/45 shadow-[0_10px_28px_-24px_rgba(0,0,0,0.85)]",
-        "hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/80 hover:shadow-[0_18px_36px_-25px_rgba(0,0,0,0.95)]",
+        "border-border bg-card",
+        "hover:border-primary/40 hover:bg-muted/60",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
         isSelected && !isForwarding && !isBulkMode
-          ? "border-primary/45 bg-card shadow-[0_12px_28px_-24px_rgba(0,0,0,0.9)]"
+          ? "border-primary bg-muted/50"
           : hasUnread
             ? "border-blue-500/25 bg-blue-500/[0.045]"
             : "",
@@ -700,11 +693,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       aria-label={`Conversa com ${chat.contact?.name || 'Desconhecido'}`}
     >
       {isSelected && !isForwarding && !isBulkMode && (
-        <div className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-primary shadow-[0_0_18px_rgba(25,245,178,0.65)]" />
+        <div className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-primary" />
       )}
       <div className={cn(
         "pointer-events-none absolute inset-x-0 top-0 h-px opacity-70",
-        isSelected ? "bg-gradient-to-r from-transparent via-primary/80 to-transparent" : "bg-gradient-to-r from-transparent via-white/15 to-transparent"
+        isSelected ? "bg-primary/60" : "bg-border/60"
       )} />
 
       {/* Bulk Mode Checkbox */}
@@ -735,13 +728,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         user={currentUser}
       />
 
-      <motion.div
-        className="relative flex-shrink-0"
-        layoutId={`avatar-morph-${chat.id}`}
-      >
+      <div className="relative flex-shrink-0">
         <Avatar className={cn(
           "h-12 w-12 border-2 shadow-sm transition-all duration-200 md:h-11 md:w-11",
-          isSelected ? "border-primary/55 shadow-[0_0_18px_-8px_rgba(25,245,178,0.75)]" : "border-border/80",
+          isSelected ? "border-primary" : "border-border",
           hasUnread && !isSelected ? "border-blue-500/45" : ""
         )}>
           <AvatarImage fallbackOnBlank src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || 'Contato'} data-ai-hint="person" />
@@ -795,7 +785,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </Tooltip>
           </TooltipProvider>
         )}
-      </motion.div >
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
@@ -804,7 +794,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               <span className={cn(
                 "h-2 w-2 flex-shrink-0 rounded-full",
                 chat.status === 'encerrados' ? "bg-slate-500" : chat.status === 'atendimentos' ? "bg-emerald-400" : "bg-blue-400",
-                hasUnread && "animate-pulse"
+                hasUnread && "bg-blue-500"
               )} />
               <p className={cn("max-w-[70%] truncate whitespace-nowrap text-base font-semibold tracking-tight text-foreground md:max-w-[60%] md:text-sm", hasUnread && "font-bold")} title={chat.contact?.name}>
                 {chat.contact?.name || 'Carregando...'}
@@ -962,16 +952,18 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             const unread = unreadCount;
             if (unread <= 0) return null;
             return (
-              <Badge className="h-5 min-w-[1.25rem] flex-shrink-0 justify-center rounded-full border-0 bg-red-500 px-1.5 text-[10px] font-bold text-white shadow-md shadow-red-500/25">
+              <Badge className="h-5 min-w-[1.25rem] flex-shrink-0 justify-center rounded-full border-0 bg-red-500 px-1.5 text-[10px] font-bold text-white">
                 {unread}
               </Badge>
             );
           })()}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
+
+const MemoizedChatListItem = React.memo(ChatListItem);
 
 interface ChatListProps {
   chats: Chat[];
@@ -1411,13 +1403,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   return (
     <div
       className={cn(
-        "flex h-full shrink-0 flex-row border-r border-border/80 bg-background/92 backdrop-blur-xl transition-none",
+        "flex h-full shrink-0 flex-row border-r border-border bg-background transition-none",
         "w-full md:w-[400px] lg:w-[440px] xl:w-[500px] 2xl:w-[540px] md:min-w-[380px] md:max-w-[560px]",
         className
       )}
     >
       {/* Side Navigation Rail */}
-      <div className="w-[80px] 2xl:w-[90px] flex-shrink-0 border-r border-border/80 flex flex-col items-center py-6 gap-4 bg-background/82 backdrop-blur-md">
+      <div className="w-[80px] 2xl:w-[90px] flex-shrink-0 border-r border-border flex flex-col items-center py-6 gap-4 bg-background">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
@@ -1431,7 +1423,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     className={cn(
                       "group relative flex flex-col h-12 w-[62px] 2xl:w-[70px] items-center justify-center rounded-xl transition-all duration-300 gap-1",
                       activeTab === tab.id
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                        ? "bg-blue-600 text-white"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
@@ -1750,7 +1742,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
           Agentes Online ({onlineAgents.length})
           {isOffline && (
-            <Badge variant="destructive" className="h-4 text-[10px] px-1 animate-pulse">
+            <Badge variant="destructive" className="h-4 text-[10px] px-1">
               Offline - Reconectando...
             </Badge>
           )}
@@ -1770,7 +1762,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       className="relative cursor-pointer transition-transform duration-200 shrink-0"
                       onClick={() => setSelectedAgent(agent.user)}
                     >
-                      <Avatar className="h-8 w-8 border border-emerald-500/70 shadow-[0_0_0_1px_rgba(16,185,129,0.2)]">
+                      <Avatar className="h-8 w-8 border border-emerald-500/70">
                         <AvatarImage fallbackOnBlank src={agent.user.avatar} className="object-cover" />
                         <AvatarFallback className="bg-emerald-900 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
                       </Avatar>
@@ -1788,7 +1780,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         <div>
                           <p className="font-bold text-lg leading-tight">{agent.user.name}</p>
                           <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                             Online agora
                           </p>
                         </div>
@@ -1857,7 +1849,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                           <p className="text-sm font-medium truncate">{agent.user.name}</p>
                           <p className="text-[11px] text-muted-foreground truncate">{agent.user.team || agent.user.role?.name || 'Agente'}</p>
                         </div>
-                        <span className="h-2 w-2 rounded-full bg-[#22C05C] shadow-[0_0_8px_rgba(34,192,92,0.8)] shrink-0" />
+                        <span className="h-2 w-2 rounded-full bg-[#22C05C] shrink-0" />
                       </button>
                     ))}
                   </div>
@@ -1967,7 +1959,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               endReached={handleEndReached}
               itemContent={(index, chat) => (
           <div className="px-2 py-1">
-                  <ChatListItem
+                  <MemoizedChatListItem
                     key={chat.id}
                     chat={chat}
                     isSelected={selectedChat?.id === chat.id}
@@ -1992,30 +1984,20 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         ) : (
           <div className="flex flex-col items-center justify-center py-20 px-6 text-center space-y-4">
             {activeTab === 'atendimentos' ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4 }}
-                className="flex flex-col items-center"
-              >
+              <div className="flex flex-col items-center">
                 <div className="relative mb-6">
                   {/* Subtle pulsing background glow */}
-                  <div className="absolute inset-0 bg-emerald-500/20 blur-[25px] rounded-full animate-pulse z-0" />
 
                   {/* Floating Container */}
-                  <motion.div
-                    animate={{ y: [0, -8, 0] }}
-                    transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
-                    className="relative z-10 bg-gradient-to-tr from-emerald-100 to-emerald-50 dark:from-emerald-900/40 dark:to-emerald-800/20 p-5 rounded-full border border-emerald-200 dark:border-emerald-700/50 shadow-lg"
-                  >
+                  <div className="relative z-10 bg-emerald-50 dark:bg-emerald-950 p-5 rounded-full border border-emerald-200 dark:border-emerald-800">
                     <svg className="h-10 w-10 text-emerald-600 dark:text-emerald-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M22 12h-6l-2 3h-4l-2-3H2" />
                       <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
                     </svg>
-                  </motion.div>
+                  </div>
                 </div>
 
-                <h3 className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent mb-1">
+                <h3 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mb-1">
                   Tudo limpo por aqui!
                 </h3>
                 <p className="text-sm text-muted-foreground/80 max-w-[240px] mb-6">
@@ -2036,7 +2018,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     />
                   </div>
                 )}
-              </motion.div>
+              </div>
             ) : (
               <>
                 <MessageSquare className="h-12 w-12 text-muted-foreground/30" />

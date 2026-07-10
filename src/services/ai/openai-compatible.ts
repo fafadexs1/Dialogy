@@ -1,7 +1,7 @@
 import type { Genkit } from 'genkit';
 import { z } from 'zod';
 import { getAiModelRuntimeProvider, type AiModelRuntimeProvider } from '@/lib/ai-models';
-import { listAgentToolDefinitions } from '@/services/agent-tools/catalog';
+import { listModelCallableAgentToolDefinitions } from '@/services/agent-tools/catalog';
 import { parseLmStudioStructuredText } from './lm-studio';
 
 export type OpenAiCompatibleOutputKind = 'agent' | 'procedure';
@@ -16,7 +16,7 @@ function getActionSchema() {
     properties: {
       type: {
         type: 'string',
-        enum: listAgentToolDefinitions().map((definition) => definition.name),
+        enum: listModelCallableAgentToolDefinitions().map((definition) => definition.name),
       },
       reason: { type: 'string' },
       payload: { type: 'object', additionalProperties: true },

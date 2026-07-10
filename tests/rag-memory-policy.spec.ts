@@ -19,7 +19,7 @@ vi.mock('@/lib/vector-store', () => ({
   },
 }));
 
-import { retrieveSupportContext } from '@/services/rag/retrieval';
+import { isLocalRagQueryEmbeddingEnabled, retrieveSupportContext } from '@/services/rag/retrieval';
 
 describe('RAG production memory policy', () => {
   beforeEach(() => {
@@ -61,5 +61,38 @@ describe('RAG production memory policy', () => {
       keywordMatches: 1,
       caseMatches: 0,
     });
+  });
+
+  it('keeps lexical retrieval available if semantic query embedding is temporarily unavailable', async () => {
+    process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED = 'true';
+    mocks.generateDocumentQueryEmbedding.mockRejectedValueOnce(new Error('model warmup failed'));
+
+    const result = await retrieveSupportContext({
+      workspaceId: 'workspace-1',
+      autopilotConfigId: 'config-1',
+      query: 'plano de 1000 mega',
+    });
+
+    expect(mocks.searchKeywordDocuments).toHaveBeenCalledOnce();
+    expect(mocks.searchSimilarDocuments).not.toHaveBeenCalled();
+    expect(result.knowledgeBaseDocuments).toEqual([
+      expect.objectContaining({ id: 'document-1', source: 'keyword' }),
+    ]);
+    expect(result.diagnostics).toMatchObject({
+      localQueryEmbeddingEnabled: true,
+      queryVectorLength: 0,
+      queryEmbeddingError: 'model warmup failed',
+    });
+  });
+
+  it('uses semantic retrieval by default unless a deployment explicitly disables it', () => {
+    const previous = process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED;
+    delete process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED;
+    try {
+      expect(isLocalRagQueryEmbeddingEnabled()).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED;
+      else process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED = previous;
+    }
   });
 });

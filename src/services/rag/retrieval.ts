@@ -12,7 +12,10 @@ const RRF_RANK_CONSTANT = 60;
 export function isLocalRagQueryEmbeddingEnabled() {
     const configured = process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED?.trim().toLowerCase();
     if (configured) return configured === 'true' || configured === '1' || configured === 'yes';
-    return process.env.NODE_ENV !== 'production';
+    // Semantic retrieval is the primary RAG path. Deployments that cannot host
+    // the local model may explicitly set this to false, but production must not
+    // silently degrade to keyword-only retrieval by default.
+    return true;
 }
 
 const DOCUMENT_MIN_SIMILARITY_BY_INTENT: Partial<Record<UniversalAutopilotIntent, number>> = {
@@ -134,20 +137,36 @@ export async function retrieveSupportContext(input: {
     }
 
     const localQueryEmbeddingEnabled = isLocalRagQueryEmbeddingEnabled();
-    const queryVector = localQueryEmbeddingEnabled
-        ? await generateDocumentQueryEmbedding(queryText)
-        : [];
+    let queryVector: number[] = [];
+    let queryEmbeddingError: string | null = null;
+    if (localQueryEmbeddingEnabled) {
+        try {
+            queryVector = await generateDocumentQueryEmbedding(queryText);
+        } catch (error) {
+            // A temporary local-model failure must not suppress lexical RAG or
+            // force the whole turn into a generic static fallback.
+            queryEmbeddingError = error instanceof Error ? error.message : String(error);
+            console.warn('[RAG] Query embedding failed; continuing with keyword retrieval:', queryEmbeddingError);
+        }
+    }
     const minSimilarity = getDocumentMinSimilarity(input.intent);
-    const docMatches = queryVector.length > 0
-        ? dedupeMatchesByDocumentId(await VectorStore.searchSimilarDocuments({
-            vector: queryVector,
-            workspaceId: input.workspaceId,
-            autopilotConfigId: input.autopilotConfigId ?? null,
-            limit: DOCUMENT_LIMIT * 3,
-            minSimilarity,
-            allowedDocumentIds: input.allowedDocumentIds,
-        })).slice(0, DOCUMENT_LIMIT * 2)
-        : [];
+    let vectorRetrievalError: string | null = null;
+    let docMatches: RankedDocumentMatch[] = [];
+    if (queryVector.length > 0) {
+        try {
+            docMatches = dedupeMatchesByDocumentId(await VectorStore.searchSimilarDocuments({
+                vector: queryVector,
+                workspaceId: input.workspaceId,
+                autopilotConfigId: input.autopilotConfigId ?? null,
+                limit: DOCUMENT_LIMIT * 3,
+                minSimilarity,
+                allowedDocumentIds: input.allowedDocumentIds,
+            })).slice(0, DOCUMENT_LIMIT * 2);
+        } catch (error) {
+            vectorRetrievalError = error instanceof Error ? error.message : String(error);
+            console.warn('[RAG] Vector retrieval failed; continuing with keyword retrieval:', vectorRetrievalError);
+        }
+    }
 
     const keywordMatches = dedupeMatchesByDocumentId(await VectorStore.searchKeywordDocuments({
         query: queryText,
@@ -165,16 +184,23 @@ export async function retrieveSupportContext(input: {
         limit: DOCUMENT_LIMIT * 2,
     });
 
-    const caseMatches = queryVector.length > 0
-        ? await VectorStore.searchSimilarCaseMemories({
-            vector: queryVector,
-            workspaceId: input.workspaceId,
-            autopilotConfigId: input.autopilotConfigId ?? null,
-            excludeChatId: input.excludeChatId ?? null,
-            limit: CASE_LIMIT,
-            minSimilarity: CASE_MIN_SIMILARITY,
-        })
-        : [];
+    let caseRetrievalError: string | null = null;
+    let caseMatches: CaseMemoryMatch[] = [];
+    if (queryVector.length > 0) {
+        try {
+            caseMatches = await VectorStore.searchSimilarCaseMemories({
+                vector: queryVector,
+                workspaceId: input.workspaceId,
+                autopilotConfigId: input.autopilotConfigId ?? null,
+                excludeChatId: input.excludeChatId ?? null,
+                limit: CASE_LIMIT,
+                minSimilarity: CASE_MIN_SIMILARITY,
+            });
+        } catch (error) {
+            caseRetrievalError = error instanceof Error ? error.message : String(error);
+            console.warn('[RAG] Case-memory retrieval failed; continuing without case memory:', caseRetrievalError);
+        }
+    }
     const finalCaseMatches = caseMatches;
 
     const knowledgeBaseDocuments = dedupeDocumentsByContent(
@@ -210,6 +236,9 @@ export async function retrieveSupportContext(input: {
         diagnostics: {
             queryVectorLength: queryVector.length,
             localQueryEmbeddingEnabled,
+            queryEmbeddingError,
+            vectorRetrievalError,
+            caseRetrievalError,
             documentMinSimilarity: minSimilarity,
             vectorMatches: docMatches.length,
             keywordMatches: keywordMatches.length,

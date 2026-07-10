@@ -92,7 +92,8 @@ import {
     compactProcedureToolResults,
     PROCEDURE_SLIM_LIMITS,
 } from '@/services/autopilot/procedure-prompt-slim';
-import { sendMultiBlockResponse } from '@/services/autopilot/runtime/message-sender';
+import { sendMultiBlockResponse as sendMultiBlockResponseRaw } from '@/services/autopilot/runtime/message-sender';
+import { scheduleAutopilotInactivityClose } from '@/services/autopilot/runtime/inactivity-close';
 import { isProviderDeliveryError } from '@/services/autopilot/runtime/provider-delivery';
 import type { AutopilotResponseTrace } from '@/services/autopilot/runtime/response-delivery';
 import {
@@ -118,6 +119,8 @@ import {
     mergeAgentActions,
     normalizeAgentActions,
 } from '@/services/autopilot/runtime/action-utils';
+import { runAutopilotWorkflowRuntimeV2Shadow } from '@/services/workflow-runtime/autopilot-rollout';
+import { runAutopilotWorkflowRuntimeV2Primary } from '@/services/workflow-runtime/autopilot-primary';
 import {
     completeProcedureToolReuse,
     planProcedureToolReuse,
@@ -215,11 +218,6 @@ async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames
                 requiresHumanApproval: safety.requiresHumanApproval,
                 customerVisible: true,
                 allowedIntents: [
-                    'purchase_inquiry',
-                    'catalog_request',
-                    'pricing_request',
-                    'promotion_request',
-                    'availability_request',
                     'billing_or_payment',
                     'scheduling_request',
                     'order_or_request_status',
@@ -824,7 +822,7 @@ async function sendToolFailureFollowUp(input: {
     if (!failureResponse) return null;
 
     const formattedResponse = formatCustomerFacingAiResponse(failureResponse);
-    await sendMultiBlockResponse(
+    await sendMultiBlockResponseRaw(
         input.chatId,
         formattedResponse,
         input.systemAgentId,
@@ -1028,6 +1026,22 @@ export async function processAutopilotForChat(
         workspaceId,
         sourceMessageId: sourceMessageId ?? null,
         orchestratorRunId: orchestratorRun.id,
+    };
+    const sendMultiBlockResponse: typeof sendMultiBlockResponseRaw = async (...args) => {
+        const result = await sendMultiBlockResponseRaw(...args);
+        if (result.success) {
+            scheduleAutopilotInactivityClose({
+                workspaceId,
+                chatId: chat.id,
+                autopilotConfigId: autopilotConfig.id,
+                systemAgentId: assignedSystemAgentId,
+                timeoutSeconds: autopilotConfig.inactivity_timeout_seconds || null,
+                anchorAt: new Date(),
+                sourceMessageId: sourceMessageId ?? null,
+                orchestratorRunId: orchestratorRun.id,
+            });
+        }
+        return result;
     };
 
     const messagesRes = await db.query(
@@ -1242,6 +1256,156 @@ export async function processAutopilotForChat(
     }).catch((error) => {
         console.warn('[AUTOPILOT_FLOW_STATE] Failed to persist active node:', error);
     });
+
+    if (
+        currentCopilotMode === 'auto'
+        && sourceMessageId
+        && autopilotConfig.workflow_builder_mode === 'native_v2'
+    ) {
+        const nativeStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'workflow_runtime_v2_primary',
+            () => runAutopilotWorkflowRuntimeV2Primary({
+                config: autopilotConfig,
+                customerMessage: enrichedLastMessageContent || '',
+                chatId: chat.id,
+                sourceMessageId,
+                staticDocuments: staticKnowledgeDocuments,
+                dependencies: {
+                    database: db,
+                    toolContext: {
+                        workspaceId,
+                        chat,
+                        contact: sanitizedContact,
+                        systemAgentId: assignedSystemAgentId,
+                        systemAgentName: assignedSystemAgentName,
+                        autopilotConfig,
+                        turnPolicy,
+                        customerMessage: enrichedLastMessageContent || '',
+                        recentCustomerVisibleMessages: messages.map((message: any) => ({
+                            fromMe: Boolean(message.from_me),
+                            content: String(message.content || ''),
+                        })),
+                        orchestratorRunId: orchestratorRun.id,
+                    },
+                    recentMessages: messages.map((message: any) => ({
+                        fromMe: Boolean(message.from_me),
+                        content: String(message.content || ''),
+                    })),
+                    sendResponse: async (message, nodeInput) => {
+                        await assertAutopilotSourceMessageCurrent({
+                            chatId: chat.id,
+                            sourceMessageId,
+                        });
+                        const formatted = formatCustomerFacingAiResponse(message);
+                        const delivery = await sendMultiBlockResponse(
+                            chat.id,
+                            formatted,
+                            assignedSystemAgentId,
+                            true,
+                            instanceName,
+                            null,
+                            { ...responseTrace, deliveryKey: `workflow:${nodeInput.node.id}` },
+                        );
+                        await logIntelligentAttendantResponse({
+                            configId: autopilotConfig.id,
+                            chatId: chat.id,
+                            systemAgentId: assignedSystemAgentId,
+                            modelName: resolvedAiModel.model,
+                            customerMessage: enrichedLastMessageContent || '',
+                            response: formatted,
+                            status: delivery.success ? 'sent' : 'error',
+                            triggeredRule: null,
+                            metadata: {
+                                runtime: 'workflow_v2_primary',
+                                workflowNodeId: nodeInput.node.id,
+                                executionId: nodeInput.execution.executionId,
+                            },
+                        });
+                        return { success: delivery.success, apiResponse: delivery.apiResponse || null };
+                    },
+                    handoff: async (nodeInput) => {
+                        const [result] = await runRequestedAgentToolsWithStatus({
+                            workspaceId,
+                            chat,
+                            contact: sanitizedContact,
+                            systemAgentId: assignedSystemAgentId,
+                            systemAgentName: assignedSystemAgentName,
+                            autopilotConfig,
+                            turnPolicy,
+                            customerMessage: enrichedLastMessageContent || '',
+                            actions: [{
+                                type: 'transfer_chat',
+                                reason: String(nodeInput.node.config.reason || 'Transferência solicitada pelo workflow.'),
+                                payload: { teamId: String(nodeInput.node.config.teamId || '') || null },
+                            }],
+                            orchestratorRunId: orchestratorRun.id,
+                            sourceMessageId,
+                        });
+                        if (!result || result.status !== 'success') {
+                            throw new Error(result?.error || 'Não foi possível transferir o atendimento.');
+                        }
+                        return { transferred: true, output: result.output || null };
+                    },
+                },
+                context: {
+                    orchestratorRunId: orchestratorRun.id,
+                    intent: intentResolution.intent,
+                    confidence: intentResolution.confidence,
+                },
+            }),
+            { workflowId: autopilotConfig.active_workflow_id || null },
+        );
+        const nativeResult = nativeStage.value;
+        if (nativeResult.enabled && nativeResult.handled) {
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'workflow_runtime_v2_primary',
+                status: nativeResult.status === 'failed' ? 'fallback' : 'success',
+                durationMs: nativeStage.durationMs,
+                payload: nativeResult,
+            });
+            await finishOrchestratorRun({
+                run: orchestratorRun,
+                status: nativeResult.status === 'failed' ? 'error' : 'success',
+                timings: { ...orchestratorTimings, workflow_runtime_v2_primary_ms: nativeStage.durationMs },
+                intent: intentResolution.intent,
+                confidenceScore: intentResolution.confidence,
+                error: nativeResult.error,
+                metadata: {
+                    responseSent: nativeResult.status !== 'failed',
+                    workflowRuntime: 'v2_primary',
+                    workflowExecutionId: nativeResult.executionId,
+                    workflowStatus: nativeResult.status,
+                },
+            });
+            return;
+        }
+        // Native configurations never fall through to the retired planner. A
+        // disabled/misconfigured V2 gate is an operational failure, not
+        // permission to execute the same turn with a second runtime.
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'workflow_runtime_v2_primary',
+            status: 'error',
+            durationMs: nativeStage.durationMs,
+            payload: { ...nativeResult, failClosed: true },
+        });
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: 'error',
+            timings: { ...orchestratorTimings, workflow_runtime_v2_primary_ms: nativeStage.durationMs },
+            intent: intentResolution.intent,
+            confidenceScore: intentResolution.confidence,
+            error: nativeResult.error || 'workflow_runtime_v2_not_available',
+            metadata: {
+                responseSent: false,
+                workflowRuntime: 'v2_primary',
+                failClosed: true,
+            },
+        });
+        return;
+    }
     const pendingActionSuperseded = currentCopilotMode === 'auto'
         ? await consumeSupersededPendingAction({
             state: persistedFlowState,
@@ -1644,6 +1808,8 @@ export async function processAutopilotForChat(
                     retrieveHybridSupportContext({
                         workspaceId,
                         autopilotConfigId: autopilotConfig.id,
+                        chatId: chat.id,
+                        orchestratorRunId: orchestratorRun.id,
                         query: enrichedLastMessageContent,
                         excludeChatId: chat.id,
                         staticDocuments: scopedStaticKnowledgeDocuments,
@@ -1659,6 +1825,7 @@ export async function processAutopilotForChat(
                     workflowId: intentResolution.workflowId,
                     initialStaticDocuments: scopedStaticKnowledgeDocuments.length,
                     allowedKnowledgeCollections: activeFlowIntentScope?.knowledgeCollectionIds || null,
+                    allowedKnowledgeDocuments: activeFlowIntentScope?.knowledgeDocumentIds || null,
                 }
             );
             orchestratorTimings.rag_ms = ragStage.durationMs;
@@ -2001,6 +2168,51 @@ export async function processAutopilotForChat(
         recentToolResults,
         enrichedLastMessageContent || ''
     );
+    try {
+        const workflowRuntimeV2ShadowStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'workflow_runtime_v2_shadow',
+            () => withTimeout(
+                runAutopilotWorkflowRuntimeV2Shadow({
+                    config: autopilotConfig,
+                    customerMessage: enrichedLastMessageContent || '',
+                    chatId: chat.id,
+                    sourceMessageId,
+                    metadata: {
+                        deterministicExecutionMode: workflowPlan.executionMode,
+                        deterministicActions: workflowPlan.actions.map(resolveActionToolName),
+                        intent: intentResolution.intent,
+                        confidence: intentResolution.confidence,
+                    },
+                }),
+                8_000,
+                'workflow runtime v2 shadow'
+            ),
+            {
+                workflowExecutionMode: workflowPlan.executionMode,
+                intent: intentResolution.intent,
+            }
+        );
+        if (workflowRuntimeV2ShadowStage.value.enabled) {
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'workflow_runtime_v2_shadow',
+                status: workflowRuntimeV2ShadowStage.value.status === 'failed' ? 'fallback' : 'success',
+                durationMs: workflowRuntimeV2ShadowStage.durationMs,
+                payload: workflowRuntimeV2ShadowStage.value,
+            });
+        }
+    } catch (error) {
+        console.warn('[WORKFLOW_RUNTIME_V2_SHADOW] Failed, keeping current autopilot runtime:', error);
+        await recordOrchestratorEvent({
+            run: orchestratorRun,
+            kind: 'workflow_runtime_v2_shadow',
+            status: 'fallback',
+            payload: {
+                error: error instanceof Error ? error.message : String(error),
+            },
+        });
+    }
     const toolCoverage = analyzeAutopilotToolCoverage({
         graph: autopilotConfig.flow_graph,
         enabledToolNames: turnPolicy.globallyEnabledToolNames,
@@ -2163,6 +2375,9 @@ export async function processAutopilotForChat(
         workflowHandledByWorkflow: workflowPlan.handledByWorkflow,
         shouldPrioritizeTurnPlan,
     });
+    // An entry message is a deterministic workflow response, never a blanket
+    // replacement for the customer's first meaningful turn. Let RAG/LLM run
+    // whenever the workflow resolved to continue_llm.
     const entryFlowMessageNode = canSendDeterministicFlowResponse
         ? resolveEntryDeterministicFlowMessage(autopilotConfig)
         : null;
@@ -3793,11 +4008,13 @@ export async function processAutopilotForChat(
             const retrieval = await retrieveHybridSupportContext({
                 workspaceId,
                 autopilotConfigId: autopilotConfig.id,
+                chatId: chat.id,
+                orchestratorRunId: orchestratorRun.id,
                 query: query || enrichedLastMessageContent || context.procedureName,
                 excludeChatId: chat.id,
                 staticDocuments: scopedStaticKnowledgeDocuments,
                 intent: intentResolution,
-                allowedDocumentIds,
+                allowedDocumentIds: step.knowledgeDocumentIds?.length ? step.knowledgeDocumentIds : allowedDocumentIds,
             });
             const selectedById = new Map(retrieval.selected.map((item) => [item.id, item]));
             const chunks = retrieval.knowledgeBaseDocuments.map((document) => {

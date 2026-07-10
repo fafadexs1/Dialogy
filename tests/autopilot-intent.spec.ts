@@ -473,4 +473,13 @@ describe('autopilot universal intent resolver', () => {
     expect(purchaseResolution.intent).toBe('purchase_inquiry');
     expect(purchaseResolution.shouldUseLlm).toBe(true);
   });
+
+  it('identifies name follow-up in availability/purchase context and continues the active context', () => {
+    const resolution = resolveAutopilotIntent({
+      customerMessage: 'Fabricio de Sousa Soares',
+      chatHistory: 'Atendente: Ótimo! O CEP 72883772 vou verificar para você. Para darmos continuidade, preciso do seu nome completo.',
+    });
+
+    expect(resolution.intent).toBe('availability_request');
+  });
 });

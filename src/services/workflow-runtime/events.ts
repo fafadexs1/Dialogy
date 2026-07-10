@@ -4,16 +4,16 @@ import { createId, isRecord } from './utils';
 
 export type WorkflowEventListener = (event: WorkflowEvent) => void | Promise<void>;
 
-function redactValue(value: unknown, key = '', visited = new Set<object>()): unknown {
+export function redactWorkflowValue(value: unknown, key = '', visited = new Set<object>()): unknown {
   if (/(password|token|secret|authorization|api[_-]?key|cpf|cnpj)/i.test(key)) {
     return '[REDACTED]';
   }
   if (!value || typeof value !== 'object' || visited.has(value)) return value;
   visited.add(value);
-  if (Array.isArray(value)) return value.map((item) => redactValue(item, key, visited));
+  if (Array.isArray(value)) return value.map((item) => redactWorkflowValue(item, key, visited));
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
-      .map(([childKey, child]) => [childKey, redactValue(child, childKey, visited)]),
+      .map(([childKey, child]) => [childKey, redactWorkflowValue(child, childKey, visited)]),
   );
 }
 
@@ -65,7 +65,7 @@ export class WorkflowEventBus {
       id: createId('evt'),
       sequence,
       data: isRecord(event.data)
-        ? redactValue(event.data) as Record<string, unknown>
+        ? redactWorkflowValue(event.data) as Record<string, unknown>
         : undefined,
       createdAt: new Date().toISOString(),
     };

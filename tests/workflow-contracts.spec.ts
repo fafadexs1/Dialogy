@@ -5,10 +5,28 @@ import {
   WorkflowDefinitionSchema,
   createWorkflowNode,
   listWorkflowNodeManifests,
+  redactWorkflowValue,
 } from '@/services/workflow-runtime';
+import { InMemoryWorkflowPersistence } from '@/services/workflow-runtime';
 import { linearWorkflow } from './workflow-runtime-fixtures';
 
 describe('workflow runtime contracts', () => {
+  it('keeps published workflow definitions immutable', async () => {
+    const persistence = new InMemoryWorkflowPersistence();
+    const definition = linearWorkflow();
+    await persistence.saveWorkflowDefinition(definition);
+    await expect(persistence.saveWorkflowDefinition({ ...definition, name: 'Changed' }))
+      .rejects.toThrow('immutable');
+  });
+  it('redacts sensitive debugger values recursively', () => {
+    expect(redactWorkflowValue({
+      nested: { password: 'secret', apiKey: 'key' },
+      safe: 'visible',
+    })).toEqual({
+      nested: { password: '[REDACTED]', apiKey: '[REDACTED]' },
+      safe: 'visible',
+    });
+  });
   it('accepts a valid universal workflow definition', () => {
     expect(WorkflowDefinitionSchema.parse(linearWorkflow()).nodes).toHaveLength(2);
   });
@@ -68,4 +86,3 @@ describe('workflow runtime contracts', () => {
     expect(left.inputPorts).not.toBe(right.inputPorts);
   });
 });
-

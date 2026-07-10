@@ -53,7 +53,6 @@ import {
   reindexAutopilotKnowledgeBase,
   runAutopilotRagLab,
   improveAutopilotKnowledgeDocument,
-  generateAutopilotFlowWithAi,
   getAutopilotDecisionInsights,
   refreshAutopilotDecisionPatterns,
   reviewAutopilotCausalPattern,
@@ -63,13 +62,18 @@ import {
   applyAutopilotScoreSuggestion,
   revertAutopilotCausalPatternApplication,
   importAutopilotEcosystemPattern,
+  previewAutopilotNativeWorkflowMigration,
+  applyAutopilotNativeWorkflowMigration,
+  createAutopilotNativeWorkflowDraft,
+  generateAutopilotNativeWorkflowWithAi,
+  runAutopilotNativeWorkflowTest,
   type AutopilotCausalPatternApplicationPreview,
   type AutopilotDecisionInsights,
 } from '@/actions/autopilot';
-import { resolveAppliedProposalToolNames } from '@/services/autopilot/flow-builder-tool-scope';
 import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
   DEFAULT_AUTOPILOT_MODEL,
+  getAiModelRuntimeProvider,
   getAiModelLabel,
   type AiModelCatalogEntry,
 } from '@/lib/ai-models';
@@ -86,7 +90,10 @@ import { AutopilotPlayground } from '@/components/autopilot/autopilot-playground
 import { AutopilotReadiness } from '@/components/autopilot/autopilot-readiness';
 import { AutopilotDecisionInsightsPanel } from '@/components/autopilot/autopilot-decision-insights';
 import { AutomationForm } from '@/components/autopilot/automation-form';
-import { AutopilotFlowBuilder, type AgentEditorPanel } from '@/components/autopilot/autopilot-flow-builder';
+import type { AgentEditorPanel } from '@/components/autopilot/autopilot-flow-builder';
+import { NativeWorkflowBuilder } from '@/components/workflow/native-workflow-builder';
+import { NativeAiBuilderDialog } from '@/components/workflow/native-ai-builder-dialog';
+import type { ModelConfiguration, NativeWorkflowTemplate, WorkflowDefinition } from '@/services/workflow-runtime';
 import {
   Dialog,
   DialogContent,
@@ -107,6 +114,8 @@ type AgentToolCatalogItem = {
   source: 'dialogy' | 'mcp';
   serverId?: string;
   serverName?: string;
+  inputSchema?: Record<string, unknown> | null;
+  outputSchema?: Record<string, unknown> | null;
 };
 
 function inferKnowledgeSourceFormat(filename: string): KnowledgeBaseDocument['sourceFormat'] {
@@ -155,7 +164,12 @@ function normalizeSnapshotForSignature(snapshot: AutopilotConfigDraftSnapshot) {
     default_fallback_reply: snapshot.default_fallback_reply || null,
     escalation_policy: snapshot.escalation_policy || null,
     closing_policy: snapshot.closing_policy || null,
+    inactivity_timeout_seconds: snapshot.inactivity_timeout_seconds || null,
     enabled_tool_names: [...(snapshot.enabled_tool_names || [])].sort(),
+    workflow_runtime_v2_mode: snapshot.workflow_runtime_v2_mode || 'off',
+    workflow_builder_mode: snapshot.workflow_builder_mode || 'legacy',
+    workflow_definition: snapshot.workflow_definition || null,
+    workflow_migration: snapshot.workflow_migration || null,
   };
 }
 
@@ -180,10 +194,15 @@ function buildSnapshotFromConfig(
     default_fallback_reply: config.default_fallback_reply || null,
     escalation_policy: config.escalation_policy || null,
     closing_policy: config.closing_policy || null,
+    inactivity_timeout_seconds: config.inactivity_timeout_seconds || null,
     enabled_tool_names: Array.isArray(config.enabled_tool_names)
       ? config.enabled_tool_names
       : defaultEnabledToolNames,
     flow_graph: config.flow_graph || null,
+    workflow_runtime_v2_mode: config.workflow_runtime_v2_mode || 'off',
+    workflow_builder_mode: config.workflow_builder_mode || 'legacy',
+    workflow_definition: config.workflow_definition || null,
+    workflow_migration: null,
   };
 }
 
@@ -208,10 +227,15 @@ function normalizeLoadedSnapshot(
     default_fallback_reply: snapshot.default_fallback_reply || null,
     escalation_policy: snapshot.escalation_policy || null,
     closing_policy: snapshot.closing_policy || null,
+    inactivity_timeout_seconds: snapshot.inactivity_timeout_seconds || fallback.inactivity_timeout_seconds || null,
     enabled_tool_names: Array.isArray(snapshot.enabled_tool_names)
       ? snapshot.enabled_tool_names
       : fallback.enabled_tool_names,
     flow_graph: snapshot.flow_graph || fallback.flow_graph || null,
+    workflow_runtime_v2_mode: snapshot.workflow_runtime_v2_mode || fallback.workflow_runtime_v2_mode || 'off',
+    workflow_builder_mode: snapshot.workflow_builder_mode || fallback.workflow_builder_mode || 'legacy',
+    workflow_definition: snapshot.workflow_definition || fallback.workflow_definition || null,
+    workflow_migration: snapshot.workflow_migration || fallback.workflow_migration || null,
   };
 }
 
@@ -276,6 +300,9 @@ function summarizeVersionChanges(
   if (normalizeTextForVersion(snapshot.closing_policy) !== normalizeTextForVersion(previous.closing_policy)) {
     changes.push('Politica de encerramento atualizada.');
   }
+  if ((snapshot.inactivity_timeout_seconds || null) !== (previous.inactivity_timeout_seconds || null)) {
+    changes.push(`Encerramento por inatividade alterado para ${snapshot.inactivity_timeout_seconds ? `${snapshot.inactivity_timeout_seconds}s` : 'desativado'}.`);
+  }
 
   const previousDocNames = previous.knowledge_base_documents.map((doc) => doc.name);
   const nextDocNames = snapshot.knowledge_base_documents.map((doc) => doc.name);
@@ -322,14 +349,18 @@ export default function AutopilotDetailPage() {
   const [isActive, setIsActive] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
+  const [workflowRuntimeV2ShadowEnabled, setWorkflowRuntimeV2ShadowEnabled] = useState(false);
   const [knowledgeBase, setKnowledgeBase] = useState('');
   const [defaultFallbackReply, setDefaultFallbackReply] = useState('');
   const [escalationPolicy, setEscalationPolicy] = useState('');
   const [closingPolicy, setClosingPolicy] = useState('');
+  const [inactivityTimeoutSeconds, setInactivityTimeoutSeconds] = useState<number | null>(null);
   const [enabledToolNames, setEnabledToolNames] = useState<string[]>([]);
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeBaseDocument[]>([]);
   const [knowledgeCollections, setKnowledgeCollections] = useState<KnowledgeCollection[]>([DEFAULT_KNOWLEDGE_COLLECTION]);
   const [flowGraph, setFlowGraph] = useState<AutopilotFlowGraph | null>(null);
+  const [workflowBuilderMode, setWorkflowBuilderMode] = useState<'legacy' | 'native_v2'>('native_v2');
+  const [workflowDefinition, setWorkflowDefinition] = useState<WorkflowDefinition | null>(null);
   const [loadedEditorSnapshot, setLoadedEditorSnapshot] = useState<AutopilotConfigDraftSnapshot | null>(null);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
   const [versions, setVersions] = useState<AutopilotConfigVersionSummary[]>([]);
@@ -343,6 +374,14 @@ export default function AutopilotDetailPage() {
   const [editingRule, setEditingRule] = useState<NexusFlowInstance | null>(null);
   const [lastPlaygroundTrace, setLastPlaygroundTrace] = useState<AutopilotPlaygroundTrace | null>(null);
   const [editorPanel, setEditorPanel] = useState<AgentEditorPanel | null>(null);
+  const [nativeSetupOpen, setNativeSetupOpen] = useState(false);
+  const [nativeSetupBusy, setNativeSetupBusy] = useState(false);
+  const [nativeMigrationPreview, setNativeMigrationPreview] = useState<{
+    workflow: WorkflowDefinition;
+    validation: { valid: boolean; errors: Array<{ message: string }> };
+    changes: string[];
+    warnings: string[];
+  } | null>(null);
   const [ragHealth, setRagHealth] = useState<AutopilotRagHealth | null>(null);
   const [isReindexingKnowledge, setIsReindexingKnowledge] = useState(false);
   const [ragLabReport, setRagLabReport] = useState<RagLabReport | null>(null);
@@ -372,6 +411,18 @@ export default function AutopilotDetailPage() {
     () => configuredAiModels,
     [configuredAiModels]
   );
+
+  const nativeDefaultModel = useMemo<ModelConfiguration>(() => ({
+    provider: getAiModelRuntimeProvider(aiModel || DEFAULT_AUTOPILOT_MODEL),
+    model: aiModel || DEFAULT_AUTOPILOT_MODEL,
+    temperature: 0.2,
+    maxOutputTokens: 2048,
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    supportsStreaming: true,
+    timeoutMs: 60_000,
+    maxRetries: 2,
+  }), [aiModel]);
 
   const fetchData = useCallback(async (options?: { showLoading?: boolean }) => {
     if (!user?.activeWorkspaceId || !agentId) return;
@@ -434,14 +485,18 @@ export default function AutopilotDetailPage() {
       setIsActive(Boolean(editorSnapshot.is_active));
       setIsPrivate(Boolean(editorSnapshot.is_private));
       setIsPrimary(Boolean(autopilotData.config.is_primary));
+      setWorkflowRuntimeV2ShadowEnabled(editorSnapshot.workflow_runtime_v2_mode === 'shadow');
       setKnowledgeBase(editorSnapshot.knowledge_base || '');
       setDefaultFallbackReply(editorSnapshot.default_fallback_reply || '');
       setEscalationPolicy(editorSnapshot.escalation_policy || '');
       setClosingPolicy(editorSnapshot.closing_policy || '');
+      setInactivityTimeoutSeconds(editorSnapshot.inactivity_timeout_seconds || null);
       setEnabledToolNames(editorSnapshot.enabled_tool_names || []);
       setKnowledgeDocuments(editorSnapshot.knowledge_base_documents || []);
       setKnowledgeCollections(normalizeKnowledgeCollections(editorSnapshot.knowledge_collections));
       setFlowGraph(editorSnapshot.flow_graph || null);
+      setWorkflowBuilderMode('native_v2');
+      setWorkflowDefinition(editorSnapshot.workflow_definition || null);
       setRagHealth(ragHealthData.health || null);
 
       const logsData = await getAutopilotUsageLogs(autopilotData.config.id);
@@ -470,8 +525,13 @@ export default function AutopilotDetailPage() {
     default_fallback_reply: defaultFallbackReply || null,
     escalation_policy: escalationPolicy || null,
     closing_policy: closingPolicy || null,
+    inactivity_timeout_seconds: inactivityTimeoutSeconds || null,
     enabled_tool_names: enabledToolNames,
     flow_graph: flowGraph,
+    workflow_runtime_v2_mode: workflowRuntimeV2ShadowEnabled ? 'shadow' : 'off',
+    workflow_builder_mode: workflowBuilderMode,
+    workflow_definition: workflowDefinition,
+    workflow_migration: loadedEditorSnapshot?.workflow_migration || null,
   }), [
     agentName,
     aiModel,
@@ -480,12 +540,17 @@ export default function AutopilotDetailPage() {
     defaultFallbackReply,
     enabledToolNames,
     escalationPolicy,
+    inactivityTimeoutSeconds,
     isActive,
     isPrivate,
     knowledgeBase,
     knowledgeDocuments,
     knowledgeCollections,
     flowGraph,
+    workflowBuilderMode,
+    workflowDefinition,
+    loadedEditorSnapshot?.workflow_migration,
+    workflowRuntimeV2ShadowEnabled,
   ]);
 
   const currentSnapshotSignature = useMemo(
@@ -504,7 +569,7 @@ export default function AutopilotDetailPage() {
 
   const hasDraft = Boolean(draftUpdatedAt);
   const hasUnpublishedChanges = hasDraft || isDirty;
-  const previewDraftSnapshot = hasUnpublishedChanges ? currentEditorSnapshot : null;
+  const previewDraftSnapshot = currentEditorSnapshot;
 
   const buildConfigFormData = useCallback(() => {
     if (!config || !user?.activeWorkspaceId) return null;
@@ -520,10 +585,14 @@ export default function AutopilotDetailPage() {
     formData.append('defaultFallbackReply', defaultFallbackReply);
     formData.append('escalationPolicy', escalationPolicy);
     formData.append('closingPolicy', closingPolicy);
+    formData.append('inactivityTimeoutSeconds', inactivityTimeoutSeconds ? String(inactivityTimeoutSeconds) : '');
     formData.append('enabledToolNames', JSON.stringify(enabledToolNames));
     formData.append('knowledgeBaseDocuments', JSON.stringify(knowledgeDocuments));
     formData.append('knowledgeCollections', JSON.stringify(knowledgeCollections));
     formData.append('flowGraph', JSON.stringify(flowGraph));
+    formData.append('workflowRuntimeV2Mode', workflowRuntimeV2ShadowEnabled ? 'shadow' : 'off');
+    formData.append('workflowBuilderMode', workflowBuilderMode);
+    formData.append('workflowDefinition', JSON.stringify(workflowDefinition));
     return formData;
   }, [
     agentName,
@@ -533,12 +602,16 @@ export default function AutopilotDetailPage() {
     defaultFallbackReply,
     enabledToolNames,
     escalationPolicy,
+    inactivityTimeoutSeconds,
     isActive,
     isPrivate,
     knowledgeBase,
     knowledgeDocuments,
     knowledgeCollections,
     flowGraph,
+    workflowBuilderMode,
+    workflowDefinition,
+    workflowRuntimeV2ShadowEnabled,
     user?.activeWorkspaceId,
   ]);
 
@@ -584,7 +657,7 @@ export default function AutopilotDetailPage() {
       const result = await publishAutopilotDraft(config.id);
       if (result.success) {
         toast({
-          title: 'Agente publicado',
+          title: workflowBuilderMode === 'native_v2' ? 'Automação publicada' : 'Agente publicado',
           description: result.versionNumber ? `Versao v${result.versionNumber} publicada.` : 'Rascunho promovido para producao.',
         });
         setLastPlaygroundTrace(null);
@@ -1177,6 +1250,67 @@ export default function AutopilotDetailPage() {
 
   if (!config) return null;
 
+  const handlePreviewNativeMigration = async () => {
+    if (!config) return;
+    setNativeSetupBusy(true);
+    try {
+      const result = await previewAutopilotNativeWorkflowMigration(config.id);
+      if (!result.workflow || !result.validation) {
+        toast({ title: 'Migração indisponível', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setNativeMigrationPreview({
+        workflow: result.workflow,
+        validation: result.validation,
+        changes: result.changes || [],
+        warnings: result.warnings || [],
+      });
+      setNativeSetupOpen(true);
+    } finally {
+      setNativeSetupBusy(false);
+    }
+  };
+
+  const handleApplyNativeMigration = async () => {
+    if (!config) return;
+    setNativeSetupBusy(true);
+    try {
+      const result = await applyAutopilotNativeWorkflowMigration(config.id);
+      if (!result.success || !result.workflow) {
+        toast({ title: 'Falha ao migrar', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setWorkflowDefinition(result.workflow);
+      setWorkflowBuilderMode('native_v2');
+      setWorkflowRuntimeV2ShadowEnabled(true);
+      setDraftUpdatedAt(result.updatedAt || new Date().toISOString());
+      setNativeSetupOpen(false);
+      toast({ title: 'Flowbuilder nativo ativado', description: 'O grafo legado foi preservado para rollback.' });
+    } finally {
+      setNativeSetupBusy(false);
+    }
+  };
+
+  const handleCreateNativeTemplate = async (template: NativeWorkflowTemplate) => {
+    if (!config) return;
+    setNativeSetupBusy(true);
+    try {
+      const result = await createAutopilotNativeWorkflowDraft({ configId: config.id, template });
+      if (!result.success || !result.workflow) {
+        toast({ title: 'Falha ao criar automação', description: result.error, variant: 'destructive' });
+        return;
+      }
+      setWorkflowDefinition(result.workflow);
+      setWorkflowBuilderMode('native_v2');
+      setWorkflowRuntimeV2ShadowEnabled(true);
+      setDraftUpdatedAt(result.updatedAt || new Date().toISOString());
+      setNativeSetupOpen(false);
+      toast({ title: 'Automação nativa criada', description: 'Configure os blocos e publique quando a validação estiver verde.' });
+    } finally {
+      setNativeSetupBusy(false);
+    }
+  };
+
   const handleOpenEditorPanel = (panel: AgentEditorPanel) => {
     const inlinePanels: AgentEditorPanel[] = ['knowledge', 'capabilities', 'analytics', 'decision', 'settings'];
     setEditorPanel((current) => (current === panel && inlinePanels.includes(panel) ? null : panel));
@@ -1377,10 +1511,14 @@ export default function AutopilotDetailPage() {
               setEscalationPolicy={setEscalationPolicy}
               closingPolicy={closingPolicy}
               setClosingPolicy={setClosingPolicy}
+              inactivityTimeoutSeconds={inactivityTimeoutSeconds}
+              setInactivityTimeoutSeconds={setInactivityTimeoutSeconds}
               isActive={isActive}
               setIsActive={setIsActive}
               isPrivate={isPrivate}
               setIsPrivate={setIsPrivate}
+              workflowRuntimeV2ShadowEnabled={workflowRuntimeV2ShadowEnabled}
+              setWorkflowRuntimeV2ShadowEnabled={setWorkflowRuntimeV2ShadowEnabled}
               isPrimary={isPrimary}
               onSetPrimary={handleSetPrimary}
               modelOptions={selectableModels}
@@ -1388,6 +1526,7 @@ export default function AutopilotDetailPage() {
               isSaving={isSaving}
               onDelete={handleDeleteAgent}
               workspace={workspace}
+              nativeWorkflow={workflowBuilderMode === 'native_v2'}
             />
           </div>
         ),
@@ -1401,56 +1540,137 @@ export default function AutopilotDetailPage() {
       ? editorPanel
       : null;
 
-  if (process.env.NEXT_PUBLIC_AUTOPILOT_VISUAL_BUILDER !== 'false') return (
+  if (workflowDefinition) return (
     <>
-      <AutopilotFlowBuilder
-        agentId={agentId}
-        agentName={agentName || config.name}
-        modelName={getAiModelLabel(aiModel, modelCatalog)}
-        isActive={isActive}
-        isPrivate={isPrivate}
-        isPrimary={isPrimary}
-        hasDraft={hasDraft}
-        isDirty={isDirty}
-        isSaving={isSaving}
-        isPublishing={isPublishing}
-        isDiscarding={isDiscardingDraft}
-        enabledToolNames={enabledToolNames}
-        tools={toolCatalog}
-        knowledgeDocuments={knowledgeDocuments}
-        knowledgeCollections={knowledgeCollections}
-        mainSystemPrompt={knowledgeBase}
-        flowGraph={flowGraph}
-        onMainSystemPromptChange={setKnowledgeBase}
-        onFlowGraphChange={setFlowGraph}
-        onBack={() => router.push('/autopilot')}
-        onOpenPanel={handleOpenEditorPanel}
-        inlinePanel={inlineEditorPanel}
-        inlinePanelName={inlineEditorPanelName}
-        onSave={handleSaveConfig}
-        onPublish={handlePublishConfig}
-        onDiscard={handleDiscardDraft}
-        onGenerateFlowWithAi={(input) => generateAutopilotFlowWithAi({
+    <div className="relative min-h-0 flex-1">
+      <NativeWorkflowBuilder
+      definition={workflowDefinition}
+      defaultModel={nativeDefaultModel}
+      tools={toolCatalog.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        source: tool.source,
+        serverId: tool.serverId,
+        riskLevel: tool.riskLevel,
+        requiresHumanApproval: tool.requiresHumanApproval,
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
+      }))}
+      isSaving={isSaving}
+      isPublishing={isPublishing}
+      onChange={setWorkflowDefinition}
+      onBack={() => router.push('/autopilot')}
+      onOpenSettings={() => setEditorPanel('settings')}
+      onTest={async () => {
+        const message = window.prompt('Mensagem de teste', 'Olá, preciso de ajuda.');
+        if (!message?.trim() || !config) return null;
+        const result = await runAutopilotNativeWorkflowTest({
+          configId: config.id,
+          customerMessage: message.trim(),
+          workflowDefinition,
+        });
+        if (!result.success || !result.executionId) {
+          toast({ title: 'Falha no teste', description: result.error, variant: 'destructive' });
+          return null;
+        }
+        return result.executionId;
+      }}
+      onTestNode={async (startNodeId, fixtures) => {
+        if (!config) return null;
+        const result = await runAutopilotNativeWorkflowTest({
+          configId: config.id,
+          customerMessage: 'Teste isolado iniciado pelo editor.',
+          workflowDefinition,
+          startNodeId,
+          fixtures,
+        });
+        if (!result.success || !result.executionId) {
+          toast({ title: 'Falha no teste isolado', description: result.error, variant: 'destructive' });
+          return null;
+        }
+        return result.executionId;
+      }}
+      onSave={handleSaveConfig}
+      onPublish={handlePublishConfig}
+      />
+      <NativeAiBuilderDialog
+        definition={workflowDefinition}
+        disabled={isSaving || isPublishing}
+        onGenerate={(conversation) => generateAutopilotNativeWorkflowWithAi({
           configId: agentId,
-          conversation: input.conversation,
-          currentGraph: input.currentGraph,
-          currentSystemPrompt: input.currentSystemPrompt,
+          conversation,
+          currentWorkflow: workflowDefinition,
           enabledToolNames,
-          model: aiModel,
         })}
-        onApplyAiProposal={(proposal) => {
-          setFlowGraph(proposal.flowGraph);
-          setKnowledgeBase(proposal.systemPrompt);
-          setEnabledToolNames(resolveAppliedProposalToolNames({
-            proposalToolNames: proposal.enabledToolNames,
-            catalogToolNames: toolCatalog.map((tool) => tool.name),
-          }));
+        onApply={(proposal) => {
+          if (!proposal.validation.valid) {
+            toast({ title: 'Proposta bloqueada', description: 'A proposta nao passou no validador do runtime.', variant: 'destructive' });
+            return;
+          }
+          setWorkflowDefinition(proposal.workflow);
+          setEnabledToolNames((current) => [...new Set([...current, ...proposal.selectedToolNames])]);
           toast({
             title: 'Proposta aplicada ao rascunho',
-            description: 'Revise o flow, teste o atendimento e salve antes de publicar.',
+            description: 'Revise o canvas, execute um teste e salve quando estiver pronto.',
           });
         }}
       />
+    </div>
+    <Dialog open={editorPanel === 'settings'} onOpenChange={(open) => !open && setEditorPanel(null)}>
+      <DialogContent className="max-h-[94vh] max-w-[min(1180px,96vw)] overflow-y-auto border-white/10 bg-[#0f1114] p-0">
+        {inlineEditorPanel}
+      </DialogContent>
+    </Dialog>
+    </>
+  );
+
+  // Native-only onboarding. Configurations without a definition can choose a
+  // supported template, but the legacy editor is no longer reachable.
+  return (
+    <>
+      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
+        <div className="w-full max-w-3xl rounded-3xl border border-cyan-500/20 bg-[#101821] p-8 text-center shadow-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-400">Flowbuilder agent-first</p>
+          <h1 className="mt-3 text-2xl font-semibold text-white">Crie a definição nativa desta automação</h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-400">Escolha um template executável. O editor anterior foi desativado e nenhum novo fluxo é salvo no formato legado.</p>
+          <Button onClick={() => { setNativeMigrationPreview(null); setNativeSetupOpen(true); }} className="mt-6 bg-cyan-500 text-slate-950 hover:bg-cyan-400">Escolher template</Button>
+        </div>
+      </div>
+
+      <Dialog open={nativeSetupOpen} onOpenChange={setNativeSetupOpen}>
+        <DialogContent className="max-w-3xl border-white/10 bg-[#111419] text-slate-100">
+          <DialogTitle>Flowbuilder agent-first</DialogTitle>
+          <DialogDescription className="text-slate-400">
+            Comece por um template ou migre o fluxo atual. O grafo legado nunca será apagado.
+          </DialogDescription>
+          {nativeMigrationPreview ? (
+            <div className="space-y-5">
+              <div className={cn('rounded-2xl border p-4', nativeMigrationPreview.validation.valid ? 'border-emerald-500/20 bg-emerald-500/[0.06]' : 'border-amber-500/20 bg-amber-500/[0.06]')}>
+                <p className="font-medium">{nativeMigrationPreview.validation.valid ? 'Migração pronta para aplicar' : 'A migração precisa de revisão'}</p>
+                <p className="mt-1 text-sm text-slate-400">{nativeMigrationPreview.workflow.nodes.length} blocos · {nativeMigrationPreview.workflow.connections.length} conexões</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {nativeMigrationPreview.changes.map((change) => <div key={change} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-slate-300">{change}</div>)}
+              </div>
+              {nativeMigrationPreview.validation.errors.length > 0 && <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] p-4 text-sm text-red-200">{nativeMigrationPreview.validation.errors.map((issue) => issue.message).join(' ')}</div>}
+              <div className="flex justify-end gap-3"><Button variant="ghost" onClick={() => setNativeMigrationPreview(null)}>Voltar aos templates</Button><Button onClick={() => void handleApplyNativeMigration()} disabled={nativeSetupBusy || !nativeMigrationPreview.validation.valid}>Aplicar migração</Button></div>
+            </div>
+          ) : (
+            <div className="grid gap-4 py-3 sm:grid-cols-3">
+              {[
+                ['single_agent', 'Agente único', 'Atendimento completo com modelo, memória, RAG e guardrail.'],
+                ['routed_team', 'Equipe roteada', 'AI Router direcionando suporte e comercial.'],
+                ['blank', 'Em branco', 'Canvas livre, inicialmente bloqueado para publicação.'],
+              ].map(([template, title, description]) => (
+                <button key={template} type="button" onClick={() => void handleCreateNativeTemplate(template as NativeWorkflowTemplate)} disabled={nativeSetupBusy} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-cyan-400/40 hover:bg-cyan-500/[0.06]">
+                  <span className="block font-semibold text-slate-100">{title}</span><span className="mt-2 block text-sm leading-6 text-slate-400">{description}</span>
+                </button>
+              ))}
+              {flowGraph && <Button variant="outline" onClick={() => void handlePreviewNativeMigration()} disabled={nativeSetupBusy} className="sm:col-span-3">Visualizar migração do flow atual</Button>}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editorPanel !== null && !inlineEditorPanelName} onOpenChange={(open) => !open && setEditorPanel(null)}>
         <DialogContent className="flex h-[92vh] max-h-[92vh] w-[min(1160px,94vw)] max-w-none flex-col overflow-hidden rounded-[26px] border-white/10 bg-[#111316] p-0 text-slate-100 shadow-2xl">
@@ -1543,7 +1763,8 @@ export default function AutopilotDetailPage() {
     </>
   );
 
-  // Rollback path while the visual workflow editor is introduced in production.
+  // Historical settings markup retained only as unreachable source during the
+  // cleanup window; both executable returns above are native-only.
   return (
     <div className="flex h-full min-w-0 flex-col gap-6 bg-background px-4 py-4 sm:px-6 lg:px-8">
       <header className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-4 rounded-[28px] border border-border bg-card p-5 shadow-sm">
@@ -1561,7 +1782,7 @@ export default function AutopilotDetailPage() {
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">
-                  {agentName || config.name}
+                  {agentName || config?.name}
                 </h1>
                 {isPrimary && (
                   <Badge className="rounded-full border-0 bg-amber-500/15 text-amber-700 dark:text-amber-300">
@@ -1645,7 +1866,7 @@ export default function AutopilotDetailPage() {
             <History className="h-4 w-4" />
             {hasDraft && (
               <span>
-                Rascunho salvo{draftUpdatedAt ? ` em ${new Date(draftUpdatedAt).toLocaleString('pt-BR')}` : ''}.
+                Rascunho salvo{draftUpdatedAt ? ` em ${new Date(String(draftUpdatedAt)).toLocaleString('pt-BR')}` : ''}.
               </span>
             )}
             {versions[0] && (
@@ -1713,7 +1934,7 @@ export default function AutopilotDetailPage() {
                     </div>
 
                     <div className="space-y-3">
-                      <h2 className="text-3xl font-bold tracking-tight text-foreground">{agentName || config.name}</h2>
+                      <h2 className="text-3xl font-bold tracking-tight text-foreground">{agentName || config?.name}</h2>
                       <p className="line-clamp-6 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
                         {knowledgeBase?.trim()
                           ? knowledgeBase.trim()
@@ -1900,10 +2121,14 @@ export default function AutopilotDetailPage() {
                 setEscalationPolicy={setEscalationPolicy}
                 closingPolicy={closingPolicy}
                 setClosingPolicy={setClosingPolicy}
+                inactivityTimeoutSeconds={inactivityTimeoutSeconds}
+                setInactivityTimeoutSeconds={setInactivityTimeoutSeconds}
                 isActive={isActive}
                 setIsActive={setIsActive}
                 isPrivate={isPrivate}
                 setIsPrivate={setIsPrivate}
+                workflowRuntimeV2ShadowEnabled={workflowRuntimeV2ShadowEnabled}
+                setWorkflowRuntimeV2ShadowEnabled={setWorkflowRuntimeV2ShadowEnabled}
                 isPrimary={isPrimary}
                 onSetPrimary={handleSetPrimary}
                 modelOptions={selectableModels}
@@ -1911,6 +2136,7 @@ export default function AutopilotDetailPage() {
                 isSaving={isSaving}
                 onDelete={handleDeleteAgent}
                 workspace={workspace}
+                nativeWorkflow={workflowBuilderMode === 'native_v2'}
               />
             </TabsContent>
 
@@ -2051,7 +2277,7 @@ export default function AutopilotDetailPage() {
         <DialogContent className="flex h-[90vh] max-h-[90vh] max-w-3xl flex-col overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl">
           {config && (
             <AutomationForm
-              configId={config.id}
+              configId={config!.id}
               instance={editingRule}
               onClose={() => setIsRuleModalOpen(false)}
               onSuccess={handleRuleSaved}

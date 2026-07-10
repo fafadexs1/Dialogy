@@ -62,7 +62,10 @@ function collectKnownVariables(
 ): Set<string> {
   const names = new Set<string>([
     'input',
+    'current',
     'context',
+    'variables',
+    'nodeResults',
     'sessionId',
     'conversationId',
     ...(options.knownVariableNames || []),
@@ -528,6 +531,17 @@ export function validateWorkflowDefinition(
         );
       }
     }
+    for (const port of node.outputPorts.filter((candidate) => !candidate.multiple)) {
+      const count = outgoing.filter((connection) => connection.sourcePortId === port.id).length;
+      if (count > 1) {
+        error(
+          collector,
+          'output_cardinality_exceeded',
+          `A saída "${port.label}" de "${node.name}" aceita somente uma conexão.`,
+          { nodeId: node.id },
+        );
+      }
+    }
     validateNodeConfig(definition, node, incoming, outgoing, collector, options);
   }
 
@@ -616,4 +630,3 @@ export function validateWorkflowDefinition(
     warnings: collector.warnings,
   };
 }
-

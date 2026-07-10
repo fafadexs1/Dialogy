@@ -45,6 +45,10 @@ export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
   const config = context.config;
   return [
     `Você é ${config.name}, um agente especializado em ${config.role}.`,
+    `Idioma de atendimento: ${config.language}.`,
+    '',
+    'PERSONA',
+    config.persona || 'Adote uma comunicação clara, respeitosa e coerente com o papel definido.',
     '',
     'OBJETIVO',
     config.objective,
@@ -170,10 +174,8 @@ function limitResult(
       };
     case 'ask_user':
       return {
-        status: 'waiting',
+        status: 'route',
         selectedOutput: 'needs_input',
-        waitingReason: reason,
-        resumeToken: `agent:${context.execution.executionId}:${context.node.id}:limit`,
         output: {
           type: 'needs_input',
           question: 'Preciso de uma informação adicional para continuar com segurança.',
@@ -365,10 +367,8 @@ export async function executeAgentNode(
         continue;
       }
       return {
-        status: 'waiting',
+        status: 'route',
         selectedOutput: 'needs_input',
-        waitingReason: 'AGENT_NEEDS_INPUT',
-        resumeToken: `agent:${context.execution.executionId}:${context.node.id}:${turn}`,
         output: decision,
         toolCalls,
         metrics: {
@@ -487,10 +487,8 @@ export async function executeAgentNode(
         break;
       case 'ask_user':
         return {
-          status: 'waiting',
+          status: 'route',
           selectedOutput: 'needs_input',
-          waitingReason: 'TOOL_FAILED_NEEDS_INPUT',
-          resumeToken: `agent:${context.execution.executionId}:${context.node.id}:tool-error`,
           output: {
             type: 'needs_input',
             question: 'Não consegui concluir a consulta automática. Você pode fornecer mais detalhes?',

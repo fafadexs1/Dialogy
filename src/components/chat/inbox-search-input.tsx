@@ -22,10 +22,6 @@ export function InboxSearchInput({
   autoComplete = 'off',
   ...props
 }: InboxSearchInputProps) {
-  const gradientIdBase = React.useId().replace(/:/g, '');
-  const ringGradientId = `${gradientIdBase}-ring`;
-  const lineGradientId = `${gradientIdBase}-line`;
-
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
       onKeyDown?.(event);
@@ -41,16 +37,7 @@ export function InboxSearchInput({
 
   return (
     <div className={cn(styles.wrapper, containerClassName)}>
-      <div className={styles.grid} aria-hidden="true" />
-      <div className={styles.frame}>
-        <div className={styles.glow} aria-hidden="true" />
-        <div className={styles.darkBorderBg} aria-hidden="true" />
-        <div className={styles.darkBorderBg} aria-hidden="true" />
-        <div className={styles.darkBorderBg} aria-hidden="true" />
-        <div className={styles.white} aria-hidden="true" />
-        <div className={styles.border} aria-hidden="true" />
-
-        <div className={styles.main}>
+      <div className={styles.main}>
           <input
             {...props}
             autoComplete={autoComplete}
@@ -58,9 +45,6 @@ export function InboxSearchInput({
             onKeyDown={handleKeyDown}
             type={type}
           />
-          <div className={styles.inputMask} aria-hidden="true" />
-          <div className={styles.pinkMask} aria-hidden="true" />
-          <div className={styles.filterBorder} aria-hidden="true" />
           <div className={styles.filterSlot}>
             {renderFilterTrigger?.(styles.filterTrigger)}
           </div>
@@ -72,25 +56,15 @@ export function InboxSearchInput({
               height="20"
               viewBox="0 0 24 24"
               fill="none"
+              stroke="currentColor"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <circle stroke={`url(#${ringGradientId})`} cx="11" cy="11" r="8" />
-              <line stroke={`url(#${lineGradientId})`} x1="22" y1="22" x2="16.65" y2="16.65" />
-              <defs>
-                <linearGradient id={ringGradientId} gradientTransform="rotate(50)">
-                  <stop offset="0%" stopColor="#f8e7f8" />
-                  <stop offset="50%" stopColor="#b6a9b7" />
-                </linearGradient>
-                <linearGradient id={lineGradientId}>
-                  <stop offset="0%" stopColor="#b6a9b7" />
-                  <stop offset="50%" stopColor="#837484" />
-                </linearGradient>
-              </defs>
+              <circle cx="11" cy="11" r="8" />
+              <line x1="22" y1="22" x2="16.65" y2="16.65" />
             </svg>
           </div>
-        </div>
       </div>
     </div>
   );

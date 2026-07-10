@@ -6,7 +6,33 @@ import { PlanType, PlanDetails, normalizePlanLimits } from './plans-types';
 
 export * from './plans-types'; // Re-export for server-side consumers if needed, but client should use plans-types directly
 
-export const getPlan = unstable_cache(
+// Helper to wrap unstable_cache to avoid throwing inside non-Next.js environments (like background workers)
+function safe_unstable_cache<T extends (...args: any[]) => Promise<any>>(
+    cb: T,
+    keyParts?: string[],
+    options?: {
+        revalidate?: number | false;
+        tags?: string[];
+    }
+): T {
+    try {
+        const cachedFn = unstable_cache(cb, keyParts, options);
+        return (async (...args: Parameters<T>) => {
+            try {
+                return await cachedFn(...args);
+            } catch (error: any) {
+                if (error instanceof Error && error.message.includes('incrementalCache')) {
+                    return await cb(...args);
+                }
+                throw error;
+            }
+        }) as unknown as T;
+    } catch (error: any) {
+        return cb;
+    }
+}
+
+export const getPlan = safe_unstable_cache(
     async (slug: string) => {
         const res = await db.query('SELECT * FROM plans WHERE slug = $1', [slug]);
         if (res.rowCount === 0) return null;
@@ -26,7 +52,7 @@ export const getPlan = unstable_cache(
     { tags: ['plans'], revalidate: false }
 );
 
-export const getAllPlans = unstable_cache(
+export const getAllPlans = safe_unstable_cache(
     async () => {
         const res = await db.query('SELECT * FROM plans WHERE is_active = true ORDER BY price ASC');
         return res.rows.map(plan => ({
@@ -40,3 +66,4 @@ export const getAllPlans = unstable_cache(
     ['get-all-plans'],
     { tags: ['plans'], revalidate: false }
 );
+

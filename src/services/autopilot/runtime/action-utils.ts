@@ -18,7 +18,6 @@ export function normalizeAgentActions(actions: unknown): AgentToolAction[] {
     'sgp_fetch_contact_panel_data',
     'sgp_generate_invoice_pix',
     'sgp_create_payment_promise',
-    'sgp_open_support_ticket',
     'mcp_call_tool',
   ]);
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
+import { redactWorkflowValue } from '@/services/workflow-runtime/events';
 
 type RouteContext = {
   params: Promise<{ executionId: string }>;
@@ -11,15 +12,12 @@ async function authorizedExecution(userId: string, executionId: string) {
     `SELECT we.*
      FROM workflow_executions we
      WHERE we.id = $1
-       AND (
-         we.workspace_id IS NULL
-         OR EXISTS (
+       AND we.workspace_id IS NOT NULL
+       AND EXISTS (
            SELECT 1
            FROM user_workspace_roles uwr
            WHERE uwr.workspace_id = we.workspace_id
              AND uwr.user_id = $2
-         )
-       )
      LIMIT 1`,
     [executionId, userId],
   );
@@ -53,13 +51,13 @@ export async function GET(_request: Request, context: RouteContext) {
       status: execution.status,
       currentNodeId: execution.current_node_id,
       previousNodeId: execution.previous_node_id,
-      variables: execution.variables,
-      context: execution.context,
-      nodeResults: execution.node_results,
-      executionPath: execution.execution_path,
+      variables: redactWorkflowValue(execution.variables),
+      context: redactWorkflowValue(execution.context),
+      nodeResults: redactWorkflowValue(execution.node_results),
+      executionPath: redactWorkflowValue(execution.execution_path),
       counters: execution.counters,
       waitingReason: execution.waiting_reason,
-      failure: execution.failure,
+      failure: redactWorkflowValue(execution.failure),
       startedAt: execution.started_at,
       updatedAt: execution.updated_at,
       finishedAt: execution.finished_at,
@@ -71,7 +69,7 @@ export async function GET(_request: Request, context: RouteContext) {
       nodeId: event.node_id,
       toolName: event.tool_name,
       safeSummary: event.safe_summary,
-      payload: event.payload,
+      payload: redactWorkflowValue(event.payload),
       createdAt: event.created_at,
     })),
   }, {
@@ -80,4 +78,3 @@ export async function GET(_request: Request, context: RouteContext) {
     },
   });
 }
-

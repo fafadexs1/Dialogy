@@ -300,6 +300,34 @@ describe('procedure flow compiler', () => {
     expect(prompts[0]).toContain('suporta mais dispositivos');
   });
 
+  it('preserves exact document scopes from visual knowledge nodes', () => {
+    const result = compileProcedureFromFlowGraph({
+      flowGraph: {
+        version: 1,
+        nodes: [
+          {
+            id: 'plans-knowledge',
+            kind: 'knowledge',
+            title: 'Planos oficiais',
+            subtitle: 'Base',
+            position: { x: 0, y: 0 },
+            config: {
+              knowledgeDocumentIds: ['plans-2026', 'fiber-faq'],
+            },
+          },
+        ],
+        edges: [],
+      },
+      configId: 'agent-plans',
+      name: 'Atendimento de planos',
+    });
+
+    expect(result.graph?.steps[0]).toMatchObject({
+      type: 'retrieve_knowledge',
+      knowledgeDocumentIds: ['plans-2026', 'fiber-faq'],
+    });
+  });
+
   it('maps v2 sequential nodes to deterministic procedure steps with grounding', () => {
     const flowGraph: AutopilotFlowGraph = {
       version: 1,

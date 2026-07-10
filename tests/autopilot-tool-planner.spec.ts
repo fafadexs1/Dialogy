@@ -54,6 +54,7 @@ describe('autopilot tool planner', () => {
     expect(hasExternalLookupPromise('Vou verificar seu cadastro no sistema.')).toBe(true);
     expect(hasExternalLookupPromise('Para verificar, vou precisar do seu CPF para acessar o sistema e verificar o que esta acontecendo.')).toBe(true);
     expect(hasExternalLookupPromise('Para consultar, me envie seu CPF.')).toBe(false);
+    expect(hasExternalLookupPromise('Nao consigo validar com seguranca qual roteador deve ser reiniciado porque a consulta de contrato nao esta habilitada. Vou precisar de verificacao manual.')).toBe(false);
   });
 
   it('blocks promised SGP lookup when customer identifier is missing and repairs the response', () => {

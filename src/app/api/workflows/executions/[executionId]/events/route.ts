@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { db } from '@/lib/db';
+import { redactWorkflowValue } from '@/services/workflow-runtime/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,15 +19,12 @@ async function canReadExecution(userId: string, executionId: string) {
     `SELECT 1
      FROM workflow_executions we
      WHERE we.id = $1
-       AND (
-         we.workspace_id IS NULL
-         OR EXISTS (
+       AND we.workspace_id IS NOT NULL
+       AND EXISTS (
            SELECT 1
            FROM user_workspace_roles uwr
            WHERE uwr.workspace_id = we.workspace_id
              AND uwr.user_id = $2
-         )
-       )
      LIMIT 1`,
     [executionId, userId],
   );
@@ -71,7 +69,7 @@ export async function GET(request: Request, context: RouteContext) {
             nodeId: row.node_id || undefined,
             toolName: row.tool_name || undefined,
             safeSummary: row.safe_summary || undefined,
-            payload: row.payload,
+            payload: redactWorkflowValue(row.payload),
             createdAt: row.created_at,
           }));
         }
@@ -93,4 +91,3 @@ export async function GET(request: Request, context: RouteContext) {
     },
   });
 }
-

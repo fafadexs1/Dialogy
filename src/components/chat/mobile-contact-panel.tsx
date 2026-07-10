@@ -51,7 +51,7 @@ export default function MobileContactPanel({
         <Sheet open={isOpen} onOpenChange={onClose}>
             <SheetContent
                 side="bottom"
-                className="flex h-[90vh] flex-col gap-0 overflow-hidden rounded-t-[32px] border-t border-slate-200/80 bg-white/98 p-0 shadow-2xl backdrop-blur-3xl dark:border-white/10 dark:bg-[#050507]/98"
+                className="flex h-[90vh] flex-col gap-0 overflow-hidden rounded-t-[24px] border-t border-slate-200 bg-white p-0 dark:border-white/10 dark:bg-[#050507]"
             >
                 {/* Hidden Header for Accessibility */}
                 <SheetHeader className="hidden">
@@ -67,8 +67,7 @@ export default function MobileContactPanel({
                 {/* Hero Section */}
                 <div className="flex flex-col items-center px-6 pb-8 pt-2 shrink-0 relative">
                     <div className="relative mb-4 group">
-                        <div className="absolute -inset-0.5 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur opacity-75 group-hover:opacity-100 transition duration-500"></div>
-                        <Avatar className="relative h-24 w-24 border-2 border-slate-200/80 bg-white ring-1 ring-slate-200/70 shadow-2xl dark:border-white/10 dark:bg-[#0B0B10] dark:ring-2 dark:ring-black/30">
+                        <Avatar className="relative h-24 w-24 border-2 border-slate-200 bg-white dark:border-white/10 dark:bg-[#0B0B10]">
                             <AvatarImage fallbackOnBlank src={contact.avatar_url || undefined} className="object-cover" />
                             <AvatarFallback className="bg-slate-100 text-2xl font-light text-slate-600 dark:bg-zinc-900 dark:text-zinc-300">
                                 {contact.name?.substring(0, 2).toUpperCase()}

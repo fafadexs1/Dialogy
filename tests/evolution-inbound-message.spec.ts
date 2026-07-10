@@ -8,6 +8,18 @@ import {
 } from '@/lib/whatsapp/evolution-inbound-message';
 
 describe('evolution inbound message helpers', () => {
+  it('maps a standard conversation webhook payload to text', () => {
+    const effectiveType = resolveEvolutionInboundMessageType({
+      messageType: 'conversation',
+      rawMessage: {
+        conversation: 'Boa tarde',
+      },
+    });
+
+    expect(effectiveType).toBe('conversation');
+    expect(mapEvolutionInboundMessageTypeToDbType(effectiveType)).toBe('text');
+  });
+
   it('treats buttonMessage payloads as text messages', () => {
     const effectiveType = resolveEvolutionInboundMessageType({
       messageType: 'buttonMessage',
