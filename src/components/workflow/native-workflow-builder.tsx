@@ -27,9 +27,12 @@ import {
   ArrowLeft,
   Bot,
   Braces,
+  BrainCircuit,
   CheckCircle2,
   Database,
   GitBranch,
+  History,
+  LineChart,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -41,19 +44,30 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  TestTube2,
   Trash2,
   UserRound,
   Wrench,
   X,
+  Zap,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import type { AiModelCatalogEntry } from '@/lib/ai-models';
+import type { KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 import {
   NATIVE_WORKFLOW_CATEGORY_COLOR,
   NATIVE_WORKFLOW_CONNECTION_META,
@@ -407,25 +421,35 @@ function GenericInspector({ node, manifest, onUpdate }: { node: WorkflowNode; ma
 export function NativeWorkflowBuilder({
   definition,
   defaultModel,
+  modelOptions,
+  knowledgeDocuments,
+  knowledgeCollections,
   tools,
   isSaving,
   isPublishing,
   onChange,
   onBack,
   onOpenSettings,
+  onOpenPanel,
   onTest,
   onTestNode,
   onSave,
   onPublish,
+  activePanelContent,
 }: {
   definition: WorkflowDefinition;
   defaultModel: ModelConfiguration;
+  modelOptions: AiModelCatalogEntry[];
+  knowledgeDocuments: KnowledgeBaseDocument[];
+  knowledgeCollections: KnowledgeCollection[];
   tools: CatalogTool[];
   isSaving: boolean;
   isPublishing: boolean;
   onChange: (definition: WorkflowDefinition) => void;
   onBack: () => void;
   onOpenSettings?: () => void;
+  onOpenPanel?: (panel: 'knowledge' | 'capabilities' | 'analytics' | 'decision' | 'settings' | 'playground' | 'versions') => void;
+  activePanelContent?: React.ReactNode;
   onTest?: () => Promise<string | null | undefined> | string | null | undefined;
   onTestNode?: (
     nodeId: string,
@@ -764,36 +788,87 @@ export function NativeWorkflowBuilder({
             <Badge className={cn('hidden shrink-0 sm:inline-flex', validation.valid ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200')}>{validation.valid ? 'Pronto para publicar' : `${validation.errors.length} pendência(s)`}</Badge>
           </div>
           <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-x-auto pb-0.5">
-            {onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings} className="shrink-0 text-slate-300"><Settings2 className="mr-2 h-4 w-4" />Ajustes</Button>}
+            {onOpenPanel ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="shrink-0 text-slate-300 gap-2 hover:bg-white/[0.08] hover:text-white">
+                    <Settings2 className="h-4 w-4" />
+                    Gerenciar agente
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 border-white/10 bg-[#111316] text-slate-200 shadow-2xl">
+                  <DropdownMenuItem onClick={() => onOpenPanel('knowledge')} className="flex items-center gap-2.5 cursor-pointer py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                    <Database className="h-4 w-4 text-emerald-400" />
+                    <span className="text-sm font-medium">Conhecimento</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onOpenPanel('capabilities')} className="flex items-center gap-2.5 cursor-pointer py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                    <Zap className="h-4 w-4 text-amber-400" />
+                    <span className="text-sm font-medium">Habilidades</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onOpenPanel('analytics')} className="flex items-center gap-2.5 cursor-pointer py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                    <LineChart className="h-4 w-4 text-violet-400" />
+                    <span className="text-sm font-medium">Analytics</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onOpenPanel('decision')} className="flex items-center gap-2.5 cursor-pointer py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                    <BrainCircuit className="h-4 w-4 text-sky-400" />
+                    <span className="text-sm font-medium">Motor de decisão</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-white/10" />
+                  <DropdownMenuItem onClick={() => onOpenPanel('playground')} className="flex items-center gap-2.5 cursor-pointer py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                    <TestTube2 className="h-4 w-4 text-rose-400" />
+                    <span className="text-sm font-medium">Playground</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onOpenPanel('versions')} className="flex items-center gap-2.5 cursor-pointer py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                    <History className="h-4 w-4 text-slate-400" />
+                    <span className="text-sm font-medium">Histórico</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-white/10" />
+                  <DropdownMenuItem onClick={() => onOpenPanel('settings')} className="flex items-center gap-2.5 cursor-pointer py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                    <Settings2 className="h-4 w-4 text-slate-300" />
+                    <span className="text-sm font-medium">Ajustes gerais</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : onOpenSettings ? (
+              <Button variant="ghost" size="sm" onClick={onOpenSettings} className="shrink-0 text-slate-300">
+                <Settings2 className="mr-2 h-4 w-4" /> Ajustes
+              </Button>
+            ) : null}
             {onTest && <Button variant="ghost" size="sm" onClick={() => void runTest()} disabled={!validation.valid || testRunning} className="shrink-0"><Play className="mr-2 h-4 w-4" />{testRunning ? 'Iniciando…' : 'Testar'}</Button>}
             <Button variant="outline" size="sm" onClick={onSave} disabled={isSaving} className="shrink-0 border-white/10 bg-[#192430]"><Save className="mr-2 h-4 w-4" />Salvar</Button>
             <Button size="sm" onClick={onPublish} disabled={isPublishing || !validation.valid} className="shrink-0"><Sparkles className="mr-2 h-4 w-4" />Publicar</Button>
             {!inspectorOpen && <Button variant="ghost" size="icon" onClick={() => setInspectorOpen(true)} className="h-8 w-8 shrink-0 text-slate-300" title="Abrir inspetor"><PanelRightOpen className="h-4 w-4" /></Button>}
           </div>
         </header>
-        <div className={cn('min-h-0 bg-[#080d14]', debugExecutionId ? 'basis-[56%]' : 'flex-1')} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={onDrop}>
-          <ReactFlow<CanvasNode, CanvasEdge>
-            className="bg-[radial-gradient(circle_at_50%_0%,rgba(30,64,90,0.22),transparent_55%)]"
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onInit={setFlowInstance}
-            onNodesChange={handleNodesChange}
-            onEdgesChange={handleEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={(_, node) => { setSelectedNodeId(node.id); setInspectorOpen(true); }}
-            onPaneClick={() => setSelectedNodeId(null)}
-            fitView
-            minZoom={0.25}
-            maxZoom={1.8}
-            deleteKeyCode={['Backspace', 'Delete']}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="rgba(125,172,205,0.24)" />
-            <Controls className="!overflow-hidden !rounded-xl !border-slate-600/70 !bg-[#172330] !text-slate-200 !shadow-xl [&>button]:!border-slate-600/60 [&>button]:!bg-[#172330] [&>button:hover]:!bg-[#25384a]" />
-            <MiniMap pannable zoomable className="!rounded-xl !border !border-slate-600/70 !bg-[#101821] !shadow-xl" nodeColor="#49667d" maskColor="rgba(3,8,14,0.7)" />
-          </ReactFlow>
+        <div className={cn('min-h-0 bg-[#080d14] flex-1 flex flex-col', debugExecutionId && !activePanelContent ? 'basis-[56%]' : 'flex-1')} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={onDrop}>
+          {activePanelContent ? (
+            <div className="h-full w-full overflow-y-auto px-6 py-6 text-slate-100 bg-[#080d14]">
+              {activePanelContent}
+            </div>
+          ) : (
+            <ReactFlow<CanvasNode, CanvasEdge>
+              className="bg-[radial-gradient(circle_at_50%_0%,rgba(30,64,90,0.22),transparent_55%)]"
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onInit={setFlowInstance}
+              onNodesChange={handleNodesChange}
+              onEdgesChange={handleEdgesChange}
+              onConnect={onConnect}
+              onNodeClick={(_, node) => { setSelectedNodeId(node.id); setInspectorOpen(true); }}
+              onPaneClick={() => setSelectedNodeId(null)}
+              fitView
+              minZoom={0.25}
+              maxZoom={1.8}
+              deleteKeyCode={['Backspace', 'Delete']}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="rgba(125,172,205,0.24)" />
+              <Controls className="!overflow-hidden !rounded-xl !border-slate-600/70 !bg-[#172330] !text-slate-200 !shadow-xl [&>button]:!border-slate-600/60 [&>button]:!bg-[#172330] [&>button:hover]:!bg-[#25384a]" />
+              <MiniMap pannable zoomable className="!rounded-xl !border !border-slate-600/70 !bg-[#101821] !shadow-xl" nodeColor="#49667d" maskColor="rgba(3,8,14,0.7)" />
+            </ReactFlow>
+          )}
         </div>
-        {debugExecutionId && (
+        {debugExecutionId && !activePanelContent && (
           <section className="relative min-h-[280px] flex-1 border-t border-sky-500/25 bg-[#101214] shadow-[0_-12px_35px_rgba(0,0,0,.35)]">
             <Button
               variant="ghost"
@@ -830,7 +905,13 @@ export function NativeWorkflowBuilder({
             {selectedNode.data.workflowNode.type === 'ai.agent'
               ? <AgentInspector node={selectedNode.data.workflowNode} onUpdate={updateSelectedNode} />
               : hasSpecializedWorkflowInspector(selectedNode.data.workflowNode.type)
-                ? <NativeSpecializedNodeInspector node={selectedNode.data.workflowNode} onUpdate={updateSelectedNode} />
+                ? <NativeSpecializedNodeInspector
+                    node={selectedNode.data.workflowNode}
+                    onUpdate={updateSelectedNode}
+                    modelOptions={modelOptions}
+                    knowledgeDocuments={knowledgeDocuments}
+                    knowledgeCollections={knowledgeCollections}
+                  />
                 : <GenericInspector node={selectedNode.data.workflowNode} manifest={getWorkflowNodeManifest(selectedNode.data.workflowNode.type)!} onUpdate={updateSelectedNode} />}
           </div>
         ) : (

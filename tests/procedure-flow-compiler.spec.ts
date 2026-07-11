@@ -169,6 +169,36 @@ describe('procedure flow compiler', () => {
     expect(formStep?.requiredSlots).toEqual(['wifi_name', 'wifi_password']);
   });
 
+  it('compiles collect requiredSlots even when the visual form has no field metadata', () => {
+    const result = compileProcedureFromFlowGraph({
+      flowGraph: {
+        version: 1,
+        nodes: [
+          {
+            id: 'collect-customer',
+            kind: 'collect',
+            title: 'Coletar cliente',
+            subtitle: 'Dados essenciais',
+            position: { x: 0, y: 0 },
+            config: {
+              message: 'Informe seu CPF.',
+              requiredSlots: ['cpf'],
+            },
+          },
+        ],
+        edges: [],
+      },
+      configId: 'agent-required-slots',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.graph?.steps[0]).toEqual(expect.objectContaining({
+      type: 'gather_data',
+      requiredSlots: ['cpf'],
+      slotDefinitions: [expect.objectContaining({ key: 'cpf', type: 'text', required: true })],
+    }));
+  });
+
   it('runs the compiled visual switch path through the procedure executor', async () => {
     const compiled = compileProcedureFromFlowGraph({
       flowGraph: visualWifiFlow(),

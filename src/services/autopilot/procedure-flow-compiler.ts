@@ -267,16 +267,35 @@ export function compileProcedureFromFlowGraph(input: {
 
     if (node.kind === 'collect') {
       const fields = node.config?.formFields || [];
-      const slotDefinitions = fields
+      const configuredSlotDefinitions = fields
         .map(slotDefinitionForField)
         .filter((slot): slot is ProcedureSlotDefinition => Boolean(slot));
+      const configuredKeys = new Set(configuredSlotDefinitions.map((slot) => slot.key));
+      const declaredRequiredSlots = (node.config?.requiredSlots || [])
+        .map(normalizeId)
+        .filter(Boolean);
+      const slotDefinitions = [
+        ...configuredSlotDefinitions,
+        ...declaredRequiredSlots
+          .filter((key) => !configuredKeys.has(key))
+          .map((key): ProcedureSlotDefinition => ({
+            key,
+            label: key.replaceAll('_', ' '),
+            type: 'text',
+            required: true,
+            aliases: [],
+          })),
+      ];
       return {
         ...base,
         type: 'gather_data',
-        requiredSlots: slotDefinitions
-          .filter((field) => field.required !== false)
-          .map((field) => field.key)
-          .filter(Boolean),
+        requiredSlots: Array.from(new Set([
+          ...slotDefinitions
+            .filter((field) => field.required !== false)
+            .map((field) => field.key)
+            .filter(Boolean),
+          ...declaredRequiredSlots,
+        ])),
         slotDefinitions,
         promptTemplate: renderFormPrompt(node),
         maxRetries: node.config?.maxAttempts,
@@ -287,7 +306,7 @@ export function compileProcedureFromFlowGraph(input: {
       return {
         ...base,
         type: 'retrieve_knowledge',
-        knowledgeQueryTemplate: node.config?.message || node.config?.instructions || '{{customerMessage}}',
+        knowledgeQueryTemplate: node.config?.message || node.config?.instructions || '{{system.customer_message}}',
         knowledgeCollectionIds: node.config?.knowledgeCollectionIds?.filter(Boolean),
         knowledgeDocumentIds: node.config?.knowledgeDocumentIds?.filter(Boolean),
         requiredKnowledgeCoverage: node.config?.requiredKnowledgeCoverage || 'medium',

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -7,7 +8,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import {
+  getAiModelRuntimeProvider,
+  type AiModelCatalogEntry,
+} from '@/lib/ai-models';
 import type { WorkflowNode } from '@/services/workflow-runtime/types';
+import {
+  applyWorkflowModelSelection,
+  getWorkflowModelOptions,
+} from '@/components/workflow/native-model-selection';
+import type { KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 
 export const SPECIALIZED_WORKFLOW_INSPECTOR_TYPES = new Set([
   'logic.ai_router',
@@ -25,6 +35,9 @@ export function hasSpecializedWorkflowInspector(type: string) {
 type InspectorProps = {
   node: WorkflowNode;
   onUpdate: (node: WorkflowNode) => void;
+  modelOptions?: AiModelCatalogEntry[];
+  knowledgeDocuments?: KnowledgeBaseDocument[];
+  knowledgeCollections?: KnowledgeCollection[];
 };
 
 function Field({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
@@ -94,11 +107,25 @@ function StringListField({ label, value, onChange, description }: {
   onChange: (value: string[]) => void;
   description?: string;
 }) {
+  const externalValue = Array.isArray(value) ? value.map(String).join('\n') : '';
+  const [draft, setDraft] = useState(externalValue);
+
+  useEffect(() => {
+    setDraft(externalValue);
+  }, [externalValue]);
+
+  const commit = () => {
+    const normalized = draft.split('\n').map((item) => item.trim()).filter(Boolean);
+    setDraft(normalized.join('\n'));
+    onChange(normalized);
+  };
+
   return (
     <Field label={label} description={description}>
       <Textarea
-        value={Array.isArray(value) ? value.map(String).join('\n') : ''}
-        onChange={(event) => onChange(event.target.value.split('\n').map((item) => item.trim()).filter(Boolean))}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
         className="min-h-24"
         placeholder="Um item por linha"
       />
@@ -180,15 +207,45 @@ export function AiRouterInspector({ node, onUpdate }: InspectorProps) {
   );
 }
 
-export function ModelInspector({ node, onUpdate }: InspectorProps) {
+export function ModelInspector({ node, onUpdate, modelOptions = [] }: InspectorProps) {
   const { config, rename } = useNodeUpdater(node, onUpdate);
+  const currentModel = String(node.config.model || '');
+  const selectOptions = getWorkflowModelOptions(modelOptions, currentModel);
+  const runtimeProvider = String(node.config.provider || getAiModelRuntimeProvider(currentModel));
+  const showBaseUrl = runtimeProvider === 'lmstudio'
+    || runtimeProvider === 'other'
+    || Boolean(node.config.baseUrl);
+
+  const selectModel = (modelId: string) => {
+    onUpdate(applyWorkflowModelSelection(node, modelId));
+  };
+
   return (
     <div className="space-y-5">
       <Field label="Nome do bloco"><Input value={node.name} onChange={(event) => rename(event.target.value)} /></Field>
-      <Field label="Provedor"><NativeSelect value={String(node.config.provider || 'googleai')} onChange={(value) => config('provider', value)}><option value="googleai">Google AI</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="lmstudio">LM Studio</option></NativeSelect></Field>
-      <Field label="Modelo"><Input value={String(node.config.model || '')} onChange={(event) => config('model', event.target.value)} placeholder="googleai/gemini-2.5-flash" /></Field>
-      <Field label="URL base" description="Opcional. Use apenas endpoints aprovados; credenciais devem ficar em referências de segredo."><Input value={String(node.config.baseUrl || '')} onChange={(event) => config('baseUrl', event.target.value || undefined)} placeholder="https://..." /></Field>
-      <Field label="Referência da API key"><Input value={String(node.config.apiKeyReference || '')} onChange={(event) => config('apiKeyReference', event.target.value || undefined)} placeholder="secret://..." /></Field>
+      <Field
+        label="Modelo"
+        description={modelOptions.length > 0
+          ? 'Somente modelos configurados com credencial neste workspace aparecem aqui. O provedor é preenchido automaticamente.'
+          : 'Nenhum modelo com credencial está configurado neste workspace.'}
+      >
+        <NativeSelect value={currentModel} onChange={selectModel}>
+          {!currentModel && <option value="">Selecione um modelo</option>}
+          {selectOptions.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label} · {model.legacy ? 'configuração antiga' : model.provider}
+            </option>
+          ))}
+        </NativeSelect>
+      </Field>
+      <Field label="Provedor" description="Definido pelo modelo selecionado.">
+        <Input value={runtimeProvider} readOnly className="cursor-default opacity-75" />
+      </Field>
+      {showBaseUrl ? (
+        <Field label="URL base" description="Opcional para LM Studio ou provedores customizados. A credencial é resolvida pelo workspace no servidor.">
+          <Input value={String(node.config.baseUrl || '')} onChange={(event) => config('baseUrl', event.target.value || undefined)} placeholder="http://host.docker.internal:1234/v1" />
+        </Field>
+      ) : null}
       <div className="grid grid-cols-2 gap-3"><Field label="Temperatura"><Input type="number" min={0} max={2} step={0.1} value={Number(node.config.temperature ?? 0.2)} onChange={(event) => config('temperature', Number(event.target.value))} /></Field><Field label="Máx. tokens"><Input type="number" min={1} value={Number(node.config.maxOutputTokens || 2048)} onChange={(event) => config('maxOutputTokens', Number(event.target.value))} /></Field></div>
       <div className="grid grid-cols-2 gap-3"><Field label="Timeout (ms)"><Input type="number" min={1000} value={Number(node.config.timeoutMs || 60000)} onChange={(event) => config('timeoutMs', Number(event.target.value))} /></Field><Field label="Tentativas"><Input type="number" min={0} max={10} value={Number(node.config.maxRetries ?? 2)} onChange={(event) => config('maxRetries', Number(event.target.value))} /></Field></div>
       <ToggleField label="Tool calling" checked={node.config.supportsTools === true} onCheckedChange={(value) => config('supportsTools', value)} />
@@ -198,13 +255,98 @@ export function ModelInspector({ node, onUpdate }: InspectorProps) {
   );
 }
 
-export function RagInspector({ node, onUpdate }: InspectorProps) {
+export function RagInspector({
+  node,
+  onUpdate,
+  knowledgeDocuments = [],
+  knowledgeCollections = [],
+}: InspectorProps) {
   const { config, rename } = useNodeUpdater(node, onUpdate);
+  const [documentQuery, setDocumentQuery] = useState('');
+  const documentIds = Array.isArray(node.config.documentIds) ? node.config.documentIds.map(String) : [];
+  const filters = node.config.filters && typeof node.config.filters === 'object' && !Array.isArray(node.config.filters)
+    ? node.config.filters as Record<string, unknown>
+    : {};
+  const collectionIds = Array.isArray(filters.collectionIds) ? filters.collectionIds.map(String) : [];
+  const normalizedDocumentQuery = documentQuery.trim().toLocaleLowerCase('pt-BR');
+  const visibleDocuments = knowledgeDocuments.filter((document) => {
+    if (document.status === 'archived' || document.status === 'expired') return false;
+    const memberships = document.collectionIds?.length ? document.collectionIds : ['general'];
+    if (collectionIds.length > 0 && !memberships.some((collectionId) => collectionIds.includes(collectionId))) return false;
+    if (!normalizedDocumentQuery) return true;
+    return `${document.name} ${document.category || ''} ${(document.tags || []).join(' ')}`
+      .toLocaleLowerCase('pt-BR')
+      .includes(normalizedDocumentQuery);
+  });
+
+  const toggleCollection = (collectionId: string) => {
+    const nextCollectionIds = collectionIds.includes(collectionId)
+      ? collectionIds.filter((id) => id !== collectionId)
+      : [...collectionIds, collectionId];
+    const allowedDocumentIds = new Set(knowledgeDocuments.filter((document) => {
+      if (nextCollectionIds.length === 0) return true;
+      const memberships = document.collectionIds?.length ? document.collectionIds : ['general'];
+      return memberships.some((id) => nextCollectionIds.includes(id));
+    }).map((document) => document.id));
+    onUpdate({
+      ...node,
+      config: {
+        ...node.config,
+        documentIds: documentIds.filter((id) => allowedDocumentIds.has(id)),
+        filters: { ...filters, collectionIds: nextCollectionIds },
+      },
+    });
+  };
+
+  const toggleDocument = (documentId: string) => {
+    config('documentIds', documentIds.includes(documentId)
+      ? documentIds.filter((id) => id !== documentId)
+      : [...documentIds, documentId]);
+  };
+
   return (
     <div className="space-y-5">
       <Field label="Nome do retriever"><Input value={node.name} onChange={(event) => rename(event.target.value)} /></Field>
-      <StringListField label="IDs dos documentos" value={node.config.documentIds} onChange={(value) => config('documentIds', value)} description="Somente documentos permitidos para este workspace." />
-      <JsonField label="Filtros" value={node.config.filters} onChange={(value) => config('filters', value)} />
+      <Field label="Coleções permitidas" description="Se nenhuma estiver marcada, o bloco consulta todas as coleções.">
+        <div className="flex flex-wrap gap-2">
+          {knowledgeCollections.map((collection) => {
+            const selected = collectionIds.includes(collection.id);
+            return (
+              <Button
+                key={collection.id}
+                type="button"
+                size="sm"
+                variant={selected ? 'default' : 'outline'}
+                aria-pressed={selected}
+                onClick={() => toggleCollection(collection.id)}
+              >
+                {collection.name}
+              </Button>
+            );
+          })}
+          {knowledgeCollections.length === 0 ? <p className="text-xs text-slate-500">Nenhuma coleção cadastrada.</p> : null}
+        </div>
+      </Field>
+      <Field label="Documentos permitidos" description="Se nenhum estiver marcado, todos os documentos das coleções acima ficam disponíveis.">
+        <Input
+          value={documentQuery}
+          onChange={(event) => setDocumentQuery(event.target.value)}
+          placeholder="Buscar por nome, categoria ou tag"
+          className="mb-2"
+        />
+        <div className="max-h-64 space-y-2 overflow-y-auto rounded-xl border border-white/[0.07] p-2">
+          {visibleDocuments.map((document) => (
+            <label key={document.id} className="flex cursor-pointer items-start gap-3 rounded-lg p-2 hover:bg-white/[0.04]">
+              <Checkbox checked={documentIds.includes(document.id)} onCheckedChange={() => toggleDocument(document.id)} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-slate-200">{document.name}</span>
+                {document.category ? <span className="block truncate text-[11px] text-slate-500">{document.category}</span> : null}
+              </span>
+            </label>
+          ))}
+          {visibleDocuments.length === 0 ? <p className="p-2 text-xs text-slate-500">Nenhum documento disponível nesta seleção.</p> : null}
+        </div>
+      </Field>
       <Field label="Estratégia"><NativeSelect value={String(node.config.strategy || 'hybrid')} onChange={(value) => config('strategy', value)}><option value="hybrid">Híbrida</option><option value="semantic">Semântica</option><option value="keyword">Palavras-chave</option></NativeSelect></Field>
       <div className="grid grid-cols-2 gap-3"><Field label="Máx. documentos"><Input type="number" min={1} value={Number(node.config.maxDocuments || 6)} onChange={(event) => config('maxDocuments', Number(event.target.value))} /></Field><Field label="Score mínimo"><Input type="number" min={0} max={1} step={0.05} value={Number(node.config.minimumScore ?? 0.55)} onChange={(event) => config('minimumScore', Number(event.target.value))} /></Field></div>
       <Field label="Limite de tokens"><Input type="number" min={1} value={Number(node.config.tokenLimit || 6000)} onChange={(event) => config('tokenLimit', Number(event.target.value))} /></Field>

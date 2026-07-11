@@ -127,6 +127,20 @@ function inferKnowledgeSourceFormat(filename: string): KnowledgeBaseDocument['so
   return 'plain_text';
 }
 
+function generateUUID(): string {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 const DEFAULT_KNOWLEDGE_COLLECTION: KnowledgeCollection = {
   id: 'general',
   name: 'Geral',
@@ -758,7 +772,7 @@ export default function AutopilotDetailPage() {
         }
 
         additions.push({
-          id: globalThis.crypto?.randomUUID?.() || `${file.name}-${Date.now()}`,
+          id: generateUUID(),
           name: file.name,
           content: text,
           sourceFormat,
@@ -778,7 +792,7 @@ export default function AutopilotDetailPage() {
 
   const handleAddManualDoc = () => {
     const newDoc: KnowledgeBaseDocument = {
-      id: globalThis.crypto?.randomUUID?.() || `manual-${Date.now()}`,
+      id: generateUUID(),
       name: `Nota ${(knowledgeDocuments.length + 1).toString().padStart(2, '0')}`,
       content: '',
       sourceFormat: 'markdown',
@@ -855,7 +869,7 @@ export default function AutopilotDetailPage() {
     if (!normalized) return false;
     if (knowledgeCollections.some((collection) => collection.name.toLowerCase() === normalized.toLowerCase())) return false;
     setKnowledgeCollections((prev) => prev.concat({
-      id: globalThis.crypto?.randomUUID?.() || `collection-${Date.now()}`,
+      id: generateUUID(),
       name: normalized,
     }));
     return true;
@@ -1533,96 +1547,183 @@ export default function AutopilotDetailPage() {
       });
     }
 
+    if (editorPanel === 'playground') {
+      return renderInlinePanelFrame({
+        eyebrow: 'Ambiente de testes',
+        title: 'Playground do agente',
+        description: 'Teste e inspecione o agente sem publicar alterações no atendimento real.',
+        icon: <TestTube2 className="h-3.5 w-3.5" />,
+        accentClassName: 'border-rose-500/25 bg-rose-500/10 text-rose-300',
+        children: (
+          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
+            <AutopilotPlayground
+              workspaceId={user?.activeWorkspaceId}
+              agentId={agentId}
+              disabled={isSaving || isPublishing}
+              stale={hasUnpublishedChanges}
+              draftSnapshot={previewDraftSnapshot}
+              onTrace={setLastPlaygroundTrace}
+            />
+          </div>
+        ),
+      });
+    }
+
+    if (editorPanel === 'versions') {
+      return renderInlinePanelFrame({
+        eyebrow: 'Versionamento',
+        title: 'Histórico de versões',
+        description: 'Restaure configurações anteriores do atendente inteligente.',
+        icon: <History className="h-3.5 w-3.5" />,
+        accentClassName: 'border-slate-500/25 bg-slate-500/10 text-slate-300',
+        children: (
+          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm text-slate-400">Ponto de restauração ativo</span>
+              <Badge variant="outline" className="rounded-full border-slate-700 text-slate-300">
+                {versions[0] ? `Atual: v${versions[0].version_number}` : 'Sem versão'}
+              </Badge>
+            </div>
+            <div className="grid gap-3">
+              {versions.map((version, index) => {
+                const current = index === 0;
+                const restoring = restoringVersionId === version.id;
+                const changes = summarizeVersionChanges(version, versions[index + 1] || null, modelCatalog);
+                return (
+                  <Card key={version.id} className="border-white/10 bg-[#1e222b]">
+                    <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-start">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-white">Versão v{version.version_number}</h3>
+                          {current && <Badge className="bg-emerald-500/15 text-emerald-300 border-0">Atual</Badge>}
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {new Date(version.created_at).toLocaleString('pt-BR')}
+                        </p>
+                        <ul className="mt-3 space-y-1 text-sm text-slate-400">
+                          {changes.slice(0, 3).map((change) => (
+                            <li key={change} className="flex gap-2">
+                              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
+                              <span>{change}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <Button
+                        variant={current ? 'outline' : 'default'}
+                        disabled={current || Boolean(restoringVersionId)}
+                        onClick={() => handleRestoreVersion(version.id, version.version_number)}
+                        className={current ? 'border-white/10 text-slate-400' : 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'}
+                      >
+                        {restoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                        {current ? 'Em uso' : 'Restaurar'}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              {versions.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-white/10 p-10 text-center text-sm text-slate-500">
+                  Publique o agente para criar o primeiro ponto de restauração.
+                </div>
+              )}
+            </div>
+          </div>
+        ),
+      });
+    }
+
     return null;
   })();
+
   const inlineEditorPanelName: AgentEditorPanel | null =
-    editorPanel === 'knowledge' || editorPanel === 'capabilities' || editorPanel === 'analytics' || editorPanel === 'decision' || editorPanel === 'settings'
+    editorPanel === 'knowledge' || editorPanel === 'capabilities' || editorPanel === 'analytics' || editorPanel === 'decision' || editorPanel === 'settings' || editorPanel === 'playground' || editorPanel === 'versions'
       ? editorPanel
       : null;
 
-  if (workflowDefinition) return (
-    <>
-    <div className="relative min-h-0 flex-1">
-      <NativeWorkflowBuilder
-      definition={workflowDefinition}
-      defaultModel={nativeDefaultModel}
-      tools={toolCatalog.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        source: tool.source,
-        serverId: tool.serverId,
-        riskLevel: tool.riskLevel,
-        requiresHumanApproval: tool.requiresHumanApproval,
-        inputSchema: tool.inputSchema,
-        outputSchema: tool.outputSchema,
-      }))}
-      isSaving={isSaving}
-      isPublishing={isPublishing}
-      onChange={setWorkflowDefinition}
-      onBack={() => router.push('/autopilot')}
-      onOpenSettings={() => setEditorPanel('settings')}
-      onTest={async () => {
-        const message = window.prompt('Mensagem de teste', 'Olá, preciso de ajuda.');
-        if (!message?.trim() || !config) return null;
-        const result = await runAutopilotNativeWorkflowTest({
-          configId: config.id,
-          customerMessage: message.trim(),
-          workflowDefinition,
-        });
-        if (!result.success || !result.executionId) {
-          toast({ title: 'Falha no teste', description: result.error, variant: 'destructive' });
-          return null;
-        }
-        return result.executionId;
-      }}
-      onTestNode={async (startNodeId, fixtures) => {
-        if (!config) return null;
-        const result = await runAutopilotNativeWorkflowTest({
-          configId: config.id,
-          customerMessage: 'Teste isolado iniciado pelo editor.',
-          workflowDefinition,
-          startNodeId,
-          fixtures,
-        });
-        if (!result.success || !result.executionId) {
-          toast({ title: 'Falha no teste isolado', description: result.error, variant: 'destructive' });
-          return null;
-        }
-        return result.executionId;
-      }}
-      onSave={handleSaveConfig}
-      onPublish={handlePublishConfig}
-      />
-      <NativeAiBuilderDialog
+  if (workflowDefinition) {
+    return (
+      <div className="relative min-h-0 flex-1 flex flex-col">
+        <NativeWorkflowBuilder
         definition={workflowDefinition}
-        disabled={isSaving || isPublishing}
-        onGenerate={(conversation) => generateAutopilotNativeWorkflowWithAi({
-          configId: agentId,
-          conversation,
-          currentWorkflow: workflowDefinition,
-          enabledToolNames,
-        })}
-        onApply={(proposal) => {
-          if (!proposal.validation.valid) {
-            toast({ title: 'Proposta bloqueada', description: 'A proposta nao passou no validador do runtime.', variant: 'destructive' });
-            return;
-          }
-          setWorkflowDefinition(proposal.workflow);
-          setEnabledToolNames((current) => [...new Set([...current, ...proposal.selectedToolNames])]);
-          toast({
-            title: 'Proposta aplicada ao rascunho',
-            description: 'Revise o canvas, execute um teste e salve quando estiver pronto.',
+        activePanelContent={inlineEditorPanel}
+        defaultModel={nativeDefaultModel}
+        modelOptions={selectableModels}
+        knowledgeDocuments={knowledgeDocuments}
+        knowledgeCollections={knowledgeCollections}
+        tools={toolCatalog.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          source: tool.source,
+          serverId: tool.serverId,
+          riskLevel: tool.riskLevel,
+          requiresHumanApproval: tool.requiresHumanApproval,
+          inputSchema: tool.inputSchema,
+          outputSchema: tool.outputSchema,
+        }))}
+        isSaving={isSaving}
+        isPublishing={isPublishing}
+        onChange={setWorkflowDefinition}
+        onBack={() => router.push('/autopilot')}
+        onOpenSettings={() => setEditorPanel('settings')}
+        onOpenPanel={(panel) => setEditorPanel(panel)}
+        onTest={async () => {
+          const message = window.prompt('Mensagem de teste', 'Olá, preciso de ajuda.');
+          if (!message?.trim() || !config) return null;
+          const result = await runAutopilotNativeWorkflowTest({
+            configId: config.id,
+            customerMessage: message.trim(),
+            workflowDefinition,
           });
+          if (!result.success || !result.executionId) {
+            toast({ title: 'Falha no teste', description: result.error, variant: 'destructive' });
+            return null;
+          }
+          return result.executionId;
         }}
-      />
-    </div>
-    <Dialog open={editorPanel === 'settings'} onOpenChange={(open) => !open && setEditorPanel(null)}>
-      <DialogContent className="max-h-[94vh] max-w-[min(1180px,96vw)] overflow-y-auto border-white/10 bg-[#0f1114] p-0">
-        {inlineEditorPanel}
-      </DialogContent>
-    </Dialog>
-    </>
-  );
+        onTestNode={async (startNodeId, fixtures) => {
+          if (!config) return null;
+          const result = await runAutopilotNativeWorkflowTest({
+            configId: config.id,
+            customerMessage: 'Teste isolado iniciado pelo editor.',
+            workflowDefinition,
+            startNodeId,
+            fixtures,
+          });
+          if (!result.success || !result.executionId) {
+            toast({ title: 'Falha no teste isolado', description: result.error, variant: 'destructive' });
+            return null;
+          }
+          return result.executionId;
+        }}
+        onSave={handleSaveConfig}
+        onPublish={handlePublishConfig}
+        />
+        <NativeAiBuilderDialog
+          definition={workflowDefinition}
+          disabled={isSaving || isPublishing}
+          onGenerate={(conversation) => generateAutopilotNativeWorkflowWithAi({
+            configId: agentId,
+            conversation,
+            currentWorkflow: workflowDefinition,
+            enabledToolNames,
+          })}
+          onApply={(proposal) => {
+            if (!proposal.validation.valid) {
+              toast({ title: 'Proposta bloqueada', description: 'A proposta nao passou no validador do runtime.', variant: 'destructive' });
+              return;
+            }
+            setWorkflowDefinition(proposal.workflow);
+            setEnabledToolNames((current) => [...new Set([...current, ...proposal.selectedToolNames])]);
+            toast({
+              title: 'Proposta aplicada ao rascunho',
+              description: 'Revise o canvas, execute um teste e salve quando estiver pronto.',
+            });
+          }}
+        />
+      </div>
+    );
+  }
 
   // Native-only onboarding. Configurations without a definition can choose a
   // supported template, but the legacy editor is no longer reachable.

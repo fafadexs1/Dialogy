@@ -103,6 +103,7 @@ import {
     type WorkflowBlockTestFixtures,
 } from '@/services/workflow-runtime';
 import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
+import { getPrimaryWorkflowModelId } from '@/services/workflow-runtime/model-selection';
 import { importEcosystemPatternForWorkspace } from '@/services/autopilot/ecosystem-patterns';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import {
@@ -336,7 +337,19 @@ async function buildSnapshotFromFormData(
     fallback: AutopilotConfigDraftSnapshot,
 ): Promise<AutopilotConfigDraftSnapshot> {
     const workspaceId = formData.get('workspaceId')?.toString() || '';
-    const requestedModel = formData.get('aiModel')?.toString() || fallback.ai_model || '';
+    const requestedWorkflowBuilderMode = formData.has('workflowBuilderMode')
+        ? normalizeWorkflowBuilderMode(formData.get('workflowBuilderMode')?.toString())
+        : normalizeWorkflowBuilderMode(fallback.workflow_builder_mode);
+    const requestedWorkflowDefinition = formData.has('workflowDefinition')
+        ? parseWorkflowDefinition(formData.get('workflowDefinition')?.toString())
+        : parseWorkflowDefinition(fallback.workflow_definition);
+    const workflowModel = requestedWorkflowBuilderMode === 'native_v2'
+        ? getPrimaryWorkflowModelId(requestedWorkflowDefinition)
+        : null;
+    const requestedModel = workflowModel
+        || formData.get('aiModel')?.toString()
+        || fallback.ai_model
+        || '';
     if (requestedModel && !(await isAllowedModelForWorkspace(workspaceId, requestedModel))) {
         throw new Error('Modelo de IA nao esta habilitado no catalogo global ou nas integracoes do workspace.');
     }
@@ -383,12 +396,8 @@ async function buildSnapshotFromFormData(
         workflow_runtime_v2_mode: formData.has('workflowRuntimeV2Mode')
             ? normalizeWorkflowRuntimeV2Mode(formData.get('workflowRuntimeV2Mode')?.toString())
             : normalizeWorkflowRuntimeV2Mode(fallback.workflow_runtime_v2_mode),
-        workflow_builder_mode: formData.has('workflowBuilderMode')
-            ? normalizeWorkflowBuilderMode(formData.get('workflowBuilderMode')?.toString())
-            : normalizeWorkflowBuilderMode(fallback.workflow_builder_mode),
-        workflow_definition: formData.has('workflowDefinition')
-            ? parseWorkflowDefinition(formData.get('workflowDefinition')?.toString())
-            : parseWorkflowDefinition(fallback.workflow_definition),
+        workflow_builder_mode: requestedWorkflowBuilderMode,
+        workflow_definition: requestedWorkflowDefinition,
         workflow_migration: fallback.workflow_migration || null,
     };
 }
@@ -1859,6 +1868,9 @@ export async function publishAutopilotDraft(configId: string): Promise<{
 
         const fallback = buildSnapshotFromConfigRow(configRow);
         const snapshot = normalizeDraftSnapshot(draftRes.rows[0].snapshot, fallback);
+        if (snapshot.workflow_builder_mode === 'native_v2') {
+            snapshot.ai_model = getPrimaryWorkflowModelId(snapshot.workflow_definition) || snapshot.ai_model;
+        }
         if (snapshot.ai_model && !(await isAllowedModelForWorkspace(currentWorkspaceId, snapshot.ai_model))) {
             await client.query('ROLLBACK');
             return { success: false, error: 'Modelo de IA nao esta habilitado no catalogo global ou nas integracoes do workspace.' };

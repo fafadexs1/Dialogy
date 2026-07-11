@@ -82,7 +82,18 @@ export function AutopilotKnowledge({
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [collectionError, setCollectionError] = useState('');
+  const [documentQuery, setDocumentQuery] = useState('');
   const [improvingDocumentId, setImprovingDocumentId] = useState<string | null>(null);
+  const [contentDraft, setContentDraft] = useState('');
+  const pendingContentRef = useRef<{ id: string; value: string } | null>(null);
+  const contentCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onUpdateContentRef = useRef(onUpdateContent);
+
+  const selectedDoc = documents.find((doc) => doc.id === selectedDocId) || null;
+
+  useEffect(() => {
+    onUpdateContentRef.current = onUpdateContent;
+  }, [onUpdateContent]);
 
   useEffect(() => {
     if (documents.length === 0) {
@@ -94,6 +105,47 @@ export function AutopilotKnowledge({
       setSelectedDocId(documents[0].id);
     }
   }, [documents, selectedDocId]);
+
+  useEffect(() => {
+    if (!selectedDoc) {
+      setContentDraft('');
+      return;
+    }
+
+    const pending = pendingContentRef.current;
+    if (pending?.id === selectedDoc.id && pending.value !== selectedDoc.content) return;
+    if (pending?.id === selectedDoc.id) pendingContentRef.current = null;
+    setContentDraft(selectedDoc.content);
+  }, [selectedDoc?.content, selectedDoc?.id]);
+
+  useEffect(() => () => {
+    if (contentCommitTimerRef.current) clearTimeout(contentCommitTimerRef.current);
+    const pending = pendingContentRef.current;
+    if (pending) onUpdateContentRef.current(pending.id, pending.value);
+  }, []);
+
+  const commitPendingContent = () => {
+    if (contentCommitTimerRef.current) {
+      clearTimeout(contentCommitTimerRef.current);
+      contentCommitTimerRef.current = null;
+    }
+    const pending = pendingContentRef.current;
+    if (!pending) return;
+    pendingContentRef.current = null;
+    onUpdateContentRef.current(pending.id, pending.value);
+  };
+
+  const updateContentDraft = (id: string, value: string) => {
+    setContentDraft(value);
+    pendingContentRef.current = { id, value };
+    if (contentCommitTimerRef.current) clearTimeout(contentCommitTimerRef.current);
+    contentCommitTimerRef.current = setTimeout(() => {
+      contentCommitTimerRef.current = null;
+      const pending = pendingContentRef.current;
+      if (!pending) return;
+      onUpdateContentRef.current(pending.id, pending.value);
+    }, 180);
+  };
 
   const handleDrag = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -116,7 +168,6 @@ export function AutopilotKnowledge({
     }
   };
 
-  const selectedDoc = documents.find((doc) => doc.id === selectedDocId) || null;
   const filteredTools = toolCatalog
     .filter((tool) => {
       if (toolQuery == null) return false;
@@ -128,6 +179,22 @@ export function AutopilotKnowledge({
       );
     })
     .slice(0, 12);
+  const normalizedDocumentQuery = documentQuery.trim().toLocaleLowerCase('pt-BR');
+  const filteredDocuments = normalizedDocumentQuery
+    ? documents.filter((document) => {
+        const collectionNames = (document.collectionIds?.length ? document.collectionIds : ['general'])
+          .map((id) => collections.find((collection) => collection.id === id)?.name || '')
+          .join(' ');
+        return [document.name, document.category, document.summary, ...(document.tags || []), collectionNames]
+          .filter(Boolean)
+          .join(' ')
+          .toLocaleLowerCase('pt-BR')
+          .includes(normalizedDocumentQuery);
+      })
+    : documents;
+  const categorySuggestions = Array.from(new Set(
+    documents.map((document) => document.category?.trim()).filter((category): category is string => Boolean(category))
+  )).sort((left, right) => left.localeCompare(right, 'pt-BR'));
   const toolLookup = new Map<string, AgentToolCatalogItem>();
   for (const tool of toolCatalog) {
     const aliases = [
@@ -140,7 +207,7 @@ export function AutopilotKnowledge({
     }
   }
   const mentionedTools = selectedDoc
-    ? Array.from(selectedDoc.content.matchAll(/@([a-zA-Z0-9_.:-]+)/g)).map((match) => {
+    ? Array.from(contentDraft.matchAll(/@([a-zA-Z0-9_.:-]+)/g)).map((match) => {
         const mention = match[1] || '';
         return {
           mention,
@@ -175,12 +242,12 @@ export function AutopilotKnowledge({
   const insertToolMention = (toolName: string) => {
     if (!selectedDoc || mentionStart == null) return;
     const textarea = textareaRef.current;
-    const caret = textarea?.selectionStart ?? selectedDoc.content.length;
-    const before = selectedDoc.content.slice(0, mentionStart);
-    const after = selectedDoc.content.slice(caret);
+    const caret = textarea?.selectionStart ?? contentDraft.length;
+    const before = contentDraft.slice(0, mentionStart);
+    const after = contentDraft.slice(caret);
     const nextValue = `${before}@${toolName} ${after}`;
     const nextCaret = before.length + toolName.length + 2;
-    onUpdateContent(selectedDoc.id, nextValue);
+    updateContentDraft(selectedDoc.id, nextValue);
     setToolQuery(null);
     setMentionStart(null);
     requestAnimationFrame(() => {
@@ -190,7 +257,10 @@ export function AutopilotKnowledge({
   };
 
   return (
-    <div className="grid min-w-0 gap-6 2xl:grid-cols-[340px_minmax(0,1fr)]">
+    <div
+      className="nodrag nowheel nopan grid min-w-0 gap-6 2xl:grid-cols-[340px_minmax(0,1fr)]"
+      onKeyDown={(event) => event.stopPropagation()}
+    >
       <Card className="min-w-0 overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
         <CardHeader className="border-b border-border/60 bg-muted/30">
           <div className="flex items-start justify-between gap-3">
@@ -429,19 +499,31 @@ export function AutopilotKnowledge({
             Ex: <span className="font-mono font-semibold text-foreground">@mcp:servidor:trocar_wifi</span>.
           </div>
 
+          <Input
+            value={documentQuery}
+            onChange={(event) => setDocumentQuery(event.target.value)}
+            placeholder="Buscar por nome, tag, categoria ou colecao"
+            aria-label="Buscar documentos da base de conhecimento"
+            className="h-10 rounded-2xl bg-background text-sm"
+          />
+
           <ScrollArea className="h-[min(52vh,520px)] rounded-[24px] border border-border bg-muted/20">
             <div className="grid gap-2 p-3">
-              {documents.length > 0 ? (
-                documents.map((doc) => {
+              {filteredDocuments.length > 0 ? (
+                filteredDocuments.map((doc) => {
                   const isSelected = selectedDoc?.id === doc.id;
 
                   return (
                     <div
                       key={doc.id}
-                      onClick={() => setSelectedDocId(doc.id)}
+                      onClick={() => {
+                        commitPendingContent();
+                        setSelectedDocId(doc.id);
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
+                          commitPendingContent();
                           setSelectedDocId(doc.id);
                         }
                       }}
@@ -492,13 +574,19 @@ export function AutopilotKnowledge({
                     </div>
                   );
                 })
-              ) : (
+              ) : documents.length === 0 ? (
                 <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[20px] border border-dashed border-border bg-background/60 px-6 text-center">
                   <FileText className="h-10 w-10 text-muted-foreground/50" />
                   <p className="mt-4 text-sm font-medium text-foreground">Nenhum documento adicionado</p>
                   <p className="mt-1 max-w-xs text-xs leading-5 text-muted-foreground">
                     Envie arquivos ou crie notas manuais para construir o contexto do agente.
                   </p>
+                </div>
+              ) : (
+                <div className="flex min-h-[160px] flex-col items-center justify-center px-6 text-center">
+                  <FileText className="h-8 w-8 text-muted-foreground/50" />
+                  <p className="mt-3 text-sm font-medium text-foreground">Nenhum documento encontrado</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Tente buscar por outro nome, tag, categoria ou colecao.</p>
                 </div>
               )}
             </div>
@@ -534,11 +622,15 @@ export function AutopilotKnowledge({
                       </Label>
                       <Input
                         id="autopilot-doc-category"
+                        list="autopilot-doc-category-options"
                         value={selectedDoc.category || ''}
                         onChange={(event) => onUpdateCategory(selectedDoc.id, event.target.value)}
                         placeholder="Ex: commercial_sales_flow"
                         className="h-12 rounded-2xl border-border bg-background font-mono text-sm"
                       />
+                      <datalist id="autopilot-doc-category-options">
+                        {categorySuggestions.map((category) => <option key={category} value={category} />)}
+                      </datalist>
                     </div>
                     <div className="min-w-0 space-y-1.5">
                       <Label htmlFor="autopilot-doc-max-prompt-chars" className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -612,8 +704,8 @@ export function AutopilotKnowledge({
                   <Badge variant="outline" className="rounded-full">
                     {(selectedDoc.tokens || 0).toLocaleString()} tokens
                   </Badge>
-                  <Badge variant="outline" className="max-w-full rounded-full font-mono text-[11px]">
-                    {selectedDoc.id}
+                  <Badge variant="outline" className="max-w-full rounded-full text-[11px]">
+                    {selectedDoc.sourceFormat === 'pdf' ? 'PDF' : selectedDoc.sourceFormat === 'markdown' ? 'Markdown' : selectedDoc.sourceFormat || 'Documento'}
                   </Badge>
                 </div>
               </div>
@@ -701,11 +793,12 @@ export function AutopilotKnowledge({
                     ref={textareaRef}
                     className="relative z-10 h-full min-h-0 resize-none overflow-y-auto rounded-[24px] border-0 bg-background px-5 py-4 font-mono text-sm leading-6 text-foreground shadow-none selection:bg-primary/20 focus-visible:ring-2"
                     placeholder="Insira o conteúdo que o agente deve consultar durante o atendimento."
-                    value={selectedDoc.content}
+                    value={contentDraft}
                     onChange={(event) => {
-                      onUpdateContent(selectedDoc.id, event.target.value);
+                      updateContentDraft(selectedDoc.id, event.target.value);
                       updateToolMentionState(event.target.value, event.target.selectionStart);
                     }}
+                    onBlur={commitPendingContent}
                     onKeyUp={(event) => updateToolMentionState(event.currentTarget.value, event.currentTarget.selectionStart)}
                     onClick={(event) => updateToolMentionState(event.currentTarget.value, event.currentTarget.selectionStart)}
                   />
@@ -788,7 +881,7 @@ export function AutopilotKnowledge({
                     Use @nome_da_tool para vincular procedimentos a ferramentas. A reindexação ocorre quando você salva o agente.
                   </span>
                   <span className="font-medium text-foreground">
-                    {selectedDoc.content.trim().length.toLocaleString()} caracteres
+                    {contentDraft.trim().length.toLocaleString()} caracteres
                   </span>
                 </div>
               </div>

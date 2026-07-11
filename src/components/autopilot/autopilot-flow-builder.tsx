@@ -816,7 +816,7 @@ function buildInitialGraph(agentName: string) {
               label: 'Atender com IA',
               description: 'Use para responder a solicitacao principal com contexto e seguranca.',
               examples: ['Tenho uma duvida', 'Preciso de ajuda'],
-              targetNodeId: 'knowledge',
+              targetNodeId: 'sub-agent',
             },
             {
               id: 'humano',
@@ -837,7 +837,7 @@ function buildInitialGraph(agentName: string) {
         kind: 'knowledge',
         title: 'Conhecimento',
         subtitle: 'Consultar base',
-        config: { instructions: 'Buscar chunks relevantes para a solicitacao atual antes do sub-agente responder.', message: '{{customerMessage}}', requiredKnowledgeCoverage: 'low', referenceId: 'conhecimento', variableName: 'conhecimento_encontrado' },
+        config: { instructions: 'Buscar chunks relevantes para a solicitacao atual antes do sub-agente responder.', message: '{{system.customer_message}}', requiredKnowledgeCoverage: 'low', referenceId: 'conhecimento', variableName: 'conhecimento_encontrado' },
       },
     },
     {
@@ -914,9 +914,9 @@ function buildInitialGraph(agentName: string) {
     buildEdge('start-welcome', 'start', 'welcome'),
     buildEdge('welcome-decision', 'welcome', 'decision'),
     edge('decision-collect', 'decision', 'collect', { routeId: 'coletar', routeLabel: 'Coletar dados', color: SWITCH_EDGE_COLOR }),
-    edge('decision-knowledge', 'decision', 'knowledge', { routeId: 'atender', routeLabel: 'Atender com IA', color: SWITCH_EDGE_COLOR }),
+    edge('decision-sub-agent', 'decision', 'sub-agent', { routeId: 'atender', routeLabel: 'Atender com IA', color: SWITCH_EDGE_COLOR }),
     edge('decision-handoff', 'decision', 'handoff', { routeId: 'humano', routeLabel: 'Transferir humano', color: SWITCH_EDGE_COLOR }),
-    buildEdge('collect-knowledge', 'collect', 'knowledge'),
+    buildEdge('collect-sub-agent', 'collect', 'sub-agent'),
     buildEdge('knowledge-sub-agent', 'knowledge', 'sub-agent'),
     buildEdge('sub-agent-end', 'sub-agent', 'end'),
   ];
@@ -1152,18 +1152,23 @@ function NodeInspector({
   flowNodes,
   availableNodeVariables,
   systemVariables,
+  knowledgeDocuments,
+  knowledgeCollections,
   knowledgeAttachment,
   knownReferenceIds,
   variableNameConflict,
   referenceIdConflict,
   onClose,
   onUpdate,
+  onDeleteSwitchRoute,
   onDelete,
 }: {
   node: AttendantNode;
   flowNodes: AttendantNode[];
   availableNodeVariables: string[];
   systemVariables: AutopilotFlowVariable[];
+  knowledgeDocuments: KnowledgeBaseDocument[];
+  knowledgeCollections: KnowledgeCollection[];
   knowledgeAttachment?: {
     targetTitle: string;
     targetKind: 'sub_agent';
@@ -1176,9 +1181,11 @@ function NodeInspector({
   referenceIdConflict: boolean;
   onClose: () => void;
   onUpdate: (patch: Partial<AttendantNodeData>) => void;
+  onDeleteSwitchRoute: (routeId: string) => void;
   onDelete: () => void;
 }) {
   const config = node.data.config || {};
+  const [knowledgeQuery, setKnowledgeQuery] = useState('');
   const updateConfig = (patch: NonNullable<AttendantNodeData['config']>) => {
     onUpdate({ config: { ...config, ...patch } });
   };
@@ -1193,6 +1200,7 @@ function NodeInspector({
   };
   const deleteSwitchRoute = (routeId: string) => {
     const nextRoutes = switchRoutes.filter((route) => route.id !== routeId);
+    onDeleteSwitchRoute(routeId);
     updateConfig({
       routes: nextRoutes,
       fallbackRouteId: config.fallbackRouteId === routeId ? nextRoutes.at(-1)?.id : config.fallbackRouteId,
@@ -1228,6 +1236,41 @@ function NodeInspector({
     : 'instructions';
   const insertVariable = (variable: string) => {
     updateConfig({ [mainField]: `${config[mainField] || ''}${config[mainField] ? ' ' : ''}${variable}` });
+  };
+  const selectedKnowledgeCollectionIds = config.knowledgeCollectionIds || [];
+  const selectedKnowledgeDocumentIds = config.knowledgeDocumentIds || [];
+  const visibleKnowledgeDocuments = knowledgeDocuments.filter((document) => {
+    if (document.status === 'archived' || document.status === 'expired') return false;
+    const collectionIds = document.collectionIds?.length ? document.collectionIds : ['general'];
+    const matchesCollection = selectedKnowledgeCollectionIds.length === 0
+      || collectionIds.some((collectionId) => selectedKnowledgeCollectionIds.includes(collectionId));
+    const query = knowledgeQuery.trim().toLocaleLowerCase('pt-BR');
+    const matchesQuery = !query
+      || `${document.name} ${document.category || ''}`.toLocaleLowerCase('pt-BR').includes(query);
+    return matchesCollection && matchesQuery;
+  });
+  const toggleKnowledgeCollection = (collectionId: string) => {
+    const nextCollectionIds = selectedKnowledgeCollectionIds.includes(collectionId)
+      ? selectedKnowledgeCollectionIds.filter((id) => id !== collectionId)
+      : [...selectedKnowledgeCollectionIds, collectionId];
+    const allowedDocumentIds = new Set(knowledgeDocuments
+      .filter((document) => {
+        if (nextCollectionIds.length === 0) return true;
+        const documentCollectionIds = document.collectionIds?.length ? document.collectionIds : ['general'];
+        return documentCollectionIds.some((id) => nextCollectionIds.includes(id));
+      })
+      .map((document) => document.id));
+    updateConfig({
+      knowledgeCollectionIds: nextCollectionIds,
+      knowledgeDocumentIds: selectedKnowledgeDocumentIds.filter((id) => allowedDocumentIds.has(id)),
+    });
+  };
+  const toggleKnowledgeDocument = (documentId: string) => {
+    updateConfig({
+      knowledgeDocumentIds: selectedKnowledgeDocumentIds.includes(documentId)
+        ? selectedKnowledgeDocumentIds.filter((id) => id !== documentId)
+        : [...selectedKnowledgeDocumentIds, documentId],
+    });
   };
 
   return (
@@ -1333,6 +1376,116 @@ function NodeInspector({
               <div className="rounded-xl border border-white/10 bg-[#17191c] p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Documentos</p>
                 <p className="mt-1 text-lg font-semibold text-orange-200">{knowledgeAttachment?.documents.length || 0}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 border-t border-orange-500/15 pt-4">
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-300">Consulta enviada ao RAG</Label>
+                <HighlightedReferenceTextarea
+                  value={config.message || ''}
+                  onChange={(value) => updateConfig({ message: value })}
+                  placeholder="{{system.customer_message}}"
+                  knownReferenceIds={knownReferenceIds}
+                  className="min-h-[88px] border-white/10 bg-[#17191c] text-sm text-slate-100"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-300">Cobertura minima exigida</Label>
+                <select
+                  value={config.requiredKnowledgeCoverage || 'low'}
+                  onChange={(event) => updateConfig({
+                    requiredKnowledgeCoverage: event.target.value as NonNullable<AttendantNodeData['config']>['requiredKnowledgeCoverage'],
+                  })}
+                  className="h-10 w-full rounded-md border border-white/10 bg-[#17191c] px-3 text-sm text-slate-100 outline-none focus:border-orange-400/50"
+                >
+                  <option value="none">Nao bloquear por cobertura</option>
+                  <option value="low">Baixa</option>
+                  <option value="medium">Media</option>
+                  <option value="high">Alta</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-3 border-t border-orange-500/15 pt-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Colecoes permitidas</p>
+                <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  Se nenhuma estiver marcada, o bloco consulta todas as colecoes.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {knowledgeCollections.map((collection) => {
+                  const selected = selectedKnowledgeCollectionIds.includes(collection.id);
+                  return (
+                    <button
+                      key={collection.id}
+                      type="button"
+                      onClick={() => toggleKnowledgeCollection(collection.id)}
+                      aria-pressed={selected}
+                      className={cn(
+                        'rounded-lg border px-2.5 py-2 text-left text-xs transition-colors',
+                        selected
+                          ? 'border-orange-400/45 bg-orange-500/15 text-orange-100'
+                          : 'border-white/10 bg-[#17191c] text-slate-400 hover:border-orange-500/25 hover:text-slate-200',
+                      )}
+                    >
+                      {collection.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-3 border-t border-orange-500/15 pt-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Documentos permitidos</p>
+                <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  Se nenhum estiver marcado, todos os documentos das colecoes acima ficam disponiveis.
+                </p>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+                <Input
+                  value={knowledgeQuery}
+                  onChange={(event) => setKnowledgeQuery(event.target.value)}
+                  placeholder="Buscar documento"
+                  className="h-10 border-white/10 bg-[#17191c] pl-9 text-xs text-slate-100 focus-visible:ring-orange-500/30"
+                />
+              </div>
+              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                {visibleKnowledgeDocuments.map((document) => {
+                  const selected = selectedKnowledgeDocumentIds.includes(document.id);
+                  return (
+                    <label
+                      key={document.id}
+                      className={cn(
+                        'flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors',
+                        selected
+                          ? 'border-orange-400/35 bg-orange-500/10'
+                          : 'border-white/10 bg-[#17191c] hover:border-orange-500/20',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleKnowledgeDocument(document.id)}
+                        className="mt-0.5 h-4 w-4 accent-orange-500"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-medium text-slate-200">{document.name}</span>
+                        <span className="mt-0.5 block text-[10px] text-slate-500">
+                          {document.tokens || 0} tokens{document.category ? ` · ${document.category}` : ''}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+                {visibleKnowledgeDocuments.length === 0 && (
+                  <p className="rounded-lg border border-white/10 bg-[#17191c] px-3 py-3 text-xs text-slate-500">
+                    Nenhum documento encontrado neste escopo.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1589,6 +1742,19 @@ function NodeInspector({
                 }}
               />
             </label>
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-300">Tentativas antes do fallback</Label>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={config.maxAttempts ?? 2}
+                onChange={(event) => updateConfig({
+                  maxAttempts: Math.max(1, Math.min(10, Number(event.target.value) || 1)),
+                })}
+                className="h-10 border-white/10 bg-[#17191c] text-slate-100 focus-visible:ring-emerald-500/30"
+              />
+            </div>
             {(config.formFields || []).map((field, index) => (
               <div key={field.id} className="space-y-2 rounded-xl border border-white/10 bg-[#17191c] p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -1627,6 +1793,68 @@ function NodeInspector({
                   placeholder="Exemplo opcional"
                   className="h-10 border-white/10 bg-[#111316] text-slate-100 focus-visible:ring-emerald-500/30"
                 />
+                <div className="grid grid-cols-[1fr_0.9fr] gap-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-slate-400">Chave da variavel</Label>
+                    <Input
+                      value={field.fieldKey || ''}
+                      onChange={(event) => updateConfig({
+                        formFields: (config.formFields || []).map((item) => (
+                          item.id === field.id ? { ...item, fieldKey: normalizeVariableName(event.target.value) } : item
+                        )),
+                      })}
+                      placeholder="nome_completo"
+                      className="h-10 border-white/10 bg-[#111316] font-mono text-xs text-slate-100 focus-visible:ring-emerald-500/30"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-slate-400">Tipo do dado</Label>
+                    <select
+                      value={field.type || 'text'}
+                      onChange={(event) => updateConfig({
+                        formFields: (config.formFields || []).map((item) => (
+                          item.id === field.id
+                            ? { ...item, type: event.target.value as AutopilotFlowFormField['type'] }
+                            : item
+                        )),
+                      })}
+                      className="h-10 w-full rounded-md border border-white/10 bg-[#111316] px-3 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+                    >
+                      <option value="text">Texto</option>
+                      <option value="name">Nome</option>
+                      <option value="phone">Telefone</option>
+                      <option value="email">E-mail</option>
+                      <option value="document">Documento</option>
+                      <option value="date">Data</option>
+                      <option value="time">Horario</option>
+                      <option value="address">Endereco</option>
+                      <option value="number">Numero</option>
+                      <option value="boolean">Sim/nao</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-slate-400">Outros nomes aceitos</Label>
+                  <Input
+                    key={`${field.id}-aliases`}
+                    defaultValue={(field.aliases || []).join(', ')}
+                    onBlur={(event) => updateConfig({
+                      formFields: (config.formFields || []).map((item) => (
+                        item.id === field.id
+                          ? {
+                              ...item,
+                              aliases: event.target.value
+                                .split(',')
+                                .map((alias) => alias.trim())
+                                .filter(Boolean),
+                            }
+                          : item
+                      )),
+                    })}
+                    placeholder="nome, nome do cliente"
+                    className="h-10 border-white/10 bg-[#111316] text-xs text-slate-100 focus-visible:ring-emerald-500/30"
+                  />
+                </div>
                 <label className="flex items-center justify-between rounded-lg border border-white/10 bg-[#111316] px-3 py-2 text-xs text-slate-300">
                   Obrigatorio
                   <Switch
@@ -1652,6 +1880,7 @@ function NodeInspector({
                       id,
                       label: 'Novo dado',
                       fieldKey: `dado_${(config.formFields || []).length + 1}`,
+                      type: 'text',
                       required: true,
                     },
                   ],
@@ -2656,6 +2885,12 @@ export function AutopilotFlowBuilder({
     setEdges((current) => current.filter((flowEdge) => flowEdge.source !== selectedNodeId && flowEdge.target !== selectedNodeId));
     setSelectedNodeId(null);
   }, [selectedNodeId, setEdges, setNodes]);
+  const deleteSelectedSwitchRoute = useCallback((routeId: string) => {
+    if (!selectedNodeId) return;
+    setEdges((current) => current.filter((flowEdge) => !(
+      flowEdge.source === selectedNodeId && flowEdge.data?.routeId === routeId
+    )));
+  }, [selectedNodeId, setEdges]);
   const deleteSelectedEdge = useCallback(() => {
     if (!selectedEdgeId) return;
     setEdges((current) => current.filter((flowEdge) => flowEdge.id !== selectedEdgeId));
@@ -2819,7 +3054,7 @@ export function AutopilotFlowBuilder({
           subtitle: 'Consultar base',
           config: {
             instructions: 'Busque chunks relevantes na base antes do sub-agente responder. Entregue apenas contexto recuperado e seguro para o proximo no.',
-            message: '{{customerMessage}}',
+            message: '{{system.customer_message}}',
             requiredKnowledgeCoverage: 'medium',
             referenceId: `conhecimento_${timestamp}`,
             variableName: `conhecimento_${timestamp}`,
@@ -3210,12 +3445,15 @@ export function AutopilotFlowBuilder({
             flowNodes={nodes}
             availableNodeVariables={availableNodeVariables}
             systemVariables={systemVariables}
+            knowledgeDocuments={knowledgeDocuments}
+            knowledgeCollections={knowledgeCollections}
             knowledgeAttachment={selectedKnowledgeAttachment}
             knownReferenceIds={knownReferenceIds}
             variableNameConflict={variableNameConflict}
             referenceIdConflict={referenceIdConflict}
             onClose={() => setSelectedNodeId(null)}
             onUpdate={updateSelectedNode}
+            onDeleteSwitchRoute={deleteSelectedSwitchRoute}
             onDelete={deleteSelectedNode}
           />
         ) : selectedEdge ? (

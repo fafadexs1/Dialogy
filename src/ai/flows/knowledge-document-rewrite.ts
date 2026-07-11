@@ -15,7 +15,7 @@ const KnowledgeDocumentRewriteSchema = z.object({
   name: z.string().min(1),
   content: z.string().min(1),
   summary: z.string().min(1),
-  category: z.string().min(1),
+  category: z.string(), // Permite categoria vazia de modelos como Deepseek
   tags: z.array(z.string()).max(12),
   contextRole: z.enum(['fact', 'procedure', 'policy', 'persona']),
   canonicalAnswer: z.string(),
