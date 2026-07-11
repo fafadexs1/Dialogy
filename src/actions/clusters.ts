@@ -22,7 +22,9 @@ export async function getClusters(): Promise<{ clusters: WhatsappCluster[] | nul
     }
 
     try {
-        const result = await db.query('SELECT * FROM whatsapp_clusters ORDER BY name');
+        const result = await db.query(
+            'SELECT id, name, api_url, is_active, created_at, updated_at FROM whatsapp_clusters ORDER BY name'
+        );
         return { clusters: result.rows };
     } catch (error: any) {
         console.error('[GET_CLUSTERS_ACTION]', error);

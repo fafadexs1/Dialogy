@@ -35,6 +35,43 @@ export type RunAutopilotPrimaryInput = {
   context?: Record<string, unknown>;
 };
 
+export type AutopilotPrimaryDeliveryOutcome = {
+  responseSent: boolean;
+  handoffCompleted: boolean;
+  recoveryResponse?: string;
+};
+
+export function inspectAutopilotPrimaryDeliveryOutcome(
+  execution: { executionPath?: Array<Record<string, unknown>> },
+): AutopilotPrimaryDeliveryOutcome {
+  const path = Array.isArray(execution.executionPath) ? execution.executionPath : [];
+  let responseSent = false;
+  let handoffCompleted = false;
+  let recoveryResponse: string | undefined;
+
+  for (const step of path) {
+    const nodeType = String(step.nodeType || '');
+    const status = String(step.status || '');
+    const output = isRecord(step.output) ? step.output : {};
+    const delivery = isRecord(output.delivery) ? output.delivery : {};
+
+    if (nodeType === 'output.respond' && delivery.success === true) {
+      responseSent = true;
+    }
+    if (nodeType === 'output.handoff' && (status === 'success' || status === 'completed')) {
+      handoffCompleted = true;
+    }
+
+    if (nodeType === 'ai.agent' || nodeType === 'ai.prompt' || nodeType === 'output.respond') {
+      const candidate = [output.response, output.question, output.message]
+        .find((value) => typeof value === 'string' && value.trim().length > 0);
+      if (typeof candidate === 'string') recoveryResponse = candidate.trim();
+    }
+  }
+
+  return { responseSent, handoffCompleted, recoveryResponse };
+}
+
 function modelConfig(node: WorkflowNode) {
   return ModelConfigurationSchema.parse(node.config);
 }
@@ -128,6 +165,9 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
   executionId?: string;
   status?: string;
   error?: string;
+  responseSent?: boolean;
+  handoffCompleted?: boolean;
+  recoveryResponse?: string;
 }> {
   const configEnabled = input.config.workflow_builder_mode === 'native_v2'
     && input.config.workflow_runtime_v2_mode === 'primary';
@@ -171,6 +211,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
   })}`;
   const existing = await persistence.getExecution(executionId);
   if (existing && ['completed', 'failed', 'cancelled', 'waiting'].includes(existing.status)) {
+    const deliveryOutcome = inspectAutopilotPrimaryDeliveryOutcome(existing);
     return {
       enabled: true,
       handled: true,
@@ -178,8 +219,12 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       executionId,
       status: existing.status,
       error: existing.failure?.message,
+      ...deliveryOutcome,
     };
   }
+
+  let responseSentDuringRun = false;
+  let handoffCompletedDuringRun = false;
 
   const handlers = createDefaultNodeHandlerRegistry({
     resolveModelChain: async (context) => modelChainForNode({
@@ -210,8 +255,16 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       return retrieval.knowledgeBaseDocuments.map((document) => ({ ...document }));
     },
     applyGuardrails: async (_phase, value) => assertGuardrailSafe(value),
-    sendResponse: input.dependencies.sendResponse,
-    handoff: input.dependencies.handoff,
+    sendResponse: async (message, nodeInput) => {
+      const result = await input.dependencies.sendResponse(message, nodeInput);
+      if (result.success === true) responseSentDuringRun = true;
+      return result;
+    },
+    handoff: async (nodeInput) => {
+      const result = await input.dependencies.handoff(nodeInput);
+      handoffCompletedDuringRun = true;
+      return result;
+    },
   });
   const executor = new WorkflowExecutor(persistence, handlers);
   try {
@@ -233,6 +286,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
           conversationId: input.chatId,
           executionId,
         }, { workerId: `autopilot_native_${input.chatId}` });
+    const deliveryOutcome = inspectAutopilotPrimaryDeliveryOutcome(execution);
     return {
       enabled: true,
       handled: true,
@@ -240,6 +294,9 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       executionId,
       status: execution.status,
       error: execution.failure?.message,
+      responseSent: responseSentDuringRun || deliveryOutcome.responseSent,
+      handoffCompleted: handoffCompletedDuringRun || deliveryOutcome.handoffCompleted,
+      recoveryResponse: deliveryOutcome.recoveryResponse,
     };
   } catch (error) {
     return {

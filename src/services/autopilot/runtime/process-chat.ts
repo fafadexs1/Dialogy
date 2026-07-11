@@ -1358,6 +1358,66 @@ export async function processAutopilotForChat(
         );
         const nativeResult = nativeStage.value;
         if (nativeResult.enabled && nativeResult.handled) {
+            let nativeResponseSent = nativeResult.responseSent === true;
+            let recoveryResponse: string | null = null;
+            if (
+                currentCopilotMode === 'auto'
+                && !nativeResponseSent
+                && !nativeResult.handoffCompleted
+                && nativeResult.status !== 'waiting'
+            ) {
+                recoveryResponse = formatCustomerFacingAiResponse(
+                    nativeResult.recoveryResponse?.trim()
+                    || autopilotConfig.default_fallback_reply?.trim()
+                    || 'Estou com uma instabilidade para responder agora. Nossa equipe vai acompanhar por aqui.'
+                );
+                const recoveryStage = await timeOrchestratorStage(
+                    orchestratorRun,
+                    'workflow_runtime_v2_recovery_send',
+                    () => sendMultiBlockResponse(
+                        chat.id,
+                        recoveryResponse!,
+                        assignedSystemAgentId,
+                        true,
+                        instanceName,
+                        null,
+                        { ...responseTrace, deliveryKey: 'workflow:recovery' },
+                    ),
+                    {
+                        workflowExecutionId: nativeResult.executionId,
+                        workflowStatus: nativeResult.status,
+                        recoveredGeneratedResponse: Boolean(nativeResult.recoveryResponse?.trim()),
+                    },
+                );
+                orchestratorTimings.workflow_runtime_v2_recovery_send_ms = recoveryStage.durationMs;
+                nativeResponseSent = recoveryStage.value.success;
+                await recordOrchestratorEvent({
+                    run: orchestratorRun,
+                    kind: 'workflow_runtime_v2_missing_response_recovered',
+                    status: nativeResponseSent ? 'success' : 'error',
+                    durationMs: recoveryStage.durationMs,
+                    payload: {
+                        executionId: nativeResult.executionId,
+                        workflowStatus: nativeResult.status,
+                        recoveredGeneratedResponse: Boolean(nativeResult.recoveryResponse?.trim()),
+                    },
+                });
+                await logIntelligentAttendantResponse({
+                    configId: autopilotConfig.id,
+                    chatId: chat.id,
+                    systemAgentId: assignedSystemAgentId,
+                    modelName: resolvedAiModel.model,
+                    customerMessage: enrichedLastMessageContent || '',
+                    response: recoveryResponse,
+                    status: nativeResponseSent ? 'sent' : 'error',
+                    triggeredRule: null,
+                    metadata: {
+                        runtime: 'workflow_v2_primary_recovery',
+                        executionId: nativeResult.executionId,
+                        workflowStatus: nativeResult.status,
+                    },
+                });
+            }
             await recordOrchestratorEvent({
                 run: orchestratorRun,
                 kind: 'workflow_runtime_v2_primary',
@@ -1367,16 +1427,20 @@ export async function processAutopilotForChat(
             });
             await finishOrchestratorRun({
                 run: orchestratorRun,
-                status: nativeResult.status === 'failed' ? 'error' : 'success',
+                status: nativeResult.status === 'failed'
+                    ? (nativeResponseSent ? 'fallback' : 'error')
+                    : 'success',
                 timings: { ...orchestratorTimings, workflow_runtime_v2_primary_ms: nativeStage.durationMs },
                 intent: intentResolution.intent,
                 confidenceScore: intentResolution.confidence,
                 error: nativeResult.error,
                 metadata: {
-                    responseSent: nativeResult.status !== 'failed',
+                    responseSent: nativeResponseSent,
                     workflowRuntime: 'v2_primary',
                     workflowExecutionId: nativeResult.executionId,
                     workflowStatus: nativeResult.status,
+                    workflowResponseRecovered: Boolean(recoveryResponse),
+                    workflowHandoffCompleted: nativeResult.handoffCompleted === true,
                 },
             });
             return;

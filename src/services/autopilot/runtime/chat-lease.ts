@@ -87,12 +87,23 @@ export async function hasCompletedAutopilotSourceMessage(input: {
   const database = input.database || db;
   const { rows } = await database.query(
     `SELECT 1
-     FROM orchestrator_runs
-     WHERE workspace_id = $1
-       AND chat_id = $2
-       AND source_message_id = $3
-       AND status IN ('success', 'fallback', 'skipped')
-       AND COALESCE(metadata->>'responseSent', 'false') = 'true'
+     FROM orchestrator_runs run
+     WHERE run.workspace_id = $1
+       AND run.chat_id = $2
+       AND run.source_message_id = $3
+       AND run.status IN ('success', 'fallback', 'skipped')
+       AND (
+         COALESCE(run.metadata->>'workflowHandoffCompleted', 'false') = 'true'
+         OR EXISTS (
+           SELECT 1
+           FROM messages response
+           WHERE response.workspace_id = $1
+             AND response.chat_id = $2
+             AND response.from_me = true
+             AND response.metadata->>'autopilotSourceMessageId' = $3::text
+             AND COALESCE(upper(response.api_message_status), '') NOT IN ('FAILED', 'ERROR')
+         )
+       )
      LIMIT 1`,
     [input.workspaceId, input.chatId, input.sourceMessageId],
   );

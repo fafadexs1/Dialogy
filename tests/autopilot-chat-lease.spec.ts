@@ -112,6 +112,26 @@ describe('autopilot distributed chat lease', () => {
     })).resolves.toBe(true);
   });
 
+  it('requires persisted delivery evidence instead of trusting responseSent metadata alone', async () => {
+    let inspectedQuery = '';
+    const database = {
+      async query(query: string) {
+        inspectedQuery = query;
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    await expect(hasCompletedAutopilotSourceMessage({
+      workspaceId: 'workspace-1',
+      chatId: 'chat-1',
+      sourceMessageId: 'message-1',
+      database,
+    })).resolves.toBe(false);
+
+    expect(inspectedQuery).toContain("response.metadata->>'autopilotSourceMessageId' = $3");
+    expect(inspectedQuery).not.toContain("metadata->>'responseSent'");
+  });
+
   it('returns a retryable timeout instead of stealing a live lease', async () => {
     const database = fakeLeaseDatabase();
     const first = await acquireAutopilotChatLease({

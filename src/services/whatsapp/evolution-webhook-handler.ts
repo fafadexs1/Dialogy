@@ -40,6 +40,7 @@ import {
     markEvolutionWebhookEventProcessed,
     persistEvolutionWebhookEvent,
 } from '@/services/whatsapp/evolution-webhook-inbox';
+import { verifyDialogyRequest } from '@/services/meta/dialogy-hmac';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
@@ -685,10 +686,29 @@ export async function POST(
     const requestId = randomUUID();
     const receivedAt = Date.now();
     let payload: any;
+    const rawBody = await request.text();
+    const keyId = request.headers.get('x-dialogy-key-id');
+    const timestamp = request.headers.get('x-dialogy-timestamp');
+    const deliveryId = request.headers.get('x-dialogy-delivery-id');
+    const signature = request.headers.get('x-dialogy-signature');
+    const hasAnySignatureHeader = Boolean(keyId || timestamp || deliveryId || signature);
+    const requireHmac = process.env.EVOLUTION_WEBHOOK_REQUIRE_HMAC === 'true';
+    if (hasAnySignatureHeader || requireHmac) {
+        if (!keyId || !timestamp || !deliveryId || !signature) {
+            return NextResponse.json({ error: 'Missing webhook signature headers' }, { status: 401 });
+        }
+        const verification = verifyDialogyRequest({ keyId, timestamp, deliveryId, signature, rawBody });
+        if (!verification.ok) {
+            return NextResponse.json(
+                { error: verification.reason },
+                { status: verification.reason === 'unknown_key' ? 403 : 401 },
+            );
+        }
+    }
 
     let outcomeLogged = false;
     try {
-        payload = await request.json();
+        payload = JSON.parse(rawBody);
     } catch (error) {
         console.error('[WEBHOOK] Erro ao converter o payload em JSON:', error);
         await logAction({
@@ -864,8 +884,6 @@ export async function POST(
             payload_bytes: payloadBytes,
             data_present: Boolean(payload?.data),
             queue: statsBefore,
-            // Keep full payload for traceability (logger will summarize).
-            full_payload: payload,
             durable_event_id: durableEvent.id,
             durable_event_status: durableEvent.status,
         },

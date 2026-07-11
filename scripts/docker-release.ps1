@@ -81,6 +81,7 @@ function Update-ComposeImages {
     $workerUpdated = $false
     $workerAiUpdated = $false
     $workerCampaignUpdated = $false
+    $workerMetaRelayUpdated = $false
 
     foreach ($line in $Lines) {
         if ($line -match '^services:\s*$') {
@@ -126,6 +127,12 @@ function Update-ComposeImages {
             continue
         }
 
+        if ($inServices -and $currentService -eq 'worker-meta-relay' -and $line -match '^    image:\s*') {
+            $updatedLines.Add("    image: $WorkerImage")
+            $workerMetaRelayUpdated = $true
+            continue
+        }
+
         $updatedLines.Add($line)
     }
 
@@ -147,6 +154,10 @@ function Update-ComposeImages {
 
     if (!$workerCampaignUpdated) {
         throw "Nao foi possivel localizar a linha image do servico 'worker-campaign' em $composePath"
+    }
+
+    if (!$workerMetaRelayUpdated) {
+        throw "Nao foi possivel localizar a linha image do servico 'worker-meta-relay' em $composePath"
     }
 
     return $updatedLines

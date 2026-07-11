@@ -462,6 +462,46 @@ create unique index if not exists uq_evo_instances_workspace_name on public.evol
 create index if not exists idx_evo_instances_cluster on public.evolution_api_instances(cluster_id);
 create index if not exists idx_evo_instances_webhook_key on public.evolution_api_instances(webhook_key);
 
+-- Eventos de webhook da Evolution
+create table if not exists public.evolution_webhook_events (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  instance_name text not null,
+  event_name text not null,
+  dedup_key text not null,
+  payload jsonb not null,
+  status text not null default 'pending',
+  attempt_count integer not null default 0,
+  max_attempts integer not null default 5,
+  available_at timestamptz not null default clock_timestamp(),
+  locked_at timestamptz,
+  locked_by text,
+  processed_at timestamptz,
+  last_error text,
+  created_at timestamptz not null default clock_timestamp(),
+  updated_at timestamptz not null default clock_timestamp(),
+  constraint evolution_webhook_events_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade,
+  constraint evolution_webhook_events_status_check
+    check (status in ('pending', 'processing', 'processed', 'failed', 'dead_letter')),
+  constraint evolution_webhook_events_attempts_check
+    check (attempt_count >= 0 and max_attempts > 0)
+);
+
+create unique index if not exists uq_evolution_webhook_events_dedup
+  on public.evolution_webhook_events (instance_name, event_name, dedup_key);
+
+create index if not exists idx_evolution_webhook_events_pending
+  on public.evolution_webhook_events (available_at, created_at)
+  where status in ('pending', 'failed');
+
+create index if not exists idx_evolution_webhook_events_workspace
+  on public.evolution_webhook_events (workspace_id, created_at desc);
+
+create index if not exists idx_evolution_webhook_events_processing_lease
+  on public.evolution_webhook_events (locked_at)
+  where status = 'processing';
+
 -- Bots Telegram
 create table if not exists public.telegram_bot_instances (
   id uuid primary key default gen_random_uuid(),
@@ -790,6 +830,23 @@ create table if not exists public.webhook_logs (
 create index if not exists idx_webhook_logs_channel on public.webhook_logs(channel_id);
 create index if not exists idx_webhook_logs_source on public.webhook_logs(source);
 
+-- Logs do Workspace
+create table if not exists public.workspace_logs (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  workspace_id uuid,
+  user_id uuid,
+  action text not null,
+  payload jsonb,
+  constraint workspace_logs_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete cascade,
+  constraint workspace_logs_user_id_fkey
+    foreign key (user_id) references public.users(id) on delete set null
+);
+
+create index if not exists idx_workspace_logs_workspace on public.workspace_logs(workspace_id);
+create index if not exists idx_workspace_logs_created_at on public.workspace_logs(created_at desc);
+
 -- Role <-> Permission
 create table if not exists public.role_permissions (
   role_id uuid not null,
@@ -1062,6 +1119,129 @@ create index if not exists idx_queue_jobs_locked_at on public.queue_jobs(locked_
 
 
 -- ============================================
+-- Meta WhatsApp Routing tables
+-- ============================================
+
+create table if not exists public.meta_whatsapp_waba_routes (
+  waba_id text primary key,
+  cluster_id uuid not null,
+  status text not null default 'active',
+  version integer not null default 1,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint meta_whatsapp_waba_routes_cluster_id_fkey
+    foreign key (cluster_id) references public.whatsapp_clusters(id) on delete restrict
+);
+
+create index if not exists idx_meta_waba_routes_cluster on public.meta_whatsapp_waba_routes(cluster_id);
+
+create table if not exists public.meta_whatsapp_phone_routes (
+  phone_number_id text primary key,
+  waba_id text not null,
+  instance_id uuid not null unique,
+  workspace_id uuid not null,
+  status text not null default 'active',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint meta_whatsapp_phone_routes_waba_id_fkey
+    foreign key (waba_id) references public.meta_whatsapp_waba_routes(waba_id) on delete restrict,
+  constraint meta_whatsapp_phone_routes_instance_id_fkey
+    foreign key (instance_id) references public.evolution_api_instances(id) on delete restrict,
+  constraint meta_whatsapp_phone_routes_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete restrict
+);
+
+create index if not exists idx_meta_phone_routes_waba on public.meta_whatsapp_phone_routes(waba_id);
+create index if not exists idx_meta_phone_routes_instance on public.meta_whatsapp_phone_routes(instance_id);
+create index if not exists idx_meta_phone_routes_workspace on public.meta_whatsapp_phone_routes(workspace_id);
+
+create table if not exists public.meta_whatsapp_receipts (
+  id uuid primary key default gen_random_uuid(),
+  body_hash text not null unique,
+  encrypted_payload text,
+  signature_verified boolean not null default false,
+  received_at timestamptz not null default clock_timestamp(),
+  payload_purged_at timestamptz,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_meta_receipts_created on public.meta_whatsapp_receipts(created_at desc);
+
+create table if not exists public.meta_whatsapp_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  event_key text not null unique,
+  receipt_id uuid,
+  encrypted_payload text,
+  waba_id text,
+  phone_number_id text,
+  cluster_id uuid,
+  instance_id uuid,
+  workspace_id uuid,
+  route_version integer,
+  status text not null default 'pending',
+  lease_expires_at timestamptz,
+  locked_by text,
+  attempts integer not null default 0,
+  max_attempts integer not null default 20,
+  available_at timestamptz not null default clock_timestamp(),
+  errors jsonb,
+  accepted_at timestamptz,
+  processed_at timestamptz,
+  payload_purged_at timestamptz,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint meta_whatsapp_deliveries_receipt_id_fkey
+    foreign key (receipt_id) references public.meta_whatsapp_receipts(id) on delete restrict,
+  constraint meta_whatsapp_deliveries_cluster_id_fkey
+    foreign key (cluster_id) references public.whatsapp_clusters(id) on delete restrict,
+  constraint meta_whatsapp_deliveries_instance_id_fkey
+    foreign key (instance_id) references public.evolution_api_instances(id) on delete restrict,
+  constraint meta_whatsapp_deliveries_workspace_id_fkey
+    foreign key (workspace_id) references public.workspaces(id) on delete restrict,
+  constraint meta_whatsapp_deliveries_status_check
+    check (status in ('pending', 'delivering', 'retry', 'accepted', 'processed', 'quarantined', 'dead_letter'))
+);
+
+create index if not exists idx_meta_deliveries_routing on public.meta_whatsapp_deliveries(status, created_at desc);
+create index if not exists idx_meta_deliveries_cluster on public.meta_whatsapp_deliveries(cluster_id);
+create index if not exists idx_meta_deliveries_instance on public.meta_whatsapp_deliveries(instance_id);
+create index if not exists idx_meta_deliveries_workspace on public.meta_whatsapp_deliveries(workspace_id);
+
+-- Enable RLS for all operational tables
+alter table public.whatsapp_clusters enable row level security;
+alter table public.evolution_api_instances enable row level security;
+alter table public.evolution_webhook_events enable row level security;
+alter table public.webhook_logs enable row level security;
+alter table public.workspace_logs enable row level security;
+alter table public.meta_whatsapp_waba_routes enable row level security;
+alter table public.meta_whatsapp_phone_routes enable row level security;
+alter table public.meta_whatsapp_receipts enable row level security;
+alter table public.meta_whatsapp_deliveries enable row level security;
+
+-- Revoke all grants from anon and authenticated roles
+revoke all on public.whatsapp_clusters from anon, authenticated;
+revoke all on public.evolution_api_instances from anon, authenticated;
+revoke all on public.evolution_webhook_events from anon, authenticated;
+revoke all on public.webhook_logs from anon, authenticated;
+revoke all on public.workspace_logs from anon, authenticated;
+revoke all on public.meta_whatsapp_waba_routes from anon, authenticated;
+revoke all on public.meta_whatsapp_phone_routes from anon, authenticated;
+revoke all on public.meta_whatsapp_receipts from anon, authenticated;
+revoke all on public.meta_whatsapp_deliveries from anon, authenticated;
+
+-- Ensure service_role and postgres roles have access
+grant all on public.whatsapp_clusters to service_role, postgres;
+grant all on public.evolution_api_instances to service_role, postgres;
+grant all on public.evolution_webhook_events to service_role, postgres;
+grant all on public.workspace_logs to service_role, postgres;
+grant all on public.meta_whatsapp_waba_routes to service_role, postgres;
+grant all on public.meta_whatsapp_phone_routes to service_role, postgres;
+grant all on public.meta_whatsapp_receipts to service_role, postgres;
+grant all on public.meta_whatsapp_deliveries to service_role, postgres;
+
+
+-- ============================================
 -- Gatilho para sincronização de novos usuários (Supabase Auth)
 -- ============================================
 create or replace function public.handle_new_user()
@@ -1147,6 +1327,10 @@ select public._create_updated_at_trigger('public.meta_contacts'); -- NEW
 select public._create_updated_at_trigger('public.meta_conversations'); -- NEW
 select public._create_updated_at_trigger('public.system_settings'); -- NEW
 select public._create_updated_at_trigger('public.queue_jobs'); -- NEW
+select public._create_updated_at_trigger('public.meta_whatsapp_waba_routes');
+select public._create_updated_at_trigger('public.meta_whatsapp_phone_routes');
+select public._create_updated_at_trigger('public.meta_whatsapp_receipts');
+select public._create_updated_at_trigger('public.meta_whatsapp_deliveries');
 
 drop function if exists public._create_updated_at_trigger(regclass);
 `;

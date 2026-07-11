@@ -251,7 +251,18 @@ export async function handleAiQueueJobFailure(
              AND run.chat_id = $3
              AND run.source_message_id = $1
              AND run.status IN ('success', 'fallback', 'skipped')
-             AND COALESCE(run.metadata->>'responseSent', 'false') = 'true'
+             AND (
+               COALESCE(run.metadata->>'workflowHandoffCompleted', 'false') = 'true'
+               OR EXISTS (
+                 SELECT 1
+                 FROM messages response
+                 WHERE response.workspace_id = $2
+                   AND response.chat_id = $3
+                   AND response.from_me = true
+                   AND response.metadata->>'autopilotSourceMessageId' = $1::text
+                   AND COALESCE(upper(response.api_message_status), '') NOT IN ('FAILED', 'ERROR')
+               )
+             )
          ) AS completed`,
       [payload.messageId, payload.workspaceId, payload.chatId],
     );

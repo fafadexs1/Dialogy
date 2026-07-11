@@ -81,7 +81,7 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
     try {
         const res = await db.query(
             `SELECT 
-                id, instance_name, to_jsonb(evolution_api_instances)->>'webhook_key' as webhook_key, display_name, type, cluster_id, webhook_url,
+                id, instance_name, display_name, type, cluster_id,
                 to_jsonb(evolution_api_instances)->>'business_name' as business_name,
                 to_jsonb(evolution_api_instances)->>'waba_name' as waba_name,
                 to_jsonb(evolution_api_instances)->>'display_phone_number' as display_phone_number,
@@ -238,15 +238,34 @@ export async function createEvolutionApiInstance(
     try {
         await client.query('BEGIN');
 
-        // 1. Encontrar um cluster ativo com a menor carga (lógica de load balance a ser implementada)
+        // 1. WABAs existentes stay on their registered owner. Only a brand-new
+        // WABA participates in active-cluster provisioning.
         const clusterRes = await client.query(
             'SELECT id, api_url, api_key FROM whatsapp_clusters WHERE is_active = TRUE ORDER BY created_at ASC'
         );
-        if (clusterRes.rowCount === 0) {
+        let ownerCluster: { id: string; api_url: string; api_key: string; route_status: string } | null = null;
+        if (isCloudApi && payload.businessId) {
+            const ownerRes = await client.query(
+                `SELECT c.id, c.api_url, c.api_key, r.status AS route_status
+                 FROM meta_whatsapp_waba_routes r
+                 JOIN whatsapp_clusters c ON c.id = r.cluster_id
+                 WHERE r.waba_id = $1
+                 FOR UPDATE OF r`,
+                [payload.businessId]
+            );
+            ownerCluster = ownerRes.rows[0] || null;
+            if (ownerCluster && ownerCluster.route_status !== 'active') {
+                throw new Error(`A WABA está com rota ${ownerCluster.route_status}; conclua a migração antes de provisionar.`);
+            }
+        }
+        if (!ownerCluster && clusterRes.rowCount === 0) {
             throw new Error('Nenhum servidor (cluster) Evolution API ativo foi encontrado.');
         }
-        const clusters = clusterRes.rows;
-        const cluster = clusters[0];
+        const activeClusters = clusterRes.rows;
+        const cluster = ownerCluster || activeClusters[0];
+        const clusters = ownerCluster && !activeClusters.some((item) => item.id === ownerCluster!.id)
+            ? [...activeClusters, ownerCluster]
+            : activeClusters;
         const apiConfig = { api_url: cluster.api_url, api_key: cluster.api_key };
 
         // 2. Gerar o próximo `instanceName` sequencial GLOBALMENTE.
@@ -399,11 +418,12 @@ export async function createEvolutionApiInstance(
         // Extract meta info if available
         const meta = payload.metaInfo || {};
 
-        await client.query(
+        const createdInstance = await client.query(
             `INSERT INTO evolution_api_instances (
                 workspace_id, cluster_id, instance_name, webhook_key, display_name, type, webhook_url,
                 business_name, waba_name, display_phone_number, verified_name, waba_id, phone_number_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING id`,
             [
                 workspaceId,
                 cluster.id,
@@ -420,6 +440,30 @@ export async function createEvolutionApiInstance(
                 payload.number || null
             ]
         );
+
+        if (instanceType === 'wa_cloud') {
+            const wabaId = payload.businessId!;
+            const phoneNumberId = payload.number!;
+            await client.query(
+                `INSERT INTO meta_whatsapp_waba_routes (waba_id, cluster_id, status, version)
+                 VALUES ($1, $2, 'active', 1)
+                 ON CONFLICT (waba_id) DO NOTHING`,
+                [wabaId, cluster.id]
+            );
+            const owner = await client.query(
+                `SELECT cluster_id FROM meta_whatsapp_waba_routes WHERE waba_id = $1 FOR UPDATE`,
+                [wabaId]
+            );
+            if (owner.rowCount !== 1 || owner.rows[0].cluster_id !== cluster.id) {
+                throw new Error('A WABA informada já pertence a outro cluster. Use uma migração versionada.');
+            }
+            await client.query(
+                `INSERT INTO meta_whatsapp_phone_routes
+                   (phone_number_id, waba_id, instance_id, workspace_id, status)
+                 VALUES ($1, $2, $3, $4, 'active')`,
+                [phoneNumberId, wabaId, createdInstance.rows[0].id, workspaceId]
+            );
+        }
 
         if (isTelegram && telegramWebhookUrl) {
             await setTelegramWebhook(telegramBotToken, telegramWebhookUrl, webhookKey);

@@ -636,6 +636,18 @@ export function createDefaultNodeHandlerRegistry(
         const source = sourceContext(input);
         const message = renderTemplate(String(input.node.config.message || '{{current.response}}'), source);
         const delivery = await dependencies.sendResponse(message, input);
+        if (delivery.success === false) {
+          return {
+            status: 'error',
+            error: {
+              code: 'RESPONSE_DELIVERY_FAILED',
+              message: typeof delivery.error === 'string'
+                ? delivery.error
+                : 'The response provider did not accept the message.',
+              retryable: true,
+            },
+          };
+        }
         return success({ message, delivery });
       },
     })
