@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
+import * as SheetPrimitive from '@radix-ui/react-dialog';
 import ChatList from '../chat/chat-list';
 import ChatPanel from '../chat/chat-panel';
 import { CommandPalette } from '../chat/command-palette';
@@ -16,6 +17,7 @@ import { toast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
+import { Sheet, SheetDescription, SheetOverlay, SheetPortal, SheetTitle } from '../ui/sheet';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
@@ -27,7 +29,7 @@ import ReactDOM from 'react-dom';
 import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
-import { formatMessageDate } from '@/lib/utils';
+import { cn, formatMessageDate } from '@/lib/utils';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
 import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
 import { reconcileRealtimeChatAssignment } from '@/lib/realtime/realtime-reconciler';
@@ -36,7 +38,29 @@ import { persistChatRead } from '@/lib/inbox-mark-as-read';
 
 const ContactPanel = dynamic(() => import('../chat/contact-panel'), {
   ssr: false,
-  loading: () => <div className="hidden h-full w-[280px] shrink-0 border-l border-border lg:block xl:w-[340px]" />,
+  loading: () => (
+    <div className="flex h-full min-h-0 w-full flex-col bg-background p-5" aria-hidden="true">
+      <div className="flex items-center justify-between gap-4 border-b border-border/70 pb-4">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-36 bg-muted" />
+          <Skeleton className="h-3 w-24 bg-muted" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-8 w-8 rounded-lg bg-muted" />
+          <Skeleton className="h-8 w-8 rounded-lg bg-muted" />
+        </div>
+      </div>
+      <div className="flex flex-1 flex-col items-center gap-5 pt-6">
+        <Skeleton className="h-20 w-20 rounded-full bg-muted" />
+        <div className="w-full space-y-3">
+          <Skeleton className="mx-auto h-5 w-40 bg-muted" />
+          <Skeleton className="h-9 w-full rounded-xl bg-muted" />
+          <Skeleton className="h-24 w-full rounded-2xl bg-muted" />
+          <Skeleton className="h-24 w-full rounded-2xl bg-muted" />
+        </div>
+      </div>
+    </div>
+  ),
 });
 
 // Notification sounds served from public assets
@@ -45,7 +69,7 @@ const SOUND_SOURCES = {
   attending: '/sounds/message-incoming-02-199577.mp3',
 } as const;
 const FALLBACK_TIMEZONE = 'America/Sao_Paulo';
-const IS_DEV = process.env.NODE_ENV !== 'production';
+const INBOX_SOUND_TESTER_ENABLED = process.env.NEXT_PUBLIC_INBOX_DEBUG === 'true';
 const DELTA_SYNC_MIN_INTERVAL_MS = 3000;
 const HEALTHY_REALTIME_POLL_VISIBLE_MS = 60000;
 const HEALTHY_REALTIME_POLL_HIDDEN_MS = 30000;
@@ -163,31 +187,37 @@ function DraggableSoundTester({
 
 function LoadingSkeleton() {
   return (
-    <div className="flex flex-1 w-full min-h-0 h-full bg-background">
-      <div className="flex flex-col w-[260px] lg:w-[300px] xl:w-[360px] 2xl:w-[400px] shrink-0 min-w-0 max-w-full border-r border-border bg-background p-4 gap-4">
-        <Skeleton className="h-12 w-full bg-muted" />
-        <Skeleton className="h-10 w-full bg-muted" />
-        <Skeleton className="h-10 w-full bg-muted" />
-        <div className="space-y-2 mt-4">
-          <Skeleton className="h-16 w-full bg-muted" />
-          <Skeleton className="h-16 w-full bg-muted" />
-          <Skeleton className="h-16 w-full bg-muted" />
-          <Skeleton className="h-16 w-full bg-muted" />
+    <div className="flex h-full min-h-0 w-full flex-1 bg-background text-foreground" aria-busy="true" aria-label="Carregando inbox">
+      <div className="flex h-full w-full shrink-0 border-r border-border bg-background md:w-[clamp(320px,29vw,460px)] md:min-w-[320px] md:max-w-[460px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-4 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <Skeleton className="h-7 w-32 bg-muted" />
+            <Skeleton className="h-9 w-9 rounded-xl bg-muted" />
+          </div>
+          <Skeleton className="h-10 w-full rounded-xl bg-muted" />
+          <div className="mt-2 space-y-2">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-[72px] w-full rounded-2xl bg-muted" />
+            ))}
+          </div>
         </div>
       </div>
-      <div className="flex-1 flex flex-col min-w-0 bg-transparent">
-        <Skeleton className="h-16 w-full bg-muted" />
-        <div className="flex-1 p-6 space-y-4">
-          <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
-          <Skeleton className="h-10 w-1/2 bg-muted" />
-          <Skeleton className="h-10 w-1/2 ml-auto bg-muted" />
+      <div className="hidden min-w-0 flex-1 flex-col bg-background md:flex">
+        <div className="flex min-h-[72px] items-center gap-3 border-b border-border px-6">
+          <Skeleton className="h-11 w-11 rounded-full bg-muted" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-36 bg-muted" />
+            <Skeleton className="h-3 w-24 bg-muted" />
+          </div>
         </div>
-        <Skeleton className="h-24 w-full bg-muted" />
-      </div>
-      <div className="hidden lg:flex lg:flex-col lg:w-[260px] xl:w-[320px] 2xl:w-[380px] lg:flex-shrink-0 border-l border-border bg-background p-4 gap-4">
-        <Skeleton className="h-16 w-full bg-muted" />
-        <Skeleton className="h-24 w-full bg-muted" />
-        <Skeleton className="h-32 w-full bg-muted" />
+        <div className="flex flex-1 flex-col gap-4 p-6">
+          <Skeleton className="ml-auto h-12 w-[min(58%,420px)] rounded-2xl bg-muted" />
+          <Skeleton className="h-12 w-[min(52%,380px)] rounded-2xl bg-muted" />
+          <Skeleton className="ml-auto h-16 w-[min(64%,460px)] rounded-2xl bg-muted" />
+        </div>
+        <div className="border-t border-border p-4">
+          <Skeleton className="h-14 w-full rounded-2xl bg-muted" />
+        </div>
       </div>
     </div>
   );
@@ -243,12 +273,18 @@ export default function CustomerChatLayout({
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
   const [debugCounter, setDebugCounter] = useState(0);
-  const [isContactPanelOpen, setIsContactPanelOpen] = useState(true);
+  const [isContactPanelOpen, setIsContactPanelOpen] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [selectedForwardingChatIds, setSelectedForwardingChatIds] = useState<Set<string>>(new Set());
   const [isForwarding, setIsForwarding] = useState(false);
   const [highContrast, setHighContrast] = useState(false);
   const [isRTL, setIsRTL] = useState(false);
+
+  useEffect(() => {
+    if (isForwarding && isContactPanelOpen) {
+      setIsContactPanelOpen(false);
+    }
+  }, [isContactPanelOpen, isForwarding]);
 
   const chats = useInboxStore((state) => state.chats);
   const selectedChatId = useInboxStore((state) => state.selectedChatId);
@@ -465,7 +501,7 @@ export default function CustomerChatLayout({
     }
   }, [chats, formatMessageDay, workspaceTimezone, initialUser]);
 
-  const unlockAudio = useCallback(async () => {
+  const unlockAudio = useCallback(async ({ showPromptOnFailure = true }: { showPromptOnFailure?: boolean } = {}) => {
     const refs = [audioRefs.current.queue, audioRefs.current.attending];
     let unlocked = false;
     for (const audio of refs) {
@@ -482,7 +518,11 @@ export default function CustomerChatLayout({
         console.warn('[NOTIFICATION] Audio unlock failed for one source, still blocked by browser', err);
       }
     }
-    setNeedsAudioUnlock(!unlocked);
+    if (unlocked) {
+      setNeedsAudioUnlock(false);
+    } else if (showPromptOnFailure) {
+      setNeedsAudioUnlock(true);
+    }
     if (unlocked) {
       console.log('[NOTIFICATION] Audio unlocked by user gesture');
     }
@@ -491,7 +531,7 @@ export default function CustomerChatLayout({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleGesture = () => {
-      unlockAudio();
+      void unlockAudio({ showPromptOnFailure: false });
     };
     window.addEventListener('pointerdown', handleGesture, { once: true });
     window.addEventListener('keydown', handleGesture, { once: true });
@@ -1658,12 +1698,12 @@ export default function CustomerChatLayout({
           dir={isRTL ? 'rtl' : 'ltr'}
         >
           {needsAudioUnlock && (
-            <div className="absolute top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground">
+            <div className="absolute right-4 top-[calc(clamp(72px,8.8vh,88px)+12px)] z-50 flex max-w-[min(360px,calc(100%-2rem))] items-center gap-2 rounded-xl border border-border bg-popover px-3 py-2 text-xs text-foreground shadow-lg">
               <span>Habilite o som de novas mensagens</span>
-              <Button size="sm" variant="secondary" onClick={unlockAudio}>Habilitar</Button>
+              <Button size="sm" variant="secondary" onClick={() => void unlockAudio()}>Habilitar</Button>
             </div>
           )}
-          {IS_DEV && (
+          {INBOX_SOUND_TESTER_ENABLED && (
             <DraggableSoundTester
               debugCounter={debugCounter}
               onPlay={(kind) => { setDebugCounter((n) => n + 1); playNotificationSound(kind); }}
@@ -1704,7 +1744,7 @@ export default function CustomerChatLayout({
               canLoadOlder={hasLoadedSelectedMessageWindow && hasMoreHistory}
               isLoadingInitialMessages={Boolean(enrichedSelectedChat && !hasLoadedSelectedMessageWindow && !(enrichedSelectedChat as any)?.protocolScoped)}
               workspaceTimezone={workspaceTimezone}
-              onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
+              onToggleContactPanel={() => setIsContactPanelOpen((open) => !open)}
               onForwardMessage={handleForwardMessage}
               highContrast={highContrast}
               onToggleHighContrast={() => setHighContrast((v) => !v)}
@@ -1712,14 +1752,39 @@ export default function CustomerChatLayout({
               onToggleRTL={() => setIsRTL((v) => !v)}
             />
           </ErrorBoundary>
-          {isContactPanelOpen && !isForwarding && (
-            <ContactPanel
-              chat={enrichedSelectedChat}
-              currentUser={initialUser}
-              onTransferSuccess={handleDataMutation}
-              onContactUpdate={handleLocalContactUpdate}
-            />
-          )}
+          <Sheet
+            open={isContactPanelOpen && !isForwarding}
+            onOpenChange={setIsContactPanelOpen}
+          >
+            <SheetPortal>
+              <SheetOverlay className="z-50 bg-slate-950/20 backdrop-blur-[2px] dark:bg-black/55" />
+              <SheetPrimitive.Content
+                dir={isRTL ? 'rtl' : 'ltr'}
+                className={cn(
+                  "fixed inset-y-0 z-50 flex h-full min-h-0 w-full flex-col overflow-hidden border-border/80 bg-background p-0 text-foreground outline-none transition ease-out data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:duration-300 data-[state=open]:duration-300 sm:w-[min(92vw,440px)] sm:max-w-none lg:w-[clamp(380px,42vw,480px)] xl:w-[clamp(420px,36vw,500px)] 2xl:w-[clamp(440px,30vw,520px)]",
+                  highContrast && "contrast-125",
+                  isRTL
+                    ? "left-0 border-r shadow-[24px_0_64px_-32px_rgba(15,23,42,0.38)] data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left dark:shadow-[24px_0_72px_-28px_rgba(0,0,0,0.72)]"
+                    : "right-0 border-l shadow-[-24px_0_64px_-32px_rgba(15,23,42,0.38)] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right dark:shadow-[-24px_0_72px_-28px_rgba(0,0,0,0.72)]"
+                )}
+              >
+                <SheetTitle className="sr-only">
+                  Contexto de {enrichedSelectedChat?.contact?.name || 'contato'}
+                </SheetTitle>
+                <SheetDescription className="sr-only">
+                  Informacoes do contato, CRM, protocolos, transferencia e recursos do SGP.
+                </SheetDescription>
+                <ContactPanel
+                  presentation="canvas"
+                  chat={enrichedSelectedChat}
+                  currentUser={initialUser}
+                  onTransferSuccess={handleDataMutation}
+                  onContactUpdate={handleLocalContactUpdate}
+                  onRequestClose={() => setIsContactPanelOpen(false)}
+                />
+              </SheetPrimitive.Content>
+            </SheetPortal>
+          </Sheet>
         </div>
 
         <CommandPalette />

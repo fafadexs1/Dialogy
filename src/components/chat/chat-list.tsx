@@ -64,7 +64,8 @@ import { SearchDetailsDialog } from './search-details-dialog';
 import { InboxSearchInput } from './inbox-search-input';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 
-const MAX_VISIBLE_ONLINE_AGENTS = 7;
+const MAX_VISIBLE_ONLINE_AGENTS = 5;
+const PRIORITY_REEVALUATION_INTERVAL_MS = 30_000;
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { workspaceId: string, onActionSuccess: () => void, trigger?: React.ReactNode }) {
@@ -403,6 +404,17 @@ interface LastMessagePreviewProps {
   showSender?: boolean;
 }
 
+const isMessageOutgoing = (message: Message): boolean => Boolean(
+  message.from_me ||
+  message.direction === 'outgoing' ||
+  message.sender?.type === 'user' ||
+  message.sender?.type === 'system_agent'
+);
+
+const isIncomingCustomerMessage = (message: Message): boolean => (
+  message.type !== 'system' && !isMessageOutgoing(message)
+);
+
 const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, currentUser, showSender = false }) => {
   const { latitude, longitude, address, locationName } = message.metadata || {};
   const isLocation = typeof latitude === 'number' && typeof longitude === 'number' || message.type === 'location';
@@ -416,12 +428,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, curren
       (senderName && senderName.toLowerCase() === currentUser.name.trim().toLowerCase())
     )
   );
-  const isOutgoing = Boolean(
-    message.from_me ||
-    message.direction === 'outgoing' ||
-    message.sender?.type === 'user' ||
-    message.sender?.type === 'system_agent'
-  );
+  const isOutgoing = isMessageOutgoing(message);
 
   const senderMeta = (() => {
     if (message.type === 'system') {
@@ -494,7 +501,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, curren
   };
 
   return (
-    <div className="flex items-center gap-1.5 text-sm text-muted-foreground overflow-hidden">
+    <div className="flex items-center gap-1.5 overflow-hidden text-[12px] leading-[18px] text-slate-500">
       <div className="flex-shrink-0 mt-0.5">
         {message.metadata?.thumbnail && typeof message.metadata.thumbnail === 'string' ? (
           <div className="relative">
@@ -539,6 +546,7 @@ interface ChatListItemProps {
   onToggleBulkSelection?: (chatId: string) => void;
   onAssign?: (chat: Chat) => Promise<void> | void;
   onPrefetch?: (chatId: string) => void;
+  priorityNow: number;
 }
 
 
@@ -554,7 +562,7 @@ const getDraftPreviewText = (draft: string): string => {
     .trim();
 };
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, onAssign, onPrefetch }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect, onUpdate, currentUser, showMarketing, isForwarding, isSelectedForForwarding, onToggleForwardSelection, onToggleBulkSelection, isBulkMode, isSelectedForBulk, onAssign, onPrefetch, priorityNow }) => {
   const isMarketingChat = useMemo(() => {
     const hasMarketingMessage = chat.messages?.some((m: any) => isMarketingMessage(m as Message)) ?? false;
     // Hide marketing badge if chat is assigned to an agent OR is in 'atendimentos'/'encerrados'
@@ -579,18 +587,20 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
   const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
   const statusTone = chat.status === 'encerrados'
-    ? 'border-red-500/20 bg-red-500/10 text-red-300'
+    ? 'border-slate-200 bg-slate-50 text-slate-500'
     : chat.status === 'atendimentos'
-      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-      : 'border-blue-500/20 bg-blue-500/10 text-blue-300';
+      ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+      : 'border-blue-100 bg-blue-50 text-blue-700';
   const hasTag = Boolean(chat.tag);
   const tagLabel = hasTag ? chat.tag : 'Sem tag';
   const unreadCount = chat.unreadCount ?? 0;
   const hasUnread = unreadCount > 0;
 
   // SLA Calculation
-  const isWaiting = chat.status === 'atendimentos' && lastMessage && !lastMessage.from_me;
-  const waitingMinutes = isWaiting && lastMessage ? (Date.now() - new Date(lastMessage.createdAt).getTime()) / 60000 : 0;
+  const isWaiting = chat.status === 'atendimentos' && lastMessage && isIncomingCustomerMessage(lastMessage);
+  const waitingMinutes = isWaiting && lastMessage
+    ? (priorityNow - new Date(lastMessage.createdAt || lastMessage.timestamp).getTime()) / 60000
+    : 0;
 
   const slaStatus = isWaiting && waitingMinutes > 30
     ? 'danger'
@@ -671,16 +681,16 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   return (
     <div
       className={cn(
-        "relative flex min-h-[106px] cursor-pointer items-start gap-3 overflow-hidden rounded-2xl border px-3.5 py-3.5 transition-all duration-200",
-        "border-border bg-card",
-        "hover:border-primary/40 hover:bg-muted/60",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        "group relative flex min-h-[84px] cursor-pointer items-start gap-2.5 overflow-hidden rounded-xl border px-3 py-2 transition-colors duration-150",
+        "border-transparent bg-card",
+        "hover:border-slate-200 hover:bg-slate-50",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30",
         isSelected && !isForwarding && !isBulkMode
-          ? "border-primary bg-muted/50"
+          ? "border-blue-100 bg-blue-50/90"
           : hasUnread
-            ? "border-blue-500/25 bg-blue-500/[0.045]"
+            ? "bg-blue-50/35"
             : "",
-        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "border-primary/45 bg-primary/[0.09]" : "",
+        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "border-blue-200 bg-blue-50" : "",
       )}
       onClick={handleSelect}
       onMouseEnter={handleMouseEnter}
@@ -690,15 +700,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       tabIndex={0}
       role="option"
       aria-selected={isSelected}
-      aria-label={`Conversa com ${chat.contact?.name || 'Desconhecido'}`}
+      aria-label={`Conversa com ${chat.contact?.name || 'Desconhecido'}; ${statusLabel}`}
     >
       {isSelected && !isForwarding && !isBulkMode && (
-        <div className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-primary" />
+        <div className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-blue-600" />
       )}
-      <div className={cn(
-        "pointer-events-none absolute inset-x-0 top-0 h-px opacity-70",
-        isSelected ? "bg-primary/60" : "bg-border/60"
-      )} />
 
       {/* Bulk Mode Checkbox */}
       {isBulkMode && (
@@ -728,11 +734,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         user={currentUser}
       />
 
-      <div className="relative flex-shrink-0">
+      <div className="relative mt-0.5 flex-shrink-0">
         <Avatar className={cn(
-          "h-12 w-12 border-2 shadow-sm transition-all duration-200 md:h-11 md:w-11",
-          isSelected ? "border-primary" : "border-border",
-          hasUnread && !isSelected ? "border-blue-500/45" : ""
+          "h-10 w-10 border shadow-sm transition-colors",
+          isSelected ? "border-blue-300" : "border-slate-200",
+          hasUnread && !isSelected ? "border-blue-300" : ""
         )}>
           <AvatarImage fallbackOnBlank src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || 'Contato'} data-ai-hint="person" />
           <AvatarFallback className="bg-muted text-muted-foreground">{(chat.contact?.name || '?').charAt(0)}</AvatarFallback>
@@ -759,7 +765,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-card text-white shadow-sm ${bg}`}>
+                  <div className={`absolute -bottom-0.5 -right-0.5 flex h-[17px] w-[17px] items-center justify-center rounded-full border-2 border-white text-white shadow-sm ${bg}`}>
                     {icon}
                   </div>
                 </TooltipTrigger>
@@ -787,7 +793,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         )}
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-center justify-between gap-2 min-w-0 flex-nowrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-nowrap">
@@ -796,14 +802,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 chat.status === 'encerrados' ? "bg-slate-500" : chat.status === 'atendimentos' ? "bg-emerald-400" : "bg-blue-400",
                 hasUnread && "bg-blue-500"
               )} />
-              <p className={cn("max-w-[70%] truncate whitespace-nowrap text-base font-semibold tracking-tight text-foreground md:max-w-[60%] md:text-sm", hasUnread && "font-bold")} title={chat.contact?.name}>
+              <p className={cn("max-w-[78%] truncate whitespace-nowrap text-[13.5px] font-semibold tracking-tight text-slate-900 min-[1280px]:max-w-[64%]", hasUnread && "font-bold")} title={chat.contact?.name}>
                 {chat.contact?.name || 'Carregando...'}
               </p>
-              <Badge className={cn("flex-shrink-0 border px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wide", statusTone)}>
+              <Badge className={cn("hidden flex-shrink-0 border px-1.5 py-0 text-[8px] font-semibold uppercase tracking-wide min-[1280px]:inline-flex", statusTone)}>
                   {statusLabel}
               </Badge>
               {isAssignedToIntelligentAgent && (
-                <Badge className="text-[10px] px-1.5 py-0 bg-cyan-500/20 text-cyan-100 border-cyan-500/30 flex-shrink-0" title={`Atendido por IA: ${chat.assignedSystemAgent?.name || 'Atendente Inteligente'}`}>
+                <Badge className="flex-shrink-0 border-violet-100 bg-violet-50 px-1.5 py-0 text-[9px] text-violet-600" title={`Atendido por IA: ${chat.assignedSystemAgent?.name || 'Atendente Inteligente'}`}>
                   <Bot className="mr-1 h-3 w-3" />
                   IA
                 </Badge>
@@ -811,7 +817,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </div>
           </div>
           <div className="flex flex-shrink-0 flex-nowrap items-center justify-end gap-1.5">
-            <div className="flex flex-nowrap items-center gap-0.5 rounded-lg border border-border/55 bg-background/55 p-0.5 opacity-85 shadow-sm transition-all group-hover:border-border group-hover:bg-background/85 group-hover:opacity-100">
+            {(canAssign || canTag || canQuickClose) && !isForwarding && !isBulkMode && (
+            <div className="absolute right-2 top-2 z-20 flex flex-nowrap items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               {canAssign && (
                 <TooltipProvider>
                   <Tooltip>
@@ -819,7 +826,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                        className="h-6 w-6 rounded-md text-slate-500 hover:bg-blue-50 hover:text-blue-600"
                         aria-label="Assumir conversa"
                         onClick={handleAssign}
                       >
@@ -855,7 +862,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 rounded-md text-muted-foreground hover:bg-red-500/10 hover:text-red-400"
+                      className="h-6 w-6 rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600"
                       onClick={handleQuickClose}
                       disabled={isClosing}
                     >
@@ -867,6 +874,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               </TooltipProvider>
             )}
             </div>
+            )}
             {slaStatus && (
               <TooltipProvider>
                 <Tooltip>
@@ -889,14 +897,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               </TooltipProvider>
             )}
             {lastMessage && (
-              <p className="flex-shrink-0 whitespace-nowrap text-[10px] font-medium text-muted-foreground">
+              <p className="flex-shrink-0 whitespace-nowrap text-[10px] font-medium text-slate-400">
                 {formatMessageTime(lastMessage.createdAt || lastMessage.timestamp, currentUser?.activeWorkspaceTimezone || 'America/Sao_Paulo')}
               </p>
             )}
           </div>
         </div>
 
-        <div className="flex min-h-[20px] flex-wrap items-center gap-1.5">
+        <div className="flex min-h-[15px] flex-nowrap items-center gap-1.5 overflow-hidden">
           {chat.status === 'atendimentos' && chat.teamName ? (
             <Badge
               style={{
@@ -904,7 +912,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 color: chat.teamColor ? (chat.teamColor.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
                 borderColor: chat.teamColor ? chat.teamColor : 'rgba(255,255,255,0.2)'
               }}
-              className="flex flex-shrink-0 items-center gap-1 border px-1.5 py-0 text-[10px] font-medium shadow-sm"
+              className="flex max-w-[55%] flex-shrink items-center gap-1 truncate border px-1.5 py-0 text-[9px] font-medium shadow-sm"
               title={chat.teamName}
             >
               <Users className="h-3 w-3" />
@@ -918,7 +926,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 borderColor: chat.color ? chat.color : 'rgba(255,255,255,0.2)'
               } : undefined}
               className={cn(
-                "flex-shrink-0 border px-1.5 py-0 text-[10px]",
+                "max-w-[55%] flex-shrink truncate border px-1.5 py-0 text-[9px]",
                 hasTag ? "shadow-sm" : "border-border/70 bg-muted/40 text-muted-foreground"
               )}
               title={hasTag ? chat.tag : 'Sem tag'}
@@ -929,7 +937,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           {isMarketingChat && (
             <Badge
               variant="secondary"
-              className="font-medium text-[10px] py-0 px-1.5 flex items-center gap-1 bg-orange-500/20 text-orange-200 border-orange-500/30"
+              className="flex flex-shrink-0 items-center gap-1 border-orange-100 bg-orange-50 px-1.5 py-0 text-[9px] font-medium text-orange-600"
             >
               <Megaphone className="h-3 w-3" />
               Marketing
@@ -937,23 +945,23 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-border/35 bg-background/35 px-2 py-1.5">
+        <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
             {hasDraft ? (
-              <p className="flex items-center gap-1 truncate text-xs font-medium text-amber-400">
+              <p className="flex items-center gap-1 truncate text-[12px] font-medium text-amber-600">
                 <PencilLine className="h-3 w-3" />
                 <span className="font-bold">[Rascunho]:</span> {draftPreview}
               </p>
             ) : (
-              lastMessage ? <LastMessagePreview message={lastMessage} currentUser={currentUser} showSender={chat.status === 'atendimentos'} /> : <div className="h-[20px]" />
+              lastMessage ? <LastMessagePreview message={lastMessage} currentUser={currentUser} showSender={chat.status === 'atendimentos'} /> : <div className="h-[18px]" />
             )}
           </div>
           {(() => {
             const unread = unreadCount;
             if (unread <= 0) return null;
             return (
-              <Badge className="h-5 min-w-[1.25rem] flex-shrink-0 justify-center rounded-full border-0 bg-red-500 px-1.5 text-[10px] font-bold text-white">
-                {unread}
+              <Badge className="h-[18px] min-w-[18px] flex-shrink-0 justify-center rounded-full border-0 bg-blue-600 px-1 text-[9px] font-bold text-white">
+                {unread > 99 ? '99+' : unread}
               </Badge>
             );
           })()}
@@ -961,6 +969,48 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       </div>
     </div>
   );
+};
+
+type ChatPriorityGroupId = 'risk' | 'waiting' | 'recent';
+
+const CHAT_PRIORITY_GROUPS: Record<ChatPriorityGroupId, { label: string; tone: string; countTone: string }> = {
+  risk: {
+    label: 'Em risco',
+    tone: 'text-red-600',
+    countTone: 'bg-red-50 text-red-600 ring-red-100',
+  },
+  waiting: {
+    label: 'Aguardando',
+    tone: 'text-amber-600',
+    countTone: 'bg-amber-50 text-amber-700 ring-amber-100',
+  },
+  recent: {
+    label: 'Recentes',
+    tone: 'text-slate-600',
+    countTone: 'bg-slate-100 text-slate-600 ring-slate-200',
+  },
+};
+
+const getChatPriorityGroup = (chat: Chat, now = Date.now()): ChatPriorityGroupId => {
+  if (chat.status === 'encerrados') return 'recent';
+
+  const messages = chat.messages || [];
+  const lastMessage = messages[messages.length - 1];
+  const waitingForAgent = Boolean(
+    chat.status === 'atendimentos' &&
+    lastMessage &&
+    isIncomingCustomerMessage(lastMessage)
+  );
+  const lastMessageTime = lastMessage
+    ? new Date(lastMessage.createdAt || lastMessage.timestamp).getTime()
+    : 0;
+  const waitingMinutes = waitingForAgent && Number.isFinite(lastMessageTime)
+    ? (now - lastMessageTime) / 60000
+    : 0;
+
+  if (waitingForAgent && waitingMinutes > 15) return 'risk';
+  if (waitingForAgent || (chat.unreadCount ?? 0) > 0) return 'waiting';
+  return 'recent';
 };
 
 const MemoizedChatListItem = React.memo(ChatListItem);
@@ -1005,6 +1055,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ChatListTabId>('gerais');
+  const [priorityNow, setPriorityNow] = useState(() => Date.now());
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [onlyUnread, setOnlyUnread] = useState(false);
@@ -1039,6 +1090,23 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isAgentBulkConfigOpen, setIsAgentBulkConfigOpen] = useState(false);
   const [bulkAgentStatus, setBulkAgentStatus] = useState(true);
   const [bulkAgentMode, setBulkAgentMode] = useState<'suggest' | 'auto'>('suggest');
+
+  useEffect(() => {
+    const refreshPriorityClock = () => setPriorityNow(Date.now());
+    const intervalId = window.setInterval(refreshPriorityClock, PRIORITY_REEVALUATION_INTERVAL_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshPriorityClock();
+    };
+
+    window.addEventListener('focus', refreshPriorityClock);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshPriorityClock);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const handleSubmitSearch = useCallback(() => {
     const query = searchTerm.trim();
@@ -1301,10 +1369,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   }, [chats]);
 
   const TABS = [
-    { id: 'robo', label: 'Robô', icon: Bot, data: sortedChats.robo },
-    { id: 'gerais', label: 'Fila', icon: ListTodo, data: sortedChats.fila },
-    { id: 'atendimentos', label: 'Atendendo', icon: MessageSquare, data: sortedChats.atendimentos },
-    { id: 'encerrados', label: 'Encerrados', icon: CheckCircle2, data: sortedChats.encerrados }
+    { id: 'robo', label: 'Robô', shortLabel: 'Robô', icon: Bot, data: sortedChats.robo },
+    { id: 'gerais', label: 'Fila', shortLabel: 'Fila', icon: ListTodo, data: sortedChats.fila },
+    { id: 'atendimentos', label: 'Atendendo', shortLabel: 'Atend.', icon: MessageSquare, data: sortedChats.atendimentos },
+    { id: 'encerrados', label: 'Encerrados', shortLabel: 'Encerr.', icon: CheckCircle2, data: sortedChats.encerrados }
   ] as const;
 
   const getBaseChatsForTab = useCallback(
@@ -1374,6 +1442,27 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     return getBaseChatsForTab(activeTab).filter(filterChatByControls);
   }, [activeTab, getBaseChatsForTab, filterChatByControls, showMarketing]);
 
+  const { groupedChats, priorityGroupCounts } = useMemo(() => {
+    const buckets: Record<ChatPriorityGroupId, Chat[]> = {
+      risk: [],
+      waiting: [],
+      recent: [],
+    };
+
+    filteredChats.forEach((chat) => {
+      buckets[getChatPriorityGroup(chat, priorityNow)].push(chat);
+    });
+
+    return {
+      groupedChats: [...buckets.risk, ...buckets.waiting, ...buckets.recent],
+      priorityGroupCounts: {
+        risk: buckets.risk.length,
+        waiting: buckets.waiting.length,
+        recent: buckets.recent.length,
+      },
+    };
+  }, [filteredChats, priorityNow]);
+
   const areAllForwardingChatsSelected = useMemo(
     () => (
       filteredChats.length > 0 &&
@@ -1403,57 +1492,18 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   return (
     <div
       className={cn(
-        "flex h-full shrink-0 flex-row border-r border-border bg-background transition-none",
-        "w-full md:w-[400px] lg:w-[440px] xl:w-[500px] 2xl:w-[540px] md:min-w-[380px] md:max-w-[560px]",
+        "flex h-full w-full shrink-0 flex-col border-r border-slate-200 bg-white transition-none",
+        "md:w-[clamp(320px,29vw,460px)] md:min-w-[320px] md:max-w-[460px]",
         className
       )}
     >
-      {/* Side Navigation Rail */}
-      <div className="w-[80px] 2xl:w-[90px] flex-shrink-0 border-r border-border flex flex-col items-center py-6 gap-4 bg-background">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
-          return (
-            <TooltipProvider key={tab.id}>
-              <Tooltip delayDuration={0}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
-                    className={cn(
-                      "group relative flex flex-col h-12 w-[62px] 2xl:w-[70px] items-center justify-center rounded-xl transition-all duration-300 gap-1",
-                      activeTab === tab.id
-                        ? "bg-blue-600 text-white"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    )}
-                  >
-                    <Icon className={cn("h-[18px] w-[18px] transition-transform duration-300", activeTab === tab.id ? "scale-105" : "group-hover:scale-105")} />
-                    <span className="text-[7.5px] 2xl:text-[8px] font-bold uppercase tracking-wider text-center leading-none">
-                      {tab.label}
-                    </span>
-                    {filteredCount > 0 && (
-                      <span className={cn(
-                        "absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold ring-2 ring-background",
-                        activeTab === tab.id ? "bg-white text-blue-600" : "bg-blue-600 text-white"
-                      )}>
-                        {filteredCount}
-                      </span>
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={10} className="font-medium bg-popover border-border text-popover-foreground">
-                  {tab.label}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          );
-        })}
-      </div>
-
-      <div className="flex flex-1 flex-col min-w-0 h-full overflow-hidden">
-      <div className="p-4 xl:p-5 flex-shrink-0 border-b border-border space-y-4">
+      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex-shrink-0 space-y-3 border-b border-slate-200 bg-white px-4 pb-3 pt-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg md:text-xl font-bold text-foreground tracking-tight">Conversas</h2>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-slate-950">Inbox</h2>
+            <p className="mt-0.5 text-[11px] font-medium text-slate-400">Central de conversas</p>
+          </div>
           <div className="flex items-center gap-2">
             {activeTab === 'atendimentos' && !isForwarding && (
               <div className="flex items-center gap-1.5 bg-muted/40 p-1 rounded-lg">
@@ -1506,14 +1556,49 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 workspaceId={currentUser.activeWorkspaceId}
                 onActionSuccess={onUpdate}
                 trigger={
-                  <Button size="sm" className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md transition-all duration-300 border-0">
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Nova Conversa
+                  <Button size="sm" className="h-9 rounded-lg border-0 bg-blue-600 px-3 text-white shadow-sm transition-colors hover:bg-blue-700">
+                    <PlusCircle className="mr-1.5 h-4 w-4" />
+                    Nova
                   </Button>
                 }
               />
             )}
           </div>
+        </div>
+        <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="Status das conversas">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
+
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                aria-label={`${tab.label}: ${filteredCount} conversas`}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "relative flex h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-semibold transition-colors",
+                  activeTab === tab.id
+                    ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200"
+                    : "text-slate-500 hover:bg-white/70 hover:text-slate-800"
+                )}
+              >
+                <Icon className="hidden h-3 w-3 flex-shrink-0 min-[1400px]:block" />
+                <span className="truncate min-[1400px]:hidden">{tab.shortLabel}</span>
+                <span className="hidden truncate min-[1400px]:inline">{tab.label}</span>
+                {filteredCount > 0 && (
+                  <span className={cn(
+                    "flex min-w-[16px] flex-shrink-0 items-center justify-center rounded-full px-1 text-[8px] leading-4",
+                    activeTab === tab.id ? "bg-blue-50 text-blue-700" : "bg-slate-200 text-slate-600"
+                  )}>
+                    {filteredCount > 99 ? '99+' : filteredCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
         <div>
           <InboxSearchInput
@@ -1525,7 +1610,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             renderFilterTrigger={(filterTriggerClassName) => (
               <Popover>
                 <PopoverTrigger asChild>
-                  <button type="button" aria-label="Filtros" className={filterTriggerClassName}>
+                  <button
+                    type="button"
+                    aria-label="Filtros"
+                    className={cn(
+                      filterTriggerClassName,
+                      (teamFilter.length > 0 || statusFilter !== 'all' || showUnassignedOnly || showMarketing) && "ring-2 ring-blue-500/20"
+                    )}
+                  >
                     <Filter className="h-4 w-4" />
                   </button>
                 </PopoverTrigger>
@@ -1646,6 +1738,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     </RadioGroup>
                   </div>
                   <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Somente sem responsável</p>
+                        <p className="text-xs text-muted-foreground">Conversas que ainda precisam de atribuição</p>
+                      </div>
+                      <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} className="data-[state=checked]:bg-blue-600" />
+                    </div>
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
@@ -1659,14 +1758,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             )}
           />
           {/* Quick Filter Chips */}
-          <div className="flex flex-wrap items-center gap-2 pt-4">
+          <div className="flex flex-nowrap items-center gap-1.5 pt-2">
             <Badge
               variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
               className={cn(
-                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                "order-2 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-colors",
                 ownershipFilter === 'mine'
-                  ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
-                  : "hover:bg-muted text-muted-foreground"
+                  ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
               )}
               onClick={() => {
                 if (ownershipFilter !== 'mine') setOwnershipFilter('mine');
@@ -1675,17 +1774,17 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               <span className="flex w-full items-center justify-center px-2">
                 <span className="inline-flex max-w-full items-center justify-center gap-1">
                   {isFiltering && ownershipFilter === 'mine' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
-                  <span className="block truncate text-center">Meus</span>
+                  <span className="block truncate text-center">Atribuídos a mim</span>
                 </span>
               </span>
             </Badge>
             <Badge
               variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
               className={cn(
-                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                "order-1 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-colors",
                 ownershipFilter === 'everyone'
-                  ? "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
-                  : "hover:bg-muted text-muted-foreground"
+                  ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
               )}
               onClick={() => {
                 if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
@@ -1698,14 +1797,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 </span>
               </span>
             </Badge>
-            <div className="h-4 w-px bg-border/40 mx-0.5" />
+            <div className="order-3 h-4 w-px bg-slate-200" />
             <Badge
               variant={onlyUnread ? 'default' : 'outline'}
               className={cn(
-                "flex h-7 items-center justify-center rounded-full px-3 text-[11px] font-medium transition-colors whitespace-nowrap",
+                "order-4 flex h-8 cursor-pointer items-center justify-center rounded-full border-transparent px-2.5 text-[10.5px] font-semibold transition-colors whitespace-nowrap",
                 onlyUnread
-                  ? "bg-amber-500 hover:bg-amber-600 text-white border-transparent"
-                  : "hover:bg-muted text-muted-foreground"
+                  ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
               )}
               onClick={() => setOnlyUnread(!onlyUnread)}
               title="Não lidas"
@@ -1715,7 +1814,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Badge
               variant={showUnassignedOnly ? 'default' : 'outline'}
               className={cn(
-                "flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors",
+                "hidden",
                 showUnassignedOnly
                   ? "bg-emerald-500 hover:bg-emerald-600 text-white border-transparent"
                   : "hover:bg-muted text-muted-foreground"
@@ -1738,21 +1837,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         onSelectChat={setSelectedChat}
       />
 
-      <div className="px-4 py-3 flex-shrink-0 border-b border-border bg-muted/20">
-        <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-          Agentes Online ({onlineAgents.length})
+      <div className="flex flex-shrink-0 items-center gap-3 border-b border-slate-100 bg-white px-4 py-2">
+        <h3 className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          Online ({onlineAgents.length})
           {isOffline && (
             <Badge variant="destructive" className="h-4 text-[10px] px-1">
               Offline - Reconectando...
             </Badge>
           )}
         </h3>
-          <div className={cn("flex flex-nowrap items-center gap-1.5 overflow-x-hidden overflow-y-visible pl-1 py-1 transition-opacity duration-300", isOffline ? "opacity-50 grayscale pointer-events-none" : "opacity-100")}>
+          <div className={cn("flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 overflow-x-hidden overflow-y-visible py-0.5 transition-opacity duration-300", isOffline ? "opacity-50 grayscale pointer-events-none" : "opacity-100")}>
             {onlineAgents.length === 0 ? (
               <div className="flex gap-2">
-                <Skeleton className="h-8 w-8 rounded-full" />
-                <Skeleton className="h-8 w-8 rounded-full" />
-                <Skeleton className="h-8 w-8 rounded-full" />
+                <Skeleton className="h-7 w-7 rounded-full" />
+                <Skeleton className="h-7 w-7 rounded-full" />
+                <Skeleton className="h-7 w-7 rounded-full" />
               </div>
             ) : (
               visibleOnlineAgents.map((agent) => (
@@ -1762,7 +1861,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       className="relative cursor-pointer transition-transform duration-200 shrink-0"
                       onClick={() => setSelectedAgent(agent.user)}
                     >
-                      <Avatar className="h-8 w-8 border border-emerald-500/70">
+                      <Avatar className="h-7 w-7 border border-emerald-400">
                         <AvatarImage fallbackOnBlank src={agent.user.avatar} className="object-cover" />
                         <AvatarFallback className="bg-emerald-900 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
                       </Avatar>
@@ -1823,7 +1922,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <HoverCardTrigger asChild>
                   <button
                     type="button"
-                    className="h-8 w-8 min-w-8 rounded-full border border-border bg-muted text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors shrink-0"
+                    className="h-7 w-7 min-w-7 flex-shrink-0 rounded-full border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
                     aria-label={`Mostrar ${hiddenOnlineAgents.length} agentes online adicionais`}
                   >
                     +{hiddenOnlineAgents.length}
@@ -1951,14 +2050,38 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           <>
             <Virtuoso
               style={{ height: '100%', width: '100%' }}
-              data={filteredChats}
-        components={{
-          Header: () => <div className="h-2" />,
-          Footer: () => <div style={{ height: (bottomPadding || 0) + 8 }} />
-        }}
+              data={groupedChats}
+              components={{
+                Header: () => <div className="h-1" />,
+                Footer: () => <div style={{ height: (bottomPadding || 0) + 8 }} />
+              }}
               endReached={handleEndReached}
-              itemContent={(index, chat) => (
-          <div className="px-2 py-1">
+              itemContent={(index, chat) => {
+                const groupId: ChatPriorityGroupId = index < priorityGroupCounts.risk
+                  ? 'risk'
+                  : index < priorityGroupCounts.risk + priorityGroupCounts.waiting
+                    ? 'waiting'
+                    : 'recent';
+                const group = CHAT_PRIORITY_GROUPS[groupId];
+                const showGroupHeader = index === 0
+                  || index === priorityGroupCounts.risk
+                  || index === priorityGroupCounts.risk + priorityGroupCounts.waiting;
+
+                return (
+                  <div className="px-3 pb-0.5">
+                    {showGroupHeader && (
+                      <div className="flex items-center justify-between px-1 pb-1.5 pt-3">
+                        <p className={cn("text-[10px] font-bold uppercase tracking-[0.12em]", group.tone)}>
+                          {group.label}
+                        </p>
+                        <span className={cn(
+                          "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[9px] font-bold ring-1 ring-inset",
+                          group.countTone
+                        )}>
+                          {priorityGroupCounts[groupId]}
+                        </span>
+                      </div>
+                    )}
                   <MemoizedChatListItem
                     key={chat.id}
                     chat={chat}
@@ -1975,9 +2098,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     onToggleBulkSelection={handleToggleBulkSelection}
                     onAssign={chat.status === 'gerais' ? handleAssignChat : undefined}
                     onPrefetch={onPrefetch}
+                    priorityNow={priorityNow}
                   />
-                </div>
-              )}
+                  </div>
+                );
+              }}
 
             />
           </>

@@ -270,6 +270,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
             activeWorkspaceId,
             activeWorkspaceTimezone,
             themePreference,
+            is_superadmin: Boolean(dbUser.is_superadmin),
         };
 
     } catch (error) {

@@ -13,6 +13,8 @@ export type AgentToolClass =
 
 export type AgentToolDefinition = {
   name: AgentToolName;
+  displayName?: string;
+  category?: 'attendance' | 'crm' | 'sgp' | 'mcp' | 'other';
   version: string;
   description: string;
   class: AgentToolClass;
@@ -47,6 +49,8 @@ function boundedTimeoutMs(value: unknown, fallback: number): number {
 const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   transfer_chat: {
     name: 'transfer_chat',
+    displayName: 'Transferir atendimento',
+    category: 'attendance',
     version: '2026-04-28',
     description: 'Transfere o atendimento para um agente humano ou equipe do workspace.',
     class: 'handoff',
@@ -75,6 +79,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   close_chat: {
     name: 'close_chat',
+    displayName: 'Encerrar conversa',
+    category: 'attendance',
     version: '2026-05-09',
     description: 'Encerra o atendimento atual quando o cliente pede explicitamente para finalizar a conversa.',
     class: 'write_non_idempotent',
@@ -117,6 +123,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   add_internal_note: {
     name: 'add_internal_note',
+    displayName: 'Adicionar nota interna',
+    category: 'attendance',
     version: '2026-04-28',
     description: 'Adiciona nota interna ao atendimento para preservar contexto operacional.',
     class: 'write_idempotent',
@@ -145,6 +153,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   crm_update_contact_custom_fields: {
     name: 'crm_update_contact_custom_fields',
+    displayName: 'Atualizar dados do contato',
+    category: 'crm',
     version: '2026-04-28',
     description: 'Atualiza campos customizados do CRM apenas no contato do chat atual.',
     class: 'write_idempotent',
@@ -171,6 +181,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   sgp_fetch_contracts: {
     name: 'sgp_fetch_contracts',
+    displayName: 'Consultar contratos no SGP',
+    category: 'sgp',
     version: '2026-04-28',
     description: 'Consulta contratos do cliente no SGP usando o CPF/CNPJ salvo no CRM.',
     class: 'read_only',
@@ -196,6 +208,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   sgp_fetch_contact_panel_data: {
     name: 'sgp_fetch_contact_panel_data',
+    displayName: 'Consultar painel do cliente no SGP',
+    category: 'sgp',
     version: '2026-04-28',
     description: 'Consulta resumo do cliente, contratos, conexao e faturas no SGP usando o CPF/CNPJ salvo no CRM. Aceita contractId opcional para restringir a consulta de suporte a um contrato especifico.',
     class: 'read_only',
@@ -233,6 +247,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   sgp_generate_invoice_pix: {
     name: 'sgp_generate_invoice_pix',
+    displayName: 'Gerar PIX de uma fatura',
+    category: 'sgp',
     version: '2026-04-28',
     description: 'Gera codigo PIX de uma fatura SGP existente.',
     class: 'write_idempotent',
@@ -249,6 +265,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   sgp_create_payment_promise: {
     name: 'sgp_create_payment_promise',
+    displayName: 'Registrar promessa de pagamento',
+    category: 'sgp',
     version: '2026-04-28',
     description: 'Registra promessa de pagamento no SGP para contrato informado.',
     class: 'write_non_idempotent',
@@ -265,6 +283,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   sgp_open_support_ticket: {
     name: 'sgp_open_support_ticket',
+    displayName: 'Abrir chamado no SGP',
+    category: 'sgp',
     version: '2026-04-28',
     description: 'Bloqueada para IA: abertura de chamado/OS no SGP deve permanecer humana.',
     class: 'write_non_idempotent',
@@ -281,6 +301,8 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
   },
   mcp_call_tool: {
     name: 'mcp_call_tool',
+    displayName: 'Executar ferramenta MCP',
+    category: 'mcp',
     version: '2026-04-30',
     description: 'Executa uma ferramenta externa descoberta via MCP quando ela estiver habilitada no agente.',
     class: 'retrieval',

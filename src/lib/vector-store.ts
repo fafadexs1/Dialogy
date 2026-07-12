@@ -37,6 +37,16 @@ type AddDocumentEmbeddingInput = {
     metadata?: Record<string, unknown>;
 };
 
+export type DeleteDocumentEmbeddingsInput = {
+    documentId: string;
+    workspaceId: string;
+    /**
+     * Pass null only for embeddings that explicitly do not belong to an agent.
+     * Requiring the property prevents an accidental workspace-wide deletion.
+     */
+    autopilotConfigId: string | null;
+};
+
 type SearchSimilarDocumentsInput = {
     vector: number[];
     workspaceId: string;
@@ -91,8 +101,37 @@ function assertDocumentVectorDimensions(vector: number[]) {
 }
 
 export const VectorStore = {
-    async deleteDocumentEmbeddings(documentId: string) {
-        await db.query(`DELETE FROM embeddings_documents WHERE document_id = $1`, [documentId]);
+    async deleteDocumentEmbeddings(input: DeleteDocumentEmbeddingsInput) {
+        if (!input.documentId?.trim()) {
+            throw new Error('documentId is required to delete document embeddings.');
+        }
+        if (!input.workspaceId?.trim()) {
+            throw new Error('workspaceId is required to delete document embeddings.');
+        }
+
+        const params: Array<string> = [input.documentId, input.workspaceId];
+        const filters = [
+            'document_id = $1',
+            'workspace_id = $2',
+        ];
+
+        if (input.autopilotConfigId === undefined) {
+            throw new Error('autopilotConfigId is required to delete document embeddings.');
+        }
+        if (input.autopilotConfigId === null) {
+            filters.push('autopilot_config_id IS NULL');
+        } else {
+            if (!input.autopilotConfigId.trim()) {
+                throw new Error('autopilotConfigId must be a non-empty string when provided.');
+            }
+            params.push(input.autopilotConfigId);
+            filters.push(`autopilot_config_id = $${params.length}`);
+        }
+
+        await db.query(
+            `DELETE FROM embeddings_documents WHERE ${filters.join(' AND ')}`,
+            params,
+        );
     },
 
     async addDocumentEmbedding(input: AddDocumentEmbeddingInput) {

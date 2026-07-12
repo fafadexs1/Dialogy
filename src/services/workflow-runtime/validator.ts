@@ -12,6 +12,7 @@ export type WorkflowValidatorOptions = {
   knownWorkflowIds?: Iterable<string>;
   knownVariableNames?: Iterable<string>;
   allowMultipleTriggers?: boolean;
+  availableModelIds?: Iterable<string>;
 };
 
 type ValidationCollector = {
@@ -484,6 +485,7 @@ export function validateWorkflowDefinition(
 
   const incomingByNode = new Map<string, WorkflowConnection[]>();
   const outgoingByNode = new Map<string, WorkflowConnection[]>();
+  const availableModelIds = options.availableModelIds ? new Set(options.availableModelIds) : null;
   for (const node of definition.nodes) {
     incomingByNode.set(node.id, []);
     outgoingByNode.set(node.id, []);
@@ -497,6 +499,17 @@ export function validateWorkflowDefinition(
     const incoming = incomingByNode.get(node.id) || [];
     const outgoing = outgoingByNode.get(node.id) || [];
     const manifest = getWorkflowNodeManifest(node.type);
+    if (availableModelIds && node.type === 'ai.model') {
+      const modelId = configuredText(node.config.model);
+      if (!modelId || !availableModelIds.has(modelId)) {
+        error(
+          collector,
+          'model_not_configured',
+          `O modelo do bloco "${node.name}" não possui uma credencial ativa neste workspace.`,
+          { nodeId: node.id },
+        );
+      }
+    }
     if (incoming.length === 0 && outgoing.length === 0 && !manifest?.terminal) {
       error(collector, 'disconnected_node', `O bloco "${node.name}" está desconectado.`, { nodeId: node.id });
     }

@@ -16,30 +16,38 @@
 
 .input {
   width: 100%;
-  height: 46px;
-  border: 1px solid rgb(51 65 85);
+  height: 42px;
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  background: rgb(9 12 18);
-  color: rgb(248 250 252);
-  padding: 0 48px 0 44px;
-  font-size: 14px;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  padding: 0 44px 0 38px;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1;
-  transition: border-color 120ms ease;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
 }
 
 .input::placeholder {
   color: rgb(148 163 184);
+  font-weight: 400;
+}
+
+.input:hover {
+  border-color: rgb(203 213 225);
 }
 
 .input:focus {
-  border-color: rgb(59 130 246);
+  border-color: rgb(96 165 250);
   outline: none;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 10%), 0 1px 2px rgb(15 23 42 / 4%);
 }
 
 .filterSlot {
   position: absolute;
-  top: 7px;
-  right: 7px;
+  top: 5px;
+  right: 5px;
   width: 32px;
   height: 32px;
 }
@@ -50,16 +58,18 @@
   justify-content: center;
   width: 100%;
   height: 100%;
-  border: 1px solid rgb(51 65 85);
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
-  background: rgb(15 23 42);
-  color: rgb(203 213 225);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
 
 .filterTrigger:hover {
-  background: rgb(30 41 59);
-  color: white;
+  border-color: rgb(191 219 254);
+  background: rgb(239 246 255);
+  color: rgb(37 99 235);
 }
 
 .filterTrigger:focus-visible {
@@ -69,8 +79,8 @@
 
 .searchIcon {
   position: absolute;
-  top: 13px;
-  left: 14px;
+  top: 11px;
+  left: 11px;
   display: flex;
   width: 20px;
   height: 20px;
@@ -80,14 +90,25 @@
   pointer-events: none;
 }
 
+.searchIcon svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.9;
+}
+
+.filterTrigger svg {
+  width: 15px;
+  height: 15px;
+}
+
 :global(.inbox-light) .input {
-  border-color: rgb(203 213 225);
+  border-color: rgb(226 232 240);
   background: white;
   color: rgb(15 23 42);
 }
 
 :global(.inbox-light) .filterTrigger {
-  border-color: rgb(203 213 225);
-  background: rgb(241 245 249);
-  color: rgb(71 85 105);
+  border-color: rgb(226 232 240);
+  background: rgb(248 250 252);
+  color: rgb(100 116 139);
 }

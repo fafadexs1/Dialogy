@@ -103,7 +103,16 @@ import {
     type WorkflowBlockTestFixtures,
 } from '@/services/workflow-runtime';
 import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
-import { getPrimaryWorkflowModelId } from '@/services/workflow-runtime/model-selection';
+import {
+    getPrimaryWorkflowModelId,
+    resolveWorkflowAwareModelId,
+    synchronizeWorkflowModelState,
+} from '@/services/workflow-runtime/model-selection';
+import {
+    reconcileNativeWorkflowTools,
+    synchronizeNativeWorkflowToolState,
+} from '@/services/workflow-runtime/native-agent-tools';
+import { selectNativeKnowledgeDocuments } from '@/services/workflow-runtime/native-knowledge-references';
 import { importEcosystemPatternForWorkspace } from '@/services/autopilot/ecosystem-patterns';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import {
@@ -277,7 +286,7 @@ function normalizeDraftSnapshot(
     const hasOwn = (key: keyof AutopilotConfigDraftSnapshot) =>
         Object.prototype.hasOwnProperty.call(snapshot, key);
 
-    return {
+    return synchronizeNativeWorkflowToolState(synchronizeWorkflowModelState({
         name: typeof snapshot.name === 'string' && snapshot.name.trim().length > 0
             ? snapshot.name
             : fallback.name,
@@ -329,7 +338,7 @@ function normalizeDraftSnapshot(
         workflow_migration: hasOwn('workflow_migration') && snapshot.workflow_migration
             ? snapshot.workflow_migration
             : fallback.workflow_migration || null,
-    };
+    }));
 }
 
 async function buildSnapshotFromFormData(
@@ -343,13 +352,11 @@ async function buildSnapshotFromFormData(
     const requestedWorkflowDefinition = formData.has('workflowDefinition')
         ? parseWorkflowDefinition(formData.get('workflowDefinition')?.toString())
         : parseWorkflowDefinition(fallback.workflow_definition);
-    const workflowModel = requestedWorkflowBuilderMode === 'native_v2'
-        ? getPrimaryWorkflowModelId(requestedWorkflowDefinition)
-        : null;
-    const requestedModel = workflowModel
-        || formData.get('aiModel')?.toString()
-        || fallback.ai_model
-        || '';
+    const requestedModel = resolveWorkflowAwareModelId({
+        ai_model: formData.get('aiModel')?.toString() || fallback.ai_model,
+        workflow_builder_mode: requestedWorkflowBuilderMode,
+        workflow_definition: requestedWorkflowDefinition,
+    }) || '';
     if (requestedModel && !(await isAllowedModelForWorkspace(workspaceId, requestedModel))) {
         throw new Error('Modelo de IA nao esta habilitado no catalogo global ou nas integracoes do workspace.');
     }
@@ -363,7 +370,7 @@ async function buildSnapshotFromFormData(
         ? parseKnowledgeCollections(formData.get('knowledgeCollections')?.toString() || '[]')
         : fallback.knowledge_collections || [];
 
-    return {
+    return synchronizeNativeWorkflowToolState({
         name: formData.get('agentName')?.toString() || fallback.name || 'Meu agente de IA',
         gemini_api_key: null,
         ai_model: requestedModel || null,
@@ -399,7 +406,7 @@ async function buildSnapshotFromFormData(
         workflow_builder_mode: requestedWorkflowBuilderMode,
         workflow_definition: requestedWorkflowDefinition,
         workflow_migration: fallback.workflow_migration || null,
-    };
+    });
 }
 
 async function reindexChangedKnowledgeDocuments({
@@ -412,7 +419,7 @@ async function reindexChangedKnowledgeDocuments({
     configId: string;
     previousDocs: KnowledgeBaseDocument[];
     nextDocs: KnowledgeBaseDocument[];
-}): Promise<void> {
+}): Promise<{ failedDocumentNames: string[] }> {
     const previousById = new Map(previousDocs.map((doc) => [doc.id, doc]));
     const nextById = new Map(nextDocs.map((doc) => [doc.id, doc]));
 
@@ -421,11 +428,17 @@ async function reindexChangedKnowledgeDocuments({
         const previous = previousById.get(doc.id);
         return hasKnowledgeDocumentIndexChanged(previous, doc);
     });
+    const failedDocumentNames = new Set<string>();
 
     await Promise.all(
         removedDocs.map((doc) =>
-            VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+            VectorStore.deleteDocumentEmbeddings({
+                documentId: doc.id,
+                workspaceId,
+                autopilotConfigId: configId,
+            }).catch((ragError) => {
                 console.error('[RAG] Failed to remove document embeddings:', ragError);
+                failedDocumentNames.add(doc.name || doc.id);
             })
         )
     );
@@ -433,23 +446,44 @@ async function reindexChangedKnowledgeDocuments({
     for (const doc of changedDocs) {
         const content = (doc.content || '').trim();
         if (!content) {
-            await VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+            await VectorStore.deleteDocumentEmbeddings({
+                documentId: doc.id,
+                workspaceId,
+                autopilotConfigId: configId,
+            }).catch((ragError) => {
                 console.error('[RAG] Failed to clear empty document embeddings:', ragError);
+                failedDocumentNames.add(doc.name || doc.id);
             });
             continue;
         }
 
         try {
-            await VectorStore.deleteDocumentEmbeddings(doc.id);
+            await VectorStore.deleteDocumentEmbeddings({
+                documentId: doc.id,
+                workspaceId,
+                autopilotConfigId: configId,
+            });
             if (shouldEnqueueJob('ai_document_ingest')) {
-                await enqueueAiDocumentIngest({
-                    workspaceId,
-                    autopilotConfigId: configId,
-                    documentId: doc.id,
-                    documentName: doc.name || 'Documento',
-                    content,
-                    document: doc,
-                });
+                try {
+                    await enqueueAiDocumentIngest({
+                        workspaceId,
+                        autopilotConfigId: configId,
+                        documentId: doc.id,
+                        documentName: doc.name || 'Documento',
+                        content,
+                        document: doc,
+                    });
+                } catch (queueError) {
+                    console.warn('[RAG] Queue unavailable; ingesting document synchronously:', queueError);
+                    await ingestKnowledgeBaseDocument({
+                        workspaceId,
+                        autopilotConfigId: configId,
+                        documentId: doc.id,
+                        documentName: doc.name || 'Documento',
+                        content,
+                        document: doc,
+                    });
+                }
             } else {
                 await ingestKnowledgeBaseDocument({
                     workspaceId,
@@ -462,8 +496,10 @@ async function reindexChangedKnowledgeDocuments({
             }
         } catch (ragError) {
             console.error('[RAG] Failed to reindex knowledge document:', ragError);
+            failedDocumentNames.add(doc.name || doc.id);
         }
     }
+    return { failedDocumentNames: [...failedDocumentNames] };
 }
 
 export async function getAutopilotRagHealth(configId: string): Promise<{
@@ -603,7 +639,11 @@ export async function reindexAutopilotKnowledgeBase(configId: string): Promise<{
         const quarantinedDocuments = publishedDocuments.filter((document) => isUnsafeAsCustomerFacingKnowledge(document));
         const documents = publishedDocuments.filter((document) => !isUnsafeAsCustomerFacingKnowledge(document));
         const documentIds = documents.map((document) => document.id);
-        await Promise.all(quarantinedDocuments.map((document) => VectorStore.deleteDocumentEmbeddings(document.id)));
+        await Promise.all(quarantinedDocuments.map((document) => VectorStore.deleteDocumentEmbeddings({
+            documentId: document.id,
+            workspaceId,
+            autopilotConfigId: configId,
+        })));
         const staleDeleteRes = await db.query(
             `DELETE FROM embeddings_documents
              WHERE workspace_id = $1
@@ -878,6 +918,8 @@ async function listWorkspaceAgentToolCatalog(workspaceId: string): Promise<Agent
         const safety = classifyMcpToolSafety(tool.qualifiedName, tool);
         return {
             name: tool.qualifiedName as AgentToolCatalogItem['name'],
+            displayName: tool.title || undefined,
+            category: 'mcp',
             version: 'mcp',
             description: tool.description || tool.title || `Ferramenta MCP ${tool.name} em ${tool.serverName}.`,
             class: safety.class,
@@ -963,6 +1005,7 @@ export async function generateAutopilotFlowWithAi(input: {
             catalog: catalog.tools,
             requestedEnabledToolNames: input.enabledToolNames,
             persistedEnabledToolNames: config.enabled_tool_names,
+            mode: 'all_eligible',
         });
 
         let targetModel = runtime.model;
@@ -1029,6 +1072,9 @@ async function persistNativeWorkflowDraft(input: {
     userId: string;
     snapshot: AutopilotConfigDraftSnapshot;
 }) {
+    const synchronizedSnapshot = synchronizeNativeWorkflowToolState(
+        synchronizeWorkflowModelState(input.snapshot),
+    );
     const saved = await db.query(
         `INSERT INTO autopilot_config_drafts (config_id, workspace_id, user_id, snapshot, updated_at)
          VALUES ($1, $2, $3, $4::jsonb, timezone('utc', now()))
@@ -1038,7 +1084,7 @@ async function persistNativeWorkflowDraft(input: {
              snapshot = EXCLUDED.snapshot,
              updated_at = timezone('utc', now())
          RETURNING updated_at`,
-        [input.configId, input.workspaceId, input.userId, JSON.stringify(input.snapshot)],
+        [input.configId, input.workspaceId, input.userId, JSON.stringify(synchronizedSnapshot)],
     );
     revalidatePath(`/autopilot/${input.configId}`);
     return saved.rows[0]?.updated_at as string | undefined;
@@ -1176,6 +1222,7 @@ export async function generateAutopilotNativeWorkflowWithAi(input: {
             catalog,
             requestedEnabledToolNames: input.enabledToolNames,
             persistedEnabledToolNames: snapshot.enabled_tool_names,
+            mode: 'all_eligible',
         });
         const existingModelNode = currentWorkflow?.nodes.find((node) => node.type === 'ai.model');
         const existingModel = existingModelNode
@@ -1221,11 +1268,25 @@ export async function generateAutopilotNativeWorkflowWithAi(input: {
             currentWorkflow,
             tools: scopedTools.map((tool) => ({
                 name: String(tool.name),
+                displayName: tool.displayName,
+                category: tool.category,
                 description: tool.description,
                 source: tool.source,
                 serverId: tool.serverId,
+                serverName: tool.serverName,
+                version: tool.version,
+                class: tool.class,
                 riskLevel: tool.riskLevel,
+                sideEffect: tool.sideEffect,
+                idempotent: tool.idempotent,
+                timeoutMs: tool.timeoutMs,
+                maxAttempts: tool.maxAttempts,
                 requiresHumanApproval: tool.requiresHumanApproval,
+                customerVisible: tool.customerVisible,
+                enabledByDefault: tool.enabledByDefault,
+                allowedIntents: tool.allowedIntents,
+                requiredSlots: tool.requiredSlots,
+                fallbackAction: tool.fallbackAction,
                 inputSchema: tool.inputSchema,
                 outputSchema: tool.outputSchema,
             })),
@@ -1263,11 +1324,21 @@ export async function runAutopilotNativeWorkflowTest(input: {
     if (!user) return { success: false, error: 'Usuário não autenticado.' };
     try {
         const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
-        const requestedWorkflow = input.workflowDefinition
+        const requestedWorkflowInput = input.workflowDefinition
             ? WorkflowDefinitionSchema.parse(input.workflowDefinition)
             : snapshot.workflow_definition;
-        if (!requestedWorkflow) return { success: false, error: 'O rascunho nativo não possui workflow.' };
-        const sourceValidation = validateWorkflowDefinition(requestedWorkflow);
+        if (!requestedWorkflowInput) return { success: false, error: 'O rascunho nativo não possui workflow.' };
+        const [configuredModels, toolCatalog] = await Promise.all([
+            listWorkspaceConfiguredAiModels(workspaceId),
+            listWorkspaceAgentToolCatalog(workspaceId),
+        ]);
+        const toolReconciliation = reconcileNativeWorkflowTools(requestedWorkflowInput, toolCatalog);
+        if (toolReconciliation.errors.length > 0) {
+            return { success: false, error: toolReconciliation.errors.join(' ') };
+        }
+        const requestedWorkflow = toolReconciliation.workflow;
+        const availableModelIds = configuredModels.map((model) => model.id);
+        const sourceValidation = validateWorkflowDefinition(requestedWorkflow, { availableModelIds });
         if (!input.startNodeId && !sourceValidation.valid) return { success: false, error: sourceValidation.errors.map((issue) => issue.message).join(' ') };
         const timestamp = new Date().toISOString();
         const standardInput = { customerMessage: input.customerMessage, message: input.customerMessage, text: input.customerMessage };
@@ -1289,7 +1360,7 @@ export async function runAutopilotNativeWorkflowTest(input: {
             status: 'draft',
             updatedAt: timestamp,
         });
-        const validation = validateWorkflowDefinition(workflow);
+        const validation = validateWorkflowDefinition(workflow, { availableModelIds });
         if (!validation.valid) return { success: false, error: validation.errors.map((issue) => issue.message).join(' ') };
         const runtimeConfig: AutopilotConfig = {
             ...config,
@@ -1301,7 +1372,8 @@ export async function runAutopilotNativeWorkflowTest(input: {
             ai_model: config.ai_model || snapshot.ai_model || null,
             transcription_model: config.transcription_model || null,
             knowledge_base: config.knowledge_base || null,
-            knowledge_base_documents: parseKnowledgeBaseDocuments(config.knowledge_base_documents),
+            knowledge_base_documents: snapshot.knowledge_base_documents
+                .filter((document) => document.content?.trim() && !isUnsafeAsCustomerFacingKnowledge(document)),
             is_primary: Boolean(config.is_primary),
             is_active: Boolean(config.is_active),
             is_private: Boolean(config.is_private),
@@ -1319,7 +1391,21 @@ export async function runAutopilotNativeWorkflowTest(input: {
                 modelNode: context.modelNode,
             }),
             loadMemory: async () => ({ sandbox: true }),
-            retrieveKnowledge: async () => [],
+            retrieveKnowledge: async (context) => {
+                const documents = selectNativeKnowledgeDocuments(
+                    context.knowledgeNodes,
+                    runtimeConfig.knowledge_base_documents || [],
+                );
+                if (documents.length === 0) return [];
+                const retrieval = await retrieveHybridSupportContext({
+                    workspaceId,
+                    autopilotConfigId: input.configId,
+                    query: input.customerMessage,
+                    staticDocuments: documents,
+                    allowedDocumentIds: documents.map((document) => document.id),
+                });
+                return retrieval.knowledgeBaseDocuments.map((document) => ({ ...document }));
+            },
             applyGuardrails: async (_phase, value) => value,
             ...sandboxSideEffects.dependencies,
         });
@@ -1368,7 +1454,17 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         await ensureAutopilotVersioningTables();
 
         // Fetch configs for the workspace
-        const configRes = await db.query('SELECT * FROM autopilot_configs WHERE workspace_id = $1 ORDER BY created_at', [workspaceId]);
+        const configRes = await db.query(
+            `SELECT configs.*, active_workflow.definition AS active_workflow_definition
+             FROM autopilot_configs configs
+             LEFT JOIN public.workflow_definitions active_workflow
+               ON active_workflow.workflow_id = configs.active_workflow_id
+              AND active_workflow.workflow_version = configs.active_workflow_version
+              AND active_workflow.workspace_id = configs.workspace_id
+             WHERE configs.workspace_id = $1
+             ORDER BY configs.created_at`,
+            [workspaceId]
+        );
 
         // Fetch workspace details (global messages)
         const workspaceRes = await db.query('SELECT * FROM workspaces WHERE id = $1', [workspaceId]);
@@ -1379,20 +1475,40 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         }
 
         const agents = configRes.rows.map((row: any) => {
+            const {
+                active_workflow_definition: rawActiveWorkflowDefinition,
+                ...configRow
+            } = row;
+            const workflowBuilderMode = normalizeWorkflowBuilderMode(row.workflow_builder_mode);
+            const activeWorkflowDefinition = workflowBuilderMode === 'native_v2'
+                ? parseWorkflowDefinition(rawActiveWorkflowDefinition)
+                : null;
+            const resolvedModel = resolveWorkflowAwareModelId({
+                ai_model: row.ai_model || null,
+                workflow_builder_mode: workflowBuilderMode,
+                workflow_definition: activeWorkflowDefinition,
+            });
+            const resolvedToolNames = synchronizeNativeWorkflowToolState({
+                workflow_builder_mode: workflowBuilderMode,
+                workflow_definition: activeWorkflowDefinition,
+                enabled_tool_names: normalizeEnabledToolNames(row.enabled_tool_names),
+            }).enabled_tool_names || [];
             return {
-                ...row,
+                ...configRow,
+                ai_model: resolvedModel,
                 knowledge_base_documents: parseKnowledgeBaseDocuments(row.knowledge_base_documents),
                 knowledge_collections: parseKnowledgeCollections(row.knowledge_collections),
-                enabled_tool_names: normalizeEnabledToolNames(row.enabled_tool_names),
+                enabled_tool_names: resolvedToolNames,
                 is_active: Boolean(row.is_active),
                 is_primary: Boolean(row.is_primary),
                 is_private: Boolean(row.is_private),
                 default_fallback_reply: row.default_fallback_reply || null,
                 flow_graph: parseFlowGraph(row.flow_graph),
                 workflow_runtime_v2_mode: normalizeWorkflowRuntimeV2Mode(row.workflow_runtime_v2_mode),
-                workflow_builder_mode: normalizeWorkflowBuilderMode(row.workflow_builder_mode),
+                workflow_builder_mode: workflowBuilderMode,
                 active_workflow_id: row.active_workflow_id || null,
                 active_workflow_version: row.active_workflow_version || null,
+                workflow_definition: activeWorkflowDefinition,
             } as AutopilotConfig;
         }).filter(agent => !agent.is_private || agent.user_id === userId); // Show only own private agents or shared ones
 
@@ -1423,9 +1539,14 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
         );
         const selectedSnapshot = buildSnapshotFromConfigRow(selectedConfig);
         if (selectedConfig.active_workflow_id && selectedConfig.active_workflow_version) {
-            selectedSnapshot.workflow_definition = await new PostgresWorkflowPersistence(db)
-                .getWorkflowDefinition(selectedConfig.active_workflow_id, selectedConfig.active_workflow_version);
+            selectedSnapshot.workflow_definition = selectedConfig.workflow_definition
+                || await new PostgresWorkflowPersistence(db)
+                    .getWorkflowDefinition(selectedConfig.active_workflow_id, selectedConfig.active_workflow_version);
             selectedConfig.workflow_definition = selectedSnapshot.workflow_definition;
+            selectedSnapshot.ai_model = resolveWorkflowAwareModelId(selectedSnapshot);
+            selectedSnapshot.enabled_tool_names = synchronizeNativeWorkflowToolState(selectedSnapshot).enabled_tool_names;
+            selectedConfig.ai_model = selectedSnapshot.ai_model;
+            selectedConfig.enabled_tool_names = selectedSnapshot.enabled_tool_names;
         }
         const draft = draftRes.rows[0]
             ? {
@@ -1657,7 +1778,11 @@ export async function saveAutopilotConfig(
 
             await Promise.all(
                 removedDocs.map((doc) =>
-                    VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+                    VectorStore.deleteDocumentEmbeddings({
+                        documentId: doc.id,
+                        workspaceId,
+                        autopilotConfigId: configId,
+                    }).catch((ragError) => {
                         console.error('[RAG] Failed to remove document embeddings:', ragError);
                     })
                 )
@@ -1666,14 +1791,22 @@ export async function saveAutopilotConfig(
             for (const doc of changedDocs) {
                 const content = (doc.content || '').trim();
                 if (!content) {
-                    await VectorStore.deleteDocumentEmbeddings(doc.id).catch((ragError) => {
+                    await VectorStore.deleteDocumentEmbeddings({
+                        documentId: doc.id,
+                        workspaceId,
+                        autopilotConfigId: configId,
+                    }).catch((ragError) => {
                         console.error('[RAG] Failed to clear empty document embeddings:', ragError);
                     });
                     continue;
                 }
 
                 try {
-                    await VectorStore.deleteDocumentEmbeddings(doc.id);
+                    await VectorStore.deleteDocumentEmbeddings({
+                        documentId: doc.id,
+                        workspaceId,
+                        autopilotConfigId: configId,
+                    });
                     if (shouldEnqueueJob('ai_document_ingest')) {
                         await enqueueAiDocumentIngest({
                             workspaceId,
@@ -1823,6 +1956,7 @@ export async function discardAutopilotDraft(configId: string): Promise<{ success
 export async function publishAutopilotDraft(configId: string): Promise<{
     success: boolean;
     error?: string;
+    warning?: string;
     versionNumber?: number;
 }> {
     const supabase = await createClient();
@@ -1881,7 +2015,20 @@ export async function publishAutopilotDraft(configId: string): Promise<{
                 await client.query('ROLLBACK');
                 return { success: false, error: 'A automação nativa não possui uma definição de workflow.' };
             }
-            const nativeValidation = validateWorkflowDefinition(snapshot.workflow_definition);
+            const [configuredModels, toolCatalog] = await Promise.all([
+                listWorkspaceConfiguredAiModels(currentWorkspaceId),
+                listWorkspaceAgentToolCatalog(currentWorkspaceId),
+            ]);
+            const toolReconciliation = reconcileNativeWorkflowTools(snapshot.workflow_definition, toolCatalog);
+            if (toolReconciliation.errors.length > 0) {
+                await client.query('ROLLBACK');
+                return { success: false, error: toolReconciliation.errors.join(' ') };
+            }
+            snapshot.workflow_definition = toolReconciliation.workflow;
+            snapshot.enabled_tool_names = synchronizeNativeWorkflowToolState(snapshot).enabled_tool_names;
+            const nativeValidation = validateWorkflowDefinition(snapshot.workflow_definition, {
+                availableModelIds: configuredModels.map((model) => model.id),
+            });
             if (!nativeValidation.valid) {
                 await client.query('ROLLBACK');
                 return {
@@ -2042,7 +2189,7 @@ export async function publishAutopilotDraft(configId: string): Promise<{
         await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
         await client.query('COMMIT');
 
-        await reindexChangedKnowledgeDocuments({
+        const indexing = await reindexChangedKnowledgeDocuments({
             workspaceId: currentWorkspaceId,
             configId,
             previousDocs,
@@ -2051,7 +2198,13 @@ export async function publishAutopilotDraft(configId: string): Promise<{
 
         revalidatePath('/autopilot');
         revalidatePath(`/autopilot/${configId}`);
-        return { success: true, versionNumber };
+        return {
+            success: true,
+            versionNumber,
+            warning: indexing.failedDocumentNames.length > 0
+                ? `A automação foi publicada, mas ${indexing.failedDocumentNames.length} documento(s) aguardam reindexação: ${indexing.failedDocumentNames.join(', ')}.`
+                : undefined,
+        };
     } catch (error) {
         await client.query('ROLLBACK').catch(() => undefined);
         console.error('[PUBLISH_AUTOPILOT_DRAFT] Erro ao publicar rascunho:', error);
@@ -2064,6 +2217,7 @@ export async function publishAutopilotDraft(configId: string): Promise<{
 export async function restoreAutopilotVersion(configId: string, versionId: string): Promise<{
     success: boolean;
     error?: string;
+    warning?: string;
     versionNumber?: number;
 }> {
     const supabase = await createClient();
@@ -2212,7 +2366,7 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
         await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1', [configId]);
         await client.query('COMMIT');
 
-        await reindexChangedKnowledgeDocuments({
+        const indexing = await reindexChangedKnowledgeDocuments({
             workspaceId: currentWorkspaceId,
             configId,
             previousDocs,
@@ -2221,7 +2375,13 @@ export async function restoreAutopilotVersion(configId: string, versionId: strin
 
         revalidatePath('/autopilot');
         revalidatePath(`/autopilot/${configId}`);
-        return { success: true, versionNumber };
+        return {
+            success: true,
+            versionNumber,
+            warning: indexing.failedDocumentNames.length > 0
+                ? `A versão foi restaurada, mas ${indexing.failedDocumentNames.length} documento(s) aguardam reindexação.`
+                : undefined,
+        };
     } catch (error) {
         await client.query('ROLLBACK').catch(() => undefined);
         console.error('[RESTORE_AUTOPILOT_VERSION] Erro ao restaurar versao:', error);

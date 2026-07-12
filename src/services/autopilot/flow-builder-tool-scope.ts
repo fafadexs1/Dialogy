@@ -1,4 +1,7 @@
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
+import { isNativeAgentToolEligible } from '@/services/workflow-runtime/native-agent-tools';
+
+export type FlowBuilderToolCatalogMode = 'current_selection' | 'all_eligible';
 
 function uniqueToolNames(values: readonly string[] | null | undefined) {
   return [...new Set((values || []).map((value) => String(value).trim()).filter(Boolean))];
@@ -8,7 +11,11 @@ export function selectFlowBuilderTools(input: {
   catalog: AgentToolCatalogItem[];
   requestedEnabledToolNames?: string[] | null;
   persistedEnabledToolNames?: unknown;
+  mode?: FlowBuilderToolCatalogMode;
 }) {
+  const eligibleCatalog = input.catalog.filter(isNativeAgentToolEligible);
+  if (input.mode === 'all_eligible') return eligibleCatalog;
+
   const hasRequestedSelection = Array.isArray(input.requestedEnabledToolNames);
   const hasPersistedSelection = Array.isArray(input.persistedEnabledToolNames);
   const selectedNames = hasRequestedSelection
@@ -16,13 +23,13 @@ export function selectFlowBuilderTools(input: {
     : hasPersistedSelection
       ? uniqueToolNames(input.persistedEnabledToolNames as string[])
       : uniqueToolNames(
-          input.catalog
+          eligibleCatalog
             .filter((tool) => tool.enabledByDefault)
             .map((tool) => String(tool.name)),
         );
   const selected = new Set(selectedNames);
 
-  return input.catalog.filter((tool) => selected.has(String(tool.name)));
+  return eligibleCatalog.filter((tool) => selected.has(String(tool.name)));
 }
 
 export function resolveAppliedProposalToolNames(input: {

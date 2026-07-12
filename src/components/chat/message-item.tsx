@@ -157,8 +157,8 @@ function LocationMessage({ message }: { message: Message }) {
     const subtitle = address || locationDescription || (hasCoords ? `Coordenadas: ${latitude?.toFixed(5)}, ${longitude?.toFixed(5)}` : undefined);
 
     return (
-        <a href={linkHref} target={hasLink ? "_blank" : undefined} rel={hasLink ? "noopener noreferrer" : undefined} className="block">
-            <div className="overflow-hidden rounded-2xl border border-border bg-card hover:border-primary/40 transition-colors max-w-[85vw] md:max-w-[320px] dark:border-white/10 dark:bg-[#111318] dark:hover:border-blue-400/40">
+        <a href={linkHref} target={hasLink ? "_blank" : undefined} rel={hasLink ? "noopener noreferrer" : undefined} className="block min-w-0 max-w-full">
+            <div className="w-[320px] max-w-full overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/40 dark:border-white/10 dark:bg-[#111318] dark:hover:border-blue-400/40">
                 {thumbnailSrc ? (
                     <div className="relative">
                         <img
@@ -258,7 +258,7 @@ function SharedContactMessage({ message }: { message: Message }) {
     }
 
     return (
-        <div className="space-y-2 max-w-[85vw] md:max-w-[340px]">
+        <div className="w-[340px] max-w-full min-w-0 space-y-2">
             <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground dark:border-white/10 dark:bg-white/10 dark:text-white/70">
                 <User className="h-3 w-3" />
                 <span>Contato compartilhado</span>
@@ -439,7 +439,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
             return (
                 <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName} chatId={message.chat_id}>
                     <div
-                        className="group relative w-[min(78vw,320px)] cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/10 shadow-sm dark:border-white/10"
+                        className="group relative w-[min(78vw,320px)] max-w-full cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/10 shadow-sm dark:border-white/10"
                         onMouseDown={startPress}
                         onMouseUp={cancelPress}
                         onMouseLeave={cancelPress}
@@ -474,7 +474,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
         if (effectiveMimeType.startsWith('video/')) {
             return (
                 <MediaViewer src={urlToUse} type="video" alt={message.content || fileName || 'Vídeo enviado'} fileName={fileName} chatId={message.chat_id}>
-                    <div className="group relative aspect-video w-[min(78vw,320px)] cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/20 shadow-sm dark:border-white/10">
+                    <div className="group relative aspect-video w-[min(78vw,320px)] max-w-full cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/20 shadow-sm dark:border-white/10">
                         <VideoThumbnail
                             videoSrc={urlToUse}
                             thumbnailSrc={safeThumbnail || undefined}
@@ -517,7 +517,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
                 href={mediaAssetUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 bg-muted/50 p-3 rounded-lg hover:bg-muted/80 transition-colors max-w-[80vw] md:max-w-[300px] dark:bg-white/10 dark:hover:bg-white/20"
+                className="flex w-[300px] max-w-full min-w-0 items-center gap-3 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted/80 dark:bg-white/10 dark:hover:bg-white/20"
             >
                 <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />
                 <div className='min-w-0 flex-1'>
@@ -530,7 +530,7 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
     };
 
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex max-w-full min-w-0 flex-col gap-2">
             {renderMedia()}
             {message.content && (
                 <p
@@ -749,12 +749,12 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
     return (
         <React.Fragment>
             {showDateSeparator && (
-                <div className="relative my-6">
+                <div className="relative my-5">
                     <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-border/50"></div>
                     </div>
                     <div className="relative flex justify-center">
-                        <span className="bg-muted px-3 py-1 text-xs font-medium text-muted-foreground rounded-full border border-border dark:bg-[#111318] dark:text-white/60 dark:border-white/10">{messageDayLabel || message.formattedDate}</span>
+                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-500 dark:border-white/10 dark:bg-[#111318] dark:text-white/60">{messageDayLabel || message.formattedDate}</span>
                     </div>
                 </div>
             )}
@@ -776,12 +776,14 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                             <AvatarImage fallbackOnBlank src={senderAvatar} alt={senderName} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-600 text-xs font-medium dark:bg-zinc-900 dark:text-zinc-300">{senderInitial}</AvatarFallback>
                         </Avatar>
-                        <div className={cn("flex flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                            <div className={cn("flex items-end", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                        <div className={cn("flex min-w-0 flex-1 flex-col", isFromMe ? 'items-end' : 'items-start')}>
+                            <div className={cn("flex w-full min-w-0 items-end gap-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
                                 <div
+                                    data-message-bubble
+                                    data-message-direction={isFromMe ? 'outgoing' : 'incoming'}
                                     className={cn(
-                                        "relative max-w-[85%] break-words [overflow-wrap:anywhere] md:max-w-lg",
-                                        !isVisualMediaMessage && "rounded-[22px] p-3 shadow-sm md:rounded-2xl md:p-3 md:shadow-lg",
+                                        "relative w-fit min-w-0 max-w-[88%] break-words [overflow-wrap:anywhere] sm:max-w-[78%] md:max-w-[min(72%,560px)]",
+                                        !isVisualMediaMessage && "rounded-[18px] p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)] md:p-3.5",
                                         isDeleted
                                             ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'
                                             : isPrearmedTool
@@ -795,7 +797,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                 : isVisualMediaMessage
                                                     ? ''
                                                 : (isFromMe
-                                                    ? 'rounded-tr-sm bg-blue-600 text-white'
+                                                    ? 'rounded-tr-md border border-blue-500/20 bg-blue-600 text-white'
                                                     : 'rounded-tl-sm border border-slate-200 bg-white text-slate-800 dark:border-white/10 dark:bg-[#111318] dark:text-zinc-100')
                                     )}
                                 >

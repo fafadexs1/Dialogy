@@ -46,6 +46,7 @@ import {
     Wrench,
     FileText,
     Plus,
+    X,
     type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -101,6 +102,8 @@ interface ContactPanelProps {
     currentUser: User | null;
     onTransferSuccess: () => void;
     onContactUpdate: (contact?: Contact) => void;
+    presentation?: 'sidebar' | 'canvas';
+    onRequestClose?: () => void;
 }
 
 export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disabled, trigger }: { chat: Chat, currentUser: User | null, onTransferSuccess: () => void, disabled?: boolean, trigger?: React.ReactNode }) {
@@ -176,8 +179,13 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
     const hasIntelligentAgents = intelligentAgents.length > 0;
 
     return (
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
+        <Dialog
+            open={!disabled && isDialogOpen}
+            onOpenChange={(open) => {
+                if (!disabled) setIsDialogOpen(open);
+            }}
+        >
+            <DialogTrigger asChild disabled={disabled}>
                 {trigger || (
                     <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted hover:text-foreground">
                         <ArrowRightLeft className="h-3 w-3 text-blue-400" />
@@ -969,7 +977,14 @@ function extractSgpPixLink(payload: unknown, raw?: string | null) {
 }
 
 
-export default function ContactPanel({ chat, currentUser, onTransferSuccess, onContactUpdate }: ContactPanelProps) {
+export default function ContactPanel({
+    chat,
+    currentUser,
+    onTransferSuccess,
+    onContactUpdate,
+    presentation = 'sidebar',
+    onRequestClose,
+}: ContactPanelProps) {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isStatsOpen, setIsStatsOpen] = useState(false);
     const [agents, setAgents] = useState<User[]>([]);
@@ -1308,12 +1323,36 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         }
     }, [chat?.id, sgpPaymentPromiseContract, sgpPaymentPromiseDate]);
 
+    const isCanvas = presentation === 'canvas';
 
     if (!chat) {
         return (
-            <div className="hidden lg:flex lg:flex-col lg:w-[280px] xl:w-[340px] 2xl:w-[400px] lg:flex-shrink-0 border-l border-border bg-background">
-                <div className="flex h-16 items-center border-b border-border px-4 xl:px-6">
-                    <h3 className="font-semibold text-foreground">Informações de Contato</h3>
+            <div
+                className={cn(
+                    "min-h-0 bg-background text-foreground",
+                    isCanvas
+                        ? "flex h-full w-full flex-col"
+                        : "hidden border-l border-border lg:flex lg:w-[280px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]"
+                )}
+            >
+                <div className="flex min-h-[64px] items-center justify-between gap-3 border-b border-border px-4 xl:px-6">
+                    <div className="min-w-0">
+                        <h3 className="truncate font-semibold text-foreground">Contexto do cliente</h3>
+                        {isCanvas && <p className="mt-0.5 text-xs text-muted-foreground">Perfil, CRM e integrações</p>}
+                    </div>
+                    {onRequestClose && (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+                            onClick={onRequestClose}
+                            aria-label="Fechar painel de contexto"
+                            title="Fechar painel"
+                        >
+                            <X className="h-4 w-4" />
+                        </Button>
+                    )}
                 </div>
                 <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
                     <div className="h-20 w-20 bg-muted rounded-full flex items-center justify-center mb-4 ring-1 ring-border">
@@ -1367,12 +1406,34 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
         : contactDisplayValue;
 
     return (
-        <div className="relative z-10 hidden h-full overflow-x-hidden overflow-y-hidden border-l border-slate-200 bg-white dark:border-white/5 dark:bg-[#050507] lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]">
+        <div
+            className={cn(
+                "relative z-10 h-full min-h-0 overflow-x-hidden overflow-y-hidden bg-white text-slate-950 dark:bg-[#050507] dark:text-zinc-50",
+                isCanvas
+                    ? "flex w-full min-w-0 flex-1 flex-col"
+                    : "hidden border-l border-slate-200 dark:border-white/5 lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]"
+            )}
+        >
 
             {/* Header */}
-            <div className="sticky top-0 z-20 flex flex-col border-b border-slate-200 bg-white px-3 pb-2 pt-3 dark:border-white/5 dark:bg-[#050507]">
+            <div
+                className={cn(
+                    "sticky top-0 z-20 flex border-b border-slate-200 bg-white dark:border-white/5 dark:bg-[#050507]",
+                    isCanvas
+                        ? "min-h-[64px] flex-row items-center justify-between gap-3 px-4 py-3"
+                        : "flex-col px-3 pb-2 pt-3"
+                )}
+            >
+                {isCanvas && (
+                    <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold tracking-tight text-foreground">Contexto do cliente</p>
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={contact.name}>
+                            {contact.name}
+                        </p>
+                    </div>
+                )}
                 {/* Quick Actions Bar - Icon only */}
-                <div className="flex flex-wrap items-center gap-1 justify-end min-w-0">
+                <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1">
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -1413,10 +1474,23 @@ export default function ContactPanel({ chat, currentUser, onTransferSuccess, onC
                             </Tooltip>
                         </TooltipProvider>
                     )}
+                    {onRequestClose && (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-black dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
+                            onClick={onRequestClose}
+                            aria-label="Fechar painel de contexto"
+                            title="Fechar painel"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </Button>
+                    )}
                 </div>
             </div>
 
-            <ScrollArea className="flex-1 custom-scrollbar">
+            <ScrollArea className="min-h-0 flex-1 custom-scrollbar">
                 <div className="overflow-x-hidden p-3.5 space-y-3.5 pb-24 sm:p-4 sm:space-y-4">
                     {/* Profile section always visible above tabs */}
                     <div className="relative">

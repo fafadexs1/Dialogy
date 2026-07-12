@@ -185,7 +185,7 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
         : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300";
 
     return (
-        <div className={cn('flex flex-col gap-2 min-w-[280px]', containerClasses)}>
+        <div className={cn('flex w-[280px] max-w-full min-w-0 flex-col gap-2', containerClasses)}>
             <div className="flex items-center gap-3">
                 <audio ref={audioRef} src={src} preload="metadata" />
 

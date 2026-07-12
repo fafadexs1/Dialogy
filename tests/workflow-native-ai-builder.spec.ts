@@ -47,19 +47,44 @@ function materialize(blueprint: NativeWorkflowAiBlueprint) {
     tools: [
       {
         name: 'lookup_customer',
+        displayName: 'Consultar cliente',
         description: 'Consulta o cadastro autorizado do cliente.',
         source: 'dialogy',
+        version: '2026-07-12',
+        class: 'read_only',
         riskLevel: 'low',
+        sideEffect: 'none',
+        idempotent: true,
+        timeoutMs: 12_000,
+        maxAttempts: 2,
+        allowedIntents: ['support_request'],
+        requiredSlots: ['customer_identifier'],
+        fallbackAction: 'ask_missing_slot',
         inputSchema: { type: 'object', properties: {} },
         outputSchema: { type: 'object', properties: {} },
       },
       {
+        name: 'blocked_operation',
+        description: 'Operação ainda não liberada para execução autônoma.',
+        source: 'dialogy',
+        riskLevel: 'medium',
+        allowedIntents: [],
+      },
+      {
         name: 'mcp:billing:create_invoice',
+        displayName: 'Criar fatura',
         description: 'Cria uma fatura depois de confirmacao explicita.',
         source: 'mcp',
         serverId: 'billing',
+        serverName: 'Financeiro',
+        version: 'mcp',
+        class: 'write_non_idempotent',
         riskLevel: 'high',
-        requiresHumanApproval: true,
+        sideEffect: 'high',
+        idempotent: false,
+        timeoutMs: 45_000,
+        maxAttempts: 1,
+        requiresHumanApproval: false,
         inputSchema: { type: 'object', properties: {} },
         outputSchema: { type: 'object', properties: {} },
       },
@@ -92,7 +117,11 @@ function expectNativeExecutableProposal(proposal: ReturnType<typeof materialize>
 
 describe('native workflow AI builder', () => {
   it('materializes a valid single-agent proposal and ignores hallucinated tools', () => {
-    const singleAgent = agent('Agente de suporte', 'suporte', ['lookup_customer', 'tool_that_does_not_exist']);
+    const singleAgent = agent('Agente de suporte', 'suporte', [
+      'lookup_customer',
+      'blocked_operation',
+      'tool_that_does_not_exist',
+    ]);
     const proposal = materialize({
       summary: 'Atendimento de suporte com consulta de cadastro.',
       architecture: 'single_agent',
@@ -108,9 +137,27 @@ describe('native workflow AI builder', () => {
     expectNativeExecutableProposal(proposal);
     expect(proposal.selectedToolNames).toEqual(['lookup_customer']);
     expect(proposal.warnings.join(' ')).toContain('tool_that_does_not_exist');
+    expect(proposal.warnings.join(' ')).toContain('blocked_operation');
+    expect(proposal.warnings.join(' ')).toContain('mantidas bloqueadas');
     expect(proposal.warnings.join(' ')).toContain('doc-hallucinated');
     expect(proposal.warnings.join(' ')).toContain('collection-hallucinated');
-    expect(proposal.workflow.nodes.some((node) => node.type === 'tool.internal')).toBe(true);
+    const internalTool = proposal.workflow.nodes.find((node) => node.type === 'tool.internal');
+    expect(internalTool?.config).toMatchObject({
+      name: 'lookup_customer',
+      displayName: 'Consultar cliente',
+      action: 'lookup_customer',
+      version: '2026-07-12',
+      class: 'read_only',
+      riskLevel: 'low',
+      sideEffect: 'none',
+      idempotent: true,
+      timeoutMs: 12_000,
+      maxAttempts: 2,
+      allowedIntents: ['support_request'],
+      requiredSlots: ['customer_identifier'],
+      fallbackAction: 'ask_missing_slot',
+    });
+    expect(proposal.workflow.nodes.some((node) => node.config.name === 'blocked_operation')).toBe(false);
     const knowledge = proposal.workflow.nodes.find((node) => node.id === 'primary_knowledge');
     expect(knowledge?.config.documentIds).toEqual(['doc-suporte']);
     expect(knowledge?.config.filters).toEqual({ collectionIds: ['suporte'] });
@@ -136,6 +183,7 @@ describe('native workflow AI builder', () => {
     });
 
     expectNativeExecutableProposal(proposal);
+    expect(proposal.selectedToolNames).toEqual(['lookup_customer', 'mcp:billing:create_invoice']);
     expect(proposal.workflow.nodes.filter((node) => node.type === 'ai.agent')).toHaveLength(2);
     const router = proposal.workflow.nodes.find((node) => node.type === 'logic.ai_router');
     expect(router).toBeDefined();
@@ -146,5 +194,11 @@ describe('native workflow AI builder', () => {
 
     const sensitiveTool = proposal.workflow.nodes.find((node) => node.type === 'tool.mcp');
     expect(sensitiveTool?.config.requiresConfirmation).toBe(true);
+    expect(sensitiveTool?.config.requiresHumanApproval).toBe(true);
+    expect(sensitiveTool?.config.riskLevel).toBe('high');
+    expect(sensitiveTool?.config.serverName).toBe('Financeiro');
+    expect(sensitiveTool?.config.timeoutMs).toBe(45_000);
+    expect(sensitiveTool?.config.allowedTools).toEqual(['create_invoice']);
+    expect(sensitiveTool?.config.permissionScope).toBe('automations:execute_sensitive_tool');
   });
 });

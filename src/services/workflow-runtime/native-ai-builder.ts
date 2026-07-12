@@ -6,6 +6,13 @@ import { createNativeWorkflowTemplate } from './native-templates';
 import { WorkflowDefinitionSchema } from './schemas';
 import type { ModelConfiguration, WorkflowConnection, WorkflowDefinition } from './types';
 import { validateWorkflowDefinition } from './validator';
+import {
+  buildNativeAgentToolConfig,
+  getNativeAgentToolLabel,
+  isNativeAgentToolEligible,
+  listAttachedWorkflowToolNames,
+  type NativeAgentToolCatalogItem,
+} from './native-agent-tools';
 
 const AiAgentBlueprintSchema = z.object({
   name: z.string().min(1).max(100),
@@ -15,7 +22,7 @@ const AiAgentBlueprintSchema = z.object({
   objective: z.string().min(1).max(2_000),
   instructions: z.array(z.string().min(1).max(1_000)).min(1).max(16),
   completionCriteria: z.array(z.string().min(1).max(1_000)).min(1).max(10),
-  toolNames: z.array(z.string().min(1)).max(20).default([]),
+  toolNames: z.array(z.string().min(1)).max(64).default([]),
   knowledgeDocumentIds: z.array(z.string().min(1)).max(128).default([]),
   knowledgeCollectionIds: z.array(z.string().min(1)).max(32).default([]),
 });
@@ -45,15 +52,8 @@ export const NativeWorkflowAiBlueprintSchema = z.object({
 
 export type NativeWorkflowAiBlueprint = z.infer<typeof NativeWorkflowAiBlueprintSchema>;
 
-export type NativeAiBuilderTool = {
-  name: string;
-  description: string;
-  source: 'dialogy' | 'mcp';
-  serverId?: string;
+export type NativeAiBuilderTool = Omit<NativeAgentToolCatalogItem, 'riskLevel'> & {
   riskLevel?: 'low' | 'medium' | 'high';
-  requiresHumanApproval?: boolean;
-  inputSchema?: Record<string, unknown> | null;
-  outputSchema?: Record<string, unknown> | null;
 };
 
 export type NativeWorkflowAiProposal = {
@@ -123,47 +123,35 @@ function addTools(input: {
   tools: NativeAiBuilderTool[];
   positionIndex: number;
 }) {
-  const catalog = new Map(input.tools.map((tool) => [tool.name, tool]));
-  const accepted: string[] = [];
+  const catalog = new Map(input.tools.map((tool) => [
+    tool.name,
+    { ...tool, riskLevel: tool.riskLevel || 'low' } satisfies NativeAgentToolCatalogItem,
+  ]));
   const rejected: string[] = [];
+  const blocked: string[] = [];
   [...new Set(input.requestedToolNames)].forEach((toolName, index) => {
     const tool = catalog.get(toolName);
     if (!tool) {
       rejected.push(toolName);
       return;
     }
+    if (!isNativeAgentToolEligible(tool)) {
+      blocked.push(toolName);
+      return;
+    }
     const id = `ai_${cleanId(input.agentId)}_${cleanId(toolName)}_${index + 1}`;
     const node = createWorkflowNode(tool.source === 'mcp' ? 'tool.mcp' : 'tool.internal', {
       id,
-      name: tool.name,
+      name: getNativeAgentToolLabel(tool),
       position: { x: 90 + input.positionIndex * 250, y: 720 + index * 125 },
-      config: tool.source === 'mcp' ? {
-        name: tool.name,
-        description: tool.description,
-        serverId: tool.serverId || '',
-        allowedTools: [tool.name],
-        inputSchema: tool.inputSchema || {},
-        outputSchema: tool.outputSchema || {},
-        requiresConfirmation: Boolean(tool.requiresHumanApproval),
-        audit: true,
-      } : {
-        name: tool.name,
-        action: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema || {},
-        outputSchema: tool.outputSchema || {},
-        idempotent: false,
-        riskLevel: tool.riskLevel || 'low',
-        requiresConfirmation: Boolean(tool.requiresHumanApproval),
-      },
+      config: buildNativeAgentToolConfig(tool),
     });
     input.workflow.nodes.push(node);
     input.workflow.connections.push(connection(
       `${id}_attachment`, node.id, 'tool', input.agentId, 'tools', 'tool',
     ));
-    accepted.push(toolName);
   });
-  return { accepted, rejected };
+  return { rejected, blocked };
 }
 
 export function materializeNativeWorkflowAiBlueprint(input: {
@@ -193,7 +181,6 @@ export function materializeNativeWorkflowAiBlueprint(input: {
         { agentId: 'support_agent', knowledgeId: 'support_knowledge' },
         { agentId: 'sales_agent', knowledgeId: 'sales_knowledge' },
       ];
-  const selectedToolNames: string[] = [];
   const warnings: string[] = [];
   const allowedDocumentIds = new Set(input.allowedKnowledgeDocumentIds);
   const allowedCollectionIds = new Set(input.allowedKnowledgeCollectionIds);
@@ -220,9 +207,11 @@ export function materializeNativeWorkflowAiBlueprint(input: {
       tools: input.tools,
       positionIndex: index,
     });
-    selectedToolNames.push(...toolResult.accepted);
     if (toolResult.rejected.length > 0) {
       warnings.push(`Ferramentas ignoradas por nao existirem no catalogo: ${toolResult.rejected.join(', ')}.`);
+    }
+    if (toolResult.blocked.length > 0) {
+      warnings.push(`Ferramentas mantidas bloqueadas por nao serem elegiveis para execucao autonoma: ${toolResult.blocked.join(', ')}.`);
     }
   });
 
@@ -261,10 +250,11 @@ export function materializeNativeWorkflowAiBlueprint(input: {
   };
   const parsedWorkflow = WorkflowDefinitionSchema.parse(workflow);
   const validation = validateWorkflowDefinition(parsedWorkflow);
+  const materializedToolNames = listAttachedWorkflowToolNames(parsedWorkflow);
   const changes = [
     `${blueprint.agents.length} agente${blueprint.agents.length === 1 ? '' : 's'} configurado${blueprint.agents.length === 1 ? '' : 's'}.`,
     blueprint.architecture === 'routed_team' ? 'AI Router com fallback de baixa confianca configurado.' : 'Rota principal de atendimento configurada.',
-    `${new Set(selectedToolNames).size} ferramenta${new Set(selectedToolNames).size === 1 ? '' : 's'} anexada${new Set(selectedToolNames).size === 1 ? '' : 's'}.`,
+    `${materializedToolNames.length} ferramenta${materializedToolNames.length === 1 ? '' : 's'} anexada${materializedToolNames.length === 1 ? '' : 's'}.`,
     'Modelo, memoria, RAG, guardrail, resposta, handoff e tratamento de erro conectados.',
   ];
   return {
@@ -273,7 +263,7 @@ export function materializeNativeWorkflowAiBlueprint(input: {
     changes,
     warnings,
     validation,
-    selectedToolNames: [...new Set(selectedToolNames)],
+    selectedToolNames: materializedToolNames,
   };
 }
 
@@ -305,13 +295,24 @@ function promptForNativeBuilder(input: {
     JSON.stringify(input.conversation),
     'Workflow nativo atual (pode ser substituido pela proposta):',
     JSON.stringify(current),
-    'Ferramentas permitidas (use somente nomes exatos desta lista):',
-    JSON.stringify(input.tools.map((tool) => ({ name: tool.name, description: tool.description, source: tool.source, riskLevel: tool.riskLevel }))),
+    'Catalogo completo de ferramentas elegiveis do workspace (use somente nomes exatos desta lista e anexe todas as necessarias para cumprir o pedido):',
+    JSON.stringify(input.tools.map((tool) => ({
+      name: tool.name,
+      displayName: getNativeAgentToolLabel({ ...tool, riskLevel: tool.riskLevel || 'low' }),
+      description: tool.description,
+      category: tool.category,
+      source: tool.source,
+      serverName: tool.serverName,
+      riskLevel: tool.riskLevel || 'low',
+      requiresConfirmation: tool.requiresHumanApproval === true || tool.riskLevel === 'high',
+      allowedIntents: tool.allowedIntents,
+      requiredSlots: tool.requiredSlots,
+    }))),
     'Documentos permitidos (use somente IDs exatos):',
     JSON.stringify(input.knowledgeDocuments),
     'Colecoes permitidas (use somente IDs exatos):',
     JSON.stringify(input.knowledgeCollections),
-    'Escolha single_agent para um especialista ou routed_team para exatamente dois especialistas. Nunca invente ferramenta, documento ou colecao. Persona, objetivo e comportamento pertencem a cada agente. Sempre inclua guardrails no_opinionated_secrets e no_unconfirmed_tool_success quando apropriado.',
+    'Escolha single_agent para um especialista ou routed_team para exatamente dois especialistas. Nunca invente ferramenta, documento ou colecao. Persona, objetivo e comportamento pertencem a cada agente. Ferramentas de alto risco permanecem protegidas por confirmacao e so devem ser anexadas quando forem realmente necessarias. Sempre inclua guardrails no_opinionated_secrets e no_unconfirmed_tool_success quando apropriado.',
   ].join('\n\n');
 }
 
@@ -327,6 +328,10 @@ export async function generateNativeWorkflowAiProposal(input: {
   knowledgeDocuments: Array<{ id: string; name: string; collectionIds?: string[] }>;
   knowledgeCollections: Array<{ id: string; name: string; description?: string }>;
 }) {
+  const eligibleTools = input.tools.filter((tool) => isNativeAgentToolEligible({
+    ...tool,
+    riskLevel: tool.riskLevel || 'low',
+  }));
   const result = await input.modelChain.generateStructured({
     schema: NativeWorkflowAiBlueprintSchema,
     schemaName: 'dialogy_native_workflow_ai_blueprint',
@@ -335,7 +340,7 @@ export async function generateNativeWorkflowAiProposal(input: {
         role: 'system',
         content: 'Voce e o arquiteto do Flowbuilder agent-first do Dialogy. Gere somente uma arquitetura segura e executavel no contrato solicitado. Toda entrega ao cliente deve ocorrer por Responder ou Handoff; agentes nunca respondem implicitamente. Uma execucao segue uma unica rota principal.',
       },
-      { role: 'user', content: promptForNativeBuilder(input) },
+      { role: 'user', content: promptForNativeBuilder({ ...input, tools: eligibleTools }) },
     ],
     timeoutMs: 90_000,
   });
@@ -346,7 +351,7 @@ export async function generateNativeWorkflowAiProposal(input: {
     name: input.name,
     model: input.model,
     blueprint,
-    tools: input.tools,
+    tools: eligibleTools,
     allowedKnowledgeDocumentIds: input.knowledgeDocuments.map((document) => document.id),
     allowedKnowledgeCollectionIds: input.knowledgeCollections.map((collection) => collection.id),
   });

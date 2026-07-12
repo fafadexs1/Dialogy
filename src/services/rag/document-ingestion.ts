@@ -19,9 +19,14 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
     const document: KnowledgeBaseDocument = input.document
         ? { ...input.document, id: input.documentId, name: input.documentName, content: input.content }
         : { id: input.documentId, name: input.documentName, content: input.content };
+    const embeddingScope = {
+        documentId: input.documentId,
+        workspaceId: input.workspaceId,
+        autopilotConfigId: input.autopilotConfigId ?? null,
+    };
 
     if (isUnsafeAsCustomerFacingKnowledge(document)) {
-        await VectorStore.deleteDocumentEmbeddings(input.documentId);
+        await VectorStore.deleteDocumentEmbeddings(embeddingScope);
         console.warn(`[RAG] Skipping unsafe conversation artifact ${input.documentId}.`);
         return {
             status: 'skipped_unsafe' as const,
@@ -56,7 +61,7 @@ export async function ingestKnowledgeBaseDocument(input: IngestKnowledgeBaseDocu
     }
 
     const chunks = await splitKnowledgeDocumentWithMetadata(document);
-    await VectorStore.deleteDocumentEmbeddings(input.documentId);
+    await VectorStore.deleteDocumentEmbeddings(embeddingScope);
 
     let embeddedChunks = 0;
     for (let index = 0; index < chunks.length; index++) {

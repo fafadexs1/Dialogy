@@ -433,7 +433,7 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
   {
     type: 'ai.model',
     label: 'Modelo de IA',
-    description: 'Configura provedor, modelo, capacidades e limites.',
+    description: 'Recurso avançado; normalmente é escolhido dentro do Agente de IA.',
     category: 'ai',
     icon: 'Cpu',
     tone: 'violet',
@@ -477,7 +477,7 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
   {
     type: 'ai.agent',
     label: 'Agente de IA',
-    description: 'Decide, solicita tools e encerra dentro dos limites do runtime.',
+    description: 'Agente completo com modelo, conhecimento, memória, proteções e ferramentas configuráveis.',
     category: 'ai',
     icon: 'Bot',
     tone: 'cyan',
@@ -599,7 +599,7 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
   {
     type: 'knowledge.rag_retriever',
     label: 'Retriever RAG',
-    description: 'Recupera somente documentos relevantes dentro do orçamento.',
+    description: 'Base avançada; normalmente é configurada dentro do Agente de IA.',
     category: 'knowledge_memory',
     icon: 'BookOpen',
     tone: 'orange',

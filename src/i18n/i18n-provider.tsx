@@ -93,8 +93,15 @@ export function I18nProvider({
 
 export function useI18n() {
   const context = useContext(I18nContext);
-  if (!context) {
-    throw new Error("useI18n must be used within an I18nProvider");
-  }
-  return context;
+  return context ?? safeFallbackI18n;
 }
+
+const safeFallbackI18n: I18nContextValue = {
+  locale: defaultLocale,
+  setLocale: (nextLocale) => {
+    persistLocale(nextLocale);
+    if (typeof window !== 'undefined') window.location.reload();
+  },
+  t: createTranslator(defaultLocale),
+  availableLocales: localeOptions,
+};

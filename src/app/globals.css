@@ -188,6 +188,70 @@
 }
 
 @layer utilities {
+  .landing-grid {
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: linear-gradient(to bottom, black, transparent 92%);
+  }
+
+  .landing-kicker {
+    @apply text-xs font-bold uppercase tracking-[0.2em] text-brand-green;
+  }
+
+  .landing-title {
+    @apply text-4xl font-black leading-[0.98] tracking-[-0.045em] text-white md:text-6xl;
+  }
+
+  .landing-copy {
+    @apply text-base leading-7 text-white/65 md:text-lg md:leading-8;
+  }
+
+  .landing-button {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-bold transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green focus-visible:ring-offset-2 focus-visible:ring-offset-black;
+  }
+
+  .landing-button-primary {
+    @apply bg-brand-green text-black hover:-translate-y-0.5 hover:bg-emerald-300;
+  }
+
+  .landing-button-secondary {
+    @apply border border-white/20 bg-white/[.04] text-white hover:border-white/40 hover:bg-white/[.08];
+  }
+
+  .landing-ref-button {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border px-6 py-3 text-sm font-bold transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green focus-visible:ring-offset-2 focus-visible:ring-offset-black;
+  }
+
+  .landing-ref-primary {
+    border-color: #32d67f;
+    background: linear-gradient(90deg, #30df83, #35d17f);
+    color: #020503;
+  }
+
+  .landing-ref-secondary {
+    @apply border-white/25 bg-transparent text-white hover:border-white/45 hover:bg-white/5;
+  }
+
+  @keyframes landing-scan {
+    0% { transform: translateY(0); opacity: 0; }
+    15%, 75% { opacity: .55; }
+    100% { transform: translateY(470px); opacity: 0; }
+  }
+
+  .landing-scan {
+    animation: landing-scan 4.8s cubic-bezier(.4,0,.2,1) infinite;
+  }
+
+  .landing-reference .text-brand-green { color: #32d67f; }
+  .landing-reference .bg-brand-green { background-color: #32d67f; }
+
+  .landing-defer {
+    content-visibility: auto;
+    contain-intrinsic-size: 900px;
+  }
+
   @keyframes toast-progress-shrink {
     from {
       transform: scaleX(1);
@@ -294,6 +358,15 @@
   .inbox-light .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(59, 130, 246, 0.35);
     box-shadow: 0 0 8px rgba(59, 130, 246, 0.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-motion *, .landing-motion *::before, .landing-motion *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
   }
 }
 

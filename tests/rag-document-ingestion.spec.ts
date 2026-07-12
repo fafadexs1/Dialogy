@@ -41,7 +41,11 @@ describe('RAG document ingestion safety', () => {
     });
 
     expect(result).toMatchObject({ status: 'skipped_unsafe', chunks: 0 });
-    expect(mocks.deleteDocumentEmbeddings).toHaveBeenCalledWith('document-1');
+    expect(mocks.deleteDocumentEmbeddings).toHaveBeenCalledWith({
+      documentId: 'document-1',
+      workspaceId: 'workspace-1',
+      autopilotConfigId: 'agent-1',
+    });
     expect(mocks.generateDocumentPassageEmbedding).not.toHaveBeenCalled();
     expect(mocks.addDocumentEmbedding).not.toHaveBeenCalled();
   });
@@ -56,6 +60,11 @@ describe('RAG document ingestion safety', () => {
     });
 
     expect(result.status).toBe('indexed');
+    expect(mocks.deleteDocumentEmbeddings).toHaveBeenCalledWith({
+      documentId: 'document-2',
+      workspaceId: 'workspace-1',
+      autopilotConfigId: 'agent-1',
+    });
     expect(mocks.generateDocumentPassageEmbedding).toHaveBeenCalledWith(
       '# Procedimento de segunda via\n\nPara emitir segunda via, valide o CPF e consulte a fatura em aberto.',
     );

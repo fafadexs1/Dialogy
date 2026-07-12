@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { generateChatSummaryAction } from '@/actions/ai';
 import { v4 as uuidv4 } from 'uuid';
 import Image from 'next/image';
-import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -59,6 +58,7 @@ import {
     SpellCheck2,
     Activity,
     Signature,
+    PanelRightOpen,
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { createClient } from '@/lib/supabase/client';
@@ -71,7 +71,6 @@ import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { fetchSGPContracts, createSGPServiceOrder } from '@/plugins/sgp/actions';
-import { Separator } from '../ui/separator';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
@@ -85,8 +84,10 @@ import { getShortcuts } from '@/actions/shortcuts';
 import { generateChatHtml } from '@/lib/chat-export';
 import {
     DropdownMenu,
+    DropdownMenuCheckboxItem,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
     DropdownMenuTrigger,
     DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
@@ -115,6 +116,7 @@ import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useTheme } from '@/providers/theme-provider';
 import { shouldAcceptAiSuggestion } from '@/lib/inbox-ownership';
+import { TransferChatDialog } from './contact-panel';
 
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
@@ -536,6 +538,10 @@ export default function ChatPanel({
     }, [canLoadOlder, chat]);
 
     const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+    const [isChatDetailsOpen, setIsChatDetailsOpen] = useState(false);
+    const mobileMoreActionsRef = useRef<HTMLButtonElement>(null);
+    const desktopMoreActionsRef = useRef<HTMLButtonElement>(null);
+    const chatDetailsReturnFocusRef = useRef<HTMLButtonElement | null>(null);
 
     const { toast } = useToast();
 
@@ -775,10 +781,6 @@ export default function ChatPanel({
     const toolExecutionEntries = useMemo(() => {
         return buildToolExecutionItems(timelineMessages.filter(isToolExecutionMessage), toolExecutionNow);
     }, [timelineMessages, toolExecutionNow]);
-
-    const hasRunningToolExecution = useMemo(() => {
-        return toolExecutionEntries.some((execution) => execution.status === 'running');
-    }, [toolExecutionEntries]);
 
     const messagesToRender = useMemo(() => {
         return timelineMessages.filter((message) => (
@@ -1939,11 +1941,19 @@ export default function ChatPanel({
         autopilotAgents.find(agent => agent.is_primary) ||
         autopilotAgents[0] ||
         null;
-    const selectedAgentDocCount = selectedAutopilotAgent?.knowledge_base_documents?.length || 0;
-    const activeAutopilotRuleCount = autopilotRules.filter(rule => rule.enabled).length;
     const currentCopilotMode = chat.copilot_mode === 'auto' ? 'auto' : 'suggest';
     const hasAutopilotAvailable = availableAutopilotAgents.length > 0;
-    const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
+    const headerAssigneeName = chat.agent?.name || chat.assignedSystemAgent?.name || 'Não atribuído';
+    const headerStatusLabel = chat.status === 'atendimentos'
+        ? 'Em atendimento'
+        : chat.status === 'encerrados'
+            ? 'Encerrado'
+            : 'Na fila';
+    const headerStatusClassName = chat.status === 'atendimentos'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+        : chat.status === 'encerrados'
+            ? 'border-slate-200 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300'
+            : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
 
 
 
@@ -1956,9 +1966,11 @@ export default function ChatPanel({
                 executions={toolExecutionEntries}
                 workspaceTimezone={workspaceTimezone}
             />
-            {/* Header */}
-            {/* Header */}
-            <header className="flex min-h-[60px] md:h-16 items-center justify-between border-b border-slate-200 bg-white px-3 md:px-6 md:pt-0 md:pb-0 flex-shrink-0 z-20 pt-[env(safe-area-inset-top)] pb-2 dark:border-white/10 dark:bg-[#050507]">
+            {/* Conversation header */}
+            <header
+                data-chat-header
+                className="z-20 flex min-h-[60px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 pb-2 pt-[env(safe-area-inset-top)] md:h-[72px] md:px-[clamp(14px,1.5vw,22px)] md:pb-0 md:pt-0 dark:border-white/10 dark:bg-[#050507]"
+            >
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                     {onBack && (
                         <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden -ml-2 mr-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
@@ -1966,49 +1978,36 @@ export default function ChatPanel({
                         </Button>
                     )}
                     <div>
-                        <Avatar className="h-10 w-10 border border-slate-200 bg-white dark:border-white/10 dark:bg-[#0B0B10]">
+                        <Avatar className="h-10 w-10 border border-slate-200 bg-white md:h-11 md:w-11 dark:border-white/10 dark:bg-[#0B0B10]">
                             <AvatarImage fallbackOnBlank src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                     </div>
                     <div className="min-w-0 flex-1">
-                        <h2 className="flex items-center gap-2 min-w-0 font-semibold text-slate-900 dark:text-white">
-                            <span className="truncate">{chat.contact.name}</span>
-                            {chat.status === 'atendimentos' && (
-                                <Badge variant="secondary" className="bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/20 text-[10px] px-1.5 h-5 shrink-0 hidden 2xl:inline-flex">
-                                    Atendendo
-                                </Badge>
-                            )}
+                        <h2 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold text-slate-950 md:text-base dark:text-white">
+                            <span className="min-w-0 truncate">{chat.contact.name}</span>
+                            <Badge
+                                data-chat-status
+                                variant="secondary"
+                                className={cn("h-5 shrink-0 whitespace-nowrap border px-2 text-[10px] font-semibold", headerStatusClassName)}
+                            >
+                                {headerStatusLabel}
+                            </Badge>
                             {chat.relatedContactThread && (
-                                <Badge variant="secondary" className="bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-500/20 text-[10px] px-1.5 h-5 shrink-0 hidden xl:inline-flex">
+                                <Badge variant="secondary" className="hidden h-5 shrink-0 border-blue-500/20 bg-blue-500/15 px-1.5 text-[10px] text-blue-700 min-[1800px]:inline-flex dark:text-blue-200">
                                     {chat.relatedChatIds?.length || 1} conversas
                                 </Badge>
                             )}
-                            {isAssignedToIntelligentAgent && (
-                                <Badge variant="secondary" className="bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 border-cyan-500/20 text-[10px] px-1.5 h-5 shrink-0 hidden xl:inline-flex">
-                                    <Bot className="mr-1 h-3 w-3" />
-                                    IA
-                                </Badge>
-                            )}
-                            <Dialog>
-                                <TooltipProvider delayDuration={150}>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <DialogTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 shrink-0 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-500 dark:hover:bg-white/5 dark:hover:text-white"
-                                                    aria-label="Ver detalhes da conversa"
-                                                >
-                                                    <Info className="h-3.5 w-3.5" />
-                                                </Button>
-                                            </DialogTrigger>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="bottom">Detalhes da conversa</TooltipContent>
-                                    </Tooltip>
-                                </TooltipProvider>
-                                <DialogContent className="sm:max-w-md">
+                            <Dialog open={isChatDetailsOpen} onOpenChange={setIsChatDetailsOpen}>
+                                <DialogContent
+                                    className="sm:max-w-md"
+                                    onCloseAutoFocus={(event) => {
+                                        event.preventDefault();
+                                        const returnFocusTarget = chatDetailsReturnFocusRef.current;
+                                        chatDetailsReturnFocusRef.current = null;
+                                        window.requestAnimationFrame(() => returnFocusTarget?.focus());
+                                    }}
+                                >
                                     <DialogHeader>
                                         <DialogTitle>Detalhes da conversa</DialogTitle>
                                         <DialogDescription>
@@ -2052,21 +2051,29 @@ export default function ChatPanel({
                                 </DialogContent>
                             </Dialog>
                         </h2>
-                        <p className="flex min-w-0 items-center gap-1 overflow-hidden text-xs text-slate-500 dark:text-zinc-500">
+                        <p className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-slate-500 dark:text-zinc-500">
                             {chat.instance_name && (
                                 <span className="flex shrink-0 items-center gap-1 text-slate-500 dark:text-zinc-500">
                                     {headerPlatformIcon}
-                                    <span className="hidden max-w-[72px] truncate lg:inline xl:max-w-[96px]">{chat.instance_name}</span>
+                                    <span className="hidden max-w-[88px] truncate min-[1200px]:inline">{chat.instance_name}</span>
                                 </span>
                             )}
                             {chat.instance_name && headerContactValue && (
-                                <span className="mx-1 hidden shrink-0 lg:inline">•</span>
+                                <span aria-hidden="true" className="hidden shrink-0 min-[1200px]:inline">•</span>
                             )}
                             <span className="min-w-0 truncate text-slate-600 dark:text-zinc-400">{headerContactValue}</span>
+                            <span aria-hidden="true" className="hidden shrink-0 min-[1500px]:inline">•</span>
+                            <span className="hidden max-w-[120px] shrink-0 truncate min-[1500px]:inline" title={`Equipe: ${chat.teamName || 'Sem equipe'}`}>
+                                {chat.teamName || 'Sem equipe'}
+                            </span>
+                            <span aria-hidden="true" className="hidden shrink-0 min-[1800px]:inline">•</span>
+                            <span className="hidden max-w-[140px] shrink-0 truncate font-medium text-slate-600 min-[1800px]:inline dark:text-zinc-400" title={`Responsável: ${headerAssigneeName}`}>
+                                {headerAssigneeName}
+                            </span>
                         </p>
                     </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div data-chat-actions className="flex shrink-0 items-center gap-2">
                     {/* Dialogs logic - rendered once */}
                     {isChatOpen && isChatAssignedToMe && (
                         <CloseChatDialog
@@ -2082,28 +2089,64 @@ export default function ChatPanel({
                     <div className="md:hidden">
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="-mr-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
+                                <Button ref={mobileMoreActionsRef} aria-label="Mais ações da conversa" variant="ghost" size="icon" className="-mr-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
                                     <MoreVertical className="h-5 w-5" />
                                 </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56 bg-popover border-border">
-
+                            <DropdownMenuContent align="end" className="w-64 bg-popover border-border">
+                                <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Conversa</DropdownMenuLabel>
+                                <DropdownMenuItem onSelect={() => {
+                                    chatDetailsReturnFocusRef.current = mobileMoreActionsRef.current;
+                                    setIsChatDetailsOpen(true);
+                                }}>
+                                    <Info className="mr-2 h-4 w-4" />
+                                    <span>Detalhes técnicos</span>
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => onToggleContactPanel()}>
-                                    <ArrowRightLeft className="mr-2 h-4 w-4" />
-                                    <span>Detalhes do Contato</span>
+                                    <PanelRightOpen className="mr-2 h-4 w-4" />
+                                    <span>Contexto do contato</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={handleExportChat}>
                                     <FileText className="mr-2 h-4 w-4" />
                                     <span>Salvar conversa</span>
                                 </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
+                                <DropdownMenuItem onClick={handleTrainAgent}>
+                                    <Brain className="mr-2 h-4 w-4" />
+                                    <span>Treinar agente</span>
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
                                     <Activity className="mr-2 h-4 w-4" />
-                                    <span>Execucoes da IA</span>
+                                    <span>Execuções da IA</span>
                                     {toolExecutionEntries.length > 0 && (
                                         <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
                                             {toolExecutionEntries.length}
                                         </Badge>
                                     )}
+                                </DropdownMenuItem>
+                                <DropdownMenuCheckboxItem
+                                    checked={isAiAgentActive}
+                                    onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
+                                    onSelect={(event) => event.preventDefault()}
+                                    disabled={isAiTyping || (!isAiAgentActive && !hasAutopilotAvailable)}
+                                    className="items-start py-2"
+                                >
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium">Agente IA</p>
+                                        <p className="max-w-[160px] truncate text-[10px] text-muted-foreground">{selectedAutopilotAgent?.name || 'Não configurado'}</p>
+                                    </div>
+                                    <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isAiAgentActive ? 'Ativo' : 'Inativo'}</span>
+                                </DropdownMenuCheckboxItem>
+                                <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('suggest')}>
+                                    <MessageSquareQuote className="mr-2 h-4 w-4" />
+                                    <span>Modo sugestão</span>
+                                    {currentCopilotMode === 'suggest' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('auto')}>
+                                    <Bot className="mr-2 h-4 w-4" />
+                                    <span>Modo automático</span>
+                                    {currentCopilotMode === 'auto' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
                                 </DropdownMenuItem>
 
 
@@ -2124,50 +2167,98 @@ export default function ChatPanel({
                         </DropdownMenu>
                     </div>
 
-                    {/* DESKTOP MENU - Dropdown for lg, full buttons for xl+ */}
-                    <div className="hidden md:flex items-center gap-1">
-                        {/* Dropdown for smaller desktops (md to 2xl) */}
-                        <div className="2xl:hidden">
+                    {/* Desktop action island */}
+                    <div className="hidden items-center gap-0.5 rounded-xl border border-slate-200 bg-slate-50/80 p-1 md:flex dark:border-white/10 dark:bg-white/[0.04]">
+                        <TransferChatDialog
+                            chat={chat}
+                            currentUser={currentUser}
+                            onTransferSuccess={onActionSuccess}
+                            disabled={chat.status === 'encerrados'}
+                            trigger={
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={chat.status === 'encerrados'}
+                                    aria-label="Transferir conversa"
+                                    className="h-8 gap-2 rounded-lg px-2 text-slate-600 shadow-none hover:bg-white hover:text-slate-950 hover:shadow-sm min-[1400px]:px-2.5 dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white"
+                                    title="Transferir conversa"
+                                >
+                                    <ArrowRightLeft className="h-4 w-4" />
+                                    <span className="hidden min-[1400px]:inline">Transferir</span>
+                                </Button>
+                            }
+                        />
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={onToggleContactPanel}
+                            className="h-8 gap-2 rounded-lg px-2 text-slate-600 shadow-none hover:bg-white hover:text-slate-950 hover:shadow-sm min-[1400px]:px-2.5 dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white"
+                            aria-label="Ver contexto do contato"
+                            title="Ver contexto do contato"
+                        >
+                            <PanelRightOpen className="h-4 w-4" />
+                            <span className="hidden min-[1400px]:inline">Contexto</span>
+                        </Button>
+                        {/* Secondary actions stay consolidated at every desktop width. */}
+                        <div>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5">
+                                    <Button ref={desktopMoreActionsRef} aria-label="Mais ações da conversa" title="Mais ações" variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white">
                                         <MoreVertical className="h-5 w-5" />
                                     </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-56 bg-popover border-border">
-                                    <DropdownMenuItem onClick={() => onToggleContactPanel()}>
-                                        <ArrowRightLeft className="mr-2 h-4 w-4" />
-                                        <span>Detalhes do Contato</span>
+                                <DropdownMenuContent align="end" className="w-64 bg-popover border-border">
+                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Conversa</DropdownMenuLabel>
+                                    <DropdownMenuItem onSelect={() => {
+                                        chatDetailsReturnFocusRef.current = desktopMoreActionsRef.current;
+                                        setIsChatDetailsOpen(true);
+                                    }}>
+                                        <Info className="mr-2 h-4 w-4" />
+                                        <span>Detalhes técnicos</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={handleExportChat}>
                                         <FileText className="mr-2 h-4 w-4" />
                                         <span>Salvar conversa</span>
                                     </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
                                     <DropdownMenuItem onClick={handleTrainAgent}>
                                         <Brain className="mr-2 h-4 w-4" />
-                                        <span>Treinar Agente</span>
+                                        <span>Treinar agente</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
                                         <Activity className="mr-2 h-4 w-4" />
-                                        <span>Execucoes da IA</span>
+                                        <span>Execuções da IA</span>
                                         {toolExecutionEntries.length > 0 && (
                                             <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
                                                 {toolExecutionEntries.length}
                                             </Badge>
                                         )}
                                     </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <div className="px-2 py-1.5 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <Bot className="h-4 w-4 text-muted-foreground" />
-                                            <span className="text-sm font-medium">Agente IA</span>
+                                    <DropdownMenuCheckboxItem
+                                        checked={isAiAgentActive}
+                                        onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
+                                        onSelect={(event) => event.preventDefault()}
+                                        disabled={isAiTyping || (!isAiAgentActive && !hasAutopilotAvailable)}
+                                        className="items-start py-2"
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-medium">Agente IA</p>
+                                            <p className="max-w-[160px] truncate text-[10px] text-muted-foreground">{selectedAutopilotAgent?.name || 'Não configurado'}</p>
                                         </div>
-                                        <Switch 
-                                            checked={isAiAgentActive} 
-                                            onCheckedChange={handleAiSwitchChange}
-                                            disabled={isAiTyping}
-                                        />
-                                    </div>
+                                        <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isAiAgentActive ? 'Ativo' : 'Inativo'}</span>
+                                    </DropdownMenuCheckboxItem>
+                                    <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('suggest')}>
+                                        <MessageSquareQuote className="mr-2 h-4 w-4" />
+                                        <span>Modo sugestão</span>
+                                        {currentCopilotMode === 'suggest' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('auto')}>
+                                        <Bot className="mr-2 h-4 w-4" />
+                                        <span>Modo automático</span>
+                                        {currentCopilotMode === 'auto' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
+                                    </DropdownMenuItem>
                                     {isChatOpen && isChatAssignedToMe && (
                                         <>
                                             <DropdownMenuSeparator />
@@ -2184,178 +2275,6 @@ export default function ChatPanel({
                             </DropdownMenu>
                         </div>
 
-                        {/* Full buttons for 2xl+ screens */}
-                        <div className="hidden 2xl:flex items-center gap-2">
-                            <TooltipProvider>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                            onClick={() => onToggleContactPanel()}
-                                        >
-                                            <ArrowRightLeft className="h-4 w-4" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent><p>Alternar Painel Lateral</p></TooltipContent>
-                                </Tooltip>
-
-                                <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-white/10" />
-
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-white/5"
-                                            onClick={handleExportChat}
-                                        >
-                                            <FileText className="h-4 w-4" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent><p>Salvar como HTML</p></TooltipContent>
-                                </Tooltip>
-
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="text-slate-500 hover:bg-cyan-500/10 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-300"
-                                            onClick={handleTrainAgent}
-                                        >
-                                            <Brain className="h-4 w-4" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent><p>Treinar Agente</p></TooltipContent>
-                                </Tooltip>
-
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="relative text-slate-500 hover:bg-cyan-500/10 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-300"
-                                            onClick={() => setIsToolExecutionsOpen(true)}
-                                        >
-                                            <Activity className={cn("h-4 w-4", hasRunningToolExecution && "text-cyan-500")} />
-                                            {toolExecutionEntries.length > 0 && (
-                                                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-1 text-[10px] font-semibold text-white">
-                                                    {toolExecutionEntries.length > 9 ? '9+' : toolExecutionEntries.length}
-                                                </span>
-                                            )}
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent><p>Execucoes da IA</p></TooltipContent>
-                                </Tooltip>
-
-                                <Popover>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <PopoverTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className={cn(
-                                                        "transition-all duration-300",
-                                                        isAiAgentActive 
-                                                            ? "text-blue-500 bg-blue-500/10 hover:bg-blue-500/20" 
-                                                            : "text-slate-500 hover:bg-slate-100 dark:text-zinc-500 dark:hover:bg-white/5"
-                                                    )}
-                                                >
-                                                    <Bot className={cn("h-4 w-4", isAiAgentActive && "text-cyan-500")} />
-                                                </Button>
-                                            </PopoverTrigger>
-                                        </TooltipTrigger>
-                                        <TooltipContent><p>Configurações do Agente</p></TooltipContent>
-                                    </Tooltip>
-                                    <PopoverContent align="end" className="w-80 p-4 border-border bg-popover">
-                                        <div className="space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <div className="space-y-0.5">
-                                                    <h4 className="text-sm font-semibold">Agente Automático</h4>
-                                                    <p className="text-xs text-muted-foreground">IA responde as mensagens</p>
-                                                </div>
-                                                <Switch 
-                                                    checked={isAiAgentActive} 
-                                                    onCheckedChange={handleAiSwitchChange}
-                                                    disabled={isAiTyping}
-                                                />
-                                            </div>
-
-                                            <Separator className="bg-border/50" />
-
-                                            <div className="space-y-2">
-                                                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Agente Responsável</Label>
-                                                <Select 
-                                                    value={chat?.autopilot_config_id || undefined} 
-                                                    onValueChange={handleAgentChange}
-                                                    disabled={!isAiAgentActive}
-                                                >
-                                                    <SelectTrigger className="h-9 bg-background border-border">
-                                                        <SelectValue placeholder="Selecione o agente" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {autopilotAgents.map(agent => (
-                                                            <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Modo de Operação</Label>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <Button 
-                                                        variant={chat?.copilot_mode === 'suggest' ? 'secondary' : 'outline'}
-                                                        size="sm"
-                                                        className={cn("h-8 text-xs", chat?.copilot_mode === 'suggest' && "bg-blue-500/10 text-blue-600 border-blue-200")}
-                                                        onClick={() => handleCopilotModeChange('suggest')}
-                                                        disabled={!isAiAgentActive}
-                                                    >
-                                                        <MessageSquareQuote className="h-3 w-3 mr-1.5" />
-                                                        Sugestão
-                                                    </Button>
-                                                    <Button 
-                                                        variant={chat?.copilot_mode === 'auto' ? 'secondary' : 'outline'}
-                                                        size="sm"
-                                                        className={cn("h-8 text-xs", chat?.copilot_mode === 'auto' && "bg-green-500/10 text-green-600 border-green-200")}
-                                                        onClick={() => handleCopilotModeChange('auto')}
-                                                        disabled={!isAiAgentActive}
-                                                    >
-                                                        <Bot className="h-3 w-3 mr-1.5" />
-                                                        Automático
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                            
-                                            <div className="pt-2">
-                                                <Link href="/autopilot" className="text-[11px] text-blue-500 hover:underline flex items-center justify-center">
-                                                    Ir para central de treinamento →
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    </PopoverContent>
-                                </Popover>
-
-                                {isChatOpen && isChatAssignedToMe && (
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => setIsCloseDialogOpen(true)}
-                                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                                            >
-                                                <XCircle className="h-4 w-4" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent><p>Encerrar atendimento</p></TooltipContent>
-                                    </Tooltip>
-                                )}
-                            </TooltipProvider>
-                        </div>
                     </div>
 
                 </div>
@@ -2363,7 +2282,7 @@ export default function ChatPanel({
 
             {/* Messages Area */}
 
-            <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-[#F3F4F6]/68 dark:bg-black/25">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F8F9FB] dark:bg-black/25">
                 {isLoadingInitialMessages ? (
                     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                         <div className="flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2">
@@ -2440,7 +2359,7 @@ export default function ChatPanel({
                             (replyToId ? visibleMessagesLookup.byId.get(replyToId) : undefined) ||
                             (replyToApiId ? visibleMessagesLookup.byApiMessageId.get(replyToApiId) : undefined);
                         return (
-                            <div className="px-2 md:px-6 py-0.5" id={`message-${message.id}`} data-no-auto-translate>
+                            <div className="px-2 py-0.5 md:px-[clamp(20px,3vw,48px)]" id={`message-${message.id}`} data-no-auto-translate>
                                 <MessageItem
                                     key={message.id}
                                     message={message}
@@ -2463,7 +2382,7 @@ export default function ChatPanel({
 
             {
                 isChatOpen ? (
-                    <footer className="z-20 max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain bg-transparent p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-4 md:pb-[calc(1rem+env(safe-area-inset-bottom))] data-[state=open]:p-0">
+                    <footer className="z-20 max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain bg-[#F8F9FB] p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-[clamp(12px,1.8vh,18px)] md:px-[clamp(16px,2.5vw,40px)] md:pb-[calc(clamp(12px,1.8vh,18px)+env(safe-area-inset-bottom))] data-[state=open]:p-0 dark:bg-black/25">
                         {showShortcutSuggestions && filteredShortcuts.length > 0 && (
                             <div className="mb-2 p-2 border border-border rounded-xl bg-popover max-h-40 overflow-y-auto">
                                 {filteredShortcuts.map(shortcut => (
@@ -2553,10 +2472,10 @@ export default function ChatPanel({
                                 <input type="hidden" name="chatId" value={chat.id} />
 
                                 <div data-input-container className={cn(
-                                    "relative flex flex-col w-full shadow-sm rounded-[24px] border transition-all duration-200 overflow-hidden",
+                                    "relative mx-auto flex w-full max-w-[1600px] flex-col overflow-hidden rounded-[22px] border shadow-[0_10px_35px_-28px_rgba(15,23,42,0.55)] transition-all duration-200",
                                     isInternalNote
                                         ? "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-300 dark:border-yellow-700/40"
-                                        : "bg-muted/50 border-border dark:border-white/10 dark:bg-black",
+                                        : "border-slate-200 bg-white dark:border-white/10 dark:bg-black",
                                     canSendFromComposer && !isInternalNote && "border-cyan-500/50",
                                     isSendBurstActive && !isInternalNote && "ring-1 ring-cyan-300/40",
                                     isAiTyping && !isInternalNote && "ring-1 ring-cyan-400/25"

@@ -129,10 +129,10 @@ function PlanCard({
                     <span className="text-4xl md:text-5xl font-extrabold tracking-tight text-white">
                         {formatCurrency(plan.price)}
                     </span>
-                    <span className="text-base text-white/40 font-medium mb-1">/mes</span>
+                    <span className="text-base text-white/60 font-medium mb-1">/mês</span>
                 </div>
                 <p className="mt-2 text-sm text-white/30 font-medium">
-                    {chats.toLocaleString('pt-BR')} chats/mes · Usuarios ilimitados
+                    {chats.toLocaleString('pt-BR')} chats/mês · Usuários ilimitados
                 </p>
             </div>
 
@@ -159,7 +159,7 @@ function PlanCard({
             <div className="mt-auto">
                 <CheckoutButton
                     planId={planId}
-                    label={`Comecar ${DEFAULT_TRIAL_DAYS} dias gratis`}
+                    label={`Começar ${DEFAULT_TRIAL_DAYS} dias grátis`}
                     variant={highlighted ? 'solid' : 'outline'}
                 />
                 <p className="mt-3 text-center text-xs font-medium text-white/30">
@@ -176,7 +176,7 @@ function EnterpriseCard() {
             <div className="flex-1 text-center sm:text-left">
                 <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white border border-white/5">
                     <Building2 className="h-3.5 w-3.5" />
-                    Grandes Operacoes
+                    Grandes operações
                 </div>
                 <h3 className="text-2xl font-bold text-white mb-2">Enterprise</h3>
                 <p className="text-white/40 text-sm leading-relaxed max-w-md font-medium">
@@ -221,17 +221,17 @@ export function ChatVolumePricingSection({
                     <div className="mx-auto mb-16 max-w-2xl text-center">
                         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-green/20 bg-brand-green/10 px-4 py-1.5 text-xs font-bold text-brand-green shadow-[0_0_15px_rgba(34,197,94,0.15)]">
                             <Sparkles className="h-4 w-4" />
-                            Planos que crescem com voce
+                            Planos que crescem com você
                         </div>
                         <h2 className={`font-extrabold tracking-tight text-white ${isLanding ? 'text-4xl md:text-5xl lg:text-6xl' : 'text-4xl md:text-5xl'}`}>
                             Escolha o plano ideal para sua{' '}
                             <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-green to-emerald-300">
-                                operacao
+                                operação
                             </span>
                             .
                         </h2>
                         <p className="mt-4 text-lg text-white/40 max-w-lg mx-auto">
-                            Todos os planos incluem usuarios ilimitados e {DEFAULT_TRIAL_DAYS} dias gratis. Sem fidelidade.
+                            Todos os planos incluem usuários ilimitados e {DEFAULT_TRIAL_DAYS} dias grátis. Sem fidelidade.
                         </p>
                     </div>
 

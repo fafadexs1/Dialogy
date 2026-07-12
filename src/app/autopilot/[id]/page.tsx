@@ -21,6 +21,8 @@ import {
   X,
   Wrench,
   GitBranch,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 
 import type {
@@ -95,6 +97,15 @@ import { NativeWorkflowBuilder } from '@/components/workflow/native-workflow-bui
 import { NativeAiBuilderDialog } from '@/components/workflow/native-ai-builder-dialog';
 import type { ModelConfiguration, NativeWorkflowTemplate, WorkflowDefinition } from '@/services/workflow-runtime';
 import {
+  listAttachedWorkflowToolNames,
+  synchronizeNativeWorkflowToolState,
+} from '@/services/workflow-runtime/native-agent-tools';
+import {
+  getPrimaryWorkflowModelId,
+  synchronizeWorkflowModelState,
+} from '@/services/workflow-runtime/model-selection';
+import { removeNativeKnowledgeReferences } from '@/services/workflow-runtime/native-knowledge-references';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -105,18 +116,45 @@ import type { RagLabReport } from '@/services/rag/evaluation';
 
 type AgentToolCatalogItem = {
   name: string;
+  displayName?: string;
+  category?: 'attendance' | 'crm' | 'sgp' | 'mcp' | 'other';
   version: string;
   description: string;
   class: string;
   riskLevel: 'low' | 'medium' | 'high';
+  sideEffect?: 'none' | 'low' | 'medium' | 'high';
+  idempotent?: boolean;
+  timeoutMs?: number;
+  maxAttempts?: number;
   requiresHumanApproval: boolean;
+  customerVisible?: boolean;
   enabledByDefault: boolean;
   source: 'dialogy' | 'mcp';
   serverId?: string;
   serverName?: string;
+  allowedIntents?: string[];
+  requiredSlots?: string[];
+  fallbackAction?: string;
   inputSchema?: Record<string, unknown> | null;
   outputSchema?: Record<string, unknown> | null;
 };
+
+type AutopilotLoadFailure = {
+  kind: 'error' | 'not_found';
+  message: string;
+};
+
+type AutopilotResourceWarning = {
+  resource: 'config' | 'models' | 'tools' | 'rag' | 'usage';
+  label: string;
+  message: string;
+};
+
+function rejectedLoadMessage(result: PromiseRejectedResult, fallback: string) {
+  return result.reason instanceof Error && result.reason.message.trim()
+    ? result.reason.message
+    : fallback;
+}
 
 function inferKnowledgeSourceFormat(filename: string): KnowledgeBaseDocument['sourceFormat'] {
   const extension = filename.split('.').pop()?.toLowerCase();
@@ -224,7 +262,7 @@ function normalizeLoadedSnapshot(
   snapshot: AutopilotConfigDraftSnapshot,
   fallback: AutopilotConfigDraftSnapshot,
 ): AutopilotConfigDraftSnapshot {
-  return {
+  return synchronizeNativeWorkflowToolState(synchronizeWorkflowModelState({
     name: snapshot.name || fallback.name,
     gemini_api_key: null,
     ai_model: snapshot.ai_model || fallback.ai_model,
@@ -250,7 +288,7 @@ function normalizeLoadedSnapshot(
     workflow_builder_mode: snapshot.workflow_builder_mode || fallback.workflow_builder_mode || 'legacy',
     workflow_definition: snapshot.workflow_definition || fallback.workflow_definition || null,
     workflow_migration: snapshot.workflow_migration || fallback.workflow_migration || null,
-  };
+  }));
 }
 
 function normalizeTextForVersion(value: string | null | undefined) {
@@ -347,6 +385,9 @@ export default function AutopilotDetailPage() {
   const agentId = params.id as string;
 
   const [loading, setLoading] = useState(true);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<AutopilotLoadFailure | null>(null);
+  const [resourceWarnings, setResourceWarnings] = useState<AutopilotResourceWarning[]>([]);
   const [config, setConfig] = useState<AutopilotConfig | null>(null);
   const [instances, setInstances] = useState<NexusFlowInstance[]>([]);
   const [usageLogs, setUsageLogs] = useState<AutopilotUsageLog[]>([]);
@@ -354,6 +395,7 @@ export default function AutopilotDetailPage() {
   const [modelCatalog, setModelCatalog] = useState<AiModelCatalogEntry[]>([]);
   const [configuredAiModels, setConfiguredAiModels] = useState<AiModelCatalogEntry[]>([]);
   const [toolCatalog, setToolCatalog] = useState<AgentToolCatalogItem[]>([]);
+  const [isToolCatalogLoading, setIsToolCatalogLoading] = useState(true);
   const [hasGlobalKey, setHasGlobalKey] = useState(false);
   const [workspaceDefaultAiModel, setWorkspaceDefaultAiModel] = useState<string | null>(null);
   const [workspaceHasGeminiConfig, setWorkspaceHasGeminiConfig] = useState(false);
@@ -378,6 +420,16 @@ export default function AutopilotDetailPage() {
   const [loadedEditorSnapshot, setLoadedEditorSnapshot] = useState<AutopilotConfigDraftSnapshot | null>(null);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
   const [versions, setVersions] = useState<AutopilotConfigVersionSummary[]>([]);
+
+  const applyWorkflowDefinition = useCallback((nextDefinition: WorkflowDefinition) => {
+    setWorkflowDefinition(nextDefinition);
+    const workflowModel = getPrimaryWorkflowModelId(nextDefinition);
+    if (workflowModel) setAiModel(workflowModel);
+    const catalogNames = new Set(toolCatalog.map((tool) => tool.name));
+    setEnabledToolNames(
+      listAttachedWorkflowToolNames(nextDefinition).filter((toolName) => catalogNames.has(toolName)),
+    );
+  }, [toolCatalog]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -443,33 +495,30 @@ export default function AutopilotDetailPage() {
 
     const showLoading = options?.showLoading ?? true;
     if (showLoading) setLoading(true);
+    setIsRefreshingData(true);
+    setIsToolCatalogLoading(true);
+    setLoadFailure(null);
     try {
-      const [autopilotData, catalogData, toolCatalogData, ragHealthData] = await Promise.all([
-        getAutopilotConfig(user.activeWorkspaceId, agentId),
-        getAiModelCatalogAction(),
-        getAgentToolCatalogAction(user.activeWorkspaceId),
-        getAutopilotRagHealth(agentId),
-      ]);
-
+      // The configuration is the only critical request. Render it first so a
+      // slow catalog or RAG health check can never hold the Flowbuilder blank.
+      const autopilotData = await getAutopilotConfig(user.activeWorkspaceId, agentId);
       if (autopilotData.error) {
-        toast({ title: 'Erro ao carregar', description: autopilotData.error, variant: 'destructive' });
-        router.push('/autopilot');
+        setLoadFailure({ kind: 'error', message: autopilotData.error });
         return;
       }
 
       if (!autopilotData.config) {
-        router.push('/autopilot');
+        setConfig(null);
+        setLoadFailure({
+          kind: 'not_found',
+          message: 'Esta automação não existe mais ou você não tem acesso a ela neste workspace.',
+        });
         return;
       }
 
-      const nextCatalog = catalogData.models || [];
       const nextConfiguredModels = autopilotData.workspaceConfiguredAiModels || [];
-      const nextToolCatalog = toolCatalogData.tools || [];
       const nextSelectableModels = nextConfiguredModels;
-      const defaultEnabledToolNames = nextToolCatalog
-        .filter((tool) => tool.enabledByDefault)
-        .map((tool) => tool.name);
-      const publishedSnapshot = buildSnapshotFromConfig(autopilotData.config, defaultEnabledToolNames);
+      const publishedSnapshot = buildSnapshotFromConfig(autopilotData.config, []);
       const loadedSnapshot = autopilotData.draft?.snapshot
         ? normalizeLoadedSnapshot(autopilotData.draft.snapshot, publishedSnapshot)
         : publishedSnapshot;
@@ -487,9 +536,8 @@ export default function AutopilotDetailPage() {
       setHasGlobalKey(!!autopilotData.hasGlobalKey);
       setWorkspaceDefaultAiModel(autopilotData.workspaceDefaultAiModel || null);
       setWorkspaceHasGeminiConfig(Boolean(autopilotData.workspaceHasGeminiConfig));
-      setModelCatalog(nextCatalog);
+      setModelCatalog(nextConfiguredModels);
       setConfiguredAiModels(nextConfiguredModels);
-      setToolCatalog(nextToolCatalog);
       setDraftUpdatedAt(autopilotData.draft?.updated_at || null);
       setVersions(autopilotData.versions || []);
       setLoadedEditorSnapshot(editorSnapshot);
@@ -511,14 +559,77 @@ export default function AutopilotDetailPage() {
       setFlowGraph(editorSnapshot.flow_graph || null);
       setWorkflowBuilderMode('native_v2');
       setWorkflowDefinition(editorSnapshot.workflow_definition || null);
-      setRagHealth(ragHealthData.health || null);
-
-      const logsData = await getAutopilotUsageLogs(autopilotData.config.id);
-      setUsageLogs(logsData.logs || []);
-    } finally {
+      setLoadFailure(null);
       if (showLoading) setLoading(false);
+
+      const [catalogLoad, toolCatalogLoad, ragHealthLoad, usageLoad] = await Promise.allSettled([
+        getAiModelCatalogAction(),
+        getAgentToolCatalogAction(user.activeWorkspaceId),
+        getAutopilotRagHealth(agentId),
+        getAutopilotUsageLogs(autopilotData.config.id),
+      ]);
+      const warnings: AutopilotResourceWarning[] = [];
+
+      if (catalogLoad.status === 'fulfilled' && !catalogLoad.value.error) {
+        setModelCatalog(catalogLoad.value.models || nextConfiguredModels);
+      } else {
+        const message = catalogLoad.status === 'rejected'
+          ? rejectedLoadMessage(catalogLoad, 'O catálogo global não respondeu.')
+          : catalogLoad.value.error || 'O catálogo global não respondeu.';
+        warnings.push({
+          resource: 'models',
+          label: 'Catálogo de modelos',
+          message: `${message} Os modelos já configurados no workspace continuam disponíveis.`,
+        });
+      }
+
+      if (toolCatalogLoad.status === 'fulfilled' && !toolCatalogLoad.value.error) {
+        setToolCatalog(toolCatalogLoad.value.tools || []);
+      } else {
+        const message = toolCatalogLoad.status === 'rejected'
+          ? rejectedLoadMessage(toolCatalogLoad, 'O catálogo de ferramentas não respondeu.')
+          : toolCatalogLoad.value.error || 'O catálogo de ferramentas não respondeu.';
+        warnings.push({
+          resource: 'tools',
+          label: 'Ferramentas',
+          message: `${message} As conexões já salvas foram preservadas.`,
+        });
+      }
+      setIsToolCatalogLoading(false);
+
+      if (ragHealthLoad.status === 'fulfilled' && !ragHealthLoad.value.error) {
+        setRagHealth(ragHealthLoad.value.health || null);
+      } else {
+        const message = ragHealthLoad.status === 'rejected'
+          ? rejectedLoadMessage(ragHealthLoad, 'A saúde do índice não pôde ser consultada.')
+          : ragHealthLoad.value.error || 'A saúde do índice não pôde ser consultada.';
+        warnings.push({
+          resource: 'rag',
+          label: 'Saúde da base de conhecimento',
+          message: `${message} Os documentos continuam editáveis.`,
+        });
+      }
+
+      if (usageLoad.status === 'fulfilled' && !usageLoad.value.error) {
+        setUsageLogs(usageLoad.value.logs || []);
+      } else {
+        const message = usageLoad.status === 'rejected'
+          ? rejectedLoadMessage(usageLoad, 'O histórico de uso não pôde ser carregado.')
+          : usageLoad.value.error || 'O histórico de uso não pôde ser carregado.';
+        warnings.push({ resource: 'usage', label: 'Histórico de uso', message });
+      }
+      setResourceWarnings(warnings);
+    } catch (error) {
+      setLoadFailure({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Não foi possível carregar o Flowbuilder.',
+      });
+    } finally {
+      setIsToolCatalogLoading(false);
+      if (showLoading) setLoading(false);
+      setIsRefreshingData(false);
     }
-  }, [agentId, router, toast, user?.activeWorkspaceId]);
+  }, [agentId, user?.activeWorkspaceId]);
 
   useEffect(() => {
     if (user?.activeWorkspaceId && agentId) {
@@ -672,7 +783,7 @@ export default function AutopilotDetailPage() {
       if (result.success) {
         toast({
           title: workflowBuilderMode === 'native_v2' ? 'Automação publicada' : 'Agente publicado',
-          description: result.versionNumber ? `Versao v${result.versionNumber} publicada.` : 'Rascunho promovido para producao.',
+          description: result.warning || (result.versionNumber ? `Versão v${result.versionNumber} publicada.` : 'Rascunho promovido para produção.'),
         });
         setLastPlaygroundTrace(null);
         await fetchData({ showLoading: false });
@@ -718,10 +829,10 @@ export default function AutopilotDetailPage() {
       const result = await restoreAutopilotVersion(config.id, versionId);
       if (result.success) {
         toast({
-          title: 'Versao restaurada',
-          description: result.versionNumber
+          title: 'Versão restaurada',
+          description: result.warning || (result.versionNumber
             ? `Rollback publicado como v${result.versionNumber}.`
-            : `A versao v${versionNumber} foi restaurada.`,
+            : `A versão v${versionNumber} foi restaurada.`),
         });
         setLastPlaygroundTrace(null);
         await fetchData({ showLoading: false });
@@ -896,10 +1007,16 @@ export default function AutopilotDetailPage() {
         },
       })),
     } : previous);
+    if (workflowDefinition) {
+      applyWorkflowDefinition(removeNativeKnowledgeReferences(workflowDefinition, { collectionId: id }));
+    }
   };
 
   const handleRemoveDoc = (id: string) => {
     setKnowledgeDocuments((prev) => prev.filter((doc) => doc.id !== id));
+    if (workflowDefinition) {
+      applyWorkflowDefinition(removeNativeKnowledgeReferences(workflowDefinition, { documentId: id }));
+    }
   };
 
   const handleReindexKnowledgeBase = async () => {
@@ -1254,15 +1371,96 @@ export default function AutopilotDetailPage() {
     }
   };
 
-  if (loading) {
+  if (loading && !config) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
+        <div className="flex w-full max-w-lg flex-col items-center rounded-3xl border border-white/10 bg-[#101821] p-10 text-center shadow-2xl">
+          <Loader2 className="h-9 w-9 animate-spin text-cyan-400" />
+          <h1 className="mt-5 text-xl font-semibold text-white">Carregando o Flowbuilder</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-400">Buscando a configuração principal e preparando os recursos auxiliares do agente.</p>
+        </div>
       </div>
     );
   }
 
-  if (!config) return null;
+  if (loadFailure && !config) {
+    const notFound = loadFailure.kind === 'not_found';
+    return (
+      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
+        <div role="alert" className="w-full max-w-xl rounded-3xl border border-amber-500/25 bg-[#101821] p-8 text-center shadow-2xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-300">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+          <h1 className="mt-5 text-2xl font-semibold text-white">
+            {notFound ? 'Automação não encontrada' : 'Não foi possível abrir o Flowbuilder'}
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-400">{loadFailure.message}</p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Button type="button" variant="outline" onClick={() => router.push('/autopilot')} className="border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07] hover:text-white">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Voltar para automações
+            </Button>
+            <Button type="button" onClick={() => void fetchData()} className="bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Tentar novamente
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!config) {
+    return (
+      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
+        <div role="alert" className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#101821] p-8 text-center text-slate-300 shadow-2xl">
+          <AlertTriangle className="mx-auto h-7 w-7 text-amber-300" />
+          <h1 className="mt-4 text-xl font-semibold text-white">Configuração indisponível</h1>
+          <p className="mt-2 text-sm text-slate-400">O agente não retornou uma configuração utilizável. Você pode tentar carregar novamente sem perder alterações publicadas.</p>
+          <Button type="button" onClick={() => void fetchData()} className="mt-6 bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Tentar novamente
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const degradedWarnings: AutopilotResourceWarning[] = [
+    ...(loadFailure ? [{
+      resource: 'config' as const,
+      label: 'Atualização da configuração',
+      message: `${loadFailure.message} A última configuração carregada foi preservada no editor.`,
+    }] : []),
+    ...resourceWarnings,
+  ];
+
+  const loadWarningBanner = degradedWarnings.length > 0 ? (
+    <div role="status" className="mx-4 mt-3 flex shrink-0 flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-500/[0.08] px-4 py-3 text-amber-100 shadow-lg sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Editor carregado com recursos limitados</p>
+          <ul className="mt-1 space-y-1 text-xs leading-5 text-amber-100/75">
+            {degradedWarnings.map((warning) => (
+              <li key={warning.resource}><span className="font-medium text-amber-100">{warning.label}:</span> {warning.message}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => void fetchData({ showLoading: false })}
+        disabled={isRefreshingData}
+        className="w-fit shrink-0 border-amber-300/25 bg-amber-950/20 text-amber-100 hover:bg-amber-900/30 hover:text-white"
+      >
+        {isRefreshingData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+        Tentar novamente
+      </Button>
+    </div>
+  ) : null;
 
   const handlePreviewNativeMigration = async () => {
     if (!config) return;
@@ -1294,7 +1492,7 @@ export default function AutopilotDetailPage() {
         toast({ title: 'Falha ao migrar', description: result.error, variant: 'destructive' });
         return;
       }
-      setWorkflowDefinition(result.workflow);
+      applyWorkflowDefinition(result.workflow);
       setWorkflowBuilderMode('native_v2');
       setWorkflowRuntimeV2ShadowEnabled(true);
       setDraftUpdatedAt(result.updatedAt || new Date().toISOString());
@@ -1314,7 +1512,7 @@ export default function AutopilotDetailPage() {
         toast({ title: 'Falha ao criar automação', description: result.error, variant: 'destructive' });
         return;
       }
-      setWorkflowDefinition(result.workflow);
+      applyWorkflowDefinition(result.workflow);
       setWorkflowBuilderMode('native_v2');
       setWorkflowRuntimeV2ShadowEnabled(true);
       setDraftUpdatedAt(result.updatedAt || new Date().toISOString());
@@ -1644,6 +1842,7 @@ export default function AutopilotDetailPage() {
   if (workflowDefinition) {
     return (
       <div className="relative min-h-0 flex-1 flex flex-col">
+        {loadWarningBanner}
         <NativeWorkflowBuilder
         definition={workflowDefinition}
         activePanelContent={inlineEditorPanel}
@@ -1653,27 +1852,45 @@ export default function AutopilotDetailPage() {
         knowledgeCollections={knowledgeCollections}
         tools={toolCatalog.map((tool) => ({
           name: tool.name,
+          displayName: tool.displayName,
+          category: tool.category,
           description: tool.description,
           source: tool.source,
           serverId: tool.serverId,
+          serverName: tool.serverName,
+          version: tool.version,
+          class: tool.class,
           riskLevel: tool.riskLevel,
+          sideEffect: tool.sideEffect,
+          idempotent: tool.idempotent,
+          timeoutMs: tool.timeoutMs,
+          maxAttempts: tool.maxAttempts,
           requiresHumanApproval: tool.requiresHumanApproval,
+          customerVisible: tool.customerVisible,
+          enabledByDefault: tool.enabledByDefault,
+          allowedIntents: tool.allowedIntents,
+          requiredSlots: tool.requiredSlots,
+          fallbackAction: tool.fallbackAction,
           inputSchema: tool.inputSchema,
           outputSchema: tool.outputSchema,
         }))}
         isSaving={isSaving}
         isPublishing={isPublishing}
-        onChange={setWorkflowDefinition}
+        toolsLoading={isToolCatalogLoading}
+        isDirty={isDirty}
+        hasDraft={hasDraft}
+        onChange={applyWorkflowDefinition}
         onBack={() => router.push('/autopilot')}
         onOpenSettings={() => setEditorPanel('settings')}
+        onOpenModelSettings={() => router.push('/integrations/ai')}
         onOpenPanel={(panel) => setEditorPanel(panel)}
-        onTest={async () => {
-          const message = window.prompt('Mensagem de teste', 'Olá, preciso de ajuda.');
-          if (!message?.trim() || !config) return null;
+        onTest={async (payload) => {
+          if (!payload.message.trim() || !config) return null;
           const result = await runAutopilotNativeWorkflowTest({
             configId: config.id,
-            customerMessage: message.trim(),
+            customerMessage: payload.message.trim(),
             workflowDefinition,
+            fixtures: payload.fixtures,
           });
           if (!result.success || !result.executionId) {
             toast({ title: 'Falha no teste', description: result.error, variant: 'destructive' });
@@ -1681,14 +1898,14 @@ export default function AutopilotDetailPage() {
           }
           return result.executionId;
         }}
-        onTestNode={async (startNodeId, fixtures) => {
+        onTestNode={async (startNodeId, payload) => {
           if (!config) return null;
           const result = await runAutopilotNativeWorkflowTest({
             configId: config.id,
-            customerMessage: 'Teste isolado iniciado pelo editor.',
+            customerMessage: payload.message.trim() || 'Teste isolado iniciado pelo editor.',
             workflowDefinition,
             startNodeId,
-            fixtures,
+            fixtures: payload.fixtures,
           });
           if (!result.success || !result.executionId) {
             toast({ title: 'Falha no teste isolado', description: result.error, variant: 'destructive' });
@@ -1702,6 +1919,9 @@ export default function AutopilotDetailPage() {
         <NativeAiBuilderDialog
           definition={workflowDefinition}
           disabled={isSaving || isPublishing}
+          configuredModelLabel={selectableModels.find((model) => model.id === aiModel)?.label || aiModel}
+          knowledgeDocumentCount={knowledgeDocuments.length}
+          availableToolCount={toolCatalog.length}
           onGenerate={(conversation) => generateAutopilotNativeWorkflowWithAi({
             configId: agentId,
             conversation,
@@ -1713,8 +1933,7 @@ export default function AutopilotDetailPage() {
               toast({ title: 'Proposta bloqueada', description: 'A proposta nao passou no validador do runtime.', variant: 'destructive' });
               return;
             }
-            setWorkflowDefinition(proposal.workflow);
-            setEnabledToolNames((current) => [...new Set([...current, ...proposal.selectedToolNames])]);
+            applyWorkflowDefinition(proposal.workflow);
             toast({
               title: 'Proposta aplicada ao rascunho',
               description: 'Revise o canvas, execute um teste e salve quando estiver pronto.',
@@ -1729,6 +1948,7 @@ export default function AutopilotDetailPage() {
   // supported template, but the legacy editor is no longer reachable.
   return (
     <>
+      {loadWarningBanner}
       <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
         <div className="w-full max-w-3xl rounded-3xl border border-cyan-500/20 bg-[#101821] p-8 text-center shadow-2xl">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-400">Flowbuilder agent-first</p>

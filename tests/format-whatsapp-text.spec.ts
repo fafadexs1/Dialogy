@@ -23,4 +23,11 @@ describe('formatWhatsappText', () => {
     expect(html).toContain('52998224725');
     expect(html).not.toContain('@@DIALOGY_PROTECTED');
   });
+
+  it.each(['Pode sim', 'Somente w', 'Obrigada'])('does not inject line breaks into short customer text: %s', (content) => {
+    const html = formatWhatsappText(content);
+
+    expect(html).toBe(content);
+    expect(html).not.toContain('<br>');
+  });
 });

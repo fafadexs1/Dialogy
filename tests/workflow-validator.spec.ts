@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createNativeWorkflowTemplate,
   validateWorkflowDefinition,
+  type ModelConfiguration,
   type WorkflowNode,
 } from '@/services/workflow-runtime';
 import {
@@ -21,6 +23,35 @@ describe('workflow static validator', () => {
       errors: [],
       warnings: [],
     });
+  });
+
+  it('rejects model attachments without an active workspace credential when a catalog is supplied', () => {
+    const model: ModelConfiguration = {
+      provider: 'deepseek',
+      model: 'deepseek/deepseek-v4-flash',
+      temperature: 0.2,
+      maxOutputTokens: 2048,
+      supportsTools: true,
+      supportsStructuredOutput: true,
+      supportsStreaming: true,
+      timeoutMs: 60_000,
+      maxRetries: 2,
+    };
+    const workflow = createNativeWorkflowTemplate({
+      configId: 'credential-validation',
+      workspaceId: 'workspace',
+      name: 'Credential validation',
+      model,
+      persona: '',
+      template: 'single_agent',
+    });
+
+    expect(issueCodes(validateWorkflowDefinition(workflow, {
+      availableModelIds: ['openai/gpt-workspace'],
+    }))).toContain('model_not_configured');
+    expect(issueCodes(validateWorkflowDefinition(workflow, {
+      availableModelIds: [model.model],
+    }))).not.toContain('model_not_configured');
   });
 
   it('rejects incompatible connection types', () => {
