@@ -97,6 +97,7 @@ import { NativeWorkflowBuilder } from '@/components/workflow/native-workflow-bui
 import { NativeAiBuilderDialog } from '@/components/workflow/native-ai-builder-dialog';
 import type { ModelConfiguration, NativeWorkflowTemplate, WorkflowDefinition } from '@/services/workflow-runtime';
 import {
+  isNativeAgentControlPlaneTool,
   listAttachedWorkflowToolNames,
   synchronizeNativeWorkflowToolState,
 } from '@/services/workflow-runtime/native-agent-tools';
@@ -1610,7 +1611,7 @@ export default function AutopilotDetailPage() {
           <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
             <AutopilotRules
               rules={instances}
-              toolCatalog={toolCatalog}
+              toolCatalog={toolCatalog.filter((tool) => !isNativeAgentControlPlaneTool(tool.name))}
               enabledToolNames={enabledToolNames}
               setEnabledToolNames={setEnabledToolNames}
               onSaveTools={handleSaveConfig}

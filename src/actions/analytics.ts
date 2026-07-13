@@ -10,6 +10,16 @@ import type { AnalyticsData, AgentPerformance, User } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import type { ConversionCounterMode, ConversionMetrics, ConversionSettings } from '@/lib/types';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
+import { after } from 'next/server';
+import {
+    analyticsSnapshotFallbackMaxAgeMs,
+    analyticsSnapshotFreshMs,
+    analyticsSnapshotRefreshLeaseMs,
+    analyticsSnapshotsEnabled,
+    buildAnalyticsSnapshotKey,
+    isHistoricalAnalyticsRange,
+    type AnalyticsSnapshotIdentity,
+} from '@/lib/analytics-snapshot';
 
 type AnalyticsFilters = { teamId?: string; agentId?: string };
 
@@ -53,20 +63,12 @@ async function hasWorkspaceAccess(userId: string, workspaceId: string): Promise<
     return hasWorkspacePermission(userId, workspaceId, 'analytics:view');
 }
 
-export async function getAnalyticsData(
+async function queryAnalyticsData(
     workspaceId: string,
     filters: AnalyticsFilters,
     dateRange: { from: string, to: string }
 ): Promise<AnalyticsData | null> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
     try {
-        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
-            return null;
-        }
-
         const analyticsRes = await db.query(
             `
             WITH filtered_agents AS MATERIALIZED (
@@ -142,7 +144,14 @@ export async function getAnalyticsData(
                 JOIN scoped_chat_ids sci ON sci.id = c.id
             ),
             scoped_messages AS MATERIALIZED (
-                SELECT m.*
+                SELECT
+                    m.id,
+                    m.chat_id,
+                    m.created_at,
+                    m.from_me,
+                    m.sender_user_id,
+                    m.type,
+                    m.api_message_status
                 FROM messages m
                 JOIN scoped_chat_ids sci ON sci.id = m.chat_id
                 WHERE m.workspace_id = $1
@@ -425,20 +434,13 @@ export async function updateConversionSettings(
     }
 }
 
-export async function getConversionMetrics(
+async function queryConversionMetrics(
     workspaceId: string,
     filters: { teamId?: string; agentId?: string },
     dateRange: { from: string; to: string },
     counterMode?: ConversionCounterMode
 ): Promise<ConversionMetrics | null> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
     try {
-        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
-            return null;
-        }
         await ensureConversionSchema();
 
         const workspaceRes = await db.query(
@@ -558,20 +560,12 @@ export async function getConversionMetrics(
     }
 }
 
-export async function getAgentPerformance(
+async function queryAgentPerformance(
     workspaceId: string,
     filters: AnalyticsFilters,
     dateRange: { from: string, to: string }
 ): Promise<AgentPerformance[] | null> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
     try {
-        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
-            return null;
-        }
-
         const query = `
             WITH active_chat_ids AS MATERIALIZED (
                 SELECT c.id
@@ -585,7 +579,16 @@ export async function getAgentPerformance(
                   AND m.created_at BETWEEN $2 AND $3
             ),
             period_messages AS MATERIALIZED (
-                SELECT m.*
+                SELECT
+                    m.id,
+                    m.chat_id,
+                    m.created_at,
+                    m.from_me,
+                    m.sender_user_id,
+                    m.type,
+                    m.api_message_status,
+                    m.content,
+                    m.metadata
                 FROM messages m
                 JOIN active_chat_ids ac ON ac.id = m.chat_id
                 WHERE m.workspace_id = $1
@@ -776,12 +779,303 @@ export async function getAgentPerformance(
     }
 }
 
+async function authorizeAnalyticsRequest(workspaceId: string): Promise<boolean> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    return Boolean(user && await hasWorkspaceAccess(user.id, workspaceId));
+}
+
+type AnalyticsSnapshotRow = {
+    payload: unknown;
+    stale_at: Date | string | null;
+};
+
+function snapshotErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingSnapshotTable(error: unknown): boolean {
+    return Boolean(error && typeof error === 'object' && 'code' in error && error.code === '42P01');
+}
+
+function snapshotStaleAt(identity: AnalyticsSnapshotIdentity): Date | null {
+    if (isHistoricalAnalyticsRange(identity.to)) return null;
+    return new Date(Date.now() + analyticsSnapshotFreshMs());
+}
+
+async function persistAnalyticsSnapshot<T>(
+    cacheKey: string,
+    identity: AnalyticsSnapshotIdentity,
+    payload: T,
+): Promise<void> {
+    await db.query(
+        `
+        INSERT INTO analytics_snapshots (
+            cache_key,
+            workspace_id,
+            metric_kind,
+            team_id,
+            agent_id,
+            date_from,
+            date_to,
+            counter_mode,
+            payload,
+            generated_at,
+            stale_at,
+            refresh_started_at,
+            last_error
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now(), $10, NULL, NULL)
+        ON CONFLICT (cache_key) DO UPDATE SET
+            payload = EXCLUDED.payload,
+            generated_at = now(),
+            stale_at = EXCLUDED.stale_at,
+            refresh_started_at = NULL,
+            last_error = NULL
+        `,
+        [
+            cacheKey,
+            identity.workspaceId,
+            identity.kind,
+            identity.teamId || null,
+            identity.agentId || null,
+            identity.from,
+            identity.to,
+            identity.counterMode || null,
+            JSON.stringify(payload),
+            snapshotStaleAt(identity),
+        ],
+    );
+}
+
+async function refreshAnalyticsSnapshot<T>(
+    cacheKey: string,
+    identity: AnalyticsSnapshotIdentity,
+    compute: () => Promise<T | null>,
+): Promise<void> {
+    const claim = await db.query(
+        `
+        UPDATE analytics_snapshots
+        SET refresh_started_at = now(), last_error = NULL
+        WHERE cache_key = $1
+          AND stale_at IS NOT NULL
+          AND stale_at <= now()
+          AND (
+            refresh_started_at IS NULL
+            OR refresh_started_at < now() - ($2::bigint * interval '1 millisecond')
+          )
+        RETURNING cache_key
+        `,
+        [cacheKey, analyticsSnapshotRefreshLeaseMs()],
+    );
+
+    if ((claim.rowCount || 0) === 0) return;
+
+    try {
+        const freshPayload = await compute();
+        if (freshPayload === null) throw new Error('Analytics refresh returned no data.');
+        await persistAnalyticsSnapshot(cacheKey, identity, freshPayload);
+    } catch (error) {
+        console.error('[ANALYTICS_SNAPSHOT_REFRESH] Error:', error);
+        await db.query(
+            `
+            UPDATE analytics_snapshots
+            SET refresh_started_at = NULL, last_error = LEFT($2, 2000)
+            WHERE cache_key = $1
+            `,
+            [cacheKey, snapshotErrorMessage(error)],
+        ).catch(() => undefined);
+    }
+}
+
+function scheduleAnalyticsSnapshotRefresh<T>(
+    cacheKey: string,
+    identity: AnalyticsSnapshotIdentity,
+    compute: () => Promise<T | null>,
+): void {
+    try {
+        after(() => refreshAnalyticsSnapshot(cacheKey, identity, compute));
+    } catch (error) {
+        // A missing request lifecycle must never turn a fast stale read into a
+        // synchronous recomputation. The next request can attempt it again.
+        console.warn('[ANALYTICS_SNAPSHOT_SCHEDULE] Refresh was not scheduled:', error);
+    }
+}
+
+async function getOrCreateAnalyticsSnapshot<T>(
+    identity: AnalyticsSnapshotIdentity,
+    compute: () => Promise<T | null>,
+): Promise<T | null> {
+    if (!analyticsSnapshotsEnabled()) return compute();
+
+    const cacheKey = buildAnalyticsSnapshotKey(identity);
+
+    try {
+        const snapshotRes = await db.query<AnalyticsSnapshotRow>(
+            `SELECT payload, stale_at FROM analytics_snapshots WHERE cache_key = $1`,
+            [cacheKey],
+        );
+        const snapshot = snapshotRes.rows[0];
+
+        if (snapshot) {
+            const staleAtMs = snapshot.stale_at ? new Date(snapshot.stale_at).getTime() : null;
+            if (staleAtMs !== null && staleAtMs <= Date.now()) {
+                scheduleAnalyticsSnapshotRefresh(cacheKey, identity, compute);
+            }
+            return snapshot.payload as T;
+        }
+
+        // Relative windows shift at midnight. Seed today's cache key with the
+        // newest snapshot for an equivalent-duration range, return it now, and
+        // refresh the exact range after the response. This prevents a daily
+        // cold start for common 7/30-day windows.
+        const fallbackRes = await db.query<Pick<AnalyticsSnapshotRow, 'payload'>>(
+            `
+            SELECT payload
+            FROM analytics_snapshots
+            WHERE workspace_id = $1
+              AND metric_kind = $2
+              AND team_id IS NOT DISTINCT FROM $3::uuid
+              AND agent_id IS NOT DISTINCT FROM $4::uuid
+              AND counter_mode IS NOT DISTINCT FROM $5::text
+              AND generated_at >= now() - ($8::bigint * interval '1 millisecond')
+              AND ABS(EXTRACT(EPOCH FROM (
+                (date_to - date_from) - ($7::timestamptz - $6::timestamptz)
+              ))) <= 1
+            ORDER BY generated_at DESC
+            LIMIT 1
+            `,
+            [
+                identity.workspaceId,
+                identity.kind,
+                identity.teamId || null,
+                identity.agentId || null,
+                identity.counterMode || null,
+                identity.from,
+                identity.to,
+                analyticsSnapshotFallbackMaxAgeMs(),
+            ],
+        );
+        const fallback = fallbackRes.rows[0];
+
+        if (fallback) {
+            await db.query(
+                `
+                INSERT INTO analytics_snapshots (
+                    cache_key, workspace_id, metric_kind, team_id, agent_id,
+                    date_from, date_to, counter_mode, payload, generated_at, stale_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now(), now())
+                ON CONFLICT (cache_key) DO NOTHING
+                `,
+                [
+                    cacheKey,
+                    identity.workspaceId,
+                    identity.kind,
+                    identity.teamId || null,
+                    identity.agentId || null,
+                    identity.from,
+                    identity.to,
+                    identity.counterMode || null,
+                    JSON.stringify(fallback.payload),
+                ],
+            );
+            scheduleAnalyticsSnapshotRefresh(cacheKey, identity, compute);
+            return fallback.payload as T;
+        }
+    } catch (error) {
+        if (!isMissingSnapshotTable(error)) {
+            console.error('[ANALYTICS_SNAPSHOT_READ] Error:', error);
+        }
+        // Safe rollout fallback: the app remains functional if code reaches an
+        // instance before the migration is applied.
+        return compute();
+    }
+
+    const payload = await compute();
+    if (payload === null) return null;
+
+    try {
+        await persistAnalyticsSnapshot(cacheKey, identity, payload);
+    } catch (error) {
+        if (!isMissingSnapshotTable(error)) {
+            console.error('[ANALYTICS_SNAPSHOT_WRITE] Error:', error);
+        }
+    }
+
+    return payload;
+}
+
+export async function getAnalyticsData(
+    workspaceId: string,
+    filters: AnalyticsFilters,
+    dateRange: { from: string; to: string },
+): Promise<AnalyticsData | null> {
+    if (!await authorizeAnalyticsRequest(workspaceId)) return null;
+    return getOrCreateAnalyticsSnapshot(
+        {
+            workspaceId,
+            kind: 'overview',
+            teamId: filters.teamId,
+            agentId: filters.agentId,
+            from: dateRange.from,
+            to: dateRange.to,
+        },
+        () => queryAnalyticsData(workspaceId, filters, dateRange),
+    );
+}
+
+export async function getAgentPerformance(
+    workspaceId: string,
+    filters: AnalyticsFilters,
+    dateRange: { from: string; to: string },
+): Promise<AgentPerformance[] | null> {
+    if (!await authorizeAnalyticsRequest(workspaceId)) return null;
+    return getOrCreateAnalyticsSnapshot(
+        {
+            workspaceId,
+            kind: 'agent_performance',
+            teamId: filters.teamId,
+            agentId: filters.agentId,
+            from: dateRange.from,
+            to: dateRange.to,
+        },
+        () => queryAgentPerformance(workspaceId, filters, dateRange),
+    );
+}
+
+export async function getConversionMetrics(
+    workspaceId: string,
+    filters: AnalyticsFilters,
+    dateRange: { from: string; to: string },
+    counterMode?: ConversionCounterMode,
+): Promise<ConversionMetrics | null> {
+    if (!await authorizeAnalyticsRequest(workspaceId)) return null;
+    const normalizedCounterMode = counterMode ? normalizeConversionCounterMode(counterMode) : undefined;
+    return getOrCreateAnalyticsSnapshot(
+        {
+            workspaceId,
+            kind: 'conversions',
+            teamId: filters.teamId,
+            agentId: filters.agentId,
+            from: dateRange.from,
+            to: dateRange.to,
+            counterMode: normalizedCounterMode,
+        },
+        () => queryConversionMetrics(workspaceId, filters, dateRange, normalizedCounterMode),
+    );
+}
+
 export async function getWorkspaceMembers(workspaceId: string, teamId?: string): Promise<{ members: User[] | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { members: null, error: "Usuário não autenticado." };
 
     try {
+        if (!await hasWorkspaceAccess(user.id, workspaceId)) {
+            return { members: null, error: "Acesso não autorizado." };
+        }
+
         let query = `
             SELECT u.id, u.full_name as name, u.avatar_url, tm.team_id
             FROM users u

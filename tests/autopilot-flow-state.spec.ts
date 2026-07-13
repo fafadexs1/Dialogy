@@ -9,11 +9,15 @@ vi.mock('@/lib/db', () => ({
 import { db } from '@/lib/db';
 import { fingerprintToolAction } from '@/services/agent-tools/action-fingerprint';
 import {
+  claimAutopilotCollectionCompletion,
+  clearAutopilotCollectionCompletion,
   consumeConfirmedPendingAction,
   consumePendingActionCancellation,
   consumeSupersededPendingAction,
   isExplicitAffirmativeMessage,
+  loadAutopilotContactMemory,
   resolveConfirmedPendingAction,
+  saveAutopilotSlotMemory,
 } from '@/services/autopilot/flow-state-store';
 
 describe('autopilot persisted confirmation', () => {
@@ -71,6 +75,137 @@ describe('autopilot persisted confirmation', () => {
       message: 'pode sim',
       allowedToolNames: ['mcp:router:other_tool'],
     })).toBeNull();
+  });
+
+  it('hydrates stable contact facts across chats and keeps current-chat facts newer', async () => {
+    vi.mocked(db.query).mockResolvedValueOnce({
+      rows: [
+        {
+          chat_id: 'chat-current',
+          metadata: {
+            conversationSlots: { address: 'CEP 72800-123; Bloco B, apto 12' },
+            stableSlots: { address: 'CEP 72800-123' },
+            nativeState: { pendingFieldIds: [] },
+          },
+          updated_at: '2026-07-13T12:00:00.000Z',
+        },
+        {
+          chat_id: 'chat-previous',
+          metadata: {
+            stableSlots: { name: 'João da Silva', phone: '61999991111' },
+          },
+          updated_at: '2026-07-10T12:00:00.000Z',
+        },
+      ],
+    } as any);
+
+    const memory = await loadAutopilotContactMemory({
+      workspaceId: 'workspace',
+      contactId: 'contact',
+      chatId: 'chat-current',
+      maxAgeDays: 180,
+    });
+
+    expect(memory.slots).toEqual({
+      address: 'CEP 72800-123; Bloco B, apto 12',
+      name: 'João da Silva',
+      phone: '61999991111',
+    });
+    expect(memory.nativeState).toEqual({ pendingFieldIds: [] });
+  });
+
+  it('orders stable facts by slot evidence time instead of unrelated state updates', async () => {
+    vi.mocked(db.query).mockResolvedValueOnce({
+      rows: [
+        {
+          chat_id: 'chat-current',
+          metadata: {
+            conversationSlots: { name: 'Nome Antigo' },
+            stableSlots: { name: 'Nome Antigo' },
+            stableSlotUpdatedAt: { name: '2026-06-01T12:00:00.000Z' },
+            slotMemoryUpdatedAt: '2026-06-01T12:00:00.000Z',
+          },
+          slot_memory_updated_at: '2026-06-01T12:00:00.000Z',
+          updated_at: '2026-07-13T12:00:00.000Z',
+        },
+        {
+          chat_id: 'chat-newer-fact',
+          metadata: {
+            stableSlots: { name: 'Nome Corrigido' },
+            stableSlotUpdatedAt: { name: '2026-07-10T12:00:00.000Z' },
+            slotMemoryUpdatedAt: '2026-07-10T12:00:00.000Z',
+          },
+          slot_memory_updated_at: '2026-07-10T12:00:00.000Z',
+          updated_at: '2026-07-10T12:00:00.000Z',
+        },
+      ],
+    } as any);
+
+    const memory = await loadAutopilotContactMemory({
+      workspaceId: 'workspace',
+      contactId: 'contact',
+      chatId: 'chat-current',
+    });
+
+    expect(memory.slots.name).toBe('Nome Corrigido');
+    expect(vi.mocked(db.query).mock.calls[0]?.[0]).toContain("metadata->>'slotMemoryUpdatedAt'");
+  });
+
+  it('stores per-field timestamps when stable facts are updated', async () => {
+    vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+
+    await saveAutopilotSlotMemory({
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      slots: { name: 'Nome Corrigido', address: 'CEP 01310-100' },
+    });
+
+    const [query, params] = vi.mocked(db.query).mock.calls[0];
+    expect(query).toContain('stableSlotUpdatedAt');
+    expect(JSON.parse(String(params?.[5]))).toMatchObject({
+      name: expect.any(String),
+      address: expect.any(String),
+    });
+  });
+
+  it('claims a collection checkpoint exactly once by its server fingerprint', async () => {
+    vi.mocked(db.query)
+      .mockResolvedValueOnce({ rows: [{ chat_id: 'chat' }] } as any)
+      .mockResolvedValueOnce({ rows: [] } as any);
+
+    const input = {
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      checkpointFingerprint: 'checkpoint-hash',
+      completionExecutionId: 'execution-current',
+    };
+    await expect(claimAutopilotCollectionCompletion(input)).resolves.toBe(true);
+    await expect(claimAutopilotCollectionCompletion(input)).resolves.toBe(false);
+
+    const [query, params] = vi.mocked(db.query).mock.calls[0];
+    const queryParams = params as unknown[];
+    expect(query).toContain("collectionCompletionV1,status}' = 'awaiting_fields'");
+    expect(query).toContain("collectionCompletionV1,status}' = 'closing'");
+    expect(query).toContain('closingClaimedAt');
+    expect(query).toContain('checkpointFingerprint');
+    expect(query).toContain("to_jsonb('closing'::text)");
+    expect(queryParams.slice(0, 4)).toEqual(['chat', 'workspace', 'checkpoint-hash', 'execution-current']);
+    expect(new Date(String(queryParams[4])).toISOString()).toBe(queryParams[4]);
+    expect(new Date(String(queryParams[5])).toISOString()).toBe(queryParams[5]);
+  });
+
+  it('clears only the matching collection checkpoint', async () => {
+    vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ chat_id: 'chat' }] } as any);
+
+    await expect(clearAutopilotCollectionCompletion({
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      checkpointFingerprint: 'checkpoint-hash',
+    })).resolves.toBe(true);
+
+    const [query, params] = vi.mocked(db.query).mock.calls[0];
+    expect(query).toContain("- 'collectionCompletionV1'");
+    expect(params).toEqual(['chat', 'workspace', 'checkpoint-hash']);
   });
 
   it('rejects a pending action whose fingerprint no longer matches its arguments', () => {

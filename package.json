@@ -37,6 +37,7 @@
     "workflow:v2:rollout": "tsx scripts/workflow-runtime-v2-rollout.ts",
     "db:migrations:audit": "tsx scripts/reconcile-prisma-migrations.ts",
     "db:migrations:reconcile": "tsx scripts/reconcile-prisma-migrations.ts --apply",
+    "diagnose:product-updates": "tsx scripts/diagnose-product-updates.ts",
     "test:ai-providers:live": "tsx scripts/verify-ai-providers-live.ts",
     "e2e:autopilot:canary": "npm run test:autopilot:canary",
     "e2e:autopilot:readonly-replay": "npm run test:autopilot:readonly-replay --",

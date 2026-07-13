@@ -437,6 +437,7 @@ export interface Team {
   color: string;
   roleId: string;
   tagId: string | null;
+  tagLabel?: string | null;
   agentRoutingConfig?: {
     enabled?: boolean;
     autoTransfer?: boolean;

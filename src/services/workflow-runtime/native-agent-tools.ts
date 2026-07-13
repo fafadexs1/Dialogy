@@ -35,7 +35,7 @@ export type NativeAgentToolGroup = {
 const INTERNAL_GROUPS: Record<string, Pick<NativeAgentToolGroup, 'label' | 'description'>> = {
   attendance: {
     label: 'Atendimento',
-    description: 'Transferência, encerramento e notas internas.',
+    description: 'Notas internas auditadas; transferência e encerramento usam blocos nativos.',
   },
   crm: {
     label: 'CRM',
@@ -79,10 +79,31 @@ export function isNativeAgentToolEligible(tool: NativeAgentToolCatalogItem) {
   return !Array.isArray(tool.allowedIntents) || tool.allowedIntents.length > 0;
 }
 
+const NATIVE_CONTROL_PLANE_TOOL_NAMES = new Set([
+  'transfer_chat',
+  'close_chat',
+]);
+
+export function isNativeAgentControlPlaneTool(tool: Pick<NativeAgentToolCatalogItem, 'name'> | string) {
+  const name = typeof tool === 'string' ? tool : tool.name;
+  return NATIVE_CONTROL_PLANE_TOOL_NAMES.has(name);
+}
+
+/**
+ * Existing workflows may retain legacy internal tool attachments, but new
+ * native workflows express conversation transfer/closure through explicit
+ * system blocks rather than model-selectable tools. Notes and CRM field
+ * updates remain audited tools because their dynamic content is chosen by the
+ * agent and no equivalent first-class block exists yet.
+ */
+export function isNativeAgentToolAttachable(tool: NativeAgentToolCatalogItem) {
+  return isNativeAgentToolEligible(tool) && !isNativeAgentControlPlaneTool(tool);
+}
+
 export function isNativeAgentToolRecommended(tool: NativeAgentToolCatalogItem) {
-  if (!isNativeAgentToolEligible(tool) || tool.requiresHumanApproval === true) return false;
+  if (!isNativeAgentToolAttachable(tool) || tool.requiresHumanApproval === true) return false;
   if (tool.enabledByDefault === true) return true;
-  return tool.source === 'dialogy' && ['transfer_chat', 'add_internal_note'].includes(tool.name);
+  return false;
 }
 
 export function nativeAgentToolTestId(toolName: string) {

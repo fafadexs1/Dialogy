@@ -21,8 +21,12 @@ export type AutopilotPrimaryRuntimeDependencies = {
   database: Pick<Pool, 'query'>;
   toolContext: AgentToolRuntimeContext;
   recentMessages: Array<{ fromMe: boolean; content: string }>;
+  structuredMemory?: Record<string, unknown>;
   sendResponse: (message: string, input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   handoff: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
+  closeConversation: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
+  loadState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
+  saveState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
 };
 
 export type RunAutopilotPrimaryInput = {
@@ -38,6 +42,7 @@ export type RunAutopilotPrimaryInput = {
 export type AutopilotPrimaryDeliveryOutcome = {
   responseSent: boolean;
   handoffCompleted: boolean;
+  conversationClosed: boolean;
   recoveryResponse?: string;
 };
 
@@ -47,6 +52,7 @@ export function inspectAutopilotPrimaryDeliveryOutcome(
   const path = Array.isArray(execution.executionPath) ? execution.executionPath : [];
   let responseSent = false;
   let handoffCompleted = false;
+  let conversationClosed = false;
   let recoveryResponse: string | undefined;
 
   for (const step of path) {
@@ -60,16 +66,20 @@ export function inspectAutopilotPrimaryDeliveryOutcome(
     }
     if (nodeType === 'output.handoff' && (status === 'success' || status === 'completed')) {
       handoffCompleted = true;
+      if (output.customerMessageSent === true) responseSent = true;
+    }
+    if (nodeType === 'output.close_conversation' && (status === 'success' || status === 'completed')) {
+      conversationClosed = true;
     }
 
-    if (nodeType === 'ai.agent' || nodeType === 'ai.prompt' || nodeType === 'output.respond') {
-      const candidate = [output.response, output.question, output.message]
+    if (nodeType === 'ai.agent' || nodeType === 'ai.prompt' || nodeType === 'output.respond' || nodeType === 'output.handoff') {
+      const candidate = [output.response, output.question, output.message, output.customerMessage]
         .find((value) => typeof value === 'string' && value.trim().length > 0);
       if (typeof candidate === 'string') recoveryResponse = candidate.trim();
     }
   }
 
-  return { responseSent, handoffCompleted, recoveryResponse };
+  return { responseSent, handoffCompleted, conversationClosed, recoveryResponse };
 }
 
 function modelConfig(node: WorkflowNode) {
@@ -167,6 +177,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
   error?: string;
   responseSent?: boolean;
   handoffCompleted?: boolean;
+  conversationClosed?: boolean;
   recoveryResponse?: string;
 }> {
   const configEnabled = input.config.workflow_builder_mode === 'native_v2'
@@ -225,6 +236,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
 
   let responseSentDuringRun = false;
   let handoffCompletedDuringRun = false;
+  let conversationClosedDuringRun = false;
 
   const handlers = createDefaultNodeHandlerRegistry({
     resolveModelChain: async (context) => modelChainForNode({
@@ -240,7 +252,10 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
         definitions,
       });
     },
-    loadMemory: async () => ({ recentMessages: input.dependencies.recentMessages.slice(-20) }),
+    loadMemory: async () => ({
+      recentMessages: input.dependencies.recentMessages.slice(-20),
+      ...(input.dependencies.structuredMemory || {}),
+    }),
     retrieveKnowledge: async (context) => {
       const documents = scopedDocuments(context.knowledgeNodes, input.staticDocuments);
       if (documents.length === 0) return [];
@@ -263,8 +278,16 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
     handoff: async (nodeInput) => {
       const result = await input.dependencies.handoff(nodeInput);
       handoffCompletedDuringRun = true;
+      if (result.customerMessageSent === true) responseSentDuringRun = true;
       return result;
     },
+    closeConversation: async (nodeInput) => {
+      const result = await input.dependencies.closeConversation(nodeInput);
+      conversationClosedDuringRun = true;
+      return result;
+    },
+    loadState: input.dependencies.loadState,
+    saveState: input.dependencies.saveState,
   });
   const executor = new WorkflowExecutor(persistence, handlers);
   try {
@@ -276,6 +299,12 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
             customerMessage: input.customerMessage,
             message: input.customerMessage,
             text: input.customerMessage,
+            knownFields: isRecord(input.dependencies.structuredMemory?.knownFields)
+              ? input.dependencies.structuredMemory?.knownFields
+              : {},
+            systemOperations: isRecord(input.dependencies.structuredMemory?.systemOperations)
+              ? input.dependencies.structuredMemory?.systemOperations
+              : {},
           },
           context: {
             source: 'autopilot_native_v2',
@@ -296,6 +325,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       error: execution.failure?.message,
       responseSent: responseSentDuringRun || deliveryOutcome.responseSent,
       handoffCompleted: handoffCompletedDuringRun || deliveryOutcome.handoffCompleted,
+      conversationClosed: conversationClosedDuringRun || deliveryOutcome.conversationClosed,
       recoveryResponse: deliveryOutcome.recoveryResponse,
     };
   } catch (error) {
@@ -306,6 +336,9 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       executionId,
       status: 'failed',
       error: error instanceof Error ? error.message : String(error),
+      responseSent: responseSentDuringRun,
+      handoffCompleted: handoffCompletedDuringRun,
+      conversationClosed: conversationClosedDuringRun,
     };
   }
 }

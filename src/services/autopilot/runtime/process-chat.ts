@@ -8,7 +8,7 @@ import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact
 import { retrieveHybridSupportContext, type KnowledgeRetrievalStrategy } from '@/services/rag/hybrid-retrieval';
 import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 import { runAgentTools } from '@/services/agent-tools/runtime';
-import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
+import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from '@/services/agent-tools/types';
 import { fingerprintToolAction } from '@/services/agent-tools/action-fingerprint';
 import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
@@ -122,6 +122,10 @@ import {
 import { runAutopilotWorkflowRuntimeV2Shadow } from '@/services/workflow-runtime/autopilot-rollout';
 import { runAutopilotWorkflowRuntimeV2Primary } from '@/services/workflow-runtime/autopilot-primary';
 import {
+    canonicalWorkflowFieldName,
+    isValidWorkflowGoalCompletionEvidence,
+} from '@/services/workflow-runtime/goal-completion';
+import {
     completeProcedureToolReuse,
     planProcedureToolReuse,
 } from '@/services/autopilot/runtime/procedure-tool-reuse';
@@ -131,6 +135,7 @@ import {
     buildToolContinuationContext,
     compactToolOutputForContinuation,
     loadRecentToolResultsForAutopilot,
+    loadRecentContactVerificationReceipts,
     shouldAnswerFromRecentToolMemory,
 } from '@/services/autopilot/runtime/tool-memory';
 import { getAutopilotConfigService } from '@/services/autopilot/runtime/config-service';
@@ -148,14 +153,37 @@ import {
 } from '@/services/autopilot/runtime/tool-run-ledger';
 import {
     consumeConfirmedPendingAction,
+    claimAutopilotCollectionCompletion,
+    clearAutopilotCollectionCompletion,
     consumePendingActionCancellation,
     consumeSupersededPendingAction,
     getAutopilotConversationState,
+    loadAutopilotContactMemory,
+    type AutopilotContactMemory,
+    saveAutopilotNativeState,
+    saveAutopilotSlotMemory,
     saveAutopilotTurnState,
     setPendingToolConfirmation,
 } from '@/services/autopilot/flow-state-store';
 import { mapAgentToolActionsToResources } from '@/services/resource-mapper/agent-tool-actions';
-import type { SlotExtractionResult } from '@/services/autopilot/slots';
+import { mapCrmContactCustomFields } from '@/services/resource-mapper/crm-contact-custom-fields';
+import {
+    extractAutopilotSlots,
+    isValidCustomerIdentifier,
+    type SlotExtractionResult,
+} from '@/services/autopilot/slots';
+import {
+    COLLECTION_COMPLETION_STATE_KEY,
+    buildCollectionCompletionCheckpoint,
+    createPersistedCollectionFieldReceipt,
+    directAgentRouteHasFailedToolCalls,
+    evaluateCompletedCollectionClose,
+    extractPendingCollectionReplyFields,
+    inspectCollectionResponseRoute,
+    parseCollectionCompletionCheckpoint,
+    type PersistedCollectionFieldReceipt,
+} from '@/services/autopilot/collection-completion';
+import { persistAutopilotContactFacts } from '@/services/autopilot/contact-facts';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
 import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
 import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
@@ -318,6 +346,40 @@ async function loadContactCustomFieldsForAutopilot(input: {
         console.error('[AUTOPILOT_WORKFLOW] Failed to load contact custom fields:', error);
         return {};
     }
+}
+
+export function buildStructuredKnownFields(
+    contact: Contact,
+    slots: SlotExtractionResult['slots'],
+    invalidSlots: SlotExtractionResult['invalidSlots'] = [],
+): Record<string, unknown> {
+    const knownFields: Record<string, unknown> = { ...slots };
+    const invalidIdentifierInCurrentMessage = invalidSlots.some((slot) => slot.name === 'customer_identifier');
+    const coreFields: Record<string, unknown> = {
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone || contact.phone_number_jid,
+        address: contact.address,
+    };
+    const addEntries = (entries: Array<[string, unknown]>, fromCustomFields: boolean) => {
+      for (const [key, value] of entries) {
+        if (knownFields[key] !== undefined || value === null || value === undefined) continue;
+        if (
+            invalidIdentifierInCurrentMessage
+            && fromCustomFields
+            && (
+                canonicalWorkflowFieldName(key) === 'customer_identifier'
+                || (typeof value === 'string' && isValidCustomerIdentifier(value))
+            )
+        ) continue;
+        if (typeof value === 'string' && value.trim()) knownFields[key] = value.trim();
+        else if (typeof value === 'number' || typeof value === 'boolean') knownFields[key] = value;
+        else if (Array.isArray(value) && value.length > 0) knownFields[key] = value;
+      }
+    };
+    addEntries(Object.entries(contact.custom_fields || {}), true);
+    addEntries(Object.entries(coreFields), false);
+    return knownFields;
 }
 
 function buildIntentClassifierContactSignals(contact: Contact) {
@@ -685,6 +747,7 @@ async function runRequestedAgentTools(input: {
     slotExtraction?: SlotExtractionResult | null;
     confirmedActionFingerprint?: string | null;
     orchestratorRunId?: string | null;
+    closeAuthorization?: AgentToolRuntimeContext['closeAuthorization'];
     sourceMessageId: string | null | undefined;
 }): Promise<AgentToolExecutionResult[]> {
     const normalizedActions = normalizeAgentActions(input.actions);
@@ -710,6 +773,8 @@ async function runRequestedAgentTools(input: {
             customerMessage: input.customerMessage,
             confirmedActionFingerprint: input.confirmedActionFingerprint ?? null,
             orchestratorRunId: input.orchestratorRunId ?? null,
+            sourceMessageId: input.sourceMessageId ?? null,
+            closeAuthorization: input.closeAuthorization ?? null,
         },
         resourceMapped.actions
     );
@@ -729,6 +794,7 @@ async function runRequestedAgentToolsWithStatus(input: {
     slotExtraction?: SlotExtractionResult | null;
     confirmedActionFingerprint?: string | null;
     orchestratorRunId?: string | null;
+    closeAuthorization?: AgentToolRuntimeContext['closeAuthorization'];
     sourceMessageId: string | null | undefined;
 }): Promise<AgentToolExecutionResult[]> {
     const normalizedActions = normalizeAgentActions(input.actions);
@@ -770,6 +836,8 @@ async function runRequestedAgentToolsWithStatus(input: {
             toolName: run.toolName,
             status: 'running',
             runId: run.runId,
+        }).catch((error) => {
+            console.warn('[AUTOPILOT_TOOL_STATUS] Failed to persist running status:', error);
         });
     }
 
@@ -794,6 +862,8 @@ async function runRequestedAgentToolsWithStatus(input: {
             status: result.status,
             runId: run?.runId,
             toolResult: result,
+        }).catch((error) => {
+            console.warn('[AUTOPILOT_TOOL_STATUS] Failed to persist terminal status:', error);
         });
     }
 
@@ -1107,6 +1177,111 @@ export async function processAutopilotForChat(
     };
     const availableTeams = await loadToolRouterTeams(workspaceId);
 
+    const contactIdForMemory = sanitizedContact.id
+        || (chat as { contact_id?: string | null }).contact_id
+        || null;
+    const contactMemoryMaxAgeDays = Math.min(
+        730,
+        Math.max(1, Number(process.env.AUTOPILOT_CONTACT_MEMORY_TTL_DAYS || 180) || 180),
+    );
+    const autopilotContactMemory: AutopilotContactMemory = contactIdForMemory
+        ? await loadAutopilotContactMemory({
+            workspaceId,
+            contactId: contactIdForMemory,
+            chatId: chat.id,
+            maxAgeDays: contactMemoryMaxAgeDays,
+        }).catch((error) => {
+            console.warn('[AUTOPILOT_CONTACT_MEMORY] Failed to hydrate structured memory:', error);
+            return { slots: {}, nativeState: {}, updatedAt: null };
+        })
+        : { slots: {}, nativeState: {}, updatedAt: null };
+    const currentSlotExtraction = extractAutopilotSlots({
+        customerMessage: enrichedLastMessageContent || '',
+        chatHistory: chatHistoryForAI,
+        contact: sanitizedContact,
+        rememberedSlots: autopilotContactMemory.slots,
+    });
+    const structuredKnownFields = buildStructuredKnownFields(
+        sanitizedContact,
+        currentSlotExtraction.slots,
+        currentSlotExtraction.invalidSlots,
+    );
+    const parsedCollectionCheckpoint = parseCollectionCompletionCheckpoint(
+        autopilotContactMemory.nativeState[COLLECTION_COMPLETION_STATE_KEY],
+    );
+    const activeCollectionCheckpoint = (
+        parsedCollectionCheckpoint?.status === 'awaiting_fields'
+        && parsedCollectionCheckpoint.chatId === chat.id
+        && parsedCollectionCheckpoint.autopilotConfigId === autopilotConfig.id
+        && parsedCollectionCheckpoint.workflowId === String(autopilotConfig.active_workflow_id || '')
+        && parsedCollectionCheckpoint.workflowVersion === String(autopilotConfig.active_workflow_version || '')
+    ) ? parsedCollectionCheckpoint : null;
+    const pendingCollectionReplyFields = activeCollectionCheckpoint
+        ? extractPendingCollectionReplyFields({
+            customerMessage: enrichedLastMessageContent || '',
+            pendingFields: activeCollectionCheckpoint.pendingFields,
+            alreadyKnownFields: structuredKnownFields,
+        })
+        : {};
+    Object.assign(structuredKnownFields, pendingCollectionReplyFields);
+    const messageSlotDetails = currentSlotExtraction.details.filter((detail) => detail.source === 'message');
+    const messageSlotsToPersist = Object.fromEntries(
+        messageSlotDetails.map((detail) => [detail.name, detail.value]),
+    );
+    const collectionPersistenceReceipts: PersistedCollectionFieldReceipt[] = [];
+    let slotMemoryPersisted = true;
+    if (messageSlotDetails.length > 0) {
+        try {
+            await saveAutopilotSlotMemory({
+                chatId: chat.id,
+                workspaceId,
+                autopilotConfigId: autopilotConfig.id,
+                slots: messageSlotsToPersist,
+            });
+            const persistedAt = new Date().toISOString();
+            for (const detail of messageSlotDetails) {
+                collectionPersistenceReceipts.push(createPersistedCollectionFieldReceipt({
+                    field: detail.name,
+                    value: detail.value,
+                    storage: 'slot_memory',
+                    sourceMessageId: sourceMessageId || '',
+                    persistedAt,
+                }));
+            }
+        } catch (error) {
+            slotMemoryPersisted = false;
+            console.warn('[AUTOPILOT_CONTACT_MEMORY] Failed to persist structured slots:', error);
+        }
+    }
+    let contactFactsPersisted = true;
+    try {
+        const persistence = await persistAutopilotContactFacts({
+            workspaceId,
+            contactId: contactIdForMemory,
+            details: messageSlotDetails,
+            customerMessage: enrichedLastMessageContent || '',
+        });
+        const hasCoreFacts = messageSlotDetails.some((detail) => ['name', 'email', 'address'].includes(detail.name));
+        contactFactsPersisted = !hasCoreFacts || persistence.persisted;
+        if (persistence.persisted) {
+            const persistedAt = new Date().toISOString();
+            for (const field of persistence.fields) {
+                const detail = messageSlotDetails.find((item) => item.name === field);
+                if (!detail) continue;
+                collectionPersistenceReceipts.push(createPersistedCollectionFieldReceipt({
+                    field,
+                    value: detail.value,
+                    storage: 'contact',
+                    sourceMessageId: sourceMessageId || '',
+                    persistedAt,
+                }));
+            }
+        }
+    } catch (error) {
+        contactFactsPersisted = false;
+        console.warn('[AUTOPILOT_CONTACT_FACTS] Failed to persist collected contact facts:', error);
+    }
+
     let workspaceGeminiApiKey: string | undefined;
     try {
         const configRes = await db.query(
@@ -1145,6 +1320,7 @@ export async function processAutopilotForChat(
         customerMessage: enrichedLastMessageContent || '',
         chatHistory: chatHistoryForAI,
         knowledgeDocuments: staticKnowledgeDocuments,
+        extractedSlots: currentSlotExtraction.slots,
     });
     const deterministicIntentResolution = intentResolution;
 
@@ -1192,6 +1368,7 @@ export async function processAutopilotForChat(
                     customerMessage: enrichedLastMessageContent || '',
                     chatHistory: chatHistoryForAI,
                     knowledgeDocuments: staticKnowledgeDocuments,
+                    extractedSlots: currentSlotExtraction.slots,
                 }, {
                     intent: aiClassification.intent,
                     confidence: aiClassification.confidence,
@@ -1257,11 +1434,194 @@ export async function processAutopilotForChat(
         console.warn('[AUTOPILOT_FLOW_STATE] Failed to persist active node:', error);
     });
 
+    let crmCustomFieldsPersisted = true;
+    if (
+        currentCopilotMode === 'auto'
+        && sourceMessageId
+        && (messageSlotDetails.length > 0 || Object.keys(pendingCollectionReplyFields).length > 0)
+    ) {
+        const messageSlotExtraction: SlotExtractionResult = {
+            slots: Object.fromEntries(messageSlotDetails.map((detail) => [detail.name, detail.value])),
+            details: messageSlotDetails,
+            invalidSlots: currentSlotExtraction.invalidSlots,
+        };
+        const crmProjection = await mapCrmContactCustomFields({
+            workspaceId,
+            customerMessage: enrichedLastMessageContent || '',
+            chatHistory: chatHistoryForAI,
+            contact: sanitizedContact,
+            slotExtraction: messageSlotExtraction,
+            fields: pendingCollectionReplyFields,
+            reason: 'Persistência determinística dos dados informados pelo cliente neste turno.',
+        }).catch((error) => {
+            crmCustomFieldsPersisted = false;
+            console.warn('[AUTOPILOT_CRM_PROJECTION] Failed to map collected fields:', error);
+            return null;
+        });
+        if (crmProjection?.mappedAction) {
+            const crmTurnPolicy: AutopilotTurnPolicy = {
+                ...turnPolicy,
+                globallyEnabledToolNames: Array.from(new Set([
+                    ...turnPolicy.globallyEnabledToolNames,
+                    'crm_update_contact_custom_fields',
+                ])),
+                allowedToolNames: Array.from(new Set([
+                    ...turnPolicy.allowedToolNames,
+                    'crm_update_contact_custom_fields',
+                ])),
+            };
+            const crmResults = await runRequestedAgentToolsWithStatus({
+                workspaceId,
+                chat,
+                contact: sanitizedContact,
+                systemAgentId: assignedSystemAgentId,
+                systemAgentName: assignedSystemAgentName,
+                autopilotConfig,
+                turnPolicy: crmTurnPolicy,
+                customerMessage: enrichedLastMessageContent || '',
+                actions: [crmProjection.mappedAction],
+                chatHistory: chatHistoryForAI,
+                slotExtraction: messageSlotExtraction,
+                orchestratorRunId: orchestratorRun.id,
+                sourceMessageId,
+            });
+            crmCustomFieldsPersisted = (
+                crmProjection.rejected.length === 0
+                && crmResults.every((result) => result.status === 'success')
+            );
+            const crmResult = crmResults.find((result) => result.toolName === 'crm_update_contact_custom_fields');
+            const updatedFields = Array.isArray(crmResult?.output?.updated)
+                ? crmResult.output.updated as Array<Record<string, unknown>>
+                : [];
+            const persistedAt = new Date().toISOString();
+            for (const mapping of crmProjection.mappings) {
+                const wasUpdated = updatedFields.some((field) => (
+                    String(field.fieldId || '') === mapping.fieldId
+                    && String(field.value || '') === mapping.value
+                ));
+                if (!wasUpdated) continue;
+                collectionPersistenceReceipts.push(createPersistedCollectionFieldReceipt({
+                    field: mapping.slot,
+                    value: mapping.value,
+                    storage: 'crm_custom_field',
+                    storageKey: mapping.fieldId,
+                    sourceMessageId: sourceMessageId || '',
+                    persistedAt,
+                }));
+            }
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'crm_slot_projection',
+                status: crmResults.every((result) => result.status === 'success') ? 'success' : 'fallback',
+                payload: {
+                    mappedFieldCount: crmProjection.mappings.length,
+                    rejectedFieldCount: crmProjection.rejected.length,
+                    toolStatuses: crmResults.map((result) => result.status),
+                },
+            });
+        } else if (crmProjection && crmProjection.rejected.length > 0) {
+            crmCustomFieldsPersisted = false;
+        }
+    }
+
+    if (
+        currentCopilotMode === 'auto'
+        && sourceMessageId
+        && explicitConversationCloseRequest
+    ) {
+        const closeAction: AgentToolAction = {
+            type: 'close_chat',
+            reason: 'Cliente pediu explicitamente para encerrar a conversa atual.',
+            payload: {
+                notes: 'Encerramento explícito solicitado pelo cliente e executado antes da confirmação ao cliente.',
+                sendCloseMessage: false,
+            },
+        };
+        const closeStage = await timeOrchestratorStage(
+            orchestratorRun,
+            'tool_execution',
+            () => runRequestedAgentToolsWithStatus({
+                workspaceId,
+                chat,
+                contact: sanitizedContact,
+                systemAgentId: assignedSystemAgentId,
+                systemAgentName: assignedSystemAgentName,
+                autopilotConfig,
+                turnPolicy: {
+                    ...turnPolicy,
+                    globallyEnabledToolNames: Array.from(new Set([...turnPolicy.globallyEnabledToolNames, 'close_chat'])),
+                    allowedToolNames: Array.from(new Set([...turnPolicy.allowedToolNames, 'close_chat'])),
+                },
+                customerMessage: enrichedLastMessageContent || '',
+                actions: [closeAction],
+                orchestratorRunId: orchestratorRun.id,
+                sourceMessageId,
+            }),
+            { explicitConversationClose: true },
+        );
+        orchestratorTimings.tool_ms = (orchestratorTimings.tool_ms || 0) + closeStage.durationMs;
+        const closeResult = closeStage.value.find((result) => result.toolName === 'close_chat');
+        const closeSucceeded = closeResult?.status === 'success';
+        const closeResponse = closeSucceeded
+            ? 'Atendimento encerrado. Obrigado pelo contato! Quando precisar, é só chamar novamente.'
+            : 'Não consegui concluir o encerramento automático agora. Seu atendimento continua aberto para acompanhamento.';
+        const delivery = await sendMultiBlockResponse(
+            chat.id,
+            closeResponse,
+            assignedSystemAgentId,
+            true,
+            instanceName,
+            null,
+            { ...responseTrace, deliveryKey: 'explicit-close' },
+        );
+        await logIntelligentAttendantResponse({
+            configId: autopilotConfig.id,
+            chatId: chat.id,
+            systemAgentId: assignedSystemAgentId,
+            modelName: 'deterministic-explicit-close',
+            customerMessage: enrichedLastMessageContent || '',
+            response: closeResponse,
+            status: delivery.success ? 'sent' : 'error',
+            triggeredRule: null,
+            metadata: {
+                explicitConversationClose: true,
+                closeToolStatus: closeResult?.status || 'missing',
+            },
+        });
+        await finishOrchestratorRun({
+            run: orchestratorRun,
+            status: closeSucceeded && delivery.success ? 'success' : 'fallback',
+            timings: orchestratorTimings,
+            intent: intentResolution.intent,
+            confidenceLevel: 'deterministic',
+            confidenceScore: intentResolution.confidence,
+            metadata: {
+                explicitConversationClose: true,
+                closeSucceeded,
+                responseSent: delivery.success,
+            },
+        });
+        return;
+    }
+
     if (
         currentCopilotMode === 'auto'
         && sourceMessageId
         && autopilotConfig.workflow_builder_mode === 'native_v2'
     ) {
+        const verificationReceiptTtlDays = Math.max(
+            1,
+            Math.min(90, Number(process.env.AUTOPILOT_VERIFICATION_RECEIPT_TTL_DAYS || 30) || 30),
+        );
+        const contactVerificationReceipts = contactIdForMemory
+            ? await loadRecentContactVerificationReceipts({
+                workspaceId,
+                contactId: contactIdForMemory,
+                toolNames: runtimeToolCatalog.map((tool) => tool.name),
+                maxAgeDays: verificationReceiptTtlDays,
+            })
+            : [];
+        let collectionCloseSucceeded = false;
         const nativeStage = await timeOrchestratorStage(
             orchestratorRun,
             'workflow_runtime_v2_primary',
@@ -1287,17 +1647,160 @@ export async function processAutopilotForChat(
                             content: String(message.content || ''),
                         })),
                         orchestratorRunId: orchestratorRun.id,
+                        sourceMessageId,
                     },
                     recentMessages: messages.map((message: any) => ({
                         fromMe: Boolean(message.from_me),
                         content: String(message.content || ''),
                     })),
+                    structuredMemory: {
+                        knownFields: structuredKnownFields,
+                        knownFieldSources: Object.fromEntries(
+                            [
+                                ...Object.keys(crmCustomFields).map((key) => [key, 'crm'] as const),
+                                ...['name', 'email', 'phone', 'address'].map((key) => [key, 'contact'] as const),
+                                ...currentSlotExtraction.details.map((detail) => [detail.name, detail.source] as const),
+                            ],
+                        ),
+                        rememberedAcrossChats: Object.keys(autopilotContactMemory.slots).length > 0,
+                        rememberedAt: autopilotContactMemory.updatedAt,
+                        previousVerificationReceipts: contactVerificationReceipts,
+                        verificationPolicy: contactVerificationReceipts.length > 0
+                            ? 'A identidade/contexto deste mesmo contato já foi verificada pelas ferramentas listadas e o comprovante ainda está válido. Não peça novamente dados estáveis já conhecidos. Reexecute a ferramenta somente se o cliente alterou a identidade ou pediu informação operacional atualizada.'
+                            : 'Nenhum comprovante operacional anterior válido foi encontrado. Use os campos estáveis conhecidos, mas valide operações externas quando necessário.',
+                        nativeState: autopilotContactMemory.nativeState,
+                        systemOperations: {
+                            slot_memory_persisted: slotMemoryPersisted,
+                            contact_facts_persisted: contactFactsPersisted,
+                            crm_custom_fields_persisted: crmCustomFieldsPersisted,
+                        },
+                        policy: 'Use os campos conhecidos; nunca solicite novamente um campo ja preenchido. Revalide apenas resultados operacionais que possam ter mudado.',
+                    },
                     sendResponse: async (message, nodeInput) => {
                         await assertAutopilotSourceMessageCurrent({
                             chatId: chat.id,
                             sourceMessageId,
                         });
-                        const formatted = formatCustomerFacingAiResponse(message);
+                        const directAgentToolFailure = directAgentRouteHasFailedToolCalls(nodeInput);
+                        if (activeCollectionCheckpoint && directAgentToolFailure) {
+                            try {
+                                await clearAutopilotCollectionCompletion({
+                                    chatId: chat.id,
+                                    workspaceId,
+                                    checkpointFingerprint: activeCollectionCheckpoint.checkpointFingerprint,
+                                });
+                            } catch (error) {
+                                console.warn('[AUTOPILOT_COLLECTION_CLOSE] Failed to invalidate checkpoint after agent tool failure:', error);
+                                throw error;
+                            }
+                            delete autopilotContactMemory.nativeState[COLLECTION_COMPLETION_STATE_KEY];
+                        }
+                        const collectionRoute = inspectCollectionResponseRoute(nodeInput, message);
+                        let messageToSend = message;
+                        if (collectionRoute?.kind === 'completed' && activeCollectionCheckpoint) {
+                            const closeDecision = evaluateCompletedCollectionClose({
+                                checkpoint: activeCollectionCheckpoint,
+                                route: collectionRoute,
+                                chatId: chat.id,
+                                autopilotConfigId: autopilotConfig.id,
+                                sourceMessageId,
+                                knownFields: structuredKnownFields,
+                                receipts: collectionPersistenceReceipts,
+                                invalidFieldNames: currentSlotExtraction.invalidSlots.map((slot) => slot.name),
+                            });
+                            if (closeDecision.allowed && closeDecision.persistenceReceiptFingerprint) {
+                                const claimed = await claimAutopilotCollectionCompletion({
+                                    chatId: chat.id,
+                                    workspaceId,
+                                    checkpointFingerprint: activeCollectionCheckpoint.checkpointFingerprint,
+                                    completionExecutionId: collectionRoute.executionId,
+                                }).catch((error) => {
+                                    console.warn('[AUTOPILOT_COLLECTION_CLOSE] Failed to claim collection checkpoint:', error);
+                                    return false;
+                                });
+                                if (claimed) {
+                                    try {
+                                    const closeAction: AgentToolAction = {
+                                        type: 'close_chat',
+                                        reason: 'Coleta solicitada pelo agente concluída e persistida com sucesso.',
+                                        payload: {
+                                            notes: 'Encerramento sistêmico após ciclo comprovado de coleta de dados.',
+                                            sendCloseMessage: false,
+                                        },
+                                    };
+                                    const [closeResult] = await runRequestedAgentToolsWithStatus({
+                                        workspaceId,
+                                        chat,
+                                        contact: sanitizedContact,
+                                        systemAgentId: assignedSystemAgentId,
+                                        systemAgentName: assignedSystemAgentName,
+                                        autopilotConfig,
+                                        turnPolicy: {
+                                            ...turnPolicy,
+                                            globallyEnabledToolNames: Array.from(new Set([...turnPolicy.globallyEnabledToolNames, 'close_chat'])),
+                                            allowedToolNames: Array.from(new Set([...turnPolicy.allowedToolNames, 'close_chat'])),
+                                        },
+                                        customerMessage: enrichedLastMessageContent || '',
+                                        actions: [closeAction],
+                                        closeAuthorization: {
+                                            source: 'conversation_collection_completed',
+                                            chatId: chat.id,
+                                            orchestratorRunId: orchestratorRun.id,
+                                            sourceMessageId,
+                                            workflowId: collectionRoute.workflowId,
+                                            workflowVersion: collectionRoute.workflowVersion,
+                                            needsInputExecutionId: activeCollectionCheckpoint.needsInputExecutionId,
+                                            completionExecutionId: collectionRoute.executionId,
+                                            agentNodeId: collectionRoute.agentNodeId,
+                                            terminalNodeId: collectionRoute.respondNodeId,
+                                            pendingFieldsFingerprint: activeCollectionCheckpoint.pendingFieldsFingerprint,
+                                            persistenceReceiptFingerprint: closeDecision.persistenceReceiptFingerprint,
+                                            checkpointFingerprint: activeCollectionCheckpoint.checkpointFingerprint,
+                                            actionFingerprint: fingerprintToolAction(closeAction),
+                                        },
+                                        orchestratorRunId: orchestratorRun.id,
+                                        sourceMessageId,
+                                    });
+                                    collectionCloseSucceeded = closeResult?.status === 'success';
+                                    if (!collectionCloseSucceeded) {
+                                        await clearAutopilotCollectionCompletion({
+                                            chatId: chat.id,
+                                            workspaceId,
+                                            checkpointFingerprint: activeCollectionCheckpoint.checkpointFingerprint,
+                                        }).catch(() => false);
+                                        messageToSend = 'Recebi suas informações, mas não consegui concluir o encerramento automático agora. O atendimento continuará aberto para acompanhamento.';
+                                    }
+                                    } catch (error) {
+                                        await clearAutopilotCollectionCompletion({
+                                            chatId: chat.id,
+                                            workspaceId,
+                                            checkpointFingerprint: activeCollectionCheckpoint.checkpointFingerprint,
+                                        }).catch(() => false);
+                                        console.warn('[AUTOPILOT_COLLECTION_CLOSE] Close failed after checkpoint claim:', error);
+                                        messageToSend = 'Recebi suas informações, mas não consegui concluir o encerramento automático agora. O atendimento continuará aberto para acompanhamento.';
+                                    }
+                                } else {
+                                    const statusResult = await db.query(
+                                        'SELECT status FROM chats WHERE id = $1 AND workspace_id = $2 LIMIT 1',
+                                        [chat.id, workspaceId],
+                                    ).catch(() => ({ rows: [] }));
+                                    collectionCloseSucceeded = statusResult.rows[0]?.status === 'encerrados';
+                                    if (!collectionCloseSucceeded) {
+                                        messageToSend = 'Recebi suas informações. O atendimento continuará aberto enquanto confirmamos o encerramento com segurança.';
+                                    }
+                                }
+                            } else {
+                                await clearAutopilotCollectionCompletion({
+                                    chatId: chat.id,
+                                    workspaceId,
+                                    checkpointFingerprint: activeCollectionCheckpoint.checkpointFingerprint,
+                                }).catch(() => false);
+                                if (closeDecision.reason !== 'response_not_terminal') {
+                                    messageToSend = 'Recebi suas informações, mas mantive o atendimento aberto porque ainda não foi possível confirmar com segurança a gravação de todos os dados.';
+                                }
+                            }
+                        }
+                        const formatted = formatCustomerFacingAiResponse(messageToSend);
                         const delivery = await sendMultiBlockResponse(
                             chat.id,
                             formatted,
@@ -1307,6 +1810,28 @@ export async function processAutopilotForChat(
                             null,
                             { ...responseTrace, deliveryKey: `workflow:${nodeInput.node.id}` },
                         );
+                        if (delivery.success && collectionRoute?.kind === 'needs_input') {
+                            const checkpoint = buildCollectionCompletionCheckpoint({
+                                chatId: chat.id,
+                                autopilotConfigId: autopilotConfig.id,
+                                sourceMessageId,
+                                route: collectionRoute,
+                                previousCheckpoint: activeCollectionCheckpoint,
+                                knownFields: structuredKnownFields,
+                                receipts: collectionPersistenceReceipts,
+                            });
+                            if (checkpoint) {
+                                autopilotContactMemory.nativeState[COLLECTION_COMPLETION_STATE_KEY] = checkpoint;
+                                await saveAutopilotNativeState({
+                                    chatId: chat.id,
+                                    workspaceId,
+                                    autopilotConfigId: autopilotConfig.id,
+                                    state: { [COLLECTION_COMPLETION_STATE_KEY]: checkpoint },
+                                }).catch((error) => {
+                                    console.warn('[AUTOPILOT_COLLECTION_CLOSE] Failed to persist needs_input checkpoint:', error);
+                                });
+                            }
+                        }
                         await logIntelligentAttendantResponse({
                             configId: autopilotConfig.id,
                             chatId: chat.id,
@@ -1325,6 +1850,124 @@ export async function processAutopilotForChat(
                         return { success: delivery.success, apiResponse: delivery.apiResponse || null };
                     },
                     handoff: async (nodeInput) => {
+                        await assertAutopilotSourceMessageCurrent({
+                            chatId: chat.id,
+                            sourceMessageId,
+                        });
+                        const customerHandoffMessage = String(
+                            nodeInput.input.customerMessage
+                            || 'Obrigado pelas informações. Seu atendimento foi encaminhado para nossa equipe continuar por aqui.',
+                        ).replace(/\s+/g, ' ').trim().slice(0, 1000);
+                        const handoffSummary = String(
+                            nodeInput.input.summary
+                            || nodeInput.node.config.summary
+                            || nodeInput.input.reason
+                            || nodeInput.node.config.reason
+                            || '',
+                        ).replace(/\s+/g, ' ').trim().slice(0, 500);
+                        const nativeHandoffTurnPolicy: AutopilotTurnPolicy = {
+                            ...turnPolicy,
+                            globallyEnabledToolNames: Array.from(new Set([
+                                ...turnPolicy.globallyEnabledToolNames,
+                                'add_internal_note',
+                                'transfer_chat',
+                            ])),
+                            allowedToolNames: Array.from(new Set([
+                                ...turnPolicy.allowedToolNames,
+                                'add_internal_note',
+                                'transfer_chat',
+                            ])),
+                        };
+                        const results = await runRequestedAgentToolsWithStatus({
+                            workspaceId,
+                            chat,
+                            contact: sanitizedContact,
+                            systemAgentId: assignedSystemAgentId,
+                            systemAgentName: assignedSystemAgentName,
+                            autopilotConfig,
+                            turnPolicy: nativeHandoffTurnPolicy,
+                            customerMessage: enrichedLastMessageContent || '',
+                            actions: [
+                                ...(handoffSummary ? [{
+                                    type: 'add_internal_note' as const,
+                                    reason: 'Resumo nativo para continuidade humana.',
+                                    payload: { content: handoffSummary },
+                                }] : []),
+                                {
+                                    type: 'transfer_chat' as const,
+                                    reason: String(nodeInput.node.config.reason || 'Transferência solicitada pelo workflow.'),
+                                    payload: { teamId: String(nodeInput.node.config.teamId || '') || null },
+                                },
+                            ],
+                            orchestratorRunId: orchestratorRun.id,
+                            sourceMessageId,
+                        });
+                        const result = [...results].reverse().find((item) => item.toolName === 'transfer_chat');
+                        if (!result || result.status !== 'success') {
+                            throw new Error(result?.error || 'Não foi possível transferir o atendimento.');
+                        }
+                        const transferOutput = result.output && typeof result.output === 'object'
+                            ? result.output as Record<string, unknown>
+                            : {};
+                        let customerMessageSent = transferOutput.fallbackExecuted === true;
+                        if (!customerMessageSent && customerHandoffMessage) {
+                            const formattedCustomerMessage = formatCustomerFacingAiResponse(customerHandoffMessage);
+                            const delivery = await sendMultiBlockResponse(
+                                chat.id,
+                                formattedCustomerMessage,
+                                assignedSystemAgentId,
+                                true,
+                                instanceName,
+                                null,
+                                { ...responseTrace, deliveryKey: `workflow:${nodeInput.node.id}:customer_message` },
+                            );
+                            customerMessageSent = delivery.success;
+                            await logIntelligentAttendantResponse({
+                                configId: autopilotConfig.id,
+                                chatId: chat.id,
+                                systemAgentId: assignedSystemAgentId,
+                                modelName: resolvedAiModel.model,
+                                customerMessage: enrichedLastMessageContent || '',
+                                response: formattedCustomerMessage,
+                                status: delivery.success ? 'sent' : 'error',
+                                triggeredRule: null,
+                                metadata: {
+                                    runtime: 'workflow_v2_primary_handoff',
+                                    workflowNodeId: nodeInput.node.id,
+                                    executionId: nodeInput.execution.executionId,
+                                },
+                            });
+                        }
+                        return {
+                            transferred: true,
+                            customerMessage: customerHandoffMessage,
+                            customerMessageSent,
+                            output: result.output || null,
+                        };
+                    },
+                    closeConversation: async (nodeInput) => {
+                        const action: AgentToolAction = {
+                            type: 'close_chat',
+                            reason: String(nodeInput.node.config.reason || 'Objetivo do atendimento concluído.'),
+                            payload: {
+                                reasonTagId: String(nodeInput.node.config.reasonTagId || '') || null,
+                                notes: String(
+                                    nodeInput.node.config.notes
+                                    || nodeInput.node.config.reason
+                                    || 'Encerramento pelo bloco nativo de conclusão.',
+                                ).slice(0, 1000),
+                                sendCloseMessage: nodeInput.node.config.sendCloseMessage === true,
+                            },
+                        };
+                        const nativeCloseTurnPolicy: AutopilotTurnPolicy = {
+                            ...turnPolicy,
+                            globallyEnabledToolNames: Array.from(new Set([...turnPolicy.globallyEnabledToolNames, 'close_chat'])),
+                            allowedToolNames: Array.from(new Set([...turnPolicy.allowedToolNames, 'close_chat'])),
+                        };
+                        const goalCompletionAuthorized = isValidWorkflowGoalCompletionEvidence(
+                            nodeInput.input.goalCompletion,
+                            nodeInput,
+                        );
                         const [result] = await runRequestedAgentToolsWithStatus({
                             workspaceId,
                             chat,
@@ -1332,20 +1975,61 @@ export async function processAutopilotForChat(
                             systemAgentId: assignedSystemAgentId,
                             systemAgentName: assignedSystemAgentName,
                             autopilotConfig,
-                            turnPolicy,
+                            turnPolicy: nativeCloseTurnPolicy,
                             customerMessage: enrichedLastMessageContent || '',
-                            actions: [{
-                                type: 'transfer_chat',
-                                reason: String(nodeInput.node.config.reason || 'Transferência solicitada pelo workflow.'),
-                                payload: { teamId: String(nodeInput.node.config.teamId || '') || null },
-                            }],
+                            actions: [action],
+                            closeAuthorization: goalCompletionAuthorized
+                                ? {
+                                    source: 'workflow_goal_completed',
+                                    chatId: chat.id,
+                                    orchestratorRunId: orchestratorRun.id,
+                                    workflowId: nodeInput.workflow.id,
+                                    workflowVersion: nodeInput.workflow.version,
+                                    executionId: nodeInput.execution.executionId,
+                                    terminalNodeId: nodeInput.node.id,
+                                    actionFingerprint: fingerprintToolAction(action),
+                                }
+                                : null,
                             orchestratorRunId: orchestratorRun.id,
                             sourceMessageId,
                         });
                         if (!result || result.status !== 'success') {
-                            throw new Error(result?.error || 'Não foi possível transferir o atendimento.');
+                            throw new Error(result?.error || 'Não foi possível encerrar o atendimento.');
                         }
-                        return { transferred: true, output: result.output || null };
+                        return { closed: true, output: result.output || null };
+                    },
+                    loadState: async (nodeInput) => {
+                        const keys = Array.isArray(nodeInput.node.config.keys)
+                            ? nodeInput.node.config.keys.map(String)
+                            : [];
+                        const state = keys.length > 0
+                            ? Object.fromEntries(keys.filter((key) => key in autopilotContactMemory.nativeState).map((key) => [key, autopilotContactMemory.nativeState[key]]))
+                            : { ...autopilotContactMemory.nativeState };
+                        return { state };
+                    },
+                    saveState: async (nodeInput) => {
+                        const allowedFields = Array.isArray(nodeInput.node.config.allowedFields)
+                            ? nodeInput.node.config.allowedFields.map(String).filter(Boolean)
+                            : [];
+                        const sourceState = nodeInput.input.state && typeof nodeInput.input.state === 'object' && !Array.isArray(nodeInput.input.state)
+                            ? nodeInput.input.state as Record<string, unknown>
+                            : nodeInput.input;
+                        const patch = Object.fromEntries(
+                            allowedFields
+                                .filter((key) => Object.prototype.hasOwnProperty.call(sourceState, key))
+                                .map((key) => [key, sourceState[key]]),
+                        );
+                        if (Object.keys(patch).length === 0) {
+                            return { saved: false, state: { ...autopilotContactMemory.nativeState } };
+                        }
+                        Object.assign(autopilotContactMemory.nativeState, patch);
+                        await saveAutopilotNativeState({
+                            chatId: chat.id,
+                            workspaceId,
+                            autopilotConfigId: autopilotConfig.id,
+                            state: patch,
+                        });
+                        return { saved: true, state: { ...autopilotContactMemory.nativeState } };
                     },
                 },
                 context: {
@@ -1359,11 +2043,13 @@ export async function processAutopilotForChat(
         const nativeResult = nativeStage.value;
         if (nativeResult.enabled && nativeResult.handled) {
             let nativeResponseSent = nativeResult.responseSent === true;
+            const nativeConversationClosed = nativeResult.conversationClosed === true || collectionCloseSucceeded;
             let recoveryResponse: string | null = null;
             if (
                 currentCopilotMode === 'auto'
                 && !nativeResponseSent
-                && !nativeResult.handoffCompleted
+                && (!nativeResult.handoffCompleted || Boolean(nativeResult.recoveryResponse?.trim()))
+                && !nativeConversationClosed
                 && nativeResult.status !== 'waiting'
             ) {
                 recoveryResponse = formatCustomerFacingAiResponse(
@@ -1423,7 +2109,7 @@ export async function processAutopilotForChat(
                 kind: 'workflow_runtime_v2_primary',
                 status: nativeResult.status === 'failed' ? 'fallback' : 'success',
                 durationMs: nativeStage.durationMs,
-                payload: nativeResult,
+                payload: { ...nativeResult, conversationClosed: nativeConversationClosed, collectionCloseSucceeded },
             });
             await finishOrchestratorRun({
                 run: orchestratorRun,
@@ -1441,6 +2127,8 @@ export async function processAutopilotForChat(
                     workflowStatus: nativeResult.status,
                     workflowResponseRecovered: Boolean(recoveryResponse),
                     workflowHandoffCompleted: nativeResult.handoffCompleted === true,
+                    workflowConversationClosed: nativeConversationClosed,
+                    collectionCloseSucceeded,
                 },
             });
             return;
@@ -2126,6 +2814,7 @@ export async function processAutopilotForChat(
         slotMappings: workflowSlotMappings,
         closeIntentGate,
         recentToolResults,
+        slotExtraction: currentSlotExtraction,
     });
     let aiWorkflowDecision: AiWorkflowDecision | null = null;
     if (shouldUseAiWorkflowClassifier({
@@ -2190,6 +2879,7 @@ export async function processAutopilotForChat(
                 closeIntentGate,
                 aiWorkflowDecision,
                 recentToolResults,
+                slotExtraction: currentSlotExtraction,
             });
             if (
                 aiWorkflowPlan.executionMode !== workflowPlan.executionMode ||
@@ -2981,7 +3671,7 @@ export async function processAutopilotForChat(
             : workflowPlan.actions;
 
         if (workflowPrearmSignal) {
-            await insertAgentToolStatusMessage({
+        await insertAgentToolStatusMessage({
                 workspaceId,
                 chatId: chat.id,
                 systemAgentId: assignedSystemAgentId,

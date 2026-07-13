@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseVisibleIdSet,
   reconcileRealtimeChatAssignment,
+  reconcileRealtimeChatPresentation,
   shouldDeliverChatPayload,
   shouldDeliverMessagePayload,
   toPostgresChangesPayload,
@@ -86,5 +87,51 @@ describe('realtime reconciler', () => {
 
     expect(assignment.agent).toBeUndefined();
     expect(assignment.assignedSystemAgent).toMatchObject({ id: 'system-1', name: 'Suporte IA' });
+  });
+
+  it('enriches a matching cached agent when its avatar arrives later', () => {
+    const existing = {
+      agentId: 'agent-1',
+      agent: { id: 'agent-1', name: 'Agente' },
+    } as Chat;
+
+    const assignment = reconcileRealtimeChatAssignment(existing, {
+      agent_id: 'agent-1',
+      agent_name: 'Agente Completo',
+      agent_avatar_url: '/avatar-completo.png',
+    });
+
+    expect(assignment.agent).toMatchObject({
+      id: 'agent-1',
+      name: 'Agente Completo',
+      avatar: '/avatar-completo.png',
+      avatar_url: '/avatar-completo.png',
+    });
+  });
+
+  it('clears stale presentation fields when hydration explicitly returns null', () => {
+    const existing = {
+      teamName: 'Equipe antiga',
+      team_id: 'team-old',
+      teamColor: '#ff0000',
+      tag: 'Tag antiga',
+      color: '#00ff00',
+    } as Chat;
+
+    const presentation = reconcileRealtimeChatPresentation(existing, {
+      team_name: null,
+      team_id: null,
+      team_color: null,
+      tag: null,
+      color: null,
+    });
+
+    expect(presentation).toMatchObject({
+      teamName: undefined,
+      team_id: undefined,
+      teamColor: undefined,
+      tag: undefined,
+      color: undefined,
+    });
   });
 });

@@ -371,7 +371,7 @@ export function NativeWorkflowTestDialog({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}>
       <DialogContent
-        className="flex max-h-[92vh] w-[min(880px,95vw)] max-w-none flex-col gap-0 overflow-hidden border-slate-700 bg-[#0b121a] p-0 text-slate-100 shadow-2xl"
+        className="dark flex max-h-[92vh] w-[min(880px,95vw)] max-w-none flex-col gap-0 overflow-hidden border-slate-700 bg-[#0b121a] p-0 text-slate-100 shadow-2xl"
         aria-busy={busy}
       >
         <DialogHeader className="border-b border-slate-700/80 bg-[#101b26] px-6 py-5 pr-12 text-left">

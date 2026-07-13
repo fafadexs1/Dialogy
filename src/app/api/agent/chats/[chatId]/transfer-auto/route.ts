@@ -4,34 +4,46 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
-import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
+import { getPresenceTtlSeconds } from '@/lib/presence';
 
 /**
- * Find any online agent in the workspace who is a member of at least one team.
- * Returns a random online agent from the pool.
+ * Find the team with the lowest normalized live portfolio. Agent selection is
+ * delegated to the same fair, atomic allocator used by every team transfer.
  */
-async function findAvailableAgent(workspaceId: string): Promise<{ userId: string; userName: string } | null> {
+async function findAvailableTeam(workspaceId: string): Promise<{ teamId: string; teamName: string } | null> {
     try {
         const ttlSeconds = getPresenceTtlSeconds();
-        const recentActivitySeconds = getPresenceRecentActivitySeconds();
-        const availabilitySql = buildPresenceAvailabilitySql('uwp', '$2', '$3');
 
-        // Find all online users who are members of at least one team in this workspace
         const result = await db.query(
             `
-            SELECT DISTINCT u.id as user_id, u.name as user_name
-            FROM users u
-            JOIN team_members tm ON tm.user_id = u.id
-            JOIN teams t ON t.id = tm.team_id
-            JOIN user_workspace_presence uwp 
-                ON uwp.user_id = u.id 
-                AND uwp.workspace_id = $1
+            SELECT
+                t.id AS team_id,
+                t.name AS team_name,
+                COUNT(DISTINCT active_chat.id)::numeric
+                  / GREATEST(COUNT(DISTINCT tm.user_id), 1) AS portfolio_per_available_agent
+            FROM teams t
+            JOIN team_members tm ON tm.team_id = t.id
+            JOIN user_workspace_presence uwp
+              ON uwp.user_id = tm.user_id
+             AND uwp.workspace_id = t.workspace_id
+             AND uwp.is_online = TRUE
+             AND uwp.last_seen > NOW() - ($2 * interval '1 second')
+            LEFT JOIN team_agent_distribution_state ds
+              ON ds.workspace_id = t.workspace_id
+             AND ds.team_id = t.id
+             AND ds.user_id = tm.user_id
+            LEFT JOIN chats active_chat
+              ON active_chat.workspace_id = t.workspace_id
+             AND active_chat.agent_id = tm.user_id
+             AND active_chat.status = 'atendimentos'
             WHERE t.workspace_id = $1
-              AND ${availabilitySql}
-            ORDER BY RANDOM()
-            LIMIT 1;
+              AND COALESCE(ds.accepting_assignments, TRUE) = TRUE
+            GROUP BY t.id, t.name
+            HAVING COUNT(DISTINCT tm.user_id) > 0
+            ORDER BY portfolio_per_available_agent ASC, t.id ASC
+            LIMIT 1
             `,
-            [workspaceId, ttlSeconds, recentActivitySeconds]
+            [workspaceId, ttlSeconds]
         );
 
         if (result.rowCount === 0) {
@@ -39,8 +51,8 @@ async function findAvailableAgent(workspaceId: string): Promise<{ userId: string
         }
 
         return {
-            userId: result.rows[0].user_id,
-            userName: result.rows[0].user_name
+            teamId: result.rows[0].team_id,
+            teamName: result.rows[0].team_name
         };
     } catch (error) {
         console.error('[TRANSFER_AUTO] Error finding available agent:', error);
@@ -110,9 +122,9 @@ export async function POST(
 
     try {
         // Find an available online agent who is in at least one team
-        const availableAgent = await findAvailableAgent(authResult.agent.workspace_id);
+        const availableTeam = await findAvailableTeam(authResult.agent.workspace_id);
 
-        if (!availableAgent) {
+        if (!availableTeam) {
             return NextResponse.json(
                 {
                     success: false,
@@ -125,7 +137,7 @@ export async function POST(
         // Transfer the chat to the found agent
         const result = await transferChatAction({
             chatId,
-            agentId: availableAgent.userId,
+            teamId: availableTeam.teamId,
         }, {
             user: {
                 id: authResult.agent.id,
@@ -138,13 +150,16 @@ export async function POST(
             return NextResponse.json({
                 success: true,
                 message: 'Chat transferido com sucesso.',
-                agentId: availableAgent.userId,
-                agentName: availableAgent.userName
+                teamId: availableTeam.teamId,
+                teamName: availableTeam.teamName,
+                agentId: result.assignedAgent?.id,
+                agentName: result.assignedAgent?.name
             });
         } else {
+            const unavailable = result.error?.includes('Nenhum agente dispon');
             return NextResponse.json(
                 { success: false, error: result.error || 'Falha ao transferir o chat.' },
-                { status: 500 }
+                { status: unavailable ? 409 : 500 }
             );
         }
 

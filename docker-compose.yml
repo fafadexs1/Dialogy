@@ -6,6 +6,14 @@
   NEXTAUTH_URL: ${NEXTAUTH_URL}
   NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
   NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+  PRODUCT_UPDATES_ENABLED: ${PRODUCT_UPDATES_ENABLED:-false}
+  NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED: ${NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED:-false}
+  ANALYTICS_SNAPSHOT_ENABLED: ${ANALYTICS_SNAPSHOT_ENABLED:-true}
+  ANALYTICS_SNAPSHOT_FRESH_MS: ${ANALYTICS_SNAPSHOT_FRESH_MS:-300000}
+  ANALYTICS_SNAPSHOT_HISTORICAL_GRACE_MS: ${ANALYTICS_SNAPSHOT_HISTORICAL_GRACE_MS:-86400000}
+  ANALYTICS_SNAPSHOT_REFRESH_LEASE_MS: ${ANALYTICS_SNAPSHOT_REFRESH_LEASE_MS:-600000}
+  ANALYTICS_SNAPSHOT_FALLBACK_MAX_AGE_MS: ${ANALYTICS_SNAPSHOT_FALLBACK_MAX_AGE_MS:-604800000}
+  ANALYTICS_SNAPSHOT_SCHEMA_VERSION: ${ANALYTICS_SNAPSHOT_SCHEMA_VERSION:-v1}
   DATABASE_URL: ${DATABASE_URL}
   POSTGRES_URL: ${POSTGRES_URL:-}
   NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
@@ -57,6 +65,9 @@
   AUTOPILOT_CHAT_LEASE_WAIT_MS: ${AUTOPILOT_CHAT_LEASE_WAIT_MS:-90000}
   AUTOPILOT_CHAT_LEASE_POLL_MS: ${AUTOPILOT_CHAT_LEASE_POLL_MS:-250}
   AUTOPILOT_TOOL_CLAIM_STALE_MS: ${AUTOPILOT_TOOL_CLAIM_STALE_MS:-600000}
+  AUTOPILOT_COLLECTION_CLOSE_CLAIM_TTL_MS: ${AUTOPILOT_COLLECTION_CLOSE_CLAIM_TTL_MS:-300000}
+  AUTOPILOT_CONTACT_MEMORY_TTL_DAYS: ${AUTOPILOT_CONTACT_MEMORY_TTL_DAYS:-180}
+  AUTOPILOT_VERIFICATION_RECEIPT_TTL_DAYS: ${AUTOPILOT_VERIFICATION_RECEIPT_TTL_DAYS:-30}
   AI_TOOL_INTENT_GATE_MODEL: ${AI_TOOL_INTENT_GATE_MODEL:-}
   AI_TOOL_INTENT_GATE_TIMEOUT_MS: ${AI_TOOL_INTENT_GATE_TIMEOUT_MS:-5000}
   AI_INTENT_CLASSIFIER_MODEL: ${AI_INTENT_CLASSIFIER_MODEL:-}
@@ -71,6 +82,9 @@
   AI_MEDIA_ANALYSIS_TIMEOUT_MS: ${AI_MEDIA_ANALYSIS_TIMEOUT_MS:-12000}
   AGENT_TOOL_TRANSFER_TIMEOUT_MS: ${AGENT_TOOL_TRANSFER_TIMEOUT_MS:-8000}
   AGENT_TOOL_CLOSE_TIMEOUT_MS: ${AGENT_TOOL_CLOSE_TIMEOUT_MS:-8000}
+  AGENT_TOOL_CLOSE_DB_ACQUIRE_TIMEOUT_MS: ${AGENT_TOOL_CLOSE_DB_ACQUIRE_TIMEOUT_MS:-5000}
+  AGENT_TOOL_CLOSE_TEMPLATE_TIMEOUT_MS: ${AGENT_TOOL_CLOSE_TEMPLATE_TIMEOUT_MS:-5000}
+  AGENT_TOOL_CLOSE_POST_COMMIT_EFFECT_TIMEOUT_MS: ${AGENT_TOOL_CLOSE_POST_COMMIT_EFFECT_TIMEOUT_MS:-10000}
   AGENT_TOOL_NOTE_TIMEOUT_MS: ${AGENT_TOOL_NOTE_TIMEOUT_MS:-3000}
   SGP_CONTACT_PANEL_TOOL_TIMEOUT_MS: ${SGP_CONTACT_PANEL_TOOL_TIMEOUT_MS:-30000}
   EVOLUTION_WEBHOOK_CONCURRENCY: ${EVOLUTION_WEBHOOK_CONCURRENCY}
@@ -152,7 +166,7 @@ services:
   # as uid 1001, so initialise the shared Hugging Face/ONNX cache before either
   # process can load a local embedding or reranking model.
   ai-cache-init:
-    image: fafadexs/dialogy-worker-ai:PBE-5.184
+    image: fafadexs/dialogy-worker-ai:PBE-5.186
     restart: "no"
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
@@ -165,7 +179,7 @@ services:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
 
   dialogy:
-    image: fafadexs/dialogy:PBE-5.184
+    image: fafadexs/dialogy:PBE-5.186
     restart: unless-stopped
     init: true
     depends_on:
@@ -192,7 +206,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PBE-5.184
+    image: fafadexs/dialogy-worker:PBE-5.186
     restart: unless-stopped
     init: true
     depends_on:
@@ -203,7 +217,7 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PBE-5.184
+    image: fafadexs/dialogy-worker-ai:PBE-5.186
     restart: unless-stopped
     init: true
     depends_on:
@@ -218,7 +232,7 @@ services:
     stop_grace_period: 30s
 
   worker-campaign:
-    image: fafadexs/dialogy-worker:PBE-5.184
+    image: fafadexs/dialogy-worker:PBE-5.186
     command: ["node", "dist/worker-campaign.js"]
     restart: unless-stopped
     init: true
@@ -230,7 +244,7 @@ services:
     stop_grace_period: 30s
 
   worker-meta-relay:
-    image: fafadexs/dialogy-worker:PBE-5.184
+    image: fafadexs/dialogy-worker:PBE-5.186
     command: ["node", "dist/worker-meta-relay.js"]
     restart: unless-stopped
     init: true

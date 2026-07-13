@@ -30,9 +30,22 @@ import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { clearPendingToolConfirmation, setPendingToolConfirmation } from '@/services/autopilot/flow-state-store';
 import { redactSensitiveLogValue } from '@/lib/observability/redaction';
 import { recordDecisionOutcomesForChat, type AutopilotOutcomeTrigger } from '@/services/autopilot/outcome-tracker';
+import type { PoolClient } from 'pg';
 
 const MAX_ACTIONS_PER_MESSAGE = 2;
 const MAX_INTERNAL_NOTE_CHARS = 500;
+const CLOSE_DB_ACQUIRE_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.min(30_000, Number(process.env.AGENT_TOOL_CLOSE_DB_ACQUIRE_TIMEOUT_MS || 5_000) || 5_000),
+);
+const CLOSE_TEMPLATE_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.min(30_000, Number(process.env.AGENT_TOOL_CLOSE_TEMPLATE_TIMEOUT_MS || 5_000) || 5_000),
+);
+const CLOSE_POST_COMMIT_EFFECT_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.min(60_000, Number(process.env.AGENT_TOOL_CLOSE_POST_COMMIT_EFFECT_TIMEOUT_MS || 10_000) || 10_000),
+);
 const ALLOWED_TOOLS = new Set([
   'transfer_chat',
   'close_chat',
@@ -94,6 +107,22 @@ function contextRun(context: AgentToolRuntimeContext): OrchestratorRunHandle | n
 
 function isToolEnabledForAgent(context: AgentToolRuntimeContext, toolName: string): boolean {
   return context.turnPolicy.allowedToolNames.includes(toolName);
+}
+
+async function acquireAgentToolDbClient(): Promise<PoolClient> {
+  const pendingClient = db.connect();
+  try {
+    return await withTimeout(
+      pendingClient,
+      CLOSE_DB_ACQUIRE_TIMEOUT_MS,
+      'close database connection',
+    );
+  } catch (error) {
+    // A Promise timeout does not cancel pg.Pool.connect(). Release a client
+    // that arrives after the deadline so the pool cannot leak capacity.
+    void pendingClient.then((lateClient) => lateClient.release()).catch(() => undefined);
+    throw error;
+  }
 }
 
 function buildToolNotAllowedMessage(context: AgentToolRuntimeContext, toolName: string): string {
@@ -174,23 +203,27 @@ async function auditToolResult(
     riskLevel: definition?.riskLevel ?? null,
     workspaceId: context.workspaceId,
   });
-  await recordOrchestratorToolCall({
-    run: contextRun(context),
-    workspaceId: context.workspaceId,
-    chatId: context.chat.id,
-    systemAgentId: context.systemAgentId,
-    autopilotConfigId: context.autopilotConfig.id,
-    toolName: result.toolName,
-    toolVersion: definition?.version ?? actionDefinition?.version ?? null,
-    class: definition?.class ?? actionDefinition?.class ?? null,
-    riskLevel: definition?.riskLevel ?? actionDefinition?.riskLevel ?? null,
-    status: result.status,
-    input: redactSensitiveLogValue(inputOverride || result.input) as Record<string, unknown>,
-    output: redactSensitiveLogValue(result.output ?? null) as Record<string, unknown> | null,
-    error: result.error ?? null,
-    durationMs,
-    requiresHumanApproval: definition?.requiresHumanApproval ?? actionDefinition?.requiresHumanApproval ?? false,
-  });
+  try {
+    await recordOrchestratorToolCall({
+      run: contextRun(context),
+      workspaceId: context.workspaceId,
+      chatId: context.chat.id,
+      systemAgentId: context.systemAgentId,
+      autopilotConfigId: context.autopilotConfig.id,
+      toolName: result.toolName,
+      toolVersion: definition?.version ?? actionDefinition?.version ?? null,
+      class: definition?.class ?? actionDefinition?.class ?? null,
+      riskLevel: definition?.riskLevel ?? actionDefinition?.riskLevel ?? null,
+      status: result.status,
+      input: redactSensitiveLogValue(inputOverride || result.input) as Record<string, unknown>,
+      output: redactSensitiveLogValue(result.output ?? null) as Record<string, unknown> | null,
+      error: result.error ?? null,
+      durationMs,
+      requiresHumanApproval: definition?.requiresHumanApproval ?? actionDefinition?.requiresHumanApproval ?? false,
+    });
+  } catch (error) {
+    console.warn('[AGENT_TOOL_AUDIT] Failed to record orchestrator tool call:', error);
+  }
 }
 
 export function sanitizeInternalNoteContent(value: string): string {
@@ -490,6 +523,103 @@ async function runTransferChatTool(
   }
 }
 
+function normalizeClosedAt(value: unknown): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+async function runClosePostCommitEffects(input: {
+  workspaceId: string;
+  chatId: string;
+  closedAt: unknown;
+  reasonTagId: string | null;
+  notes: string | null;
+  tag: string | null;
+  color: string | null;
+  closeTemplate?: string;
+  sendCloseMessage: boolean;
+  systemAgentId: string;
+  lastInstanceName: string | null;
+}) {
+  const closedAt = normalizeClosedAt(input.closedAt);
+  const effects: Array<{ label: string; run: () => Promise<unknown> }> = [
+    {
+      label: 'abortar procedimentos',
+      run: async () => abortActiveProcedures(input.chatId),
+    },
+    {
+      label: 'publicar atualização',
+      run: async () => broadcastChatUpdate(input.workspaceId, input.chatId, {
+        status: 'encerrados',
+        closed_at: closedAt,
+        close_reason_tag_id: input.reasonTagId,
+        close_notes: input.notes,
+        tag: input.tag || '',
+        color: input.color || '',
+        is_autopilot_active: false,
+        copilot_mode: 'off',
+      }),
+    },
+    {
+      label: 'atualizar memória de caso',
+      run: async () => {
+        if (shouldEnqueueJob('ai_case_memory_refresh')) {
+          await enqueueAiCaseMemoryRefresh({
+            workspaceId: input.workspaceId,
+            chatId: input.chatId,
+            closedAt,
+          });
+        } else {
+          await refreshCaseMemoryForChat({
+            workspaceId: input.workspaceId,
+            chatId: input.chatId,
+            closedAt,
+          });
+        }
+      },
+    },
+  ];
+  if (input.closeTemplate && input.sendCloseMessage) {
+    effects.push({
+      label: 'enviar template de encerramento',
+      run: async () => {
+        const result = await sendAutomatedMessageAction(
+          input.chatId,
+          input.closeTemplate!,
+          input.systemAgentId,
+          true,
+          input.lastInstanceName || undefined,
+          {
+            event: 'close_notice',
+            authored_by_system_agent_id: input.systemAgentId,
+            template_applied: true,
+            reason_tag_id: input.reasonTagId,
+          },
+        );
+        if (!result.success) {
+          throw new Error(result.error || 'Falha ao enviar template de encerramento.');
+        }
+        return result;
+      },
+    });
+  }
+
+  const results = await Promise.allSettled(effects.map((effect) => withTimeout(
+    Promise.resolve().then(effect.run),
+    CLOSE_POST_COMMIT_EFFECT_TIMEOUT_MS,
+    `close post-commit effect: ${effect.label}`,
+  )));
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.error(
+        `[AGENT_TOOL_CLOSE_CHAT] Falha pós-commit ao ${effects[index]?.label || 'executar efeito'}:`,
+        result.reason,
+      );
+    }
+  });
+}
+
 async function runCloseChatTool(
   context: AgentToolRuntimeContext,
   action: Extract<AgentToolAction, { type: 'close_chat' }>
@@ -503,13 +633,30 @@ async function runCloseChatTool(
     : (action.reason?.trim() || 'Encerramento solicitado pelo cliente via Atendente Inteligente.');
   const sendCloseMessage = payload.sendCloseMessage === true;
 
-  const client = await db.connect();
   let closeTemplate: string | undefined;
+  if (sendCloseMessage) {
+    try {
+      const { closeMessageTemplate } = await withTimeout(
+        getWorkspaceTemplates(context.workspaceId),
+        CLOSE_TEMPLATE_TIMEOUT_MS,
+        'close template lookup',
+      );
+      closeTemplate = closeMessageTemplate || undefined;
+    } catch (templateLookupError) {
+      console.error('[AGENT_TOOL_CLOSE_CHAT] Falha ao carregar template antes da transação:', templateLookupError);
+    }
+  }
+  const client = await acquireAgentToolDbClient();
   let workspaceId = context.workspaceId;
   let lastInstanceName: string | null = null;
+  let committed = false;
+  let commitAttempted = false;
+  let clientReleased = false;
 
   try {
     await client.query('BEGIN');
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '20s'");
 
     const chatRes = await client.query(
       `SELECT
@@ -549,9 +696,6 @@ async function runCloseChatTool(
     workspaceId = chatRow.workspace_id;
     lastInstanceName = chatRow.last_instance_name || null;
 
-    const { closeMessageTemplate } = await getWorkspaceTemplates(workspaceId);
-    closeTemplate = closeMessageTemplate || undefined;
-
     let tagInfo = { label: null as string | null, color: null as string | null };
     if (reasonTagId) {
       const tagRes = await client.query(
@@ -566,7 +710,7 @@ async function runCloseChatTool(
       }
     }
 
-    await client.query(
+    const closeUpdateRes = await client.query(
       `UPDATE chats
        SET
           status = 'encerrados',
@@ -574,8 +718,12 @@ async function runCloseChatTool(
           close_reason_tag_id = $1,
           close_notes = $2,
           tag = $3,
-          color = $4
-       WHERE id = $5 AND workspace_id = $6`,
+          color = $4,
+          is_autopilot_active = FALSE,
+          copilot_mode = 'off',
+          updated_at = clock_timestamp()
+       WHERE id = $5 AND workspace_id = $6
+       RETURNING closed_at, close_reason_tag_id, close_notes, tag, color`,
       [
         reasonTagId,
         notes,
@@ -591,6 +739,21 @@ async function runCloseChatTool(
        SET status = 'closed', updated_at = timezone('utc', now())
        WHERE chat_id = $1`,
       [context.chat.id]
+    );
+
+    await client.query(
+      `UPDATE autopilot_conversation_states
+          SET pending_confirmation = NULL,
+              active_node_id = NULL,
+              metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb),
+                '{nativeState}',
+                COALESCE(metadata->'nativeState', '{}'::jsonb) - 'collectionCompletionV1',
+                true
+              ),
+              updated_at = clock_timestamp()
+        WHERE chat_id = $1`,
+      [context.chat.id],
     );
 
     await client.query(
@@ -619,60 +782,24 @@ async function runCloseChatTool(
       ]
     );
 
+    commitAttempted = true;
     await client.query('COMMIT');
+    committed = true;
 
-    const closedAtStr = new Date().toISOString();
-    await broadcastChatUpdate(workspaceId, context.chat.id, {
-      status: 'encerrados',
-      closed_at: closedAtStr,
-      close_reason_tag_id: reasonTagId,
-      close_notes: notes,
-      tag: tagInfo.label ?? chatRow.current_tag ?? '',
-      color: tagInfo.color ?? chatRow.current_color ?? '',
+    const closedChatState = closeUpdateRes.rows[0] || {};
+    await runClosePostCommitEffects({
+      workspaceId,
+      chatId: context.chat.id,
+      closedAt: closedChatState.closed_at,
+      reasonTagId: closedChatState.close_reason_tag_id ?? reasonTagId,
+      notes: closedChatState.close_notes ?? notes,
+      tag: closedChatState.tag ?? tagInfo.label ?? chatRow.current_tag ?? '',
+      color: closedChatState.color ?? tagInfo.color ?? chatRow.current_color ?? '',
+      closeTemplate,
+      sendCloseMessage,
+      systemAgentId: context.systemAgentId,
+      lastInstanceName,
     });
-
-    try {
-      const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [context.chat.id]);
-      const closedAt = closedAtRes.rows[0]?.closed_at
-        ? new Date(closedAtRes.rows[0].closed_at).toISOString()
-        : null;
-
-      if (shouldEnqueueJob('ai_case_memory_refresh')) {
-        await enqueueAiCaseMemoryRefresh({
-          workspaceId,
-          chatId: context.chat.id,
-          closedAt,
-        });
-      } else {
-        await refreshCaseMemoryForChat({
-          workspaceId,
-          chatId: context.chat.id,
-          closedAt,
-        });
-      }
-    } catch (caseMemoryError) {
-      console.error('[AGENT_TOOL_CLOSE_CHAT] Falha ao atualizar memoria de caso:', caseMemoryError);
-    }
-
-    if (closeTemplate && sendCloseMessage) {
-      try {
-        await sendAutomatedMessageAction(
-          context.chat.id,
-          closeTemplate,
-          context.systemAgentId,
-          true,
-          lastInstanceName || undefined,
-          {
-            event: 'close_notice',
-            authored_by_system_agent_id: context.systemAgentId,
-            template_applied: true,
-            reason_tag_id: reasonTagId,
-          }
-        );
-      } catch (templateError) {
-        console.error('[AGENT_TOOL_CLOSE_CHAT] Falha ao enviar template de encerramento:', templateError);
-      }
-    }
 
     return {
       toolName: 'close_chat',
@@ -685,10 +812,78 @@ async function runCloseChatTool(
       },
     };
   } catch (error) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // Ignore rollback errors after connection-level failures.
+    if (!committed && commitAttempted) {
+      try {
+        client.release(true);
+        clientReleased = true;
+      } catch {
+        // The connection may already have been discarded by pg.
+      }
+      try {
+        const reconciliation = await withTimeout(
+          db.query(
+            `SELECT status, closed_at, close_reason_tag_id, close_notes, tag, color
+             FROM chats
+             WHERE id = $1 AND workspace_id = $2
+             LIMIT 1`,
+            [context.chat.id, context.workspaceId],
+          ),
+          5_000,
+          'close commit reconciliation',
+        );
+        const reconciledChat = reconciliation.rows[0];
+        if (reconciledChat?.status === 'encerrados') {
+          console.warn('[AGENT_TOOL_CLOSE_CHAT] COMMIT sem confirmação de rede; estado fechado reconciliado no banco.');
+          await runClosePostCommitEffects({
+            workspaceId: context.workspaceId,
+            chatId: context.chat.id,
+            closedAt: reconciledChat.closed_at,
+            reasonTagId: reconciledChat.close_reason_tag_id ?? reasonTagId,
+            notes: reconciledChat.close_notes ?? notes,
+            tag: reconciledChat.tag ?? '',
+            color: reconciledChat.color ?? '',
+            closeTemplate,
+            sendCloseMessage,
+            systemAgentId: context.systemAgentId,
+            lastInstanceName,
+          });
+          return {
+            toolName: 'close_chat',
+            status: 'success',
+            input: action,
+            output: {
+              closed: true,
+              reasonTagId,
+              sendCloseMessage,
+              commitOutcomeReconciled: true,
+            },
+          };
+        }
+      } catch (reconciliationError) {
+        console.error('[AGENT_TOOL_CLOSE_CHAT] Não foi possível reconciliar COMMIT incerto:', reconciliationError);
+      }
+    }
+    if (!committed) {
+      if (!clientReleased) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          // Ignore rollback errors after connection-level failures.
+        }
+      }
+    } else {
+      console.error('[AGENT_TOOL_CLOSE_CHAT] Falha pós-commit não reverte o encerramento:', error);
+      return {
+        toolName: 'close_chat',
+        status: 'success',
+        input: action,
+        output: {
+          closed: true,
+          reasonTagId,
+          sendCloseMessage,
+          postCommitWarning: true,
+        },
+      };
     }
     return {
       toolName: 'close_chat',
@@ -697,7 +892,7 @@ async function runCloseChatTool(
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    client.release();
+    if (!clientReleased) client.release();
   }
 }
 
@@ -991,7 +1186,7 @@ export async function runAgentTools(
 
     let result: AgentToolExecutionResult;
     try {
-      result = await withTimeout((async () => {
+      const operation = (async () => {
         if (action.type === 'transfer_chat') return runTransferChatTool(runtimeContext, action);
         if (action.type === 'close_chat') return runCloseChatTool(runtimeContext, action);
         if (action.type === 'add_internal_note') return runAddInternalNoteTool(runtimeContext, action);
@@ -1000,7 +1195,13 @@ export async function runAgentTools(
           return runCrmUpdateContactCustomFieldsTool(runtimeContext, action);
         }
         return runSgpTool(runtimeContext, action as any);
-      })(), definition.timeoutMs, `agent tool ${definition.name}`);
+      })();
+      // close_chat owns a database transaction. A Promise timeout cannot
+      // cancel PostgreSQL and could report an error while the transaction later
+      // commits, so wait for its authoritative result.
+      result = action.type === 'close_chat'
+        ? await operation
+        : await withTimeout(operation, definition.timeoutMs, `agent tool ${definition.name}`);
     } catch (error) {
       result = {
         toolName: requestedToolName as AgentToolExecutionResult['toolName'],
@@ -1022,7 +1223,9 @@ export async function runAgentTools(
       transferExecuted = true;
     }
     if (result.status === 'success') {
-      await clearPendingToolConfirmation(runtimeContext.chat.id, action);
+      await clearPendingToolConfirmation(runtimeContext.chat.id, action).catch((error) => {
+        console.warn('[AGENT_TOOL_CONFIRMATION] Failed to clear confirmation after successful tool:', error);
+      });
     }
 
     await auditToolResult(runtimeContext, result, Date.now() - startedAt);

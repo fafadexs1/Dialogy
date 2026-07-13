@@ -18,7 +18,7 @@ function pickString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-function getSenderAvatar(sender: MessageSender): string | undefined {
+function getSenderAvatar(sender: unknown): string | undefined {
   if (!sender || typeof sender !== 'object') return undefined;
   return pickString((sender as any).avatar, (sender as any).avatar_url);
 }
@@ -109,6 +109,9 @@ export function resolveRealtimeSender({
     metadataRecord?.from_system_agent_avatar_url
   );
   const knownSystemAgent = getKnownSystemAgentSender(knownMessages, systemAgentId, systemAgentName);
+  const assignedSystemAgent = chat?.assignedSystemAgent && (
+    !systemAgentId || chat.assignedSystemAgent.id === systemAgentId
+  ) ? chat.assignedSystemAgent : undefined;
   const userSenderName = pickString(
     metadataRecord?.authored_by_name,
     metadataRecord?.senderName,
@@ -138,9 +141,9 @@ export function resolveRealtimeSender({
   if (data.from_me) {
     if (isSystemAgent) {
       return {
-        id: systemAgentId || knownSystemAgent?.id || 'system_agent',
-        name: systemAgentName || knownSystemAgent?.name || 'Assistente Virtual',
-        avatar: systemAgentAvatar || getSenderAvatar(knownSystemAgent),
+        id: systemAgentId || assignedSystemAgent?.id || knownSystemAgent?.id || 'system_agent',
+        name: systemAgentName || assignedSystemAgent?.name || knownSystemAgent?.name || 'Assistente Virtual',
+        avatar: systemAgentAvatar || getSenderAvatar(assignedSystemAgent) || getSenderAvatar(knownSystemAgent),
         type: 'system_agent',
       };
     }
@@ -164,6 +167,15 @@ export function resolveRealtimeSender({
     }
 
     if (data.sender_user_id && (userSenderName || userSenderAvatar)) {
+      return {
+        id: data.sender_user_id,
+        name: userSenderName || 'Agente',
+        avatar: userSenderAvatar,
+        type: 'user',
+      };
+    }
+
+    if (data.sender_user_id) {
       return {
         id: data.sender_user_id,
         name: userSenderName || 'Agente',

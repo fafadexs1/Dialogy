@@ -9,6 +9,7 @@ export * from './autopilot-tool-bridge';
 export * from './block-test';
 export * from './catalog';
 export * from './events';
+export * from './goal-completion';
 export * from './executor';
 export * from './model-adapter';
 export * from './model-capability-store';

@@ -6,6 +6,8 @@ import {
   buildNativeAgentToolConfig,
   getNativeAgentToolLabel,
   groupNativeAgentTools,
+  isNativeAgentControlPlaneTool,
+  isNativeAgentToolAttachable,
   isNativeAgentToolEligible,
   isNativeAgentToolRecommended,
   listAttachedWorkflowToolNames,
@@ -64,9 +66,29 @@ describe('native workflow agent tool catalog', () => {
     expect(isNativeAgentToolEligible(transfer)).toBe(true);
     expect(getNativeAgentToolLabel(blockedTicket)).toBe('Abrir chamado no SGP');
     expect(isNativeAgentToolEligible(blockedTicket)).toBe(false);
-    expect(isNativeAgentToolRecommended(transfer)).toBe(true);
+    expect(isNativeAgentToolAttachable(transfer)).toBe(false);
+    expect(isNativeAgentToolRecommended(transfer)).toBe(false);
     expect(isNativeAgentToolRecommended(blockedTicket)).toBe(false);
     expect(nativeAgentToolTestId('mcp:billing:create_invoice')).toBe('agent-tool-mcp-billing-create-invoice');
+  });
+
+  it('uses native blocks for conversation control while keeping audited note and CRM tools attachable', () => {
+    const catalog = listAgentToolCatalogItems();
+    for (const name of ['transfer_chat', 'close_chat']) {
+      const tool = catalog.find((item) => item.name === name)!;
+      expect(isNativeAgentControlPlaneTool(tool)).toBe(true);
+      expect(isNativeAgentToolEligible(tool)).toBe(true);
+      expect(isNativeAgentToolAttachable(tool)).toBe(false);
+    }
+    for (const name of ['add_internal_note', 'crm_update_contact_custom_fields']) {
+      const tool = catalog.find((item) => item.name === name)!;
+      expect(isNativeAgentControlPlaneTool(tool)).toBe(false);
+      expect(isNativeAgentToolEligible(tool)).toBe(true);
+      expect(isNativeAgentToolAttachable(tool)).toBe(true);
+    }
+
+    expect(isNativeAgentToolAttachable(mcpTool())).toBe(true);
+    expect(isNativeAgentToolAttachable(catalog.find((tool) => tool.name === 'sgp_fetch_contracts')!)).toBe(true);
   });
 
   it('groups MCP tools by their server and humanizes qualified technical names', () => {
@@ -193,6 +215,7 @@ describe('native workflow tool permission synchronization', () => {
     expect(canonicalMcp.config.requiresConfirmation).toBe(true);
     expect(canonicalMcp.config.requiresHumanApproval).toBe(true);
     expect(canonicalMcp.config.inputSchema).toEqual(mcpTool().inputSchema);
+    expect(reconciled.workflow.nodes.some((node) => node.id === 'tool-transfer')).toBe(true);
   });
 
   it('blocks attached tools that disappeared from or are ineligible in the workspace catalog', () => {

@@ -281,6 +281,7 @@ const AgentHandoffDecisionSchema = z.object({
   type: z.literal('handoff'),
   reason: z.string().min(1),
   summary: z.string().min(1),
+  customerMessage: z.string().min(1).optional(),
 });
 
 export const AgentDecisionSchema = z.discriminatedUnion('type', [

@@ -29,7 +29,7 @@ export type ResourceFieldContract = {
 export type ResourceSlotEvidence = {
   slot: AutopilotSlotName | string;
   value: string;
-  source: 'message' | 'contact' | 'history' | 'model_payload' | 'inferred';
+  source: 'message' | 'contact' | 'history' | 'memory' | 'model_payload' | 'inferred';
   confidence: number;
   requestedKey?: string | null;
 };

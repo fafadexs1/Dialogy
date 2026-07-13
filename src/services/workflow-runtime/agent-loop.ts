@@ -11,7 +11,8 @@ import type {
   WorkflowNode,
 } from './types';
 import type { ToolRegistry } from './tools';
-import { hashValue, stableStringify } from './utils';
+import { hashValue, isRecord, stableStringify } from './utils';
+import { responseRequestsMoreCustomerInput } from '@/services/autopilot/close-intent';
 
 export type AgentRuntimeContext = {
   config: AgentNodeConfig;
@@ -89,6 +90,8 @@ export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
     '8. Não exponha raciocínio interno, cadeia de pensamento ou análise detalhada.',
     '9. purposeSummary deve explicar brevemente por que a ferramenta é necessária.',
     '10. Responda exclusivamente no contrato estruturado solicitado.',
+    '11. Nunca pergunte qual opção, item, horário, produto, serviço ou alternativa o cliente prefere antes de apresentar as escolhas. Referências como "desses", "dessas", "deles", "delas", "esse" e "qual mais interessou" precisam ter um referente claro na conversa ou na própria resposta.',
+    '12. Ao retornar handoff, use summary somente como contexto interno objetivo para a equipe e customerMessage como a mensagem visível ao cliente. Agradeça ou confirme o encaminhamento em customerMessage, nunca apenas em summary.',
   ].join('\n');
 }
 
@@ -100,6 +103,199 @@ function hasValueAtPath(source: Record<string, unknown>, path: string): boolean 
     current = (current as Record<string, unknown>)[segment];
   }
   return current !== undefined && current !== null && current !== '';
+}
+
+function normalizeFieldName(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function knownFieldsFromState(state: Record<string, unknown>): Record<string, unknown> {
+  const candidates = [
+    state.knownFields,
+    isRecord(state.memory) ? state.memory.knownFields : null,
+    isRecord(state.context) ? state.context.knownFields : null,
+  ];
+  return candidates.reduce<Record<string, unknown>>((merged, candidate) => (
+    isRecord(candidate) ? { ...merged, ...candidate } : merged
+  ), {});
+}
+
+function hasKnownField(
+  requestedField: string,
+  availableState: Record<string, unknown>,
+): boolean {
+  if (hasValueAtPath(availableState, requestedField)) return true;
+  const requested = normalizeFieldName(requestedField.split('.').pop() || requestedField);
+  const knownFields = knownFieldsFromState(availableState);
+  const normalizedKnown = new Map(
+    Object.entries(knownFields)
+      .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+      .map(([key, value]) => [normalizeFieldName(key), String(value)]),
+  );
+  if (normalizedKnown.has(requested)) return true;
+
+  const aliases: Array<{ pattern: RegExp; key: string }> = [
+    { pattern: /\b(nome|nome completo|titular)\b/, key: 'name' },
+    { pattern: /\b(cpf|cnpj|documento|identificador)\b/, key: 'customer identifier' },
+    { pattern: /\b(telefone|whatsapp|celular|numero de contato)\b/, key: 'phone' },
+    { pattern: /\b(email|e mail)\b/, key: 'email' },
+    { pattern: /\b(endereco|logradouro|rua|localidade|residencia)\b/, key: 'address' },
+    { pattern: /\b(produto|servico|plano|preferencia|opcao)\b/, key: 'product or service preference' },
+  ];
+  const alias = aliases.find((item) => item.pattern.test(requested));
+  if (alias && normalizedKnown.has(alias.key)) return true;
+
+  const address = normalizedKnown.get('address') || '';
+  if (/\b(cep|codigo postal|postal code|zip)\b/.test(requested)) {
+    return /\b\d{5}-?\d{3}\b/.test(address);
+  }
+  if (/\b(complemento|apartamento|apto|bloco|casa|numero da residencia)\b/.test(requested)) {
+    return /\b(complemento|apartamento|apto|bloco|casa|numero|n\s*\d)\b/i.test(address);
+  }
+  return false;
+}
+
+function availableFieldState(context: AgentRuntimeContext): Record<string, unknown> {
+  return {
+    input: context.execution.input,
+    context: context.execution.context,
+    variables: context.execution.variables,
+    memory: context.memory || {},
+    knownFields: isRecord(context.memory?.knownFields) ? context.memory.knownFields : {},
+  };
+}
+
+function requestedKnownFieldsFromResponse(
+  response: string,
+  availableState: Record<string, unknown>,
+): string[] {
+  const normalized = normalizeFieldName(response);
+  const requestCue = '(?:qual|informe|envie|passe|forneca|preciso|necessito|confirme|digite|diga|pode me dizer|pode me passar|por favor)';
+  const fields: Array<{ label: string; pattern: string }> = [
+    { label: 'name', pattern: '(?:nome|nome completo|titular)' },
+    { label: 'customer_identifier', pattern: '(?:cpf|cnpj|documento|identificador)' },
+    { label: 'phone', pattern: '(?:telefone|whatsapp|celular|numero de contato)' },
+    { label: 'email', pattern: '(?:email|e mail)' },
+    { label: 'CEP', pattern: '(?:cep|codigo postal|postal code|zip)' },
+    { label: 'address', pattern: '(?:endereco|logradouro|rua|localidade|residencia)' },
+    { label: 'address complement', pattern: '(?:complemento|apartamento|apto|bloco|casa|numero da residencia)' },
+    { label: 'product or service preference', pattern: '(?:produto|servico|plano|preferencia|opcao)' },
+  ];
+
+  return fields
+    .filter((field) => hasKnownField(field.label, availableState))
+    .filter((field) => (
+      new RegExp(`\\b${requestCue}\\b.{0,80}\\b${field.pattern}\\b`).test(normalized)
+      || new RegExp(`\\b${field.pattern}\\b.{0,40}\\b(?:por favor|novamente|de novo|qual|informe|envie|passe|confirme)\\b`).test(normalized)
+    ))
+    .map((field) => field.label);
+}
+
+type UnsupportedChoiceReference = {
+  phrase: string;
+  subject: string | null;
+};
+
+function normalizeConversationalText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function choiceSubjectFromMatch(match: RegExpMatchArray): string | null {
+  const subject = String(match[1] || '')
+    .replace(/\b(?:mais|que|te|lhe|voce|prefere|preferiu|interessou|interessa|agradou|agrada|escolhe|escolheria|chamou)\b.*$/i, '')
+    .trim();
+  return subject || null;
+}
+
+function findChoiceReference(value: string): (UnsupportedChoiceReference & { index: number }) | null {
+  const normalized = normalizeConversationalText(value);
+  const patterns = [
+    /\b(?:qual|quais|algum|alguma|alguns|algumas)\s+(?:desses|dessas|destes|destas|deles|delas)(?:\s+([a-z][a-z -]{0,40}?))?(?=\s+(?:mais|que|te|lhe|voce|prefere|preferiu|interessou|interessa|agradou|agrada|escolhe|escolheria|chamou)\b|[?!.,]|$)/i,
+    /\bqual(?:\s+d[oa]s?)?\s+([a-z][a-z -]{0,30}?)\s+(?:mais\s+)?(?:te\s+|lhe\s+)?(?:interessou|interessa|agradou|agrada|prefere|preferiu|escolhe|escolheria|chamou)(?=[?!.,\s]|$)/i,
+    /\b(?:esse|essa|esses|essas|este|esta|estes|estas)\s+([a-z][a-z -]{0,30}?)\s+(?:te\s+|lhe\s+)?(?:interessou|interessa|agradou|agrada|serve|atende)(?=[?!.,\s]|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match || match.index === undefined) continue;
+    return {
+      phrase: match[0].trim(),
+      subject: choiceSubjectFromMatch(match),
+      index: match.index,
+    };
+  }
+  return null;
+}
+
+function singularChoiceToken(value: string): string {
+  if (value.length > 4 && value.endsWith('oes')) return value.slice(0, -3);
+  if (value.length > 4 && value.endsWith('es')) return value.slice(0, -2);
+  if (value.length > 3 && value.endsWith('s')) return value.slice(0, -1);
+  return value;
+}
+
+function textMentionsChoiceSubject(value: string, subject: string | null): boolean {
+  if (!subject) return true;
+  const stopWords = new Set(['a', 'as', 'o', 'os', 'de', 'do', 'da', 'dos', 'das', 'opcao', 'opcoes', 'alternativa', 'alternativas']);
+  const tokens = normalizeFieldName(subject)
+    .split(' ')
+    .filter((token) => token.length > 1 && !stopWords.has(token));
+  if (tokens.length === 0) return true;
+  const normalized = ` ${normalizeFieldName(value)} `;
+  return tokens.some((token) => {
+    const stem = singularChoiceToken(token);
+    return new RegExp(`\\b${stem}[a-z0-9]*\\b`, 'i').test(normalized);
+  });
+}
+
+function looksLikeChoicePresentation(value: string, subject: string | null): boolean {
+  if (!value.trim() || !textMentionsChoiceSubject(value, subject)) return false;
+  const normalized = normalizeConversationalText(value);
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const listLines = lines.filter((line) => /^(?:[-*•‣◦⁃] |\d{1,2}[.)-]\s|[^\p{L}\p{N}\s]{1,3}\s)/u.test(line));
+  const commaCount = (value.match(/[,;]/g) || []).length;
+  const hasJoinedAlternatives = commaCount >= 1 && /\b(?:e|ou)\b/.test(normalized);
+  const hasLabeledAlternatives = /:\s*[^\n]{1,80}\b(?:e|ou)\b/.test(normalized);
+  const repeatedValues = (
+    (value.match(/R\$\s*\d/gi) || []).length >= 2
+    || (value.match(/\b\d{1,2}(?::\d{2}|h\b)/gi) || []).length >= 2
+  );
+  return listLines.length >= 2
+    || lines.length >= 3
+    || commaCount >= 2
+    || hasJoinedAlternatives
+    || hasLabeledAlternatives
+    || repeatedValues;
+}
+
+function unsupportedChoiceReference(
+  response: string,
+  memory?: Record<string, unknown>,
+): UnsupportedChoiceReference | null {
+  const reference = findChoiceReference(response);
+  if (!reference) return null;
+
+  const responseBeforeReference = response.slice(0, reference.index);
+  if (looksLikeChoicePresentation(responseBeforeReference, reference.subject)) return null;
+
+  const recentMessages = Array.isArray(memory?.recentMessages)
+    ? memory.recentMessages.filter(isRecord)
+    : [];
+  const priorAssistantPresentation = recentMessages.some((message) => (
+    message.fromMe === true
+    && typeof message.content === 'string'
+    && looksLikeChoicePresentation(message.content, reference.subject)
+  ));
+  if (priorAssistantPresentation) return null;
+
+  return { phrase: reference.phrase, subject: reference.subject };
 }
 
 function relevantState(context: AgentRuntimeContext, toolState: Record<string, unknown>) {
@@ -190,7 +386,10 @@ function limitResult(
         output: {
           type: 'handoff',
           reason,
-          summary: partialResponse || 'O agente atingiu o limite operacional configurado.',
+          summary: partialResponse
+            ? `Transferência automática por ${reason}. Contexto para continuidade: ${partialResponse}`
+            : `Transferência automática por ${reason}. O agente atingiu o limite operacional configurado.`,
+          customerMessage: 'Obrigado pelas informações. Vou encaminhar seu atendimento para nossa equipe continuar por aqui.',
         },
       };
     default:
@@ -226,6 +425,7 @@ export async function executeAgentNode(
   let modelCalls = 0;
   let lastPartialResponse = '';
   let strategyRedirects = 0;
+  let partialFinalCorrectionIssued = false;
 
   for (let turn = 1; turn <= config.maxTurns; turn += 1) {
     if (context.signal.aborted) {
@@ -321,8 +521,41 @@ export async function executeAgentNode(
       };
     }
 
+    const customerFacingDecisionText = decision.type === 'final'
+      ? decision.response
+      : decision.type === 'needs_input'
+        ? decision.question
+        : null;
+    const unsupportedReference = customerFacingDecisionText
+      ? unsupportedChoiceReference(customerFacingDecisionText, context.memory)
+      : null;
+    if (unsupportedReference) {
+      messages.push({
+        role: 'assistant',
+        content: stableStringify(decision),
+      }, {
+        role: 'user',
+        content: `A resposta contém uma referência sem antecedente ("${unsupportedReference.phrase}"). As escolhas ainda não foram apresentadas ao cliente. Corrija a resposta completa: primeiro apresente as opções relevantes usando apenas fatos confirmados do contexto ou conhecimento e somente depois, se necessário, pergunte qual ele prefere. Não envie uma pergunta que pressuponha conteúdo omitido.`,
+      });
+      continue;
+    }
+
     if (decision.type === 'final') {
       lastPartialResponse = decision.response;
+      const repeatedKnownFields = requestedKnownFieldsFromResponse(
+        decision.response,
+        availableFieldState(context),
+      );
+      if (repeatedKnownFields.length > 0) {
+        messages.push({
+          role: 'assistant',
+          content: stableStringify(decision),
+        }, {
+          role: 'user',
+          content: `A resposta voltou a pedir campos já conhecidos: ${repeatedKnownFields.join(', ')}. Use esses valores e peça somente dados realmente ausentes.`,
+        });
+        continue;
+      }
       const invalidFinal = validateStructuredFinalOutput(config, decision);
       if (invalidFinal) {
         messages.push({
@@ -331,6 +564,24 @@ export async function executeAgentNode(
         }, {
           role: 'user',
           content: `${invalidFinal} Corrija a saída e retorne novamente o contrato completo.`,
+        });
+        continue;
+      }
+      if (
+        decision.completionStatus === 'partial'
+        && !partialFinalCorrectionIssued
+        && turn < config.maxTurns
+      ) {
+        partialFinalCorrectionIssued = true;
+        const asksForMoreInput = responseRequestsMoreCustomerInput(decision.response);
+        messages.push({
+          role: 'assistant',
+          content: stableStringify(decision),
+        }, {
+          role: 'user',
+          content: asksForMoreInput
+            ? 'A resposta estÃ¡ pedindo mais dados, portanto nÃ£o pode ser uma saÃ­da final parcial. Retorne type=needs_input com apenas os missingFields realmente ausentes. Se nenhum dado falta e todos os critÃ©rios foram cumpridos, retorne type=final com completionStatus=completed. Se depender de atendimento humano, retorne type=handoff.'
+            : 'A resposta foi apresentada como final, mas completionStatus=partial deixa o estado ambÃ­guo. Reavalie os critÃ©rios: se foram cumpridos, retorne type=final com completionStatus=completed; se falta dado do cliente, retorne type=needs_input com missingFields exatos; se depender de atendimento humano, retorne type=handoff. NÃ£o agradeÃ§a nem declare conclusÃ£o enquanto o objetivo estiver parcial.',
         });
         continue;
       }
@@ -350,19 +601,16 @@ export async function executeAgentNode(
     }
 
     if (decision.type === 'needs_input') {
-      const availableState = {
-        input: context.execution.input,
-        context: context.execution.context,
-        variables: context.execution.variables,
-      };
-      const alreadyAvailable = decision.missingFields.filter((field) => hasValueAtPath(availableState, field));
-      if (alreadyAvailable.length > 0 && alreadyAvailable.length === decision.missingFields.length) {
+      const availableState = availableFieldState(context);
+      const alreadyAvailable = decision.missingFields.filter((field) => hasKnownField(field, availableState));
+      if (alreadyAvailable.length > 0) {
+        const actuallyMissing = decision.missingFields.filter((field) => !alreadyAvailable.includes(field));
         messages.push({
           role: 'assistant',
           content: stableStringify(decision),
         }, {
           role: 'user',
-          content: `Os campos declarados como ausentes já estão disponíveis: ${alreadyAvailable.join(', ')}. Use o contexto existente e escolha outra ação.`,
+          content: `Os campos declarados como ausentes já estão disponíveis: ${alreadyAvailable.join(', ')}. Use o contexto existente. Se ainda precisar perguntar, limite-se a: ${actuallyMissing.join(', ') || 'nenhum campo'}.`,
         });
         continue;
       }

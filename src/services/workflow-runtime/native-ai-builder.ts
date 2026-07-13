@@ -9,10 +9,16 @@ import { validateWorkflowDefinition } from './validator';
 import {
   buildNativeAgentToolConfig,
   getNativeAgentToolLabel,
-  isNativeAgentToolEligible,
+  isNativeAgentToolAttachable,
   listAttachedWorkflowToolNames,
   type NativeAgentToolCatalogItem,
 } from './native-agent-tools';
+
+const AI_COMPLETION_SYSTEM_OPERATIONS = [
+  'system:slot_memory_persisted',
+  'system:contact_facts_persisted',
+  'system:crm_custom_fields_persisted',
+] as const;
 
 const AiAgentBlueprintSchema = z.object({
   name: z.string().min(1).max(100),
@@ -25,6 +31,12 @@ const AiAgentBlueprintSchema = z.object({
   toolNames: z.array(z.string().min(1)).max(64).default([]),
   knowledgeDocumentIds: z.array(z.string().min(1)).max(128).default([]),
   knowledgeCollectionIds: z.array(z.string().min(1)).max(32).default([]),
+  completionControl: z.object({
+    closeWhenComplete: z.boolean(),
+    requiredFields: z.array(z.string().min(1).max(120)).max(30).default([]),
+    requiredOperations: z.array(z.enum(AI_COMPLETION_SYSTEM_OPERATIONS)).max(3).default([]),
+    allowFieldlessCompletion: z.boolean().default(false),
+  }).optional(),
 });
 
 export const NativeWorkflowAiBlueprintSchema = z.object({
@@ -48,6 +60,21 @@ export const NativeWorkflowAiBlueprintSchema = z.object({
   if (value.architecture === 'routed_team' && (value.agents.length !== 2 || !value.router)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['router'], message: 'Equipe roteada exige dois agentes e duas rotas.' });
   }
+  value.agents.forEach((agent, index) => {
+    const completion = agent.completionControl;
+    if (
+      completion?.closeWhenComplete
+      && completion.requiredFields.length === 0
+      && completion.requiredOperations.length === 0
+      && !completion.allowFieldlessCompletion
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agents', index, 'completionControl'],
+        message: 'Encerramento automático exige campos/etapas verificáveis ou permissão fieldless explícita.',
+      });
+    }
+  });
 });
 
 export type NativeWorkflowAiBlueprint = z.infer<typeof NativeWorkflowAiBlueprintSchema>;
@@ -135,7 +162,7 @@ function addTools(input: {
       rejected.push(toolName);
       return;
     }
-    if (!isNativeAgentToolEligible(tool)) {
+    if (!isNativeAgentToolAttachable(tool)) {
       blocked.push(toolName);
       return;
     }
@@ -152,6 +179,79 @@ function addTools(input: {
     ));
   });
   return { rejected, blocked };
+}
+
+function addDeterministicCompletionControl(input: {
+  workflow: WorkflowDefinition;
+  agentId: string;
+  completion: NonNullable<z.infer<typeof AiAgentBlueprintSchema>['completionControl']>;
+}) {
+  if (!input.completion.closeWhenComplete) return false;
+  const agent = input.workflow.nodes.find((node) => node.id === input.agentId);
+  const prefix = input.agentId.replace(/_agent$/, '');
+  const respond = input.workflow.nodes.find((node) => node.id === `${prefix}_respond`);
+  const errorHandler = input.workflow.nodes.find((node) => node.id === 'workflow_error');
+  if (!agent || !respond || !errorHandler) return false;
+
+  const directCompletion = input.workflow.connections.find((candidate) => (
+    candidate.sourceNodeId === agent.id
+    && candidate.sourcePortId === 'completed'
+    && candidate.targetNodeId === respond.id
+    && candidate.connectionType === 'main'
+  ));
+  if (!directCompletion) return false;
+  input.workflow.connections = input.workflow.connections.filter((candidate) => candidate.id !== directCompletion.id);
+
+  const goal = createWorkflowNode('logic.goal_completion', {
+    id: `${prefix}_goal_completion`,
+    name: 'Comprovar objetivo concluído',
+    position: { x: agent.position.x + 280, y: agent.position.y - 210 },
+    config: {
+      requiredFields: input.completion.requiredFields,
+      requiredOperations: input.completion.requiredOperations,
+      requireCompletionSignal: true,
+      allowFieldlessCompletion: input.completion.allowFieldlessCompletion,
+    },
+  });
+  const close = createWorkflowNode('output.close_conversation', {
+    id: `${prefix}_close_conversation`,
+    name: 'Encerrar atendimento',
+    position: { x: agent.position.x + 560, y: agent.position.y - 210 },
+    config: {
+      reason: 'Objetivo do atendimento comprovadamente concluído.',
+      notes: 'Encerramento pelo controle nativo de conclusão.',
+      reasonTagId: '',
+      sendCloseMessage: false,
+      permissionScope: 'conversation:close',
+    },
+  });
+  const incompleteResponse = createWorkflowNode('output.respond', {
+    id: `${prefix}_completion_incomplete`,
+    name: 'Manter atendimento aberto',
+    position: { x: agent.position.x + 560, y: agent.position.y - 40 },
+    config: {
+      channel: 'source',
+      message: 'Recebi sua mensagem, mas ainda não foi possível comprovar a conclusão de todas as etapas. O atendimento continuará aberto.',
+      idempotent: true,
+    },
+  });
+  const incompleteEnd = createWorkflowNode('output.end', {
+    id: `${prefix}_completion_incomplete_end`,
+    name: 'Finalizar sem encerrar atendimento',
+    position: { x: agent.position.x + 840, y: agent.position.y - 40 },
+  });
+  input.workflow.nodes.push(goal, close, incompleteResponse, incompleteEnd);
+  input.workflow.connections.push(
+    connection(`${prefix}_completion_evaluate`, agent.id, 'completed', goal.id, 'main', 'main'),
+    connection(`${prefix}_completion_close`, goal.id, 'completed', close.id, 'main', 'main'),
+    connection(`${prefix}_completion_keep_open`, goal.id, 'incomplete', incompleteResponse.id, 'main', 'main'),
+    connection(`${prefix}_completion_deliver`, close.id, 'completed', respond.id, 'main', 'main'),
+    connection(`${prefix}_completion_open_end`, incompleteResponse.id, 'success', incompleteEnd.id, 'main', 'main'),
+    connection(`${prefix}_completion_goal_error`, goal.id, 'error', errorHandler.id, 'error', 'error'),
+    connection(`${prefix}_completion_close_error`, close.id, 'error', errorHandler.id, 'error', 'error'),
+    connection(`${prefix}_completion_open_error`, incompleteResponse.id, 'error', errorHandler.id, 'error', 'error'),
+  );
+  return true;
 }
 
 export function materializeNativeWorkflowAiBlueprint(input: {
@@ -182,6 +282,7 @@ export function materializeNativeWorkflowAiBlueprint(input: {
         { agentId: 'sales_agent', knowledgeId: 'sales_knowledge' },
       ];
   const warnings: string[] = [];
+  let deterministicCompletionControls = 0;
   const allowedDocumentIds = new Set(input.allowedKnowledgeDocumentIds);
   const allowedCollectionIds = new Set(input.allowedKnowledgeCollectionIds);
   blueprint.agents.forEach((agent, index) => {
@@ -212,6 +313,17 @@ export function materializeNativeWorkflowAiBlueprint(input: {
     }
     if (toolResult.blocked.length > 0) {
       warnings.push(`Ferramentas mantidas bloqueadas por nao serem elegiveis para execucao autonoma: ${toolResult.blocked.join(', ')}.`);
+    }
+    if (agent.completionControl?.closeWhenComplete) {
+      if (addDeterministicCompletionControl({
+        workflow,
+        agentId: target.agentId,
+        completion: agent.completionControl,
+      })) {
+        deterministicCompletionControls += 1;
+      } else {
+        warnings.push(`Controle nativo de encerramento não pôde ser conectado ao agente ${agent.name}.`);
+      }
     }
   });
 
@@ -255,6 +367,7 @@ export function materializeNativeWorkflowAiBlueprint(input: {
     `${blueprint.agents.length} agente${blueprint.agents.length === 1 ? '' : 's'} configurado${blueprint.agents.length === 1 ? '' : 's'}.`,
     blueprint.architecture === 'routed_team' ? 'AI Router com fallback de baixa confianca configurado.' : 'Rota principal de atendimento configurada.',
     `${materializedToolNames.length} ferramenta${materializedToolNames.length === 1 ? '' : 's'} anexada${materializedToolNames.length === 1 ? '' : 's'}.`,
+    `${deterministicCompletionControls} controle${deterministicCompletionControls === 1 ? '' : 's'} nativo${deterministicCompletionControls === 1 ? '' : 's'} de conclusao configurado${deterministicCompletionControls === 1 ? '' : 's'}.`,
     'Modelo, memoria, RAG, guardrail, resposta, handoff e tratamento de erro conectados.',
   ];
   return {
@@ -312,7 +425,7 @@ function promptForNativeBuilder(input: {
     JSON.stringify(input.knowledgeDocuments),
     'Colecoes permitidas (use somente IDs exatos):',
     JSON.stringify(input.knowledgeCollections),
-    'Escolha single_agent para um especialista ou routed_team para exatamente dois especialistas. Nunca invente ferramenta, documento ou colecao. Persona, objetivo e comportamento pertencem a cada agente. Ferramentas de alto risco permanecem protegidas por confirmacao e so devem ser anexadas quando forem realmente necessarias. Sempre inclua guardrails no_opinionated_secrets e no_unconfirmed_tool_success quando apropriado.',
+    `Escolha single_agent para um especialista ou routed_team para exatamente dois especialistas. Nunca invente ferramenta, documento ou colecao. Persona, objetivo e comportamento pertencem a cada agente. Para um pedido explicito de encerrar depois de concluir, configure completionControl.closeWhenComplete e liste campos verificaveis. requiredOperations aceita somente: ${AI_COMPLETION_SYSTEM_OPERATIONS.join(', ')}. Nao use close_chat como ferramenta do agente. Nunca habilite allowFieldlessCompletion sem uma solicitacao inequivoca do usuario. Ferramentas de alto risco permanecem protegidas por confirmacao e so devem ser anexadas quando forem realmente necessarias. Sempre inclua guardrails no_opinionated_secrets e no_unconfirmed_tool_success quando apropriado.`,
   ].join('\n\n');
 }
 
@@ -328,7 +441,7 @@ export async function generateNativeWorkflowAiProposal(input: {
   knowledgeDocuments: Array<{ id: string; name: string; collectionIds?: string[] }>;
   knowledgeCollections: Array<{ id: string; name: string; description?: string }>;
 }) {
-  const eligibleTools = input.tools.filter((tool) => isNativeAgentToolEligible({
+  const eligibleTools = input.tools.filter((tool) => isNativeAgentToolAttachable({
     ...tool,
     riskLevel: tool.riskLevel || 'low',
   }));
@@ -338,7 +451,7 @@ export async function generateNativeWorkflowAiProposal(input: {
     messages: [
       {
         role: 'system',
-        content: 'Voce e o arquiteto do Flowbuilder agent-first do Dialogy. Gere somente uma arquitetura segura e executavel no contrato solicitado. Toda entrega ao cliente deve ocorrer por Responder ou Handoff; agentes nunca respondem implicitamente. Uma execucao segue uma unica rota principal.',
+        content: 'Voce e o arquiteto do Flowbuilder agent-first do Dialogy. Gere somente uma arquitetura segura e executavel no contrato solicitado. Toda entrega ao cliente deve ocorrer por Responder ou Handoff; agentes nunca respondem implicitamente. Transferencia e encerramento sao blocos nativos do sistema, nunca ferramentas escolhidas pelo modelo. Uma execucao segue uma unica rota principal.',
       },
       { role: 'user', content: promptForNativeBuilder({ ...input, tools: eligibleTools }) },
     ],

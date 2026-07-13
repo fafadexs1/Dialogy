@@ -98,7 +98,7 @@ export function NativeAiBuilderDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[92vh] w-[min(900px,95vw)] max-w-none flex-col overflow-hidden border-slate-700 bg-[#0b121a] p-0 text-slate-100 shadow-2xl">
+        <DialogContent className="dark flex max-h-[92vh] w-[min(900px,95vw)] max-w-none flex-col overflow-hidden border-slate-700 bg-[#0b121a] p-0 text-slate-100 shadow-2xl">
           <div className="border-b border-slate-700/80 bg-[#101b26] px-5 py-4 sm:px-6 sm:py-5">
             <div className="flex items-start justify-between gap-4 pr-7">
               <DialogTitle className="flex items-center gap-2 text-lg">

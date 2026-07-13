@@ -598,6 +598,7 @@ export function resolveAutopilotIntent(input: {
   customerMessage: string;
   chatHistory?: string;
   knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  extractedSlots?: AutopilotExtractedSlots;
 }): AutopilotIntentResolution {
   const detected = detectIntent(input.customerMessage, input.chatHistory || '');
   return buildAutopilotIntentResolution(input, detected);
@@ -607,6 +608,7 @@ export function resolveAutopilotIntentWithOverride(input: {
   customerMessage: string;
   chatHistory?: string;
   knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  extractedSlots?: AutopilotExtractedSlots;
 }, override: DetectedIntent): AutopilotIntentResolution {
   return buildAutopilotIntentResolution(input, override);
 }
@@ -615,9 +617,10 @@ function buildAutopilotIntentResolution(input: {
   customerMessage: string;
   chatHistory?: string;
   knowledgeDocuments?: KnowledgeBaseDocument[] | null;
+  extractedSlots?: AutopilotExtractedSlots;
 }, detected: DetectedIntent): AutopilotIntentResolution {
   const workflow = getAutopilotWorkflow(detected.intent);
-  const extractedSlots = extractSlots(input.customerMessage);
+  const extractedSlots = input.extractedSlots || extractSlots(input.customerMessage);
   const shouldRetrieveKnowledge = !['greeting', 'thanks', 'human_handoff'].includes(detected.intent);
 
   return {

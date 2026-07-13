@@ -20,6 +20,7 @@ function runtime(options: { validateBeforeRun?: boolean } = {}) {
   const handlers = createDefaultNodeHandlerRegistry({
     sendResponse: async (message) => ({ delivered: true, message }),
     handoff: async () => ({ transferred: true }),
+    closeConversation: async () => ({ closed: true }),
     loadState: async () => ({ loaded: true }),
     saveState: async () => ({ saved: true }),
     executeSubflow: async () => ({ subflow: true }),
@@ -107,6 +108,50 @@ describe('workflow executor', () => {
     const { executor } = runtime();
     const execution = await executor.start({ workflow, input: { route } });
     expect(execution.nodeResults.switch?.selectedOutput).toBe(expectedOutput);
+  });
+
+  it('preserves completion evidence while closing before the final thank-you response', async () => {
+    const trigger = workflowNode('trigger.manual', 'trigger');
+    const goal = workflowNode('logic.goal_completion', 'goal', {
+      requiredFields: ['name'],
+      requiredOperations: [],
+      requireCompletionSignal: true,
+      allowFieldlessCompletion: false,
+    });
+    const close = workflowNode('output.close_conversation', 'close');
+    const respond = workflowNode('output.respond', 'respond', { message: '{{current.response}}' });
+    const incomplete = workflowNode('output.end', 'incomplete');
+    const end = workflowNode('output.end', 'end');
+    const errorHandler = workflowNode('error.handler', 'error-handler', { mode: 'recover' });
+    const errorEnd = workflowNode('output.end', 'error-end');
+    const workflow = workflowDefinition(
+      [trigger, goal, close, respond, incomplete, end, errorHandler, errorEnd],
+      [
+        connect(trigger, 'started', goal, 'main'),
+        connect(goal, 'completed', close, 'main'),
+        connect(goal, 'incomplete', incomplete, 'main'),
+        connect(close, 'completed', respond, 'main'),
+        connect(close, 'error', errorHandler, 'error', 'error'),
+        connect(respond, 'success', end, 'main'),
+        connect(respond, 'error', errorHandler, 'error', 'error'),
+        connect(errorHandler, 'recovered', errorEnd, 'main'),
+      ],
+    );
+    const { executor } = runtime();
+
+    const execution = await executor.start({
+      workflow,
+      input: {
+        response: 'Obrigado! Seu atendimento foi concluído.',
+        completionStatus: 'completed',
+        knownFields: { name: 'Marina' },
+      },
+    });
+
+    expect(execution.status).toBe('completed');
+    expect(execution.previousNodeId).toBe('end');
+    expect(execution.nodeResults.close?.output?.goalCompletion).toMatchObject({ complete: true });
+    expect(execution.nodeResults.respond?.output?.message).toBe('Obrigado! Seu atendimento foi concluído.');
   });
 
   it('retries a temporary node failure and then succeeds', async () => {

@@ -15,7 +15,6 @@ import { consumeRateLimit } from '@/lib/ratelimit';
 import { assignChatSchema, closeChatSchema, transferChatSchema } from '@/lib/validation/chat-schemas';
 import { reportServerError } from '@/lib/observability/errors';
 import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-config';
-import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 import { touchUserPresenceActivity } from '@/lib/presence-server';
 import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
 import { mergeEquivalentContacts } from '@/lib/whatsapp/contact-thread';
@@ -26,6 +25,7 @@ import { loadContactThreadContext } from '@/server/inbox/contact-thread-service'
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { recordDecisionOutcomesForChat } from '@/services/autopilot/outcome-tracker';
 import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
+import { selectFairAgentForTeam } from '@/services/chat-distribution/fair-distribution';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -135,7 +135,7 @@ export const transferChatAction = withDebug(
         input: { chatId: string; teamId?: string; agentId?: string },
         // Optional parameter to accept a session-like object from an API call
         prefetchedSession?: { user: { id: string, name: string, email?: string | null }, isSystemAgent?: boolean }
-    ): Promise<{ success: boolean; error?: string; chat?: Chat }> {
+    ): Promise<{ success: boolean; error?: string; chat?: Chat; assignedAgent?: { id: string; name: string } }> {
         let sessionToUse = prefetchedSession;
 
         if (!sessionToUse) {
@@ -178,6 +178,7 @@ export const transferChatAction = withDebug(
                 ) AS last_instance_name
             FROM chats c
             WHERE c.id = $1
+            FOR UPDATE OF c
         `, [chatId]);
             if (chatRes.rows.length === 0) {
                 await client.query('ROLLBACK');
@@ -293,46 +294,53 @@ export const transferChatAction = withDebug(
                     }
                 }
 
-                console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente com base no tempo desde a última atribuição...`);
+                console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente por carga efetiva e justiça...`);
                 console.log('[TRANSFER_CHAT] Params:', teamId, currentAgentId);
-                const presenceTtlSeconds = getPresenceTtlSeconds();
-                const recentActivitySeconds = getPresenceRecentActivitySeconds();
-                const availabilitySql = buildPresenceAvailabilitySql('uwp', '$3', '$4');
-                const query = `
-                SELECT
-                    u.id as "agentId",
-                    u.full_name as "agentName",
-                    t.name as "teamName",
-                    MAX(c.assigned_at) as "lastAssigned"
-                FROM users u
-                JOIN team_members tm ON u.id = tm.user_id
-                JOIN teams t ON tm.team_id = t.id
-                JOIN user_workspace_presence uwp
-                    ON uwp.user_id = u.id
-                    AND uwp.workspace_id = t.workspace_id
-                LEFT JOIN chats c ON u.id = c.agent_id
-                WHERE tm.team_id = $1
-                  AND ${availabilitySql}
-                  AND u.id <> $2
-                GROUP BY u.id, t.name
-                ORDER BY "lastAssigned" ASC NULLS FIRST, random()
-                LIMIT 1
-            `;
+                const selectedAgent = await selectFairAgentForTeam(client, {
+                    workspaceId,
+                    teamId,
+                    chatId,
+                    source: isSystemAgent ? 'system_agent_team_transfer' : 'human_team_transfer',
+                    excludeAgentId: isSystemAgent ? null : currentAgentId,
+                });
 
-                const agentRes = await client.query(query, [teamId, currentAgentId, presenceTtlSeconds, recentActivitySeconds]);
-
-                if (agentRes.rows.length === 0) {
+                if (!selectedAgent) {
                     await client.query('ROLLBACK');
                     return { success: false, error: "Nenhum agente disponível nesta equipe no momento." };
                 }
-                finalAgentId = agentRes.rows[0].agentId;
-                transferTargetName = agentRes.rows[0].teamName;
-                console.log(`[TRANSFER_CHAT] Equipe ${transferTargetName} selecionada. Agente por load balance: ${finalAgentId}`);
+                finalAgentId = selectedAgent.agentId;
+                transferTargetName = selectedAgent.teamName;
+                console.log('[TRANSFER_CHAT] Agente selecionado pelo balanceador justo.', {
+                    teamId,
+                    finalAgentId,
+                    effectiveLoad: selectedAgent.effectiveLoad,
+                    occupancy: selectedAgent.occupancy,
+                    portfolioCount: selectedAgent.portfolioCount,
+                    fairnessScoreBefore: selectedAgent.fairnessScoreBefore,
+                });
             } else if (agentId) {
-                const agentRes = await client.query('SELECT full_name FROM users WHERE id = $1', [agentId]);
+                const agentRes = await client.query(
+                    `SELECT u.full_name
+                     FROM users u
+                     WHERE u.id = $1
+                       AND (
+                         EXISTS (
+                           SELECT 1
+                           FROM user_workspace_roles uwr
+                           WHERE uwr.user_id = u.id AND uwr.workspace_id = $2
+                         )
+                         OR EXISTS (
+                           SELECT 1
+                           FROM team_members tm
+                           JOIN teams t ON t.id = tm.team_id
+                           WHERE tm.user_id = u.id AND t.workspace_id = $2
+                         )
+                       )`,
+                    [agentId, workspaceId]
+                );
                 if (agentRes.rows.length === 0) {
                     await client.query('ROLLBACK');
-                    return { success: false, error: "Agente de destino não encontrado." };
+                    return { success: false, error: "Agente de destino não encontrado neste workspace." };
                 }
                 transferTargetName = agentRes.rows[0].full_name;
             }
@@ -389,6 +397,11 @@ export const transferChatAction = withDebug(
 
             await client.query('COMMIT');
             await broadcastHydratedChatUpdate(workspaceId, chatId);
+            const updatedChat = await fetchHydratedChatForImmediateReturn(
+                workspaceId,
+                currentAgentId,
+                chatId,
+            );
             if (!isSystemAgent) {
                 await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'transfer_chat');
             }
@@ -418,7 +431,11 @@ export const transferChatAction = withDebug(
                 })();
             }
 
-            return { success: true };
+            return {
+                success: true,
+                chat: updatedChat,
+                assignedAgent: { id: finalAgentId, name: transferTargetName },
+            };
 
         } catch (error) {
             await client.query('ROLLBACK');
@@ -562,6 +579,11 @@ export const transferChatToIntelligentAgentAction = withDebug(
 
             await client.query('COMMIT');
             await broadcastHydratedChatUpdate(workspaceId, chatId);
+            const updatedChat = await fetchHydratedChatForImmediateReturn(
+                workspaceId,
+                sessionToUse.user.id,
+                chatId,
+            );
 
             try {
                 const lastInboundRes = await db.query(
@@ -609,18 +631,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
                 console.error('[TRANSFER_TO_AI] Falha ao enfileirar resposta inicial:', error);
             }
 
-            const rows = await fetchChats({
-                workspaceId,
-                userId: sessionToUse.user.id,
-                limit: 1,
-                includeChatId: chatId,
-                ownership: 'everyone',
-                statuses: [],
-            });
-            const timezone = await getWorkspaceTimezone(workspaceId);
-            const { chats } = await hydrateChats(rows, timezone);
-
-            return { success: true, chat: chats[0] };
+            return { success: true, chat: updatedChat };
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('[TRANSFER_TO_AI] Erro ao transferir para Atendente Inteligente:', error);
@@ -2781,6 +2792,33 @@ async function fetchChatsDelta({
 }
 
 type AgentRow = { id: string; full_name: string; avatar_url?: string | null };
+
+async function fetchHydratedChatForImmediateReturn(
+    workspaceId: string,
+    userId: string,
+    chatId: string,
+): Promise<Chat | undefined> {
+    try {
+        const rows = await fetchChats({
+            workspaceId,
+            userId,
+            limit: 1,
+            includeChatId: chatId,
+            ownership: 'everyone',
+            statuses: [],
+        });
+        if (!rows.length) return undefined;
+
+        const timezone = await getWorkspaceTimezone(workspaceId);
+        const { chats } = await hydrateChats(rows, timezone);
+        return chats[0];
+    } catch (error) {
+        // The transfer is already committed at this point. A hydration failure
+        // must not turn a successful ownership change into a false error.
+        console.error('[CHAT_HYDRATION] Failed to hydrate immediate chat response:', error);
+        return undefined;
+    }
+}
 
 async function fetchAgentsMap(ids: string[]): Promise<Map<string, AgentRow>> {
     if (!ids.length) return new Map();

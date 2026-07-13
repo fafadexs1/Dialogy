@@ -33,6 +33,7 @@ import {
   GitBranch,
   History,
   LineChart,
+  ListChecks,
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -121,7 +122,7 @@ import {
   getNativeAgentToolUnavailableReason,
   getWorkflowToolName,
   groupNativeAgentTools,
-  isNativeAgentToolEligible,
+  isNativeAgentToolAttachable,
   isNativeAgentToolRecommended,
   nativeAgentToolTestId,
   type NativeAgentToolCatalogItem,
@@ -173,12 +174,14 @@ const CATEGORY_META: Record<WorkflowNodeCategory, { label: string; icon: typeof 
 function nodeIcon(type: string) {
   if (type.startsWith('trigger.')) return Play;
   if (type === 'ai.agent') return Bot;
+  if (type === 'logic.goal_completion') return ListChecks;
   if (type === 'logic.ai_router' || type === 'logic.switch' || type === 'logic.if') return GitBranch;
   if (type.startsWith('knowledge.') || type.startsWith('memory.')) return Database;
   if (type.startsWith('tool.')) return Wrench;
   if (type === 'guardrail.policy') return ShieldCheck;
   if (type === 'output.respond') return Send;
   if (type === 'output.handoff') return UserRound;
+  if (type === 'output.close_conversation') return CheckCircle2;
   if (type === 'output.end') return CheckCircle2;
   return Braces;
 }
@@ -448,11 +451,17 @@ function AgentInspector({
   const [toolQuery, setToolQuery] = useState('');
   const normalizedToolQuery = toolQuery.trim().toLocaleLowerCase('pt-BR');
   const visibleTools = tools
+    .filter((tool) => isNativeAgentToolAttachable(tool) || connectedToolNames.has(tool.name))
     .filter((tool) => !normalizedToolQuery || `${getNativeAgentToolLabel(tool)} ${tool.name} ${tool.description} ${tool.serverName || ''}`.toLocaleLowerCase('pt-BR').includes(normalizedToolQuery))
     .sort((left, right) => Number(connectedToolNames.has(right.name)) - Number(connectedToolNames.has(left.name)));
   const toolGroups = groupNativeAgentTools(visibleTools);
-  const eligibleToolCount = tools.filter(isNativeAgentToolEligible).length;
+  const eligibleToolCount = tools.filter(isNativeAgentToolAttachable).length;
   const selectedToolCount = tools.filter((tool) => connectedToolNames.has(tool.name)).length;
+  const recommendedTools = tools.filter(isNativeAgentToolRecommended);
+  const connectedRetainedTools = tools.filter((tool) => (
+    connectedToolNames.has(tool.name) && !isNativeAgentToolAttachable(tool)
+  ));
+  const selectableOrRetainedToolCount = eligibleToolCount + connectedRetainedTools.length;
   const selectedModel = String(connectedModel?.config.model || '');
   const selectedDocumentCount = Array.isArray(connectedKnowledge?.config.documentIds) ? connectedKnowledge.config.documentIds.length : 0;
   const knowledgeFilters = connectedKnowledge?.config.filters && typeof connectedKnowledge.config.filters === 'object'
@@ -463,9 +472,9 @@ function AgentInspector({
   return (
     <div className="space-y-4">
       <InspectorSection title="Identidade" description="Defina quem atende e qual responsabilidade este agente possui.">
-        <div className="space-y-2"><Label htmlFor={fieldId('role')}>Papel do agente</Label><Input id={fieldId('role')} value={String(config.role || '')} onChange={(event) => set('role', event.target.value)} placeholder="Ex.: especialista de suporte e retenção" /></div>
-        <div className="space-y-2"><Label htmlFor={fieldId('language')}>Idioma</Label><select id={fieldId('language')} value={String(config.language || 'pt-BR')} onChange={(event) => set('language', event.target.value)} className="h-10 w-full rounded-md border border-white/10 bg-slate-950 px-3 text-sm text-slate-200"><option value="pt-BR">Português (Brasil)</option><option value="en-US">English</option><option value="es-ES">Español</option></select></div>
-        <div className="space-y-2"><Label htmlFor={fieldId('persona')}>Tom e personalidade</Label><Textarea id={fieldId('persona')} value={String(config.persona || '')} onChange={(event) => set('persona', event.target.value)} className="min-h-28" placeholder="Ex.: cordial, objetivo e didático. Não use jargões técnicos." /></div>
+        <div className="space-y-2"><Label htmlFor={fieldId('role')}>Papel do agente</Label><Input id={fieldId('role')} value={String(config.role || '')} onChange={(event) => set('role', event.target.value)} className="rounded-xl border-white/10 bg-slate-950 text-slate-100 placeholder:text-slate-600" placeholder="Ex.: especialista de suporte e retenção" /></div>
+        <div className="space-y-2"><Label htmlFor={fieldId('language')}>Idioma</Label><select id={fieldId('language')} value={String(config.language || 'pt-BR')} onChange={(event) => set('language', event.target.value)} className="h-10 w-full rounded-xl border border-white/10 bg-slate-950 px-3 text-sm text-slate-200"><option value="pt-BR">Português (Brasil)</option><option value="en-US">English</option><option value="es-ES">Español</option></select></div>
+        <div className="space-y-2"><Label htmlFor={fieldId('persona')}>Tom e personalidade</Label><Textarea id={fieldId('persona')} value={String(config.persona || '')} onChange={(event) => set('persona', event.target.value)} className="min-h-28 rounded-xl border-white/10 bg-slate-950 text-slate-100 placeholder:text-slate-600" placeholder="Ex.: cordial, objetivo e didático. Não use jargões técnicos." /></div>
       </InspectorSection>
 
       <InspectorSection title="Recursos da IA" description="Configure aqui o que este agente pode usar. As conexões técnicas são gerenciadas automaticamente.">
@@ -485,12 +494,12 @@ function AgentInspector({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor={fieldId('tool-search')}>Ferramentas permitidas</Label>
-            <span data-testid="agent-tool-selection-count" aria-live="polite" className="text-xs text-slate-400">{toolsLoading ? 'Carregando catálogo…' : `${selectedToolCount} de ${eligibleToolCount} ativas`}</span>
+            <span data-testid="agent-tool-selection-count" aria-live="polite" className="text-xs text-slate-400">{toolsLoading ? 'Carregando catálogo…' : `${selectedToolCount} de ${selectableOrRetainedToolCount} ativas`}</span>
           </div>
-          <Input id={fieldId('tool-search')} value={toolQuery} onChange={(event) => setToolQuery(event.target.value)} placeholder="Buscar por nome, função ou integração" />
+          <Input id={fieldId('tool-search')} value={toolQuery} onChange={(event) => setToolQuery(event.target.value)} className="rounded-xl border-white/10 bg-slate-950 text-slate-100 placeholder:text-slate-600" placeholder="Buscar por nome, função ou integração" />
           <div className="flex flex-wrap gap-1.5">
-            <Button type="button" size="sm" variant="outline" data-testid="agent-tools-select-recommended" onClick={() => onSetTools(tools.filter(isNativeAgentToolRecommended))} disabled={toolsLoading || tools.length === 0} className="h-7 border-white/10 px-2 text-[10px]">Selecionar recomendadas</Button>
-            <Button type="button" size="sm" variant="outline" data-testid="agent-tools-select-all-eligible" onClick={() => onSetTools(tools.filter(isNativeAgentToolEligible))} disabled={toolsLoading || tools.length === 0} className="h-7 border-white/10 px-2 text-[10px]">Todas elegíveis</Button>
+            {recommendedTools.length > 0 ? <Button type="button" size="sm" variant="outline" data-testid="agent-tools-select-recommended" onClick={() => onSetTools([...recommendedTools, ...connectedRetainedTools])} disabled={toolsLoading} className="h-7 border-white/10 px-2 text-[10px]">Selecionar recomendadas</Button> : null}
+            <Button type="button" size="sm" variant="outline" data-testid="agent-tools-select-all-eligible" onClick={() => onSetTools([...tools.filter(isNativeAgentToolAttachable), ...connectedRetainedTools])} disabled={toolsLoading || eligibleToolCount === 0} className="h-7 border-white/10 px-2 text-[10px]">Todas elegíveis</Button>
             <Button type="button" size="sm" variant="ghost" data-testid="agent-tools-clear" onClick={() => onSetTools([])} disabled={toolsLoading || selectedToolCount === 0} className="h-7 px-2 text-[10px] text-slate-400">Limpar</Button>
           </div>
           <div className="max-h-80 space-y-3 overflow-y-auto rounded-xl border border-white/[0.07] p-2">
@@ -913,7 +922,7 @@ export function NativeWorkflowBuilder({
     const { type, tool, position } = input;
     let workflowNode: WorkflowNode | null = null;
     if (tool) {
-      if (!isNativeAgentToolEligible(tool)) return;
+      if (!isNativeAgentToolAttachable(tool)) return;
       workflowNode = createWorkflowNode(tool.source === 'mcp' ? 'tool.mcp' : 'tool.internal', {
         id: `tool_${crypto.randomUUID()}`,
         name: getNativeAgentToolLabel(tool),
@@ -1086,7 +1095,7 @@ export function NativeWorkflowBuilder({
   };
 
   const handleToggleAgentTool = (tool: CatalogTool) => {
-    if (!selectedWorkflowNode || !isNativeAgentToolEligible(tool)) return;
+    if (!selectedWorkflowNode) return;
     const connectedTool = connectedToolNodes.find((node) => getWorkflowToolName(node) === tool.name);
     if (connectedTool) {
       const lifecycle = detachWorkflowConnectionsAndPrune({
@@ -1104,6 +1113,7 @@ export function NativeWorkflowBuilder({
       commit(next.nodes, next.edges);
       return;
     }
+    if (!isNativeAgentToolAttachable(tool)) return;
     attachResourceToSelectedAgent(
       tool.source === 'mcp' ? 'tool.mcp' : 'tool.internal',
       'tool',
@@ -1114,7 +1124,9 @@ export function NativeWorkflowBuilder({
   const handleSetAgentTools = (requestedTools: CatalogTool[]) => {
     if (!selectedNode || !selectedWorkflowNode || selectedWorkflowNode.type !== 'ai.agent') return;
     const desiredTools = new Map(
-      requestedTools.filter(isNativeAgentToolEligible).map((tool) => [tool.name, tool]),
+      requestedTools
+        .filter((tool) => isNativeAgentToolAttachable(tool) || connectedToolNames.has(tool.name))
+        .map((tool) => [tool.name, tool]),
     );
     const currentWorkflowNodes = new Map(nodes.map((node) => [node.id, node.data.workflowNode]));
     let nextNodes = [...nodes];
@@ -1320,7 +1332,8 @@ export function NativeWorkflowBuilder({
     manifest.attachment && !['tool.internal', 'tool.mcp'].includes(manifest.type)
   )), [manifests]);
   const libraryToolGroups = useMemo(() => groupNativeAgentTools(tools.filter((tool) => (
-    !query || `${getNativeAgentToolLabel(tool)} ${tool.name} ${tool.description} ${tool.serverName || ''}`.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))
+    isNativeAgentToolAttachable(tool)
+    && (!query || `${getNativeAgentToolLabel(tool)} ${tool.name} ${tool.description} ${tool.serverName || ''}`.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR')))
   ))), [query, tools]);
   const hiddenResourceNodeIds = useMemo(() => new Set(showAdvancedResources ? [] : nodes
     .filter((node) => getWorkflowNodeManifest(node.data.workflowNode.type)?.attachment)
@@ -1373,7 +1386,7 @@ export function NativeWorkflowBuilder({
                 <div key={group.id} className="mb-3">
                   <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">{group.label}</p>
                   {group.tools.map((tool) => {
-                    const eligible = isNativeAgentToolEligible(tool);
+                    const eligible = isNativeAgentToolAttachable(tool);
                     return (
                       <button
                         key={tool.name}
@@ -1525,7 +1538,7 @@ export function NativeWorkflowBuilder({
                 config: selectedNode.data.workflowNode.type === 'ai.agent'
                   ? { ...selectedNode.data.workflowNode.config, name: event.target.value }
                   : selectedNode.data.workflowNode.config,
-              })} className="mt-1.5 border-slate-600/70 bg-[#192430] font-semibold" />
+              })} className="mt-1.5 rounded-xl border-slate-600/70 bg-[#192430] font-semibold text-slate-100 placeholder:text-slate-500" />
               {onTestNode && <Button variant="outline" size="sm" onClick={openSelectedNodeTest} disabled={Boolean(selectedTestBlockedReason) || testRunning} title={selectedTestBlockedReason || 'Executar este bloco com as dependências anteriores simuladas'} className="mt-3 w-full border-sky-500/30 bg-sky-500/[0.08] text-sky-100 hover:bg-sky-500/[0.15]"><Play className="mr-2 h-4 w-4" />{testRunning ? 'Iniciando…' : 'Testar deste bloco'}</Button>}
               {selectedNode.data.workflowNode.type !== 'ai.agent' ? <Button variant="destructive" size="sm" onClick={requestDeleteSelectedNode} title="Excluir bloco (Delete)" className="mt-3 w-full"><Trash2 className="mr-2 h-4 w-4" />Excluir bloco</Button> : null}
             </div>
@@ -1573,7 +1586,7 @@ export function NativeWorkflowBuilder({
         )}
       </aside>}
       <AlertDialog open={Boolean(deleteCandidate)} onOpenChange={(open) => { if (!open) setDeleteCandidateId(null); }}>
-        <AlertDialogContent className="border-white/10 bg-[#111820] text-slate-100">
+        <AlertDialogContent className="dark border-white/10 bg-[#111820] text-slate-100">
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir “{deleteCandidate?.data.workflowNode.name || 'bloco'}”?</AlertDialogTitle>
             <AlertDialogDescription className="text-slate-400">

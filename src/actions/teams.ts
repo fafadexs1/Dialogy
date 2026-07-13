@@ -25,6 +25,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                 t.color,
                 t.role_id as "roleId",
                 t.tag_id as "tagId",
+                team_tag.label as "tagLabel",
                 COALESCE(t.agent_routing_config, '{}'::jsonb) as "agentRoutingConfig",
                 COALESCE(
                     (SELECT json_agg(
@@ -70,6 +71,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                     '[]'::json
                 ) as "scheduleExceptions"
             FROM teams t
+            LEFT JOIN tags team_tag ON team_tag.id = t.tag_id AND team_tag.workspace_id = t.workspace_id
             WHERE t.workspace_id = $1
             ORDER BY t.name;
         `, [workspaceId]);

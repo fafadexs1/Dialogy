@@ -17,7 +17,13 @@
     overflow-x: hidden;
   }
 
-  :root {
+  /*
+   * The theme provider puts `light` or `dark` on <html>.  Keep the light
+   * tokens on that same element: the dark default below intentionally wins
+   * for the first server render, while `:root.light` has higher specificity
+   * and wins as soon as the user selects the light theme.
+   */
+  :root.light {
     /* Fonts currently handled by Next.js font loader optimization but mapped here for reference if needed */
     --font-heading: 'Inter', sans-serif;
     --font-body: 'Inter', sans-serif;
@@ -74,7 +80,21 @@
 
   /* Force Dark Mode aesthetic by default for the landing page or use .dark class */
   /* We will assume the site is predominantly dark mode for the premium feel */
-  :root {
+  :root,
+  .dark {
+    color-scheme: dark;
+
+    /* Geometry and typography are theme-independent. These tokens must exist
+       in both modes; otherwise rounded-sm/md/lg resolve to invalid CSS in dark. */
+    --font-heading: 'Inter', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --radius: 0.75rem;
+    --chart-1: 162 90% 53%;
+    --chart-2: 210 100% 61%;
+    --chart-3: 257 100% 68%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+
     /* Deep Void Background #050507 -> HSL 240 17% 2% */
     --background: 240 17% 2%;
     --foreground: 210 40% 98%;
@@ -161,6 +181,7 @@
   .inbox-dark {
     color-scheme: dark;
   }
+
 }
 
 @layer base {
@@ -521,4 +542,54 @@
   height: 6px;
   border-radius: 50%;
   animation: spellcheck-sparkle 0.8s ease-out forwards;
+}
+
+/* Inbox filters stay inside short laptop/tablet viewports while preserving
+   the complete information hierarchy. `zoom` intentionally scales controls,
+   type and spacing together; Radix's available-height variable remains the
+   hard boundary and provides scrolling as a final safety net. */
+.inbox-smart-filter {
+  --inbox-filter-scale: 1;
+  zoom: var(--inbox-filter-scale);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  transform-origin: top left;
+}
+
+.inbox-smart-filter::-webkit-scrollbar {
+  width: 5px;
+}
+
+.inbox-smart-filter::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* Keep wheel scrolling visually inert: rows moving below a stationary pointer
+   must not repeatedly trigger hover transforms, tooltips, or fades. */
+.chat-timeline[data-scrolling='true'] [data-message-row] {
+  pointer-events: none;
+}
+
+.chat-timeline[data-scrolling='true'] [data-message-bubble],
+.chat-timeline[data-scrolling='true'] [data-message-bubble] * {
+  transition: none !important;
+}
+
+@media (max-height: 860px) {
+  .inbox-smart-filter {
+    --inbox-filter-scale: 0.86;
+  }
+}
+
+@media (max-height: 740px) {
+  .inbox-smart-filter {
+    --inbox-filter-scale: 0.76;
+  }
+}
+
+@media (max-height: 640px) {
+  .inbox-smart-filter {
+    --inbox-filter-scale: 0.68;
+  }
 }

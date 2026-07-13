@@ -2,7 +2,7 @@ import type { WorkflowNodeCategory } from '@/services/workflow-runtime/catalog';
 import type { ConnectionType } from '@/services/workflow-runtime/types';
 
 export const NATIVE_WORKFLOW_SHELL_CLASS =
-  'relative flex h-full min-h-0 w-full overflow-hidden bg-[#080d14] text-slate-100';
+  'dark relative flex h-full min-h-0 w-full overflow-hidden bg-[#080d14] text-slate-100';
 
 export const NATIVE_WORKFLOW_CONNECTION_META: Record<ConnectionType, { label: string; color: string; dashed: boolean }> = {
   main: { label: 'Execução', color: '#38bdf8', dashed: false },

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
 import { resolveClientMediaUrl } from '@/lib/storage-url';
@@ -53,22 +54,24 @@ import { getEvolutionApiInstances } from '@/actions/evolution-api';
 import { getTelegramInstances } from '@/actions/telegram';
 import { buildChatProtocol } from '@/lib/utils';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { getTeams } from '@/actions/teams';
+import { getWorkspaceUsers } from '@/actions/crm';
 import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
-import { isMarketingMessage, shouldKeepMarketingOnlyChatVisible } from './chat-list-visibility';
+import { isMarketingMessage, matchesChatTeamFilter, shouldKeepMarketingOnlyChatVisible } from './chat-list-visibility';
 
 import { SearchDetailsDialog } from './search-details-dialog';
 import { InboxSearchInput } from './inbox-search-input';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { usePremiumWheelScroller } from '@/hooks/use-premium-wheel-scroller';
 
 const MAX_VISIBLE_ONLINE_AGENTS = 5;
-const PRIORITY_REEVALUATION_INTERVAL_MS = 30_000;
+const PRIORITY_REEVALUATION_INTERVAL_MS = 60_000;
 
 // --- Start New Conversation Dialog ---
 function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { workspaceId: string, onActionSuccess: () => void, trigger?: React.ReactNode }) {
+  const dialogAnimationId = React.useId();
   const [isOpen, setIsOpen] = useState(false);
   const [instances, setInstances] = useState<Array<
     Omit<EvolutionInstance, 'status' | 'qrCode'> |
@@ -76,13 +79,17 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
   >>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState('55');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [countryCode, setCountryCode] = useState('55');
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [freeMessage, setFreeMessage] = useState('');
 
   const [selectedInstanceName, setSelectedInstanceName] = useState('');
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedTemplateName, setSelectedTemplateName] = useState('');
   const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
 
   // Helper to find selected instance object
   const selectedInstance = useMemo(() => instances.find(i => i.instance_name === selectedInstanceName), [instances, selectedInstanceName]);
@@ -106,6 +113,37 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     const uniqueNumbers = Array.from(new Set(matches.map((m: string) => parseInt(m.replace(/\{|\}/g, ''), 10)))) as number[];
     return uniqueNumbers.sort((a, b) => a - b).map(n => n.toString());
   }, [selectedTemplate]);
+
+  const normalizedPhoneNumber = useMemo(
+    () => isTelegram ? phoneNumber.trim() : `${countryCode}${phoneNumber.replace(/\D/g, '')}`,
+    [countryCode, isTelegram, phoneNumber]
+  );
+  const isRecipientValid = isTelegram
+    ? normalizedPhoneNumber.length >= 3
+    : normalizedPhoneNumber.length >= 10 && normalizedPhoneNumber.length <= 15;
+  const filteredTemplates = useMemo(() => {
+    const query = templateSearch.trim().toLocaleLowerCase('pt-BR');
+    if (!query) return templates;
+    return templates.filter((template: any) => {
+      const body = template.components?.find((component: any) => component.type === 'BODY')?.text || '';
+      return `${template.name || ''} ${body}`.toLocaleLowerCase('pt-BR').includes(query);
+    });
+  }, [templateSearch, templates]);
+  const selectedTemplateBody = useMemo(
+    () => selectedTemplate?.components?.find((component: any) => component.type === 'BODY')?.text || '',
+    [selectedTemplate]
+  );
+  const renderedTemplatePreview = useMemo(() => {
+    let preview = selectedTemplateBody;
+    variableKeys.forEach((key) => {
+      preview = preview.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), templateVariables[key]?.trim() || `{{${key}}}`);
+    });
+    return preview;
+  }, [selectedTemplateBody, templateVariables, variableKeys]);
+  const areTemplateVariablesComplete = variableKeys.every(key => Boolean(templateVariables[key]?.trim()));
+  const canSubmit = Boolean(selectedInstanceName)
+    && isRecipientValid
+    && (isCloud ? Boolean(selectedTemplate && areTemplateVariablesComplete) : Boolean(freeMessage.trim()));
 
   useEffect(() => {
     if (isOpen && workspaceId) {
@@ -163,16 +201,22 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     }
   }, [isCloud, selectedInstanceName]);
 
-  useEffect(() => {
-    if (isTelegram && phoneNumber === '55') {
-      setPhoneNumber('');
-    } else if (!isTelegram && phoneNumber === '') {
-      setPhoneNumber('55');
-    }
-  }, [isTelegram, phoneNumber]);
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!canSubmit) {
+      toast({
+        title: 'Revise os dados da conversa',
+        description: !selectedInstanceName
+          ? 'Selecione uma instância de envio.'
+          : !isRecipientValid
+            ? 'Informe um destinatário válido.'
+            : !isCloud && !freeMessage.trim()
+              ? 'Escreva a primeira mensagem do atendimento.'
+              : 'Selecione um template e preencha suas variáveis.',
+        variant: 'destructive'
+      });
+      return;
+    }
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
     const message = formData.get('message') as string;
@@ -211,7 +255,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     const result = await startNewConversation({
       workspaceId,
       instanceName: selectedInstanceName,
-      phoneNumber: phoneNumber,
+      phoneNumber: normalizedPhoneNumber,
       message: templatePayload ? `[Template: ${selectedTemplate.name}]` : message, // Fallback message for UI if needed
       tabId: null,
       template: templatePayload
@@ -221,9 +265,11 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
       toast({ title: 'Mensagem Enviada!', description: 'A conversa foi iniciada e aparecerá na sua lista.' });
       setIsOpen(false);
       onActionSuccess();
-      setPhoneNumber('55');
+      setPhoneNumber('');
       setTemplateVariables({});
       setSelectedTemplateName('');
+      setTemplateSearch('');
+      setFreeMessage('');
       // Keep instance selected
     } else {
       toast({ title: 'Erro ao Enviar', description: result.error, variant: 'destructive' });
@@ -235,8 +281,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     <Dialog open={isOpen} onOpenChange={(open) => {
       setIsOpen(open);
       if (!open) {
-        // Optional: reset state on close
-        // setSelectedInstanceName(''); 
+        setTemplateSearch('');
       }
     }}>
       <DialogTrigger asChild>
@@ -246,121 +291,237 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="bg-background border-border text-foreground sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-foreground">Iniciar Nova Conversa</DialogTitle>
-          <DialogDescription className="text-muted-foreground">
-            Envie uma mensagem para um novo número para iniciar um atendimento.
+      <DialogContent className="flex max-h-[92dvh] w-[calc(100vw-24px)] max-w-[1120px] flex-col gap-0 overflow-hidden rounded-[22px] border-slate-200 bg-white p-0 text-slate-950 shadow-[0_32px_90px_-35px_rgba(15,23,42,0.65)] sm:max-w-[1120px] dark:border-white/10 dark:bg-[#09090b] dark:text-white">
+        <DialogHeader className="shrink-0 border-b border-slate-200 px-6 py-5 pr-14 text-left dark:border-white/10">
+          <DialogTitle className="text-xl font-semibold tracking-[-0.02em]">Nova conversa</DialogTitle>
+          <DialogDescription className="text-sm text-slate-500 dark:text-zinc-400">
+            Escolha o destino e prepare a primeira mensagem do atendimento.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-2 pb-4">
-            <div className="space-y-2">
-              <Label htmlFor="instanceName" className="text-muted-foreground">Instância de Envio</Label>
-              <Select name="instanceName" required value={selectedInstanceName} onValueChange={setSelectedInstanceName}>
-                <SelectTrigger id="instanceName" className="bg-muted/50 border-input text-foreground">
-                  <SelectValue placeholder="Selecione a instância..." />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border text-popover-foreground">
-                  {isLoading ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">Carregando...</div>
-                  ) : (
-                    instances.map((instance) => (
-                      <SelectItem key={instance.id} value={instance.instance_name} className="focus:bg-accent focus:text-accent-foreground">
-                        {instance.display_name} {instance.type === 'wa_cloud' && '(Cloud API)'} {instance.type === 'telegram' && '(Telegram)'}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="phoneNumber" className="text-muted-foreground">{isTelegram ? 'Chat ID do Telegram' : 'Numero do WhatsApp (JID)'}</Label>
-              <Input
-                id="phoneNumber"
-                name="phoneNumber"
-                placeholder={isTelegram ? 'telegram:123456789' : '5511999998888'}
-                required
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                className="bg-muted/50 border-input text-foreground placeholder:text-muted-foreground/50"
-              />
-              <p className="text-xs text-muted-foreground">
-                {isTelegram ? 'Use o ID do chat que ja conversou com o bot. Bots do Telegram nao iniciam conversa com usuarios desconhecidos.' : 'Inclua o codigo do pais e o DDD. Nao use mascaras ou caracteres especiais.'}
-              </p>
-            </div>
-
-            {isCloud ? (
-              <div className="space-y-4 border-l-2 border-blue-500 pl-4 bg-muted/30 p-2 rounded-r-md">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden">
+            <section className="border-b border-slate-200 bg-slate-50/60 p-5 lg:overflow-y-auto lg:border-b-0 lg:border-r dark:border-white/10 dark:bg-white/[0.025]">
+              <div className="mb-5 flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                  <Hash className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold">Destino</h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-500">Canal e destinatário</p>
+                </div>
+              </div>
+              <div className="space-y-5">
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground">Selecionar Template (Cloud API)</Label>
-                  <Select value={selectedTemplateName} onValueChange={setSelectedTemplateName} required>
-                    <SelectTrigger className="bg-muted/50 border-input text-foreground">
-                      <SelectValue placeholder={loadingTemplates ? "Carregando templates..." : "Selecione um template..."} />
+                  <Label htmlFor="instanceName" className="text-xs font-semibold text-slate-600 dark:text-zinc-300">Instância</Label>
+                  <Select name="instanceName" required value={selectedInstanceName} onValueChange={(value) => {
+                    setSelectedInstanceName(value);
+                    setSelectedTemplateName('');
+                    setTemplateVariables({});
+                    setTemplateSearch('');
+                  }}>
+                    <SelectTrigger id="instanceName" className="h-auto min-h-14 rounded-xl border-slate-200 bg-white px-3 text-left shadow-sm transition-all duration-200 focus:ring-2 focus:ring-blue-500/25 dark:border-white/10 dark:bg-white/[0.04]">
+                      <SelectValue placeholder={isLoading ? 'Carregando instâncias...' : 'Selecione uma instância'} />
                     </SelectTrigger>
-                    <SelectContent className="bg-popover border-border text-popover-foreground max-h-[200px]">
-                      {loadingTemplates ? (
-                        <div className="p-2 text-center text-xs text-muted-foreground">Carregando...</div>
-                      ) : templates.length === 0 ? (
-                        <div className="p-2 text-center text-xs text-muted-foreground">Nenhum template aprovado encontrado.</div>
-                      ) : (
-                        templates.map((t: any) => (
-                          <SelectItem key={t.name} value={t.name}>{t.name}</SelectItem>
-                        ))
-                      )}
+                    <SelectContent className="rounded-xl border-slate-200 dark:border-white/10">
+                      {isLoading ? (
+                        <div className="flex items-center justify-center gap-2 p-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Carregando...</div>
+                      ) : instances.length === 0 ? (
+                        <div className="p-4 text-center text-sm text-muted-foreground">Nenhuma instância disponível.</div>
+                      ) : instances.map((instance) => (
+                        <SelectItem key={instance.id} value={instance.instance_name} className="rounded-lg py-2.5 focus:bg-blue-50 dark:focus:bg-blue-500/10">
+                          <span className="flex items-center gap-2">
+                            {instance.type === 'telegram' ? <FaTelegram className="h-4 w-4 text-sky-500" /> : <FaWhatsapp className="h-4 w-4 text-emerald-500" />}
+                            <span>{instance.display_name}</span>
+                            {instance.type === 'wa_cloud' && <span className="text-[10px] text-blue-600 dark:text-blue-300">Cloud API</span>}
+                          </span>
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  {selectedTemplate && (
-                    <p className="text-xs text-muted-foreground italic mt-1 bg-muted p-2 rounded">
-                      "{(selectedTemplate.components.find((c: any) => c.type === 'BODY')?.text || '')}"
-                    </p>
-                  )}
+                  <AnimatePresence initial={false}>
+                    {selectedInstance && (
+                      <motion.div initial={prefersReducedMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="flex items-center gap-2 px-1 text-[11px] text-slate-500 dark:text-zinc-500">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        <span>{isTelegram ? 'Telegram' : isCloud ? 'WhatsApp Cloud API' : 'WhatsApp conectado'}</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
-
-                {variableKeys.length > 0 && (
-                  <div className="space-y-3 [&_input]:!border-input [&_input]:!bg-background [&_input]:!text-sm [&_label]:!text-muted-foreground">
-                    <Label className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Variáveis do Template</Label>
-                    {variableKeys.map((key) => (
-                      <div key={key} className="space-y-1">
-                        <Label htmlFor={`var-${key}`} className="text-xs text-white/70">Variável {`{{${key}}}`}</Label>
-                        <Input
-                          id={`var-${key}`}
-                          className="bg-zinc-950/50 border-white/10 h-8 text-sm"
-                          placeholder={`Valor para {{${key}}}`}
-                          value={templateVariables[key] || ''}
-                          onChange={(e) => setTemplateVariables(prev => ({ ...prev, [key]: e.target.value }))}
-                          required
-                        />
-                      </div>
-                    ))}
+                <div className="space-y-2">
+                  <Label htmlFor="phoneNumber" className="text-xs font-semibold text-slate-600 dark:text-zinc-300">{isTelegram ? 'Chat ID' : 'Número'}</Label>
+                  <div className={cn(
+                    "flex min-h-12 overflow-hidden rounded-xl border bg-white shadow-sm transition-all duration-300 focus-within:ring-2 dark:bg-white/[0.04]",
+                    isRecipientValid ? "border-emerald-400 focus-within:ring-emerald-500/15 dark:border-emerald-500/60" : "border-slate-200 focus-within:border-blue-500 focus-within:ring-blue-500/15 dark:border-white/10"
+                  )}>
+                    {!isTelegram && (
+                      <Select value={countryCode} onValueChange={setCountryCode}>
+                        <SelectTrigger aria-label="Código do país" className="h-12 w-[92px] shrink-0 rounded-none border-0 border-r border-slate-200 bg-slate-50 px-2 shadow-none focus:ring-0 dark:border-white/10 dark:bg-white/[0.04]"><SelectValue /></SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          <SelectItem value="55">BR +55</SelectItem>
+                          <SelectItem value="1">US +1</SelectItem>
+                          <SelectItem value="351">PT +351</SelectItem>
+                          <SelectItem value="34">ES +34</SelectItem>
+                          <SelectItem value="52">MX +52</SelectItem>
+                          <SelectItem value="54">AR +54</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Input
+                      id="phoneNumber"
+                      name="phoneNumber"
+                      inputMode={isTelegram ? 'text' : 'numeric'}
+                      autoComplete="tel"
+                      placeholder={isTelegram ? '123456789' : '11 99999 8888'}
+                      required
+                      value={phoneNumber}
+                      onChange={(event) => setPhoneNumber(isTelegram ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 13))}
+                      className="h-12 flex-1 rounded-none border-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0"
+                    />
+                    <AnimatePresence initial={false}>
+                      {isRecipientValid && (
+                        <motion.span initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.65 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.65 }} className="flex w-11 items-center justify-center text-emerald-500" aria-label="Destinatário válido">
+                          <CircleCheck className="h-5 w-5" />
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
                   </div>
-                )}
+                  <p className={cn("flex min-h-4 items-center gap-1.5 text-[11px] transition-colors", isRecipientValid ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-zinc-500")}>
+                    {isRecipientValid && <Check className="h-3 w-3" />}
+                    {isTelegram ? isRecipientValid ? 'Chat ID pronto para envio' : 'Use o ID de um chat que já conversou com o bot.' : isRecipientValid ? 'Número válido para WhatsApp' : 'Digite o DDD e o número, sem símbolos.'}
+                  </p>
+                </div>
+                <motion.div layout className={cn(
+                  "rounded-xl border p-3 transition-colors duration-300",
+                  canSubmit ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200" : "border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400"
+                )}>
+                  <div className="flex items-start gap-2.5">
+                    {canSubmit ? <CircleCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <MessageCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+                    <div>
+                      <p className="text-xs font-semibold">{canSubmit ? 'Tudo pronto para enviar' : 'Prepare o destino'}</p>
+                      <p className="mt-1 text-[11px] leading-relaxed opacity-75">{selectedInstanceName ? `${isTelegram ? 'Telegram' : 'WhatsApp'}${isRecipientValid ? ` • ${normalizedPhoneNumber}` : ''}` : 'Selecione uma instância para continuar.'}</p>
+                    </div>
+                  </div>
+                </motion.div>
               </div>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="message" className="text-muted-foreground">Mensagem</Label>
-                <Textarea
-                  id="message"
-                  name="message"
-                  placeholder="Olá! Gostaria de falar sobre..."
-                  required={!isCloud}
-                  className="bg-muted/50 border-input text-foreground placeholder:text-muted-foreground/50 min-h-[100px]"
-                />
-              </div>
-            )}
+            </section>
 
+            <section className="min-w-0 p-5 lg:overflow-y-auto lg:p-6">
+              <div className="mx-auto mb-5 grid w-full max-w-sm grid-cols-2 rounded-xl bg-slate-100 p-1 dark:bg-white/[0.05]" aria-label="Tipo de mensagem">
+                <div className={cn("flex h-9 items-center justify-center gap-2 rounded-lg text-xs font-semibold transition-all duration-300", !isCloud ? "bg-white text-blue-700 shadow-sm dark:bg-white/10 dark:text-blue-300" : "text-slate-400 dark:text-zinc-500")}><MessageSquare className="h-4 w-4" /> Mensagem livre</div>
+                <div className={cn("flex h-9 items-center justify-center gap-2 rounded-lg text-xs font-semibold transition-all duration-300", isCloud ? "bg-white text-blue-700 shadow-sm dark:bg-white/10 dark:text-blue-300" : "text-slate-400 dark:text-zinc-500")}><LayoutTemplate className="h-4 w-4" /> Template</div>
+              </div>
+              <AnimatePresence mode="wait" initial={false}>
+                {isCloud ? (
+                  <motion.div key="template-workspace" initial={prefersReducedMotion ? false : { opacity: 0, x: 14 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: prefersReducedMotion ? 0 : 0.24 }} className="grid min-w-0 gap-6 xl:grid-cols-[minmax(250px,0.9fr)_minmax(310px,1.1fr)]">
+                    <div className="min-w-0 space-y-3 xl:border-r xl:border-slate-200 xl:pr-6 dark:xl:border-white/10">
+                      <div><h3 className="text-sm font-semibold">Templates aprovados</h3><p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">Escolha a mensagem inicial.</p></div>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Buscar por nome" aria-label="Buscar template aprovado" className="h-10 rounded-xl border-slate-200 bg-white pl-9 shadow-none dark:border-white/10 dark:bg-white/[0.03]" />
+                      </div>
+                      <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
+                        {loadingTemplates ? (
+                          <div className="flex min-h-36 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Carregando templates...</div>
+                        ) : filteredTemplates.length === 0 ? (
+                          <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 px-4 text-center dark:border-white/10">
+                            <LayoutTemplate className="mb-2 h-5 w-5 text-slate-400" /><p className="text-sm font-medium">Nenhum template encontrado</p><p className="mt-1 text-xs text-muted-foreground">Tente outro termo ou confira os templates aprovados.</p>
+                          </div>
+                        ) : filteredTemplates.map((template: any) => {
+                          const templateBody = template.components?.find((component: any) => component.type === 'BODY')?.text || '';
+                          const isSelected = selectedTemplateName === template.name;
+                          return (
+                            <motion.button
+                              layout
+                              type="button"
+                              key={template.name}
+                              aria-pressed={isSelected}
+                              whileTap={prefersReducedMotion ? undefined : { scale: 0.985 }}
+                              onClick={() => { setSelectedTemplateName(template.name); setTemplateVariables({}); }}
+                              className={cn(
+                                "group relative w-full overflow-hidden rounded-xl border p-3 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30",
+                                isSelected ? "border-blue-500 bg-blue-50/80 shadow-[0_8px_25px_-18px_rgba(37,99,235,0.8)] dark:border-blue-400/60 dark:bg-blue-500/10" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.025] dark:hover:border-blue-500/30 dark:hover:bg-white/[0.05]"
+                              )}
+                            >
+                              {isSelected && <motion.span layoutId={`${dialogAnimationId}-selected-template-accent`} className="absolute inset-y-0 left-0 w-1 bg-blue-600 dark:bg-blue-400" />}
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-900 dark:text-white">{template.name}</p><p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-500 dark:text-zinc-500">{templateBody || 'Template sem prévia de texto.'}</p></div>
+                                <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all", isSelected ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-transparent dark:border-white/15")}><Check className="h-3 w-3" /></span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-1.5">
+                                <Badge variant="secondary" className="h-5 rounded-full border-0 bg-emerald-50 px-2 text-[9px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">{template.category || 'Utilidade'}</Badge>
+                                <span className="text-[9px] uppercase tracking-wide text-slate-400">{template.language || 'pt_BR'}</span>
+                              </div>
+                            </motion.button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="min-w-0 space-y-5">
+                      <div><h3 className="text-sm font-semibold">Prévia</h3><p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">Confira exatamente o que será enviado.</p></div>
+                      <div className="rounded-2xl bg-[#f2eee7] p-4 dark:bg-[#151713]">
+                        <AnimatePresence mode="wait" initial={false}>
+                          {selectedTemplate ? (
+                            <motion.div key={selectedTemplate.name} initial={prefersReducedMotion ? false : { opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5 }} className="ml-auto max-w-[92%] rounded-xl rounded-tr-sm bg-white p-3.5 text-sm leading-relaxed text-slate-800 shadow-sm dark:bg-[#202c33] dark:text-zinc-100">
+                              <p className="whitespace-pre-wrap">{renderedTemplatePreview}</p><p className="mt-2 text-right text-[9px] text-slate-400">prévia</p>
+                            </motion.div>
+                          ) : (
+                            <motion.div key="empty-preview" className="flex min-h-28 flex-col items-center justify-center text-center text-slate-500 dark:text-zinc-500"><MessageSquareQuote className="mb-2 h-5 w-5" /><p className="text-xs">Selecione um template para visualizar a mensagem.</p></motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                      <AnimatePresence initial={false}>
+                        {selectedTemplate && (
+                          <motion.div initial={prefersReducedMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div><h3 className="text-sm font-semibold">Variáveis</h3><p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">Personalize os campos do template.</p></div>
+                              {variableKeys.length > 0 && <Badge variant="secondary" className="rounded-full text-[10px]">{variableKeys.length} campos</Badge>}
+                            </div>
+                            {variableKeys.length === 0 ? (
+                              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"><CircleCheck className="h-4 w-4" /> Este template não precisa de personalização.</div>
+                            ) : (
+                              <div className="space-y-3">
+                                {variableKeys.map((key, index) => {
+                                  const value = templateVariables[key] || '';
+                                  return (
+                                    <motion.div key={key} initial={prefersReducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: prefersReducedMotion ? 0 : index * 0.04 }} className="space-y-1.5">
+                                      <div className="flex items-center justify-between gap-2"><Label htmlFor={`var-${key}`} className="text-xs font-medium">Variável {`{{${key}}}`}</Label>{value.trim() && <Check className="h-3.5 w-3.5 text-emerald-500" />}</div>
+                                      <Input id={`var-${key}`} value={value} onChange={(event) => setTemplateVariables(previous => ({ ...previous, [key]: event.target.value }))} placeholder={`Valor para {{${key}}}`} required className="h-10 rounded-xl border-slate-200 bg-white shadow-none transition-all focus-visible:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.03]" />
+                                    </motion.div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div key="free-message" initial={prefersReducedMotion ? false : { opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: prefersReducedMotion ? 0 : 0.22 }} className="mx-auto max-w-2xl space-y-3">
+                    <div><h3 className="text-sm font-semibold">Mensagem livre</h3><p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">Escreva a primeira mensagem do atendimento.</p></div>
+                    <Textarea id="message" name="message" value={freeMessage} onChange={(event) => setFreeMessage(event.target.value)} placeholder="Olá! Gostaria de falar sobre..." required className="min-h-[240px] resize-none rounded-2xl border-slate-200 bg-white p-4 text-sm leading-relaxed shadow-none transition-all focus-visible:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.03]" />
+                    <p className="text-xs text-slate-500 dark:text-zinc-500">A conversa será criada assim que a mensagem for enviada.</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
           </div>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="ghost" className="text-muted-foreground hover:text-foreground">
-                Cancelar
-              </Button>
-            </DialogClose>
-            <Button type="submit" disabled={isSubmitting || (isCloud && !selectedTemplate)} className="bg-blue-600 hover:bg-blue-500 text-white">
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isCloud ? 'Enviar Template' : 'Enviar Mensagem'}
-            </Button>
-          </DialogFooter>
+          <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-[#09090b]">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-slate-500 dark:text-zinc-500">
+              <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full", canSubmit ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300" : "bg-slate-100 text-slate-400 dark:bg-white/5")}>
+                {canSubmit ? <Check className="h-3.5 w-3.5" /> : <MessageSquare className="h-3.5 w-3.5" />}
+              </span>
+              <span className="truncate">{canSubmit ? `${isTelegram ? 'Telegram' : 'WhatsApp'} • ${normalizedPhoneNumber}${isCloud && selectedTemplate ? ` • ${selectedTemplate.name}` : ''}` : 'Preencha os dados obrigatórios para iniciar a conversa.'}</span>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <DialogClose asChild><Button type="button" variant="ghost" className="rounded-xl px-4 text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white">Cancelar</Button></DialogClose>
+              <motion.div whileTap={prefersReducedMotion || !canSubmit ? undefined : { scale: 0.96 }}>
+                <Button type="submit" disabled={isSubmitting || !canSubmit} className="h-11 rounded-xl bg-blue-600 px-5 text-white shadow-[0_12px_30px_-16px_rgba(37,99,235,0.9)] transition-all duration-200 hover:bg-blue-700 disabled:shadow-none">
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />} Iniciar conversa
+                </Button>
+              </motion.div>
+            </div>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
@@ -434,7 +595,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, curren
     if (message.type === 'system') {
       return {
         label: 'Sistema',
-        tone: 'text-slate-400',
+        tone: 'text-slate-400 dark:text-zinc-400',
         icon: <MessageSquare className="h-3 w-3" />
       };
     }
@@ -458,7 +619,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, curren
 
     return {
       label: 'Cliente',
-      tone: 'text-slate-500',
+      tone: 'text-slate-500 dark:text-zinc-400',
       icon: <UserIcon className="h-3 w-3" />
     };
   })();
@@ -501,7 +662,7 @@ const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, curren
   };
 
   return (
-    <div className="flex items-center gap-1.5 overflow-hidden text-[12px] leading-[18px] text-slate-500">
+    <div className="flex items-center gap-1.5 overflow-hidden text-[12px] leading-[18px] text-slate-500 dark:text-zinc-400">
       <div className="flex-shrink-0 mt-0.5">
         {message.metadata?.thumbnail && typeof message.metadata.thumbnail === 'string' ? (
           <div className="relative">
@@ -587,7 +748,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
   const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
   const statusTone = chat.status === 'encerrados'
-    ? 'border-slate-200 bg-slate-50 text-slate-500'
+    ? 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-zinc-300'
     : chat.status === 'atendimentos'
       ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
       : 'border-blue-100 bg-blue-50 text-blue-700';
@@ -665,9 +826,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
 
   const handleMouseEnter = () => {
     if (!onPrefetch) return;
-    // Debounce prefetch 200ms
+    if (prefetchTimeoutRef.current) clearTimeout(prefetchTimeoutRef.current);
     prefetchTimeoutRef.current = setTimeout(() => {
       onPrefetch(chat.id);
+      prefetchTimeoutRef.current = null;
     }, 200);
   };
 
@@ -678,19 +840,23 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     }
   };
 
+  useEffect(() => () => {
+    if (prefetchTimeoutRef.current) clearTimeout(prefetchTimeoutRef.current);
+  }, []);
+
   return (
     <div
       className={cn(
-        "group relative flex min-h-[84px] cursor-pointer items-start gap-2.5 overflow-hidden rounded-xl border px-3 py-2 transition-colors duration-150",
+        "group relative flex min-h-[84px] cursor-pointer items-start gap-2.5 overflow-hidden rounded-xl border px-3 py-2 transition-[background-color,border-color,box-shadow,transform] duration-150 active:scale-[0.995] motion-reduce:transform-none motion-reduce:transition-none",
         "border-transparent bg-card",
-        "hover:border-slate-200 hover:bg-slate-50",
+        "hover:border-slate-200 hover:bg-slate-50 dark:border-white/[0.06] dark:bg-white/[0.025] dark:hover:border-white/10 dark:hover:bg-white/[0.055]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30",
         isSelected && !isForwarding && !isBulkMode
-          ? "border-blue-100 bg-blue-50/90"
+          ? "border-blue-100 bg-blue-50/90 shadow-[0_8px_24px_-22px_rgba(37,99,235,0.9)] dark:border-blue-400/25 dark:bg-blue-500/10"
           : hasUnread
-            ? "bg-blue-50/35"
+            ? "bg-blue-50/35 dark:bg-blue-500/[0.06]"
             : "",
-        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "border-blue-200 bg-blue-50" : "",
+        (isForwarding && isSelectedForForwarding) || (isBulkMode && isSelectedForBulk) ? "border-blue-200 bg-blue-50 dark:border-blue-400/30 dark:bg-blue-500/10" : "",
       )}
       onClick={handleSelect}
       onMouseEnter={handleMouseEnter}
@@ -702,9 +868,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       aria-selected={isSelected}
       aria-label={`Conversa com ${chat.contact?.name || 'Desconhecido'}; ${statusLabel}`}
     >
-      {isSelected && !isForwarding && !isBulkMode && (
-        <div className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-blue-600" />
-      )}
+      <div className={cn(
+        "absolute inset-y-2 left-0 w-0.5 origin-center rounded-r-full bg-blue-600 transition-[opacity,transform] duration-200 motion-reduce:transition-none",
+        isSelected && !isForwarding && !isBulkMode ? "scale-y-100 opacity-100" : "scale-y-50 opacity-0"
+      )} />
 
       {/* Bulk Mode Checkbox */}
       {isBulkMode && (
@@ -737,7 +904,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       <div className="relative mt-0.5 flex-shrink-0">
         <Avatar className={cn(
           "h-10 w-10 border shadow-sm transition-colors",
-          isSelected ? "border-blue-300" : "border-slate-200",
+          isSelected ? "border-blue-300" : "border-slate-200 dark:border-white/10",
           hasUnread && !isSelected ? "border-blue-300" : ""
         )}>
           <AvatarImage fallbackOnBlank src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || 'Contato'} data-ai-hint="person" />
@@ -802,7 +969,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 chat.status === 'encerrados' ? "bg-slate-500" : chat.status === 'atendimentos' ? "bg-emerald-400" : "bg-blue-400",
                 hasUnread && "bg-blue-500"
               )} />
-              <p className={cn("max-w-[78%] truncate whitespace-nowrap text-[13.5px] font-semibold tracking-tight text-slate-900 min-[1280px]:max-w-[64%]", hasUnread && "font-bold")} title={chat.contact?.name}>
+              <p className={cn("max-w-[78%] truncate whitespace-nowrap text-[13.5px] font-semibold tracking-tight text-slate-900 dark:text-zinc-100 min-[1280px]:max-w-[64%]", hasUnread && "font-bold")} title={chat.contact?.name}>
                 {chat.contact?.name || 'Carregando...'}
               </p>
               <Badge className={cn("hidden flex-shrink-0 border px-1.5 py-0 text-[8px] font-semibold uppercase tracking-wide min-[1280px]:inline-flex", statusTone)}>
@@ -818,7 +985,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           </div>
           <div className="flex flex-shrink-0 flex-nowrap items-center justify-end gap-1.5">
             {(canAssign || canTag || canQuickClose) && !isForwarding && !isBulkMode && (
-            <div className="absolute right-2 top-2 z-20 flex flex-nowrap items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <div className="absolute right-2 top-2 z-20 flex flex-nowrap items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-white/10 dark:bg-zinc-950">
               {canAssign && (
                 <TooltipProvider>
                   <Tooltip>
@@ -826,7 +993,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 rounded-md text-slate-500 hover:bg-blue-50 hover:text-blue-600"
+                        className="h-6 w-6 rounded-md text-slate-500 hover:bg-blue-50 hover:text-blue-600 dark:text-zinc-400 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
                         aria-label="Assumir conversa"
                         onClick={handleAssign}
                       >
@@ -862,7 +1029,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600"
+                      className="h-6 w-6 rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                       onClick={handleQuickClose}
                       disabled={isClosing}
                     >
@@ -897,7 +1064,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               </TooltipProvider>
             )}
             {lastMessage && (
-              <p className="flex-shrink-0 whitespace-nowrap text-[10px] font-medium text-slate-400">
+              <p className="flex-shrink-0 whitespace-nowrap text-[10px] font-medium text-slate-400 dark:text-zinc-500">
                 {formatMessageTime(lastMessage.createdAt || lastMessage.timestamp, currentUser?.activeWorkspaceTimezone || 'America/Sao_Paulo')}
               </p>
             )}
@@ -986,8 +1153,8 @@ const CHAT_PRIORITY_GROUPS: Record<ChatPriorityGroupId, { label: string; tone: s
   },
   recent: {
     label: 'Recentes',
-    tone: 'text-slate-600',
-    countTone: 'bg-slate-100 text-slate-600 ring-slate-200',
+    tone: 'text-slate-600 dark:text-zinc-400',
+    countTone: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-white/[0.06] dark:text-zinc-300 dark:ring-white/10',
   },
 };
 
@@ -1012,6 +1179,8 @@ const getChatPriorityGroup = (chat: Chat, now = Date.now()): ChatPriorityGroupId
   if (waitingForAgent || (chat.unreadCount ?? 0) > 0) return 'waiting';
   return 'recent';
 };
+
+const getChatItemKey = (_index: number, chat: Chat) => chat.id;
 
 const MemoizedChatListItem = React.memo(ChatListItem);
 
@@ -1066,9 +1235,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
   const [teamFilter, setTeamFilter] = useState<string[]>([]);
-  const [singleTeamMode, setSingleTeamMode] = useState(false);
   const [isTeamFilterOpen, setIsTeamFilterOpen] = useState(false);
   const [teamSearchTerm, setTeamSearchTerm] = useState('');
+  const [workspaceUsers, setWorkspaceUsers] = useState<User[]>([]);
+  const [isLoadingWorkspaceUsers, setIsLoadingWorkspaceUsers] = useState(false);
+  const [responsibleFilter, setResponsibleFilter] = useState<string | null>(null);
+  const [isResponsibleFilterOpen, setIsResponsibleFilterOpen] = useState(false);
+  const [responsibleSearchTerm, setResponsibleSearchTerm] = useState('');
 
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
   const appendChats = useInboxStore((state) => state.appendChats);
@@ -1134,15 +1307,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
   };
 
-  const handleToggleBulkSelection = (chatId: string) => {
-    const newSelected = new Set(selectedBulkChats);
-    if (newSelected.has(chatId)) {
-      newSelected.delete(chatId);
-    } else {
-      newSelected.add(chatId);
-    }
-    setSelectedBulkChats(newSelected);
-  };
+  const handleToggleBulkSelection = useCallback((chatId: string) => {
+    setSelectedBulkChats((current) => {
+      const next = new Set(current);
+      if (next.has(chatId)) next.delete(chatId);
+      else next.add(chatId);
+      return next;
+    });
+  }, []);
 
   const handleSelectAllBulk = () => {
     if (filteredChats.length === 0) return;
@@ -1156,33 +1328,34 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
   };
 
-  const toggleSingleTeamMode = useCallback(() => {
-    setSingleTeamMode((prev) => {
-      const next = !prev;
-      if (next) {
-        if (ownershipFilter !== 'everyone') {
-          setOwnershipFilter('everyone');
-        }
-        setTeamFilter((current) => current.slice(0, 1));
-      }
-      return next;
-    });
-  }, [ownershipFilter]);
-
   const toggleTeamSelection = useCallback((teamId: string) => {
     if (ownershipFilter !== 'everyone') {
       setOwnershipFilter('everyone');
     }
     setTeamFilter((prev) => {
-      if (singleTeamMode) {
-        return prev[0] === teamId ? [] : [teamId];
-      }
-
       return prev.includes(teamId)
         ? prev.filter((id) => id !== teamId)
         : [...prev, teamId];
     });
-  }, [singleTeamMode, ownershipFilter]);
+  }, [ownershipFilter]);
+
+  const selectResponsible = useCallback((userId: string | null) => {
+    setResponsibleFilter(userId);
+    if (userId) {
+      setShowUnassignedOnly(false);
+      if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
+    }
+    setIsResponsibleFilterOpen(false);
+    setResponsibleSearchTerm('');
+  }, [ownershipFilter]);
+
+  const clearAdvancedFilters = useCallback(() => {
+    setTeamFilter([]);
+    setResponsibleFilter(null);
+    setStatusFilter('all');
+    setShowUnassignedOnly(false);
+    setShowMarketing(false);
+  }, []);
 
   const handleBulkSubmit = async () => {
     if (selectedBulkChats.size === 0) return;
@@ -1253,9 +1426,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
   };
 
-  const handleAssignChat = (chat: Chat) => {
+  const handleAssignChat = useCallback((chat: Chat) => {
     setChatToAssign(chat);
-  };
+  }, []);
 
   const confirmAssignChat = async () => {
     if (!chatToAssign) return;
@@ -1289,6 +1462,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           }
         })
         .finally(() => setIsLoadingTeams(false));
+
+      setIsLoadingWorkspaceUsers(true);
+      getWorkspaceUsers(currentUser.activeWorkspaceId)
+        .then((res) => {
+          if (res.users) setWorkspaceUsers(res.users);
+        })
+        .finally(() => setIsLoadingWorkspaceUsers(false));
 
       // Fetch autopilot agents
       import('@/actions/autopilot').then(({ getAutopilotConfig }) => {
@@ -1368,38 +1548,32 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     return { robo, fila, atendimentos, encerrados };
   }, [chats]);
 
-  const TABS = [
+  const tabs = useMemo(() => [
     { id: 'robo', label: 'Robô', shortLabel: 'Robô', icon: Bot, data: sortedChats.robo },
     { id: 'gerais', label: 'Fila', shortLabel: 'Fila', icon: ListTodo, data: sortedChats.fila },
     { id: 'atendimentos', label: 'Atendendo', shortLabel: 'Atend.', icon: MessageSquare, data: sortedChats.atendimentos },
     { id: 'encerrados', label: 'Encerrados', shortLabel: 'Encerr.', icon: CheckCircle2, data: sortedChats.encerrados }
-  ] as const;
+  ] as const, [sortedChats]);
 
-  const getBaseChatsForTab = useCallback(
-    (tabId: ChatListTabId) => {
-      switch (tabId) {
-        case 'robo':
-          return sortedChats.robo;
-        case 'gerais':
-          return sortedChats.fila;
-        case 'atendimentos':
-          return sortedChats.atendimentos;
-        case 'encerrados':
-        default:
-          return sortedChats.encerrados;
+  const filteredChatsByTab = useMemo(() => {
+    const query = debouncedSearchTerm.trim().toLocaleLowerCase('pt-BR');
+
+    const matchesControls = (chat: Chat) => {
+      const messages = chat.messages || [];
+      let hasVisibleMessage = false;
+      let matchesMessageContent = false;
+
+      for (const message of messages) {
+        if (!showMarketing && isMarketingMessage(message)) continue;
+        hasVisibleMessage = true;
+        if (query && !matchesMessageContent && (message.content || '').toLocaleLowerCase('pt-BR').includes(query)) {
+          matchesMessageContent = true;
+        }
       }
-    },
-    [sortedChats]
-  );
 
-  const filterChatByControls = useCallback(
-    (chat: Chat) => {
-      const visibleMessages = showMarketing
-        ? chat.messages
-        : chat.messages.filter(m => !isMarketingMessage(m));
       if (
         !showMarketing &&
-        visibleMessages.length === 0 &&
+        !hasVisibleMessage &&
         !shouldKeepMarketingOnlyChatVisible(chat, selectedChat?.id)
       ) {
         return false;
@@ -1411,36 +1585,60 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
       const chatAgentId = chat.agent?.id || chat.agentId;
       const chatSystemAgentId = chat.assigned_system_agent_id || chat.assignedSystemAgent?.id;
-      const matchesTeam =
-        ownershipFilter === 'mine'
-          ? true
-          : (teamFilter.length === 0 || (chat.team_id && teamFilter.includes(chat.team_id)));
+      const matchesTeam = matchesChatTeamFilter(chat, teams, teamFilter);
 
       const matchesOwner =
-        ownershipFilter === 'everyone' ||
-        chatAgentId === currentUser.id ||
-        chat.status === 'gerais';
+        responsibleFilter
+          ? chatAgentId === responsibleFilter
+          : ownershipFilter === 'everyone' ||
+            chatAgentId === currentUser.id ||
+            chat.status === 'gerais';
 
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
       const matchesUnassigned = !showUnassignedOnly || (!chat.agent && !chatSystemAgentId);
-      const query = debouncedSearchTerm.toLowerCase();
-      const protocol = chat.protocol || buildChatProtocol(chat.id);
-      const matchesSearch =
-        !query ||
-        (chat.contact.name || '').toLowerCase().includes(query) ||
-        (chat.contact.phone || '').includes(query) ||
-        (protocol || '').toLowerCase().includes(query) ||
-        (chat.id || '').toLowerCase().includes(query) ||
-        visibleMessages.some(m => (m.content || '').toLowerCase().includes(query));
+      let matchesSearch = true;
+
+      if (query) {
+        const protocol = chat.protocol || buildChatProtocol(chat.id);
+        matchesSearch =
+          (chat.contact.name || '').toLocaleLowerCase('pt-BR').includes(query) ||
+          (chat.contact.phone || '').includes(query) ||
+          (protocol || '').toLocaleLowerCase('pt-BR').includes(query) ||
+          (chat.id || '').toLocaleLowerCase('pt-BR').includes(query) ||
+          matchesMessageContent;
+      }
 
       return matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned && matchesSearch;
-    },
-    [statusFilter, ownershipFilter, teamFilter, onlyUnread, showUnassignedOnly, currentUser.id, debouncedSearchTerm, showMarketing, selectedChat?.id]
-  );
+    };
 
-  const filteredChats = useMemo(() => {
-    return getBaseChatsForTab(activeTab).filter(filterChatByControls);
-  }, [activeTab, getBaseChatsForTab, filterChatByControls, showMarketing]);
+    return {
+      robo: sortedChats.robo.filter(matchesControls),
+      gerais: sortedChats.fila.filter(matchesControls),
+      atendimentos: sortedChats.atendimentos.filter(matchesControls),
+      encerrados: sortedChats.encerrados.filter(matchesControls),
+    } satisfies Record<ChatListTabId, Chat[]>;
+  }, [
+    currentUser.id,
+    debouncedSearchTerm,
+    onlyUnread,
+    ownershipFilter,
+    responsibleFilter,
+    selectedChat?.id,
+    showMarketing,
+    showUnassignedOnly,
+    sortedChats,
+    statusFilter,
+    teamFilter,
+    teams,
+  ]);
+
+  const filteredChats = filteredChatsByTab[activeTab];
+  const tabCounts = useMemo(() => ({
+    robo: filteredChatsByTab.robo.length,
+    gerais: filteredChatsByTab.gerais.length,
+    atendimentos: filteredChatsByTab.atendimentos.length,
+    encerrados: filteredChatsByTab.encerrados.length,
+  }), [filteredChatsByTab]);
 
   const { groupedChats, priorityGroupCounts } = useMemo(() => {
     const buckets: Record<ChatPriorityGroupId, Chat[]> = {
@@ -1463,6 +1661,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     };
   }, [filteredChats, priorityNow]);
 
+  const chatListContentVersion = `${activeTab}:${groupedChats.length}:${groupedChats[0]?.id || 'empty'}:${groupedChats[groupedChats.length - 1]?.id || 'empty'}`;
+  const { scrollerRef: premiumWheelScrollerRef } = usePremiumWheelScroller(
+    Boolean(isLoadingMore),
+    chatListContentVersion
+  );
+
   const areAllForwardingChatsSelected = useMemo(
     () => (
       filteredChats.length > 0 &&
@@ -1481,6 +1685,30 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     return teams.filter((team) => team.name.toLowerCase().includes(query));
   }, [teams, teamSearchTerm]);
 
+  const filteredWorkspaceUsers = useMemo(() => {
+    const query = responsibleSearchTerm.trim().toLocaleLowerCase('pt-BR');
+    if (!query) return workspaceUsers;
+    return workspaceUsers.filter((user) =>
+      `${user.name || ''} ${user.email || ''}`.toLocaleLowerCase('pt-BR').includes(query)
+    );
+  }, [responsibleSearchTerm, workspaceUsers]);
+
+  const selectedResponsible = useMemo(
+    () => workspaceUsers.find((user) => user.id === responsibleFilter) || null,
+    [responsibleFilter, workspaceUsers]
+  );
+
+  const selectedTeams = useMemo(
+    () => teams.filter((team) => teamFilter.includes(team.id)),
+    [teamFilter, teams]
+  );
+
+  const advancedFilterCount = teamFilter.length
+    + (responsibleFilter ? 1 : 0)
+    + (statusFilter !== 'all' ? 1 : 0)
+    + (showUnassignedOnly ? 1 : 0)
+    + (showMarketing ? 1 : 0);
+
   const canLoadMore = Boolean(loadMore) && !isLoadingMore && (hasMore ?? hasMoreChats);
   const handleEndReached = useCallback(() => {
     if (!canLoadMore) return;
@@ -1489,20 +1717,88 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     loadMore?.({ statuses: ['encerrados'], ownership: ownershipFilter });
   }, [activeTab, canLoadMore, filteredChats.length, loadMore, ownershipFilter]);
 
+  const virtuosoComponents = useMemo(() => ({
+    Header: () => <div className="h-1" />,
+    Footer: () => <div style={{ height: (bottomPadding || 0) + 8 }} />,
+  }), [bottomPadding]);
+
+  const renderChatItem = useCallback((index: number, chat: Chat) => {
+    const groupId: ChatPriorityGroupId = index < priorityGroupCounts.risk
+      ? 'risk'
+      : index < priorityGroupCounts.risk + priorityGroupCounts.waiting
+        ? 'waiting'
+        : 'recent';
+    const group = CHAT_PRIORITY_GROUPS[groupId];
+    const showGroupHeader = index === 0
+      || index === priorityGroupCounts.risk
+      || index === priorityGroupCounts.risk + priorityGroupCounts.waiting;
+
+    return (
+      <div className="px-3 pb-0.5">
+        {showGroupHeader && (
+          <div className="flex items-center justify-between px-1 pb-1.5 pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200">
+            <p className={cn("text-[10px] font-bold uppercase tracking-[0.12em]", group.tone)}>
+              {group.label}
+            </p>
+            <span className={cn(
+              "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[9px] font-bold ring-1 ring-inset",
+              group.countTone
+            )}>
+              {priorityGroupCounts[groupId]}
+            </span>
+          </div>
+        )}
+        <MemoizedChatListItem
+          chat={chat}
+          isSelected={selectedChat?.id === chat.id}
+          onSelect={setSelectedChat}
+          onUpdate={onUpdate}
+          currentUser={currentUser}
+          showMarketing={showMarketing}
+          isForwarding={isForwarding}
+          isSelectedForForwarding={selectedForwardingChatIds?.has(chat.id)}
+          onToggleForwardSelection={onToggleForwardSelection}
+          isBulkMode={isBulkMode}
+          isSelectedForBulk={selectedBulkChats.has(chat.id)}
+          onToggleBulkSelection={handleToggleBulkSelection}
+          onAssign={chat.status === 'gerais' ? handleAssignChat : undefined}
+          onPrefetch={onPrefetch}
+          priorityNow={priorityNow}
+        />
+      </div>
+    );
+  }, [
+    currentUser,
+    handleAssignChat,
+    handleToggleBulkSelection,
+    isBulkMode,
+    isForwarding,
+    onPrefetch,
+    onToggleForwardSelection,
+    onUpdate,
+    priorityGroupCounts,
+    priorityNow,
+    selectedBulkChats,
+    selectedChat?.id,
+    selectedForwardingChatIds,
+    setSelectedChat,
+    showMarketing,
+  ]);
+
   return (
     <div
       className={cn(
-        "flex h-full w-full shrink-0 flex-col border-r border-slate-200 bg-white transition-none",
+        "inbox-chat-list flex h-full w-full shrink-0 flex-col border-r border-slate-200 bg-white transition-none dark:border-white/10 dark:bg-[#050507]",
         "md:w-[clamp(320px,29vw,460px)] md:min-w-[320px] md:max-w-[460px]",
         className
       )}
     >
       <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex-shrink-0 space-y-3 border-b border-slate-200 bg-white px-4 pb-3 pt-4">
+      <div className="flex-shrink-0 space-y-3 border-b border-slate-200 bg-white px-4 pb-3 pt-4 dark:border-white/10 dark:bg-[#050507]">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-bold tracking-tight text-slate-950">Inbox</h2>
-            <p className="mt-0.5 text-[11px] font-medium text-slate-400">Central de conversas</p>
+            <h2 className="text-xl font-bold tracking-tight text-slate-950 dark:text-white">Inbox</h2>
+            <p className="mt-0.5 text-[11px] font-medium text-slate-400 dark:text-zinc-500">Central de conversas</p>
           </div>
           <div className="flex items-center gap-2">
             {activeTab === 'atendimentos' && !isForwarding && (
@@ -1514,7 +1810,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         variant={isBulkMode && bulkAction === 'close' ? "secondary" : "ghost"}
                         size="icon"
                         className={cn(
-                          "h-7 w-7 text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-200", 
+                          "h-7 w-7 text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-90 motion-reduce:transform-none motion-reduce:transition-none",
                           isBulkMode && bulkAction === 'close' && "bg-red-500/20 text-red-600 hover:bg-red-500/30 hover:text-red-700"
                         )}
                         onClick={() => toggleBulkMode('close')}
@@ -1535,7 +1831,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         variant={isBulkMode && bulkAction === 'agent' ? "secondary" : "ghost"}
                         size="icon"
                         className={cn(
-                          "h-7 w-7 text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-200", 
+                          "h-7 w-7 text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-90 motion-reduce:transform-none motion-reduce:transition-none",
                           isBulkMode && bulkAction === 'agent' && "bg-blue-500/20 text-blue-600 hover:bg-blue-500/30 hover:text-blue-700"
                         )}
                         onClick={() => toggleBulkMode('agent')}
@@ -1565,10 +1861,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             )}
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="Status das conversas">
-          {TABS.map((tab) => {
+        <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/[0.05]" role="tablist" aria-label="Status das conversas">
+          {tabs.map((tab) => {
             const Icon = tab.icon;
-            const filteredCount = getBaseChatsForTab(tab.id).filter(filterChatByControls).length;
+            const filteredCount = tabCounts[tab.id];
 
             return (
               <button
@@ -1579,10 +1875,10 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 aria-label={`${tab.label}: ${filteredCount} conversas`}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "relative flex h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-semibold transition-colors",
+                  "relative flex h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-semibold transition-[background-color,color,box-shadow,transform] duration-200 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none",
                   activeTab === tab.id
-                    ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200"
-                    : "text-slate-500 hover:bg-white/70 hover:text-slate-800"
+                    ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-white/10 dark:text-blue-300 dark:ring-white/10"
+                    : "text-slate-500 hover:bg-white/70 hover:text-slate-800 dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-zinc-100"
                 )}
               >
                 <Icon className="hidden h-3 w-3 flex-shrink-0 min-[1400px]:block" />
@@ -1591,7 +1887,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 {filteredCount > 0 && (
                   <span className={cn(
                     "flex min-w-[16px] flex-shrink-0 items-center justify-center rounded-full px-1 text-[8px] leading-4",
-                    activeTab === tab.id ? "bg-blue-50 text-blue-700" : "bg-slate-200 text-slate-600"
+                    activeTab === tab.id ? "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" : "bg-slate-200 text-slate-600 dark:bg-white/[0.08] dark:text-zinc-400"
                   )}>
                     {filteredCount > 99 ? '99+' : filteredCount}
                   </span>
@@ -1612,36 +1908,62 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    aria-label="Filtros"
+                    aria-label={advancedFilterCount > 0 ? `Filtros, ${advancedFilterCount} ativos` : 'Filtros'}
                     className={cn(
                       filterTriggerClassName,
-                      (teamFilter.length > 0 || statusFilter !== 'all' || showUnassignedOnly || showMarketing) && "ring-2 ring-blue-500/20"
+                      "relative",
+                      advancedFilterCount > 0 && "bg-blue-600 text-white ring-4 ring-blue-500/10 hover:bg-blue-700 hover:text-white dark:bg-blue-500"
                     )}
                   >
                     <Filter className="h-4 w-4" />
+                    {advancedFilterCount > 0 && (
+                      <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-white bg-slate-950 px-0.5 text-[8px] font-bold leading-none text-white dark:border-[#050507] dark:bg-white dark:text-slate-950">
+                        {advancedFilterCount}
+                      </span>
+                    )}
                   </button>
                 </PopoverTrigger>
                 <PopoverContent
                   align="start"
-                  className="w-[340px] p-4 space-y-5 bg-popover border-border text-popover-foreground"
+                  sideOffset={10}
+                  collisionPadding={12}
+                  className="inbox-smart-filter max-h-[720px] space-y-5 overflow-x-hidden overflow-y-auto rounded-2xl border-slate-200/80 bg-white/95 p-5 text-slate-950 shadow-[0_24px_80px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b0b0f]/95 dark:text-white"
+                  style={{
+                    width: 'min(380px, calc(100vw - 24px))',
+                    maxHeight: 'min(720px, calc(var(--radix-popover-content-available-height) - 4px))',
+                  }}
                   onInteractOutside={(event) => {
                     const target = event.target as HTMLElement | null;
-                    if (target?.closest('[data-team-filter-popover="true"]')) {
+                    if (target?.closest('[data-filter-subpopover="true"]')) {
                       event.preventDefault();
                     }
                   }}
                 >
-                  <div className="space-y-3 pt-2 border-t border-border/50">
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4 dark:border-white/10">
+                    <div className="flex gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20">
+                        <SlidersHorizontal className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold tracking-tight">Visão inteligente</p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-zinc-400">Combine filtros em qualquer fila da Inbox.</p>
+                      </div>
+                    </div>
+                    {advancedFilterCount > 0 && (
+                      <Button variant="ghost" size="sm" onClick={clearAdvancedFilters} className="h-8 rounded-lg px-2 text-[10px] font-semibold text-slate-500 dark:text-zinc-400">
+                        <RotateCcw className="mr-1 h-3 w-3" />
+                        Limpar
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
-                      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filtrar por Equipe</Label>
+                      <div>
+                        <Label className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Equipes</Label>
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">Uma ou várias, em todas as filas.</p>
+                      </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-muted-foreground">1 equipe</span>
-                        <Switch
-                          checked={singleTeamMode}
-                          onCheckedChange={() => toggleSingleTeamMode()}
-                          className="h-5 w-9 data-[state=checked]:bg-indigo-600"
-                          aria-label="Ativar selecao de equipe unica"
-                        />
                         {teamFilter.length > 0 && (
                           <Button
                             variant="ghost"
@@ -1666,7 +1988,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                           variant="outline"
                           role="combobox"
                           aria-expanded={isTeamFilterOpen}
-                          className="w-full justify-between bg-muted/30 border-input hover:bg-muted/50 hover:text-foreground"
+                          className="h-11 w-full justify-between rounded-xl border-slate-200 bg-slate-50 text-xs hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] dark:hover:text-white"
                         >
                           {teamFilter.length > 0
                             ? `${teamFilter.length} equipe${teamFilter.length > 1 ? 's' : ''} selecionada${teamFilter.length > 1 ? 's' : ''}`
@@ -1674,7 +1996,16 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0" align="start" data-team-filter-popover="true">
+                      <PopoverContent
+                        className="overflow-x-hidden overflow-y-auto rounded-xl p-0"
+                        align="start"
+                        collisionPadding={12}
+                        data-filter-subpopover="true"
+                        style={{
+                          width: 'min(340px, calc(100vw - 24px))',
+                          maxHeight: 'calc(var(--radix-popover-content-available-height) - 4px)',
+                        }}
+                      >
                         <div className="border-b border-border p-2">
                           <Input
                             value={teamSearchTerm}
@@ -1714,28 +2045,131 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         </ScrollArea>
                       </PopoverContent>
                     </Popover>
+                    {selectedTeams.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedTeams.map((team) => (
+                          <button key={team.id} type="button" onClick={() => toggleTeamSelection(team.id)} className="inline-flex h-7 items-center gap-1.5 rounded-full bg-blue-50 px-2.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20">
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: team.color || '#2563eb' }} />
+                            <span className="max-w-[150px] truncate">{team.name}</span>
+                            <X className="h-3 w-3 opacity-60" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  <div>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</p>
-                    <RadioGroup
-                      value={statusFilter}
-                      onValueChange={(value) => setStatusFilter(value as 'all' | 'open' | 'closed')}
-                      className="mt-2 space-y-2"
+                  <div className="space-y-3 border-t border-slate-100 pt-4 dark:border-white/10">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Responsável</p>
+                      <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">Veja apenas as conversas de uma pessoa.</p>
+                    </div>
+                    <Popover
+                      open={isResponsibleFilterOpen}
+                      onOpenChange={(open) => {
+                        setIsResponsibleFilterOpen(open);
+                        if (!open) setResponsibleSearchTerm('');
+                      }}
                     >
-                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        <RadioGroupItem value="all" id="status-all" className="border-border text-blue-500" />
-                        <Label htmlFor="status-all" className="cursor-pointer text-foreground">Todos</Label>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        <RadioGroupItem value="open" id="status-open" className="border-border text-blue-500" />
-                        <Label htmlFor="status-open" className="cursor-pointer text-foreground">Abertos (Robô + Fila + Atendendo)</Label>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        <RadioGroupItem value="closed" id="status-closed" className="border-border text-blue-500" />
-                        <Label htmlFor="status-closed" className="cursor-pointer text-foreground">Encerrados</Label>
-                      </div>
-                    </RadioGroup>
+                      <PopoverTrigger asChild>
+                        <button type="button" className={cn(
+                          "flex h-11 w-full items-center justify-between rounded-xl border px-3 text-left transition-colors",
+                          selectedResponsible
+                            ? "border-blue-200 bg-blue-50/70 dark:border-blue-500/20 dark:bg-blue-500/10"
+                            : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+                        )}>
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <Avatar className="h-7 w-7 border border-white shadow-sm dark:border-white/10">
+                              <AvatarImage src={selectedResponsible?.avatar || selectedResponsible?.avatar_url} />
+                              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-[9px] font-bold text-white">
+                                {selectedResponsible ? selectedResponsible.name?.slice(0, 2).toUpperCase() : <Users className="h-3.5 w-3.5" />}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-semibold">{selectedResponsible?.name || 'Qualquer responsável'}</span>
+                              <span className="block text-[10px] text-slate-500 dark:text-zinc-400">Filtrar usuário</span>
+                            </span>
+                          </span>
+                          <ChevronsUpDown className="h-4 w-4 shrink-0 text-slate-400" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        className="overflow-x-hidden overflow-y-auto rounded-xl p-0"
+                        align="start"
+                        collisionPadding={12}
+                        data-filter-subpopover="true"
+                        style={{
+                          width: 'min(340px, calc(100vw - 24px))',
+                          maxHeight: 'calc(var(--radix-popover-content-available-height) - 4px)',
+                        }}
+                      >
+                        <div className="border-b border-border p-2">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                            <Input value={responsibleSearchTerm} onChange={(event) => setResponsibleSearchTerm(event.target.value)} placeholder="Buscar responsável..." className="h-9 pl-9" />
+                          </div>
+                        </div>
+                        <ScrollArea className="max-h-[240px]">
+                          <div className="p-1.5">
+                            <button type="button" onClick={() => selectResponsible(null)} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-accent">
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 dark:bg-white/10"><Users className="h-3.5 w-3.5" /></div>
+                              <span className="flex-1 font-medium">Qualquer responsável</span>
+                              {!responsibleFilter && <Check className="h-4 w-4 text-blue-600" />}
+                            </button>
+                            {isLoadingWorkspaceUsers ? (
+                              <div className="flex items-center gap-2 px-2 py-4 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Carregando pessoas...</div>
+                            ) : filteredWorkspaceUsers.length === 0 ? (
+                              <div className="px-2 py-4 text-xs text-muted-foreground">Nenhum responsável encontrado.</div>
+                            ) : filteredWorkspaceUsers.map((user) => (
+                              <button key={user.id} type="button" onClick={() => selectResponsible(user.id)} className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent", responsibleFilter === user.id && "bg-blue-50 dark:bg-blue-500/10")}>
+                                <Avatar className="h-7 w-7"><AvatarImage src={user.avatar || user.avatar_url} /><AvatarFallback className="text-[9px]">{user.name?.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+                                <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{user.name}</span><span className="block truncate text-[10px] text-muted-foreground">{user.email}</span></span>
+                                {responsibleFilter === user.id && <Check className="h-4 w-4 text-blue-600" />}
+                              </button>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </PopoverContent>
+                    </Popover>
+                    {selectedResponsible && (
+                      <button type="button" onClick={() => selectResponsible(null)} className="inline-flex h-8 max-w-full items-center gap-2 rounded-full bg-blue-600 px-2.5 pr-2 text-[10px] font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-700">
+                        <Avatar className="h-5 w-5"><AvatarImage src={selectedResponsible.avatar || selectedResponsible.avatar_url} /><AvatarFallback className="bg-white/20 text-[8px] text-white">{selectedResponsible.name?.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+                        <span className="truncate">{selectedResponsible.name}</span>
+                        <X className="h-3 w-3 opacity-70" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2.5 border-t border-slate-100 pt-4 dark:border-white/10">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Escopo das filas</p>
+                      <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">Aplique a visão a todas, abertas ou encerradas.</p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/[0.06]" role="group" aria-label="Status das filas">
+                      {([
+                        { value: 'all', label: 'Todas' },
+                        { value: 'open', label: 'Abertas' },
+                        { value: 'closed', label: 'Encerradas' },
+                      ] as const).map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={statusFilter === option.value}
+                          onClick={() => {
+                            setStatusFilter(option.value);
+                            if (option.value === 'closed') setActiveTab('encerrados');
+                            if (option.value === 'open' && activeTab === 'encerrados') setActiveTab('gerais');
+                          }}
+                          className={cn(
+                            "h-9 rounded-lg text-[10px] font-semibold transition-all",
+                            statusFilter === option.value
+                              ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-white/10 dark:text-blue-300 dark:ring-white/10"
+                              : "text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
@@ -1743,7 +2177,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         <p className="text-sm font-medium text-foreground">Somente sem responsável</p>
                         <p className="text-xs text-muted-foreground">Conversas que ainda precisam de atribuição</p>
                       </div>
-                      <Switch checked={showUnassignedOnly} onCheckedChange={setShowUnassignedOnly} className="data-[state=checked]:bg-blue-600" />
+                      <Switch
+                        checked={showUnassignedOnly}
+                        onCheckedChange={(checked) => {
+                          setShowUnassignedOnly(checked);
+                          if (checked) setResponsibleFilter(null);
+                        }}
+                        className="data-[state=checked]:bg-blue-600"
+                      />
                     </div>
                     <div className="flex items-center justify-between">
                       <div>
@@ -1757,17 +2198,35 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               </Popover>
             )}
           />
+          {selectedResponsible && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => selectResponsible(null)}
+                title="Remover filtro de responsável"
+                className="group inline-flex h-8 max-w-full items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-2.5 pr-2 text-[10px] font-semibold text-white shadow-md shadow-blue-500/15 transition-transform hover:scale-[1.01] active:scale-[0.98] motion-reduce:transform-none"
+              >
+                <Avatar className="h-5 w-5 border border-white/20">
+                  <AvatarImage src={selectedResponsible.avatar || selectedResponsible.avatar_url} />
+                  <AvatarFallback className="bg-white/15 text-[8px] text-white">{selectedResponsible.name?.slice(0, 2).toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <span className="truncate">Responsável: {selectedResponsible.name}</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/10 transition-colors group-hover:bg-white/20"><X className="h-3 w-3" /></span>
+              </button>
+            </div>
+          )}
           {/* Quick Filter Chips */}
           <div className="flex flex-nowrap items-center gap-1.5 pt-2">
             <Badge
               variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
               className={cn(
-                "order-2 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-colors",
+                "order-2 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
                 ownershipFilter === 'mine'
                   ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
-                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
               )}
               onClick={() => {
+                setResponsibleFilter(null);
                 if (ownershipFilter !== 'mine') setOwnershipFilter('mine');
               }}
             >
@@ -1781,12 +2240,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Badge
               variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
               className={cn(
-                "order-1 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-colors",
+                "order-1 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
                 ownershipFilter === 'everyone'
                   ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
-                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
               )}
               onClick={() => {
+                setResponsibleFilter(null);
                 if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
               }}
             >
@@ -1797,14 +2257,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 </span>
               </span>
             </Badge>
-            <div className="order-3 h-4 w-px bg-slate-200" />
+            <div className="order-3 h-4 w-px bg-slate-200 dark:bg-white/10" />
             <Badge
               variant={onlyUnread ? 'default' : 'outline'}
               className={cn(
-                "order-4 flex h-8 cursor-pointer items-center justify-center rounded-full border-transparent px-2.5 text-[10.5px] font-semibold transition-colors whitespace-nowrap",
+                "order-4 flex h-8 cursor-pointer items-center justify-center rounded-full border-transparent px-2.5 text-[10.5px] font-semibold whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
                 onlyUnread
                   ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
-                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
               )}
               onClick={() => setOnlyUnread(!onlyUnread)}
               title="Não lidas"
@@ -1837,8 +2297,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         onSelectChat={setSelectedChat}
       />
 
-      <div className="flex flex-shrink-0 items-center gap-3 border-b border-slate-100 bg-white px-4 py-2">
-        <h3 className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+      <div className="flex flex-shrink-0 items-center gap-3 border-b border-slate-100 bg-white px-4 py-2 dark:border-white/10 dark:bg-[#050507]">
+        <h3 className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
           Online ({onlineAgents.length})
           {isOffline && (
             <Badge variant="destructive" className="h-4 text-[10px] px-1">
@@ -1858,7 +2318,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <HoverCard key={agent.user.id}>
                   <HoverCardTrigger asChild>
                     <div
-                      className="relative cursor-pointer transition-transform duration-200 shrink-0"
+                      className="relative shrink-0 cursor-pointer transition-transform duration-150 hover:-translate-y-0.5 active:scale-90 motion-reduce:transform-none motion-reduce:transition-none"
                       onClick={() => setSelectedAgent(agent.user)}
                     >
                       <Avatar className="h-7 w-7 border border-emerald-400">
@@ -1922,7 +2382,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <HoverCardTrigger asChild>
                   <button
                     type="button"
-                    className="h-7 w-7 min-w-7 flex-shrink-0 rounded-full border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                    className="h-7 w-7 min-w-7 flex-shrink-0 rounded-full border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:border-white/10 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
                     aria-label={`Mostrar ${hiddenOnlineAgents.length} agentes online adicionais`}
                   >
                     +{hiddenOnlineAgents.length}
@@ -2051,59 +2511,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             <Virtuoso
               style={{ height: '100%', width: '100%' }}
               data={groupedChats}
-              components={{
-                Header: () => <div className="h-1" />,
-                Footer: () => <div style={{ height: (bottomPadding || 0) + 8 }} />
-              }}
+              scrollerRef={premiumWheelScrollerRef}
+              components={virtuosoComponents}
+              computeItemKey={getChatItemKey}
               endReached={handleEndReached}
-              itemContent={(index, chat) => {
-                const groupId: ChatPriorityGroupId = index < priorityGroupCounts.risk
-                  ? 'risk'
-                  : index < priorityGroupCounts.risk + priorityGroupCounts.waiting
-                    ? 'waiting'
-                    : 'recent';
-                const group = CHAT_PRIORITY_GROUPS[groupId];
-                const showGroupHeader = index === 0
-                  || index === priorityGroupCounts.risk
-                  || index === priorityGroupCounts.risk + priorityGroupCounts.waiting;
-
-                return (
-                  <div className="px-3 pb-0.5">
-                    {showGroupHeader && (
-                      <div className="flex items-center justify-between px-1 pb-1.5 pt-3">
-                        <p className={cn("text-[10px] font-bold uppercase tracking-[0.12em]", group.tone)}>
-                          {group.label}
-                        </p>
-                        <span className={cn(
-                          "flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[9px] font-bold ring-1 ring-inset",
-                          group.countTone
-                        )}>
-                          {priorityGroupCounts[groupId]}
-                        </span>
-                      </div>
-                    )}
-                  <MemoizedChatListItem
-                    key={chat.id}
-                    chat={chat}
-                    isSelected={selectedChat?.id === chat.id}
-                    onSelect={setSelectedChat}
-                    onUpdate={onUpdate}
-                    currentUser={currentUser}
-                    showMarketing={showMarketing}
-                    isForwarding={isForwarding}
-                    isSelectedForForwarding={selectedForwardingChatIds?.has(chat.id)}
-                    onToggleForwardSelection={onToggleForwardSelection}
-                    isBulkMode={isBulkMode}
-                    isSelectedForBulk={selectedBulkChats.has(chat.id)}
-                    onToggleBulkSelection={handleToggleBulkSelection}
-                    onAssign={chat.status === 'gerais' ? handleAssignChat : undefined}
-                    onPrefetch={onPrefetch}
-                    priorityNow={priorityNow}
-                  />
-                  </div>
-                );
-              }}
-
+              itemContent={renderChatItem}
             />
           </>
         ) : (

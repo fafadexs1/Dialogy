@@ -385,6 +385,134 @@ describe('agent tool execution policy', () => {
     expect(result).toEqual({ allowed: true, riskLevel: 'medium' });
   });
 
+  it('allows a close reached through a server-authorized native terminal block', async () => {
+    const action = {
+      type: 'close_chat' as const,
+      reason: 'Objetivo concluído.',
+      payload: { sendCloseMessage: false },
+    };
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Perfeito, obrigado',
+        orchestratorRunId: 'run-1',
+        closeAuthorization: {
+          source: 'workflow_goal_completed',
+          chatId: 'chat-1',
+          orchestratorRunId: 'run-1',
+          workflowId: 'workflow-1',
+          workflowVersion: '18',
+          executionId: 'execution-1',
+          terminalNodeId: 'close-node',
+          actionFingerprint: fingerprintToolAction(action),
+        },
+      },
+      action,
+    });
+
+    expect(result).toEqual({ allowed: true, riskLevel: 'medium' });
+  });
+
+  it('rejects a mismatched or forged native close authorization', async () => {
+    const action = {
+      type: 'close_chat' as const,
+      reason: 'Objetivo concluído.',
+      payload: { sendCloseMessage: false },
+    };
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Perfeito, obrigado',
+        orchestratorRunId: 'run-1',
+        closeAuthorization: {
+          source: 'workflow_goal_completed',
+          chatId: 'another-chat',
+          orchestratorRunId: 'run-1',
+          workflowId: 'workflow-1',
+          workflowVersion: '18',
+          executionId: 'execution-1',
+          terminalNodeId: 'close-node',
+          actionFingerprint: fingerprintToolAction(action),
+        },
+      },
+      action,
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('[tool_policy:intent_mismatch]');
+  });
+
+  it('allows collection completion only with a fully bound server authorization', async () => {
+    const action = {
+      type: 'close_chat' as const,
+      reason: 'Coleta concluída.',
+      payload: { sendCloseMessage: false },
+    };
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Ana; 01310-100',
+        orchestratorRunId: 'run-collection',
+        sourceMessageId: 'message-current',
+        closeAuthorization: {
+          source: 'conversation_collection_completed',
+          chatId: 'chat-1',
+          orchestratorRunId: 'run-collection',
+          sourceMessageId: 'message-current',
+          workflowId: 'workflow-1',
+          workflowVersion: '18',
+          needsInputExecutionId: 'execution-before',
+          completionExecutionId: 'execution-current',
+          agentNodeId: 'agent-1',
+          terminalNodeId: 'respond-1',
+          pendingFieldsFingerprint: 'pending-hash',
+          persistenceReceiptFingerprint: 'receipt-hash',
+          checkpointFingerprint: 'checkpoint-hash',
+          actionFingerprint: fingerprintToolAction(action),
+        },
+      },
+      action,
+    });
+
+    expect(result).toEqual({ allowed: true, riskLevel: 'medium' });
+  });
+
+  it('rejects collection authorization from another source message or the same execution', async () => {
+    const action = {
+      type: 'close_chat' as const,
+      reason: 'Coleta concluída.',
+      payload: { sendCloseMessage: false },
+    };
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Obrigado',
+        orchestratorRunId: 'run-collection',
+        sourceMessageId: 'message-current',
+        closeAuthorization: {
+          source: 'conversation_collection_completed',
+          chatId: 'chat-1',
+          orchestratorRunId: 'run-collection',
+          sourceMessageId: 'message-other',
+          workflowId: 'workflow-1',
+          workflowVersion: '18',
+          needsInputExecutionId: 'execution-current',
+          completionExecutionId: 'execution-current',
+          agentNodeId: 'agent-1',
+          terminalNodeId: 'respond-1',
+          pendingFieldsFingerprint: 'pending-hash',
+          persistenceReceiptFingerprint: 'receipt-hash',
+          checkpointFingerprint: 'checkpoint-hash',
+          actionFingerprint: fingerprintToolAction(action),
+        },
+      },
+      action,
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('[tool_policy:intent_mismatch]');
+  });
+
   it('does not treat cancellation of a business service as authorization to close the chat', async () => {
     const result = await evaluateAgentToolPolicy({
       context: {

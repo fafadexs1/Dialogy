@@ -71,7 +71,56 @@ function policyReject(riskLevel: AgentToolPolicyRisk, code: string, reason: stri
   };
 }
 
-function validateActionContext(action: AgentToolAction, riskLevel: AgentToolPolicyRisk, customerMessage: string): AgentToolPolicyDecision | null {
+function hasValidServerCloseAuthorization(
+  action: AgentToolAction,
+  context: AgentToolRuntimeContext,
+): boolean {
+  if (action.type !== 'close_chat') return false;
+  const authorization = context.closeAuthorization;
+  if (!authorization) return false;
+  if (
+    authorization.chatId !== context.chat.id ||
+    !context.orchestratorRunId ||
+    authorization.orchestratorRunId !== context.orchestratorRunId ||
+    authorization.actionFingerprint !== fingerprintToolAction(action)
+  ) return false;
+
+  if (authorization.source === 'procedure_goal_completed') {
+    return Boolean(authorization.procedureExecutionId.trim());
+  }
+  if (authorization.source === 'conversation_collection_completed') {
+    return (
+      Boolean(context.sourceMessageId)
+      && authorization.sourceMessageId === context.sourceMessageId
+      && authorization.needsInputExecutionId !== authorization.completionExecutionId
+      && [
+        authorization.workflowId,
+        authorization.workflowVersion,
+        authorization.needsInputExecutionId,
+        authorization.completionExecutionId,
+        authorization.agentNodeId,
+        authorization.terminalNodeId,
+        authorization.pendingFieldsFingerprint,
+        authorization.persistenceReceiptFingerprint,
+        authorization.checkpointFingerprint,
+      ].every((value) => Boolean(value.trim()))
+    );
+  }
+  if (authorization.source !== 'workflow_goal_completed') return false;
+  return (
+    Boolean(authorization.workflowId.trim()) &&
+    Boolean(authorization.workflowVersion.trim()) &&
+    Boolean(authorization.executionId.trim()) &&
+    Boolean(authorization.terminalNodeId.trim())
+  );
+}
+
+function validateActionContext(
+  action: AgentToolAction,
+  riskLevel: AgentToolPolicyRisk,
+  context: AgentToolRuntimeContext,
+): AgentToolPolicyDecision | null {
+  const customerMessage = context.customerMessage;
   const normalized = normalize(customerMessage);
   if (
     action.type === 'mcp_call_tool' &&
@@ -101,7 +150,11 @@ function validateActionContext(action: AgentToolAction, riskLevel: AgentToolPoli
       return policyReject(riskLevel, 'missing_parameters', 'Transferencia exige uma equipe ou atendente de destino.');
     }
   }
-  if (action.type === 'close_chat' && !isConversationCloseRequest(customerMessage)) {
+  if (
+    action.type === 'close_chat' &&
+    !isConversationCloseRequest(customerMessage) &&
+    !hasValidServerCloseAuthorization(action, context)
+  ) {
     return policyReject(
       riskLevel,
       'intent_mismatch',
@@ -154,12 +207,15 @@ export async function evaluateAgentToolPolicy(input: {
     );
   }
 
-  const actionContextRejection = validateActionContext(input.action, riskLevel, input.context.customerMessage);
+  const actionContextRejection = validateActionContext(input.action, riskLevel, input.context);
   if (actionContextRejection) return actionContextRejection;
 
   const explicitlyAuthorizedConversationClose = (
     input.action.type === 'close_chat'
-    && isConversationCloseRequest(input.context.customerMessage)
+    && (
+      isConversationCloseRequest(input.context.customerMessage)
+      || hasValidServerCloseAuthorization(input.action, input.context)
+    )
   );
   if (!explicitlyAuthorizedConversationClose &&
       requiresExplicitConfirmation(input.action, definition, riskLevel) &&

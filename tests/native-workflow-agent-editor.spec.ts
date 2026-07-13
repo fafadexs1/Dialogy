@@ -21,6 +21,9 @@ describe('native workflow agent editor usability contract', () => {
     expect(source).toContain('onModelChange={handleAgentModelChange}');
     expect(source).toContain('onConfigureKnowledge={handleConfigureAgentKnowledge}');
     expect(source).toContain('onToggleTool={handleToggleAgentTool}');
+    expect(source).toContain('isNativeAgentToolAttachable');
+    expect(source).toContain('connectedRetainedTools');
+    expect(source).toContain('connectedToolNames.has(tool.name)');
     expect(source).toContain('Ferramentas permitidas');
     expect(source).toContain('data-testid="agent-tool-selection-count"');
     expect(source).toContain('data-testid="agent-tools-select-recommended"');

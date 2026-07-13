@@ -56,6 +56,7 @@ export const STABLE_WORKFLOW_NODE_TYPES = new Set([
   'logic.if',
   'logic.switch',
   'logic.ai_router',
+  'logic.goal_completion',
   'logic.wait',
   'ai.model',
   'ai.agent',
@@ -66,6 +67,7 @@ export const STABLE_WORKFLOW_NODE_TYPES = new Set([
   'guardrail.policy',
   'output.respond',
   'output.handoff',
+  'output.close_conversation',
   'output.end',
   'error.handler',
 ] as const);
@@ -84,11 +86,13 @@ function defaultCapabilitiesFor(type: string): string[] {
   if (type === 'ai.model') return ['model_provider'];
   if (type === 'ai.agent') return ['structured_output'];
   if (type === 'logic.ai_router' || type === 'data.extract') return ['structured_output'];
+  if (type === 'logic.goal_completion') return ['conversation_state'];
   if (type.startsWith('tool.')) return ['tool_runtime'];
   if (type === 'knowledge.rag_retriever') return ['rag'];
   if (type.startsWith('memory.')) return ['conversation_state'];
   if (type === 'output.respond') return ['message_delivery'];
   if (type === 'output.handoff') return ['human_handoff'];
+  if (type === 'output.close_conversation') return ['conversation_control'];
   return [];
 }
 
@@ -343,6 +347,51 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     },
     attachment: false,
     requiresErrorRoute: true,
+  },
+  {
+    type: 'logic.goal_completion',
+    label: 'Objetivo concluído',
+    description: 'Comprova campos e etapas obrigatórias antes de permitir o encerramento.',
+    category: 'logic',
+    icon: 'ListChecks',
+    tone: 'emerald',
+    inputPorts: [mainInput],
+    outputPorts: [
+      output('completed', 'Concluído', 'main', { required: true }),
+      output('incomplete', 'Incompleto', 'main', { required: true }),
+      errorOutput,
+    ],
+    defaultConfig: {
+      requiredFields: [],
+      requiredOperations: [],
+      requireCompletionSignal: true,
+      allowFieldlessCompletion: false,
+    },
+    attachment: false,
+    editorFields: [
+      {
+        path: 'requiredFields',
+        label: 'Campos obrigatórios',
+        control: 'string_list',
+        description: 'Um campo por linha. Aceita aliases comuns, como nome, CPF/CNPJ, telefone e CEP.',
+      },
+      {
+        path: 'requiredOperations',
+        label: 'Etapas obrigatórias',
+        control: 'string_list',
+        description: 'IDs de blocos, ID:saída ou operações system:* que precisam ter concluído com sucesso.',
+      },
+      {
+        path: 'requireCompletionSignal',
+        label: 'Exigir conclusão do agente',
+        control: 'boolean',
+      },
+      {
+        path: 'allowFieldlessCompletion',
+        label: 'Permitir objetivo sem campos',
+        control: 'boolean',
+      },
+    ],
   },
   {
     type: 'logic.merge',
@@ -816,7 +865,32 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     tone: 'violet',
     inputPorts: [mainInput],
     outputPorts: [output('completed', 'Transferido', 'main'), errorOutput],
-    defaultConfig: { teamId: '', reason: '', requireConfirmation: false },
+    defaultConfig: {
+      teamId: '',
+      reason: '',
+      requireConfirmation: false,
+      permissionScope: 'conversation:handoff',
+    },
+    attachment: false,
+    sensitive: true,
+    requiresErrorRoute: true,
+  },
+  {
+    type: 'output.close_conversation',
+    label: 'Encerrar atendimento',
+    description: 'Fecha o atendimento quando este ramo determinístico for alcançado.',
+    category: 'output',
+    icon: 'CheckCircle2',
+    tone: 'emerald',
+    inputPorts: [mainInput],
+    outputPorts: [output('completed', 'Encerrado', 'main'), errorOutput],
+    defaultConfig: {
+      reason: 'Objetivo do atendimento concluído.',
+      notes: '',
+      reasonTagId: '',
+      sendCloseMessage: false,
+      permissionScope: 'conversation:close',
+    },
     attachment: false,
     sensitive: true,
     requiresErrorRoute: true,

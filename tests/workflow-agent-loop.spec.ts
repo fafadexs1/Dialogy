@@ -146,13 +146,14 @@ function agentFixture(
   return {
     primary,
     events,
-    run: () => executeAgentNode({
+    run: (memory?: Record<string, unknown>) => executeAgentNode({
       config: AgentNodeConfigSchema.parse(agent.config),
       execution,
       workflow,
       node: agent,
       modelChain: new ModelFallbackChain(candidates),
       tools,
+      memory,
       signal: new AbortController().signal,
       emit: async (event) => {
         events.push(event.type);
@@ -202,6 +203,162 @@ describe('controlled agent loop', () => {
     expect(result.selectedOutput).toBe('needs_input');
     expect(result.output?.question).toBe('Qual é o número do contrato?');
     expect(result.resumeToken).toBeUndefined();
+  });
+
+  it('repairs a choice question when the options were not presented first', async () => {
+    const fixture = agentFixture([
+      {
+        type: 'needs_input',
+        question: 'Qual desses planos mais te interessou?',
+        missingFields: ['plano_desejado'],
+      },
+      {
+        type: 'needs_input',
+        question: 'Temos os planos Básico, Profissional e Empresarial. Qual desses planos mais te interessou?',
+        missingFields: ['plano_desejado'],
+      },
+    ]);
+
+    const result = await fixture.run({
+      recentMessages: [
+        { fromMe: false, content: 'Olá' },
+        { fromMe: true, content: 'Como posso ajudar?' },
+      ],
+    });
+
+    expect(result.selectedOutput).toBe('needs_input');
+    expect(result.output?.question).toContain('Básico, Profissional e Empresarial');
+    expect(fixture.primary.calls).toBe(2);
+  });
+
+  it('repairs a final answer that asks for an unpresented scheduling choice', async () => {
+    const fixture = agentFixture([
+      {
+        type: 'final',
+        response: 'Qual horário você prefere?',
+        completionStatus: 'completed',
+      },
+      {
+        type: 'final',
+        response: 'Horários disponíveis: 09:00, 11:00 ou 15:00. Qual horário você prefere?',
+        completionStatus: 'completed',
+      },
+    ]);
+
+    const result = await fixture.run();
+
+    expect(result.status).toBe('completed');
+    expect(result.output?.response).toContain('09:00, 11:00 ou 15:00');
+    expect(fixture.primary.calls).toBe(2);
+  });
+
+  it('allows a follow-up choice when an earlier assistant message presented the options', async () => {
+    const fixture = agentFixture([{
+      type: 'needs_input',
+      question: 'Qual desses imóveis mais te interessou?',
+      missingFields: ['imovel_desejado'],
+    }]);
+
+    const result = await fixture.run({
+      recentMessages: [{
+        fromMe: true,
+        content: 'Imóveis disponíveis:\n1. Apartamento no Centro\n2. Casa no Bairro Verde',
+      }],
+    });
+
+    expect(result.selectedOutput).toBe('needs_input');
+    expect(fixture.primary.calls).toBe(1);
+  });
+
+  it('refuses to ask again for a field already present in structured memory', async () => {
+    const fixture = agentFixture([
+      {
+        type: 'needs_input',
+        question: 'Qual é o seu CEP?',
+        missingFields: ['CEP'],
+      },
+      {
+        type: 'final',
+        response: 'Usei o CEP já confirmado.',
+        completionStatus: 'completed',
+      },
+    ]);
+
+    const result = await fixture.run({
+      knownFields: { address: 'CEP 72800-123' },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.output?.response).toBe('Usei o CEP já confirmado.');
+    expect(fixture.primary.calls).toBe(2);
+  });
+
+  it('removes known fields when only part of a missing-field list is truly absent', async () => {
+    const fixture = agentFixture([
+      {
+        type: 'needs_input',
+        question: 'Qual é seu CEP e seu e-mail?',
+        missingFields: ['CEP', 'email'],
+      },
+      {
+        type: 'needs_input',
+        question: 'Qual é seu e-mail?',
+        missingFields: ['email'],
+      },
+    ]);
+
+    const result = await fixture.run({
+      knownFields: { address: 'CEP 72800-123' },
+    });
+
+    expect(result.selectedOutput).toBe('needs_input');
+    expect(result.output?.missingFields).toEqual(['email']);
+    expect(result.output?.question).toBe('Qual é seu e-mail?');
+    expect(fixture.primary.calls).toBe(2);
+  });
+
+  it('rejects a partial final response that asks again for a known field', async () => {
+    const fixture = agentFixture([
+      {
+        type: 'final',
+        response: 'Para continuar, informe novamente seu CEP e seu e-mail.',
+        completionStatus: 'partial',
+      },
+      {
+        type: 'needs_input',
+        question: 'Qual é seu e-mail?',
+        missingFields: ['email'],
+      },
+    ]);
+
+    const result = await fixture.run({
+      knownFields: { address: 'CEP 72800-123' },
+    });
+
+    expect(result.selectedOutput).toBe('needs_input');
+    expect(result.output?.missingFields).toEqual(['email']);
+    expect(fixture.primary.calls).toBe(2);
+  });
+
+  it('forces one explicit resolution of an ambiguous terminal partial response', async () => {
+    const fixture = agentFixture([
+      {
+        type: 'final',
+        response: 'Obrigada pelas informaÃ§Ãµes. EstÃ¡ tudo certo!',
+        completionStatus: 'partial',
+      },
+      {
+        type: 'final',
+        response: 'Obrigada pelas informaÃ§Ãµes. EstÃ¡ tudo certo!',
+        completionStatus: 'completed',
+      },
+    ]);
+
+    const result = await fixture.run();
+
+    expect(result.selectedOutput).toBe('completed');
+    expect(result.output?.completionStatus).toBe('completed');
+    expect(fixture.primary.calls).toBe(2);
   });
 
   it('completes without tools', async () => {
@@ -315,6 +472,34 @@ describe('controlled agent loop', () => {
     const result = await fixture.run();
     expect(result.status).toBe('error');
     expect(result.error?.code).toBe('MAX_AGENT_TURNS_REACHED');
+  });
+
+  it('separates the visible customer message from the internal summary on automatic handoff', async () => {
+    const repeatedInvalidFinal: AgentDecision = {
+      type: 'final',
+      response: 'Recebi os dados do cliente e preciso encaminhar para a equipe.',
+      completionStatus: 'completed',
+    };
+    const fixture = agentFixture(
+      [repeatedInvalidFinal, repeatedInvalidFinal, repeatedInvalidFinal, repeatedInvalidFinal],
+      {
+        maxTurns: 8,
+        onLimitReached: 'handoff',
+        requireStructuredFinalOutput: true,
+        finalOutputSchema: {
+          type: 'object',
+          required: ['confirmed'],
+          properties: { confirmed: { type: 'boolean' } },
+        },
+      },
+    );
+
+    const result = await fixture.run();
+
+    expect(result.selectedOutput).toBe('handoff');
+    expect(result.output?.customerMessage).toContain('Obrigado pelas informações');
+    expect(result.output?.summary).toContain('Transferência automática por REPEATED_DECISION_SIGNATURE');
+    expect(result.output?.summary).toContain('Contexto para continuidade');
   });
 
   it('falls back after retryable invalid structured output', async () => {

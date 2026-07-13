@@ -32,9 +32,10 @@ import { reportClientMetric } from '@/lib/observability/client';
 import { cn, formatMessageDate } from '@/lib/utils';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
 import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
-import { reconcileRealtimeChatAssignment } from '@/lib/realtime/realtime-reconciler';
+import { reconcileRealtimeChatAssignment, reconcileRealtimeChatPresentation } from '@/lib/realtime/realtime-reconciler';
 import { shouldMarkChatAsRead } from '@/lib/inbox-read-state';
 import { persistChatRead } from '@/lib/inbox-mark-as-read';
+import { inboxDebug } from '@/lib/inbox-debug';
 
 const ContactPanel = dynamic(() => import('../chat/contact-panel'), {
   ssr: false,
@@ -341,7 +342,7 @@ export default function CustomerChatLayout({
     if (!initialResetDoneRef.current) {
       initialResetDoneRef.current = true;
       useInboxStore.getState().reset();
-      console.log('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+      inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
     }
   }, []);
 
@@ -366,7 +367,7 @@ export default function CustomerChatLayout({
     // Safe UUID generation fallback
     const genId = () => uuidv4();
     tabIdRef.current = genId();
-    console.log('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
+    inboxDebug('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
   }
 
   useEffect(() => {
@@ -377,7 +378,7 @@ export default function CustomerChatLayout({
       }
     });
 
-    console.log('[NOTIFICATION] Auth listener registered');
+    inboxDebug('[NOTIFICATION] Auth listener registered');
     return () => {
       data.subscription.unsubscribe();
     };
@@ -524,7 +525,7 @@ export default function CustomerChatLayout({
       setNeedsAudioUnlock(true);
     }
     if (unlocked) {
-      console.log('[NOTIFICATION] Audio unlocked by user gesture');
+      inboxDebug('[NOTIFICATION] Audio unlocked by user gesture');
     }
   }, []);
 
@@ -544,7 +545,7 @@ export default function CustomerChatLayout({
   }, [unlockAudio]);
 
   useEffect(() => {
-    console.log('[NOTIFICATION] Audio element ready? queue:', !!audioRefs.current.queue, 'attending:', !!audioRefs.current.attending, 'Needs unlock?', needsAudioUnlock);
+    inboxDebug('[NOTIFICATION] Audio element ready? queue:', !!audioRefs.current.queue, 'attending:', !!audioRefs.current.attending, 'Needs unlock?', needsAudioUnlock);
   }, [needsAudioUnlock]);
 
   const playNotificationSound = useCallback((kind: keyof typeof SOUND_SOURCES = 'queue') => {
@@ -565,7 +566,7 @@ export default function CustomerChatLayout({
 
     const audio = audioRefs.current[kind];
     const src = SOUND_SOURCES[kind];
-    console.log('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);
+    inboxDebug('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);
     if (!isSoundEnabled) return;
 
     const tryPlay = async () => {
@@ -574,7 +575,7 @@ export default function CustomerChatLayout({
       audio.volume = 1;
       audio.currentTime = 0;
       await audio.play();
-      console.log('[NOTIFICATION] Sound played successfully (ref)', kind);
+      inboxDebug('[NOTIFICATION] Sound played successfully (ref)', kind);
     };
 
     tryPlay().catch(async (e) => {
@@ -585,11 +586,11 @@ export default function CustomerChatLayout({
         audioUnlockRequestedRef.current = true;
       }
       try {
-        console.log('[NOTIFICATION] Trying fallback Audio() playback');
+        inboxDebug('[NOTIFICATION] Trying fallback Audio() playback');
         const fallback = new Audio(src);
         fallback.volume = 1;
         await fallback.play();
-        console.log('[NOTIFICATION] Sound played successfully (fallback)', kind);
+        inboxDebug('[NOTIFICATION] Sound played successfully (fallback)', kind);
       } catch (fallbackError: any) {
         // Only log fallback error if it's not another autoplay block
         if (fallbackError?.name !== 'NotAllowedError') {
@@ -625,7 +626,7 @@ export default function CustomerChatLayout({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     (window as any).__playNotificationTest = (kind: keyof typeof SOUND_SOURCES = 'queue') => {
-      console.log('[NOTIFICATION] Manual test trigger', kind);
+      inboxDebug('[NOTIFICATION] Manual test trigger', kind);
       playNotificationSound(kind);
     };
     return () => {
@@ -648,7 +649,7 @@ export default function CustomerChatLayout({
       return;
     }
 
-    console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me, 'Event:', payload.eventType);
+    inboxDebug('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me, 'Event:', payload.eventType);
 
     const snapshot = useInboxStore.getState();
     const messageChat = snapshot.chats.find((chat) => chat.id === message.chat_id);
@@ -691,7 +692,7 @@ export default function CustomerChatLayout({
   const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
     try {
-      console.log('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
+      inboxDebug('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
       const state = useInboxStore.getState();
       const activeChat = state.chats.find((candidate) => candidate.id === chatId);
       const chatOnly = !!(activeChat as any)?.protocolScoped;
@@ -703,7 +704,7 @@ export default function CustomerChatLayout({
         timezone: workspaceTimezone,
         chatOnly,
       });
-      console.log('[LOAD_MESSAGES] Result:', {
+      inboxDebug('[LOAD_MESSAGES] Result:', {
         messagesCount: result.messages.length,
         oldestMessageDate: result.oldestMessageDate,
         oldestMessageId: result.oldestMessageId,
@@ -734,9 +735,9 @@ export default function CustomerChatLayout({
   }, [prependMessagesToChat, setMessagesForChat, updateChatContact, workspaceTimezone]);
 
   const loadOlderMessages = useCallback(async () => {
-    console.log('[LOAD_OLDER] Called. selectedChatId:', selectedChatId, 'beforeDate:', oldestLoadedMessageDate, 'beforeId:', oldestLoadedMessageId);
+    inboxDebug('[LOAD_OLDER] Called. selectedChatId:', selectedChatId, 'beforeDate:', oldestLoadedMessageDate, 'beforeId:', oldestLoadedMessageId);
     if (!selectedChatId) {
-      console.log('[LOAD_OLDER] No selected chat, returning');
+      inboxDebug('[LOAD_OLDER] No selected chat, returning');
       return;
     }
     const state = useInboxStore.getState();
@@ -744,7 +745,7 @@ export default function CustomerChatLayout({
     const oldestMessage = currentMessages[0];
     const beforeDate = oldestLoadedMessageDate ?? oldestMessage?.createdAt ?? null;
     const beforeId = oldestLoadedMessageId ?? oldestMessage?.id ?? null;
-    console.log('[LOAD_OLDER] Computed cursors:', {
+    inboxDebug('[LOAD_OLDER] Computed cursors:', {
       storedOldestDate: oldestLoadedMessageDate,
       storedOldestId: oldestLoadedMessageId,
       fallbackFromMessage: oldestMessage?.createdAt,
@@ -753,7 +754,7 @@ export default function CustomerChatLayout({
       hasMoreHistory: state.hasMoreHistoryByChat[selectedChatId]
     });
     if (!beforeDate) {
-      console.log('[LOAD_OLDER] Missing cursor date, returning');
+      inboxDebug('[LOAD_OLDER] Missing cursor date, returning');
       return;
     }
     await loadChatMessages(selectedChatId, beforeDate, beforeId ?? undefined);
@@ -766,13 +767,13 @@ export default function CustomerChatLayout({
     const hasLoadedMessageWindow =
       hasRecordKey(state.lastSyncMessages, chatId) ||
       hasRecordKey(state.oldestMessageDateByChat, chatId);
-    console.log('[ENSURE_MESSAGES] Called for chat:', chatId, 'force:', force, 'currentMessages:', currentMessages.length, 'hasLoadedMessageWindow:', hasLoadedMessageWindow, 'hasMoreHistory:', state.hasMoreHistoryByChat[chatId]);
+    inboxDebug('[ENSURE_MESSAGES] Called for chat:', chatId, 'force:', force, 'currentMessages:', currentMessages.length, 'hasLoadedMessageWindow:', hasLoadedMessageWindow, 'hasMoreHistory:', state.hasMoreHistoryByChat[chatId]);
     if (force || !hasLoadedMessageWindow || !currentMessages.length) {
       if (messageWindowLoadsInFlightRef.current.has(chatId)) {
-        console.log('[ENSURE_MESSAGES] Skipped - load already in flight:', chatId);
+        inboxDebug('[ENSURE_MESSAGES] Skipped - load already in flight:', chatId);
         return;
       }
-      console.log('[ENSURE_MESSAGES] Loading messages (force or empty)');
+      inboxDebug('[ENSURE_MESSAGES] Loading messages (force or empty)');
       messageWindowLoadsInFlightRef.current.add(chatId);
       try {
         await loadChatMessages(chatId);
@@ -789,10 +790,10 @@ export default function CustomerChatLayout({
       : undefined;
     if (latestMessage && !currentMessages.some((message) => message.id === latestMessage.id)) {
       // Chat list is fresher than the cached thread; refresh the window.
-      console.log('[ENSURE_MESSAGES] Chat list fresher, loading messages');
+      inboxDebug('[ENSURE_MESSAGES] Chat list fresher, loading messages');
       await loadChatMessages(chatId);
     } else {
-      console.log('[ENSURE_MESSAGES] Skipped loading, messages already present');
+      inboxDebug('[ENSURE_MESSAGES] Skipped loading, messages already present');
     }
   }, [loadChatMessages]);
 
@@ -803,10 +804,10 @@ export default function CustomerChatLayout({
   useEffect(() => {
     if (!selectedChatId) return;
     if (activatedChatIdsRef.current.has(selectedChatId) && hasLoadedSelectedMessageWindow) {
-      console.log('[ENSURE_MESSAGES_EFFECT] Skipped - already activated:', selectedChatId);
+      inboxDebug('[ENSURE_MESSAGES_EFFECT] Skipped - already activated:', selectedChatId);
       return;
     }
-    console.log('[ENSURE_MESSAGES_EFFECT] First activation for chat:', selectedChatId);
+    inboxDebug('[ENSURE_MESSAGES_EFFECT] First activation for chat:', selectedChatId);
     activatedChatIdsRef.current.add(selectedChatId);
     void ensureMessagesForChat(selectedChatId, { force: !hasLoadedSelectedMessageWindow });
   }, [selectedChatId, ensureMessagesForChat, hasLoadedSelectedMessageWindow]);
@@ -982,7 +983,7 @@ export default function CustomerChatLayout({
       const message = error.message || 'Não foi possível buscar os dados do chat.';
       // Auto-retry once for network blips
       if (retryCount < 1) {
-        console.log('[INITIAL_CHATS] Retrying initialization in 1s...');
+        inboxDebug('[INITIAL_CHATS] Retrying initialization in 1s...');
         setTimeout(() => {
           setRetryCount(prev => prev + 1);
         }, 1000);
@@ -1314,7 +1315,7 @@ export default function CustomerChatLayout({
 
       // Wait for hydration before polling
       if (!isHydratedRef.current) {
-        console.log('[POLLING] Waiting for hydration...');
+        inboxDebug('[POLLING] Waiting for hydration...');
         timeoutId = setTimeout(poll, 1000);
         return;
       }
@@ -1395,7 +1396,7 @@ export default function CustomerChatLayout({
 
   // Centralized Realtime subscriptions - prevents duplicate channel conflicts
   const handleRealtimeChatUpdate = useCallback(async (payload: RealtimePostgresChangesPayload<any>) => {
-    console.log('[REALTIME] Chat update received:', payload);
+    inboxDebug('[REALTIME] Chat update received:', payload);
     const newChatData = payload.new as any;
     if (!newChatData?.id) return;
     if (newChatData.workspace_id && newChatData.workspace_id !== initialUser?.activeWorkspaceId) return;
@@ -1478,6 +1479,7 @@ export default function CustomerChatLayout({
     }
 
     const assignmentUpdate = reconcileRealtimeChatAssignment(existingChat, newChatData, initialUser);
+    const presentationUpdate = reconcileRealtimeChatPresentation(existingChat, newChatData);
     const optimisticUpdate: Partial<Chat> = {
       ...newChatData,
       id: newChatData.id,
@@ -1488,18 +1490,14 @@ export default function CustomerChatLayout({
         '',
       status: incomingStatus,
       ...assignmentUpdate,
+      ...presentationUpdate,
       updatedAt: newChatData.updated_at || existingChat?.updatedAt || previewIso,
       unreadCount:
         Number.isFinite(unreadCountValue)
           ? unreadCountValue
           : existingChat?.unreadCount,
-      teamName: newChatData.team_name || existingChat?.teamName,
-      team_id: newChatData.team_id || existingChat?.team_id,
-      teamColor: newChatData.team_color || existingChat?.teamColor,
       instance_name: newChatData.instance_name || existingChat?.instance_name,
       protocol: newChatData.protocol || existingChat?.protocol || `PRT-${String(newChatData.id).toUpperCase()}`,
-      tag: typeof newChatData.tag === 'string' ? newChatData.tag : existingChat?.tag,
-      color: typeof newChatData.color === 'string' ? newChatData.color : existingChat?.color,
       is_autopilot_active:
         typeof newChatData.is_autopilot_active === 'boolean'
           ? newChatData.is_autopilot_active

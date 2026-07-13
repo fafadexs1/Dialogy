@@ -1,6 +1,79 @@
 import { db } from '@/lib/db';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 
+export type ContactVerificationReceipt = {
+  toolName: string;
+  chatId: string;
+  scope: 'contact_identity_context';
+  verifiedAt: string;
+  expiresAt: string;
+  source: 'successful_tool_execution';
+};
+
+export function isContactIdentityVerificationToolName(toolName: string): boolean {
+  const normalized = toolName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_');
+  if (['sgp_fetch_contracts', 'sgp_fetch_contact_panel_data'].includes(normalized)) return true;
+  return (
+    /(?:verify|validate|lookup|find|fetch|get|search|buscar|consultar|localizar)_(?:customer|client|contact|account|subscriber|member|cliente|contato|assinante|cadastro)(?:_|$)/.test(normalized)
+    || /(?:customer|client|contact|account|subscriber|member|cliente|contato|assinante|cadastro)_(?:profile|identity|details|record|contracts|perfil|identidade|dados|contratos)(?:_|$)/.test(normalized)
+  );
+}
+
+/**
+ * Loads only the fact that an identity/contact lookup succeeded for the same
+ * CRM contact. Volatile tool output is deliberately excluded.
+ */
+export async function loadRecentContactVerificationReceipts(input: {
+  workspaceId: string;
+  contactId: string;
+  toolNames: string[];
+  maxAgeDays?: number;
+  limit?: number;
+}): Promise<ContactVerificationReceipt[]> {
+  const toolNames = [...new Set(input.toolNames.filter(isContactIdentityVerificationToolName))];
+  if (!input.contactId || toolNames.length === 0) return [];
+  const maxAgeDays = Math.max(1, Math.min(input.maxAgeDays || 30, 90));
+  const limit = Math.max(1, Math.min(input.limit || 8, 20));
+  try {
+    const { rows } = await db.query(
+      `SELECT execution.tool_name, execution.chat_id, execution.created_at
+         FROM public.agent_tool_executions execution
+         JOIN public.chats chat ON chat.id = execution.chat_id
+        WHERE execution.workspace_id = $1
+          AND chat.contact_id = $2
+          AND execution.tool_name = ANY($3::text[])
+          AND execution.status = 'success'
+          AND execution.created_at >= clock_timestamp() - ($4::int * INTERVAL '1 day')
+        ORDER BY execution.created_at DESC
+        LIMIT $5`,
+      [input.workspaceId, input.contactId, toolNames, maxAgeDays, limit],
+    );
+    const seen = new Set<string>();
+    return rows.flatMap((row: any) => {
+      const toolName = String(row.tool_name || '').trim();
+      const chatId = String(row.chat_id || '').trim();
+      const verifiedAtDate = new Date(row.created_at);
+      if (!toolName || !chatId || !Number.isFinite(verifiedAtDate.getTime()) || seen.has(toolName)) return [];
+      seen.add(toolName);
+      return [{
+        toolName,
+        chatId,
+        scope: 'contact_identity_context' as const,
+        verifiedAt: verifiedAtDate.toISOString(),
+        expiresAt: new Date(verifiedAtDate.getTime() + maxAgeDays * 24 * 60 * 60 * 1000).toISOString(),
+        source: 'successful_tool_execution' as const,
+      }];
+    });
+  } catch (error) {
+    console.warn('[AUTOPILOT_VERIFICATION_MEMORY] Failed to load contact verification receipts:', error);
+    return [];
+  }
+}
+
 const CUSTOMER_FIELD_LABELS: Record<string, string> = {
   id: 'ID',
   name: 'Nome',

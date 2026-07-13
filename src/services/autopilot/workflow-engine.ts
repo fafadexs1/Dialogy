@@ -89,10 +89,11 @@ export function resolveAutopilotWorkflowPlan(input: {
   closeIntentGate?: CloseIntentGateDecision;
   aiWorkflowDecision?: AiWorkflowDecision | null;
   recentToolResults?: AgentToolExecutionResult[] | null;
+  slotExtraction?: SlotExtractionResult;
   now?: Date;
 }): AutopilotWorkflowPlan {
   const workflow = getAutopilotWorkflow(input.intentResolution.intent);
-  const slotExtraction = extractAutopilotSlots({
+  const slotExtraction = input.slotExtraction || extractAutopilotSlots({
     customerMessage: input.customerMessage,
     chatHistory: input.chatHistory,
     contact: input.contact,

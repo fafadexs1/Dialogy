@@ -1,4 +1,18 @@
-import type { Chat, Message } from '@/lib/types';
+import type { Chat, Message, Team } from '@/lib/types';
+
+export function matchesChatTeamFilter(
+  chat: Pick<Chat, 'team_id' | 'tag'>,
+  teams: Array<Pick<Team, 'id' | 'tagLabel'>>,
+  selectedTeamIds: string[]
+) {
+  if (selectedTeamIds.length === 0) return true;
+  if (chat.team_id && selectedTeamIds.includes(chat.team_id)) return true;
+
+  return teams.some((team) =>
+    selectedTeamIds.includes(team.id) &&
+    Boolean(team.tagLabel && chat.tag && team.tagLabel === chat.tag)
+  );
+}
 
 export function isMarketingMessage(message: Message) {
   const meta = message.metadata as any;

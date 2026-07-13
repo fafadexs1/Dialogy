@@ -84,6 +84,12 @@ const inboxNavItem: NavItem = {
   labelKey: "nav.inbox",
 };
 
+const communityNavItem: NavItem = {
+  href: "/comunidade",
+  icon: UsersRound,
+  labelKey: "nav.community",
+};
+
 const clientsNavItems: NavItem[] = [
   {
     href: "/crm",
@@ -1037,6 +1043,13 @@ export function Sidebar({ user }: SidebarProps) {
       <div className={cn("my-3 h-px w-7 shrink-0 [@media(max-height:700px)]:my-2", light ? "bg-slate-200" : "bg-white/10")} />
 
       <nav className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-1.5 [@media(max-height:700px)]:gap-1" aria-label={t("nav.primaryNavigation")}>
+        <SidebarIconLink
+          item={communityNavItem}
+          label={t(communityNavItem.labelKey)}
+          active={routeIsActive(pathname, communityNavItem.href)}
+          light={light}
+        />
+
         <SidebarIconLink
           item={inboxNavItem}
           label={t(inboxNavItem.labelKey)}

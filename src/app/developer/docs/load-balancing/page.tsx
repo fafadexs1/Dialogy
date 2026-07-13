@@ -42,10 +42,10 @@ export default function LoadBalancingDocs() {
                     <div className="p-6 rounded-2xl bg-white/5 border border-white/10 mb-10">
                         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                             <Clock className="w-5 h-5 text-blue-400" />
-                            Algoritmo "Least Recently Assigned" (LRA)
+                            Carga efetiva com justiça por turno
                         </h3>
                         <p className="text-white/70 mb-0">
-                            O Dialogy utiliza uma variação do algoritmo <strong>Least Recently Assigned</strong>. Isso significa que, ao transferir um chat para uma equipe, o sistema busca o agente que está <strong>há mais tempo sem receber um novo atendimento</strong>.
+                            O Dialogy combina <strong>carga conversacional efetiva</strong>, capacidade, limite de carteira e um score de justiça persistente. Conversas esperando resposta do agente pesam mais; conversas esperando o cliente ou inativas pesam menos.
                         </p>
                     </div>
 
@@ -63,17 +63,17 @@ export default function LoadBalancingDocs() {
                             },
                             {
                                 title: "2. Exclusão do Remetente",
-                                desc: "Se quem está transferindo também faz parte da equipe de destino, ele é excluído da seleção para evitar que o chat volte para ele mesmo.",
+                                desc: "Se quem está transferindo também faz parte da equipe de destino, outros agentes elegíveis têm preferência. Se ele for o único disponível, a equipe não fica artificialmente indisponível.",
                                 icon: CheckCircle2
                             },
                             {
-                                title: "3. Análise Temporal",
-                                desc: "Para cada agente disponível, o sistema verifica o timestamp da última vez que um chat foi atribuído a ele (assigned_at).",
+                                title: "3. Carga Conversacional",
+                                desc: "O sistema diferencia conversas exigindo resposta, conversas em atividade e conversas aguardando o cliente, sem confundir carteira total com trabalho simultâneo.",
                                 icon: Clock
                             },
                             {
-                                title: "4. Ordenação e Seleção",
-                                desc: "Os agentes são ordenados de forma que quem recebeu um chat há mais tempo (ou nunca recebeu) fica no topo da lista. Em caso de empate exato, um sorteio randômico é feito.",
+                                title: "4. Justiça e Seleção",
+                                desc: "Entre agentes com ocupação semelhante, recebe quem tem menor score de justiça e está há mais tempo sem uma atribuição. Quem entra depois começa na mediana da equipe, evitando punição ou enxurrada de chats.",
                                 icon: Scale
                             }
                         ].map((step, i) => (

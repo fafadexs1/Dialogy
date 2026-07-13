@@ -23,7 +23,8 @@ import {
     Copy,
     Clock,
     ArrowRightLeft,
-    XCircle
+    XCircle,
+    Loader2
 } from 'lucide-react';
 import { type Message } from '@/lib/types';
 import {
@@ -749,7 +750,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
     return (
         <React.Fragment>
             {showDateSeparator && (
-                <div className="relative my-5">
+                <div className="relative py-5">
                     <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-border/50"></div>
                     </div>
@@ -760,7 +761,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
             )}
             {
                 message.type === 'system' ? (
-                    <div className="flex justify-center items-center my-6">
+                    <div className="flex items-center justify-center py-6">
                         <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-full px-3 py-1 border border-border dark:text-white/60 dark:bg-white/5 dark:border-white/10">
                             <Info className="h-3.5 w-3.5" />
                             <span>{message.content}</span>
@@ -961,7 +962,14 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                         ) : (
                                             (() => {
                                                 // Case-insensitive pending check
-                                                if (message.optimistic) return null; // Optimistic: No icon (immediate feedback)
+                                                if (message.optimistic) {
+                                                    return (
+                                                        <Loader2
+                                                            className="h-3.5 w-3.5 animate-spin text-blue-500 dark:text-blue-400"
+                                                            aria-label="Enviando mensagem"
+                                                        />
+                                                    );
+                                                }
 
                                                 if (status === 'PENDING') return <Check className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />; // Saved in DB: Single Check
 

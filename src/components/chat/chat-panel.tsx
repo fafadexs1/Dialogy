@@ -58,6 +58,7 @@ import {
     SpellCheck2,
     Activity,
     Signature,
+    SlidersHorizontal,
     PanelRightOpen,
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
@@ -113,7 +114,10 @@ import { AudioRecorder } from './audio-recorder';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
 import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import {
+    Virtuoso,
+    type VirtuosoHandle,
+} from 'react-virtuoso';
 import { useTheme } from '@/providers/theme-provider';
 import { shouldAcceptAiSuggestion } from '@/lib/inbox-ownership';
 import { TransferChatDialog } from './contact-panel';
@@ -122,13 +126,12 @@ import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-
 import { Badge } from '../ui/badge';
 import { getChatIdentityDisplayValue, resolveChatPlatform } from '@/lib/chat-platform';
 import { buildToolExecutionItems, isToolExecutionMessage, ToolExecutionsSheet } from './tool-executions-sheet';
+import { usePremiumWheelScroller } from '@/hooks/use-premium-wheel-scroller';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
     ssr: false,
     loading: () => <div className="h-[360px] w-[300px] rounded-xl bg-muted" />,
 });
-
-
 
 interface ChatPanelProps {
     chat: Chat | null;
@@ -481,12 +484,9 @@ export default function ChatPanel({
     const canLoadOlderRef = useRef(canLoadOlder);
     const [allContactMessages, setAllContactMessages] = useState<Message[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-    const [sendState, setSendState] = useState<'idle' | 'sending' | 'error'>('idle');
-    const [lastSendError, setLastSendError] = useState<string | null>(null);
     const lastSendDraftRef = useRef<{ text: string; media: MediaFileType[]; isNote: boolean } | null>(null);
     const textSendQueueRef = useRef<TextSendJob[]>([]);
     const textSendProcessingRef = useRef(false);
-    const [textSendQueueCount, setTextSendQueueCount] = useState(0);
     const retryingMessagesRef = useRef(new Set<string>());
     const [sendFeedbackKey, setSendFeedbackKey] = useState(0);
     const [isSendBurstActive, setIsSendBurstActive] = useState(false);
@@ -517,6 +517,9 @@ export default function ChatPanel({
     const [isSpellChecking, setIsSpellChecking] = useState(false);
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const messageTimelineRef = useRef<HTMLDivElement>(null);
+    const scrollToLatestFrameRef = useRef<number | null>(null);
+    const initiallyPositionedChatRef = useRef<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const contentEditableRef = useRef<any>(null);
     const processedMessageIds = useRef(new Set<string>());
@@ -834,6 +837,11 @@ export default function ChatPanel({
 
     // VIRTUALIZATION ENABLED
     const visibleMessages = messagesToRender;
+    const timelineContentVersion = `${chat?.id || 'none'}:${visibleMessages.length}:${visibleMessages[0]?.id || 'empty'}:${visibleMessages[visibleMessages.length - 1]?.id || 'empty'}`;
+    const {
+        cancelAnimation: cancelPremiumWheelAnimation,
+        scrollerRef: premiumWheelScrollerRef,
+    } = usePremiumWheelScroller(isLoadingOlderMessages, timelineContentVersion);
     const visibleMessagesLookup = useMemo(() => {
         const byId = new Map<string, Message>();
         const byApiMessageId = new Map<string, Message>();
@@ -853,7 +861,7 @@ export default function ChatPanel({
     // Strategy: Update state DURING render if changes are detected.
     // This pattern forces React to restart the render with the new value immediately,
     // ensuring Virtuoso never renders with mismatched data/index.
-    const START_INDEX = 10000;
+    const START_INDEX = 1_000_000;
     const [firstItemIndex, setFirstItemIndex] = useState(START_INDEX);
     const [prevVisibleMessages, setPrevVisibleMessages] = useState<Message[]>(visibleMessages);
 
@@ -867,21 +875,76 @@ export default function ChatPanel({
 
     // Detect Prepend logic
     if (visibleMessages !== prevVisibleMessages) {
-        const currentLen = visibleMessages.length;
-        const prevLen = prevVisibleMessages.length;
         const currentFirstId = visibleMessages.length > 0 ? visibleMessages[0].id : null;
         const prevFirstId = prevVisibleMessages.length > 0 ? prevVisibleMessages[0].id : null;
 
         // Update the tracking state
         setPrevVisibleMessages(visibleMessages);
 
-        // Calculate offset if it's a prepend
-        if (currentLen > prevLen && currentFirstId !== prevFirstId && prevFirstId !== null) {
-            const diff = currentLen - prevLen;
-            console.log('[VIRTUOSO] Prepend detected (render-phase):', diff, 'Adjusting firstItemIndex.');
-            setFirstItemIndex(prev => prev - diff);
+        // Anchor against the first previously visible message. Counting the total
+        // length delta is not safe because a realtime append can happen while the
+        // older page is loading and would make the viewport jump.
+        if (currentFirstId !== prevFirstId && prevFirstId !== null) {
+            const prependedItemCount = visibleMessages.findIndex((message) => message.id === prevFirstId);
+            if (prependedItemCount > 0) {
+                setFirstItemIndex(prev => prev - prependedItemCount);
+            }
         }
     }
+
+    const handleMessageRangeChanged = useCallback(({ startIndex: visibleStartIndex }: { startIndex: number }) => {
+        // Start fetching shortly before the user reaches the first item. Once the
+        // page is prepended, firstItemIndex moves backwards and this distance grows,
+        // preventing a cascade of requests while preserving the visual anchor.
+        if (visibleStartIndex - firstItemIndex <= 6) {
+            tryLoadOlder();
+        }
+    }, [firstItemIndex, tryLoadOlder]);
+
+    const handleMessageScrolling = useCallback((isScrolling: boolean) => {
+        if (!messageTimelineRef.current) return;
+        messageTimelineRef.current.dataset.scrolling = isScrolling ? 'true' : 'false';
+    }, []);
+
+    const scrollToLatestMessage = useCallback((behavior: 'auto' | 'smooth' = 'smooth') => {
+        cancelPremiumWheelAnimation();
+        userScrolledUpRef.current = false;
+
+        if (scrollToLatestFrameRef.current !== null) {
+            window.cancelAnimationFrame(scrollToLatestFrameRef.current);
+        }
+
+        const resolvedBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : behavior;
+
+        // Two frames let the optimistic/store update commit before Virtuoso resolves
+        // LAST, avoiding stale relative indices after a prepend-enabled timeline.
+        scrollToLatestFrameRef.current = window.requestAnimationFrame(() => {
+            scrollToLatestFrameRef.current = window.requestAnimationFrame(() => {
+                scrollToLatestFrameRef.current = null;
+                virtuosoRef.current?.scrollToIndex({
+                    index: 'LAST',
+                    align: 'end',
+                    behavior: resolvedBehavior,
+                });
+            });
+        });
+    }, [cancelPremiumWheelAnimation]);
+
+    useEffect(() => () => {
+        if (scrollToLatestFrameRef.current !== null) {
+            window.cancelAnimationFrame(scrollToLatestFrameRef.current);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!chat?.id || isLoadingInitialMessages || visibleMessages.length === 0) return;
+        if (initiallyPositionedChatRef.current === chat.id) return;
+
+        initiallyPositionedChatRef.current = chat.id;
+        scrollToLatestMessage('auto');
+    }, [chat?.id, isLoadingInitialMessages, scrollToLatestMessage, visibleMessages.length]);
 
     const startIndex = 0;
     const padTop = 0;
@@ -1289,13 +1352,11 @@ export default function ChatPanel({
             }
 
             textSendQueueRef.current.shift();
-            setTextSendQueueCount(textSendQueueRef.current.length);
         }
     }, [currentUser, onActionSuccess, replaceOptimisticMessage, setDraft, tabId, toast, updateMessage, workspaceTimezone]);
 
     const enqueueTextSend = useCallback((job: TextSendJob) => {
         textSendQueueRef.current.push(job);
-        setTextSendQueueCount(textSendQueueRef.current.length);
         void processTextSendQueue();
     }, [processTextSendQueue]);
 
@@ -1416,17 +1477,12 @@ export default function ChatPanel({
             appendMessagesToChat(chat.id, [optimisticMessage]);
             triggerSendFeedback();
 
-            // Force scroll to bottom by resetting user scroll state
-            userScrolledUpRef.current = false;
-
-            // Virtuoso handles auto-scroll via followOutput prop or ref
-            setTimeout(() => {
-                virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length, align: 'end', behavior: 'smooth' });
-            }, 50);
+            scrollToLatestMessage();
 
             setNewMessage('');
             setMediaFiles([]);
             setSkipUserSignature(false);
+            setIsInternalNote(false);
             if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
 
             setDraft(chat.id, '');
@@ -1442,10 +1498,7 @@ export default function ChatPanel({
             return;
         }
 
-        if (sendState === 'sending') return;
         // Optimization: Do not block for media sending.
-        // setSendState('sending'); // Removed blocking state for media
-        setLastSendError(null);
         const sendStart = performance.now();
 
         // Save context for background tasks
@@ -1458,6 +1511,7 @@ export default function ChatPanel({
         setNewMessage('');
         setMediaFiles([]);
         setSkipUserSignature(false);
+        setIsInternalNote(false);
         if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
         setDraft(chatId, '');
 
@@ -1508,11 +1562,7 @@ export default function ChatPanel({
         appendMessagesToChat(chatId, optimisticMessages);
         triggerSendFeedback();
 
-        // Scroll to bottom
-        userScrolledUpRef.current = false;
-        setTimeout(() => {
-            virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length + optimisticMessages.length, align: 'end', behavior: 'smooth' });
-        }, 50);
+        scrollToLatestMessage();
 
         // Process in background (Fire-and-forget from UI perspective)
         (async () => {
@@ -1649,6 +1699,7 @@ export default function ChatPanel({
             console.log('[AUDIO_SEND] Success, appending messages');
             appendMessagesToChat(chat.id, (result as any).messages);
             triggerSendFeedback();
+            scrollToLatestMessage();
         }
 
         // Cleanup happens server-side after the background send completes.
@@ -1954,6 +2005,22 @@ export default function ChatPanel({
         : chat.status === 'encerrados'
             ? 'border-slate-200 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300'
             : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
+    const headerPlatformLabel = resolvedPlatform === 'instagram'
+        ? 'Instagram'
+        : resolvedPlatform === 'messenger'
+            ? 'Messenger'
+            : resolvedPlatform === 'telegram'
+                ? 'Telegram'
+                : 'WhatsApp';
+    const headerServiceStartedAt = chat.assigned_at || chat.updatedAt;
+    const headerServiceStartedAtMs = headerServiceStartedAt ? new Date(headerServiceStartedAt).getTime() : Number.NaN;
+    const headerServiceStartedTime = Number.isFinite(headerServiceStartedAtMs)
+        ? new Date(headerServiceStartedAtMs).toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: workspaceTimezone,
+        })
+        : null;
 
 
 
@@ -1977,11 +2044,12 @@ export default function ChatPanel({
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                     )}
-                    <div>
+                    <div className="relative shrink-0">
                         <Avatar className="h-10 w-10 border border-slate-200 bg-white md:h-11 md:w-11 dark:border-white/10 dark:bg-[#0B0B10]">
                             <AvatarImage fallbackOnBlank src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
                         </Avatar>
+                        <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-[#050507]" aria-hidden="true" />
                     </div>
                     <div className="min-w-0 flex-1">
                         <h2 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold text-slate-950 md:text-base dark:text-white">
@@ -1989,7 +2057,7 @@ export default function ChatPanel({
                             <Badge
                                 data-chat-status
                                 variant="secondary"
-                                className={cn("h-5 shrink-0 whitespace-nowrap border px-2 text-[10px] font-semibold", headerStatusClassName)}
+                                className={cn("h-5 shrink-0 whitespace-nowrap border px-2 text-[10px] font-semibold md:hidden", headerStatusClassName)}
                             >
                                 {headerStatusLabel}
                             </Badge>
@@ -2052,24 +2120,37 @@ export default function ChatPanel({
                             </Dialog>
                         </h2>
                         <p className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-slate-500 dark:text-zinc-500">
-                            {chat.instance_name && (
-                                <span className="flex shrink-0 items-center gap-1 text-slate-500 dark:text-zinc-500">
-                                    {headerPlatformIcon}
-                                    <span className="hidden max-w-[88px] truncate min-[1200px]:inline">{chat.instance_name}</span>
-                                </span>
-                            )}
-                            {chat.instance_name && headerContactValue && (
-                                <span aria-hidden="true" className="hidden shrink-0 min-[1200px]:inline">•</span>
-                            )}
+                            <span className="flex shrink-0 items-center gap-1">
+                                {headerPlatformIcon}
+                                <span>{headerPlatformLabel}</span>
+                            </span>
+                            {headerContactValue && <span aria-hidden="true">•</span>}
                             <span className="min-w-0 truncate text-slate-600 dark:text-zinc-400">{headerContactValue}</span>
-                            <span aria-hidden="true" className="hidden shrink-0 min-[1500px]:inline">•</span>
-                            <span className="hidden max-w-[120px] shrink-0 truncate min-[1500px]:inline" title={`Equipe: ${chat.teamName || 'Sem equipe'}`}>
-                                {chat.teamName || 'Sem equipe'}
-                            </span>
-                            <span aria-hidden="true" className="hidden shrink-0 min-[1800px]:inline">•</span>
-                            <span className="hidden max-w-[140px] shrink-0 truncate font-medium text-slate-600 min-[1800px]:inline dark:text-zinc-400" title={`Responsável: ${headerAssigneeName}`}>
-                                {headerAssigneeName}
-                            </span>
+                        </p>
+                    </div>
+                    <div className="hidden h-9 w-px shrink-0 bg-slate-200 xl:block dark:bg-white/10" />
+                    <div className="hidden min-w-[118px] items-center gap-2 xl:flex">
+                        <Users className="h-4 w-4 shrink-0 text-slate-400 dark:text-zinc-500" />
+                        <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-slate-800 dark:text-zinc-200">{chat.teamName || 'Sem equipe'}</p>
+                            <p className="text-[10px] text-slate-400 dark:text-zinc-500">Equipe</p>
+                        </div>
+                    </div>
+                    <div className="hidden h-9 w-px shrink-0 bg-slate-200 2xl:block dark:bg-white/10" />
+                    <div className="hidden min-w-[132px] items-center gap-2 2xl:flex">
+                        <Clock className="h-4 w-4 shrink-0 text-slate-400 dark:text-zinc-500" />
+                        <div>
+                            <p className="text-xs font-semibold text-slate-800 dark:text-zinc-200">Atendimento</p>
+                            <p className="text-[10px] text-slate-400 dark:text-zinc-500">{headerServiceStartedTime ? `desde ${headerServiceStartedTime}` : 'Horário indisponível'}</p>
+                        </div>
+                    </div>
+                    <div className="hidden h-9 w-px shrink-0 bg-slate-200 md:block dark:bg-white/10" />
+                    <div className="hidden min-w-[104px] md:block">
+                        <Badge variant="secondary" className={cn("h-5 whitespace-nowrap border px-2 text-[10px] font-semibold", headerStatusClassName)}>
+                            {headerStatusLabel}
+                        </Badge>
+                        <p className="mt-0.5 truncate text-[10px] text-slate-400 dark:text-zinc-500" title={`Responsável: ${headerAssigneeName}`}>
+                            {headerAssigneeName}
                         </p>
                     </div>
                 </div>
@@ -2282,7 +2363,10 @@ export default function ChatPanel({
 
             {/* Messages Area */}
 
-            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F8F9FB] dark:bg-black/25">
+            <div
+                ref={messageTimelineRef}
+                className="chat-timeline relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F8F9FB] dark:bg-black/25"
+            >
                 {isLoadingInitialMessages ? (
                     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                         <div className="flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2">
@@ -2291,16 +2375,37 @@ export default function ChatPanel({
                         </div>
                     </div>
                 ) : (
+                <>
+                <div
+                    className={cn(
+                        "pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 transition-[opacity,transform] duration-200 motion-reduce:transition-none",
+                        isLoadingOlderMessages
+                            ? "translate-y-0 opacity-100"
+                            : "-translate-y-2 opacity-0"
+                    )}
+                    role="status"
+                    aria-live="polite"
+                    aria-hidden={!isLoadingOlderMessages}
+                >
+                    <div className="flex items-center gap-2 rounded-full border border-border/80 bg-background/95 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-lg shadow-black/5 backdrop-blur-md dark:shadow-black/30">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Buscando mensagens anteriores...</span>
+                    </div>
+                </div>
                 <Virtuoso
                     key={chat?.id}
                     ref={virtuosoRef}
+                    scrollerRef={premiumWheelScrollerRef}
                     style={{ height: '100%', width: '100%' }}
                     data={visibleMessages}
                     firstItemIndex={firstItemIndex}
-                    initialTopMostItemIndex={firstItemIndex + visibleMessages.length - 1}
-                    increaseViewportBy={1000} // Increased for smoother fast scrolling
-                    defaultItemHeight={80} // STABILITY: Prevents height guessing during scroll
+                    initialTopMostItemIndex={{ index: Math.max(0, visibleMessages.length - 1), align: 'end' }}
+                    increaseViewportBy={{ top: 480, bottom: 240 }}
+                    minOverscanItemCount={{ top: 4, bottom: 2 }}
+                    defaultItemHeight={96}
+                    skipAnimationFrameInResizeObserver
                     alignToBottom={true}
+                    isScrolling={handleMessageScrolling}
                     computeItemKey={(index, item) => item.id} // STABILITY: Prevent re-renders on prepend
                     followOutput={(isAtBottom) => {
                         // If we are at the bottom, stay there.
@@ -2310,22 +2415,10 @@ export default function ChatPanel({
                     atBottomStateChange={(atBottom) => {
                         userScrolledUpRef.current = !atBottom;
                     }}
-                    startReached={() => {
-                        if (canLoadOlder && !isLoadingOlderMessages && !isFetchingHistoryRef.current) {
-                            tryLoadOlder();
-                        }
-                    }}
+                    rangeChanged={handleMessageRangeChanged}
+                    startReached={tryLoadOlder}
                     components={{
-                        Header: () => (
-                            <div className="h-4 flex justify-center p-2">
-                                {isLoadingOlderMessages && (
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background px-3 py-1 rounded-full border border-border">
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                        <span>Carregando histórico...</span>
-                                    </div>
-                                )}
-                            </div>
-                        ),
+                        Header: () => <div className="h-4" aria-hidden="true" />,
                         Footer: () => (
                             <div className="min-h-4 px-2 pb-2 md:px-6">
                                 {isAiTyping && (
@@ -2359,7 +2452,7 @@ export default function ChatPanel({
                             (replyToId ? visibleMessagesLookup.byId.get(replyToId) : undefined) ||
                             (replyToApiId ? visibleMessagesLookup.byApiMessageId.get(replyToApiId) : undefined);
                         return (
-                            <div className="px-2 py-0.5 md:px-[clamp(20px,3vw,48px)]" id={`message-${message.id}`} data-no-auto-translate>
+                            <div className="px-2 py-0.5 md:px-[clamp(20px,3vw,48px)]" id={`message-${message.id}`} data-message-row data-no-auto-translate>
                                 <MessageItem
                                     key={message.id}
                                     message={message}
@@ -2376,6 +2469,7 @@ export default function ChatPanel({
                         );
                     }}
                 />
+                </>
                 )}
             </div>
 
@@ -2505,13 +2599,13 @@ export default function ChatPanel({
                                     )}
 
                                     {/* Text Input Area */}
-                                    <div className="relative min-w-0 px-4 pt-2 pb-1">
+                                    <div className="relative min-w-0 px-5 pb-1 pt-4">
                                         {showTextInput && isComposerTextEmpty && !showAiTypingOverlay && (
-                                            <div className="absolute inset-0 px-4 pt-3 pb-1 pointer-events-none select-none">
+                                            <div className="pointer-events-none absolute inset-0 px-5 pb-1 pt-4 select-none">
                                                 <span className={cn(
                                                     "text-[15px] leading-relaxed",
                                                     isInternalNote ? "text-muted-foreground/50" : "text-slate-400 dark:text-zinc-500"
-                                                )}>Digite aqui o seu texto...</span>
+                                                )}>Digite aqui a sua mensagem...</span>
                                             </div>
                                         )}
                                         {showAiTypingOverlay && (
@@ -2547,7 +2641,7 @@ export default function ChatPanel({
                                                 onChange={handleMessageChange}
                                                 onPaste={handlePaste}
                                                 className={cn(
-                                                    "w-full bg-transparent border-0 focus:ring-0 p-0 resize-none max-h-[120px] min-h-[28px] focus:outline-none scrollbar-hide whitespace-pre-wrap overflow-y-auto text-[15px] leading-relaxed",
+                                                    "max-h-[140px] min-h-[44px] w-full resize-none overflow-y-auto whitespace-pre-wrap border-0 bg-transparent p-0 text-[15px] leading-relaxed focus:outline-none focus:ring-0 scrollbar-hide",
                                                     isInternalNote ? "text-foreground" : "text-slate-900 caret-slate-900 dark:text-white dark:caret-white",
                                                     showAiTypingOverlay && "opacity-0"
                                                 )}
@@ -2559,17 +2653,17 @@ export default function ChatPanel({
                                     </div>
 
                                     {/* Bottom Toolbar */}
-                                    <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+                                    <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
                                         {/* Left Action Buttons */}
-                                        <div className="flex items-center gap-1">
+                                        <div className="flex min-w-0 items-center gap-1 overflow-x-auto scrollbar-hide">
                                             <button
                                                 type="button"
-                                                className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/10 transition-colors"
+                                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
                                                 onClick={() => fileInputRef.current?.click()}
                                                 disabled={isAiTyping}
                                                 aria-label="Anexar arquivo"
                                             >
-                                                <Plus className="h-4 w-4" />
+                                                <Paperclip className="h-4 w-4" />
                                             </button>
                                             <input
                                                 type="file"
@@ -2580,46 +2674,67 @@ export default function ChatPanel({
                                                 accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
                                             />
 
-                                            <button
-                                                type="button"
-                                                className={cn(
-                                                    "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
-                                                    isInternalNote
-                                                        ? "bg-yellow-500/15 text-yellow-700 hover:bg-yellow-500/20 dark:text-yellow-300"
-                                                        : "text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                )}
-                                                onClick={() => setIsInternalNote(!isInternalNote)}
-                                                disabled={isAiTyping}
-                                                aria-pressed={isInternalNote}
-                                            >
-                                                <StickyNote className="h-4 w-4" />
-                                                <span className="hidden sm:inline">{isInternalNote ? 'Remover nota' : 'Nota interna'}</span>
-                                            </button>
-
-                                            {!isInternalNote && (
-                                                <TooltipProvider delayDuration={150}>
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <button
-                                                                type="button"
-                                                                className={cn(
-                                                                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors",
-                                                                    skipUserSignature
-                                                                        ? "bg-red-500/15 text-red-600 hover:bg-red-500/20 dark:text-red-300"
-                                                                        : "text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                                )}
-                                                                onClick={() => setSkipUserSignature((value) => !value)}
-                                                                disabled={isAiTyping}
-                                                                aria-label="Remover Assinatura"
-                                                                aria-pressed={skipUserSignature}
-                                                            >
-                                                                <Signature className="h-4 w-4" />
-                                                            </button>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent side="top">Remover Assinatura</TooltipContent>
-                                                    </Tooltip>
-                                                </TooltipProvider>
-                                            )}
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className={cn(
+                                                            "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+                                                            isInternalNote || skipUserSignature
+                                                                ? "bg-blue-500/10 text-blue-700 hover:bg-blue-500/15 dark:text-blue-300"
+                                                                : "text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
+                                                        )}
+                                                        disabled={isAiTyping}
+                                                        aria-label="Selecionar opções para a próxima mensagem"
+                                                    >
+                                                        <SlidersHorizontal className="h-4 w-4" />
+                                                        <span className="hidden sm:inline">Opções</span>
+                                                        {(isInternalNote || skipUserSignature) && (
+                                                            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold text-white">
+                                                                {Number(isInternalNote) + Number(skipUserSignature)}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="start" className="w-72">
+                                                    <DropdownMenuLabel>
+                                                        <span className="block text-sm">Próxima mensagem</span>
+                                                        <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">As opções são desativadas após o envio.</span>
+                                                    </DropdownMenuLabel>
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuCheckboxItem
+                                                        checked={isInternalNote}
+                                                        onCheckedChange={(checked) => {
+                                                            const enabled = checked === true;
+                                                            setIsInternalNote(enabled);
+                                                            if (enabled) setSkipUserSignature(false);
+                                                        }}
+                                                        onSelect={(event) => event.preventDefault()}
+                                                    >
+                                                        <StickyNote className="mr-2 h-4 w-4 text-amber-500" />
+                                                        <div>
+                                                            <p className="text-sm font-medium">Nota interna</p>
+                                                            <p className="text-[10px] text-muted-foreground">Visível somente para a equipe</p>
+                                                        </div>
+                                                    </DropdownMenuCheckboxItem>
+                                                    <DropdownMenuCheckboxItem
+                                                        checked={skipUserSignature}
+                                                        disabled={isInternalNote}
+                                                        onCheckedChange={(checked) => {
+                                                            const enabled = checked === true;
+                                                            setSkipUserSignature(enabled);
+                                                            if (enabled) setIsInternalNote(false);
+                                                        }}
+                                                        onSelect={(event) => event.preventDefault()}
+                                                    >
+                                                        <Signature className="mr-2 h-4 w-4 text-violet-500" />
+                                                        <div>
+                                                            <p className="text-sm font-medium">Sem assinatura</p>
+                                                            <p className="text-[10px] text-muted-foreground">Envia sem o nome do atendente</p>
+                                                        </div>
+                                                    </DropdownMenuCheckboxItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
 
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
@@ -2670,14 +2785,15 @@ export default function ChatPanel({
                                                     <button
                                                         type="button"
                                                         className={cn(
-                                                            "h-8 w-8 flex items-center justify-center rounded-full transition-colors hover:bg-muted dark:hover:bg-white/10",
+                                                            "flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition-colors hover:bg-muted dark:hover:bg-white/10",
                                                             isAiAgentActive
                                                                 ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300"
                                                                 : "text-muted-foreground hover:text-foreground"
                                                         )}
                                                         aria-label="Configurar IA"
                                                     >
-                                                        <Globe className={cn("h-4 w-4", isAiAgentActive && "text-cyan-500")} />
+                                                        <Sparkles className={cn("h-4 w-4", isAiAgentActive && "text-cyan-500")} />
+                                                        <span>IA</span>
                                                     </button>
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="start" className="w-72">
@@ -2755,7 +2871,7 @@ export default function ChatPanel({
                                             ) : (
                                                 <div className="animate-in zoom-in duration-150">
                                                     <SendMessageButton
-                                                        disabled={isAiTyping || (sendState === 'sending' && mediaFiles.length > 0)}
+                                                        disabled={isAiTyping}
                                                         isPrimed={!isAiTyping && canSendFromComposer}
                                                         feedbackKey={sendFeedbackKey}
                                                         showFeedback={isSendBurstActive}
@@ -2766,27 +2882,6 @@ export default function ChatPanel({
                                     </div>
                                 </div>
                             </form>
-                            {sendState === 'sending' && (
-                                <div className="text-xs text-blue-300 flex items-center gap-2 pl-1">
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                    <span>Enviando...</span>
-                                </div>
-                            )}
-                            {sendState === 'error' && (
-                                <div className="text-xs text-red-300 flex items-center gap-2 pl-1">
-                                    <span>{lastSendError || 'Falha ao enviar. Tente novamente.'}</span>
-                                    <Button variant="link" size="sm" className="px-1 h-auto text-red-200" onClick={handleFormSubmit}>
-                                        Reenviar
-                                    </Button>
-                                </div>
-                            )}
-                            {textSendQueueCount > 0 && (
-                                <div className="text-xs text-muted-foreground flex items-center gap-2 pl-1">
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                    <span>Fila de envio: {textSendQueueCount} mensagem{textSendQueueCount > 1 ? 's' : ''}</span>
-                                </div>
-                            )}
-
                             {/* Agent UI removed from here, moving to header */}
                         </div>
                     </footer>

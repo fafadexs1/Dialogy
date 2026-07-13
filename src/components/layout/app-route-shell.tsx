@@ -8,6 +8,7 @@ import { PresenceProvider } from '@/hooks/use-online-status';
 import { AuthProvider } from '@/providers/auth-provider';
 import { ThemeProvider } from '@/providers/theme-provider';
 import { getWorkspaceLimits } from '@/lib/billing-logic';
+import { ProductUpdateAnnouncementModal } from '@/components/product-updates/product-update-announcement';
 
 export async function AppRouteShell({ children }: { children: React.ReactNode }) {
   ensureServerHeartbeat();
@@ -29,6 +30,7 @@ export async function AppRouteShell({ children }: { children: React.ReactNode })
           disableTransitionOnChange
         >
             <AuthProvider>
+              <ProductUpdateAnnouncementModal />
               <PresenceProvider initialUser={user}>
                 <MainAppLayout
                   billingStatus={billing?.billingStatus ?? null}

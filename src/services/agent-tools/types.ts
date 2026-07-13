@@ -106,6 +106,46 @@ export type AgentToolRuntimeContext = {
   }>;
   confirmedActionFingerprint?: string | null;
   orchestratorRunId?: string | null;
+  sourceMessageId?: string | null;
+  /**
+   * Server-only control-plane authorization. It is never parsed from model
+   * output or accepted inside an AgentToolAction payload.
+   */
+  closeAuthorization?: (
+    | {
+        source: 'workflow_goal_completed';
+        chatId: string;
+        orchestratorRunId: string;
+        workflowId: string;
+        workflowVersion: string;
+        executionId: string;
+        terminalNodeId: string;
+        actionFingerprint: string;
+      }
+    | {
+        source: 'procedure_goal_completed';
+        chatId: string;
+        orchestratorRunId: string;
+        procedureExecutionId: string;
+        actionFingerprint: string;
+      }
+    | {
+        source: 'conversation_collection_completed';
+        chatId: string;
+        orchestratorRunId: string;
+        sourceMessageId: string;
+        workflowId: string;
+        workflowVersion: string;
+        needsInputExecutionId: string;
+        completionExecutionId: string;
+        agentNodeId: string;
+        terminalNodeId: string;
+        pendingFieldsFingerprint: string;
+        persistenceReceiptFingerprint: string;
+        checkpointFingerprint: string;
+        actionFingerprint: string;
+      }
+  ) | null;
 };
 
 export type AgentToolExecutionResult = {

@@ -12,6 +12,7 @@ import type {
   WorkflowNode,
 } from './types';
 import { AgentNodeConfigSchema } from './schemas';
+import { evaluateWorkflowGoalCompletion } from './goal-completion';
 import type { ToolRegistry } from './tools';
 import {
   createId,
@@ -49,6 +50,7 @@ export type WorkflowHandlerDependencies = {
     input: NodeRuntimeInput,
   ) => Promise<Record<string, unknown>>;
   handoff?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
+  closeConversation?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   loadState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   saveState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   executeSubflow?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
@@ -327,6 +329,21 @@ const switchHandler: NodeHandler = {
   },
 };
 
+const goalCompletionHandler: NodeHandler = {
+  type: 'logic.goal_completion',
+  execute: async (input) => {
+    const goalCompletion = evaluateWorkflowGoalCompletion(input);
+    return {
+      status: 'route',
+      selectedOutput: goalCompletion.complete ? 'completed' : 'incomplete',
+      output: {
+        ...input.input,
+        goalCompletion,
+      },
+    };
+  },
+};
+
 const AiRouterDecisionSchema = z.object({
   routeId: z.string().min(1),
   confidence: z.number().min(0).max(1),
@@ -599,6 +616,7 @@ export function createDefaultNodeHandlerRegistry(
     .register(extractHandler(dependencies))
     .register(templateHandler)
     .register(ifHandler)
+    .register(goalCompletionHandler)
     .register(switchHandler)
     .register(aiRouterHandler(dependencies))
     .register(mergeHandler)
@@ -648,7 +666,7 @@ export function createDefaultNodeHandlerRegistry(
             },
           };
         }
-        return success({ message, delivery });
+        return success({ ...input.input, message, delivery });
       },
     })
     .register({
@@ -665,6 +683,25 @@ export function createDefaultNodeHandlerRegistry(
           };
         }
         return success(await dependencies.handoff(input), undefined, 'completed');
+      },
+    })
+    .register({
+      type: 'output.close_conversation',
+      execute: async (input) => {
+        if (!dependencies.closeConversation) {
+          return {
+            status: 'error',
+            error: {
+              code: 'CONVERSATION_CLOSE_NOT_CONFIGURED',
+              message: 'Conversation close dependency is not configured.',
+              retryable: false,
+            },
+          };
+        }
+        return success({
+          ...input.input,
+          ...await dependencies.closeConversation(input),
+        }, undefined, 'completed');
       },
     })
     .register({

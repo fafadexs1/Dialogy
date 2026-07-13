@@ -1,6 +1,8 @@
 {
   "nav": {
     "primaryNavigation": "Navegação principal",
+    "news": "Novidades",
+    "community": "Comunidade",
     "inbox": "Inbox",
     "chat": "Chat",
     "clients": "Clientes",

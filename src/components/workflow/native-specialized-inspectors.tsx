@@ -29,6 +29,7 @@ export const SPECIALIZED_WORKFLOW_INSPECTOR_TYPES = new Set([
   'logic.if',
   'logic.switch',
   'logic.ai_router',
+  'logic.goal_completion',
   'logic.wait',
   'ai.model',
   'knowledge.rag_retriever',
@@ -38,6 +39,7 @@ export const SPECIALIZED_WORKFLOW_INSPECTOR_TYPES = new Set([
   'guardrail.policy',
   'output.respond',
   'output.handoff',
+  'output.close_conversation',
   'output.end',
   'error.handler',
 ]);
@@ -677,6 +679,41 @@ function LogicWaitInspector({ node, onUpdate }: InspectorProps) {
   );
 }
 
+function GoalCompletionInspector({ node, onUpdate }: InspectorProps) {
+  const { config } = useNodeUpdater(node, onUpdate);
+  return (
+    <div className="space-y-5">
+      <div role="note" className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-xs leading-relaxed text-slate-300">
+        Este bloco calcula a conclusão no próprio sistema. Ligue a saída “Concluído” ao encerramento e a saída “Incompleto” a uma pergunta ou continuação do fluxo.
+      </div>
+      <StringListField
+        label="Campos obrigatórios"
+        value={node.config.requiredFields}
+        onChange={(value) => config('requiredFields', value)}
+        description="Um campo por linha. Os aliases comuns são reconhecidos: nome, documento/CPF/CNPJ, telefone, e-mail, CEP, endereço, produto, serviço e plano."
+      />
+      <StringListField
+        label="Etapas obrigatórias"
+        value={node.config.requiredOperations}
+        onChange={(value) => config('requiredOperations', value)}
+        description="Opcional. Use o ID do bloco, ID:saída para exigir uma rota específica, ou system:slot_memory_persisted, system:contact_facts_persisted e system:crm_custom_fields_persisted."
+      />
+      <ToggleField
+        label="Exigir sinal de conclusão do agente"
+        checked={node.config.requireCompletionSignal !== false}
+        onCheckedChange={(value) => config('requireCompletionSignal', value)}
+        description="Impede fechar apenas porque os dados existem quando o agente ainda não terminou a tarefa."
+      />
+      <ToggleField
+        label="Permitir objetivo sem campos obrigatórios"
+        checked={node.config.allowFieldlessCompletion === true}
+        onCheckedChange={(value) => config('allowFieldlessCompletion', value)}
+        description="Use somente em fluxos informativos. Em coletas, mantenha desligado para evitar encerramento prematuro."
+      />
+    </div>
+  );
+}
+
 function MemorySessionInspector({ node, onUpdate }: InspectorProps) {
   const { config } = useNodeUpdater(node, onUpdate);
   const messagesId = `memory-messages-${node.id}`;
@@ -731,6 +768,30 @@ function HandoffInspector({ node, onUpdate }: InspectorProps) {
         <Textarea id={reasonId} value={String(node.config.reason || '')} onChange={(event) => config('reason', event.target.value)} className="min-h-28" placeholder="Explique quando e por que transferir" />
       </Field>
       <ToggleField label="Confirmar antes de transferir" checked={node.config.requireConfirmation === true} onCheckedChange={(value) => config('requireConfirmation', value)} description="Peça confirmação quando a transferência tiver impacto no atendimento." />
+    </div>
+  );
+}
+
+function CloseConversationInspector({ node, onUpdate }: InspectorProps) {
+  const { config } = useNodeUpdater(node, onUpdate);
+  const reasonId = `close-reason-${node.id}`;
+  const notesId = `close-notes-${node.id}`;
+  const tagId = `close-tag-${node.id}`;
+  return (
+    <div className="space-y-5">
+      <div role="note" className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-xs leading-relaxed text-slate-300">
+        Este bloco só encerra sem pedido explícito do cliente quando recebe a prova do bloco “Objetivo concluído” na mesma execução. Uma resposta comum ou um agradecimento não autorizam o fechamento.
+      </div>
+      <Field label="Motivo do encerramento" htmlFor={reasonId} description="Explique qual objetivo foi concluído.">
+        <Input id={reasonId} value={String(node.config.reason || '')} onChange={(event) => config('reason', event.target.value)} placeholder="Objetivo do atendimento concluído" />
+      </Field>
+      <Field label="Resumo interno" htmlFor={notesId} description="Fica registrado no atendimento e não é enviado ao cliente.">
+        <Textarea id={notesId} value={String(node.config.notes || '')} onChange={(event) => config('notes', event.target.value)} className="min-h-24" placeholder="Dados confirmados e resultado alcançado" />
+      </Field>
+      <Field label="Marcador de motivo (opcional)" htmlFor={tagId}>
+        <Input id={tagId} value={String(node.config.reasonTagId || '')} onChange={(event) => config('reasonTagId', event.target.value)} placeholder="ID do marcador" />
+      </Field>
+      <ToggleField label="Enviar template de encerramento" checked={node.config.sendCloseMessage === true} onCheckedChange={(value) => config('sendCloseMessage', value)} description="Use somente quando o fluxo não enviou uma mensagem final própria." />
     </div>
   );
 }
@@ -1296,6 +1357,7 @@ export function NativeSpecializedNodeInspector(props: InspectorProps) {
     case 'logic.if': return <LogicIfInspector {...props} />;
     case 'logic.switch': return <LogicSwitchInspector {...props} />;
     case 'logic.ai_router': return <AiRouterInspector {...props} />;
+    case 'logic.goal_completion': return <GoalCompletionInspector {...props} />;
     case 'logic.wait': return <LogicWaitInspector {...props} />;
     case 'ai.model': return <ModelInspector {...props} />;
     case 'knowledge.rag_retriever': return <RagInspector {...props} />;
@@ -1305,6 +1367,7 @@ export function NativeSpecializedNodeInspector(props: InspectorProps) {
     case 'guardrail.policy': return <GuardrailInspector {...props} />;
     case 'output.respond': return <RespondInspector {...props} />;
     case 'output.handoff': return <HandoffInspector {...props} />;
+    case 'output.close_conversation': return <CloseConversationInspector {...props} />;
     case 'output.end': return <EndInspector {...props} />;
     case 'error.handler': return <ErrorHandlerInspector {...props} />;
     default: return null;

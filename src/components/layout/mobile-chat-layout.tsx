@@ -32,9 +32,10 @@ import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
 import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
-import { reconcileRealtimeChatAssignment } from '@/lib/realtime/realtime-reconciler';
+import { reconcileRealtimeChatAssignment, reconcileRealtimeChatPresentation } from '@/lib/realtime/realtime-reconciler';
 import { shouldMarkChatAsRead } from '@/lib/inbox-read-state';
 import { persistChatRead } from '@/lib/inbox-mark-as-read';
+import { inboxDebug } from '@/lib/inbox-debug';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -353,9 +354,9 @@ export default function MobileChatLayout({
       // If we have chats or a selected chat, preserve state to avoid navigation glitches.
       if (state.chats.length === 0 && !state.selectedChatId) {
         state.reset();
-        console.log('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+        inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
       } else {
-        console.log('[NOTIFICATION] Layout mounted. Preserving existing store state.');
+        inboxDebug('[NOTIFICATION] Layout mounted. Preserving existing store state.');
       }
       isHydratedRef.current = true;
     }
@@ -392,7 +393,7 @@ export default function MobileChatLayout({
     // Safe UUID generation fallback
     const genId = () => uuidv4();
     tabIdRef.current = genId();
-    console.log('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
+    inboxDebug('[NOTIFICATION] Generated tabId for notifications:', tabIdRef.current);
   }
 
   useEffect(() => {
@@ -403,7 +404,7 @@ export default function MobileChatLayout({
       }
     });
 
-    console.log('[NOTIFICATION] Auth listener registered');
+    inboxDebug('[NOTIFICATION] Auth listener registered');
     return () => {
       data.subscription.unsubscribe();
     };
@@ -511,7 +512,7 @@ export default function MobileChatLayout({
     }
     setNeedsAudioUnlock(!unlocked);
     if (unlocked) {
-      console.log('[NOTIFICATION] Audio unlocked by user gesture');
+      inboxDebug('[NOTIFICATION] Audio unlocked by user gesture');
     }
   }, []);
 
@@ -531,7 +532,7 @@ export default function MobileChatLayout({
   }, [unlockAudio]);
 
   useEffect(() => {
-    console.log('[NOTIFICATION] Audio element ready? queue:', !!audioRefs.current.queue, 'attending:', !!audioRefs.current.attending, 'Needs unlock?', needsAudioUnlock);
+    inboxDebug('[NOTIFICATION] Audio element ready? queue:', !!audioRefs.current.queue, 'attending:', !!audioRefs.current.attending, 'Needs unlock?', needsAudioUnlock);
   }, [needsAudioUnlock]);
 
   const playNotificationSound = useCallback((kind: keyof typeof SOUND_SOURCES = 'queue') => {
@@ -552,7 +553,7 @@ export default function MobileChatLayout({
 
     const audio = audioRefs.current[kind];
     const src = SOUND_SOURCES[kind];
-    console.log('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);
+    inboxDebug('[NOTIFICATION] Attempting to play sound. Kind:', kind, 'Enabled:', isSoundEnabled, 'AudioRef:', !!audio, 'Src:', audio?.src, 'Volume:', audio?.volume);
     if (!isSoundEnabled) return;
 
     const tryPlay = async () => {
@@ -561,7 +562,7 @@ export default function MobileChatLayout({
       audio.volume = 1;
       audio.currentTime = 0;
       await audio.play();
-      console.log('[NOTIFICATION] Sound played successfully (ref)', kind);
+      inboxDebug('[NOTIFICATION] Sound played successfully (ref)', kind);
     };
 
     tryPlay().catch(async (e) => {
@@ -571,11 +572,11 @@ export default function MobileChatLayout({
         audioUnlockRequestedRef.current = true;
       }
       try {
-        console.log('[NOTIFICATION] Trying fallback Audio() playback');
+        inboxDebug('[NOTIFICATION] Trying fallback Audio() playback');
         const fallback = new Audio(src);
         fallback.volume = 1;
         await fallback.play();
-        console.log('[NOTIFICATION] Sound played successfully (fallback)', kind);
+        inboxDebug('[NOTIFICATION] Sound played successfully (fallback)', kind);
       } catch (fallbackError) {
         console.error('[NOTIFICATION] Fallback playback failed:', fallbackError);
       }
@@ -594,12 +595,12 @@ export default function MobileChatLayout({
       const current = chat.unreadCount || 0;
       if (current > prev) {
         if (chat.status === 'gerais') {
-          console.log('[NOTIFICATION] Unread increased for queue chat', chat.id, 'from', prev, 'to', current);
+          inboxDebug('[NOTIFICATION] Unread increased for queue chat', chat.id, 'from', prev, 'to', current);
           playNotificationSound('queue');
         } else if (chat.status === 'atendimentos') {
           // Only play attending sound if the chat belongs to the current user
           if (chat.agent?.id === initialUser?.id) {
-            console.log('[NOTIFICATION] Unread increased for my attending chat', chat.id, 'from', prev, 'to', current);
+            inboxDebug('[NOTIFICATION] Unread increased for my attending chat', chat.id, 'from', prev, 'to', current);
             playNotificationSound('attending');
           }
         }
@@ -611,7 +612,7 @@ export default function MobileChatLayout({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     (window as any).__playNotificationTest = (kind: keyof typeof SOUND_SOURCES = 'queue') => {
-      console.log('[NOTIFICATION] Manual test trigger', kind);
+      inboxDebug('[NOTIFICATION] Manual test trigger', kind);
       playNotificationSound(kind);
     };
     return () => {
@@ -634,7 +635,7 @@ export default function MobileChatLayout({
       return;
     }
 
-    console.log('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
+    inboxDebug('[REALTIME] Message received:', message.id, 'Chat:', message.chat_id, 'FromMe:', message.from_me);
 
     const snapshot = useInboxStore.getState();
     const messageChat = snapshot.chats.find((chat) => chat.id === message.chat_id);
@@ -867,7 +868,7 @@ export default function MobileChatLayout({
       const message = error.message || 'Não foi possível buscar os dados do chat.';
       // Auto-retry once for network blips
       if (retryCount < 1) {
-        console.log('[INITIAL_CHATS] Retrying initialization in 1s...');
+        inboxDebug('[INITIAL_CHATS] Retrying initialization in 1s...');
         setTimeout(() => {
           setRetryCount(prev => prev + 1);
         }, 1000);
@@ -1140,7 +1141,7 @@ export default function MobileChatLayout({
 
       // Wait for hydration before polling
       if (!isHydratedRef.current) {
-        console.log('[POLLING] Waiting for hydration...');
+        inboxDebug('[POLLING] Waiting for hydration...');
         timeoutId = setTimeout(poll, 1000);
         return;
       }
@@ -1221,7 +1222,7 @@ export default function MobileChatLayout({
 
   // Centralized Realtime subscriptions - prevents duplicate channel conflicts
   const handleRealtimeChatUpdate = useCallback(async (payload: RealtimePostgresChangesPayload<any>) => {
-    console.log('[REALTIME] Chat update received:', payload);
+    inboxDebug('[REALTIME] Chat update received:', payload);
     const newChatData = payload.new as any;
     if (!newChatData?.id) return;
     if (newChatData.workspace_id && newChatData.workspace_id !== initialUser?.activeWorkspaceId) return;
@@ -1304,6 +1305,7 @@ export default function MobileChatLayout({
     }
 
     const assignmentUpdate = reconcileRealtimeChatAssignment(existingChat, newChatData, initialUser);
+    const presentationUpdate = reconcileRealtimeChatPresentation(existingChat, newChatData);
     const optimisticUpdate: Partial<Chat> = {
       ...newChatData,
       id: newChatData.id,
@@ -1314,18 +1316,14 @@ export default function MobileChatLayout({
         '',
       status: incomingStatus,
       ...assignmentUpdate,
+      ...presentationUpdate,
       updatedAt: newChatData.updated_at || existingChat?.updatedAt || previewIso,
       unreadCount:
         Number.isFinite(unreadCountValue)
           ? unreadCountValue
           : existingChat?.unreadCount,
-      teamName: newChatData.team_name || existingChat?.teamName,
-      team_id: newChatData.team_id || existingChat?.team_id,
-      teamColor: newChatData.team_color || existingChat?.teamColor,
       instance_name: newChatData.instance_name || existingChat?.instance_name,
       protocol: newChatData.protocol || existingChat?.protocol || `PRT-${String(newChatData.id).toUpperCase()}`,
-      tag: typeof newChatData.tag === 'string' ? newChatData.tag : existingChat?.tag,
-      color: typeof newChatData.color === 'string' ? newChatData.color : existingChat?.color,
       is_autopilot_active:
         typeof newChatData.is_autopilot_active === 'boolean'
           ? newChatData.is_autopilot_active
@@ -1411,7 +1409,7 @@ export default function MobileChatLayout({
       let effectiveChats = initialData.chats;
 
       if (shouldPreserveSelection) {
-        console.log('[hydrate-mobile] Preserving client selection against null server selection.', {
+        inboxDebug('[hydrate-mobile] Preserving client selection against null server selection.', {
           client: selectedChatIdRef.current,
           server: initialData.selectedChatId
         });
@@ -1426,7 +1424,7 @@ export default function MobileChatLayout({
           const cachedChat = currentStoreChats.find(c => c.id === effectiveSelectedChatId);
 
           if (cachedChat) {
-            console.log('[hydrate-mobile] Injecting cached chat object into new server list.');
+            inboxDebug('[hydrate-mobile] Injecting cached chat object into new server list.');
             effectiveChats = [cachedChat, ...effectiveChats];
           }
         }

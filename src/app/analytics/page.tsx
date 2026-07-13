@@ -80,6 +80,7 @@ import type {
 } from '@/lib/types';
 
 type TimeRange = 'last_30_days' | 'last_7_days' | 'today' | 'this_month';
+type AnalyticsTab = 'overview' | 'channels' | 'team' | 'conversion';
 type StatTone = 'emerald' | 'blue' | 'violet' | 'amber' | 'rose' | 'cyan' | 'slate';
 type IconComponent = React.ComponentType<{ className?: string }>;
 
@@ -455,12 +456,15 @@ export default function AnalyticsPage() {
   const [conversionMetrics, setConversionMetrics] = useState<ConversionMetrics | null>(null);
   const [conversionCounterMode, setConversionCounterMode] = useState<ConversionCounterMode>('won_deals');
   const [isSavingConversionMode, setIsSavingConversionMode] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
+  const [isAgentPerformanceLoading, setIsAgentPerformanceLoading] = useState(false);
+  const [isConversionLoading, setIsConversionLoading] = useState(false);
   const [allMembers, setAllMembers] = useState<User[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [timeRange, setTimeRange] = useState<TimeRange>('last_30_days');
   const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
   const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<AnalyticsTab>('overview');
 
   useEffect(() => {
     if (!user?.activeWorkspaceId) return;
@@ -501,30 +505,23 @@ export default function AnalyticsPage() {
     };
     const dateRange = getDateRange(timeRange, workspaceTimeZone);
 
-    setIsLoading(true);
-    Promise.all([
-      getAnalyticsData(user.activeWorkspaceId, filters, dateRange),
-      getAgentPerformance(user.activeWorkspaceId, filters, dateRange),
-      getConversionMetrics(user.activeWorkspaceId, filters, dateRange, conversionCounterMode),
-    ])
-      .then(([analytics, performance, conversions]) => {
+    setIsAnalyticsLoading(true);
+    getAnalyticsData(user.activeWorkspaceId, filters, dateRange)
+      .then((analytics) => {
         if (cancelled) return;
         setAnalyticsData(analytics);
-        setAgentPerformance(performance || []);
-        setConversionMetrics(conversions);
       })
       .catch((error) => {
-        console.error('[ANALYTICS_PAGE] Failed to load analytics:', error);
+        console.error('[ANALYTICS_PAGE] Failed to load analytics overview:', error);
       })
       .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) setIsAnalyticsLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
   }, [
-    conversionCounterMode,
     selectedAgentId,
     selectedTeamId,
     timeRange,
@@ -534,8 +531,68 @@ export default function AnalyticsPage() {
   ]);
 
   useEffect(() => {
+    if (!user?.activeWorkspaceId || activeTab !== 'team') return;
+
+    let cancelled = false;
+    const activeWorkspace = user.workspaces?.find((workspace) => workspace.id === user.activeWorkspaceId);
+    const workspaceTimeZone = user.activeWorkspaceTimezone || activeWorkspace?.timezone || 'America/Sao_Paulo';
+    const filters = {
+      teamId: selectedTeamId === 'all' ? undefined : selectedTeamId,
+      agentId: selectedAgentId === 'all' ? undefined : selectedAgentId,
+    };
+
+    setIsAgentPerformanceLoading(true);
+    getAgentPerformance(user.activeWorkspaceId, filters, getDateRange(timeRange, workspaceTimeZone))
+      .then((performance) => {
+        if (!cancelled) setAgentPerformance(performance || []);
+      })
+      .catch((error) => console.error('[ANALYTICS_PAGE] Failed to load agent performance:', error))
+      .finally(() => {
+        if (!cancelled) setIsAgentPerformanceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, selectedAgentId, selectedTeamId, timeRange, user?.activeWorkspaceId, user?.activeWorkspaceTimezone, user?.workspaces]);
+
+  useEffect(() => {
+    if (!user?.activeWorkspaceId || activeTab !== 'conversion') return;
+
+    let cancelled = false;
+    const activeWorkspace = user.workspaces?.find((workspace) => workspace.id === user.activeWorkspaceId);
+    const workspaceTimeZone = user.activeWorkspaceTimezone || activeWorkspace?.timezone || 'America/Sao_Paulo';
+    const filters = {
+      teamId: selectedTeamId === 'all' ? undefined : selectedTeamId,
+      agentId: selectedAgentId === 'all' ? undefined : selectedAgentId,
+    };
+
+    setIsConversionLoading(true);
+    getConversionMetrics(
+      user.activeWorkspaceId,
+      filters,
+      getDateRange(timeRange, workspaceTimeZone),
+      conversionCounterMode,
+    )
+      .then((metrics) => {
+        if (!cancelled) setConversionMetrics(metrics);
+      })
+      .catch((error) => console.error('[ANALYTICS_PAGE] Failed to load conversions:', error))
+      .finally(() => {
+        if (!cancelled) setIsConversionLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, conversionCounterMode, selectedAgentId, selectedTeamId, timeRange, user?.activeWorkspaceId, user?.activeWorkspaceTimezone, user?.workspaces]);
+
+  const handleTeamChange = useCallback((teamId: string) => {
+    // Batch dependent filters so changing a team never launches a throwaway
+    // request with an agent from the previously selected team.
+    setSelectedTeamId(teamId);
     setSelectedAgentId('all');
-  }, [selectedTeamId]);
+  }, []);
 
   const filteredMembers = useMemo(() => {
     const members =
@@ -611,6 +668,10 @@ export default function AnalyticsPage() {
   const displayedResolution = displayedChats > 0 ? (displayedResolved / displayedChats) * 100 : 0;
   const conversionCounterValue = conversionMetrics?.counterValue ?? 0;
   const conversionRate = totalConversations > 0 ? (conversionCounterValue / totalConversations) * 100 : 0;
+  const isInitialAnalyticsLoading = isAnalyticsLoading && analyticsData === null;
+  const isInitialAgentLoading = isAgentPerformanceLoading && agentPerformance.length === 0;
+  const isInitialConversionLoading = isConversionLoading && conversionMetrics === null;
+  const isRefreshing = isAnalyticsLoading || isAgentPerformanceLoading || isConversionLoading;
 
   return (
     <div className="min-h-full bg-background pb-10 text-foreground selection:bg-emerald-500/20">
@@ -621,7 +682,15 @@ export default function AnalyticsPage() {
               <Zap className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground">Analytics</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-semibold tracking-tight text-foreground">Analytics</h1>
+                {isRefreshing && !isInitialAnalyticsLoading ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground" aria-live="polite">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Atualizando
+                  </span>
+                ) : null}
+              </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {timeRangeLabels[timeRange]} com filtros de setor, atendente e canais.
               </p>
@@ -642,7 +711,7 @@ export default function AnalyticsPage() {
               </SelectContent>
             </Select>
 
-            <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
+            <Select value={selectedTeamId} onValueChange={handleTeamChange}>
               <SelectTrigger className="h-10 w-full border-border bg-background text-foreground xl:w-[190px]">
                 <Users2 className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400" />
                 <SelectValue placeholder="Setor" />
@@ -678,7 +747,7 @@ export default function AnalyticsPage() {
           </div>
         </header>
 
-        <Tabs defaultValue="overview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalyticsTab)} className="space-y-6">
           <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-lg bg-muted p-1 text-muted-foreground lg:w-fit lg:grid-cols-4">
             <TabsTrigger value="overview" className="rounded-md data-[state=active]:bg-background data-[state=active]:text-foreground">
               <BarChart3 className="h-4 w-4" />
@@ -706,7 +775,7 @@ export default function AnalyticsPage() {
                 description={`${formatNumber(openConversations)} abertas no periodo`}
                 icon={MessagesSquare}
                 tone="emerald"
-                loading={isLoading}
+                loading={isInitialAnalyticsLoading}
               />
               <StatCard
                 title="Novos contatos"
@@ -714,7 +783,7 @@ export default function AnalyticsPage() {
                 description="Contatos criados no workspace"
                 icon={Users}
                 tone="blue"
-                loading={isLoading}
+                loading={isInitialAnalyticsLoading}
               />
               <StatCard
                 title="Tempo de resposta"
@@ -722,7 +791,7 @@ export default function AnalyticsPage() {
                 description="Media entre cliente e proxima resposta"
                 icon={Clock3}
                 tone="violet"
-                loading={isLoading}
+                loading={isInitialAnalyticsLoading}
               />
               <StatCard
                 title="Resolucao"
@@ -730,7 +799,7 @@ export default function AnalyticsPage() {
                 description={`${formatNumber(resolvedConversations)} conversas encerradas`}
                 icon={CheckCircle2}
                 tone="amber"
-                loading={isLoading}
+                loading={isInitialAnalyticsLoading}
               />
             </section>
 
@@ -744,7 +813,7 @@ export default function AnalyticsPage() {
                   <CardDescription>Distribuicao de conversas por horario.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[320px]">
-                  {isLoading ? (
+                  {isInitialAnalyticsLoading ? (
                     <Skeleton className="h-full w-full rounded-lg bg-muted" />
                   ) : conversationsByHour.length ? (
                     <ResponsiveContainer width="100%" height="100%">
@@ -781,7 +850,7 @@ export default function AnalyticsPage() {
                   <CardDescription>Indicadores resumidos do periodo.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {isLoading ? (
+                  {isInitialAnalyticsLoading ? (
                     <div className="space-y-3">
                       {Array.from({ length: 5 }).map((_, index) => (
                         <Skeleton key={index} className="h-12 w-full rounded-lg bg-muted" />
@@ -847,7 +916,7 @@ export default function AnalyticsPage() {
                   <CardDescription>Conversas agrupadas pela origem real identificada.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {isLoading ? (
+                  {isInitialAnalyticsLoading ? (
                     <Skeleton className="h-[310px] w-full rounded-lg bg-muted" />
                   ) : (
                     <div className="relative h-[310px]">
@@ -904,7 +973,7 @@ export default function AnalyticsPage() {
                   <CardDescription>WhatsApp, Instagram, Messenger, Telegram e outros canais.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {isLoading ? (
+                  {isInitialAnalyticsLoading ? (
                     <div className="space-y-3">
                       {Array.from({ length: 5 }).map((_, index) => (
                         <Skeleton key={index} className="h-16 w-full rounded-lg bg-muted" />
@@ -955,7 +1024,7 @@ export default function AnalyticsPage() {
                 description="Com conversas no periodo"
                 icon={UserRoundCheck}
                 tone="blue"
-                loading={isLoading}
+                loading={isInitialAgentLoading}
               />
               <StatCard
                 title="Atendimentos da equipe"
@@ -963,7 +1032,7 @@ export default function AnalyticsPage() {
                 description={`${formatNumber(displayedResolved)} resolvidos`}
                 icon={Users}
                 tone="emerald"
-                loading={isLoading}
+                loading={isInitialAgentLoading}
               />
               <StatCard
                 title="Resolucao da equipe"
@@ -971,7 +1040,7 @@ export default function AnalyticsPage() {
                 description="Baseada nos atendimentos filtrados"
                 icon={CheckCircle2}
                 tone="amber"
-                loading={isLoading}
+                loading={isInitialAgentLoading}
               />
               <StatCard
                 title="Maior volume"
@@ -979,7 +1048,7 @@ export default function AnalyticsPage() {
                 description={topAgent ? `${formatNumber(topAgent.total_chats)} atendimentos` : 'Sem dados'}
                 icon={Award}
                 tone="violet"
-                loading={isLoading}
+                loading={isInitialAgentLoading}
               />
             </section>
 
@@ -992,7 +1061,7 @@ export default function AnalyticsPage() {
                 <CardDescription>Conversas, resolucao e tempo medio de resposta por atendente.</CardDescription>
               </CardHeader>
               <CardContent>
-                <AgentPerformanceTable performance={performanceToDisplay} loading={isLoading} />
+                <AgentPerformanceTable performance={performanceToDisplay} loading={isInitialAgentLoading} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1005,7 +1074,7 @@ export default function AnalyticsPage() {
                 description={`${formatPercent(conversionRate)} sobre conversas do periodo`}
                 icon={Target}
                 tone="emerald"
-                loading={isLoading}
+                loading={isInitialConversionLoading}
               />
               <StatCard
                 title="Receita convertida"
@@ -1013,7 +1082,7 @@ export default function AnalyticsPage() {
                 description="Somatorio de negocios ganhos"
                 icon={TrendingUp}
                 tone="blue"
-                loading={isLoading}
+                loading={isInitialConversionLoading}
               />
               <StatCard
                 title="Leads unicos"
@@ -1021,7 +1090,7 @@ export default function AnalyticsPage() {
                 description="Contatos marcados como convertidos"
                 icon={UserRoundCheck}
                 tone="violet"
-                loading={isLoading}
+                loading={isInitialConversionLoading}
               />
               <StatCard
                 title="Deals ganhos"
@@ -1029,7 +1098,7 @@ export default function AnalyticsPage() {
                 description="Oportunidades fechadas como ganhas"
                 icon={CheckCircle2}
                 tone="amber"
-                loading={isLoading}
+                loading={isInitialConversionLoading}
               />
             </section>
 
@@ -1053,7 +1122,7 @@ export default function AnalyticsPage() {
                 </Select>
               </CardHeader>
               <CardContent>
-                {isLoading ? (
+                {isInitialConversionLoading ? (
                   <Skeleton className="h-[240px] w-full rounded-lg bg-muted" />
                 ) : (
                   <div className="grid gap-4 lg:grid-cols-3">

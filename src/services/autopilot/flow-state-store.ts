@@ -1,6 +1,7 @@
 import type { AgentToolAction } from "@/services/agent-tools/types";
 import { fingerprintToolAction } from "@/services/agent-tools/action-fingerprint";
 import { db } from "@/lib/db";
+import type { AutopilotExtractedSlots, AutopilotSlotName } from './intent-types';
 
 const CONFIRMATION_TTL_MS = 10 * 60 * 1000;
 
@@ -18,6 +19,7 @@ export type AutopilotConversationState = {
   pendingConfirmation: PendingToolConfirmation | null;
   lastAction: AgentToolAction | null;
   repetitionCount: number;
+  metadata?: Record<string, unknown>;
 };
 
 type StateRow = {
@@ -28,6 +30,7 @@ type StateRow = {
   pending_confirmation: PendingToolConfirmation | null;
   last_action: AgentToolAction | null;
   repetition_count: number;
+  metadata: Record<string, unknown> | null;
 };
 
 function mapRow(row: StateRow): AutopilotConversationState {
@@ -39,13 +42,14 @@ function mapRow(row: StateRow): AutopilotConversationState {
     pendingConfirmation: row.pending_confirmation,
     lastAction: row.last_action,
     repetitionCount: row.repetition_count,
+    metadata: row.metadata || {},
   };
 }
 
 export async function getAutopilotConversationState(chatId: string) {
   const result = await db.query<StateRow>(
     `SELECT chat_id, workspace_id, autopilot_config_id, active_node_id,
-            pending_confirmation, last_action, repetition_count
+            pending_confirmation, last_action, repetition_count, metadata
        FROM autopilot_conversation_states
       WHERE chat_id = $1
       LIMIT 1`,
@@ -126,6 +130,303 @@ function normalize(value: string) {
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const STABLE_CONTACT_SLOT_NAMES = new Set<AutopilotSlotName>([
+  'name',
+  'customer_identifier',
+  'phone',
+  'email',
+  'address',
+  'location',
+]);
+
+const ALL_SLOT_NAMES = new Set<AutopilotSlotName>([
+  'name',
+  'customer_identifier',
+  'date',
+  'time',
+  'phone',
+  'email',
+  'address',
+  'order_or_request_id',
+  'invoice_or_payment_id',
+  'product_or_service_id',
+  'product_or_service_preference',
+  'quantity',
+  'location',
+]);
+
+function sanitizeSlotRecord(value: unknown, allowed = ALL_SLOT_NAMES): AutopilotExtractedSlots {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const slots: AutopilotExtractedSlots = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!allowed.has(key as AutopilotSlotName) || typeof raw !== 'string') continue;
+    const clean = raw.replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (clean) slots[key as AutopilotSlotName] = clean;
+  }
+  return slots;
+}
+
+export type AutopilotContactMemory = {
+  slots: AutopilotExtractedSlots;
+  nativeState: Record<string, unknown>;
+  updatedAt: string | null;
+};
+
+type ContactMemoryRow = {
+  chat_id: string;
+  metadata: Record<string, unknown> | null;
+  updated_at: string | Date;
+  slot_memory_updated_at: string | Date;
+};
+
+/**
+ * Hydrates stable contact facts across chats and turn-scoped facts from the
+ * current chat. Operational tool outputs are deliberately not reused here.
+ */
+export async function loadAutopilotContactMemory(input: {
+  workspaceId: string;
+  contactId: string;
+  chatId: string;
+  maxAgeDays?: number;
+}): Promise<AutopilotContactMemory> {
+  const maxAgeDays = Math.min(730, Math.max(1, input.maxAgeDays || 180));
+  const result = await db.query<ContactMemoryRow>(
+    `SELECT
+        state.chat_id,
+        state.metadata,
+        state.updated_at,
+        COALESCE(
+          CASE
+            WHEN state.metadata->>'slotMemoryUpdatedAt' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+              THEN (state.metadata->>'slotMemoryUpdatedAt')::timestamptz
+          END,
+          state.updated_at
+        ) AS slot_memory_updated_at
+       FROM autopilot_conversation_states state
+       JOIN chats chat ON chat.id = state.chat_id
+      WHERE state.workspace_id = $1
+        AND chat.contact_id = $2
+        AND COALESCE(
+          CASE
+            WHEN state.metadata->>'slotMemoryUpdatedAt' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+              THEN (state.metadata->>'slotMemoryUpdatedAt')::timestamptz
+          END,
+          state.updated_at
+        )
+          >= clock_timestamp() - ($4::int * INTERVAL '1 day')
+      ORDER BY slot_memory_updated_at DESC
+      LIMIT 24`,
+    [input.workspaceId, input.contactId, input.chatId, maxAgeDays],
+  );
+
+  const stableSlots: AutopilotExtractedSlots = {};
+  const stableSlotTimes = new Map<AutopilotSlotName, number>();
+  let currentSlots: AutopilotExtractedSlots = {};
+  let nativeState: Record<string, unknown> = {};
+  let updatedAt: string | null = null;
+  let latestSlotTime = Number.NEGATIVE_INFINITY;
+
+  for (const row of result.rows) {
+    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+    const rowSlotTime = new Date(row.slot_memory_updated_at || row.updated_at).getTime();
+    const stableSlotUpdatedAt = metadata.stableSlotUpdatedAt && typeof metadata.stableSlotUpdatedAt === 'object' && !Array.isArray(metadata.stableSlotUpdatedAt)
+      ? metadata.stableSlotUpdatedAt as Record<string, unknown>
+      : {};
+    const stable = sanitizeSlotRecord(metadata.stableSlots, STABLE_CONTACT_SLOT_NAMES);
+    for (const [key, value] of Object.entries(stable)) {
+      const slotName = key as AutopilotSlotName;
+      const fieldTimestamp = new Date(String(stableSlotUpdatedAt[key] || row.slot_memory_updated_at || row.updated_at)).getTime();
+      const comparableTimestamp = Number.isFinite(fieldTimestamp) ? fieldTimestamp : rowSlotTime;
+      if (value && comparableTimestamp > (stableSlotTimes.get(slotName) ?? Number.NEGATIVE_INFINITY)) {
+        stableSlots[slotName] = value;
+        stableSlotTimes.set(slotName, comparableTimestamp);
+      }
+    }
+    if (row.chat_id === input.chatId) {
+      currentSlots = sanitizeSlotRecord(metadata.conversationSlots);
+      for (const stableName of STABLE_CONTACT_SLOT_NAMES) {
+        const currentValue = currentSlots[stableName];
+        if (currentValue && rowSlotTime >= (stableSlotTimes.get(stableName) ?? Number.NEGATIVE_INFINITY)) {
+          stableSlots[stableName] = currentValue;
+          stableSlotTimes.set(stableName, rowSlotTime);
+        }
+        delete currentSlots[stableName];
+      }
+      nativeState = metadata.nativeState && typeof metadata.nativeState === 'object' && !Array.isArray(metadata.nativeState)
+        ? metadata.nativeState as Record<string, unknown>
+        : {};
+    }
+    if (Number.isFinite(rowSlotTime) && rowSlotTime > latestSlotTime) latestSlotTime = rowSlotTime;
+  }
+
+  if (Number.isFinite(latestSlotTime)) updatedAt = new Date(latestSlotTime).toISOString();
+
+  return {
+    slots: { ...stableSlots, ...currentSlots },
+    nativeState,
+    updatedAt,
+  };
+}
+
+export async function saveAutopilotSlotMemory(input: {
+  chatId: string;
+  workspaceId: string;
+  autopilotConfigId?: string | null;
+  slots: AutopilotExtractedSlots;
+}) {
+  const conversationSlots = sanitizeSlotRecord(input.slots);
+  const stableSlots = sanitizeSlotRecord(input.slots, STABLE_CONTACT_SLOT_NAMES);
+  if (Object.keys(conversationSlots).length === 0) return;
+  const persistedAt = new Date().toISOString();
+  const stableSlotUpdatedAt = Object.fromEntries(
+    Object.keys(stableSlots).map((key) => [key, persistedAt]),
+  );
+
+  await db.query(
+    `INSERT INTO autopilot_conversation_states (
+       chat_id, workspace_id, autopilot_config_id, metadata, updated_at
+     ) VALUES (
+       $1, $2, $3,
+       jsonb_build_object(
+         'conversationSlots', $4::jsonb,
+         'stableSlots', $5::jsonb,
+         'stableSlotUpdatedAt', $6::jsonb,
+         'slotMemoryUpdatedAt', to_jsonb(clock_timestamp())
+       ),
+       clock_timestamp()
+     )
+     ON CONFLICT (chat_id) DO UPDATE SET
+       workspace_id = EXCLUDED.workspace_id,
+       autopilot_config_id = COALESCE(EXCLUDED.autopilot_config_id, autopilot_conversation_states.autopilot_config_id),
+       metadata = COALESCE(autopilot_conversation_states.metadata, '{}'::jsonb)
+         || jsonb_build_object(
+           'conversationSlots', COALESCE(autopilot_conversation_states.metadata->'conversationSlots', '{}'::jsonb) || $4::jsonb,
+           'stableSlots', COALESCE(autopilot_conversation_states.metadata->'stableSlots', '{}'::jsonb) || $5::jsonb,
+           'stableSlotUpdatedAt', COALESCE(autopilot_conversation_states.metadata->'stableSlotUpdatedAt', '{}'::jsonb) || $6::jsonb,
+           'slotMemoryUpdatedAt', to_jsonb(clock_timestamp())
+         ),
+       updated_at = clock_timestamp()`,
+    [
+      input.chatId,
+      input.workspaceId,
+      input.autopilotConfigId ?? null,
+      JSON.stringify(conversationSlots),
+      JSON.stringify(stableSlots),
+      JSON.stringify(stableSlotUpdatedAt),
+    ],
+  );
+}
+
+export async function saveAutopilotNativeState(input: {
+  chatId: string;
+  workspaceId: string;
+  autopilotConfigId?: string | null;
+  state: Record<string, unknown>;
+}) {
+  const serialized = JSON.stringify(input.state || {});
+  if (serialized.length > 64_000) throw new Error('Native workflow state exceeded 64KB.');
+  await db.query(
+    `INSERT INTO autopilot_conversation_states (
+       chat_id, workspace_id, autopilot_config_id, metadata, updated_at
+     ) VALUES ($1, $2, $3, jsonb_build_object('nativeState', $4::jsonb), clock_timestamp())
+     ON CONFLICT (chat_id) DO UPDATE SET
+       workspace_id = EXCLUDED.workspace_id,
+       autopilot_config_id = COALESCE(EXCLUDED.autopilot_config_id, autopilot_conversation_states.autopilot_config_id),
+       metadata = jsonb_set(
+         COALESCE(autopilot_conversation_states.metadata, '{}'::jsonb),
+         '{nativeState}',
+         COALESCE(autopilot_conversation_states.metadata->'nativeState', '{}'::jsonb) || $4::jsonb,
+         true
+       ),
+       updated_at = clock_timestamp()`,
+    [input.chatId, input.workspaceId, input.autopilotConfigId ?? null, serialized],
+  );
+}
+
+/**
+ * Atomically claims a collection checkpoint before a close side effect. The
+ * fingerprint binds the claim to the exact needs_input turn that created it.
+ */
+export async function claimAutopilotCollectionCompletion(input: {
+  chatId: string;
+  workspaceId: string;
+  checkpointFingerprint: string;
+  completionExecutionId: string;
+}): Promise<boolean> {
+  const claimTtlMs = Math.max(
+    30_000,
+    Math.min(30 * 60_000, Number(process.env.AUTOPILOT_COLLECTION_CLOSE_CLAIM_TTL_MS || 300_000) || 300_000),
+  );
+  const claimedAt = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - claimTtlMs).toISOString();
+  const result = await db.query(
+    `UPDATE autopilot_conversation_states
+        SET metadata = jsonb_set(
+              jsonb_set(
+                jsonb_set(
+                  COALESCE(metadata, '{}'::jsonb),
+                  '{nativeState,collectionCompletionV1,status}',
+                  to_jsonb('closing'::text),
+                  false
+                ),
+                '{nativeState,collectionCompletionV1,closingExecutionId}',
+                to_jsonb($4::text),
+                true
+              ),
+              '{nativeState,collectionCompletionV1,closingClaimedAt}',
+              to_jsonb($5::text),
+              true
+            ),
+            updated_at = clock_timestamp()
+      WHERE chat_id = $1
+        AND workspace_id = $2
+        AND metadata #>> '{nativeState,collectionCompletionV1,checkpointFingerprint}' = $3
+        AND (
+          metadata #>> '{nativeState,collectionCompletionV1,status}' = 'awaiting_fields'
+          OR (
+            metadata #>> '{nativeState,collectionCompletionV1,status}' = 'closing'
+            AND COALESCE(metadata #>> '{nativeState,collectionCompletionV1,closingClaimedAt}', '') < $6
+          )
+        )
+      RETURNING chat_id`,
+    [
+      input.chatId,
+      input.workspaceId,
+      input.checkpointFingerprint,
+      input.completionExecutionId,
+      claimedAt,
+      staleBefore,
+    ],
+  );
+  return Boolean(result.rows[0]);
+}
+
+export async function clearAutopilotCollectionCompletion(input: {
+  chatId: string;
+  workspaceId: string;
+  checkpointFingerprint?: string | null;
+}): Promise<boolean> {
+  const result = await db.query(
+    `UPDATE autopilot_conversation_states
+        SET metadata = jsonb_set(
+              COALESCE(metadata, '{}'::jsonb),
+              '{nativeState}',
+              COALESCE(metadata->'nativeState', '{}'::jsonb) - 'collectionCompletionV1',
+              true
+            ),
+            updated_at = clock_timestamp()
+      WHERE chat_id = $1
+        AND workspace_id = $2
+        AND (
+          $3::text IS NULL
+          OR metadata #>> '{nativeState,collectionCompletionV1,checkpointFingerprint}' = $3
+        )
+      RETURNING chat_id`,
+    [input.chatId, input.workspaceId, input.checkpointFingerprint ?? null],
+  );
+  return Boolean(result.rows[0]);
 }
 
 function requestedToolName(action: AgentToolAction) {

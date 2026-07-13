@@ -1,7 +1,38 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Chat, Message } from '@/lib/types';
-import { isMarketingMessage, shouldKeepMarketingOnlyChatVisible } from '@/components/chat/chat-list-visibility';
+import { isMarketingMessage, matchesChatTeamFilter, shouldKeepMarketingOnlyChatVisible } from '@/components/chat/chat-list-visibility';
+
+describe('chat list team visibility', () => {
+  const teams = [
+    { id: 'team-sales', tagLabel: 'Vendas' },
+    { id: 'team-support', tagLabel: 'Suporte' },
+  ];
+
+  it('matches assigned chats by the responsible agent team', () => {
+    expect(matchesChatTeamFilter(
+      { team_id: 'team-sales' },
+      teams,
+      ['team-sales']
+    )).toBe(true);
+  });
+
+  it('matches unassigned queue chats by the queue tag linked to the team', () => {
+    expect(matchesChatTeamFilter(
+      { tag: 'Suporte' },
+      teams,
+      ['team-support']
+    )).toBe(true);
+  });
+
+  it('does not leak chats from another team or queue', () => {
+    expect(matchesChatTeamFilter(
+      { team_id: 'team-sales', tag: 'Vendas' },
+      teams,
+      ['team-support']
+    )).toBe(false);
+  });
+});
 
 describe('chat list marketing visibility', () => {
   it('detects marketing messages by metadata flag', () => {

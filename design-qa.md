@@ -94,3 +94,104 @@
 - [x] Automated tests, types, build, and browser console passed.
 
 final result: passed
+
+---
+
+# Design QA — Chat header and composer redesign (2026-07-13)
+
+## Evidence
+
+- Source visual truth:
+  - `C:\Users\fabri\AppData\Local\Temp\codex-clipboard-b8f7cbdc-ea7b-41ed-9557-adf7facc9baf.png`
+  - `C:\Users\fabri\AppData\Local\Temp\codex-clipboard-0be8405f-d163-4eef-9c13-abd5af29d2a7.png`
+  - `C:\Users\fabri\AppData\Local\Temp\codex-clipboard-b5078957-b2ab-4e72-8a2c-0f7a050438ab.png`
+- Implementation target: `http://localhost:9002/inbox`
+- Implementation screenshot: unavailable; local URL access was blocked by the active browser security policy.
+- Intended viewport/state: authenticated desktop Inbox, selected open conversation, light and dark themes, composer idle and “Próxima mensagem” menu open.
+- Full-view comparison: blocked because no browser-rendered implementation capture could be produced.
+- Focused comparison: blocked for the chat header, composer, options menu, and responsive toolbar for the same reason.
+
+## Findings
+
+- [P1] Visual fidelity cannot be verified against the supplied references.
+  - Location: Inbox chat header and composer.
+  - Evidence: all three source screenshots were opened, but the local implementation could not be captured in the permitted browser surface.
+  - Impact: typography, spacing, responsive wrapping, light/dark contrast, menu placement, and border-radius fidelity remain visually unverified.
+  - Fix: capture the authenticated Inbox at matching desktop viewports in both themes and compare the full screen plus focused header/composer regions against the references.
+
+## Comparison history
+
+- Iteration 0: source references inspected and implementation completed in `src/components/chat/chat-panel.tsx`.
+- Automated validation: `npm run typecheck` passed; `git diff --check` reported no whitespace errors.
+- Post-fix visual evidence: unavailable due to browser security policy; no visual comparison iteration can be claimed.
+
+## Implementation checklist
+
+- [x] Composer options consolidated into a one-shot selector.
+- [x] Compatible selection model represented; mutually exclusive options are guarded.
+- [x] Attachments remain an immediate action outside the selector.
+- [x] One-shot options reset only after an actual send.
+- [x] Header enriched with channel, team, service start, status, and assignee while preserving action placement.
+- [x] TypeScript validation passed.
+- [ ] Capture and compare authenticated light and dark implementations.
+- [ ] Verify desktop breakpoints, menu placement, and horizontal overflow visually.
+- [ ] Check browser console during the interaction pass.
+
+final result: blocked
+
+---
+
+# Design QA — Nova conversa, opção 2 (2026-07-13)
+
+## Evidence
+
+- Source visual truth: `design-qa/sources/new-conversation-option-2.png`.
+- Implementation target: `src/components/chat/chat-list.tsx`, component `NewConversationDialog` at `http://localhost:9002/inbox`.
+- Implementation screenshot: unavailable. The permitted browser surface blocked access to the local Inbox under the active network security policy.
+- Intended viewport: 1440 × 1024 desktop, with responsive behavior down to narrow desktop/mobile widths.
+- Intended state: authenticated Inbox, modal open, WhatsApp Cloud API instance selected, valid recipient, approved template selected, template variables populated.
+- Full-view comparison: blocked because a browser-rendered implementation capture could not be produced.
+- Focused comparison: blocked for destination validation, template selection, preview, variables, footer readiness, light theme, dark theme, and responsive stacking.
+
+## Findings
+
+- [P1] Rendered fidelity and interaction polish cannot be verified.
+  - Location: Inbox > Nova conversa.
+  - Evidence: the selected visual source is available and was inspected, but there is no permitted browser capture of the implementation.
+  - Impact: typography, grid proportions, scrolling, radii, theme contrast, animation timing, focus states, and footer visibility remain visually unverified.
+  - Fix: capture the modal in the Cloud API state at 1440 × 1024, then repeat in dark mode and a narrow viewport; compare the full frame and focused modal regions against the selected source.
+
+## Fidelity surfaces
+
+- Fonts and typography: implemented with the existing application typography and source-like weights/sizes; rendered comparison blocked.
+- Spacing and layout rhythm: implemented as a 300px destination rail plus responsive template/preview workspace, 12–22px radii and restrained elevation; rendered comparison blocked.
+- Colors and tokens: implemented with slate, blue, emerald and existing dark-mode tokens; rendered contrast comparison blocked.
+- Image and icon fidelity: the source contains no custom raster assets; production icon libraries are used for all channel and UI icons.
+- Copy and content: real channel, template, variable and recipient data are preserved; fictional recent contacts from the concept were intentionally omitted.
+
+## Interaction coverage
+
+- Implemented: instance switching, country code selection, digit normalization, recipient validation, free-message validation, template loading/search/selection, variable completion, live preview, reduced-motion support, tactile button/template feedback, submit loading state and success reset.
+- Browser interactions tested: unavailable.
+- Browser console checked: unavailable.
+- Automated checks: `npm run typecheck` passed; `git diff --check` found no whitespace errors; the local Inbox returned HTTP 200.
+
+## Comparison history
+
+- Iteration 0: selected option 2 was opened and mapped to the existing production workflow.
+- Implementation preserved WhatsApp, Cloud API and Telegram submission behavior while replacing the long form with a split workspace.
+- Post-fix visual evidence: unavailable due to the browser security-policy blocker.
+
+## Implementation checklist
+
+- [x] Selected source preserved in the project QA folder.
+- [x] Split destination/template/preview layout implemented.
+- [x] Real template search, variables and live preview wired.
+- [x] Click, selection, content-change and reduced-motion states implemented.
+- [x] Light and dark style variants authored.
+- [x] TypeScript validation passed.
+- [ ] Capture authenticated implementation in matching light and dark states.
+- [ ] Verify responsive stacking, modal scrolling, animation timing and console output.
+- [ ] Run normalized side-by-side design comparison and fix any P1/P2 drift.
+
+final result: blocked

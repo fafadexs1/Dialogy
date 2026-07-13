@@ -64,6 +64,14 @@ function materialize(blueprint: NativeWorkflowAiBlueprint) {
         outputSchema: { type: 'object', properties: {} },
       },
       {
+        name: 'close_chat',
+        displayName: 'Encerrar atendimento',
+        description: 'Ação interna de encerramento.',
+        source: 'dialogy',
+        riskLevel: 'medium',
+        allowedIntents: ['support_request'],
+      },
+      {
         name: 'blocked_operation',
         description: 'Operação ainda não liberada para execução autônoma.',
         source: 'dialogy',
@@ -116,9 +124,29 @@ function expectNativeExecutableProposal(proposal: ReturnType<typeof materialize>
 }
 
 describe('native workflow AI builder', () => {
+  it('rejects completion operations outside the server-owned receipt catalog', () => {
+    const singleAgent = agent('Agente de suporte', 'suporte');
+    expect(() => materialize({
+      summary: 'Fluxo com operação inventada.',
+      architecture: 'single_agent',
+      agents: [{
+        ...singleAgent,
+        completionControl: {
+          closeWhenComplete: true,
+          requiredFields: [],
+          requiredOperations: ['system:invented_receipt'] as any,
+          allowFieldlessCompletion: false,
+        },
+      }],
+      fallbackMessage: 'Pode detalhar um pouco mais?',
+      guardrailChecks: ['no_secret_exposure'],
+    })).toThrow();
+  });
+
   it('materializes a valid single-agent proposal and ignores hallucinated tools', () => {
     const singleAgent = agent('Agente de suporte', 'suporte', [
       'lookup_customer',
+      'close_chat',
       'blocked_operation',
       'tool_that_does_not_exist',
     ]);
@@ -127,6 +155,12 @@ describe('native workflow AI builder', () => {
       architecture: 'single_agent',
       agents: [{
         ...singleAgent,
+        completionControl: {
+          closeWhenComplete: true,
+          requiredFields: ['name', 'CEP'],
+          requiredOperations: ['system:contact_facts_persisted'],
+          allowFieldlessCompletion: false,
+        },
         knowledgeDocumentIds: [...singleAgent.knowledgeDocumentIds, 'doc-hallucinated'],
         knowledgeCollectionIds: [...singleAgent.knowledgeCollectionIds, 'collection-hallucinated'],
       }],
@@ -138,6 +172,7 @@ describe('native workflow AI builder', () => {
     expect(proposal.selectedToolNames).toEqual(['lookup_customer']);
     expect(proposal.warnings.join(' ')).toContain('tool_that_does_not_exist');
     expect(proposal.warnings.join(' ')).toContain('blocked_operation');
+    expect(proposal.warnings.join(' ')).toContain('close_chat');
     expect(proposal.warnings.join(' ')).toContain('mantidas bloqueadas');
     expect(proposal.warnings.join(' ')).toContain('doc-hallucinated');
     expect(proposal.warnings.join(' ')).toContain('collection-hallucinated');
@@ -158,6 +193,26 @@ describe('native workflow AI builder', () => {
       fallbackAction: 'ask_missing_slot',
     });
     expect(proposal.workflow.nodes.some((node) => node.config.name === 'blocked_operation')).toBe(false);
+    expect(proposal.workflow.nodes.some((node) => node.config.name === 'close_chat')).toBe(false);
+    const goal = proposal.workflow.nodes.find((node) => node.type === 'logic.goal_completion');
+    const close = proposal.workflow.nodes.find((node) => node.type === 'output.close_conversation');
+    expect(goal?.config).toMatchObject({
+      requiredFields: ['name', 'CEP'],
+      requiredOperations: ['system:contact_facts_persisted'],
+      requireCompletionSignal: true,
+      allowFieldlessCompletion: false,
+    });
+    expect(close).toBeDefined();
+    expect(proposal.workflow.connections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: 'primary_agent', sourcePortId: 'completed', targetNodeId: goal!.id }),
+      expect.objectContaining({ sourceNodeId: goal!.id, sourcePortId: 'completed', targetNodeId: close!.id }),
+      expect.objectContaining({ sourceNodeId: close!.id, sourcePortId: 'completed', targetNodeId: 'primary_respond' }),
+    ]));
+    expect(proposal.workflow.connections.some((item) => (
+      item.sourceNodeId === 'primary_agent'
+      && item.sourcePortId === 'completed'
+      && item.targetNodeId === 'primary_respond'
+    ))).toBe(false);
     const knowledge = proposal.workflow.nodes.find((node) => node.id === 'primary_knowledge');
     expect(knowledge?.config.documentIds).toEqual(['doc-suporte']);
     expect(knowledge?.config.filters).toEqual({ collectionIds: ['suporte'] });

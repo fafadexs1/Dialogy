@@ -104,14 +104,25 @@ export function reconcileRealtimeChatAssignment(
   if (hasAgentId) {
     if (!incomingAgentId) {
       agent = undefined;
-    } else if (currentUser?.id === incomingAgentId) {
-      agent = currentUser ?? undefined;
-    } else if (existingChat?.agent?.id !== incomingAgentId) {
-      agent = record.agent_name
+    } else {
+      const cachedAgent = existingChat?.agent;
+      const knownAgent = currentUser?.id === incomingAgentId
+        ? currentUser
+        : cachedAgent?.id === incomingAgentId
+          ? cachedAgent
+          : undefined;
+      const agentName = record.agent_name || knownAgent?.name;
+      const agentAvatar = hasOwn(record, 'agent_avatar_url')
+        ? record.agent_avatar_url || undefined
+        : knownAgent?.avatar_url || knownAgent?.avatar;
+
+      agent = agentName
         ? {
+            ...knownAgent,
             id: incomingAgentId,
-            name: record.agent_name,
-            avatar_url: record.agent_avatar_url || undefined,
+            name: agentName,
+            avatar_url: agentAvatar,
+            avatar: agentAvatar,
           } as User
         : undefined;
     }
@@ -120,13 +131,21 @@ export function reconcileRealtimeChatAssignment(
   if (hasSystemAgentId) {
     if (!incomingSystemAgentId) {
       assignedSystemAgent = undefined;
-    } else if (existingChat?.assignedSystemAgent?.id !== incomingSystemAgentId) {
-      assignedSystemAgent = record.assigned_system_agent_name
+    } else {
+      const cachedSystemAgent = existingChat?.assignedSystemAgent;
+      const knownSystemAgent = cachedSystemAgent?.id === incomingSystemAgentId
+        ? cachedSystemAgent
+        : undefined;
+      const systemAgentName = record.assigned_system_agent_name || knownSystemAgent?.name;
+      assignedSystemAgent = systemAgentName
         ? {
+            ...knownSystemAgent,
             id: incomingSystemAgentId,
-            name: record.assigned_system_agent_name,
-            avatar_url: record.assigned_system_agent_avatar_url || undefined,
-            type: record.assigned_system_agent_type || undefined,
+            name: systemAgentName,
+            avatar_url: hasOwn(record, 'assigned_system_agent_avatar_url')
+              ? record.assigned_system_agent_avatar_url || undefined
+              : knownSystemAgent?.avatar_url,
+            type: record.assigned_system_agent_type || knownSystemAgent?.type,
           }
         : undefined;
     }
@@ -144,5 +163,22 @@ export function reconcileRealtimeChatAssignment(
     agent,
     assigned_system_agent_id: incomingSystemAgentId,
     assignedSystemAgent,
+  };
+}
+
+export function reconcileRealtimeChatPresentation(
+  existingChat: Chat | undefined,
+  record: RealtimeRow,
+): Pick<Partial<Chat>, 'teamName' | 'team_id' | 'teamColor' | 'tag' | 'color' | 'assigned_at'> {
+  const explicitValue = <T>(key: string, existingValue: T | undefined): T | undefined =>
+    hasOwn(record, key) ? (record[key] ?? undefined) as T | undefined : existingValue;
+
+  return {
+    teamName: explicitValue<string>('team_name', existingChat?.teamName),
+    team_id: explicitValue<string>('team_id', existingChat?.team_id),
+    teamColor: explicitValue<string>('team_color', existingChat?.teamColor),
+    tag: explicitValue<string>('tag', existingChat?.tag),
+    color: explicitValue<string>('color', existingChat?.color),
+    assigned_at: explicitValue<string>('assigned_at', existingChat?.assigned_at),
   };
 }
