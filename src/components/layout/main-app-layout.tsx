@@ -18,10 +18,12 @@ export function MainAppLayout({
   children,
   billingStatus,
   billingBlocked,
+  billingUnavailable,
 }: {
   children: React.ReactNode;
   billingStatus: BillingStatus;
   billingBlocked: boolean;
+  billingUnavailable: boolean;
 }) {
   const pathname = usePathname();
   const user = useCurrentUser();
@@ -30,6 +32,8 @@ export function MainAppLayout({
   const isInboxRoute = pathname === '/inbox' || pathname.startsWith('/inbox/');
   const isSettingsRoute = pathname === '/settings' || pathname.startsWith('/settings/');
   const isAutopilotEditorRoute = /^\/autopilot\/[^/]+\/?$/.test(pathname);
+  const isNexusRoute = pathname === '/nexus' || pathname.startsWith('/nexus/');
+  const usesFixedViewport = isInboxRoute || isSettingsRoute || isAutopilotEditorRoute || isNexusRoute;
   const [mounted, setMounted] = React.useState(false);
 
   const noSidebarPrefixes = [
@@ -89,7 +93,7 @@ export function MainAppLayout({
   }, [shellThemeClass]);
 
   React.useEffect(() => {
-    if (!isSettingsRoute && !isAutopilotEditorRoute) {
+    if (!isSettingsRoute && !isAutopilotEditorRoute && !isNexusRoute) {
       return;
     }
 
@@ -111,7 +115,7 @@ export function MainAppLayout({
       html.style.overscrollBehavior = previousHtmlOverscroll;
       body.style.overscrollBehavior = previousBodyOverscroll;
     };
-  }, [isAutopilotEditorRoute, isSettingsRoute]);
+  }, [isAutopilotEditorRoute, isNexusRoute, isSettingsRoute]);
 
   return (
     <div
@@ -148,25 +152,31 @@ export function MainAppLayout({
       <main
         className={cn(
           'min-h-0 min-w-0 flex flex-1 flex-col',
-          isInboxRoute || isSettingsRoute || isAutopilotEditorRoute ? 'overflow-hidden overscroll-none' : 'overflow-y-auto'
+          usesFixedViewport ? 'overflow-hidden overscroll-none' : 'overflow-y-auto'
         )}
       >
-        {billingBlocked && !isBillingRoute && (
+        {(billingBlocked || billingUnavailable) && !isBillingRoute && (
           <div className="z-50 flex shrink-0 items-center justify-center gap-3 border-b border-amber-400/30 bg-amber-950 px-4 py-2.5 text-sm text-amber-50">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
-            <span><strong>{billingTitle}.</strong> Regularize a assinatura para voltar a operar o workspace.</span>
-            <Link
-              href="/settings/billing"
-              className="rounded-lg bg-amber-300 px-3 py-1 font-semibold text-amber-950 hover:bg-amber-200"
-            >
-              Regularizar
-            </Link>
+            <span>
+              {billingUnavailable
+                ? <><strong>Cobrança temporariamente indisponível.</strong> Operações faturáveis estão pausadas; tente novamente em instantes.</>
+                : <><strong>{billingTitle}.</strong> Regularize a assinatura para voltar a operar o workspace.</>}
+            </span>
+            {!billingUnavailable && (
+              <Link
+                href="/settings/billing"
+                className="rounded-lg bg-amber-300 px-3 py-1 font-semibold text-amber-950 hover:bg-amber-200"
+              >
+                Regularizar
+              </Link>
+            )}
           </div>
         )}
         <div
           className={cn(
             'relative flex min-h-0 flex-1 flex-col',
-            (isInboxRoute || isSettingsRoute || isAutopilotEditorRoute) && 'overflow-hidden overscroll-none'
+            usesFixedViewport && 'overflow-hidden overscroll-none'
           )}
         >
           <div

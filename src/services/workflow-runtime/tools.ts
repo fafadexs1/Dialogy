@@ -33,10 +33,20 @@ export type ToolDefinition<
   name: string;
   description: string;
   inputSchema: z.ZodType<TInput>;
+  /** Original provider schema shown to the model. Zod transforms/refinements
+   * are not reliably reversible to JSON Schema. */
+  inputJsonSchema?: Record<string, unknown>;
   outputSchema: z.ZodType<TOutput>;
   timeoutMs: number;
   retryPolicy: RetryPolicy;
   idempotent: boolean;
+  /** Whether a successful result may be reused for identical calls in the
+   * same execution. Read-only status/polling tools must disable this because
+   * their result changes while an external operation is progressing. */
+  cacheResult?: boolean;
+  /** Allows the agent loop to repeat this safe call while its latest output
+   * explicitly reports a transient state such as pending or processing. */
+  allowRepeatedCallsWhilePending?: boolean;
   riskLevel: ToolRiskLevel;
   requiresConfirmation: boolean;
   permissionScope?: string;
@@ -142,6 +152,7 @@ export class ToolRegistry {
         parsedArguments.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '),
       );
     }
+    baseRecord.arguments = structuredClone(parsedArguments.data);
 
     const decisionSignature = hashValue({
       toolName: input.toolName,
@@ -169,8 +180,16 @@ export class ToolRegistry {
       toolName: input.toolName,
       arguments: parsedArguments.data,
     });
-    baseRecord.idempotencyKey = idempotencyKey;
-    if (definition.idempotent && this.idempotencyCache.has(idempotencyKey)) {
+    if (definition.idempotent) {
+      // Repeated calls inside the same execution represent the same durable
+      // operation. Reuse the record id as well as the output so persistence
+      // updates the existing row instead of violating the unique idempotency
+      // index with a second successful row.
+      baseRecord.id = `tool_${idempotencyKey}`;
+      baseRecord.idempotencyKey = idempotencyKey;
+    }
+    const cacheResult = definition.cacheResult ?? definition.idempotent;
+    if (cacheResult && this.idempotencyCache.has(idempotencyKey)) {
       const output = structuredClone(this.idempotencyCache.get(idempotencyKey)!);
       return {
         record: {
@@ -219,7 +238,7 @@ export class ToolRegistry {
           error.code = 'TOOL_OUTPUT_TOO_LARGE';
           throw error;
         }
-        if (definition.idempotent) {
+        if (cacheResult) {
           this.idempotencyCache.set(idempotencyKey, structuredClone(parsedOutput));
         }
         const finishedAt = new Date().toISOString();

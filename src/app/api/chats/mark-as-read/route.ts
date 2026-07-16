@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { fetchEvolutionAPI } from '@/actions/evolution-api';
+import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { createClient } from '@/lib/supabase/server';
 import type { Message } from '@/lib/types';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';

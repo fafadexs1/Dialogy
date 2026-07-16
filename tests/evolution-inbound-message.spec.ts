@@ -83,6 +83,31 @@ describe('evolution inbound message helpers', () => {
     ).toBe('Atendimento presencial');
   });
 
+  it('treats Evolution interactiveMessage list clicks as inbound text', () => {
+    const effectiveType = resolveEvolutionInboundMessageType({
+      messageType: 'interactiveMessage',
+      rawMessage: {
+        contextInfo: { stanzaId: 'list-message-id' },
+        conversation: 'contract-28174',
+      },
+    });
+
+    expect(effectiveType).toBe('interactiveMessage');
+    expect(mapEvolutionInboundMessageTypeToDbType(effectiveType)).toBe('text');
+  });
+
+  it('extracts a native flow selection nested in interactiveMessage', () => {
+    expect(
+      extractEvolutionInteractiveResponseText({
+        interactiveMessage: {
+          nativeFlowResponseMessage: {
+            paramsJson: JSON.stringify({ selectedRowId: 'invoice-123' }),
+          },
+        },
+      })
+    ).toBe('invoice-123');
+  });
+
   it('appends only delayed messages to a closed WhatsApp chat', () => {
     const closedAt = new Date('2026-04-25T11:00:00.000Z');
 

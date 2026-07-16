@@ -26,6 +26,13 @@ const explicitConversationCloseRequestPattern = new RegExp(
   `^(?:(?:pode|por favor|favor|quero|queria|poderia|consegue|gostaria de|preciso|vamos)\\s+)?${CLOSE_COMMAND_PATTERN}(?:\\s+(?:o|a|meu|minha|esse|essa|este|esta)?\\s*${CONVERSATION_OBJECT_PATTERN})?(?:\\s+(?:ai|aqui|agora|por aqui|por favor|favor|isso|pra mim|para mim|entao|obrigad[ao]|valeu))*(?:\\s+(?:use|usa|execute)\\s+close\\s+chat)?$`
 );
 
+// A ordem de encerramento frequentemente vem depois de uma despedida natural,
+// em vez de chegar como frase isolada. Este sufixo cobre esses casos sem
+// remover as protecoes abaixo contra cancelamento de plano, pedido ou contrato.
+const contextualConversationCloseRequestPattern = new RegExp(
+  `(?:^por\\s+enquanto\\s+|\\b(?:mas|entao|certo|ok|okay|beleza|show|perfeito|valeu|obrigad[ao])\\s+(?:por\\s+enquanto\\s+)?)(?:(?:pode|por favor|favor|quero|queria|poderia|consegue|gostaria de|preciso|vamos)\\s+)?${CLOSE_COMMAND_PATTERN}(?:\\s+(?:o|a|meu|minha|esse|essa|este|esta)?\\s*${CONVERSATION_OBJECT_PATTERN})?(?:\\s+(?:ai|aqui|agora|por aqui|por favor|favor|isso|pra mim|para mim|entao|obrigad[ao]|valeu))*$`
+);
+
 const doneHerePattern =
   /^(?:(?:era|e|eh)\s+)?so\s+isso(?:\s+(?:obrigad[ao]|valeu))?$|^nao\s+(?:preciso|quero)(?:\s+de)?\s+mais\s+nada(?:\s+(?:obrigad[ao]|valeu))?$/;
 const terminalGoodbyePattern = /^(?:(?:ok|okay|certo|perfeito|show|beleza|blz|tudo certo|deu certo|funcionou|(?:ficou\s+)?resolvido)\s+)?(?:obrigad[ao]|valeu|agradeco|grato|tchau|ate mais|ate logo|por enquanto)(?:\s+(?:mesmo|viu|tudo certo|ate mais|ate logo|por enquanto|obrigad[ao]|valeu))*$/;
@@ -128,6 +135,7 @@ export function isConversationCloseRequest(message: string): boolean {
 
   return (
     explicitConversationCloseRequestPattern.test(normalized) ||
+    contextualConversationCloseRequestPattern.test(normalized) ||
     doneHerePattern.test(normalized)
   );
 }

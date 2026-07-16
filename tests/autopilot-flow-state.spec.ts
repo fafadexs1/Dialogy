@@ -85,13 +85,25 @@ describe('autopilot persisted confirmation', () => {
           metadata: {
             conversationSlots: { address: 'CEP 72800-123; Bloco B, apto 12' },
             stableSlots: { address: 'CEP 72800-123' },
-            nativeState: { pendingFieldIds: [] },
+            nativeState: {
+              pendingFieldIds: [],
+              conversationKnownFieldsV1: {
+                autopilotConfigId: 'config-current',
+                fields: { contractId: '16318' },
+              },
+            },
           },
           updated_at: '2026-07-13T12:00:00.000Z',
         },
         {
           chat_id: 'chat-previous',
           metadata: {
+            nativeState: {
+              conversationKnownFieldsV1: {
+                autopilotConfigId: 'config-previous',
+                fields: { contractId: '99999' },
+              },
+            },
             stableSlots: { name: 'João da Silva', phone: '61999991111' },
           },
           updated_at: '2026-07-10T12:00:00.000Z',
@@ -111,7 +123,17 @@ describe('autopilot persisted confirmation', () => {
       name: 'João da Silva',
       phone: '61999991111',
     });
-    expect(memory.nativeState).toEqual({ pendingFieldIds: [] });
+    expect(memory.nativeState).toEqual({
+      pendingFieldIds: [],
+      conversationKnownFieldsV1: {
+        autopilotConfigId: 'config-current',
+        fields: { contractId: '16318' },
+      },
+    });
+    const [query, params] = vi.mocked(db.query).mock.calls[0];
+    expect(query).toContain("$3::int * INTERVAL '1 day'");
+    expect(query).not.toContain('$4::int');
+    expect(params).toEqual(['workspace', 'contact', 180]);
   });
 
   it('orders stable facts by slot evidence time instead of unrelated state updates', async () => {

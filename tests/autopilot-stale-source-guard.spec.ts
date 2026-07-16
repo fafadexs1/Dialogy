@@ -26,6 +26,23 @@ function fakeDatabase(state: {
 }
 
 describe('autopilot stale source guard', () => {
+  it('ignores internal system-agent events when deciding whether the customer source is stale', async () => {
+    let queryText = '';
+    await isAutopilotSourceMessageStillCurrent({
+      chatId: 'chat-1',
+      sourceMessageId: 'message-1',
+      database: {
+        async query(query) {
+          queryText = query;
+          return { rows: [{ source_exists: true, has_newer_customer_message: false }] };
+        },
+      },
+    });
+
+    expect(queryText).toContain('m.sender_system_agent_id IS NULL');
+    expect(queryText).toContain("COALESCE(m.type, '') <> 'system'");
+  });
+
   it('accepts the latest existing customer message', async () => {
     await expect(isAutopilotSourceMessageStillCurrent({
       chatId: 'chat-1',

@@ -43,7 +43,7 @@ function compact(value: string): string {
 
 function fallbackResponse(value?: string | null): string {
   return compact(value || '') ||
-    'Estou com uma instabilidade para responder isso com seguranca agora. Nossa equipe vai acompanhar por aqui.';
+    'Nao consegui concluir esta solicitacao automaticamente. Vou deixar o atendimento para verificacao manual com o contexto desta conversa.';
 }
 
 function hasSuccessfulLookup(toolResults: AgentToolExecutionResult[]): boolean {

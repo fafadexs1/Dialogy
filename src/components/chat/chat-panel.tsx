@@ -80,7 +80,7 @@ import { getContactMessages, toggleChatAutopilot, updateChatCopilotModeAction } 
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction, getMessageStatusBatchAction, retryMessageAction } from '@/actions/messages';
-import { getAutopilotConfig, addDocumentToKnowledgeBase } from '@/actions/autopilot';
+import { getAutopilotConfig } from '@/actions/autopilot';
 import { getShortcuts } from '@/actions/shortcuts';
 import { generateChatHtml } from '@/lib/chat-export';
 import {
@@ -126,6 +126,7 @@ import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-
 import { Badge } from '../ui/badge';
 import { getChatIdentityDisplayValue, resolveChatPlatform } from '@/lib/chat-platform';
 import { buildToolExecutionItems, isToolExecutionMessage, ToolExecutionsSheet } from './tool-executions-sheet';
+import { ConversationLearningDialog } from './conversation-learning-dialog';
 import { usePremiumWheelScroller } from '@/hooks/use-premium-wheel-scroller';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
@@ -478,6 +479,7 @@ export default function ChatPanel({
     const [isInternalNote, setIsInternalNote] = useState(false);
     const [skipUserSignature, setSkipUserSignature] = useState(false);
     const [isToolExecutionsOpen, setIsToolExecutionsOpen] = useState(false);
+    const [isConversationLearningOpen, setIsConversationLearningOpen] = useState(false);
     const [toolExecutionNow, setToolExecutionNow] = useState(() => Date.now());
     const autopilotSwitchTouchedRef = useRef(false);
     const [isAiTyping, setIsAiTyping] = useState(false);
@@ -1091,34 +1093,16 @@ export default function ChatPanel({
         }
     };
 
-    const handleTrainAgent = async () => {
-        if (!chat) return;
-
-        // Use store messages for complete data
-        const msgs = (messagesByChat[chat.id] || chat.messages || []).filter((message) => !isToolExecutionMessage(message));
-        if (!msgs.length) {
-            toast({ title: "Aviso", description: "Nenhuma mensagem carregada para treinar.", variant: 'destructive' });
+    const handleLearnFromConversation = () => {
+        if (!activeAutopilotConfig) {
+            toast({
+                title: 'Nenhum agente selecionado',
+                description: 'Selecione o agente que deve receber este aprendizado.',
+                variant: 'destructive',
+            });
             return;
         }
-
-        // Simplify conversation for training
-        const conversationText = msgs
-            .map(m => {
-                const sender = m.from_me ? 'Atendente' : 'Cliente';
-                const body = m.type === 'text' ? m.content : `[${m.type.toUpperCase()}]`;
-                return `${sender}: ${body}`;
-            })
-            .join('\n');
-
-        const title = `Conversa - ${chat.contact.name} - ${new Date().toLocaleDateString()}`;
-
-        const result = await addDocumentToKnowledgeBase(chat.workspace_id, title, conversationText);
-
-        if (result.success) {
-            toast({ title: "Agente Treinado!", description: "Conversa adicionada à base de conhecimento." });
-        } else {
-            toast({ title: "Erro", description: result.error, variant: 'destructive' });
-        }
+        setIsConversationLearningOpen(true);
     };
 
     const generateVideoThumbnail = async (file: File): Promise<string> => {
@@ -2033,6 +2017,14 @@ export default function ChatPanel({
                 executions={toolExecutionEntries}
                 workspaceTimezone={workspaceTimezone}
             />
+            <ConversationLearningDialog
+                open={isConversationLearningOpen}
+                onOpenChange={setIsConversationLearningOpen}
+                chatId={chat.id}
+                workspaceId={chat.workspace_id}
+                agent={activeAutopilotConfig}
+                onPublished={fetchAutopilotData}
+            />
             {/* Conversation header */}
             <header
                 data-chat-header
@@ -2193,9 +2185,9 @@ export default function ChatPanel({
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={handleTrainAgent}>
+                                <DropdownMenuItem onClick={handleLearnFromConversation}>
                                     <Brain className="mr-2 h-4 w-4" />
-                                    <span>Treinar agente</span>
+                                    <span>Aprender com esta conversa</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
                                     <Activity className="mr-2 h-4 w-4" />
@@ -2304,9 +2296,9 @@ export default function ChatPanel({
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={handleTrainAgent}>
+                                    <DropdownMenuItem onClick={handleLearnFromConversation}>
                                         <Brain className="mr-2 h-4 w-4" />
-                                        <span>Treinar agente</span>
+                                        <span>Aprender com esta conversa</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
                                         <Activity className="mr-2 h-4 w-4" />

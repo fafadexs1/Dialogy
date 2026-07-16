@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import type { MetaChannel, User } from '@/lib/types';
-import { createMetaChannel, listMetaChannels, deleteMetaChannel, getMetaVerifyToken } from '@/actions/meta-channels';
+import { createMetaChannel, listMetaChannels, deleteMetaChannel, getMetaVerifyTokenStatus } from '@/actions/meta-channels';
 import { Loader2, Trash2, Link2, RefreshCw, Wand2, MessageCircle, Check, Copy, ArrowRight, ShieldCheck, Key, Facebook, Laptop, Settings } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -87,14 +87,10 @@ export default function MetaMessengerIntegrationPage() {
 
   useEffect(() => {
     const loadVerifyToken = async () => {
+      if (!user?.activeWorkspaceId) return;
       try {
-        const token = await getMetaVerifyToken();
-        if (token) {
-          setVerifyTokenSource(token);
-          resetForm(token);
-        } else {
-          resetForm();
-        }
+        await getMetaVerifyTokenStatus(user.activeWorkspaceId);
+        resetForm();
       } catch (error) {
         console.error('[META_VERIFY_TOKEN]', error);
         resetForm();
@@ -102,7 +98,7 @@ export default function MetaMessengerIntegrationPage() {
     };
 
     loadVerifyToken();
-  }, []);
+  }, [user?.activeWorkspaceId]);
 
   const loadChannels = async (workspaceId: string) => {
     setLoading(true);

@@ -1,6 +1,22 @@
 
 const enableWebpackOverrides = process.env.NODE_ENV === 'production';
 
+function buildAllowedImagePatterns() {
+  const configuredHosts = (process.env.NEXT_IMAGE_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean);
+  for (const value of [process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.PRIVATE_S3_ENDPOINT]) {
+    if (!value) continue;
+    try {
+      configuredHosts.push(new URL(value).hostname);
+    } catch {
+      // Invalid environment configuration is reported by the owning service at startup.
+    }
+  }
+  return [...new Set(configuredHosts)].map((hostname) => ({ protocol: 'https', hostname }));
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || '.next',
@@ -11,28 +27,16 @@ const nextConfig = {
   experimental: {
     lockDistDir: false,
     serverActions: {
-      bodySizeLimit: '100mb',
+      bodySizeLimit: '10mb',
     },
     // Renamed from middlewareClientMaxBodySize
     // Renamed from middlewareClientMaxBodySize
-    proxyClientMaxBodySize: '100mb',
+    proxyClientMaxBodySize: '10mb',
   },
   transpilePackages: ['@supabase/node-fetch', '@radix-ui/react-slot', 'class-variance-authority'],
-  typescript: {
-    // Evita que erros de tipo parem o build.
-    ignoreBuildErrors: true,
-  },
+  typescript: { ignoreBuildErrors: false },
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '**',
-      },
-      {
-        protocol: 'http',
-        hostname: '**',
-      },
-    ],
+    remotePatterns: buildAllowedImagePatterns(),
   },
   /*
     ...(enableWebpackOverrides && {
@@ -89,10 +93,16 @@ const withPWA = require('@ducanh2912/next-pwa').default({
   cacheOnFrontEndNav: false,
   aggressiveFrontEndNavCaching: false,
   reloadOnOnline: true,
+  publicExcludes: ['!noprecache/**/*', '!product-updates/**/*', '!*.log', '!*.sqlite', '!*.db'],
   swcMinify: true,
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
     disableDevLogs: true,
+    exclude: [
+      /\.map$/,
+      /^manifest.*\.js$/,
+      /static\/chunks\/app\/(?:analytics|autopilot|campaigns|crm|integrations)\//,
+    ],
     runtimeCaching: [
       {
         urlPattern: /\/_next\/image\?url=.+$/i,

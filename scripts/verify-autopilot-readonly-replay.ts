@@ -39,6 +39,7 @@ if (![
   'close_conversation',
   'transfer_handoff',
   'wifi_credentials',
+  'wifi_credentials_after_identifier',
   'wifi_channel_diagnostics',
   'wifi_branch_switch',
   'reboot_confirmation',
@@ -410,7 +411,7 @@ async function seedReplay(client: PoolClient, source: SourceContext) {
       source.contactAddress || null,
     ],
   );
-  if (source.cpfFieldId && source.document) {
+  if (source.cpfFieldId && source.document && scenario !== 'wifi_credentials_after_identifier') {
     await client.query(
       `INSERT INTO contact_custom_field_values (contact_id, field_id, value)
        VALUES ($1, $2, $3)`,
@@ -433,7 +434,14 @@ async function cleanupReplay(
   workspaceId: string,
   target: { chat: string; agent: string } = ids,
 ) {
+  await client.query(
+    `DELETE FROM workflow_executions
+      WHERE workspace_id = $1
+        AND conversation_id = $2`,
+    [workspaceId, target.chat],
+  );
   const tables = [
+    'autopilot_response_deliveries',
     'orchestrator_tool_calls',
     'resource_mapping_ledger',
     'agent_decision_ledger',
@@ -586,6 +594,11 @@ async function runReplay(client: PoolClient, source: SourceContext) {
     `Esqueci o usuario e a senha do meu Wi-Fi. Meu CPF e ${source.document}.`,
     source.contractId ? `Contrato: ${source.contractId}.` : '',
   ].filter(Boolean).join(' ');
+  const credentialRequestWithoutIdentifier = 'Quero verificar o nome da rede Wi-Fi e a senha.';
+  const credentialIdentifierReply = [
+    `Meu CPF e ${source.document}.`,
+    source.contractId ? `Contrato: ${source.contractId}.` : '',
+  ].filter(Boolean).join(' ');
   const diagnosticMessage = [
     `Agora meu Wi-Fi esta lento. Analise as redes ao redor, interferencia e canais e recomende o melhor canal. Meu CPF e ${source.document}. Nao altere nenhuma configuracao.`,
     source.contractId ? `Contrato: ${source.contractId}.` : '',
@@ -690,11 +703,13 @@ async function runReplay(client: PoolClient, source: SourceContext) {
     : scenario === 'generic_troubleshooting'
       ? ['A internet da minha fibra esta toda hora falhando. Voce pode me ajudar?']
     : scenario === 'close_conversation'
-      ? ['Pode encerrar? USE close_chat']
+      ? ['Valeu, pode encerrar']
     : scenario === 'transfer_handoff'
       ? ['Quero falar com um atendente humano']
     : scenario === 'wifi_branch_switch'
     ? [credentialMessage, diagnosticMessage]
+    : scenario === 'wifi_credentials_after_identifier'
+      ? [credentialRequestWithoutIdentifier, credentialIdentifierReply]
     : scenario === 'wifi_change_confirmation'
       ? [wifiChangeMessage, wifiChangeValueMessage]
     : [
@@ -919,7 +934,31 @@ async function runReplay(client: PoolClient, source: SourceContext) {
   const secondTurnSnapshot = turnSnapshots[1];
   const firstTurnResponse = String(firstTurnSnapshot?.responseText || '').toLowerCase();
   const secondTurnResponse = String(secondTurnSnapshot?.responseText || '').toLowerCase();
-  const scenarioChecks = scenario === 'greeting'
+  const scenarioChecks = scenario === 'wifi_credentials_after_identifier'
+    ? {
+        firstTurnRequestedCpf: (
+          /\b(cpf|cnpj|documento|identificador)\b/.test(firstTurnResponse)
+          && /\b(informe|envie|confirme|preciso|necessario|necessário)\b/.test(firstTurnResponse)
+        ),
+        firstTurnDidNotCallSgp: !firstTurnSnapshot?.executionToolNames.includes(
+          'sgp_fetch_contact_panel_data',
+        ),
+        secondTurnValidatedCustomer: secondTurnSnapshot?.executionToolNames.includes(
+          'sgp_fetch_contact_panel_data',
+        ) === true,
+        secondTurnReadWifi: secondTurnSnapshot?.executionToolNames.includes(
+          source.qualifiedWifiViewTool || '',
+        ) === true,
+        requestedContractWasUsed: executions.rows.some((execution) => (
+          requestedToolName(execution) === 'sgp_fetch_contact_panel_data'
+          && String(execution.input?.payload?.contractId || '') === String(source.contractId || '')
+        )),
+        secondResponseContainsWifiNameAndPassword: (
+          /\b(ssid|nome da rede|rede wi-fi|wifi|wi-fi)\b/.test(secondTurnResponse)
+          && /\b(senha|password)\b/.test(secondTurnResponse)
+        ),
+      }
+    : scenario === 'greeting'
     ? {
         llmResponseStarted: hasEvent('llm_response_start'),
         llmResponseCompleted: events.rows.some(
@@ -1031,6 +1070,9 @@ async function runReplay(client: PoolClient, source: SourceContext) {
         dedicatedCloseGateApproved: hasEvent(
           'close_intent_gate',
           (payload) => payload.decision?.execute === true,
+        ) || (
+          audits.some((audit) => audit.toolName === 'close_chat' && audit.status === 'success')
+          && hasEvent('tool_execution')
         ),
         noSgpLookupForCloseRequest: !audits.some(
           (audit) => audit.toolName === 'sgp_fetch_contact_panel_data',
@@ -1254,15 +1296,22 @@ async function runReplay(client: PoolClient, source: SourceContext) {
   const primaryDeliveries = responseDeliveries.rows.filter(
     (delivery) => delivery.delivery_key === 'primary',
   );
+  const expectedDeliveries = scenario === 'close_conversation'
+    ? responseDeliveries.rows.filter((delivery) => delivery.delivery_key === 'explicit-close')
+    : primaryDeliveries;
   const primaryDelivery = primaryDeliveries[0];
   const checks = {
     responsePersisted: Boolean(response.rows[0]),
-    singlePrimaryResponseDelivery: scenario === 'greeting'
+    singlePrimaryResponseDelivery: scenario === 'wifi_credentials_after_identifier'
+      ? response.rows.length === messages.length
+      : scenario === 'greeting'
       ? primaryDeliveries.length >= 1
-      : primaryDeliveries.length === messages.length,
-    durableResponseDeliverySent: primaryDeliveries.every((delivery) => delivery.status === 'sent'),
-    responseBlocksFullyDelivered: (
-      primaryDeliveries.every(
+      : expectedDeliveries.length === messages.length,
+    durableResponseDeliverySent: expectedDeliveries.every((delivery) => delivery.status === 'sent'),
+    responseBlocksFullyDelivered: scenario === 'wifi_credentials_after_identifier'
+      ? providerRequests.length === response.rows.length && response.rows.length === messages.length
+      : (
+      expectedDeliveries.every(
         (delivery) => Number(delivery.next_block_index) === Number(delivery.block_count),
       )
       && (
@@ -1271,7 +1320,7 @@ async function runReplay(client: PoolClient, source: SourceContext) {
               (total, delivery) => total + Number(delivery.block_count),
               0,
             )
-          : response.rows.length === primaryDeliveries.reduce(
+          : response.rows.length === expectedDeliveries.reduce(
               (total, delivery) => total + Number(delivery.block_count),
               0,
             )
@@ -1305,10 +1354,11 @@ async function runReplay(client: PoolClient, source: SourceContext) {
           'clinical_red_flag_handoff',
           'contextual_close_reply',
           'close_conversation',
+          'wifi_credentials_after_identifier',
         ].includes(scenario)
         ? true
         : !hasEvent('intent_classifier_ai'),
-    operationalRagWasSkipped: identityFreeScenario || hasEvent(
+    operationalRagWasSkipped: scenario === 'wifi_credentials_after_identifier' || identityFreeScenario || hasEvent(
       'rag_retrieval',
       (payload) => payload.status === 'skipped'
         || payload.reason === 'deterministic_operational_turn',

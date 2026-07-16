@@ -13,6 +13,7 @@ import {
     getPrimaryService,
     normalizeText,
 } from '../../contact-panel-data';
+import { enrichSupportContractsWithLiveRadius } from '../../radius-session';
 
 type SGPContractOption = {
     id: string;
@@ -159,23 +160,8 @@ async function fetchSGPSupportContractsByLookupContext({
             : { cliente_cpfcnpj: normalizeCpfCnpjDigits(cpf) }
     );
     const requestCandidates: RequestInit[] = [
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(payload),
-        },
+        createSGPJsonRequestInit(sgpUser.token, payload),
     ];
-
-    if (sgpUser?.token) {
-        requestCandidates.push(
-            createSGPJsonRequestInit(
-                sgpUser.token,
-                payload
-            )
-        );
-    }
 
     let lastError = 'Falha ao consultar contratos de suporte no SGP.';
 
@@ -275,10 +261,14 @@ export async function fetchSGPContactPanelDataImpl(chatId: string, contractId?: 
         console.warn('[SGP] Support contract list unavailable for contact panel:', supportRes.error);
     }
 
-    const data = buildSGPContactPanelData(
-        clientRes.clientes,
-        supportRes.success ? supportRes.contracts : []
-    );
+    const supportContracts = supportRes.success
+        ? await enrichSupportContractsWithLiveRadius({
+            global: lookup.data.global,
+            user: lookup.data.sgpUser,
+            contracts: supportRes.contracts,
+        })
+        : [];
+    const data = buildSGPContactPanelData(clientRes.clientes, supportContracts);
     if (!data) {
         return { success: false, error: 'Nenhum dado SGP encontrado para este cliente.' };
     }

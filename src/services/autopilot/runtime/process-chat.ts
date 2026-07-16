@@ -75,6 +75,11 @@ import {
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
+import { toolInputSchemaForPrompt } from '@/services/workflow-runtime/tool-arguments';
+import {
+    buildContextualAutopilotFallback,
+    isGenericInstabilityReply,
+} from '@/services/autopilot/contextual-fallback';
 import { completeProcedureExecution, createProcedureExecution, getActiveProcedureExecution, saveProcedureExecution } from '@/services/autopilot/procedure-store';
 import { compileAllProcedures } from '@/services/autopilot/procedure-compiler';
 import { compileProcedureFromFlowGraph } from '@/services/autopilot/procedure-flow-compiler';
@@ -174,13 +179,18 @@ import {
 } from '@/services/autopilot/slots';
 import {
     COLLECTION_COMPLETION_STATE_KEY,
+    CONVERSATION_KNOWN_FIELDS_STATE_KEY,
     buildCollectionCompletionCheckpoint,
+    chooseNonRepeatingCollectionFallback,
     createPersistedCollectionFieldReceipt,
     directAgentRouteHasFailedToolCalls,
     evaluateCompletedCollectionClose,
+    extractPendingCollectionHistoryFields,
     extractPendingCollectionReplyFields,
+    findPendingCollectionQuestion,
     inspectCollectionResponseRoute,
     parseCollectionCompletionCheckpoint,
+    sanitizeConversationKnownFields,
     type PersistedCollectionFieldReceipt,
 } from '@/services/autopilot/collection-completion';
 import { persistAutopilotContactFacts } from '@/services/autopilot/contact-facts';
@@ -363,7 +373,7 @@ export function buildStructuredKnownFields(
     };
     const addEntries = (entries: Array<[string, unknown]>, fromCustomFields: boolean) => {
       for (const [key, value] of entries) {
-        if (knownFields[key] !== undefined || value === null || value === undefined) continue;
+        if (value === null || value === undefined) continue;
         if (
             invalidIdentifierInCurrentMessage
             && fromCustomFields
@@ -372,13 +382,20 @@ export function buildStructuredKnownFields(
                 || (typeof value === 'string' && isValidCustomerIdentifier(value))
             )
         ) continue;
-        if (typeof value === 'string' && value.trim()) knownFields[key] = value.trim();
-        else if (typeof value === 'number' || typeof value === 'boolean') knownFields[key] = value;
-        else if (Array.isArray(value) && value.length > 0) knownFields[key] = value;
+        let cleanValue: unknown;
+        if (typeof value === 'string' && value.trim()) cleanValue = value.trim();
+        else if (typeof value === 'number' || typeof value === 'boolean') cleanValue = value;
+        else if (Array.isArray(value) && value.length > 0) cleanValue = value;
+        if (cleanValue === undefined) continue;
+        if (knownFields[key] === undefined) knownFields[key] = cleanValue;
+        const canonicalKey = canonicalWorkflowFieldName(key);
+        if (canonicalKey && knownFields[canonicalKey] === undefined) {
+            knownFields[canonicalKey] = cleanValue;
+        }
       }
     };
-    addEntries(Object.entries(contact.custom_fields || {}), true);
     addEntries(Object.entries(coreFields), false);
+    addEntries(Object.entries(contact.custom_fields || {}), true);
     return knownFields;
 }
 
@@ -412,7 +429,9 @@ function buildEnabledAgentToolsDescription(
 
     return enabledTools
         .map((tool) => {
-            const schema = tool.inputSchema ? ` Entrada JSON: ${JSON.stringify(tool.inputSchema).slice(0, 600)}` : '';
+            const schema = tool.inputSchema
+                ? ` Entrada JSON: ${JSON.stringify(toolInputSchemaForPrompt(tool.inputSchema))}`
+                : '';
             const instructions = toolInstructionsByName[tool.name]
                 ? ` Instrucao configurada no flow: ${toolInstructionsByName[tool.name]}`
                 : '';
@@ -1115,7 +1134,7 @@ export async function processAutopilotForChat(
     };
 
     const messagesRes = await db.query(
-        `SELECT content, from_me, sender_user_id
+        `SELECT id, content, from_me, sender_user_id, sender_system_agent_id, type, api_message_status, created_at
          FROM messages
          WHERE chat_id = $1
          ORDER BY created_at DESC
@@ -1124,6 +1143,12 @@ export async function processAutopilotForChat(
     );
 
     const messages = messagesRes.rows.reverse();
+    const customerVisibleMessages = messages.filter((message: any) => (
+        String(message.type || '').toLowerCase() !== 'system'
+        && String(message.api_message_status || '').toLowerCase() !== 'internal'
+        && !['failed', 'error'].includes(String(message.api_message_status || '').toLowerCase())
+        && String(message.content || '').trim().length > 0
+    ));
     const chatHistoryForAI = messages.map((m: any) => {
         const sender = m.from_me ? 'Atendente' : 'Cliente';
         return `${sender}: ${m.content}`;
@@ -1201,11 +1226,38 @@ export async function processAutopilotForChat(
         contact: sanitizedContact,
         rememberedSlots: autopilotContactMemory.slots,
     });
-    const structuredKnownFields = buildStructuredKnownFields(
-        sanitizedContact,
-        currentSlotExtraction.slots,
-        currentSlotExtraction.invalidSlots,
+    const rawConversationFieldsState = autopilotContactMemory.nativeState[CONVERSATION_KNOWN_FIELDS_STATE_KEY];
+    const rememberedConversationFields = rawConversationFieldsState
+        && typeof rawConversationFieldsState === 'object'
+        && !Array.isArray(rawConversationFieldsState)
+        && String((rawConversationFieldsState as Record<string, unknown>).autopilotConfigId || '') === autopilotConfig.id
+        && String((rawConversationFieldsState as Record<string, unknown>).workflowId || '') === String(autopilotConfig.active_workflow_id || '')
+        && String((rawConversationFieldsState as Record<string, unknown>).workflowVersion || '') === String(autopilotConfig.active_workflow_version || '')
+        ? sanitizeConversationKnownFields((rawConversationFieldsState as Record<string, unknown>).fields)
+        : {};
+    const structuredKnownFields: Record<string, unknown> = {
+        ...rememberedConversationFields,
+        ...buildStructuredKnownFields(
+            sanitizedContact,
+            currentSlotExtraction.slots,
+            currentSlotExtraction.invalidSlots,
+        ),
+    };
+    const focusedConversationFields: Record<string, string> = focusedContractId
+        ? { contract_id: focusedContractId }
+        : {};
+    // The latest contract explicitly selected by the customer is authoritative
+    // for this chat. Promote it to structured memory instead of leaving it only
+    // in prompt prose, so tool dependencies and later turns use the same scope.
+    Object.assign(structuredKnownFields, focusedConversationFields);
+    const invalidCanonicalFields = new Set(
+        currentSlotExtraction.invalidSlots.map((slot) => canonicalWorkflowFieldName(slot.name)),
     );
+    for (const field of Object.keys(structuredKnownFields)) {
+        if (invalidCanonicalFields.has(canonicalWorkflowFieldName(field))) {
+            delete structuredKnownFields[field];
+        }
+    }
     const parsedCollectionCheckpoint = parseCollectionCompletionCheckpoint(
         autopilotContactMemory.nativeState[COLLECTION_COMPLETION_STATE_KEY],
     );
@@ -1216,11 +1268,52 @@ export async function processAutopilotForChat(
         && parsedCollectionCheckpoint.workflowId === String(autopilotConfig.active_workflow_id || '')
         && parsedCollectionCheckpoint.workflowVersion === String(autopilotConfig.active_workflow_version || '')
     ) ? parsedCollectionCheckpoint : null;
+    const currentSourceIndex = sourceMessageId
+        ? customerVisibleMessages.findIndex((message: any) => String(message.id || '') === sourceMessageId)
+        : -1;
+    const messagesBeforeCurrentSource = currentSourceIndex >= 0
+        ? customerVisibleMessages.slice(0, currentSourceIndex)
+        : sourceMessageId ? [] : customerVisibleMessages.slice(0, -1);
+    const collectionStartedAtMs = activeCollectionCheckpoint
+        ? new Date(activeCollectionCheckpoint.collectionStartedAt).getTime()
+        : Number.POSITIVE_INFINITY;
+    const currentSourceCreatedAtMs = currentSourceIndex >= 0
+        ? new Date(customerVisibleMessages[currentSourceIndex]?.created_at).getTime()
+        : Date.now();
+    const collectionHistoryLowerBoundMs = Math.max(
+        collectionStartedAtMs - 10_000,
+        (Number.isFinite(currentSourceCreatedAtMs) ? currentSourceCreatedAtMs : Date.now()) - (30 * 60_000),
+    );
+    const currentCollectionMessages = messagesBeforeCurrentSource.filter((message: any) => {
+        const createdAtMs = new Date(message.created_at).getTime();
+        return Number.isFinite(createdAtMs) && createdAtMs >= collectionHistoryLowerBoundMs;
+    });
+    const recoveredCollectionHistoryFields = activeCollectionCheckpoint
+        ? extractPendingCollectionHistoryFields({
+            messages: currentCollectionMessages.map((message: any) => ({
+                fromMe: Boolean(message.from_me),
+                content: String(message.content || ''),
+            })),
+            pendingFields: activeCollectionCheckpoint.pendingFields,
+            alreadyKnownFields: structuredKnownFields,
+        })
+        : {};
+    Object.assign(structuredKnownFields, recoveredCollectionHistoryFields);
+    const previousCollectionQuestion = activeCollectionCheckpoint
+        ? findPendingCollectionQuestion({
+            messages: currentCollectionMessages.map((message: any) => ({
+                fromMe: Boolean(message.from_me),
+                content: String(message.content || ''),
+            })),
+            pendingFields: activeCollectionCheckpoint.pendingFields,
+        })
+        : null;
     const pendingCollectionReplyFields = activeCollectionCheckpoint
         ? extractPendingCollectionReplyFields({
             customerMessage: enrichedLastMessageContent || '',
             pendingFields: activeCollectionCheckpoint.pendingFields,
             alreadyKnownFields: structuredKnownFields,
+            previousQuestion: String(previousCollectionQuestion || ''),
         })
         : {};
     Object.assign(structuredKnownFields, pendingCollectionReplyFields);
@@ -1229,6 +1322,70 @@ export async function processAutopilotForChat(
         messageSlotDetails.map((detail) => [detail.name, detail.value]),
     );
     const collectionPersistenceReceipts: PersistedCollectionFieldReceipt[] = [];
+    const discoveredConversationFields = sanitizeConversationKnownFields({
+        ...focusedConversationFields,
+        ...recoveredCollectionHistoryFields,
+        ...pendingCollectionReplyFields,
+    });
+    let conversationFieldsPersisted = true;
+    if (Object.keys(discoveredConversationFields).length > 0) {
+        const mergedConversationFields = sanitizeConversationKnownFields({
+            ...discoveredConversationFields,
+            ...rememberedConversationFields,
+            ...discoveredConversationFields,
+        });
+        try {
+            await saveAutopilotNativeState({
+                chatId: chat.id,
+                workspaceId,
+                autopilotConfigId: autopilotConfig.id,
+                state: {
+                    [CONVERSATION_KNOWN_FIELDS_STATE_KEY]: {
+                        autopilotConfigId: autopilotConfig.id,
+                        workflowId: String(autopilotConfig.active_workflow_id || ''),
+                        workflowVersion: String(autopilotConfig.active_workflow_version || ''),
+                        fields: mergedConversationFields,
+                        updatedAt: new Date().toISOString(),
+                    },
+                },
+            });
+            autopilotContactMemory.nativeState[CONVERSATION_KNOWN_FIELDS_STATE_KEY] = {
+                autopilotConfigId: autopilotConfig.id,
+                workflowId: String(autopilotConfig.active_workflow_id || ''),
+                workflowVersion: String(autopilotConfig.active_workflow_version || ''),
+                fields: mergedConversationFields,
+                updatedAt: new Date().toISOString(),
+            };
+            const persistedAt = new Date().toISOString();
+            for (const [field, value] of Object.entries(pendingCollectionReplyFields)) {
+                collectionPersistenceReceipts.push(createPersistedCollectionFieldReceipt({
+                    field,
+                    value,
+                    storage: 'slot_memory',
+                    storageKey: `${CONVERSATION_KNOWN_FIELDS_STATE_KEY}.fields.${field}`,
+                    sourceMessageId: sourceMessageId || '',
+                    persistedAt,
+                }));
+            }
+        } catch (error) {
+            conversationFieldsPersisted = false;
+            console.warn('[AUTOPILOT_CONTACT_MEMORY] Failed to persist conversation fields:', error);
+        }
+    }
+    const configuredFallbackReply = autopilotConfig.default_fallback_reply?.trim() || '';
+    const safeConfiguredFallbackReply = configuredFallbackReply && !isGenericInstabilityReply(configuredFallbackReply)
+        ? chooseNonRepeatingCollectionFallback({
+            configuredFallback: configuredFallbackReply,
+            knownFields: structuredKnownFields,
+            genericFallback: '',
+        })
+        : '';
+    const contextualFallbackReply = (documents: KnowledgeBaseDocument[] = []) => buildContextualAutopilotFallback({
+        intent: intentResolution.intent,
+        customerMessage: enrichedLastMessageContent || lastMessageContent || '',
+        knowledgeDocuments: documents,
+        configuredFallback: safeConfiguredFallbackReply,
+    });
     let slotMemoryPersisted = true;
     if (messageSlotDetails.length > 0) {
         try {
@@ -1642,14 +1799,31 @@ export async function processAutopilotForChat(
                         autopilotConfig,
                         turnPolicy,
                         customerMessage: enrichedLastMessageContent || '',
-                        recentCustomerVisibleMessages: messages.map((message: any) => ({
+                        recentCustomerVisibleMessages: customerVisibleMessages.map((message: any) => ({
                             fromMe: Boolean(message.from_me),
                             content: String(message.content || ''),
                         })),
+                        allowRecentConversationalConfirmation: true,
                         orchestratorRunId: orchestratorRun.id,
                         sourceMessageId,
                     },
-                    recentMessages: messages.map((message: any) => ({
+                    reportToolStatus: async (event) => {
+                        await insertAgentToolStatusMessage({
+                            workspaceId,
+                            chatId: chat.id,
+                            systemAgentId: assignedSystemAgentId,
+                            content: event.status === 'running'
+                                ? `Executando ferramenta: ${event.toolName}.`
+                                : event.result
+                                    ? summarizeAgentToolResult(event.result)
+                                    : `Ferramenta ${event.toolName}: ${event.status}.`,
+                            toolName: event.toolName,
+                            status: event.status,
+                            runId: event.runId,
+                            toolResult: event.result,
+                        });
+                    },
+                    recentMessages: customerVisibleMessages.map((message: any) => ({
                         fromMe: Boolean(message.from_me),
                         content: String(message.content || ''),
                     })),
@@ -1659,10 +1833,14 @@ export async function processAutopilotForChat(
                             [
                                 ...Object.keys(crmCustomFields).map((key) => [key, 'crm'] as const),
                                 ...['name', 'email', 'phone', 'address'].map((key) => [key, 'contact'] as const),
+                                ...Object.keys(rememberedConversationFields).map((key) => [key, 'conversation_memory'] as const),
+                                ...Object.keys(recoveredCollectionHistoryFields).map((key) => [key, 'conversation_history'] as const),
+                                ...Object.keys(pendingCollectionReplyFields).map((key) => [key, 'current_reply'] as const),
                                 ...currentSlotExtraction.details.map((detail) => [detail.name, detail.source] as const),
                             ],
                         ),
                         rememberedAcrossChats: Object.keys(autopilotContactMemory.slots).length > 0,
+                        rememberedInConversation: Object.keys(rememberedConversationFields).length > 0,
                         rememberedAt: autopilotContactMemory.updatedAt,
                         previousVerificationReceipts: contactVerificationReceipts,
                         verificationPolicy: contactVerificationReceipts.length > 0
@@ -1673,6 +1851,7 @@ export async function processAutopilotForChat(
                             slot_memory_persisted: slotMemoryPersisted,
                             contact_facts_persisted: contactFactsPersisted,
                             crm_custom_fields_persisted: crmCustomFieldsPersisted,
+                            conversation_fields_persisted: conversationFieldsPersisted,
                         },
                         policy: 'Use os campos conhecidos; nunca solicite novamente um campo ja preenchido. Revalide apenas resultados operacionais que possam ter mudado.',
                     },
@@ -2054,8 +2233,7 @@ export async function processAutopilotForChat(
             ) {
                 recoveryResponse = formatCustomerFacingAiResponse(
                     nativeResult.recoveryResponse?.trim()
-                    || autopilotConfig.default_fallback_reply?.trim()
-                    || 'Estou com uma instabilidade para responder agora. Nossa equipe vai acompanhar por aqui.'
+                    || contextualFallbackReply(scopedStaticKnowledgeDocuments)
                 );
                 const recoveryStage = await timeOrchestratorStage(
                     orchestratorRun,
@@ -3340,7 +3518,7 @@ export async function processAutopilotForChat(
         let finalResponse = formatCustomerFacingAiResponse(recentToolMemoryResponse);
         const responseValidator = validateAutopilotResponse({
             response: finalResponse,
-            fallbackReply: autopilotConfig.default_fallback_reply || '',
+            fallbackReply: safeConfiguredFallbackReply,
             customerMessage: enrichedLastMessageContent || '',
             chatHistory: chatHistoryForAI,
             continuationRequiredSlots: workflowPlan.missingSlots,
@@ -3637,7 +3815,7 @@ export async function processAutopilotForChat(
 
         const responseValidator = validateAutopilotResponse({
             response: finalResponse,
-            fallbackReply: autopilotConfig.default_fallback_reply || '',
+            fallbackReply: safeConfiguredFallbackReply,
             customerMessage: enrichedLastMessageContent || '',
             chatHistory: chatHistoryForAI,
             continuationRequiredSlots: workflowPlan.missingSlots,
@@ -4200,7 +4378,7 @@ export async function processAutopilotForChat(
             const completedToolActions = passThroughToolResults.map((result) => result.input);
             const responseValidator = validateAutopilotResponse({
                 response: finalResponse,
-                fallbackReply: autopilotConfig.default_fallback_reply || '',
+                fallbackReply: safeConfiguredFallbackReply,
                 customerMessage: enrichedLastMessageContent || '',
                 chatHistory: chatHistoryForAI,
                 continuationRequiredSlots: [],
@@ -4491,12 +4669,12 @@ export async function processAutopilotForChat(
             mcpResponse ||
             sgpResponse ||
             toolFailureResponse ||
-            autopilotConfig.default_fallback_reply?.trim() ||
+            contextualFallbackReply(promptKnowledgeDocuments) ||
             'Nao consegui concluir a consulta automatica agora. Nossa equipe vai acompanhar por aqui.'
         );
         const responseValidator = validateAutopilotResponse({
             response: finalResponse,
-            fallbackReply: autopilotConfig.default_fallback_reply || '',
+            fallbackReply: safeConfiguredFallbackReply,
             customerMessage: enrichedLastMessageContent || '',
             chatHistory: chatHistoryForAI,
             continuationRequiredSlots: workflowPlan.missingSlots,
@@ -4656,7 +4834,7 @@ export async function processAutopilotForChat(
                     customerMessage: enrichedLastMessageContent || '',
                     chatHistory: procedureSlimChatHistory,
                     persona: procedureSlimPersona,
-                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                    fallbackReply: safeConfiguredFallbackReply,
                     escalationPolicy: autopilotConfig.escalation_policy || '',
                     model: resolvedAiModel.model,
                     contact: sanitizedContact,
@@ -4707,7 +4885,7 @@ export async function processAutopilotForChat(
                     customerMessage: enrichedLastMessageContent || '',
                     chatHistory: procedureSlimChatHistory,
                     persona: procedureSlimPersona,
-                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                    fallbackReply: safeConfiguredFallbackReply,
                     escalationPolicy: autopilotConfig.escalation_policy || '',
                     model: resolvedAiModel.model,
                     contact: sanitizedContact,
@@ -5151,7 +5329,7 @@ export async function processAutopilotForChat(
                 }
                 const procedureResponseValidator = validateAutopilotResponse({
                     response: finalResponse,
-                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                    fallbackReply: safeConfiguredFallbackReply,
                     customerMessage: enrichedLastMessageContent || '',
                     chatHistory: chatHistoryForAI,
                     continuationRequiredSlots: procedureMissingSlots.length > 0
@@ -5305,7 +5483,7 @@ export async function processAutopilotForChat(
             knowledgeBaseDocuments: isConversationalLlmTurn ? [] : promptKnowledgeDocuments,
             workflowKnowledgeDocuments: isConversationalLlmTurn ? [] : promptWorkflowKnowledgeDocuments,
             resolvedCases: isConversationalLlmTurn ? [] : resolvedCases,
-            fallbackReply: isConversationalLlmTurn ? '' : autopilotConfig.default_fallback_reply || '',
+            fallbackReply: isConversationalLlmTurn ? '' : safeConfiguredFallbackReply,
             escalationPolicy: [
                 isConversationalLlmTurn ? '' : autopilotConfig.escalation_policy || '',
                 deterministicRouting.matchedReason
@@ -5389,7 +5567,7 @@ export async function processAutopilotForChat(
                     }
                 } catch (webhookError) {
                     console.error('[AUTOPILOT_WEBHOOK_ACTION] Failed to execute webhook rule:', webhookError);
-                    finalResponse = autopilotConfig.default_fallback_reply || result.response;
+                    finalResponse = safeConfiguredFallbackReply || result.response;
                     aiMessageBlocks = null; // Webhook error, blocks no longer valid
                     webhookExecution = {
                         reply: finalResponse,
@@ -5750,7 +5928,7 @@ export async function processAutopilotForChat(
                                     knowledgeBaseDocuments: promptKnowledgeDocuments,
                                     workflowKnowledgeDocuments: promptWorkflowKnowledgeDocuments,
                                     resolvedCases,
-                                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                                    fallbackReply: safeConfiguredFallbackReply,
                                     escalationPolicy: autopilotConfig.escalation_policy || '',
                                     closingPolicy: autopilotConfig.closing_policy || '',
                                     model: resolvedAiModel.model,
@@ -5919,7 +6097,7 @@ export async function processAutopilotForChat(
                 const validatorToolResults = [...recentToolResults, ...toolResults];
                 const responseValidator = validateAutopilotResponse({
                     response: finalResponse,
-                    fallbackReply: autopilotConfig.default_fallback_reply || '',
+                    fallbackReply: safeConfiguredFallbackReply,
                     customerMessage: enrichedLastMessageContent || '',
                     chatHistory: chatHistoryForAI,
                     continuationRequiredSlots: workflowPlan.missingSlots,
@@ -6137,8 +6315,7 @@ export async function processAutopilotForChat(
             const emptyResponseFallback = currentCopilotMode === 'auto'
                 ? formatCustomerFacingAiResponse(
                     buildToolFailureResponse(toolResults, '') ||
-                    autopilotConfig.default_fallback_reply?.trim() ||
-                    'Estou com uma instabilidade para responder agora. Nossa equipe vai acompanhar por aqui.'
+                    contextualFallbackReply(promptKnowledgeDocuments)
                 )
                 : null;
             if (emptyResponseFallback) {
@@ -6228,12 +6405,7 @@ export async function processAutopilotForChat(
                 ? 'llm_timeout'
                 : 'autopilot_processing_error';
             const automaticFallback = formatCustomerFacingAiResponse(
-                intentResolution.intent === 'greeting'
-                    ? 'Ola! Como posso ajudar voce hoje?'
-                    : intentResolution.intent === 'thanks'
-                        ? 'Por nada! Posso ajudar em mais alguma coisa?'
-                        : autopilotConfig.default_fallback_reply?.trim() ||
-                            'Estou com uma instabilidade para responder agora. Pode aguardar um instante? Nossa equipe vai acompanhar por aqui.'
+                contextualFallbackReply(promptKnowledgeDocuments)
             );
             try {
                 const sendStage = await timeOrchestratorStage(

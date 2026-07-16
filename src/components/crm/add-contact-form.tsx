@@ -139,7 +139,7 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
 
 type AttachedFile = { url: string; name: string; note: string };
 
-function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFieldDefinition, fieldName: string, defaultValue?: string }) {
+function FileUploadField({ field, fieldName, defaultValue, workspaceId }: { field: CustomFieldDefinition, fieldName: string, defaultValue?: string, workspaceId: string }) {
   const [files, setFiles] = useState<AttachedFile[]>(() => {
     if (!defaultValue) return [];
     try {
@@ -161,12 +161,13 @@ function FileUploadField({ field, fieldName, defaultValue }: { field: CustomFiel
     setUploading(true);
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('pathPrefix', 'crm-custom-fields');
+    formData.append('workspaceId', workspaceId);
 
     try {
       const result = await uploadToS3Action(formData);
-      if (result.success && result.url) {
-        setFiles(prev => [...prev, { url: result.url, name: result.fileName || file.name, note: '' }]);
+      const uploadedUrl = result.url;
+      if (result.success && typeof uploadedUrl === 'string') {
+        setFiles(prev => [...prev, { url: uploadedUrl, name: result.fileName || file.name, note: '' }]);
         toast({ title: "Arquivo anexado com sucesso" });
         // Reset the input value so the same file can be selected again if needed
         e.target.value = '';
@@ -294,7 +295,7 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
         );
       case 'file':
         return (
-          <FileUploadField field={field} fieldName={fieldName} defaultValue={defaultValue} />
+          <FileUploadField field={field} fieldName={fieldName} defaultValue={defaultValue} workspaceId={workspaceId} />
         );
       default:
         return (

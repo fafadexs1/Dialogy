@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/actions/user';
 import { getIntegrationConfig } from '@/actions/integrations';
 import { DEFAULT_AUTOPILOT_MODEL, getGoogleAiSdkModelName } from '@/lib/ai-models';
+import { consumeRateLimit } from '@/lib/ratelimit';
 
 const MIN_OUTPUT_TOKENS = 1024;
 const MAX_OUTPUT_TOKENS = 8192;
@@ -46,11 +47,19 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'N\u00e3o autenticado.' }, { status: 401 });
         }
 
+        const rate = consumeRateLimit(`spellcheck:${user.activeWorkspaceId}:${user.id}`, 20, 60_000);
+        if (!rate.ok) {
+            return NextResponse.json({ code: 'rate_limited', error: 'Muitas solicitações.' }, { status: 429 });
+        }
+
         const body = await request.json();
         const { text } = body;
 
         if (!text || typeof text !== 'string' || text.trim().length === 0) {
             return NextResponse.json({ error: 'Texto vazio.' }, { status: 400 });
+        }
+        if (text.length > 20_000) {
+            return NextResponse.json({ error: 'Texto excede o limite de 20.000 caracteres.' }, { status: 413 });
         }
 
         // Resolve Gemini API key: workspace integrations -> env var

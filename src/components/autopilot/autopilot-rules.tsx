@@ -28,6 +28,8 @@ interface AutopilotRulesProps {
   toolCatalog: AgentToolCatalogItem[];
   enabledToolNames: string[];
   setEnabledToolNames: (toolNames: string[]) => void;
+  onToolToggle?: (tool: AgentToolCatalogItem, enabled: boolean) => void;
+  toolsManagedByWorkflow?: boolean;
   onSaveTools: () => void;
   isSavingTools: boolean;
   onAdd: () => void;
@@ -180,6 +182,8 @@ export function AutopilotRules({
   toolCatalog,
   enabledToolNames,
   setEnabledToolNames,
+  onToolToggle,
+  toolsManagedByWorkflow = false,
   onSaveTools,
   isSavingTools,
   onAdd,
@@ -205,11 +209,15 @@ export function AutopilotRules({
   const selectedEnabledCount = selectedToolGroup
     ? selectedToolGroup.tools.filter((tool) => enabledToolSet.has(tool.name)).length
     : 0;
-  const toggleTool = (toolName: string, nextChecked: boolean) => {
+  const toggleTool = (tool: AgentToolCatalogItem, nextChecked: boolean) => {
+    if (onToolToggle) {
+      onToolToggle(tool, nextChecked);
+      return;
+    }
     setEnabledToolNames(
       nextChecked
-        ? Array.from(new Set([...enabledToolNames, toolName]))
-        : enabledToolNames.filter((name) => name !== toolName)
+        ? Array.from(new Set([...enabledToolNames, tool.name]))
+        : enabledToolNames.filter((name) => name !== tool.name)
     );
   };
 
@@ -348,7 +356,7 @@ export function AutopilotRules({
                           </div>
                           <p className="text-xs leading-5 text-muted-foreground">{tool.description}</p>
                         </div>
-                        <Switch checked={checked} onCheckedChange={(nextChecked) => toggleTool(tool.name, nextChecked)} />
+                        <Switch checked={checked} onCheckedChange={(nextChecked) => toggleTool(tool, nextChecked)} />
                       </div>
                     );
                   })}
@@ -361,7 +369,11 @@ export function AutopilotRules({
                     <Link href={selectedToolGroup.href}>Gerenciar servidor</Link>
                   </Button>
                 ) : (
-                  <div className="text-xs text-muted-foreground">As alteracoes entram no rascunho do agente.</div>
+                  <div className="text-xs text-muted-foreground">
+                    {toolsManagedByWorkflow
+                      ? 'Ao ativar, a tool e conectada ao agente principal. Ao desativar, ela e removida do fluxo.'
+                      : 'As alteracoes entram no rascunho do agente.'}
+                  </div>
                 )}
                 <Button onClick={onSaveTools} disabled={isSavingTools} className="rounded-full">
                   {isSavingTools ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

@@ -13,8 +13,7 @@ import { ProductUpdateAnnouncementModal } from '@/components/product-updates/pro
 export async function AppRouteShell({ children }: { children: React.ReactNode }) {
   ensureServerHeartbeat();
 
-  const user = await getCurrentUser();
-  const locale = await getServerLocale();
+  const [user, locale] = await Promise.all([getCurrentUser(), getServerLocale()]);
   const billing = user?.activeWorkspaceId
     ? await getWorkspaceLimits(user.activeWorkspaceId)
     : null;
@@ -34,7 +33,8 @@ export async function AppRouteShell({ children }: { children: React.ReactNode })
               <PresenceProvider initialUser={user}>
                 <MainAppLayout
                   billingStatus={billing?.billingStatus ?? null}
-                  billingBlocked={billing?.blocked ?? false}
+                  billingBlocked={billing?.blocked === true && billing.availability === 'available'}
+                  billingUnavailable={billing?.availability === 'unavailable'}
                 >
                   {children}
                 </MainAppLayout>

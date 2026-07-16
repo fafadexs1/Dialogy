@@ -463,9 +463,24 @@ export function extractAutopilotSlots(input: {
   }
 
   const phoneExtract = extractFromTextOrHistory((text, takeLast) => {
-    const matches = text.match(/(?:\+?\d{1,3}\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}/g);
-    if (!matches) return null;
-    return takeLast ? matches[matches.length - 1] : matches[0];
+    const pattern = /(?:\+?\d{1,3}\s*)?(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}/g;
+    const matches = Array.from(text.matchAll(pattern)).filter((match) => {
+      const raw = match[0] || '';
+      const digits = onlyDigits(raw);
+      if (!isValidCustomerIdentifier(digits)) return true;
+
+      const index = match.index || 0;
+      const prefix = normalizeText(text.slice(Math.max(0, index - 32), index));
+      // A valid CPF can have the same 11-digit shape as a Brazilian mobile
+      // number. Only reuse it as phone when the customer labelled it as such.
+      if (/\b(?:telefone|tel|whatsapp|celular|fone|numero de contato)\b/.test(prefix)) return true;
+      if (/\b(?:cpf|cnpj|documento|identificador)\b/.test(prefix)) return false;
+
+      const identifier = extractCustomerIdentifierFromText(text, takeLast);
+      return identifier?.digits !== digits;
+    });
+    if (matches.length === 0) return null;
+    return takeLast ? matches[matches.length - 1]?.[0] : matches[0]?.[0];
   });
   const contactPhone = input.contact?.phone || input.contact?.phone_number_jid || null;
   const rememberedPhone = input.rememberedSlots?.phone || null;

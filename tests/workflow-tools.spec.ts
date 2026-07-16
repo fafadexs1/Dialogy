@@ -55,6 +55,7 @@ function registerTool(
     attempts?: number;
     timeoutMs?: number;
     idempotent?: boolean;
+    cacheResult?: boolean;
   } = {},
   permission: ConstructorParameters<typeof ToolRegistry>[0] = () => true,
 ) {
@@ -73,6 +74,7 @@ function registerTool(
       retryableErrorCodes: ['TEMPORARY'],
     },
     idempotent: options.idempotent ?? false,
+    cacheResult: options.cacheResult,
     riskLevel: 'low',
     requiresConfirmation: false,
     execute,
@@ -145,7 +147,40 @@ describe('safe tool runtime', () => {
     const second = await toolContext(registry, { value: 'same' });
     expect(first.record.status).toBe('success');
     expect(second.record.status).toBe('success');
+    expect(second.record.id).toBe(first.record.id);
+    expect(second.record.idempotencyKey).toBe(first.record.idempotencyKey);
     expect(calls).toBe(1);
   });
-});
 
+  it('keeps repeated non-idempotent calls as distinct durable records', async () => {
+    let calls = 0;
+    const registry = registerTool(async ({ value }) => {
+      calls += 1;
+      return { value };
+    }, { idempotent: false });
+
+    const first = await toolContext(registry, { value: 'same' });
+    const second = await toolContext(registry, { value: 'same' });
+
+    expect(first.record.id).not.toBe(second.record.id);
+    expect(first.record.idempotencyKey).toBeUndefined();
+    expect(second.record.idempotencyKey).toBeUndefined();
+    expect(calls).toBe(2);
+  });
+
+  it('refreshes an idempotent read when result caching is disabled', async () => {
+    let calls = 0;
+    const registry = registerTool(async ({ value }) => {
+      calls += 1;
+      return { value: `${value}-${calls}` };
+    }, { idempotent: true, cacheResult: false });
+
+    const first = await toolContext(registry, { value: 'status' });
+    const second = await toolContext(registry, { value: 'status' });
+
+    expect(first.output?.value).toBe('status-1');
+    expect(second.output?.value).toBe('status-2');
+    expect(second.record.id).toBe(first.record.id);
+    expect(calls).toBe(2);
+  });
+});

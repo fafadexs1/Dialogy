@@ -38,8 +38,10 @@ export function extractEvolutionInteractiveResponseText(rawMessage: any): string
   const templateButtonReply = rawMessage.templateButtonReplyMessage;
   const listResponse = rawMessage.listResponseMessage;
   const interactiveResponse = rawMessage.interactiveResponseMessage;
+  const interactiveMessage = rawMessage.interactiveMessage;
   const nativeFlowParams = parseNativeFlowParams(
-    interactiveResponse?.nativeFlowResponseMessage?.paramsJson
+    interactiveResponse?.nativeFlowResponseMessage?.paramsJson ??
+    interactiveMessage?.nativeFlowResponseMessage?.paramsJson
   );
 
   return pickFirstNonEmptyString(
@@ -52,6 +54,8 @@ export function extractEvolutionInteractiveResponseText(rawMessage: any): string
     listResponse?.singleSelectReply?.selectedRowId,
     interactiveResponse?.body?.text,
     interactiveResponse?.nativeFlowResponseMessage?.name,
+    interactiveMessage?.body?.text,
+    interactiveMessage?.nativeFlowResponseMessage?.name,
     nativeFlowParams?.title,
     nativeFlowParams?.text,
     nativeFlowParams?.name,
@@ -93,6 +97,7 @@ export function resolveEvolutionInboundMessageType(params: {
   if (rawMessage.templateButtonReplyMessage) return 'templateButtonReplyMessage';
   if (rawMessage.listResponseMessage) return 'listResponseMessage';
   if (rawMessage.interactiveResponseMessage) return 'interactiveResponseMessage';
+  if (rawMessage.interactiveMessage) return 'interactiveMessage';
   if (rawMessage.buttonMessage) return 'buttonMessage';
   if (rawMessage.extendedTextMessage) return 'extendedTextMessage';
   if (rawMessage.conversation) return 'conversation';
@@ -116,6 +121,7 @@ export function mapEvolutionInboundMessageTypeToDbType(
     case 'templateButtonReplyMessage':
     case 'listResponseMessage':
     case 'interactiveResponseMessage':
+    case 'interactiveMessage':
     case 'contactMessage':
     case 'contactsArrayMessage':
       return 'text';

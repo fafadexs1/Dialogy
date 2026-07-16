@@ -17,11 +17,16 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        uses: gitleaks/gitleaks-action@v2
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,8 +37,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run autopilot quality gate
-        run: npm run test:autopilot:quality
+      - name: Audit production dependencies
+        run: npm run security:audit
+
+      - name: Run complete test suite
+        run: npm test
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Build with type validation
+        run: npm run build
+
+      - name: Enforce bundle budget
+        run: npm run bundle:check
+
+      - name: Audit migration ledger
+        if: ${{ secrets.DATABASE_URL != '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrations:audit

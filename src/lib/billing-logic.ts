@@ -97,7 +97,15 @@ export async function getWorkspaceBillingStatus(workspaceId: string): Promise<Bi
     return (res.rows[0]?.status as BillingStatus) || null;
 }
 
-export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: PlanType, limits: PlanLimits, billingStatus: BillingStatus, blocked: boolean }> {
+export type WorkspaceLimitsResult = {
+    plan: PlanType;
+    limits: PlanLimits;
+    billingStatus: BillingStatus;
+    blocked: boolean;
+    availability: 'available' | 'unavailable';
+};
+
+export async function getWorkspaceLimits(workspaceId: string): Promise<WorkspaceLimitsResult> {
     try {
         const res = await db.query(
             `SELECT 
@@ -126,6 +134,7 @@ export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: P
                 limits: { ...FROZEN_LIMITS },
                 billingStatus,
                 blocked: true,
+                availability: 'available',
             };
         }
 
@@ -141,40 +150,41 @@ export async function getWorkspaceLimits(workspaceId: string): Promise<{ plan: P
             ...(custom_limits || {})
         }, planType);
 
-        return { plan: planType, limits, billingStatus, blocked: false };
+        return { plan: planType, limits, billingStatus, blocked: false, availability: 'available' };
     } catch (error) {
         console.error('[getWorkspaceLimits] Error:', error);
         return {
             plan: 'starter',
-            limits: normalizePlanLimits(null, 'starter'),
+            limits: { ...FROZEN_LIMITS },
             billingStatus: null,
-            blocked: false,
+            blocked: true,
+            availability: 'unavailable',
         };
     }
 }
 
-export async function checkLimit(workspaceId: string, feature: keyof PlanLimits, currentCount: number = 0): Promise<{ allowed: boolean, limit: number, plan: PlanType, billingStatus: BillingStatus, blocked: boolean }> {
-    const { plan, limits, billingStatus, blocked } = await getWorkspaceLimits(workspaceId);
+export async function checkLimit(workspaceId: string, feature: keyof PlanLimits, currentCount: number = 0): Promise<{ allowed: boolean, limit: number, plan: PlanType, billingStatus: BillingStatus, blocked: boolean, availability: 'available' | 'unavailable' }> {
+    const { plan, limits, billingStatus, blocked, availability } = await getWorkspaceLimits(workspaceId);
 
     // If blocked, deny everything
     if (blocked) {
-        return { allowed: false, limit: 0, plan, billingStatus, blocked };
+        return { allowed: false, limit: 0, plan, billingStatus, blocked, availability };
     }
 
     const limit = limits[feature];
 
     if (typeof limit === 'boolean') {
-        return { allowed: limit, limit: limit ? 1 : 0, plan, billingStatus, blocked };
+        return { allowed: limit, limit: limit ? 1 : 0, plan, billingStatus, blocked, availability };
     }
 
     if (typeof limit === 'string') {
-        return { allowed: true, limit: 0, plan, billingStatus, blocked };
+        return { allowed: true, limit: 0, plan, billingStatus, blocked, availability };
     }
 
-    return { allowed: currentCount < (limit as number), limit: limit as number, plan, billingStatus, blocked };
+    return { allowed: currentCount < (limit as number), limit: limit as number, plan, billingStatus, blocked, availability };
 }
 
-export async function getMonthlyChatLimitStatus(workspaceId: string): Promise<{ allowed: boolean, limit: number, plan: PlanType, current: number, billingStatus: BillingStatus, blocked: boolean }> {
+export async function getMonthlyChatLimitStatus(workspaceId: string): Promise<{ allowed: boolean, limit: number, plan: PlanType, current: number, billingStatus: BillingStatus, blocked: boolean, availability: 'available' | 'unavailable' }> {
     const countRes = await db.query(
         `SELECT COUNT(*) as count
          FROM chats

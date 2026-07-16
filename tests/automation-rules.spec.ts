@@ -59,6 +59,37 @@ describe('autopilot automation rule sanitation', () => {
     ]);
   });
 
+  it('ignores the exact empty webhook shape without aborting the remaining rules', () => {
+    const result = sanitizeAutopilotRules([
+      {
+        id: 'valid-reply',
+        name: 'Planos',
+        trigger: 'Cliente pede planos',
+        action: { type: 'reply', value: 'Aqui estao os planos.' },
+      },
+      {
+        id: 'empty-webhook',
+        name: 'Financeiro antigo',
+        trigger: 'asdsad',
+        action: {
+          type: 'webhook',
+          url: '',
+          method: 'POST',
+          headers: {},
+          query: {},
+          bodyType: 'json',
+        },
+      },
+    ]);
+
+    expect(result.rules).toEqual([
+      expect.objectContaining({ id: 'valid-reply' }),
+    ]);
+    expect(result.invalid).toEqual([
+      expect.objectContaining({ id: 'empty-webhook', reason: 'unsupported_or_invalid_action' }),
+    ]);
+  });
+
   it('does not disclose webhook credentials or URL to the model prompt', () => {
     const { rules } = sanitizeAutopilotRules([{
       id: 'webhook-rule',

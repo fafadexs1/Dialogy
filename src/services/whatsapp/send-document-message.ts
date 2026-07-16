@@ -1,7 +1,7 @@
 
 'use server';
 
-import { fetchEvolutionAPI } from "@/actions/evolution-api";
+import { fetchEvolutionAPI } from "@/lib/whatsapp/evolution-api-client";
 import type { EvolutionApiConfig } from "@/lib/types";
 
 import { uploadTempMedia } from "./upload-temp-media";

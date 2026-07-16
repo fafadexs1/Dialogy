@@ -20,12 +20,18 @@ import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe'
 import { mergeEquivalentContacts } from '@/lib/whatsapp/contact-thread';
 import { enqueueAiAutopilotProcess, enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
-import { requireWorkspaceAccess } from '@/server/inbox/access';
+import { requireChatAccess, requireWorkspaceAccess } from '@/server/inbox/access';
 import { loadContactThreadContext } from '@/server/inbox/contact-thread-service';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { recordDecisionOutcomesForChat } from '@/services/autopilot/outcome-tracker';
 import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
 import { selectFairAgentForTeam } from '@/services/chat-distribution/fair-distribution';
+import {
+    isTrustedActorContext,
+    isTrustedUserContext,
+    type TrustedActorContext,
+    type TrustedUserContext,
+} from '@/lib/security/trusted-server-context';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
@@ -61,6 +67,11 @@ export const assignChatToSelfAction = withDebug(
         }
 
         try {
+            const chatAccess = await requireChatAccess(currentAgentId, chatId);
+            if (!chatAccess.ok) {
+                return { success: false, error: chatAccess.error };
+            }
+
             // Corrected query: Allow taking ownership as long as the chat is in the 'gerais' (general) queue,
             // regardless of whether agent_id was previously filled.
             const result = await db.query(
@@ -133,10 +144,13 @@ export const transferChatAction = withDebug(
     'transfer_chat',
     async function transferChatAction(
         input: { chatId: string; teamId?: string; agentId?: string },
-        // Optional parameter to accept a session-like object from an API call
-        prefetchedSession?: { user: { id: string, name: string, email?: string | null }, isSystemAgent?: boolean }
+        trustedContext?: TrustedActorContext
     ): Promise<{ success: boolean; error?: string; chat?: Chat; assignedAgent?: { id: string; name: string } }> {
-        let sessionToUse = prefetchedSession;
+        const trustedCall = isTrustedActorContext(trustedContext);
+        let sessionToUse: {
+            user: { id: string; name?: string | null; email?: string | null };
+            isSystemAgent?: boolean;
+        } | undefined = trustedCall ? trustedContext : undefined;
 
         if (!sessionToUse) {
             const supabase = await createClient();
@@ -191,8 +205,18 @@ export const transferChatAction = withDebug(
                 return { success: false, error: "Não é possível transferir um atendimento que já foi encerrado." };
             }
 
-            // System agents have implicit permission
-            if (!prefetchedSession) {
+            if (trustedCall && isSystemAgent) {
+                const actorAccess = await client.query(
+                    `SELECT 1 FROM system_agents
+                     WHERE id = $1 AND workspace_id = $2 AND is_active = TRUE
+                     LIMIT 1`,
+                    [currentAgentId, workspaceId]
+                );
+                if ((actorAccess.rowCount ?? 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: 'Agente do sistema não autorizado para este workspace.' };
+                }
+            } else if (!trustedCall) {
                 if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
                     await client.query('ROLLBACK');
                     return { success: false, error: "Você não tem permissão para transferir atendimentos." };
@@ -208,7 +232,10 @@ export const transferChatAction = withDebug(
             let automaticTeamTagColor: string | null = null;
 
             if (isSystemAgent) {
-                const actorRes = await client.query('SELECT name, avatar_url FROM system_agents WHERE id = $1', [currentAgentId]);
+                const actorRes = await client.query(
+                    'SELECT name, avatar_url FROM system_agents WHERE id = $1 AND workspace_id = $2',
+                    [currentAgentId, workspaceId]
+                );
                 transferActorName = actorRes.rows[0]?.name || currentAgentName;
                 transferActorAvatarUrl = actorRes.rows[0]?.avatar_url || null;
             } else {
@@ -454,10 +481,14 @@ export const transferChatToIntelligentAgentAction = withDebug(
     'transfer_chat_to_intelligent_agent',
     async function transferChatToIntelligentAgentAction(
         input: { chatId: string; systemAgentId: string },
-        prefetchedSession?: { user: { id: string, name: string, email?: string | null }, isSystemAgent?: boolean }
+        trustedContext?: TrustedActorContext
     ): Promise<{ success: boolean; error?: string; chat?: Chat }> {
         const supabase = await createClient();
-        let sessionToUse = prefetchedSession;
+        const trustedCall = isTrustedActorContext(trustedContext);
+        let sessionToUse: {
+            user: { id: string; name?: string | null; email?: string | null };
+            isSystemAgent?: boolean;
+        } | undefined = trustedCall ? trustedContext : undefined;
 
         if (!sessionToUse) {
             const { data: { user } } = await supabase.auth.getUser();
@@ -498,7 +529,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
             }
 
             const workspaceId = chat.workspace_id;
-            if (prefetchedSession?.isSystemAgent) {
+            if (trustedCall && trustedContext.isSystemAgent) {
                 const actorRes = await client.query(
                     `SELECT 1 FROM system_agents
                      WHERE id = $1 AND workspace_id = $2 AND is_active = TRUE
@@ -510,7 +541,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
                     return { success: false, error: "Agente do sistema não autorizado para este workspace." };
                 }
             }
-            if (!prefetchedSession && !await hasPermission(sessionToUse.user.id, workspaceId, 'teams:view')) {
+            if (!trustedCall && !await hasPermission(sessionToUse.user.id, workspaceId, 'teams:view')) {
                 await client.query('ROLLBACK');
                 return { success: false, error: "Você não tem permissão para transferir atendimentos." };
             }
@@ -570,7 +601,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
                     {
                         event: 'transfer_to_intelligent_attendant',
                         from_actor_id: sessionToUse.user.id,
-                        from_actor_type: prefetchedSession?.isSystemAgent ? 'system_agent' : 'user',
+                        from_actor_type: trustedCall && trustedContext.isSystemAgent ? 'system_agent' : 'user',
                         to_system_agent_id: systemAgentId,
                         autopilot_config_id: intelligentAgent.autopilot_config_id,
                     },
@@ -667,6 +698,11 @@ export const closeChatAction = withDebug(
 
         if (!chatId) {
             return { success: false, error: "ID do chat e obrigatorio." };
+        }
+
+        const chatAccess = await requireChatAccess(currentAgentId, chatId);
+        if (!chatAccess.ok) {
+            return { success: false, error: chatAccess.error };
         }
 
         const client = await db.connect();
@@ -917,7 +953,16 @@ export const updateChatTagAction = withDebug(
         }
 
         try {
-            const tagRes = await db.query('SELECT label, color FROM tags WHERE id = $1', [tagId]);
+            const chatAccess = await requireChatAccess(user.id, chatId);
+            if (!chatAccess.ok) return { success: false, error: chatAccess.error };
+
+            const tagRes = await db.query(
+                `SELECT t.label, t.color
+                 FROM tags t
+                 JOIN chats c ON c.workspace_id = t.workspace_id
+                 WHERE t.id = $1 AND c.id = $2`,
+                [tagId, chatId]
+            );
             if (tagRes.rowCount === 0) {
                 return { success: false, error: "Etiqueta não encontrada." };
             }
@@ -951,6 +996,9 @@ export const toggleMultipleChatsAutopilotAction = withDebug(
 
         try {
             const copilotMode = isActive ? mode : 'off';
+            const accessResults = await Promise.all(chatIds.map((chatId) => requireChatAccess(user.id, chatId)));
+            const denied = accessResults.find((result) => !result.ok);
+            if (denied && !denied.ok) return { success: false, error: denied.error };
             
             // Execute updates in parallel
             await Promise.all(chatIds.map(async (chatId) => {
@@ -986,6 +1034,13 @@ export type InitialChatsPayload = {
     hasMoreHistory: boolean;
     hasMoreChats: boolean;
     timezone: string;
+    nextCursor?: { lastActivityAt: string; id: string } | null;
+    selectedMessageWindow?: {
+        messages: Message[];
+        oldestMessageDate: string | null;
+        oldestMessageId: string | null;
+        hasMoreHistory: boolean;
+    } | null;
     error?: string;
 };
 
@@ -1086,6 +1141,7 @@ export const loadOlderChatsAction = withDebug(
     async function loadOlderChatsAction(
         workspaceId: string,
         before: string,
+        beforeId: string | null,
         statuses: Chat['status'][] = ['gerais', 'atendimentos'],
         ownership: 'mine' | 'everyone' = 'mine'
     ): Promise<{ success: boolean; chats?: Chat[]; error?: string }> {
@@ -1098,7 +1154,9 @@ export const loadOlderChatsAction = withDebug(
 
         try {
             const userId = user.id;
-            const limit = 20;
+            const access = await requireWorkspaceAccess(userId, workspaceId);
+            if (!access.ok) return { success: false, error: access.error };
+            const limit = 25;
 
             const rows = await fetchChats({
                 workspaceId,
@@ -1106,6 +1164,7 @@ export const loadOlderChatsAction = withDebug(
                 limit,
                 includeChatId: null,
                 before,
+                beforeId,
                 ownership,
                 statuses
             });
@@ -1126,7 +1185,7 @@ export const loadOlderChatsAction = withDebug(
         }
     },
     {
-        contextResolver: (workspaceId, before) => ({ payload: { workspaceId, before } })
+        contextResolver: (workspaceId, before, beforeId) => ({ payload: { workspaceId, before, beforeId } })
     }
 );
 
@@ -1136,6 +1195,7 @@ async function fetchChats({
     limit,
     includeChatId,
     before,
+    beforeId,
     ownership = 'mine',
     statuses,
 }: {
@@ -1144,6 +1204,7 @@ async function fetchChats({
     limit: number;
     includeChatId: string | null;
     before?: string | null;
+    beforeId?: string | null;
     ownership?: 'mine' | 'everyone';
     statuses?: Chat['status'][];
 }): Promise<ChatRow[]> {
@@ -1152,10 +1213,14 @@ async function fetchChats({
     let queryIndex = 3;
 
     let beforeClause = '';
-    if (before) {
+    if (before && beforeId) {
+        params.push(before, beforeId);
+        beforeClause = `AND (c.last_activity_at, c.id) < ($${queryIndex}::timestamptz, $${queryIndex + 1}::uuid)`;
+        queryIndex += 2;
+    } else if (before) {
         params.push(before);
-        beforeClause = `AND c.last_activity_at < $${queryIndex}`;
-        queryIndex++;
+        beforeClause = `AND c.last_activity_at < $${queryIndex}::timestamptz`;
+        queryIndex += 1;
     }
 
     let ownershipClause = '';
@@ -1194,7 +1259,7 @@ async function fetchChats({
               ${statusClause}
               ${ownershipClause}
               ${beforeClause}
-            ORDER BY c.last_activity_at DESC
+            ORDER BY c.last_activity_at DESC, c.id DESC
             LIMIT $2
         ),
         sorted_chat_ids AS (
@@ -1390,7 +1455,7 @@ async function fetchChats({
             ) instances
             LIMIT 1
         ) channel_instance ON true
-        ORDER BY c.last_activity_at DESC
+        ORDER BY c.last_activity_at DESC, c.id DESC
         `,
         params
     );
@@ -1411,16 +1476,14 @@ export const getInitialChatsData = withDebug(
         workspaceId,
         selectedChatId,
         ownership = 'mine',
-        userIdOverride,
         workspaceTimezone,
     }: {
         workspaceId: string;
         selectedChatId: string | null;
         ownership?: 'mine' | 'everyone';
-        userIdOverride?: string;
         workspaceTimezone?: string | null;
-    }): Promise<InitialChatsPayload> {
-        let userId = userIdOverride;
+    }, trustedContext?: TrustedUserContext): Promise<InitialChatsPayload> {
+        let userId = isTrustedUserContext(trustedContext) ? trustedContext.userId : undefined;
 
         if (!userId) {
             const supabase = await createClient();
@@ -1476,7 +1539,7 @@ export const getInitialChatsData = withDebug(
                 [workspaceId]
             ).catch(err => console.error('[REPAIR_CHATS] Failed:', err));
 
-            const activeChatsLimit = 200; // Paginated; more loaded on scroll
+            const activeChatsLimit = 50;
             const timezonePromise = workspaceTimezone
                 ? Promise.resolve(workspaceTimezone)
                 : getWorkspaceTimezone(workspaceId);
@@ -1525,12 +1588,13 @@ export const getInitialChatsData = withDebug(
             uniqueChatRows.sort((a, b) => {
                 const timeA = new Date(a.chat_activity_at || 0).getTime();
                 const timeB = new Date(b.chat_activity_at || 0).getTime();
-                return timeB - timeA;
+                return timeB - timeA || b.id.localeCompare(a.id);
             });
 
             const { chats, lastSyncChats } = await hydrateChats(uniqueChatRows, timezone);
 
-            const hasMoreChats = closedChatsDegraded || closedChatRows.length === closedChatsLimit;
+            const hasMoreChats = closedChatsDegraded || activeChatRows.length === activeChatsLimit || closedChatRows.length === closedChatsLimit;
+            const cursorRow = activeChatRows.at(-1);
 
             const messages: Message[] = [];
             const lastSyncMessageForSelected: string | null = null;
@@ -1549,6 +1613,9 @@ export const getInitialChatsData = withDebug(
                 hasMoreHistory,
                 hasMoreChats,
                 timezone,
+                nextCursor: cursorRow?.chat_activity_at
+                    ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                    : null,
             };
 
         } catch (error) {
@@ -3409,6 +3476,9 @@ export const toggleChatAutopilot = withDebug(
         if (!user) return { success: false, error: "Usuário não autenticado." };
 
         try {
+            const chatAccess = await requireChatAccess(user.id, chatId);
+            if (!chatAccess.ok) return { success: false, error: chatAccess.error };
+
             const copilotMode = isActive ? 'suggest' : 'off';
             await db.query(`
                 UPDATE chats 
@@ -3442,6 +3512,9 @@ export const updateChatCopilotModeAction = withDebug(
         logToDebugFile(`[updateChatCopilotModeAction] Request: chatId=${chatId}, mode=${mode}`);
 
         try {
+            const chatAccess = await requireChatAccess(user.id, chatId);
+            if (!chatAccess.ok) return { success: false, error: chatAccess.error };
+
             await db.query(`
                 UPDATE chats 
                 SET copilot_mode = $1

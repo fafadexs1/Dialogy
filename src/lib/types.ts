@@ -490,12 +490,11 @@ export type MetaChannel = {
   type: 'instagram' | 'messenger';
   external_page_id?: string | null;
   ig_business_id?: string | null;
-  access_token?: string;
-  verify_token?: string;
-  app_secret?: string | null;
   name?: string | null;
   status?: string | null;
-  settings?: Record<string, any>;
+  hasCredential?: boolean;
+  hasAppSecret?: boolean;
+  hasVerifyToken?: boolean;
   created_at?: string;
   updated_at?: string;
 };

@@ -28,6 +28,9 @@ describe('autopilot close intent', () => {
     'era so isso',
     'nao preciso de mais nada',
     'só isso',
+    'Valeu, pode encerrar',
+    'Cara, muito bacana. Mas por enquanto, pode encerrar!',
+    'Certo, pode encerrar por aqui',
   ])('detects conversation close request: %s', (message) => {
     expect(isConversationCloseRequest(message)).toBe(true);
   });
@@ -52,6 +55,7 @@ describe('autopilot close intent', () => {
     'Não use a ferramenta close',
     'A tela mostrou close chat; o que significa?',
     'Se der erro, não encerre o atendimento',
+    'Esse plano parece bom, mas quero finalizar a contratação',
   ])('does not confuse business cancellation with conversation close: %s', (message) => {
     expect(isConversationCloseRequest(message)).toBe(false);
   });

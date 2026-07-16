@@ -25,9 +25,13 @@ function apiCall(url, apiKey) {
 }
 
 async function main() {
-  const api_url = 'https://o1whatsv2.klyraai.com.br';
-  const api_key = '429683C4C977415CAAFCCE10F7D57E11';
-  const instanceName = 'zap2';
+  const api_url = process.env.EVOLUTION_API_URL;
+  const api_key = process.env.EVOLUTION_API_KEY;
+  const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'zap2';
+
+  if (!api_url || !api_key) {
+    throw new Error('EVOLUTION_API_URL and EVOLUTION_API_KEY are required.');
+  }
 
   console.log(`Checking connection state for ${instanceName}...`);
   try {

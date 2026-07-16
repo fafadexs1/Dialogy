@@ -155,7 +155,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Either chatId or phoneNumber is required.' }, { status: 400 });
     }
 
-    if (!content && (!media || media.length === 0)) {
+    if (type !== 'list' && !content && (!media || media.length === 0)) {
       return NextResponse.json({ error: 'Either content or media must be provided.' }, { status: 400 });
     }
 

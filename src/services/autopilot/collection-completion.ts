@@ -12,6 +12,7 @@ import { hashValue, isRecord } from '@/services/workflow-runtime/utils';
 import { isValidCustomerIdentifier } from './slots';
 
 export const COLLECTION_COMPLETION_STATE_KEY = 'collectionCompletionV1' as const;
+export const CONVERSATION_KNOWN_FIELDS_STATE_KEY = 'conversationKnownFieldsV1' as const;
 export const COLLECTION_COMPLETION_VERSION = 2 as const;
 const COLLECTION_COMPLETION_CLAIM_TTL_MS = Math.max(
   30_000,
@@ -33,6 +34,7 @@ export type CollectionCompletionCheckpoint = {
   confirmedFields: string[];
   pendingFieldsFingerprint: string;
   checkpointFingerprint: string;
+  collectionStartedAt: string;
   askedAt: string;
   closingClaimedAt?: string;
 };
@@ -93,11 +95,20 @@ function checkpointFingerprint(input: Omit<CollectionCompletionCheckpoint, 'chec
   return hashValue({ ...input, status: 'awaiting_fields' });
 }
 
+function legacyCheckpointFingerprint(input: Omit<CollectionCompletionCheckpoint, 'checkpointFingerprint' | 'status' | 'closingClaimedAt'>) {
+  const { collectionStartedAt: _collectionStartedAt, ...legacyInput } = input;
+  return hashValue({ ...legacyInput, status: 'awaiting_fields' });
+}
+
 export function parseCollectionCompletionCheckpoint(value: unknown): CollectionCompletionCheckpoint | null {
   if (!isRecord(value) || value.version !== COLLECTION_COMPLETION_VERSION) return null;
   const pendingFields = uniqueFields(value.pendingFields);
   const confirmedFields = uniqueFields(value.confirmedFields);
   const askedAt = safeIso(value.askedAt);
+  const persistedCollectionStartedAt = safeIso(value.collectionStartedAt);
+  const collectionStartedAt = persistedCollectionStartedAt || (askedAt
+    ? new Date(new Date(askedAt).getTime() - 5 * 60_000).toISOString()
+    : null);
   const closingClaimedAt = safeIso(value.closingClaimedAt);
   const rawStatus = value.status === 'closing' ? 'closing' : value.status === 'awaiting_fields' ? 'awaiting_fields' : null;
   const status = rawStatus === 'closing' && (
@@ -140,9 +151,16 @@ export function parseCollectionCompletionCheckpoint(value: unknown): CollectionC
     pendingFields,
     confirmedFields,
     pendingFieldsFingerprint: strings.pendingFieldsFingerprint,
+    collectionStartedAt: collectionStartedAt!,
     askedAt,
   } satisfies Omit<CollectionCompletionCheckpoint, 'checkpointFingerprint' | 'status' | 'closingClaimedAt'>;
-  if (strings.checkpointFingerprint !== checkpointFingerprint(withoutFingerprint)) return null;
+  const fingerprintMatches = strings.checkpointFingerprint === checkpointFingerprint(withoutFingerprint);
+  const legacyFingerprintMatches = (
+    !persistedCollectionStartedAt
+    && (value.collectionStartedAt === undefined || value.collectionStartedAt === null || value.collectionStartedAt === '')
+    && strings.checkpointFingerprint === legacyCheckpointFingerprint(withoutFingerprint)
+  );
+  if (!fingerprintMatches && !legacyFingerprintMatches) return null;
 
   return {
     ...withoutFingerprint,
@@ -296,6 +314,7 @@ export function buildCollectionCompletionCheckpoint(input: {
     pendingFields,
     confirmedFields,
     pendingFieldsFingerprint: pendingCollectionFieldsFingerprint(pendingFields),
+    collectionStartedAt: previous?.collectionStartedAt || askedAt,
     askedAt,
   } satisfies Omit<CollectionCompletionCheckpoint, 'checkpointFingerprint' | 'status' | 'closingClaimedAt'>;
   return {
@@ -313,6 +332,111 @@ function normalizeReplyValue(value: string): string {
     .slice(0, 500);
 }
 
+export function sanitizeConversationKnownFields(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  const fields: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (Object.keys(fields).length >= 30) break;
+    const key = rawKey.replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!key || ['__proto__', 'prototype', 'constructor'].includes(key)) continue;
+    if (!['string', 'number', 'boolean'].includes(typeof rawValue)) continue;
+    const clean = String(rawValue).replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (clean) fields[key] = clean;
+  }
+  return fields;
+}
+
+function normalizeCollectionText(value: string, splitCamelCase = false): string {
+  const source = splitCamelCase
+    ? value.replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    : value;
+  return source
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function questionLooksLikeCollectionRequest(question: string): boolean {
+  const normalized = normalizeCollectionText(question);
+  return Boolean(
+    /[?？]/.test(question)
+    || /\b(?:qual|quais|informe|informar|envie|enviar|passe|passar|forneca|fornecer|confirme|confirmar|digite|diga|preciso|necessito|gostaria|prefere|deseja|quer|escolha|selecione|pode me dizer|pode me passar)\b/.test(normalized)
+  );
+}
+
+function questionReferencesCollectionField(question: string, field: string): boolean {
+  if (!questionLooksLikeCollectionRequest(question)) return false;
+  const normalizedQuestion = normalizeCollectionText(question);
+  const normalizedField = normalizeCollectionText(field, true);
+  const canonical = canonicalWorkflowFieldName(field);
+  const semanticPatterns: Array<{ field: RegExp; question: RegExp }> = [
+    {
+      field: /\b(?:customer identifier|cpf|cnpj|document|documento|tax id|identificador)\b/,
+      question: /\b(?:cpf|cnpj|documento|identificador|cadastro)\b/,
+    },
+    {
+      field: /\b(?:contract|contrato)(?:\s+(?:id|number|numero))?\b|\b(?:id|numero)\s+(?:do\s+)?(?:servico|contrato)\b/,
+      question: /\b(?:contrato|contract|servico|assinatura)\b/,
+    },
+    {
+      field: /\b(?:problem|problema|issue|incident|incidente|failure|falha|defect|defeito|symptom|sintoma)(?:\s+(?:description|descricao))?\b/,
+      question: /\b(?:problema|acontecendo|ocorrendo|falha|defeito|sintoma|dificuldade|lentidao|lento|conexao|sinal)\b/,
+    },
+    {
+      field: /\b(?:preference|preferencia|choice|escolha|option|opcao|desired action|acao desejada|product or service preference)\b/,
+      question: /\b(?:prefere|preferencia|escolha|opcao|ativar|desativar|alterar|mudar|trocar|acao)\b/,
+    },
+    {
+      field: /\b(?:address|endereco|location|localizacao|local)\b/,
+      question: /\b(?:endereco|logradouro|rua|local|localizacao|onde)\b/,
+    },
+    {
+      field: /\b(?:name|nome|titular|full name)\b/,
+      question: /\b(?:nome|full name)\b/,
+    },
+    {
+      field: /\b(?:phone|telefone|celular|whatsapp|mobile)\b/,
+      question: /\b(?:telefone|celular|whatsapp|contato)\b/,
+    },
+    { field: /\b(?:email|e mail)\b/, question: /\b(?:email|e mail)\b/ },
+    { field: /\b(?:date|data|day|dia)\b/, question: /\b(?:data|dia|quando)\b/ },
+    { field: /\b(?:time|hora|horario)\b/, question: /\b(?:hora|horario)\b/ },
+    { field: /\b(?:quantity|quantidade)\b/, question: /\b(?:quantidade|quantos|quantas)\b/ },
+    {
+      field: /\b(?:invoice|fatura|payment|pagamento|boleto)\b/,
+      question: /\b(?:fatura|pagamento|boleto|cobranca)\b/,
+    },
+  ];
+  const semanticField = `${normalizedField} ${normalizeCollectionText(canonical, true)}`;
+  if (semanticPatterns.some((entry) => entry.field.test(semanticField) && entry.question.test(normalizedQuestion))) {
+    return true;
+  }
+
+  const ignoredTokens = new Set([
+    'id', 'field', 'campo', 'value', 'valor', 'description', 'descricao', 'data',
+    'customer', 'client', 'cliente', 'requested', 'required', 'informacao',
+  ]);
+  const tokens = normalizedField
+    .split(' ')
+    .filter((token) => token.length >= 3 && !ignoredTokens.has(token));
+  return tokens.some((token) => new RegExp(`\\b${token}\\b`).test(normalizedQuestion));
+}
+
+function normalizeReplyForField(value: string, field: string): string {
+  const normalizedField = normalizeCollectionText(field, true);
+  if (
+    /^(?:contract|contrato)(?: id| number| numero)?$/.test(normalizedField)
+    || /^(?:id|numero) (?:do )?(?:contrato|servico)$/.test(normalizedField)
+  ) {
+    const contractId = value.match(/\b\d{2,30}\b/)?.[0];
+    if (contractId) return contractId;
+  }
+  return normalizeReplyValue(value);
+}
+
 function isUnsafeCollectionReply(value: string, field: string): boolean {
   const normalized = value
     .normalize('NFD')
@@ -322,7 +446,7 @@ function isUnsafeCollectionReply(value: string, field: string): boolean {
     .replace(/\s+/g, ' ')
     .trim();
   if (!normalized || /[?ï¼Ÿ]/.test(value)) return true;
-  const booleanLikeField = /(?:consent|aceite|confirm|autoriz|permiss|opt.?in|termos|deseja|possui|tem_)/.test(
+  const booleanLikeField = /(?:consent|aceite|confirm|autoriz|permiss|opt.?in|termos|deseja|possui|tem_|preference|preferencia|choice|option|opcao|action|acao)/.test(
     canonicalWorkflowFieldName(field),
   );
   if (/^(?:nao|sim)$/.test(normalized)) return !booleanLikeField;
@@ -356,8 +480,10 @@ export function extractPendingCollectionReplyFields(input: {
   customerMessage: string;
   pendingFields: string[];
   alreadyKnownFields: Record<string, unknown>;
+  previousQuestion?: string | null;
 }): Record<string, string> {
-  const pendingFields = uniqueFields(input.pendingFields)
+  const pendingFields = uniqueFields(input.pendingFields);
+  const missingFields = pendingFields
     .filter((field) => !hasKnownWorkflowField(field, input.alreadyKnownFields));
   if (pendingFields.length === 0) return {};
   const message = input.customerMessage.trim();
@@ -368,25 +494,112 @@ export function extractPendingCollectionReplyFields(input: {
   const labelled = /(?:^|[\n;,|])\s*([\p{L}\p{N}_.() /-]{1,100}?)\s*(?::|=|\sé\s)\s*([^\n;,|]{1,500})/giu;
   for (const match of message.matchAll(labelled)) {
     const requestedField = byCanonical.get(canonicalWorkflowFieldName(match[1] || ''));
-    const value = normalizeReplyValue(match[2] || '');
+    const value = normalizeReplyForField(match[2] || '', requestedField || '');
     if (requestedField && value && !isUnsafeCollectionReply(value, requestedField)) {
       extracted[requestedField] = value;
     }
   }
 
-  const stillMissing = pendingFields.filter((field) => !hasKnownWorkflowField(field, extracted));
+  const questionMatchedFields = input.previousQuestion && Object.keys(extracted).length === 0
+    ? pendingFields.filter((field) => questionReferencesCollectionField(input.previousQuestion || '', field))
+    : [];
+  if (questionMatchedFields.length === 1 && !/[?？]/.test(message)) {
+    const requestedField = questionMatchedFields[0];
+    const value = normalizeReplyForField(
+      message.replace(/^[^:=]{1,100}(?::|=)\s*/, ''),
+      requestedField,
+    );
+    if (value && !isUnsafeCollectionReply(value, requestedField)) {
+      extracted[requestedField] = value;
+    }
+  }
+
+  const stillMissing = missingFields.filter((field) => !hasKnownWorkflowField(field, extracted));
   if (
     stillMissing.length === 1
-    && pendingFields.length === 1
+    && missingFields.length === 1
     && Object.keys(extracted).length === 0
     && !/[?？]/.test(message)
   ) {
-    const value = normalizeReplyValue(message.replace(/^[^:=]{1,100}(?::|=)\s*/, ''));
+    const value = normalizeReplyForField(
+      message.replace(/^[^:=]{1,100}(?::|=)\s*/, ''),
+      stillMissing[0],
+    );
     if (value && !isUnsafeCollectionReply(value, stillMissing[0])) {
       extracted[stillMissing[0]] = value;
     }
   }
   return extracted;
+}
+
+function collectionQuestionFields(question: string, pendingFields: string[]): string[] {
+  return uniqueFields(pendingFields)
+    .filter((field) => questionReferencesCollectionField(question, field));
+}
+
+export function findPendingCollectionQuestion(input: {
+  messages: Array<{ fromMe: boolean; content: string }>;
+  pendingFields: string[];
+}): string | null {
+  let pendingQuestion: string | null = null;
+  for (const message of input.messages) {
+    const content = String(message.content || '').trim();
+    if (!content) continue;
+    if (!message.fromMe) {
+      pendingQuestion = null;
+      continue;
+    }
+    const matchedFields = collectionQuestionFields(content, input.pendingFields);
+    if (matchedFields.length === 1) pendingQuestion = content;
+    else if (questionLooksLikeCollectionRequest(content)) pendingQuestion = null;
+  }
+  return pendingQuestion;
+}
+
+export function extractPendingCollectionHistoryFields(input: {
+  messages: Array<{ fromMe: boolean; content: string }>;
+  pendingFields: string[];
+  alreadyKnownFields: Record<string, unknown>;
+}): Record<string, string> {
+  const extracted: Record<string, string> = {};
+  let previousQuestion: string | null = null;
+  for (const message of input.messages) {
+    const content = String(message.content || '').trim();
+    if (!content) continue;
+    if (message.fromMe) {
+      const matchedFields = collectionQuestionFields(content, input.pendingFields);
+      if (matchedFields.length === 1) previousQuestion = content;
+      else if (questionLooksLikeCollectionRequest(content)) previousQuestion = null;
+      continue;
+    }
+    if (!previousQuestion) continue;
+    const replyFields = extractPendingCollectionReplyFields({
+      customerMessage: content,
+      pendingFields: input.pendingFields,
+      alreadyKnownFields: {
+        ...input.alreadyKnownFields,
+        ...extracted,
+      },
+      previousQuestion,
+    });
+    Object.assign(extracted, replyFields);
+    previousQuestion = null;
+  }
+  return extracted;
+}
+
+export function chooseNonRepeatingCollectionFallback(input: {
+  configuredFallback?: string | null;
+  knownFields: Record<string, unknown>;
+  genericFallback: string;
+}): string {
+  const configured = String(input.configuredFallback || '').trim();
+  if (!configured) return input.genericFallback;
+  const knownFieldNames = Object.keys(input.knownFields)
+    .filter((field) => hasKnownWorkflowField(field, input.knownFields));
+  return knownFieldNames.some((field) => questionReferencesCollectionField(configured, field))
+    ? input.genericFallback
+    : configured;
 }
 
 export function createPersistedCollectionFieldReceipt(input: {

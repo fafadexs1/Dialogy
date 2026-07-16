@@ -6,13 +6,23 @@ import { revalidatePath } from 'next/cache';
 import { MetaChannel } from '@/lib/types';
 import { exchangeFacebookUserToken, findChannelByExternalId } from '@/services/meta/meta-channel.service';
 import { resilientFetch } from '@/lib/http/resilient-fetch';
+import { requireWorkspaceAccess, requireWorkspacePermission } from '@/lib/security/access';
 
 export async function listMetaChannels(
   workspaceId: string,
   type: 'messenger' | 'instagram'
 ): Promise<MetaChannel[]> {
+    await requireWorkspaceAccess(workspaceId);
   const { rows } = await db.query(
-    `SELECT * FROM meta_channels WHERE workspace_id = $1 AND type = $2 ORDER BY created_at DESC`,
+    `SELECT
+       id, workspace_id, type, external_page_id, ig_business_id, name, status,
+       created_at, updated_at,
+       (NULLIF(access_token, '') IS NOT NULL) AS has_credential,
+       (NULLIF(app_secret, '') IS NOT NULL) AS has_app_secret,
+       (NULLIF(verify_token, '') IS NOT NULL) AS has_verify_token
+     FROM meta_channels
+     WHERE workspace_id = $1 AND type = $2
+     ORDER BY created_at DESC`,
     [workspaceId, type]
   );
 
@@ -22,19 +32,19 @@ export async function listMetaChannels(
     type: row.type,
     external_page_id: row.external_page_id,
     ig_business_id: row.ig_business_id,
-    access_token: row.access_token,
-    verify_token: row.verify_token,
-    app_secret: row.app_secret,
     name: row.name,
     status: row.status,
-    settings: row.settings,
+    hasCredential: Boolean(row.has_credential),
+    hasAppSecret: Boolean(row.has_app_secret),
+    hasVerifyToken: Boolean(row.has_verify_token),
     created_at: row.created_at,
     updated_at: row.updated_at
   }));
 }
 
-export async function getMetaVerifyToken(): Promise<string | null> {
-  return process.env.META_VERIFY_TOKEN || null;
+export async function getMetaVerifyTokenStatus(workspaceId: string): Promise<{ configured: boolean }> {
+    await requireWorkspaceAccess(workspaceId);
+  return { configured: Boolean(process.env.META_VERIFY_TOKEN) };
 }
 
 export async function createMetaChannel(data: {
@@ -63,6 +73,8 @@ export async function createMetaChannel(data: {
     fbUserTokenExpiresAt,
     igBusinessId,
   } = data;
+
+  await requireWorkspacePermission(workspaceId, 'workspace:settings:edit');
 
   // IF we have a global verify token, we use it for verification (in the webhook route),
   // BUT we cannot store it in the DB for multiple channels due to the unique constraint (workspace_id, verify_token).
@@ -177,6 +189,7 @@ async function subscribeAppToPage(pageId: string, pageAccessToken: string) {
 }
 
 export async function deleteMetaChannel(id: string, workspaceId: string) {
+  await requireWorkspacePermission(workspaceId, 'workspace:settings:edit');
   await db.query(`DELETE FROM meta_channels WHERE id = $1 AND workspace_id = $2`, [id, workspaceId]);
   revalidatePath('/integrations/meta-messenger');
   revalidatePath('/integrations/meta-instagram');
@@ -187,6 +200,7 @@ export async function exchangeInstagramToken(
   workspaceId: string,
   redirectUri: string
 ) {
+  await requireWorkspacePermission(workspaceId, 'workspace:settings:edit');
   const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
   const clientSecret = process.env.INSTAGRAM_APP_SECRET;
 

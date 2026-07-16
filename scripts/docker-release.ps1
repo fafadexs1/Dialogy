@@ -1,6 +1,8 @@
 param(
     [string]$EnvFile = ".env",
     [string]$ComposeFile = "docker-compose.yml",
+    [string]$ReleaseTag,
+    [switch]$NoCache,
     [switch]$SkipDocker
 )
 
@@ -186,7 +188,11 @@ $dialogyRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_IMAGE_REPO"
 $workerRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_WORKER_IMAGE_REPO"
 $workerAiRepo = Get-EnvValue -Content $originalContent -Key "DIALOGY_WORKER_AI_IMAGE_REPO"
 $currentTag = $match.Groups[2].Value.Trim()
-$nextTag = Get-NextTag -Tag $currentTag
+$nextTag = if ($ReleaseTag) { $ReleaseTag.Trim() } else { Get-NextTag -Tag $currentTag }
+
+if ($nextTag -notmatch '^PDC-\d+\.\d+$') {
+    throw "Formato de tag invalido: '$nextTag'. Use o padrao PDC-1.0."
+}
 
 $updatedContent = [regex]::Replace(
     $originalContent,
@@ -215,9 +221,16 @@ try {
     } else {
         $env:DOCKER_BUILDKIT = "1"
         $dockerBuildSecret = "id=dotenv,src=$envPath"
-        Invoke-CheckedCommand -Command @("docker", "build", "--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "runner", "-t", $dialogyImage, ".")
-        Invoke-CheckedCommand -Command @("docker", "build", "--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "worker-runner", "-t", $workerImage, ".")
-        Invoke-CheckedCommand -Command @("docker", "build", "--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "worker-ai-runner", "-t", $workerAiImage, ".")
+        $buildOptions = @("build", "--pull")
+        if ($NoCache) {
+            $buildOptions += "--no-cache"
+        }
+        $dialogyBuildCommand = @("docker") + $buildOptions + @("--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "runner", "-t", $dialogyImage, ".")
+        $workerBuildCommand = @("docker") + $buildOptions + @("--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "worker-runner", "-t", $workerImage, ".")
+        $workerAiBuildCommand = @("docker") + $buildOptions + @("--secret", $dockerBuildSecret, "-f", "Dockerfile", "--target", "worker-ai-runner", "-t", $workerAiImage, ".")
+        Invoke-CheckedCommand -Command $dialogyBuildCommand
+        Invoke-CheckedCommand -Command $workerBuildCommand
+        Invoke-CheckedCommand -Command $workerAiBuildCommand
         Invoke-CheckedCommand -Command @("docker", "push", $dialogyImage)
         Invoke-CheckedCommand -Command @("docker", "push", $workerImage)
         Invoke-CheckedCommand -Command @("docker", "push", $workerAiImage)

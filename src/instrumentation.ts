@@ -1,3 +1,6 @@
 export async function register() {
-  // Reserved for future server-side instrumentation.
+  if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.NODE_ENV === 'production') {
+    const { validateSecurityRuntimeEnvironment } = await import('@/lib/security/runtime-env');
+    validateSecurityRuntimeEnvironment();
+  }
 }

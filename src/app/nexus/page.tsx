@@ -9,7 +9,7 @@ export default function NexusPage() {
     console.log('[NexusPage] Runtime Env URL:', nexusUrl);
 
     return (
-        <div className="p-2 h-full w-full overflow-hidden">
+        <div className="h-full min-h-0 w-full overflow-hidden">
             <NexusEmbed nexusUrl={nexusUrl} />
         </div>
     );

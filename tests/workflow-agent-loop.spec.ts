@@ -162,13 +162,17 @@ function agentFixture(
   };
 }
 
-function lookupToolRegistry(executor?: () => Promise<Record<string, unknown>>) {
+function lookupToolRegistry(
+  executor?: () => Promise<Record<string, unknown>>,
+  inputJsonSchema?: Record<string, unknown>,
+) {
   let calls = 0;
   const registry = new ToolRegistry(() => true);
   registry.register({
     name: 'lookup',
     description: 'Looks up a record.',
     inputSchema: z.object({ id: z.string() }),
+    inputJsonSchema,
     outputSchema: z.object({ found: z.boolean(), id: z.string() }),
     timeoutMs: 500,
     retryPolicy: {
@@ -186,6 +190,36 @@ function lookupToolRegistry(executor?: () => Promise<Record<string, unknown>>) {
       return executor
         ? { found: true, id, ...await executor() }
         : { found: true, id };
+    },
+  });
+  return { registry, getCalls: () => calls };
+}
+
+function pollingToolRegistry(statuses: string[]) {
+  let calls = 0;
+  const registry = new ToolRegistry(() => true);
+  registry.register({
+    name: 'get_command_status',
+    description: 'Gets the current asynchronous command status.',
+    inputSchema: z.object({ command_id: z.string() }),
+    outputSchema: z.object({ status: z.string(), command_id: z.string() }),
+    timeoutMs: 500,
+    retryPolicy: {
+      maxAttempts: 1,
+      initialDelayMs: 0,
+      backoffMultiplier: 2,
+      maxDelayMs: 10,
+      retryableErrorCodes: [],
+    },
+    idempotent: true,
+    cacheResult: false,
+    allowRepeatedCallsWhilePending: true,
+    riskLevel: 'low',
+    requiresConfirmation: false,
+    execute: async ({ command_id }) => {
+      const status = statuses[Math.min(calls, statuses.length - 1)] || 'pending';
+      calls += 1;
+      return { status, command_id };
     },
   });
   return { registry, getCalls: () => calls };
@@ -340,6 +374,39 @@ describe('controlled agent loop', () => {
     expect(fixture.primary.calls).toBe(2);
   });
 
+  it('delivers presented choices even when a broader category is already known', async () => {
+    const response = [
+      'Olá, Mel! Aqui estão as opções disponíveis:',
+      '',
+      '1. Opção Essencial',
+      '2. Opção Completa',
+      '3. Opção Premium',
+      '',
+      'Qual dessas opções mais chamou sua atenção?',
+    ].join('\n');
+    const fixture = agentFixture([{
+      type: 'final',
+      response,
+      completionStatus: 'partial',
+    }], { onLimitReached: 'handoff' });
+
+    const result = await fixture.run({
+      knownFields: {
+        name: 'Mel',
+        product_or_service_preference: 'Internet',
+      },
+    });
+
+    expect(result.status).toBe('route');
+    expect(result.selectedOutput).toBe('needs_input');
+    expect(result.output).toMatchObject({
+      type: 'needs_input',
+      question: response,
+      missingFields: ['selected_option'],
+    });
+    expect(fixture.primary.calls).toBe(1);
+  });
+
   it('forces one explicit resolution of an ambiguous terminal partial response', async () => {
     const fixture = agentFixture([
       {
@@ -435,6 +502,45 @@ describe('controlled agent loop', () => {
     expect(getCalls()).toBe(0);
   });
 
+  it('gives the model one schema-guided repair turn for invalid tool arguments', async () => {
+    const { registry, getCalls } = lookupToolRegistry(undefined, {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    });
+    const fixture = agentFixture([
+      {
+        type: 'tool_call',
+        toolName: 'lookup',
+        arguments: {},
+        purposeSummary: 'Lookup missing its id.',
+      },
+      {
+        type: 'tool_call',
+        toolName: 'lookup',
+        arguments: { id: '123' },
+        purposeSummary: 'Corrected lookup.',
+      },
+      {
+        type: 'final',
+        response: 'Record confirmed after correcting the call.',
+        completionStatus: 'completed',
+      },
+    ], {}, registry);
+
+    const result = await fixture.run();
+
+    expect(result.status).toBe('completed');
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls?.[0]).toMatchObject({
+      status: 'rejected',
+      error: { code: 'INVALID_TOOL_ARGUMENTS' },
+    });
+    expect(result.toolCalls?.[1]).toMatchObject({ status: 'success' });
+    expect(getCalls()).toBe(1);
+    expect(fixture.primary.calls).toBe(3);
+  });
+
   it('stops repeated identical tool calls', async () => {
     const { registry } = lookupToolRegistry();
     const repeated: AgentDecision = {
@@ -451,6 +557,77 @@ describe('controlled agent loop', () => {
     const result = await fixture.run();
     expect(result.status).toBe('error');
     expect(result.error?.code).toBe('REPEATED_TOOL_CALL_LIMIT');
+  });
+
+  it('polls an identical read-only status call until pending becomes completed', async () => {
+    const { registry, getCalls } = pollingToolRegistry(['pending', 'completed']);
+    const poll: AgentDecision = {
+      type: 'tool_call',
+      toolName: 'get_command_status',
+      arguments: { command_id: 'command-1' },
+      purposeSummary: 'Check whether the command finished.',
+    };
+    const fixture = agentFixture([
+      poll,
+      poll,
+      {
+        type: 'final',
+        response: 'The command completed successfully.',
+        completionStatus: 'completed',
+      },
+    ], { maxRepeatedToolCalls: 1 }, registry);
+
+    const result = await fixture.run();
+
+    expect(result.status).toBe('completed');
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls?.[0]?.output).toMatchObject({ status: 'pending' });
+    expect(result.toolCalls?.[1]?.output).toMatchObject({ status: 'completed' });
+    expect(getCalls()).toBe(2);
+  });
+
+  it('repairs needs_input with no missing fields instead of failing schema validation', async () => {
+    const fixture = agentFixture([
+      {
+        type: 'needs_input',
+        question: 'Wait while I check the operation.',
+        missingFields: [],
+      },
+      {
+        type: 'final',
+        response: 'The operation is confirmed.',
+        completionStatus: 'completed',
+      },
+    ]);
+
+    const result = await fixture.run();
+
+    expect(result.status).toBe('completed');
+    expect(fixture.primary.calls).toBe(2);
+  });
+
+  it('returns a truthful processing message instead of an error when polling is still pending at the turn limit', async () => {
+    const { registry } = pollingToolRegistry(['pending']);
+    const fixture = agentFixture([
+      {
+        type: 'tool_call',
+        toolName: 'get_command_status',
+        arguments: { command_id: 'slow-command' },
+        purposeSummary: 'Check the slow command.',
+      },
+      {
+        type: 'needs_input',
+        question: 'Wait while I check the operation.',
+        missingFields: [],
+      },
+    ], { maxTurns: 2, onLimitReached: 'error' }, registry);
+
+    const result = await fixture.run();
+
+    expect(result.status).toBe('route');
+    expect(result.selectedOutput).toBe('limit_reached');
+    expect(result.output?.response).toContain('ainda está sendo processada');
+    expect(result.error).toBeUndefined();
   });
 
   it('enforces the maximum agent turns', async () => {

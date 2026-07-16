@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getEvolutionApiConfigMock, resilientFetchMock } = vi.hoisted(() => ({
+const { getEvolutionApiConfigMock, resilientFetchMock, queryMock } = vi.hoisted(() => ({
   getEvolutionApiConfigMock: vi.fn(),
   resilientFetchMock: vi.fn(),
+  queryMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
   db: {
     connect: vi.fn(),
-    query: vi.fn(),
+    query: queryMock,
   },
 }));
 
@@ -18,6 +19,11 @@ vi.mock('next/cache', () => ({
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
+}));
+
+vi.mock('@/lib/security/access', () => ({
+  requireWorkspaceAccess: vi.fn().mockResolvedValue({ id: 'user-1' }),
+  requireWorkspacePermission: vi.fn().mockResolvedValue({ id: 'user-1' }),
 }));
 
 vi.mock('@/services/telegram/bot-api', () => ({
@@ -50,6 +56,8 @@ describe('createWhatsappTemplate', () => {
     vi.restoreAllMocks();
     getEvolutionApiConfigMock.mockReset();
     resilientFetchMock.mockReset();
+    queryMock.mockReset();
+    queryMock.mockResolvedValue({ rows: [{ workspace_id: 'workspace-1' }], rowCount: 1 });
     getEvolutionApiConfigMock.mockResolvedValue(apiConfig);
     resilientFetchMock.mockResolvedValue(new Response('{}', { status: 200, statusText: 'OK' }));
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -68,7 +76,8 @@ describe('createWhatsappTemplate', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify(payload),
-      })
+      }),
+      expect.any(Object),
     );
   });
 

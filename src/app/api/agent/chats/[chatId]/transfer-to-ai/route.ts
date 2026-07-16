@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatToIntelligentAgentAction } from '@/actions/chats';
+import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 
 type TransferToAiPayload = {
   systemAgentId?: string;
@@ -46,13 +47,13 @@ export async function POST(
 
     const result = await transferChatToIntelligentAgentAction(
       { chatId, systemAgentId: body.systemAgentId },
-      {
+      createTrustedActorContext({
         user: {
           id: auth.agent.id,
           name: auth.agent.name,
         },
         isSystemAgent: true,
-      }
+      })
     );
 
     if (!result.success) {

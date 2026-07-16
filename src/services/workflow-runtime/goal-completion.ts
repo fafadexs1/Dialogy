@@ -33,6 +33,8 @@ const FIELD_ALIASES: readonly string[][] = [
   ['address_complement', 'complement', 'complemento'],
   ['city', 'cidade', 'municipio'],
   ['state', 'estado', 'uf'],
+  ['contract_id', 'contractid', 'contract', 'contrato', 'numero_contrato', 'id_contrato', 'id_servico'],
+  ['problem_description', 'problemdescription', 'problem', 'problema', 'issue_description', 'descricao_problema'],
   ['product_or_service_preference', 'product', 'produto', 'service', 'servico', 'plan', 'plano', 'preference', 'preferencia'],
 ];
 

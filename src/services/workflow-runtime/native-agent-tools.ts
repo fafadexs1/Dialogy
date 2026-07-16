@@ -1,4 +1,6 @@
-import type { WorkflowDefinition, WorkflowNode } from './types';
+import { createWorkflowNode } from './catalog';
+import { getPrimaryWorkflowAgentId } from './model-selection';
+import type { WorkflowConnection, WorkflowDefinition, WorkflowNode } from './types';
 
 export type NativeAgentToolCatalogItem = {
   name: string;
@@ -198,6 +200,139 @@ export function listAttachedWorkflowToolNames(definition: WorkflowDefinition) {
     .map((node) => node ? getWorkflowToolName(node) : '')
     .filter(Boolean);
   return [...new Set(names)];
+}
+
+export type AttachNativeToolResult = {
+  workflow: WorkflowDefinition;
+  status: 'attached' | 'already_attached' | 'ineligible' | 'missing_agent' | 'missing_ports';
+};
+
+export type DetachNativeToolResult = {
+  workflow: WorkflowDefinition;
+  status: 'detached' | 'not_attached';
+};
+
+function nextWorkflowId(prefix: string, existingIds: Set<string>) {
+  if (!existingIds.has(prefix)) return prefix;
+  let suffix = 2;
+  while (existingIds.has(`${prefix}_${suffix}`)) suffix += 1;
+  return `${prefix}_${suffix}`;
+}
+
+function toolIdPrefix(toolName: string) {
+  const normalized = toolName
+    .toLocaleLowerCase('en-US')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64);
+  return `tool_${normalized || 'capability'}`;
+}
+
+/**
+ * Materializes a capability selected in the global tools panel into the
+ * native workflow. The workflow remains authoritative: removing a capability
+ * is intentionally done by disconnecting it in the flow builder.
+ */
+export function attachNativeToolToPrimaryAgent(
+  definition: WorkflowDefinition,
+  tool: NativeAgentToolCatalogItem,
+): AttachNativeToolResult {
+  if (!isNativeAgentToolAttachable(tool)) {
+    return { workflow: definition, status: 'ineligible' };
+  }
+
+  const primaryAgentId = getPrimaryWorkflowAgentId(definition);
+  const primaryAgent = definition.nodes.find((node) => node.id === primaryAgentId);
+  if (!primaryAgent) return { workflow: definition, status: 'missing_agent' };
+
+  const expectedType = tool.source === 'mcp' ? 'tool.mcp' : 'tool.internal';
+  const alreadyAttachedConnection = definition.connections.find((connection) => {
+    if (connection.targetNodeId !== primaryAgent.id || connection.connectionType !== 'tool') return false;
+    const source = definition.nodes.find((node) => node.id === connection.sourceNodeId);
+    return Boolean(source && getWorkflowToolName(source) === tool.name);
+  });
+  if (alreadyAttachedConnection) {
+    const canonicalNodes = definition.nodes.map((node) => (
+      node.id === alreadyAttachedConnection.sourceNodeId
+        ? {
+          ...node,
+          type: expectedType,
+          name: getNativeAgentToolLabel(tool),
+          config: { ...node.config, ...buildNativeAgentToolConfig(tool) },
+        }
+        : node
+    ));
+    return {
+      workflow: { ...definition, nodes: canonicalNodes },
+      status: 'already_attached',
+    };
+  }
+
+  const reusableTool = definition.nodes.find((node) => (
+    node.type === expectedType && getWorkflowToolName(node) === tool.name
+  ));
+  const attachedCount = definition.connections.filter((connection) => (
+    connection.targetNodeId === primaryAgent.id && connection.connectionType === 'tool'
+  )).length;
+  const nodeIds = new Set(definition.nodes.map((node) => node.id));
+  const toolNode = reusableTool
+    ? {
+      ...reusableTool,
+      name: getNativeAgentToolLabel(tool),
+      config: { ...reusableTool.config, ...buildNativeAgentToolConfig(tool) },
+    }
+    : createWorkflowNode(expectedType, {
+      id: nextWorkflowId(toolIdPrefix(tool.name), nodeIds),
+      name: getNativeAgentToolLabel(tool),
+      position: {
+        x: primaryAgent.position.x - 320,
+        y: primaryAgent.position.y + 120 + attachedCount * 90,
+      },
+      config: buildNativeAgentToolConfig(tool),
+    });
+  const sourcePort = toolNode.outputPorts.find((port) => port.connectionType === 'tool');
+  const targetPort = primaryAgent.inputPorts.find((port) => port.connectionType === 'tool');
+  if (!sourcePort || !targetPort) return { workflow: definition, status: 'missing_ports' };
+
+  const connectionIds = new Set(definition.connections.map((connection) => connection.id));
+  const connection: WorkflowConnection = {
+    id: nextWorkflowId(`conn_${toolNode.id}_${primaryAgent.id}`, connectionIds),
+    sourceNodeId: toolNode.id,
+    sourcePortId: sourcePort.id,
+    targetNodeId: primaryAgent.id,
+    targetPortId: targetPort.id,
+    connectionType: 'tool',
+  };
+  const nodes = reusableTool
+    ? definition.nodes.map((node) => node.id === reusableTool.id ? toolNode : node)
+    : [...definition.nodes, toolNode];
+
+  return {
+    workflow: { ...definition, nodes, connections: [...definition.connections, connection] },
+    status: 'attached',
+  };
+}
+
+/** Removes every node and connection for a globally disabled tool. */
+export function detachNativeToolFromWorkflow(
+  definition: WorkflowDefinition,
+  toolName: string,
+): DetachNativeToolResult {
+  const toolNodeIds = new Set(definition.nodes
+    .filter((node) => node.type.startsWith('tool.') && getWorkflowToolName(node) === toolName)
+    .map((node) => node.id));
+  if (toolNodeIds.size === 0) return { workflow: definition, status: 'not_attached' };
+
+  return {
+    workflow: {
+      ...definition,
+      nodes: definition.nodes.filter((node) => !toolNodeIds.has(node.id)),
+      connections: definition.connections.filter((connection) => (
+        !toolNodeIds.has(connection.sourceNodeId) && !toolNodeIds.has(connection.targetNodeId)
+      )),
+    },
+    status: 'detached',
+  };
 }
 
 export function synchronizeNativeWorkflowToolState<

@@ -46,6 +46,7 @@ import {
     Wrench,
     FileText,
     Plus,
+    Search,
     X,
     type LucideIcon,
 } from 'lucide-react';
@@ -796,6 +797,24 @@ function getSgpContractStatusBadgeClasses(statusTone: SGPContactPanelContract['s
     }
 }
 
+type SgpContractFilter = 'all' | 'online' | 'offline' | 'suspended' | 'cancelled' | 'unknown';
+
+function getSgpOperationalStatus(contract: SGPContactPanelContract): Exclude<SgpContractFilter, 'all'> {
+    if (contract.statusTone === 'cancelled') return 'cancelled';
+    if (contract.statusTone === 'suspended') return 'suspended';
+    if (contract.connectionStatus === 'online') return 'online';
+    if (contract.connectionStatus === 'offline') return 'offline';
+    return 'unknown';
+}
+
+function normalizeSgpSearchValue(value: unknown) {
+    return String(value ?? '')
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase()
+        .trim();
+}
+
 function formatSgpInvoiceStatusLabel(status: string) {
     const normalizedStatus = String(status || '').trim().toLowerCase();
     if (!normalizedStatus) {
@@ -1020,6 +1039,8 @@ export default function ContactPanel({
     const [isSgpPaymentPromiseDialogOpen, setIsSgpPaymentPromiseDialogOpen] = useState(false);
     const [isSubmittingSgpPaymentPromise, setIsSubmittingSgpPaymentPromise] = useState(false);
     const [selectedSgpCategory, setSelectedSgpCategory] = useState<string | null>(null);
+    const [sgpContractFilter, setSgpContractFilter] = useState<SgpContractFilter>('all');
+    const [sgpContractSearch, setSgpContractSearch] = useState('');
 
     const contactId = chat?.contact?.id;
     const sgpReloadFingerprint = useMemo(
@@ -1104,6 +1125,8 @@ export default function ContactPanel({
         setSgpPaymentPromiseContract(null);
         setSgpPaymentPromiseDate('');
         setSgpPaymentPromiseResponse(null);
+        setSgpContractFilter('all');
+        setSgpContractSearch('');
     }, [chat?.id]);
 
     useEffect(() => loadSgpContactPanelData(), [loadSgpContactPanelData, sgpReloadFingerprint]);
@@ -1146,6 +1169,41 @@ export default function ContactPanel({
     const hasSgpDebt = sgpOverdueInvoices > 0;
     const sgpContractsWithDebt = sgpInvoiceGroups.filter((group) => !group.isUnassigned && group.summary.hasDebt).length;
     const sgpUnassignedInvoices = sgpInvoiceGroups.find((group) => group.isUnassigned)?.summary.totalInvoices || 0;
+    const sgpStatusCounts = useMemo(() => {
+        const counts: Record<Exclude<SgpContractFilter, 'all'>, number> = {
+            online: 0,
+            offline: 0,
+            suspended: 0,
+            cancelled: 0,
+            unknown: 0,
+        };
+        for (const contract of sgpContracts) counts[getSgpOperationalStatus(contract)] += 1;
+        return counts;
+    }, [sgpContracts]);
+    const visibleSgpInvoiceGroups = useMemo(() => {
+        const query = normalizeSgpSearchValue(sgpContractSearch);
+        return sgpInvoiceGroups
+            .filter((group) => {
+                if (group.isUnassigned) return sgpContractFilter === 'all' && !query;
+                const contract = group.contract;
+                if (!contract) return false;
+                if (sgpContractFilter !== 'all' && getSgpOperationalStatus(contract) !== sgpContractFilter) return false;
+                if (!query) return true;
+                const searchable = normalizeSgpSearchValue([
+                    contract.id,
+                    contract.addressLabel,
+                    contract.planDescription,
+                    contract.login,
+                    contract.ip,
+                    contract.statusLabel,
+                ].filter(Boolean).join(' '));
+                return searchable.includes(query);
+            })
+            .sort((left, right) => {
+                if (!left.contract || !right.contract) return left.contract ? -1 : right.contract ? 1 : 0;
+                return left.contract.addressLabel.localeCompare(right.contract.addressLabel, 'pt-BR');
+            });
+    }, [sgpContractFilter, sgpContractSearch, sgpInvoiceGroups]);
 
     const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -1408,7 +1466,7 @@ export default function ContactPanel({
     return (
         <div
             className={cn(
-                "relative z-10 h-full min-h-0 overflow-x-hidden overflow-y-hidden bg-white text-slate-950 dark:bg-[#050507] dark:text-zinc-50",
+                "relative z-10 h-full min-h-0 max-w-full overflow-x-hidden overflow-y-hidden bg-white text-slate-950 dark:bg-[#050507] dark:text-zinc-50",
                 isCanvas
                     ? "flex w-full min-w-0 flex-1 flex-col"
                     : "hidden border-l border-slate-200 dark:border-white/5 lg:flex lg:w-[280px] lg:max-w-[400px] lg:min-w-[240px] lg:flex-shrink-0 lg:flex-col xl:w-[340px] 2xl:w-[400px]"
@@ -1490,14 +1548,22 @@ export default function ContactPanel({
                 </div>
             </div>
 
-            <ScrollArea className="min-h-0 flex-1 custom-scrollbar">
-                <div className="overflow-x-hidden p-3.5 space-y-3.5 pb-24 sm:p-4 sm:space-y-4">
+            <ScrollArea className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden custom-scrollbar [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:w-full [&_[data-radix-scroll-area-viewport]>div]:min-w-0 [&_[data-radix-scroll-area-viewport]>div]:max-w-full">
+                <div className="w-full min-w-0 max-w-full space-y-3.5 overflow-x-hidden p-3.5 pb-24 sm:space-y-4 sm:p-4">
                     {/* Profile section always visible above tabs */}
                     <div className="relative">
-                        <div className="relative flex w-full flex-col items-center text-center overflow-hidden">
+                        <div className={cn(
+                            "relative flex w-full overflow-hidden",
+                            isCanvas
+                                ? "items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/90 p-3 text-left shadow-sm dark:border-white/5 dark:bg-[#07080b]"
+                                : "flex-col items-center text-center"
+                        )}>
                             <div className="relative group cursor-pointer" onClick={() => contact.avatar_url && window.open(contact.avatar_url, '_blank')}>
                                 <div className="rounded-full border border-slate-200 bg-white p-1 dark:border-white/5 dark:bg-black">
-                                    <Avatar className="relative h-16 w-16 shrink-0 rounded-full border-2 border-slate-200 sm:h-20 sm:w-20 dark:border-white/10">
+                                    <Avatar className={cn(
+                                        "relative shrink-0 rounded-full border-2 border-slate-200 dark:border-white/10",
+                                        isCanvas ? "h-12 w-12" : "h-16 w-16 sm:h-20 sm:w-20"
+                                    )}>
                                         <AvatarImage fallbackOnBlank src={contact.avatar_url || undefined} alt={contact.name} className="object-cover" />
                                         <AvatarFallback className="bg-slate-100 text-xl font-bold text-slate-700 sm:text-2xl dark:bg-zinc-900 dark:text-zinc-300">
                                             {contact.name.charAt(0)}
@@ -1521,14 +1587,20 @@ export default function ContactPanel({
                                 </div>
                             </div>
 
-                            <div className="mt-3 w-full px-4 space-y-1.5 sm:mt-4 sm:px-6 sm:space-y-2">
-                                <div className="flex w-full min-w-0 flex-col items-center gap-1.5 px-1">
-                                    <h2 className="w-full max-w-full text-center font-black text-base leading-tight tracking-tight text-foreground break-words [overflow-wrap:anywhere] sm:text-lg" title={contact.name}>
+                            <div className={cn(
+                                "w-full space-y-1.5",
+                                isCanvas ? "mt-0 min-w-0 flex-1 px-0" : "mt-3 px-4 sm:mt-4 sm:px-6 sm:space-y-2"
+                            )}>
+                                <div className={cn("flex w-full min-w-0 flex-col gap-1.5 px-1", isCanvas ? "items-start" : "items-center")}>
+                                    <h2 className={cn(
+                                        "w-full max-w-full font-black text-base leading-tight tracking-tight text-foreground break-words [overflow-wrap:anywhere] sm:text-lg",
+                                        isCanvas ? "text-left" : "text-center"
+                                    )} title={contact.name}>
                                         {contact.name}
                                     </h2>
                                     <LeadScoreBadge score={contact.lead_score} size="sm" className="shrink-0" />
                                 </div>
-                                <div className="flex w-full flex-wrap items-center justify-center gap-1.5">
+                                <div className={cn("flex w-full flex-wrap items-center gap-1.5", isCanvas ? "justify-start" : "justify-center")}>
                                     {chat.tag && chat.color && (
                                         <div
                                             style={{ backgroundColor: `${chat.color}20`, color: chat.color, borderColor: `${chat.color}40` }}
@@ -1564,17 +1636,17 @@ export default function ContactPanel({
                     </div>
 
                     {/* ==== TABBED CONTENT ==== */}
-                    <Tabs defaultValue="info" className="w-full min-w-0">
-                        <TabsList className={cn("grid h-8 w-full rounded-xl border border-border bg-muted/40 dark:border-white/10 dark:bg-[#07080b]", isSgpActive ? "grid-cols-3" : "grid-cols-2")}>
-                            <TabsTrigger value="info" className="h-7 min-w-0 rounded-lg px-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground sm:text-[11px] dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">Info</TabsTrigger>
-                            <TabsTrigger value="crm" className="h-7 min-w-0 rounded-lg px-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground sm:text-[11px] dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
-                                CRM
+                    <Tabs defaultValue="info" className="w-full min-w-0 max-w-full overflow-hidden">
+                        <TabsList className={cn("grid h-10 w-full rounded-xl border border-border bg-muted/40 p-1 dark:border-white/10 dark:bg-[#07080b]", isSgpActive ? "grid-cols-3" : "grid-cols-2")}>
+                            <TabsTrigger value="info" className="h-8 min-w-0 rounded-lg px-1.5 text-[11px] font-bold text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">Contato</TabsTrigger>
+                            <TabsTrigger value="crm" className="h-8 min-w-0 rounded-lg px-1.5 text-[11px] font-bold text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
+                                Relacionamento
                                 {openDeals.length > 0 && (
                                     <span className="ml-1.5 h-4 px-1.5 bg-emerald-500/20 text-emerald-400 text-[9px] font-black rounded flex items-center">{openDeals.length}</span>
                                 )}
                             </TabsTrigger>
                             {isSgpActive && (
-                                <TabsTrigger value="sgp" className="h-7 min-w-0 rounded-lg px-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground sm:text-[11px] dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
+                                <TabsTrigger value="sgp" className="h-8 min-w-0 rounded-lg px-1.5 text-[11px] font-bold text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:bg-black dark:data-[state=active]:text-white">
                                     SGP
                                 </TabsTrigger>
                             )}
@@ -1908,7 +1980,7 @@ export default function ContactPanel({
 
                         {/* ▬▬ SGP TAB ▬▬ */}
                         {isSgpActive && (
-                            <TabsContent value="sgp" className="mt-4 space-y-5 overflow-x-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
+                            <TabsContent value="sgp" className="mt-4 w-full min-w-0 max-w-full space-y-5 overflow-x-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
                                 {sgpLoading ? (
                                     <div className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-4 text-sm text-muted-foreground dark:border-white/5 dark:bg-[#07080b]">
                                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -1926,73 +1998,101 @@ export default function ContactPanel({
                                     </div>
                                 ) : (
                                     <>
-                                        <div
-                                            className={cn(
-                                                "overflow-hidden rounded-2xl border p-4 shadow-sm",
-                                                hasSgpDebt
-                                                    ? "border-red-300/70 bg-gradient-to-br from-red-50 via-white to-red-50/40 dark:border-red-900/60 dark:bg-gradient-to-br dark:from-red-950/50 dark:via-zinc-950 dark:to-zinc-950"
-                                                    : "border-emerald-300/70 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 dark:border-emerald-900/50 dark:bg-gradient-to-br dark:from-emerald-950/40 dark:via-zinc-950 dark:to-zinc-950"
-                                            )}
-                                        >
-                                            <div className="flex min-w-0 items-start gap-3">
-                                                <div
-                                                    className={cn(
-                                                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
-                                                        hasSgpDebt
-                                                            ? "border-red-300/60 bg-red-100 text-red-600 dark:border-red-800 dark:bg-red-950/70 dark:text-red-200"
-                                                            : "border-emerald-300/60 bg-emerald-100 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200"
-                                                    )}
-                                                >
-                                                    {hasSgpDebt ? <AlertTriangle className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
+                                        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/90" data-testid="sgp-customer-summary">
+                                            <div className="flex min-w-0 flex-wrap items-start gap-3">
+                                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200">
+                                                    <Router className="h-4 w-4" />
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <h4 className={cn("break-words text-[13px] font-black", hasSgpDebt ? "text-red-700 dark:text-red-200" : "text-emerald-700 dark:text-emerald-200")}>
-                                                        {hasSgpDebt ? 'Cliente com pendencia financeira' : 'Financeiro regularizado'}
-                                                    </h4>
-                                                    <p className="mt-1 break-words text-[11px] font-medium text-slate-700 dark:text-zinc-300">
-                                                        {sgpData?.customerName || contact?.name || 'Cliente'} - {sgpContracts.length} contrato{sgpContracts.length === 1 ? '' : 's'} no cadastro
-                                                    </p>
+                                                    <h4 className="break-words text-[13px] font-black text-slate-900 dark:text-zinc-100">Visão operacional do cliente</h4>
+                                                    <p className="mt-1 break-words text-[11px] font-medium text-slate-600 dark:text-zinc-300">{sgpData?.customerName || contact?.name || 'Cliente'}</p>
                                                     {sgpData?.cpfCnpj && (
-                                                        <p className="mt-1 break-words text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 [overflow-wrap:anywhere] dark:text-zinc-400" title={`CPF/CNPJ ${sgpData.cpfCnpj}`}>
+                                                        <p className="mt-1 break-words text-[10px] font-semibold text-slate-500 [overflow-wrap:anywhere] dark:text-zinc-400" title={`CPF/CNPJ ${sgpData.cpfCnpj}`}>
                                                             CPF/CNPJ {sgpData.cpfCnpj}
                                                         </p>
                                                     )}
                                                 </div>
+                                                <span className={cn(
+                                                    "shrink-0 rounded-full border px-2 py-1 text-[9px] font-bold",
+                                                    hasSgpDebt
+                                                        ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/60 dark:text-red-200"
+                                                        : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-200"
+                                                )}>
+                                                    {hasSgpDebt ? `${sgpOverdueInvoices} vencida${sgpOverdueInvoices === 1 ? '' : 's'}` : 'Financeiro em dia'}
+                                                </span>
                                             </div>
 
                                             <div className="mt-4 grid grid-cols-2 gap-2">
-                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
-                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Vencidas</span>
-                                                    <span className={cn("mt-1 block text-[16px] font-black tabular-nums", hasSgpDebt ? "text-red-600 dark:text-red-200" : "text-slate-900 dark:text-zinc-100")}>
-                                                        {sgpOverdueInvoices}
-                                                    </span>
-                                                </div>
-                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
-                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Em aberto</span>
-                                                    <span className="mt-1 block text-[16px] font-black tabular-nums text-amber-600 dark:text-amber-200">
-                                                        {sgpOpenInvoices}
-                                                    </span>
-                                                </div>
-                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
-                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Contratos online</span>
-                                                    <span className="mt-1 block text-[16px] font-black tabular-nums text-emerald-600 dark:text-emerald-200">
-                                                        {sgpOnlineContracts}
-                                                    </span>
-                                                </div>
-                                                <div className="rounded-xl border border-slate-200/80 bg-white/90 p-3 dark:border-zinc-800 dark:bg-zinc-950/90">
-                                                    <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">Contratos criticos</span>
-                                                    <span className={cn("mt-1 block text-[16px] font-black tabular-nums", sgpContractsWithDebt > 0 ? "text-red-600 dark:text-red-200" : "text-slate-900 dark:text-zinc-100")}>
-                                                        {sgpContractsWithDebt}
-                                                    </span>
-                                                </div>
+                                                {[
+                                                    { label: 'Contratos', value: sgpContracts.length, tone: 'text-slate-900 dark:text-zinc-100' },
+                                                    { label: 'Online agora', value: sgpStatusCounts.online, tone: 'text-emerald-600 dark:text-emerald-300' },
+                                                    { label: 'Offline agora', value: sgpStatusCounts.offline, tone: 'text-slate-700 dark:text-zinc-200' },
+                                                    { label: 'Exigem atenção', value: sgpStatusCounts.suspended + sgpStatusCounts.cancelled + sgpStatusCounts.unknown, tone: 'text-amber-600 dark:text-amber-300' },
+                                                ].map((item) => (
+                                                    <div
+                                                        key={item.label}
+                                                        className="rounded-xl border border-slate-200/80 bg-slate-50 p-3 text-left dark:border-zinc-800 dark:bg-zinc-900/70"
+                                                    >
+                                                        <span className="block text-[10px] font-bold text-slate-500 dark:text-zinc-500">{item.label}</span>
+                                                        <span className={cn("mt-1 block text-[18px] font-black tabular-nums", item.tone)}>{item.value}</span>
+                                                    </div>
+                                                ))}
                                             </div>
+                                            {(sgpOpenInvoices > 0 || sgpContractsWithDebt > 0) && (
+                                                <p className="mt-3 text-[10px] font-medium text-slate-500 dark:text-zinc-400">
+                                                    Financeiro: {sgpOpenInvoices} fatura{sgpOpenInvoices === 1 ? '' : 's'} em aberto; {sgpContractsWithDebt} contrato{sgpContractsWithDebt === 1 ? '' : 's'} com pendência.
+                                                </p>
+                                            )}
                                         </div>
 
                                         <div className="space-y-2">
+                                            <div className="w-full min-w-0 max-w-full space-y-3 overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/90">
+                                                <div className="relative">
+                                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                                    <Input
+                                                        value={sgpContractSearch}
+                                                        onChange={(event) => setSgpContractSearch(event.target.value)}
+                                                        placeholder="Buscar endereço, contrato, plano, login ou IP"
+                                                        className="h-10 w-full min-w-0 rounded-xl border-slate-200 bg-slate-50 pl-9 text-[12px] dark:border-zinc-800 dark:bg-zinc-900"
+                                                        data-testid="sgp-contract-search"
+                                                    />
+                                                </div>
+                                                <div className="flex w-full min-w-0 flex-wrap gap-1.5">
+                                                    {([
+                                                        { value: 'all', label: 'Todos', count: sgpContracts.length },
+                                                        { value: 'online', label: 'Online', count: sgpStatusCounts.online },
+                                                        { value: 'offline', label: 'Offline', count: sgpStatusCounts.offline },
+                                                        { value: 'suspended', label: 'Suspensos', count: sgpStatusCounts.suspended },
+                                                        { value: 'cancelled', label: 'Cancelados', count: sgpStatusCounts.cancelled },
+                                                        { value: 'unknown', label: 'Sem sinal', count: sgpStatusCounts.unknown },
+                                                    ] as const).map((filter) => (
+                                                        <button
+                                                            key={filter.value}
+                                                            type="button"
+                                                            onClick={() => setSgpContractFilter(filter.value)}
+                                                            className={cn(
+                                                                "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[10px] font-bold transition-colors",
+                                                                sgpContractFilter === filter.value
+                                                                    ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-black"
+                                                                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-zinc-700"
+                                                            )}
+                                                            data-testid={`sgp-contract-filter-${filter.value}`}
+                                                        >
+                                                            {filter.label}
+                                                            <span className={cn(
+                                                                "tabular-nums",
+                                                                sgpContractFilter === filter.value ? "text-white/70 dark:text-black/60" : "text-slate-400 dark:text-zinc-500"
+                                                            )}>{filter.count}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
                                             <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-600 dark:text-zinc-400">
-                                                    Carteira por contrato ({sgpContracts.length})
-                                                </h4>
+                                                <div>
+                                                    <h4 className="text-[12px] font-black text-slate-800 dark:text-zinc-200">Contratos ({visibleSgpInvoiceGroups.filter((group) => !group.isUnassigned).length})</h4>
+                                                    <p className="mt-0.5 text-[10px] font-medium text-slate-500 dark:text-zinc-500">Organizados pelo endereço de instalação</p>
+                                                </div>
                                                 {sgpUnassignedInvoices > 0 && (
                                                     <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
                                                         {sgpUnassignedInvoices} sem vinculo
@@ -2000,8 +2100,8 @@ export default function ContactPanel({
                                                 )}
                                             </div>
 
-                                            {sgpInvoiceGroups.length > 0 ? (
-                                                sgpInvoiceGroups.map((group) => {
+                                            {visibleSgpInvoiceGroups.length > 0 ? (
+                                                visibleSgpInvoiceGroups.map((group) => {
                                                     const contract = group.contract;
                                                     const isExpanded = expandedContractId === group.key;
                                                     const isOnline = contract?.connectionStatus === 'online';
@@ -2076,37 +2176,42 @@ export default function ContactPanel({
                                                                         {group.isUnassigned ? <Receipt className="h-4 w-4" /> : <Router className="h-4 w-4" />}
                                                                     </div>
                                                                     <div className="min-w-0 flex-1">
-                                                                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                                                            <h5 className="min-w-0 flex-1 break-words text-[13px] font-black leading-tight text-slate-900 dark:text-zinc-100">
-                                                                                {group.title}
-                                                                            </h5>
-                                                                            {contract ? (
-                                                                                <span
-                                                                                    className={cn(
-                                                                                        "flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[9px] font-bold uppercase tracking-wide",
-                                                                                        statusBadgeClasses.badge
-                                                                                    )}
-                                                                                >
-                                                                                    <div className={cn("h-1.5 w-1.5 rounded-full", statusBadgeClasses.dot)} />
-                                                                                    {contract.statusLabel}
-                                                                                </span>
-                                                                            ) : (
-                                                                                <span className="flex h-5 shrink-0 items-center rounded-full border border-slate-300/60 bg-slate-100 px-2 text-[9px] font-bold uppercase tracking-wide text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-                                                                                    Revisar
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
+                                                                        <h5 className="break-words text-[13px] font-black leading-snug text-slate-900 dark:text-zinc-100">
+                                                                            {contract?.addressLabel || group.title}
+                                                                        </h5>
 
-                                                                        {group.subtitle && (
-                                                                            <p className="mt-1 break-words text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-zinc-400">
-                                                                                {group.subtitle}
-                                                                            </p>
-                                                                        )}
-
-                                                                        {contract?.detailsLabel && (
-                                                                            <p className="mt-1 break-all text-[10px] font-medium leading-relaxed text-slate-600 dark:text-zinc-300" title={contract.detailsLabel}>
-                                                                                {contract.detailsLabel}
-                                                                            </p>
+                                                                        {contract ? (
+                                                                            <>
+                                                                                <p className="mt-1 break-words text-[11px] font-medium text-slate-600 dark:text-zinc-300">
+                                                                                    {contract.planDescription || 'Plano não informado'}
+                                                                                </p>
+                                                                                <p className="mt-1 text-[10px] font-semibold text-slate-500 dark:text-zinc-500">Contrato {contract.id}</p>
+                                                                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                                    <span className={cn(
+                                                                                        "flex h-6 items-center gap-1.5 rounded-full border px-2 text-[9px] font-bold",
+                                                                                        isOnline
+                                                                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-200"
+                                                                                            : isOffline
+                                                                                                ? "border-slate-300 bg-slate-100 text-slate-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                                                                                                : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/60 dark:text-amber-200"
+                                                                                    )}>
+                                                                                        <span className={cn("h-1.5 w-1.5 rounded-full", isOnline ? "bg-emerald-500" : isOffline ? "bg-slate-400" : "bg-amber-500")} />
+                                                                                        {isOnline ? 'Online agora' : isOffline ? 'Offline agora' : 'Conexão sem sinal'}
+                                                                                    </span>
+                                                                                    <span className={cn("flex h-6 items-center gap-1 rounded-full border px-2 text-[9px] font-bold", statusBadgeClasses.badge)}>
+                                                                                        <span className={cn("h-1.5 w-1.5 rounded-full", statusBadgeClasses.dot)} />
+                                                                                        Contrato {contract.statusLabel}
+                                                                                    </span>
+                                                                                </div>
+                                                                                {(contract.login || contract.ip) && (
+                                                                                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-medium text-slate-500 dark:text-zinc-400">
+                                                                                        {contract.ip && <span title={contract.ip}>IP <strong className="font-bold text-slate-700 dark:text-zinc-200">{contract.ip}</strong></span>}
+                                                                                        {contract.login && <span className="break-all">PPPoE <strong className="font-bold text-slate-700 dark:text-zinc-200">{contract.login}</strong></span>}
+                                                                                    </div>
+                                                                                )}
+                                                                            </>
+                                                                        ) : (
+                                                                            <span className="mt-2 inline-flex h-5 items-center rounded-full border border-slate-300/60 bg-slate-100 px-2 text-[9px] font-bold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">Fatura sem contrato vinculado</span>
                                                                         )}
 
                                                                         <div className="mt-3 flex flex-wrap gap-2">
@@ -2356,7 +2461,23 @@ export default function ContactPanel({
                                 );
                             })
                         ) : (
-                            <p className="py-3 text-center text-[12px] text-slate-500 dark:text-zinc-500">Nenhum contrato retornado pelo SGP.</p>
+                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center dark:border-zinc-700 dark:bg-zinc-900/40">
+                                <Search className="mx-auto h-5 w-5 text-slate-400 dark:text-zinc-500" />
+                                <p className="mt-2 text-[12px] font-bold text-slate-700 dark:text-zinc-200">Nenhum contrato encontrado</p>
+                                <p className="mt-1 text-[10px] text-slate-500 dark:text-zinc-500">Ajuste o filtro ou limpe a busca para ver outros endereços.</p>
+                                {(sgpContractFilter !== 'all' || sgpContractSearch) && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSgpContractFilter('all');
+                                            setSgpContractSearch('');
+                                        }}
+                                        className="mt-3 text-[10px] font-bold text-blue-600 hover:underline dark:text-blue-400"
+                                    >
+                                        Limpar filtros
+                                    </button>
+                                )}
+                            </div>
                                                             )}
                                                         </div>
                                                     </>

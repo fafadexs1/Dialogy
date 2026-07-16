@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
 import { getPresenceTtlSeconds } from '@/lib/presence';
+import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 
 interface TransferPayload {
     teamId?: string;
@@ -135,13 +136,13 @@ export async function POST(
             chatId,
             teamId,
             agentId,
-        }, {
+        }, createTrustedActorContext({
             user: {
                 id: authResult.agent.id,
                 name: authResult.agent.name,
             },
             isSystemAgent: true
-        });
+        }));
 
 
         if (result.success) {

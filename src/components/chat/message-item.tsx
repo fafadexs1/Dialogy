@@ -24,7 +24,9 @@ import {
     Clock,
     ArrowRightLeft,
     XCircle,
-    Loader2
+    Loader2,
+    ChevronDown,
+    ListTree
 } from 'lucide-react';
 import { type Message } from '@/lib/types';
 import {
@@ -50,12 +52,78 @@ import { AudioPlayer } from './audio-player';
 import { MediaViewer } from './media-viewer';
 import { useToast } from '@/hooks/use-toast';
 import { resolveClientMediaUrl } from '@/lib/storage-url';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 function formatDuration(seconds: number): string {
     if (!seconds) return '0:00';
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.floor(seconds % 60);
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+type InteractiveListPayload = NonNullable<NonNullable<Message['metadata']>['interactivePayload']>;
+
+function InteractiveListMessage({ payload, isFromMe }: { payload: InteractiveListPayload; isFromMe: boolean }) {
+    const [open, setOpen] = React.useState(false);
+    const rowCount = payload.sections.reduce((total, section) => total + section.rows.length, 0);
+
+    return (
+        <div className="min-w-[220px] max-w-full space-y-2">
+            {payload.title?.trim() && <p className="text-sm font-semibold leading-snug">{payload.title}</p>}
+            {payload.description?.trim() && (
+                <p className={cn('whitespace-pre-wrap text-xs leading-relaxed', isFromMe ? 'text-white/85' : 'text-slate-600 dark:text-zinc-300')}>
+                    {payload.description}
+                </p>
+            )}
+            <Collapsible open={open} onOpenChange={setOpen}>
+                <CollapsibleTrigger asChild>
+                    <button
+                        type="button"
+                        className={cn(
+                            'flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors',
+                            isFromMe
+                                ? 'border-white/25 bg-white/10 hover:bg-white/20'
+                                : 'border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
+                        )}
+                    >
+                        <span className="flex min-w-0 items-center gap-2">
+                            <ListTree className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{payload.buttonText}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1 text-[10px] opacity-75">
+                            {rowCount} {rowCount === 1 ? 'opção' : 'opções'}
+                            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
+                        </span>
+                    </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                    <div className={cn(
+                        'max-h-72 space-y-2 overflow-y-auto rounded-xl border p-2',
+                        isFromMe ? 'border-white/20 bg-black/10' : 'border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-black/20'
+                    )}>
+                        {payload.sections.map((section, sectionIndex) => (
+                            <div key={`${section.title}:${sectionIndex}`} className="space-y-1.5">
+                                {section.title.trim() && <p className="px-1 text-[10px] font-bold uppercase tracking-wide opacity-65">{section.title}</p>}
+                                {section.rows.map((row, rowIndex) => (
+                                    <div
+                                        key={`${row.rowId}:${rowIndex}`}
+                                        className={cn(
+                                            'rounded-lg border px-2.5 py-2',
+                                            isFromMe ? 'border-white/15 bg-white/10' : 'border-slate-200 bg-white dark:border-white/10 dark:bg-white/5'
+                                        )}
+                                    >
+                                        <p className="break-words text-xs font-semibold">{row.title}</p>
+                                        {row.description?.trim() && <p className="mt-0.5 break-words text-[10px] leading-relaxed opacity-70">{row.description}</p>}
+                                    </div>
+                                ))}
+                            </div>
+                        ))}
+                    </div>
+                </CollapsibleContent>
+            </Collapsible>
+            {payload.footerText?.trim() && <p className="text-[10px] opacity-65">{payload.footerText}</p>}
+        </div>
+    );
 }
 
 type FailureDetailsView = {
@@ -701,6 +769,14 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
         const orderDetails = getTemplateOrderDetails(message);
+        const interactiveList = message.metadata?.interactiveType === 'list'
+            ? message.metadata.interactivePayload
+            : undefined;
+
+        if (interactiveList?.kind === 'list' && Array.isArray(interactiveList.sections)) {
+            return <InteractiveListMessage payload={interactiveList} isFromMe={isFromMe} />;
+        }
+
         const hasSharedContacts =
             (Array.isArray(message.metadata?.sharedContacts) && message.metadata.sharedContacts.length > 0) ||
             !!message.metadata?.sharedContactName ||

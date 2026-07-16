@@ -1,5 +1,9 @@
 import 'server-only';
 
+import { fetchSafeRemote, readResponseBodyLimited } from '@/lib/security/safe-remote-url';
+
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+
 function resolveWhisperBaseUrl(): string {
   return (process.env.WHISPER_BASE_URL || process.env.BASE_URL || '').trim().replace(/\/+$/, '');
 }
@@ -52,17 +56,28 @@ export async function transcribeAudioUrlWithWhisper(audioUrl: string): Promise<s
   }
 
   const sourceUrl = unwrapMediaProxyUrl(audioUrl);
-  const response = await fetch(sourceUrl);
+  const allowedHosts = (process.env.AUDIO_SOURCE_ALLOWED_HOSTS || '')
+    .split(',').map((host) => host.trim()).filter(Boolean);
+  if (!allowedHosts.length) throw new Error('Allowlist de origem de audio nao configurada.');
+
+  const response = await fetchSafeRemote(sourceUrl, { cache: 'no-store' }, {
+    allowedHosts,
+    timeoutMs: 10_000,
+    maxRedirects: 2,
+  });
   if (!response.ok) {
     throw new Error(`Falha ao baixar audio: ${response.statusText}`);
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  const mimeType = response.headers.get('content-type') || 'audio/mp3';
+  const mimeType = (response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+  if (!mimeType.startsWith('audio/')) throw new Error('Tipo de midia invalido para transcricao.');
+  const audioBytes = await readResponseBodyLimited(response, MAX_AUDIO_BYTES);
+  const arrayBuffer = new Uint8Array(audioBytes.byteLength);
+  arrayBuffer.set(audioBytes);
   const fileName = sourceUrl.split('/').pop()?.split('?')[0] || 'audio.mp3';
   const formData = new FormData();
 
-  formData.append('file', new Blob([arrayBuffer], { type: mimeType }), fileName);
+  formData.append('file', new Blob([arrayBuffer.buffer], { type: mimeType }), fileName);
   formData.append('language', process.env.WHISPER_LANGUAGE?.trim() || 'pt');
   formData.append('task', process.env.WHISPER_TASK?.trim() || 'transcribe');
 

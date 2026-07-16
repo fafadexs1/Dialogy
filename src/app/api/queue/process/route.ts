@@ -1,9 +1,28 @@
-import { NextResponse } from 'next/server';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { NextRequest, NextResponse } from 'next/server';
 import { processQueueOnce, shouldEnqueueJob } from '@/lib/queue';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+function hasValidWorkerToken(request: NextRequest): boolean {
+  const expected = process.env.QUEUE_WORKER_TOKEN;
+  const provided = request.headers.get('x-queue-token');
+  if (!expected || !provided) return false;
+  const expectedHash = createHash('sha256').update(expected).digest();
+  const providedHash = createHash('sha256').update(provided).digest();
+  return timingSafeEqual(expectedHash, providedHash);
+}
+
+export async function GET(request: NextRequest) {
+  if (!process.env.QUEUE_WORKER_TOKEN) {
+    return NextResponse.json(
+      { code: 'dependency_unavailable', error: 'Queue worker token is not configured.' },
+      { status: 503 },
+    );
+  }
+  if (!hasValidWorkerToken(request)) {
+    return NextResponse.json({ code: 'unauthenticated', error: 'Invalid worker token.' }, { status: 401 });
+  }
   const snapshot = await processQueueOnce();
 
   return NextResponse.json({

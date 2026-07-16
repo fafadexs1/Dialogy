@@ -105,6 +105,12 @@ export type AgentToolRuntimeContext = {
     content: string;
   }>;
   confirmedActionFingerprint?: string | null;
+  /**
+   * Native workflows can bind a natural-language confirmation to a recent,
+   * customer-visible request for the same tool. Legacy callers remain on the
+   * stricter persisted-fingerprint path unless they opt in explicitly.
+   */
+  allowRecentConversationalConfirmation?: boolean;
   orchestratorRunId?: string | null;
   sourceMessageId?: string | null;
   /**

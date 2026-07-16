@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
 import { requireWorkspaceAccess } from '@/server/inbox/access';
+import { consumeRateLimit } from '@/lib/ratelimit';
 import { transcribeAudioUrlWithWhisper } from '@/services/audio/transcription-service';
 
 export async function POST(request: NextRequest) {
@@ -23,6 +24,10 @@ export async function POST(request: NextRequest) {
 
     if (!access.ok) {
       return NextResponse.json({ error: access.error }, { status: user ? 403 : 401 });
+    }
+    const rate = consumeRateLimit(`audio-transcribe:${workspaceId}:${user!.id}`, 20, 60_000);
+    if (!rate.ok) {
+      return NextResponse.json({ code: 'rate_limited', error: 'Muitas transcricoes.' }, { status: 429 });
     }
 
     if (messageId) {

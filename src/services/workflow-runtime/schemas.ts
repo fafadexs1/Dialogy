@@ -274,7 +274,10 @@ const AgentToolCallDecisionSchema = z.object({
 const AgentNeedsInputDecisionSchema = z.object({
   type: z.literal('needs_input'),
   question: z.string().min(1),
-  missingFields: z.array(z.string().min(1)).min(1),
+  // Keep provider-level structured parsing tolerant. The agent loop handles
+  // an empty list semantically and asks the model to choose final/handoff,
+  // avoiding a hard workflow failure after successful tool execution.
+  missingFields: z.array(z.string().min(1)),
 });
 
 const AgentHandoffDecisionSchema = z.object({

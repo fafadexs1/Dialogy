@@ -136,6 +136,22 @@ describe('autopilot slot extraction', () => {
     expect(result.invalidSlots).toHaveLength(0);
   });
 
+  it('does not overwrite the contact phone with a labelled CPF from the message', () => {
+    const result = extractAutopilotSlots({
+      customerMessage: 'cpf 86675273191 e o meu IP é esse 100.66.15.159',
+      contact: {
+        id: 'contact-1',
+        workspace_id: 'workspace-1',
+        phone: '5561995215930',
+        phone_number_jid: '5561995215930@s.whatsapp.net',
+      } as Contact,
+    });
+
+    expect(result.slots.customer_identifier).toBe('86675273191');
+    expect(result.slots.phone).toBe('5561995215930');
+    expect(result.details.find((detail) => detail.name === 'phone')?.source).toBe('contact');
+  });
+
   it('lets an explicit new CEP replace the remembered CEP', () => {
     const result = extractAutopilotSlots({
       customerMessage: 'Meu CEP agora é 01310-100',

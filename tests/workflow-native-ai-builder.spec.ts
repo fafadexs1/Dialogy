@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { getWorkflowNodeManifest } from '@/services/workflow-runtime/catalog';
 import {
+  generateNativeWorkflowAiProposal,
   materializeNativeWorkflowAiBlueprint,
   type NativeWorkflowAiBlueprint,
 } from '@/services/workflow-runtime/native-ai-builder';
@@ -124,6 +125,46 @@ function expectNativeExecutableProposal(proposal: ReturnType<typeof materialize>
 }
 
 describe('native workflow AI builder', () => {
+  it('rebuilds the prompt after invalid structured JSON instead of failing immediately', async () => {
+    const requests: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    const blueprint: NativeWorkflowAiBlueprint = {
+      summary: 'Suporte tecnico seguro.',
+      architecture: 'single_agent',
+      agents: [agent('Lucas', 'suporte')],
+      fallbackMessage: 'Vou encaminhar para o suporte.',
+      guardrailChecks: ['no_secret_exposure', 'no_unconfirmed_tool_success'],
+    };
+    const invalid = Object.assign(new Error('deepseek returned invalid JSON'), {
+      code: 'INVALID_STRUCTURED_OUTPUT',
+      retryable: true,
+    });
+    const modelChain = {
+      generateStructured: async (request: { messages: Array<{ role: string; content: string }> }) => {
+        requests.push(request);
+        if (requests.length === 1) throw invalid;
+        return { output: blueprint, selected: {} as any, attempts: [] };
+      },
+    };
+
+    const proposal = await generateNativeWorkflowAiProposal({
+      configId: 'config-repair',
+      workspaceId: 'workspace-repair',
+      name: 'Lucas Suporte',
+      model,
+      modelChain: modelChain as any,
+      conversation: [{ role: 'user', content: 'Crie o Lucas para suporte tecnico.' }],
+      currentWorkflow: null,
+      tools: [],
+      knowledgeDocuments: [{ id: 'doc-suporte', name: 'Suporte' }],
+      knowledgeCollections: [{ id: 'suporte', name: 'Suporte' }],
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1].messages.at(-1)?.content).toContain('RECONSTRUCA O BLUEPRINT DO ZERO');
+    expect(proposal.validation.valid).toBe(true);
+    expect(proposal.workflow.nodes.some((node) => node.name === 'Lucas')).toBe(true);
+  });
+
   it('rejects completion operations outside the server-owned receipt catalog', () => {
     const singleAgent = agent('Agente de suporte', 'suporte');
     expect(() => materialize({

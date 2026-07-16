@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { fetchEvolutionAPI } from '@/actions/evolution-api';
+import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { randomUUID } from 'crypto';

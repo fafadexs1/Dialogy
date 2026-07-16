@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
 import { getPresenceTtlSeconds } from '@/lib/presence';
+import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 
 /**
  * Find the team with the lowest normalized live portfolio. Agent selection is
@@ -138,13 +139,13 @@ export async function POST(
         const result = await transferChatAction({
             chatId,
             teamId: availableTeam.teamId,
-        }, {
+        }, createTrustedActorContext({
             user: {
                 id: authResult.agent.id,
                 name: authResult.agent.name,
             },
             isSystemAgent: true
-        });
+        }));
 
         if (result.success) {
             return NextResponse.json({

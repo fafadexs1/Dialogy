@@ -3,11 +3,11 @@
 
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { EvolutionInstance, EvolutionInstanceCreationPayload, Workspace, EvolutionApiConfig, EvolutionInstanceSettings } from '@/lib/types';
-import { createClient } from '@/lib/supabase/server';
+import type { EvolutionInstance, EvolutionInstanceCreationPayload, EvolutionInstanceSettings } from '@/lib/types';
 import { randomUUID } from 'crypto';
 import { buildEvolutionWebhookUrl, getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
-import { resilientFetch } from '@/lib/http/resilient-fetch';
+import { requireWorkspaceAccess, requireWorkspacePermission } from '@/lib/security/access';
+import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import {
     buildTelegramWebhookUrl,
     deleteTelegramWebhook,
@@ -70,6 +70,32 @@ async function getTelegramInstanceRecord(
     return res.rows[0] || null;
 }
 
+async function getInstanceWorkspaceId(instanceName: string): Promise<string | null> {
+    const result = await db.query(
+        `SELECT workspace_id
+           FROM evolution_api_instances
+          WHERE instance_name = $1
+         UNION ALL
+         SELECT workspace_id
+           FROM telegram_bot_instances
+          WHERE instance_name = $1
+          LIMIT 1`,
+        [instanceName]
+    );
+    return result.rows[0]?.workspace_id || null;
+}
+
+async function requireInstanceAccess(
+    instanceName: string,
+    permission: 'workspace:settings:edit' | null
+): Promise<string> {
+    const workspaceId = await getInstanceWorkspaceId(instanceName);
+    if (!workspaceId) throw new Error('Instância não encontrada.');
+    if (permission) await requireWorkspacePermission(workspaceId, permission);
+    else await requireWorkspaceAccess(workspaceId);
+    return workspaceId;
+}
+
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
@@ -79,6 +105,7 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
     }
 
     try {
+        await requireWorkspaceAccess(workspaceId);
         const res = await db.query(
             `SELECT 
                 id, instance_name, display_name, type, cluster_id,
@@ -119,44 +146,6 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
 }
 
 /**
- * Wrapper genérico para chamadas à Evolution API.
- */
-export async function fetchEvolutionAPI(
-    endpoint: string,
-    apiConfig: { api_url: string; api_key: string },
-    options: RequestInit = {}
-): Promise<any> {
-    if (!apiConfig.api_url || !apiConfig.api_key) {
-        throw new Error("A configuração da API (URL e Chave) é necessária.");
-    }
-    const baseUrl = apiConfig.api_url.endsWith('/') ? apiConfig.api_url.slice(0, -1) : apiConfig.api_url;
-    const url = `${baseUrl}${endpoint}`;
-
-    try {
-        const response = await resilientFetch(url, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                'apikey': apiConfig.api_key,
-                ...options.headers,
-            },
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`Evolution API Error: ${response.status} ${response.statusText} - ${errorBody}`);
-        }
-
-        const text = await response.text();
-        return text ? JSON.parse(text) : null;
-
-    } catch (error) {
-        console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
-        throw error;
-    }
-}
-
-/**
  * Cria uma nova instância na API da Evolution e a registra no banco de dados local.
  */
 export async function createEvolutionApiInstance(
@@ -166,6 +155,7 @@ export async function createEvolutionApiInstance(
     if (!workspaceId) {
         return { success: false, error: 'ID do Workspace não encontrado.' };
     }
+    await requireWorkspacePermission(workspaceId, 'workspace:settings:edit');
     if (!payload.displayName?.trim()) {
         return { success: false, error: 'O apelido da instância é obrigatório.' }
     }
@@ -516,6 +506,7 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
             return { error: 'Instância ou cluster associado não encontrado.' };
         }
         const { instance_name: instanceName, api_url, api_key, type, telegram_bot_token: telegramBotToken } = instanceRes.rows[0];
+        const workspaceId = await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const apiConfig = { api_url, api_key };
 
         if (type === 'telegram' && telegramBotToken) {
@@ -528,16 +519,11 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
         await fetchEvolutionAPI(`/instance/delete/${instanceName}`, apiConfig, { method: 'DELETE' });
 
         // Se a chamada da API for bem-sucedida, delete do DB local
-        await db.query('DELETE FROM evolution_api_instances WHERE id = $1', [instanceId]);
+        await db.query('DELETE FROM evolution_api_instances WHERE id = $1 AND workspace_id = $2', [instanceId, workspaceId]);
 
     } catch (error: any) {
         console.error('[EVO_ACTION_DELETE_INSTANCE] Error deleting instance:', error);
         // Mesmo se a API falhar, tentamos remover do nosso DB
-        try {
-            await db.query('DELETE FROM evolution_api_instances WHERE id = $1', [instanceId]);
-        } catch (dbError) {
-            console.error('[EVO_ACTION_DELETE_INSTANCE] Error deleting from DB after API error:', dbError);
-        }
         return { error: `Falha ao deletar instância. Erro: ${error.message}` };
     }
 
@@ -551,6 +537,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
 
 export async function checkInstanceStatus(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
+        await requireInstanceAccess(instanceName, null);
         const telegramInstance = await getTelegramInstanceRecord(instanceName);
         if (telegramInstance) {
             if (!telegramInstance.telegram_bot_token) {
@@ -587,6 +574,7 @@ export async function checkInstanceStatus(instanceName: string): Promise<{ statu
 
 export async function connectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
     try {
+        await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const telegramInstance = await getTelegramInstanceRecord(instanceName);
         if (telegramInstance) {
             if (!telegramInstance.telegram_bot_token || !telegramInstance.webhook_key) {
@@ -618,6 +606,7 @@ export async function connectInstance(instanceName: string): Promise<{ status: E
 
 export async function disconnectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'] }> {
     try {
+        await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const telegramInstance = await getTelegramInstanceRecord(instanceName);
         if (telegramInstance?.telegram_bot_token) {
             await deleteTelegramWebhook(telegramInstance.telegram_bot_token);
@@ -636,6 +625,7 @@ export async function disconnectInstance(instanceName: string): Promise<{ status
 
 export async function restartInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
     try {
+        await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const telegramInstance = await getTelegramInstanceRecord(instanceName);
         if (telegramInstance) {
             if (!telegramInstance.telegram_bot_token || !telegramInstance.webhook_key) {
@@ -669,9 +659,18 @@ export async function deleteMessageAction(
     try {
         await client.query('BEGIN');
 
-        const msgRes = await client.query('SELECT message_id_from_api, from_me, chat_id FROM messages WHERE id = $1', [messageId]);
+        const msgRes = await client.query(
+            `SELECT m.message_id_from_api, m.from_me, m.chat_id, c.workspace_id
+               FROM messages m
+               JOIN chats c ON c.id = m.chat_id
+              WHERE m.id = $1`,
+            [messageId]
+        );
         if (msgRes.rowCount === 0) throw new Error("Mensagem não encontrada no banco de dados.");
-        const { message_id_from_api: apiMessageId, from_me: fromMe, chat_id } = msgRes.rows[0];
+        const { message_id_from_api: apiMessageId, from_me: fromMe, chat_id, workspace_id: workspaceId } = msgRes.rows[0];
+        await requireWorkspacePermission(workspaceId, 'inbox:access');
+        const instanceWorkspaceId = await requireInstanceAccess(instanceName, null);
+        if (instanceWorkspaceId !== workspaceId) throw new Error('Instância não pertence ao workspace da mensagem.');
 
         if (!apiMessageId) throw new Error("A mensagem não possui um ID da API para ser apagada.");
 
@@ -691,7 +690,15 @@ export async function deleteMessageAction(
             body: JSON.stringify(deletePayload)
         });
 
-        await client.query("UPDATE messages SET api_message_status = 'DELETED', content = 'Mensagem apagada' WHERE id = $1", [messageId]);
+        await client.query(
+            `UPDATE messages m
+                SET api_message_status = 'DELETED', content = 'Mensagem apagada'
+               FROM chats c
+              WHERE m.id = $1
+                AND c.id = m.chat_id
+                AND c.workspace_id = $2`,
+            [messageId, workspaceId]
+        );
 
         await client.query('COMMIT');
         revalidatePath('/', 'layout');
@@ -713,6 +720,7 @@ export async function createWhatsappTemplate(
     payload: any
 ): Promise<{ success: boolean; error?: string }> {
     try {
+        await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         const requestOptions = {
@@ -743,6 +751,7 @@ export async function findWhatsappTemplates(
     instanceName: string
 ): Promise<{ templates: any[] | null; error?: string }> {
     try {
+        await requireInstanceAccess(instanceName, null);
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) throw new Error(`Configuração de API não encontrada para ${instanceName}`);
         const response = await fetchEvolutionAPI(`/template/find/${instanceName}`, apiConfig);
@@ -755,6 +764,7 @@ export async function findWhatsappTemplates(
 
 export async function getInstanceSettings(instanceName: string): Promise<EvolutionInstanceSettings | null> {
     try {
+        await requireInstanceAccess(instanceName, null);
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) {
             throw new Error(`Configuração de API não encontrada para a instância ${instanceName}`);
@@ -782,6 +792,7 @@ export async function updateInstanceSettings(
     settings: Partial<EvolutionInstanceSettings>
 ): Promise<{ success: boolean; error?: string }> {
     try {
+        await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const apiConfig = await getApiConfigForInstance(instanceName);
         if (!apiConfig) {
             throw new Error(`Configuração de API não encontrada para a instância ${instanceName}`);

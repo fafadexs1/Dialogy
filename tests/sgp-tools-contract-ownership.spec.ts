@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterSupportContractsToValidatedClients,
   getValidatedSgpContractIds,
+  scopeSgpClientsToContract,
 } from '@/services/agent-tools/sgp-tools';
 
 describe('SGP support contract ownership boundary', () => {
@@ -33,5 +34,18 @@ describe('SGP support contract ownership boundary', () => {
       [{ contratos: [] }],
       [{ contrato_id: '999' }],
     )).toEqual([]);
+  });
+
+  it('returns only the explicitly requested contract while preserving customer data', () => {
+    const scoped = scopeSgpClientsToContract([{
+      nome: 'Cliente Teste',
+      contratos: [{ contrato: 101 }, { id: '202' }],
+    }], '202');
+
+    expect(scoped).toEqual([{
+      nome: 'Cliente Teste',
+      contratos: [{ id: '202' }],
+    }]);
+    expect(scopeSgpClientsToContract(clients, '999')).toEqual([]);
   });
 });

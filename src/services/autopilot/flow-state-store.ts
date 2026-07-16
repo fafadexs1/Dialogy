@@ -215,10 +215,10 @@ export async function loadAutopilotContactMemory(input: {
           END,
           state.updated_at
         )
-          >= clock_timestamp() - ($4::int * INTERVAL '1 day')
+          >= clock_timestamp() - ($3::int * INTERVAL '1 day')
       ORDER BY slot_memory_updated_at DESC
       LIMIT 24`,
-    [input.workspaceId, input.contactId, input.chatId, maxAgeDays],
+    [input.workspaceId, input.contactId, maxAgeDays],
   );
 
   const stableSlots: AutopilotExtractedSlots = {};

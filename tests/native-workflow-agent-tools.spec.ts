@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import { createWorkflowNode } from '@/services/workflow-runtime/catalog';
 import {
+  attachNativeToolToPrimaryAgent,
   buildNativeAgentToolConfig,
+  detachNativeToolFromWorkflow,
+  getWorkflowToolName,
   getNativeAgentToolLabel,
   groupNativeAgentTools,
   isNativeAgentControlPlaneTool,
@@ -176,6 +179,70 @@ describe('native workflow tool permission synchronization', () => {
       'transfer_chat',
       'mcp:billing:create_invoice',
     ]);
+  });
+
+  it('connects a tool enabled in the global panel to the primary workflow agent', () => {
+    const workflow = createNativeWorkflowTemplate({
+      configId: 'config-global-tools',
+      workspaceId: 'workspace-global-tools',
+      name: 'Agente com painel global',
+      model,
+      persona: 'Objetivo e seguro.',
+      template: 'single_agent',
+    });
+    const tool = mcpTool();
+
+    const attached = attachNativeToolToPrimaryAgent(workflow, tool);
+    const attachedAgain = attachNativeToolToPrimaryAgent(attached.workflow, tool);
+
+    expect(attached.status).toBe('attached');
+    expect(listAttachedWorkflowToolNames(attached.workflow)).toContain(tool.name);
+    expect(attached.workflow.nodes.filter((node) => getWorkflowToolName(node) === tool.name)).toHaveLength(1);
+    expect(attachedAgain.status).toBe('already_attached');
+    expect(attachedAgain.workflow.connections.filter((connection) => connection.connectionType === 'tool')).toHaveLength(1);
+  });
+
+  it('does not materialize control-plane tools from the global panel', () => {
+    const workflow = createNativeWorkflowTemplate({
+      configId: 'config-control-plane',
+      workspaceId: 'workspace-control-plane',
+      name: 'Agente seguro',
+      model,
+      persona: 'Objetivo e seguro.',
+      template: 'single_agent',
+    });
+    const transfer = listAgentToolCatalogItems().find((tool) => tool.name === 'transfer_chat')!;
+
+    const result = attachNativeToolToPrimaryAgent(workflow, transfer);
+
+    expect(result.status).toBe('ineligible');
+    expect(result.workflow).toBe(workflow);
+  });
+
+  it('removes the tool node and all of its connections when disabled globally', () => {
+    const workflow = createNativeWorkflowTemplate({
+      configId: 'config-disable-global-tool',
+      workspaceId: 'workspace-disable-global-tool',
+      name: 'Agente com remocao global',
+      model,
+      persona: 'Objetivo e seguro.',
+      template: 'single_agent',
+    });
+    const tool = mcpTool();
+    const attached = attachNativeToolToPrimaryAgent(workflow, tool);
+    const toolNode = attached.workflow.nodes.find((node) => getWorkflowToolName(node) === tool.name)!;
+
+    const detached = detachNativeToolFromWorkflow(attached.workflow, tool.name);
+    const detachedAgain = detachNativeToolFromWorkflow(detached.workflow, tool.name);
+
+    expect(detached.status).toBe('detached');
+    expect(listAttachedWorkflowToolNames(detached.workflow)).not.toContain(tool.name);
+    expect(detached.workflow.nodes.some((node) => node.id === toolNode.id)).toBe(false);
+    expect(detached.workflow.connections.some((connection) => (
+      connection.sourceNodeId === toolNode.id || connection.targetNodeId === toolNode.id
+    ))).toBe(false);
+    expect(detachedAgain.status).toBe('not_attached');
+    expect(detachedAgain.workflow).toBe(detached.workflow);
   });
 
   it('repairs stale native permissions on load/save while preserving legacy selections', () => {

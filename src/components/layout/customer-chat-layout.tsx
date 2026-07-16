@@ -847,6 +847,7 @@ export default function CustomerChatLayout({
       const result = await loadOlderChatsAction(
         initialUser.activeWorkspaceId,
         lastChat.updatedAt,
+        lastChat.id,
         statuses,
         ownership
       );
@@ -953,7 +954,6 @@ export default function CustomerChatLayout({
       const result = await getInitialChatsData({
         workspaceId: initialUser.activeWorkspaceId,
         selectedChatId: initialChatId,
-        userIdOverride: initialUser.id,
         workspaceTimezone: initialUser.activeWorkspaceTimezone,
       });
       if (result.error) throw new Error(result.error);
@@ -1759,7 +1759,7 @@ export default function CustomerChatLayout({
               <SheetPrimitive.Content
                 dir={isRTL ? 'rtl' : 'ltr'}
                 className={cn(
-                  "fixed inset-y-0 z-50 flex h-full min-h-0 w-full flex-col overflow-hidden border-border/80 bg-background p-0 text-foreground outline-none transition ease-out data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:duration-300 data-[state=open]:duration-300 sm:w-[min(92vw,440px)] sm:max-w-none lg:w-[clamp(380px,42vw,480px)] xl:w-[clamp(420px,36vw,500px)] 2xl:w-[clamp(440px,30vw,520px)]",
+                  "fixed inset-y-0 z-50 box-border flex h-full min-h-0 w-full max-w-[100vw] flex-col overflow-hidden border-border/80 bg-background p-0 text-foreground outline-none transition ease-out data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:duration-300 data-[state=open]:duration-300 sm:w-[min(92vw,440px)] sm:max-w-[100vw] lg:w-[clamp(380px,42vw,480px)] xl:w-[clamp(420px,36vw,500px)] 2xl:w-[clamp(440px,30vw,520px)]",
                   highContrast && "contrast-125",
                   isRTL
                     ? "left-0 border-r shadow-[24px_0_64px_-32px_rgba(15,23,42,0.38)] data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left dark:shadow-[24px_0_72px_-28px_rgba(0,0,0,0.72)]"

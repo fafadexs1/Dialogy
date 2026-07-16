@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCollectionCompletionCheckpoint,
+  chooseNonRepeatingCollectionFallback,
   createPersistedCollectionFieldReceipt,
   directAgentRouteHasFailedToolCalls,
   evaluateCompletedCollectionClose,
+  extractPendingCollectionHistoryFields,
   extractPendingCollectionReplyFields,
+  findPendingCollectionQuestion,
   inspectCollectionResponseRoute,
   parseCollectionCompletionCheckpoint,
+  sanitizeConversationKnownFields,
 } from '@/services/autopilot/collection-completion';
 import type { NodeRuntimeInput } from '@/services/workflow-runtime';
+import { hashValue } from '@/services/workflow-runtime/utils';
 import { connect, workflowDefinition, workflowNode } from './workflow-runtime-fixtures';
 
 function routedInput(kind: 'needs_input' | 'completed', options: {
@@ -96,6 +101,19 @@ describe('autopilot collection completion compatibility', () => {
 
     expect(parseCollectionCompletionCheckpoint(checkpoint)).toEqual(checkpoint);
     expect(parseCollectionCompletionCheckpoint({ ...checkpoint, pendingFields: ['email'] })).toBeNull();
+    const {
+      checkpointFingerprint: _checkpointFingerprint,
+      collectionStartedAt: _collectionStartedAt,
+      ...legacyCheckpoint
+    } = checkpoint!;
+    const legacyFingerprint = hashValue({ ...legacyCheckpoint, status: 'awaiting_fields' });
+    expect(parseCollectionCompletionCheckpoint({
+      ...legacyCheckpoint,
+      checkpointFingerprint: legacyFingerprint,
+    })).toMatchObject({
+      collectionStartedAt: new Date(new Date(checkpoint!.askedAt).getTime() - 5 * 60_000).toISOString(),
+      checkpointFingerprint: legacyFingerprint,
+    });
   });
 
   it('extracts labelled arbitrary fields without assigning an ambiguous multi-field reply', () => {
@@ -110,6 +128,132 @@ describe('autopilot collection completion compatibility', () => {
       pendingFields: ['Empresa', 'Setor'],
       alreadyKnownFields: {},
     })).toEqual({});
+  });
+
+  it('binds a short reply to the one pending field explicitly asked in the prior question', () => {
+    const pendingFields = ['contractId', 'problemDescription', 'preference'];
+
+    expect(extractPendingCollectionReplyFields({
+      customerMessage: '16318 esse aqui',
+      pendingFields,
+      alreadyKnownFields: { customer_identifier: '86675273191' },
+      previousQuestion: 'Qual contrato ou endereco voce deseja consultar?',
+    })).toEqual({ contractId: '16318' });
+
+    expect(extractPendingCollectionReplyFields({
+      customerMessage: 'A conexao da internet esta muito lenta',
+      pendingFields,
+      alreadyKnownFields: { contractId: '16318' },
+      previousQuestion: 'Qual problema esta acontecendo com a sua conexao?',
+    })).toEqual({ problemDescription: 'A conexao da internet esta muito lenta' });
+
+    expect(extractPendingCollectionReplyFields({
+      customerMessage: 'Ativa ai pra mim o Wi-Fi',
+      pendingFields,
+      alreadyKnownFields: {
+        contractId: '16318',
+        problemDescription: 'A conexao da internet esta muito lenta',
+      },
+      previousQuestion: 'Voce gostaria de ativar ou prefere alterar o nome e a senha?',
+    })).toEqual({ preference: 'Ativa ai pra mim o Wi-Fi' });
+  });
+
+  it('reconstructs collected workflow fields from alternating visible chat history', () => {
+    const recovered = extractPendingCollectionHistoryFields({
+      messages: [
+        { fromMe: true, content: 'Qual contrato voce deseja consultar?' },
+        { fromMe: false, content: '16318 esse aqui' },
+        { fromMe: true, content: 'Qual problema esta acontecendo?' },
+        { fromMe: false, content: 'Meu Wi-Fi esta muito lento' },
+        { fromMe: true, content: 'Voce prefere ativar ou alterar as configuracoes?' },
+        { fromMe: false, content: 'Ativa ai pra mim' },
+      ],
+      pendingFields: ['contractId', 'problemDescription', 'preference'],
+      alreadyKnownFields: { customer_identifier: '86675273191' },
+    });
+
+    expect(recovered).toEqual({
+      contractId: '16318',
+      problemDescription: 'Meu Wi-Fi esta muito lento',
+      preference: 'Ativa ai pra mim',
+    });
+  });
+
+  it('keeps ambiguous questions and unrelated replies out of generic conversation memory', () => {
+    expect(extractPendingCollectionReplyFields({
+      customerMessage: 'Dialogy Suporte',
+      pendingFields: ['Empresa', 'Setor'],
+      alreadyKnownFields: {},
+      previousQuestion: 'Informe a empresa e o setor.',
+    })).toEqual({});
+    expect(extractPendingCollectionReplyFields({
+      customerMessage: 'Tudo certo por aqui',
+      pendingFields: ['contractId', 'problemDescription', 'preference'],
+      alreadyKnownFields: {},
+      previousQuestion: 'Posso ajudar em mais alguma coisa?',
+    })).toEqual({});
+  });
+
+  it('accepts an explicit correction to a remembered field', () => {
+    expect(extractPendingCollectionReplyFields({
+      customerMessage: '99999',
+      pendingFields: ['contractId', 'problemDescription'],
+      alreadyKnownFields: { contractId: '16318' },
+      previousQuestion: 'Qual contrato voce quer consultar agora?',
+    })).toEqual({ contractId: '99999' });
+    expect(extractPendingCollectionReplyFields({
+      customerMessage: 'Contrato: 88888',
+      pendingFields: ['contractId', 'problemDescription'],
+      alreadyKnownFields: { contractId: '16318' },
+    })).toEqual({ contractId: '88888' });
+  });
+
+  it('keeps the pending question across informational messages but not another request', () => {
+    expect(findPendingCollectionQuestion({
+      messages: [
+        { fromMe: true, content: 'Qual contrato voce deseja consultar?' },
+        { fromMe: true, content: 'Vou usar apenas consultas seguras.' },
+      ],
+      pendingFields: ['contractId', 'problemDescription'],
+    })).toBe('Qual contrato voce deseja consultar?');
+    expect(findPendingCollectionQuestion({
+      messages: [
+        { fromMe: true, content: 'Qual contrato voce deseja consultar?' },
+        { fromMe: true, content: 'Posso ajudar em outra coisa?' },
+      ],
+      pendingFields: ['contractId', 'problemDescription'],
+    })).toBeNull();
+  });
+
+  it('replaces a configured fallback that asks for a field already known', () => {
+    const genericFallback = 'Nao consegui concluir esta etapa agora.';
+    expect(chooseNonRepeatingCollectionFallback({
+      configuredFallback: 'Para continuar, me informe seu CPF ou CNPJ.',
+      knownFields: { customer_identifier: '86675273191' },
+      genericFallback,
+    })).toBe(genericFallback);
+    expect(chooseNonRepeatingCollectionFallback({
+      configuredFallback: 'Pode detalhar o problema?',
+      knownFields: { customer_identifier: '86675273191' },
+      genericFallback,
+    })).toBe('Pode detalhar o problema?');
+    expect(chooseNonRepeatingCollectionFallback({
+      configuredFallback: 'Me informe o CPF/CNPJ do titular, por favor.',
+      knownFields: { name: 'Fabricio' },
+      genericFallback,
+    })).toBe('Me informe o CPF/CNPJ do titular, por favor.');
+  });
+
+  it('sanitizes bounded current-chat workflow memory without accepting nested state', () => {
+    expect(sanitizeConversationKnownFields({
+      contractId: ' 16318 esse aqui ',
+      preference: ' Ativar Wi-Fi ',
+      nested: { unsafe: true },
+      constructor: 'ignored',
+    })).toEqual({
+      contractId: '16318 esse aqui',
+      preference: 'Ativar Wi-Fi',
+    });
   });
 
   it('does not persist conversation-control replies as a single requested field', () => {
@@ -261,6 +405,7 @@ describe('autopilot collection completion compatibility', () => {
     expect(secondCheckpoint).toMatchObject({
       pendingFields: ['Empresa', 'Setor'],
       confirmedFields: ['Empresa'],
+      collectionStartedAt: firstCheckpoint.collectionStartedAt,
     });
     const finalRoute = inspectCollectionResponseRoute(routedInput('completed', {
       executionId: 'complete-3',

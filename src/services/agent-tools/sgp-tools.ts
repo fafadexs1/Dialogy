@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { buildSGPContactPanelData, getContractId, getPrimaryService, normalizeText } from '@/plugins/sgp/contact-panel-data';
 import type { SGPGlobalConfig, SGPUserConfig } from '@/plugins/sgp/types';
+import { enrichSupportContractsWithLiveRadius } from '@/plugins/sgp/radius-session';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
 
 type SgpToolContext = {
@@ -48,6 +49,17 @@ export function filterSupportContractsToValidatedClients(
       contract?.contrato_id ?? contract?.contrato ?? contract?.id
     );
     return Boolean(contractId) && validatedContractIds.has(contractId);
+  });
+}
+
+export function scopeSgpClientsToContract(clients: any[], contractId?: string | null): any[] {
+  const normalizedContractId = onlyDigits(contractId);
+  if (!normalizedContractId) return Array.isArray(clients) ? clients : [];
+
+  return (Array.isArray(clients) ? clients : []).flatMap((client: any) => {
+    const contracts = (Array.isArray(client?.contratos) ? client.contratos : [])
+      .filter((contract: any) => onlyDigits(getContractId(contract)) === normalizedContractId);
+    return contracts.length > 0 ? [{ ...client, contratos: contracts }] : [];
   });
 }
 
@@ -246,11 +258,17 @@ export async function runSgpTool(
       const rawSupportContracts = requestedContractFound
         ? await fetchSupportContracts(sgp, contractId)
         : [];
-      const supportContracts = filterSupportContractsToValidatedClients(
+      const validatedSupportContracts = filterSupportContractsToValidatedClients(
         clients,
         rawSupportContracts
       );
-      const data = buildSGPContactPanelData(clients, supportContracts);
+      const supportContracts = await enrichSupportContractsWithLiveRadius({
+        global: sgp.global,
+        user: sgp.user,
+        contracts: validatedSupportContracts,
+      });
+      const scopedClients = scopeSgpClientsToContract(clients, contractId);
+      const data = buildSGPContactPanelData(scopedClients, supportContracts);
       if (!data) throw new Error('Nenhum dado SGP encontrado para este cliente.');
       return {
         toolName: action.type,

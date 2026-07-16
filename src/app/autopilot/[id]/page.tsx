@@ -97,7 +97,10 @@ import { NativeWorkflowBuilder } from '@/components/workflow/native-workflow-bui
 import { NativeAiBuilderDialog } from '@/components/workflow/native-ai-builder-dialog';
 import type { ModelConfiguration, NativeWorkflowTemplate, WorkflowDefinition } from '@/services/workflow-runtime';
 import {
+  attachNativeToolToPrimaryAgent,
+  detachNativeToolFromWorkflow,
   isNativeAgentControlPlaneTool,
+  isNativeAgentToolAttachable,
   listAttachedWorkflowToolNames,
   synchronizeNativeWorkflowToolState,
 } from '@/services/workflow-runtime/native-agent-tools';
@@ -431,6 +434,52 @@ export default function AutopilotDetailPage() {
       listAttachedWorkflowToolNames(nextDefinition).filter((toolName) => catalogNames.has(toolName)),
     );
   }, [toolCatalog]);
+
+  const handleCapabilityToolToggle = useCallback((tool: AgentToolCatalogItem, nextChecked: boolean) => {
+    if (workflowBuilderMode !== 'native_v2' || !workflowDefinition) {
+      setEnabledToolNames((current) => (
+        nextChecked
+          ? Array.from(new Set([...current, tool.name]))
+          : current.filter((name) => name !== tool.name)
+      ));
+      return;
+    }
+
+    if (!nextChecked) {
+      const detachment = detachNativeToolFromWorkflow(workflowDefinition, tool.name);
+      applyWorkflowDefinition(detachment.workflow);
+      toast({
+        title: detachment.status === 'detached' ? 'Tool removida do fluxo' : 'Tool ja estava desconectada',
+        description: `${tool.displayName || tool.name} nao esta mais ligada ao workflow. Salve o rascunho para manter a alteracao.`,
+      });
+      return;
+    }
+    if (!isNativeAgentToolAttachable(tool)) {
+      toast({
+        title: 'Tool nao conectavel',
+        description: 'Esta acao usa um bloco nativo ou nao esta liberada para execucao autonoma.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const attachment = attachNativeToolToPrimaryAgent(workflowDefinition, tool);
+    if (attachment.status === 'missing_agent' || attachment.status === 'missing_ports') {
+      toast({
+        title: 'Nao foi possivel conectar a tool',
+        description: attachment.status === 'missing_agent'
+          ? 'Adicione um bloco Agente de IA ao fluxo antes de ativar ferramentas.'
+          : 'O bloco de agente nao possui uma entrada de ferramentas valida.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    applyWorkflowDefinition(attachment.workflow);
+    toast({
+      title: attachment.status === 'already_attached' ? 'Tool ja conectada' : 'Tool conectada ao fluxo',
+      description: `${tool.displayName || tool.name} esta ligada ao agente principal. Salve o rascunho para manter a alteracao.`,
+    });
+  }, [applyWorkflowDefinition, toast, workflowBuilderMode, workflowDefinition]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -1614,6 +1663,8 @@ export default function AutopilotDetailPage() {
               toolCatalog={toolCatalog.filter((tool) => !isNativeAgentControlPlaneTool(tool.name))}
               enabledToolNames={enabledToolNames}
               setEnabledToolNames={setEnabledToolNames}
+              onToolToggle={handleCapabilityToolToggle}
+              toolsManagedByWorkflow={workflowBuilderMode === 'native_v2'}
               onSaveTools={handleSaveConfig}
               isSavingTools={isSaving}
               onAdd={() => {
@@ -2366,6 +2417,8 @@ export default function AutopilotDetailPage() {
                 toolCatalog={toolCatalog}
                 enabledToolNames={enabledToolNames}
                 setEnabledToolNames={setEnabledToolNames}
+                onToolToggle={handleCapabilityToolToggle}
+                toolsManagedByWorkflow={workflowBuilderMode === 'native_v2'}
                 onSaveTools={handleSaveConfig}
                 isSavingTools={isSaving}
                 onAdd={() => {

@@ -92,6 +92,29 @@ export type NativeWorkflowAiProposal = {
   selectedToolNames: string[];
 };
 
+const NATIVE_AI_BLUEPRINT_ATTEMPTS = 2;
+
+function isRepairableBlueprintError(error: unknown) {
+  const candidate = error as { code?: string; retryable?: boolean; message?: string } | null;
+  if (candidate?.retryable === true) return true;
+  if (['INVALID_STRUCTURED_OUTPUT', 'MODEL_SCHEMA_VALIDATION_FAILED'].includes(candidate?.code || '')) return true;
+  return /invalid json|does not match|schema|structured output|validation/i.test(candidate?.message || '');
+}
+
+function blueprintRepairMessage(error: unknown) {
+  const reason = error instanceof Error ? error.message : String(error || 'formato invalido');
+  return [
+    'RECONSTRUCA O BLUEPRINT DO ZERO. A tentativa anterior foi descartada por JSON ou schema invalido.',
+    `Falha resumida: ${reason.slice(0, 400)}`,
+    'Retorne somente o objeto JSON, sem markdown, comentarios ou texto externo.',
+    'Inclua obrigatoriamente: summary, architecture, agents, fallbackMessage e guardrailChecks.',
+    'Para single_agent use exatamente 1 agente e omita router. Para routed_team use exatamente 2 agentes e 2 rotas.',
+    'Cada agente deve conter name, role, persona, language, objective, instructions, completionCriteria, toolNames, knowledgeDocumentIds e knowledgeCollectionIds.',
+    'Use textos compactos, no maximo 8 instructions e 5 completionCriteria por agente. Preserve o objetivo funcional do usuario.',
+    'Use apenas nomes e IDs exatos dos catalogos fornecidos. Nao invente campos.',
+  ].join('\n');
+}
+
 function connection(
   id: string,
   sourceNodeId: string,
@@ -445,18 +468,45 @@ export async function generateNativeWorkflowAiProposal(input: {
     ...tool,
     riskLevel: tool.riskLevel || 'low',
   }));
-  const result = await input.modelChain.generateStructured({
-    schema: NativeWorkflowAiBlueprintSchema,
-    schemaName: 'dialogy_native_workflow_ai_blueprint',
-    messages: [
-      {
-        role: 'system',
-        content: 'Voce e o arquiteto do Flowbuilder agent-first do Dialogy. Gere somente uma arquitetura segura e executavel no contrato solicitado. Toda entrega ao cliente deve ocorrer por Responder ou Handoff; agentes nunca respondem implicitamente. Transferencia e encerramento sao blocos nativos do sistema, nunca ferramentas escolhidas pelo modelo. Uma execucao segue uma unica rota principal.',
-      },
-      { role: 'user', content: promptForNativeBuilder({ ...input, tools: eligibleTools }) },
-    ],
-    timeoutMs: 90_000,
-  });
+  const messages = [
+    {
+      role: 'system' as const,
+      content: 'Voce e o arquiteto do Flowbuilder agent-first do Dialogy. Gere somente uma arquitetura segura e executavel no contrato solicitado. Toda entrega ao cliente deve ocorrer por Responder ou Handoff; agentes nunca respondem implicitamente. Transferencia e encerramento sao blocos nativos do sistema, nunca ferramentas escolhidas pelo modelo. Uma execucao segue uma unica rota principal.',
+    },
+    { role: 'user' as const, content: promptForNativeBuilder({ ...input, tools: eligibleTools }) },
+  ];
+  let result: { output: NativeWorkflowAiBlueprint } | null = null;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= NATIVE_AI_BLUEPRINT_ATTEMPTS; attempt += 1) {
+    try {
+      const generated = await input.modelChain.generateStructured({
+        schema: NativeWorkflowAiBlueprintSchema,
+        schemaName: 'dialogy_native_workflow_ai_blueprint',
+        messages: attempt === 1
+          ? messages
+          : [...messages, { role: 'user' as const, content: blueprintRepairMessage(lastError) }],
+        timeoutMs: 90_000,
+      });
+	  result = { output: NativeWorkflowAiBlueprintSchema.parse(generated.output) };
+      break;
+    } catch (error) {
+      lastError = error;
+      if (!isRepairableBlueprintError(error)) throw error;
+      if (attempt >= NATIVE_AI_BLUEPRINT_ATTEMPTS) break;
+      console.warn('[NATIVE_WORKFLOW_AI_BUILDER] Rebuilding blueprint after invalid structured output:', error);
+    }
+  }
+  if (!result) {
+    const error = new Error('A IA nao conseguiu reconstruir um workflow valido. Tente novamente ou escolha outro modelo.') as Error & {
+      code?: string;
+      retryable?: boolean;
+      cause?: unknown;
+    };
+    error.code = 'INVALID_STRUCTURED_OUTPUT';
+    error.retryable = true;
+    error.cause = lastError;
+    throw error;
+  }
   const blueprint = NativeWorkflowAiBlueprintSchema.parse(result.output);
   const proposal = materializeNativeWorkflowAiBlueprint({
     configId: input.configId,

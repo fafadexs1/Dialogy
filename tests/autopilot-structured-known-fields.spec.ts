@@ -35,6 +35,28 @@ describe('autopilot structured known fields', () => {
       custom_fields: { CPF: '529.982.247-25' },
     } as Contact;
 
-    expect(buildStructuredKnownFields(contact, {}, []).CPF).toBe('529.982.247-25');
+    const known = buildStructuredKnownFields(contact, {}, []);
+    expect(known.CPF).toBe('529.982.247-25');
+    expect(known.customer_identifier).toBe('529.982.247-25');
+  });
+
+  it('keeps current core contact facts ahead of stale custom-field aliases', () => {
+    const contact = {
+      id: 'contact-1',
+      workspace_id: 'workspace-1',
+      name: 'Nome Atual',
+      email: 'atual@example.com',
+      custom_fields: {
+        Nome: 'Nome Antigo',
+        Email: 'antigo@example.com',
+        CPF: '529.982.247-25',
+      },
+    } as Contact;
+
+    const known = buildStructuredKnownFields(contact, {}, []);
+    expect(known.name).toBe('Nome Atual');
+    expect(known.email).toBe('atual@example.com');
+    expect(known.Nome).toBe('Nome Antigo');
+    expect(known.customer_identifier).toBe('529.982.247-25');
   });
 });

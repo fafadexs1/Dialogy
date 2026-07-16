@@ -1,10 +1,15 @@
 import type { AutopilotConfig, KnowledgeBaseDocument } from '@/lib/types';
 import type { Pool } from 'pg';
 import type { AgentToolRuntimeContext } from '@/services/agent-tools/types';
+import type { AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
 import { resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
-import { createAutopilotToolRegistry, type AutopilotToolBridgeDefinition } from './autopilot-tool-bridge';
+import {
+  createAutopilotToolRegistry,
+  type AutopilotToolBridgeDefinition,
+  type NativeToolStatusEvent,
+} from './autopilot-tool-bridge';
 import { RuntimeProviderModelAdapter } from './adapters/runtime-provider';
 import { LmStudioModelAdapter } from './adapters/lm-studio';
 import { WorkflowExecutor } from './executor';
@@ -16,6 +21,7 @@ import type { NodeRuntimeInput, WorkflowDefinition, WorkflowNode } from './types
 import { hashValue, isRecord } from './utils';
 import { validateWorkflowDefinition } from './validator';
 import { isWorkflowRuntimeV2ModeEnabled } from './autopilot-rollout';
+import { hasKnownWorkflowField } from './goal-completion';
 
 export type AutopilotPrimaryRuntimeDependencies = {
   database: Pick<Pool, 'query'>;
@@ -27,6 +33,7 @@ export type AutopilotPrimaryRuntimeDependencies = {
   closeConversation: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   loadState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   saveState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
+  reportToolStatus?: (event: NativeToolStatusEvent) => Promise<void>;
 };
 
 export type RunAutopilotPrimaryInput = {
@@ -46,8 +53,36 @@ export type AutopilotPrimaryDeliveryOutcome = {
   recoveryResponse?: string;
 };
 
+export function authorizeNativeWorkflowConnectedTools(
+  turnPolicy: AutopilotTurnPolicy,
+  connectedToolNames: string[],
+): AutopilotTurnPolicy {
+  if (turnPolicy.toolMode === 'deny') return turnPolicy;
+  const globallyEnabled = new Set(turnPolicy.globallyEnabledToolNames);
+  const connectedAndEnabled = connectedToolNames
+    .map((toolName) => toolName.trim())
+    .filter((toolName) => toolName && globallyEnabled.has(toolName));
+  if (connectedAndEnabled.length === 0) return turnPolicy;
+
+  return {
+    ...turnPolicy,
+    attachedToolNames: Array.from(new Set([
+      ...turnPolicy.attachedToolNames,
+      ...connectedAndEnabled,
+    ])),
+    allowedToolNames: Array.from(new Set([
+      ...turnPolicy.allowedToolNames,
+      ...connectedAndEnabled,
+    ])),
+    reason: 'native_workflow_connected_tools_allowed',
+  };
+}
+
 export function inspectAutopilotPrimaryDeliveryOutcome(
-  execution: { executionPath?: Array<Record<string, unknown>> },
+  execution: {
+    executionPath?: Array<Record<string, unknown>>;
+    failure?: { message?: string; details?: Record<string, unknown> };
+  },
 ): AutopilotPrimaryDeliveryOutcome {
   const path = Array.isArray(execution.executionPath) ? execution.executionPath : [];
   let responseSent = false;
@@ -79,7 +114,36 @@ export function inspectAutopilotPrimaryDeliveryOutcome(
     }
   }
 
+  if (!recoveryResponse) {
+    recoveryResponse = buildAutopilotPrimaryFailureRecovery(execution.failure);
+  }
+
   return { responseSent, handoffCompleted, conversationClosed, recoveryResponse };
+}
+
+export function buildAutopilotPrimaryFailureRecovery(
+  failure?: { message?: string; details?: Record<string, unknown> },
+): string | undefined {
+  const detailsMessage = typeof failure?.details?.message === 'string'
+    ? failure.details.message
+    : '';
+  const diagnostic = `${failure?.message || ''} ${detailsMessage}`;
+  if (/\[tool_policy:confirmation_required\]|confirmacao explicita/i.test(diagnostic)) {
+    return 'A acao ainda nao foi executada. Para eu prosseguir com seguranca, responda "confirmo" autorizando a acao solicitada.';
+  }
+  if (/\[tool_policy:confirmation_context_missing\]/i.test(diagnostic)) {
+    return 'Nao consegui vincular sua confirmacao a uma acao especifica. Diga qual acao voce autoriza e responda "confirmo".';
+  }
+  if (/INVALID_TOOL_ARGUMENTS|JSON schema validation/i.test(diagnostic)) {
+    return 'Nao consegui executar a acao porque um dos dados enviados para a ferramenta estava em formato invalido. Nenhuma alteracao foi aplicada. Vou corrigir os dados antes de tentar novamente.';
+  }
+  if (/TOOL_DEPENDENCY_MISSING|IP WAN atual|Informe o contrato antes/i.test(diagnostic)) {
+    return 'Nao consegui executar a acao porque nao foi possivel confirmar o IP do roteador vinculado ao contrato selecionado. Nenhuma alteracao foi aplicada.';
+  }
+  if (/TOOL_DEPENDENCY_FAILED/i.test(diagnostic)) {
+    return 'Nao consegui executar a acao porque a consulta necessaria para identificar o roteador falhou. Nenhuma alteracao foi aplicada.';
+  }
+  return undefined;
 }
 
 function modelConfig(node: WorkflowNode) {
@@ -143,18 +207,42 @@ function toolDefinitions(nodes: WorkflowNode[]): AutopilotToolBridgeDefinition[]
   return nodes.flatMap((node) => {
     const name = String(node.config.name || node.config.action || '').trim();
     if (!name) return [];
+    const inputSchema = isRecord(node.config.inputSchema) ? node.config.inputSchema : {};
+    const requiredInputs = Array.isArray(inputSchema.required)
+      ? inputSchema.required.map(String)
+      : [];
+    const inputProperties = isRecord(inputSchema.properties) ? inputSchema.properties : {};
+    const configuredRequiredSlots = Array.isArray(node.config.requiredSlots)
+      ? node.config.requiredSlots.map(String).map((slot) => slot.trim()).filter(Boolean)
+      : [];
+    const requiredSlots = requiredInputs.includes('client_ip') || 'client_ip' in inputProperties
+      ? Array.from(new Set([...configuredRequiredSlots, 'customer_identifier']))
+      : configuredRequiredSlots;
     return [{
       name: name as AutopilotToolBridgeDefinition['name'],
       description: String(node.config.description || node.name),
+      class: typeof node.config.class === 'string'
+        ? node.config.class as AutopilotToolBridgeDefinition['class']
+        : undefined,
       riskLevel: node.config.riskLevel === 'high' || node.config.riskLevel === 'medium' ? node.config.riskLevel : 'low',
       idempotent: node.config.idempotent === true,
       timeoutMs: Number(node.config.timeoutMs || 20_000),
       maxAttempts: Number(node.config.maxAttempts || 1),
       requiresHumanApproval: node.config.requiresConfirmation === true,
-      inputSchema: isRecord(node.config.inputSchema) ? node.config.inputSchema : {},
+      requiredSlots,
+      inputSchema,
       outputSchema: isRecord(node.config.outputSchema) ? node.config.outputSchema : {},
     }];
   });
+}
+
+export function filterNativeToolsByKnownFields(
+  definitions: AutopilotToolBridgeDefinition[],
+  knownFields: Record<string, unknown>,
+): AutopilotToolBridgeDefinition[] {
+  return definitions.filter((definition) => (
+    (definition.requiredSlots || []).every((slot) => hasKnownWorkflowField(slot, knownFields))
+  ));
 }
 
 function assertGuardrailSafe(value: Record<string, unknown>) {
@@ -245,11 +333,29 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       modelNode: context.modelNode,
     }),
     resolveToolRegistry: async (context) => {
-      const definitions = toolDefinitions(context.toolNodes);
+      const knownFields = isRecord(input.dependencies.structuredMemory?.knownFields)
+        ? input.dependencies.structuredMemory.knownFields
+        : {};
+      const definitions = filterNativeToolsByKnownFields(
+        toolDefinitions(context.toolNodes),
+        knownFields,
+      );
+      const nativeToolContext: AgentToolRuntimeContext = {
+        ...input.dependencies.toolContext,
+        // The native workflow definition is the authority for tools connected
+        // to this AI node. Keep the global agent allowlist as the second gate,
+        // so a stale legacy flow_graph cannot reject a valid native connection.
+        turnPolicy: authorizeNativeWorkflowConnectedTools(
+          input.dependencies.toolContext.turnPolicy,
+          definitions.map((definition) => definition.name),
+        ),
+      };
       return createAutopilotToolRegistry({
-        context: input.dependencies.toolContext,
+        context: nativeToolContext,
         toolNames: definitions.map((definition) => definition.name),
         definitions,
+        knownFields,
+        reportToolStatus: input.dependencies.reportToolStatus,
       });
     },
     loadMemory: async () => ({

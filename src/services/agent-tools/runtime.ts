@@ -23,6 +23,7 @@ import {
 } from '@/services/orchestrator/runtime';
 import { getWorkspaceTemplates } from '@/lib/workspace-config';
 import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
+import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
 import { evaluateAgentToolPolicy } from './policy';
 import { abortActiveProcedures } from '@/services/autopilot/procedure-store';
@@ -31,6 +32,8 @@ import { clearPendingToolConfirmation, setPendingToolConfirmation } from '@/serv
 import { redactSensitiveLogValue } from '@/lib/observability/redaction';
 import { recordDecisionOutcomesForChat, type AutopilotOutcomeTrigger } from '@/services/autopilot/outcome-tracker';
 import type { PoolClient } from 'pg';
+import { validateSchema } from 'genkit/schema';
+import { normalizeToolArgumentsFromJsonSchema } from '@/services/workflow-runtime/tool-arguments';
 
 const MAX_ACTIONS_PER_MESSAGE = 2;
 const MAX_INTERNAL_NOTE_CHARS = 500;
@@ -140,24 +143,41 @@ function resolveRequestedToolName(action: AgentToolAction): string {
   return action.type;
 }
 
-async function resolveActionIdempotence(
+type ActionExecutionPolicy = {
+  idempotent: boolean;
+  useDurableClaim: boolean;
+};
+
+async function resolveActionExecutionPolicy(
   context: AgentToolRuntimeContext,
   action: AgentToolAction,
-): Promise<boolean> {
+): Promise<ActionExecutionPolicy> {
   const definition = getAgentToolDefinition(action.type);
-  if (action.type !== 'mcp_call_tool') return Boolean(definition?.idempotent);
+  if (action.type !== 'mcp_call_tool') {
+    return {
+      idempotent: Boolean(definition?.idempotent),
+      useDurableClaim: !['read_only', 'compute_only', 'retrieval'].includes(definition?.class || ''),
+    };
+  }
 
   const qualifiedName = action.payload?.toolName?.trim() || '';
   const parsed = parseQualifiedMcpToolName(qualifiedName);
-  if (!parsed) return false;
+  if (!parsed) return { idempotent: false, useDurableClaim: true };
   try {
     const config = await getMcpWorkspaceConfig(context.workspaceId);
     const server = config.servers.find((item) => item.id === parsed.serverId && item.isActive);
     const tool = server?.tools?.find((item) => item.qualifiedName === qualifiedName);
-    return classifyMcpToolSafety(qualifiedName, tool).idempotent;
+    const safety = classifyMcpToolSafety(qualifiedName, tool);
+    return {
+      idempotent: safety.idempotent,
+      // Durable claims protect mutations from duplicate side effects. Reads
+      // are changing snapshots and must execute again (not reuse a persisted
+      // pending result) when the agent polls an asynchronous command.
+      useDurableClaim: !['read_only', 'compute_only', 'retrieval'].includes(safety.class),
+    };
   } catch (error) {
     console.warn('[AGENT_TOOL_IDEMPOTENCY] Failed to resolve MCP safety:', error);
-    return false;
+    return { idempotent: false, useDurableClaim: true };
   }
 }
 
@@ -409,13 +429,13 @@ async function runTransferChatTool(
         chatId: context.chat.id,
         ...target,
       },
-      {
+      createTrustedActorContext({
         user: {
           id: context.systemAgentId,
           name: context.systemAgentName,
         },
         isSystemAgent: true,
-      }
+      })
     );
 
     if (!result.success) {
@@ -985,6 +1005,29 @@ async function runMcpCallTool(
     if (!normalizedArguments.success) {
       return reject(action, normalizedArguments.error);
     }
+    const schemaArguments = normalizeToolArgumentsFromJsonSchema(
+      normalizedArguments.arguments,
+      tool.inputSchema,
+    );
+    if (tool.inputSchema && Object.keys(tool.inputSchema).length > 0) {
+      const validation = validateSchema(schemaArguments, { jsonSchema: tool.inputSchema });
+      if (!validation.valid) {
+        const required = Array.isArray(tool.inputSchema.required)
+          ? tool.inputSchema.required.map(String)
+          : [];
+        return reject(
+          action,
+          `Argumentos invalidos para ${qualifiedName}. Campos esperados: ${required.join(', ') || 'conforme o schema sincronizado'}.`,
+        );
+      }
+    }
+    const normalizedAction: typeof action = {
+      ...action,
+      payload: {
+        ...action.payload,
+        arguments: schemaArguments,
+      },
+    };
 
     const callStartedAt = Date.now();
     let result: Awaited<ReturnType<typeof callMcpServerTool>>;
@@ -992,7 +1035,7 @@ async function runMcpCallTool(
       result = await callMcpServerTool({
         server,
         toolName: parsed.toolName,
-        arguments: normalizedArguments.arguments,
+        arguments: schemaArguments,
       });
       await recordMcpServerHealth({
         workspaceId: context.workspaceId,
@@ -1028,7 +1071,7 @@ async function runMcpCallTool(
       return {
         toolName: qualifiedName as any,
         status: 'error',
-        input: action,
+        input: normalizedAction,
         error: textError || 'Ferramenta MCP retornou erro.',
         output: JSON.parse(JSON.stringify({
           content,
@@ -1041,7 +1084,7 @@ async function runMcpCallTool(
     return {
       toolName: qualifiedName as any,
       status: 'success',
-      input: action,
+      input: normalizedAction,
       output: JSON.parse(JSON.stringify({
         content,
         structuredContent: (result as any).structuredContent || null,
@@ -1150,27 +1193,30 @@ export async function runAgentTools(
       continue;
     }
 
-    const actionIdempotent = await resolveActionIdempotence(runtimeContext, action);
+    const executionPolicy = await resolveActionExecutionPolicy(runtimeContext, action);
+    const actionIdempotent = executionPolicy.idempotent;
     let durableClaim: DurableToolClaim = { kind: 'disabled' };
-    try {
-      durableClaim = await claimDurableAgentToolExecution({
-        workspaceId: runtimeContext.workspaceId,
-        chatId: runtimeContext.chat.id,
-        orchestratorRunId: runtimeContext.orchestratorRunId,
-        action,
-        toolName: requestedToolName,
-        idempotent: actionIdempotent,
-      });
-    } catch (error) {
-      console.error('[AGENT_TOOL_IDEMPOTENCY] Failed to acquire durable execution claim:', error);
-      if (!actionIdempotent) {
-        const result = reject(
+    if (executionPolicy.useDurableClaim) {
+      try {
+        durableClaim = await claimDurableAgentToolExecution({
+          workspaceId: runtimeContext.workspaceId,
+          chatId: runtimeContext.chat.id,
+          orchestratorRunId: runtimeContext.orchestratorRunId,
           action,
-          '[tool_idempotency:unavailable] Nao foi possivel garantir execucao unica. A acao foi bloqueada por seguranca.',
-        );
-        await auditToolResult(runtimeContext, result, Date.now() - startedAt);
-        results.push(result);
-        continue;
+          toolName: requestedToolName,
+          idempotent: actionIdempotent,
+        });
+      } catch (error) {
+        console.error('[AGENT_TOOL_IDEMPOTENCY] Failed to acquire durable execution claim:', error);
+        if (!actionIdempotent) {
+          const result = reject(
+            action,
+            '[tool_idempotency:unavailable] Nao foi possivel garantir execucao unica. A acao foi bloqueada por seguranca.',
+          );
+          await auditToolResult(runtimeContext, result, Date.now() - startedAt);
+          results.push(result);
+          continue;
+        }
       }
     }
 

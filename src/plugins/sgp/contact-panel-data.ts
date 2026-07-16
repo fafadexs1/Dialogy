@@ -24,6 +24,7 @@ type SGPSupportContractSnapshot = {
     serial: string | null;
     connectedAt: string | null;
     contractDate: string | null;
+    radiusLookupStatus: 'online' | 'offline' | 'unavailable' | 'missing_login' | null;
 };
 
 function parseDateValue(value: string | null | undefined): number | null {
@@ -414,6 +415,7 @@ function buildSupportContractSnapshot(rawContract: any): SGPSupportContractSnaps
         serial: normalizeText(rawContract?.servico_onu_serial),
         connectedAt: normalizeText(rawContract?.rad_dataconexao),
         contractDate: normalizeText(rawContract?.contrato_cadastro),
+        radiusLookupStatus: normalizeText(rawContract?.radius_lookup_status) as SGPSupportContractSnapshot['radiusLookupStatus'],
     };
 }
 
@@ -456,6 +458,7 @@ function mergeSupportContractSnapshots(
         serial: preferred.serial || fallback.serial,
         connectedAt: preferred.connectedAt || fallback.connectedAt,
         contractDate: preferred.contractDate || fallback.contractDate,
+        radiusLookupStatus: preferred.radiusLookupStatus || fallback.radiusLookupStatus,
     };
 }
 
@@ -523,10 +526,14 @@ function buildContractDetails(
         : null;
     const rawStatus = normalizeText(rawContract?.status) || supportContract?.rawStatus || null;
     const primaryConnectionStatus = normalizeConnectionStatus(connection?.status);
-    const connectionStatus =
-        primaryConnectionStatus !== 'unknown' ? primaryConnectionStatus : supportContract?.connectionStatus || 'unknown';
+    const hasAuthoritativeRadiusLookup = Boolean(supportContract?.radiusLookupStatus);
+    const connectionStatus = hasAuthoritativeRadiusLookup
+        ? supportContract?.connectionStatus || 'unknown'
+        : primaryConnectionStatus !== 'unknown' ? primaryConnectionStatus : supportContract?.connectionStatus || 'unknown';
     const statusTone = normalizeContractStatusTone(rawStatus);
-    const ip = supportContract?.ip || normalizeText(connection?.ip) || normalizeText(primaryService?.ip);
+    const ip = hasAuthoritativeRadiusLookup
+        ? supportContract?.ip || null
+        : supportContract?.ip || normalizeText(connection?.ip) || normalizeText(primaryService?.ip);
     const ipv6 = supportContract?.ipv6 || null;
     const delegatedIpv6 = supportContract?.delegatedIpv6 || null;
     const mac = normalizeText(primaryService?.mac) || supportContract?.mac || null;

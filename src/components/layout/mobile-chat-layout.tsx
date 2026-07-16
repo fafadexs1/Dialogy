@@ -838,7 +838,6 @@ export default function MobileChatLayout({
       const result = await getInitialChatsData({
         workspaceId: initialUser.activeWorkspaceId,
         selectedChatId: initialChatId,
-        userIdOverride: initialUser.id,
         workspaceTimezone: initialUser.activeWorkspaceTimezone,
       });
       if (result.error) throw new Error(result.error);

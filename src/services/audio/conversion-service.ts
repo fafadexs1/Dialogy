@@ -4,6 +4,7 @@ import os from 'os';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { createClient } from '@/lib/supabase/server';
+import { fetchSafeRemote, readResponseBodyLimited } from '@/lib/security/safe-remote-url';
 // @ts-ignore
 import ffmpegPath from 'ffmpeg-static';
 // @ts-ignore
@@ -55,11 +56,21 @@ export interface ConversionResult {
     error?: string;
 }
 
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+const FFMPEG_TIMEOUT_MS = 30_000;
+const ALLOWED_AUDIO_TYPES = new Set([
+    'audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/x-wav',
+]);
+
 /**
  * Converts audio from WebM to OGG+Opus format for WhatsApp compatibility.
  * Can be called directly from Server Actions or API Routes.
  */
-export async function convertAudioFile(audioUrl: string, bucket: string = 'temp-media'): Promise<ConversionResult> {
+export async function convertAudioFile(
+    audioUrl: string,
+    workspaceId: string,
+    allowedHosts: readonly string[],
+): Promise<ConversionResult> {
     const startTime = Date.now();
 
     try {
@@ -72,12 +83,17 @@ export async function convertAudioFile(audioUrl: string, bucket: string = 'temp-
         console.log(`[AUDIO_CONVERT_SERVICE] Starting conversion for: ${audioUrl}`);
 
         // 1. Download the audio file
-        const audioResponse = await fetch(audioUrl);
+        const audioResponse = await fetchSafeRemote(audioUrl, { cache: 'no-store' }, {
+            allowedHosts,
+            timeoutMs: 10_000,
+            maxRedirects: 2,
+        });
         if (!audioResponse.ok) {
             throw new Error(`Failed to download audio: ${audioResponse.statusText}`);
         }
-
-        const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+        const contentType = (audioResponse.headers.get('content-type') || '').split(';')[0].toLowerCase();
+        if (!ALLOWED_AUDIO_TYPES.has(contentType)) throw new Error('Unsupported audio MIME type.');
+        const audioBuffer = Buffer.from(await readResponseBodyLimited(audioResponse, MAX_AUDIO_BYTES));
         console.log(`[AUDIO_CONVERT_SERVICE] Downloaded audio file, size: ${audioBuffer.length} bytes`);
 
         // 2. Create temp files for input and output
@@ -93,15 +109,24 @@ export async function convertAudioFile(audioUrl: string, bucket: string = 'temp-
 
             // 3. Convert using FFmpeg
             await new Promise<void>((resolve, reject) => {
-                ffmpeg(inputPath)
+                const command = ffmpeg(inputPath)
                     .audioCodec('libopus')
                     .audioChannels(1)
                     .audioBitrate('48k')
                     .audioFrequency(48000)
                     .format('ogg')
-                    .on('error', (err) => reject(err))
-                    .on('end', () => resolve())
-                    .save(outputPath);
+                    .on('end', () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    });
+                const timeout = setTimeout(() => {
+                    command.kill('SIGKILL');
+                    reject(new Error('Audio conversion timed out.'));
+                }, FFMPEG_TIMEOUT_MS);
+                command.on('error', (error) => {
+                    clearTimeout(timeout);
+                    reject(error);
+                }).save(outputPath);
             });
 
             // 4. Read converted file
@@ -109,25 +134,30 @@ export async function convertAudioFile(audioUrl: string, bucket: string = 'temp-
 
             // 5. Upload to Supabase storage
             const supabase = await createClient();
-            const convertedFileName = `audio_converted_${Date.now()}.ogg`;
+            const bucket = process.env.AUDIO_OUTPUT_BUCKET || 'temp-media';
+            const convertedFileName = `workspaces/${workspaceId}/converted/${randomUUID()}.ogg`;
 
             const { error: uploadError } = await supabase.storage
                 .from(bucket)
                 .upload(convertedFileName, convertedBuffer, {
                     contentType: 'audio/ogg',
-                    upsert: true
+                    upsert: false
                 });
 
             if (uploadError) {
                 throw new Error(`Failed to upload converted audio: ${uploadError.message}`);
             }
 
-            // 6. Get public URL
-            const { data: publicUrlData } = supabase.storage
+            // 6. Return an expiring URL; the output bucket remains private.
+            const { data: signedUrlData, error: signedUrlError } = await supabase.storage
                 .from(bucket)
-                .getPublicUrl(convertedFileName);
+                .createSignedUrl(convertedFileName, 300);
 
-            const convertedUrl = publicUrlData.publicUrl;
+            if (signedUrlError || !signedUrlData?.signedUrl) {
+                throw new Error(`Failed to sign converted audio: ${signedUrlError?.message || 'unknown error'}`);
+            }
+
+            const convertedUrl = signedUrlData.signedUrl;
             console.log(`[AUDIO_CONVERT_SERVICE] Success: ${convertedUrl}`);
 
             return {

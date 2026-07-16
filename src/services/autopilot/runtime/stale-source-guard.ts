@@ -35,6 +35,8 @@ export async function isAutopilotSourceMessageStillCurrent(input: {
          WHERE id = $1
            AND chat_id = $2
            AND from_me = false
+           AND sender_system_agent_id IS NULL
+           AND COALESCE(type, '') <> 'system'
          LIMIT 1
        ),
        newer_customer_message AS (
@@ -43,6 +45,8 @@ export async function isAutopilotSourceMessageStillCurrent(input: {
          JOIN source_message source ON true
          WHERE m.chat_id = $2
            AND m.from_me = false
+           AND m.sender_system_agent_id IS NULL
+           AND COALESCE(m.type, '') <> 'system'
            AND m.created_at >= source.created_at
            AND m.id <> source.id
          LIMIT 1

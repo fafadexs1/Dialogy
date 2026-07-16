@@ -4,7 +4,7 @@ const { fetchEvolutionAPIMock } = vi.hoisted(() => ({
   fetchEvolutionAPIMock: vi.fn(),
 }));
 
-vi.mock('@/actions/evolution-api', () => ({
+vi.mock('@/lib/whatsapp/evolution-api-client', () => ({
   fetchEvolutionAPI: fetchEvolutionAPIMock,
 }));
 

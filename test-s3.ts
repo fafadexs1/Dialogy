@@ -2,11 +2,11 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 
 const s3Client = new S3Client({
-    region: 'us-east-1',
-    endpoint: 'https://storage.klyraai.com.br',
+    region: process.env.PRIVATE_S3_REGION || 'us-east-1',
+    endpoint: process.env.PRIVATE_S3_ENDPOINT,
     credentials: {
-        accessKeyId: 'jS5Uv7JIFvyFU5j2TlfC',
-        secretAccessKey: 'gVS1WwLNJz3Xg7M4jomTT1b0HQ3C13CZxwnUkIB8',
+        accessKeyId: process.env.PRIVATE_S3_ACCESS_KEY_ID || '',
+        secretAccessKey: process.env.PRIVATE_S3_SECRET_ACCESS_KEY || '',
     },
     forcePathStyle: true,
 });
@@ -16,11 +16,10 @@ async function testUpload() {
         console.log('Testing upload...');
         const buffer = Buffer.from('test text content');
         const command = new PutObjectCommand({
-            Bucket: 'crm',
+            Bucket: process.env.PRIVATE_S3_BUCKET,
             Key: 'test/test.txt',
             Body: buffer,
             ContentType: 'text/plain',
-            ACL: 'public-read',
         });
 
         await s3Client.send(command);

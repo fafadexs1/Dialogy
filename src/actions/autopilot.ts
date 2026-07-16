@@ -25,7 +25,7 @@ import { DOCUMENT_EMBEDDING_DIMENSIONS, DOCUMENT_EMBEDDING_MODEL } from '@/lib/e
 import { ingestKnowledgeBaseDocument } from '@/services/rag/document-ingestion';
 import { hasKnowledgeDocumentIndexChanged } from '@/services/rag/knowledge-document';
 import { VectorStore } from '@/lib/vector-store';
-import { isUnsafeAsCustomerFacingKnowledge } from '@/services/rag/document-safety';
+import { isCustomerConversationArtifact, isUnsafeAsCustomerFacingKnowledge } from '@/services/rag/document-safety';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import { buildRagLabCases, summarizeRagLabResults, type RagLabCaseResult, type RagLabReport } from '@/services/rag/evaluation';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
@@ -36,6 +36,7 @@ import { listMcpToolsForWorkspace } from '@/services/mcp/store';
 import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
 import { getAiModelRuntimeProvider, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-rewrite';
+import { learnFromConversation } from '@/ai/flows/conversation-learning';
 import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
 import {
     generateNativeWorkflowAiProposal,
@@ -3800,89 +3801,235 @@ export async function revertAutopilotCausalPatternApplication(input: {
     }
 }
 
-export async function addDocumentToKnowledgeBase(
-    workspaceId: string,
-    title: string,
-    content: string
-): Promise<{ success: boolean; error?: string }> {
+export async function generateConversationKnowledgeDraft(input: {
+    workspaceId: string;
+    configId: string;
+    chatId: string;
+}): Promise<{
+    document: KnowledgeBaseDocument | null;
+    reason?: string;
+    collectionName?: string | null;
+    error?: string;
+}> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return { success: false, error: 'Usuário não autenticado.' };
+    if (!user) return { document: null, error: 'Usuario nao autenticado.' };
+    if (!await isWorkspaceMember(user.id, input.workspaceId)) {
+        return { document: null, error: 'Acesso nao autorizado.' };
     }
 
-    if (!await isWorkspaceMember(user.id, workspaceId)) {
-        return { success: false, error: 'Acesso não autorizado.' };
-    }
-
-    // Try to find the user's own PRIVATE agent first, then their own SHARED, then fallback to primary
     try {
         const configRes = await db.query(
-            `SELECT * FROM autopilot_configs 
-             WHERE workspace_id = $1 
-             ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END, is_private DESC, is_primary DESC, created_at ASC 
+            `SELECT id, workspace_id, name, gemini_api_key, knowledge_base_documents, knowledge_collections, enabled_tool_names
+             FROM autopilot_configs
+             WHERE id = $1 AND workspace_id = $2
              LIMIT 1`,
-            [workspaceId, user.id]
+            [input.configId, input.workspaceId],
         );
+        if (configRes.rowCount === 0) return { document: null, error: 'Agente nao encontrado neste workspace.' };
+        const config = configRes.rows[0];
 
-        if (configRes.rowCount === 0) {
-            return { success: false, error: 'Nenhum agente de IA encontrado neste workspace.' };
+        const chatRes = await db.query(
+            `SELECT c.id, c.workspace_id, c.status, c.close_notes, t.label AS close_reason_label
+             FROM chats c
+             LEFT JOIN tags t ON t.id = c.close_reason_tag_id
+             WHERE c.id = $1 AND c.workspace_id = $2
+             LIMIT 1`,
+            [input.chatId, input.workspaceId],
+        );
+        if (chatRes.rowCount === 0) return { document: null, error: 'Conversa nao encontrada.' };
+
+        const messagesRes = await db.query(
+            `SELECT content, from_me, type
+             FROM messages
+             WHERE chat_id = $1
+               AND content IS NOT NULL
+               AND btrim(content) <> ''
+             ORDER BY created_at ASC
+             LIMIT 160`,
+            [input.chatId],
+        );
+        const transcript = messagesRes.rows
+            .filter((row) => row.type !== 'system' && row.type !== 'tool')
+            .map((row) => `${row.from_me ? 'Atendente' : 'Cliente'}: ${String(row.content).trim()}`)
+            .join('\n');
+        if (transcript.length < 80) {
+            return { document: null, error: 'A conversa ainda nao tem conteudo suficiente para gerar aprendizado.' };
         }
 
-        const config = configRes.rows[0];
-        const currentDocs: KnowledgeBaseDocument[] = typeof config.knowledge_base_documents === 'string'
-            ? JSON.parse(config.knowledge_base_documents)
-            : Array.isArray(config.knowledge_base_documents)
-                ? config.knowledge_base_documents
-                : [];
+        const currentDocs = parseKnowledgeBaseDocuments(config.knowledge_base_documents);
+        const existingKnowledge = currentDocs
+            .filter((document) => document.status !== 'archived' && document.status !== 'expired')
+            .slice(0, 40)
+            .map((document) => [
+                `Titulo: ${document.name}`,
+                document.summary ? `Resumo: ${document.summary}` : '',
+                document.canonicalAnswer ? `Resposta canonica: ${document.canonicalAnswer}` : '',
+            ].filter(Boolean).join('\n'))
+            .join('\n\n');
+        const chat = chatRes.rows[0];
+        const closeContext = [
+            `Status: ${chat.status || 'nao informado'}`,
+            chat.close_reason_label ? `Motivo: ${chat.close_reason_label}` : '',
+            chat.close_notes ? `Observacoes: ${chat.close_notes}` : '',
+        ].filter(Boolean).join('\n');
 
-        const docId = uuidv4();
-        const newDoc: KnowledgeBaseDocument = {
-            id: docId,
-            name: title,
-            content: content,
+        const runtime = await resolveWorkspaceAiExecutionContext(input.workspaceId, input.configId);
+        const apiKeyCandidates = await resolveAiProviderKeyCandidates({
+            config,
+            workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
+        });
+        const learned = await learnFromConversation({
+            transcript,
+            closeContext,
+            existingKnowledge,
+            model: runtime.model,
+            apiKeyCandidates,
+        });
+        if (!learned.shouldStore) {
+            return { document: null, reason: learned.reason || 'A conversa nao tem uma resolucao reutilizavel confirmada.' };
+        }
+
+        const collections = parseKnowledgeCollections(config.knowledge_collections);
+        const defaultCollection = collections.find((collection) => collection.isDefault) || collections[0] || null;
+        const explicitToolNames = new Set(
+            Array.from(transcript.matchAll(/@([a-zA-Z0-9_.:-]+)/g)).map((match) => match[1]),
+        );
+        const document: KnowledgeBaseDocument = {
+            id: uuidv4(),
+            name: learned.name.trim(),
+            content: learned.content.trim(),
             sourceFormat: 'markdown',
             uploaded_at: new Date().toISOString(),
-            tokens: 0 // We could estimate tokens here if needed
+            updatedAt: new Date().toISOString(),
+            tokens: 0,
+            summary: learned.summary.trim(),
+            category: learned.category.trim() || 'uncategorized',
+            tags: learned.tags.map((tag) => tag.trim()).filter(Boolean),
+            status: 'draft',
+            source: `conversation:${input.chatId}`,
+            owner: user.id,
+            workflowHints: learned.workflowHints.map((hint) => hint.trim()).filter(Boolean),
+            requiredTools: learned.requiredTools
+                .map((tool) => tool.replace(/^@/, '').trim())
+                .filter((tool) => tool && explicitToolNames.has(tool)),
+            canonicalAnswer: learned.canonicalAnswer.trim(),
+            contextRole: learned.contextRole,
+            collectionIds: defaultCollection ? [defaultCollection.id] : [],
         };
+        return {
+            document,
+            reason: learned.reason,
+            collectionName: defaultCollection?.name || null,
+        };
+    } catch (error) {
+        console.error('[GENERATE_CONVERSATION_KNOWLEDGE] Erro ao analisar conversa:', error);
+        return { document: null, error: error instanceof Error ? error.message : 'Falha ao analisar a conversa.' };
+    }
+}
 
-        const updatedDocs = [...currentDocs, newDoc];
+export async function publishConversationKnowledgeDraft(input: {
+    workspaceId: string;
+    configId: string;
+    chatId: string;
+    document: KnowledgeBaseDocument;
+}): Promise<{ success: boolean; error?: string }> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuario nao autenticado.' };
+    if (!await isWorkspaceMember(user.id, input.workspaceId)) {
+        return { success: false, error: 'Acesso nao autorizado.' };
+    }
+
+    try {
+        const [configRes, chatRes] = await Promise.all([
+            db.query(
+                `SELECT id, knowledge_base_documents, knowledge_collections
+                 FROM autopilot_configs
+                 WHERE id = $1 AND workspace_id = $2
+                 LIMIT 1`,
+                [input.configId, input.workspaceId],
+            ),
+            db.query('SELECT id FROM chats WHERE id = $1 AND workspace_id = $2 LIMIT 1', [input.chatId, input.workspaceId]),
+        ]);
+        if (configRes.rowCount === 0) return { success: false, error: 'Agente nao encontrado neste workspace.' };
+        if (chatRes.rowCount === 0) return { success: false, error: 'Conversa nao encontrada.' };
+
+        const now = new Date().toISOString();
+        const collections = parseKnowledgeCollections(configRes.rows[0].knowledge_collections);
+        const allowedCollectionIds = new Set(collections.map((collection) => collection.id));
+        const contextRole = ['fact', 'procedure', 'policy', 'persona'].includes(String(input.document.contextRole))
+            ? input.document.contextRole
+            : 'procedure';
+        const document: KnowledgeBaseDocument = {
+            ...input.document,
+            id: input.document.id || uuidv4(),
+            name: String(input.document.name || '').trim(),
+            content: String(input.document.content || '').trim(),
+            summary: String(input.document.summary || '').trim(),
+            canonicalAnswer: String(input.document.canonicalAnswer || '').trim(),
+            category: String(input.document.category || 'uncategorized').trim(),
+            tags: (input.document.tags || []).map((tag) => String(tag).trim()).filter(Boolean).slice(0, 12),
+            workflowHints: (input.document.workflowHints || []).map((hint) => String(hint).trim()).filter(Boolean).slice(0, 12),
+            requiredTools: (input.document.requiredTools || []).map((tool) => String(tool).replace(/^@/, '').trim()).filter(Boolean).slice(0, 12),
+            collectionIds: (input.document.collectionIds || []).filter((id) => allowedCollectionIds.has(id)),
+            contextRole,
+            source: `conversation:${input.chatId}`,
+            sourceFormat: 'markdown',
+            status: 'active',
+            owner: user.id,
+            uploaded_at: input.document.uploaded_at || now,
+            updatedAt: now,
+        };
+        if (!document.name || !document.content || !document.summary || !document.canonicalAnswer) {
+            return { success: false, error: 'Preencha titulo, resumo, orientacao e resposta sugerida.' };
+        }
+        if (isCustomerConversationArtifact(document)) {
+            return { success: false, error: 'A nota ainda parece conter o historico bruto. Resuma como orientacao reutilizavel.' };
+        }
+
+        const currentDocs = parseKnowledgeBaseDocuments(configRes.rows[0].knowledge_base_documents);
+        const source = `conversation:${input.chatId}`;
+        const existingIndex = currentDocs.findIndex((item) => item.source === source);
+        const updatedDocs = [...currentDocs];
+        if (existingIndex >= 0) updatedDocs[existingIndex] = { ...document, id: currentDocs[existingIndex].id };
+        else updatedDocs.push(document);
+        const persistedDocument = existingIndex >= 0 ? updatedDocs[existingIndex] : document;
 
         await db.query(
             'UPDATE autopilot_configs SET knowledge_base_documents = $1, updated_at = NOW() WHERE id = $2',
-            [JSON.stringify(updatedDocs), config.id]
+            [JSON.stringify(updatedDocs), input.configId],
         );
 
         try {
             if (shouldEnqueueJob('ai_document_ingest')) {
                 await enqueueAiDocumentIngest({
-                    workspaceId,
-                    autopilotConfigId: config.id,
-                    documentId: docId,
-                    documentName: title,
-                    content,
-                    document: newDoc,
+                    workspaceId: input.workspaceId,
+                    autopilotConfigId: input.configId,
+                    documentId: persistedDocument.id,
+                    documentName: persistedDocument.name,
+                    content: persistedDocument.content,
+                    document: persistedDocument,
                 });
             } else {
                 await ingestKnowledgeBaseDocument({
-                    workspaceId,
-                    autopilotConfigId: config.id,
-                    documentId: docId,
-                    documentName: title,
-                    content,
-                    document: newDoc,
+                    workspaceId: input.workspaceId,
+                    autopilotConfigId: input.configId,
+                    documentId: persistedDocument.id,
+                    documentName: persistedDocument.name,
+                    content: persistedDocument.content,
+                    document: persistedDocument,
                 });
             }
         } catch (ragError) {
-            console.error('[RAG] Failed to enqueue document ingestion:', ragError);
+            console.error('[RAG] Falha ao indexar aprendizado da conversa:', ragError);
         }
 
         revalidatePath('/autopilot');
+        revalidatePath(`/autopilot/${input.configId}`);
         return { success: true };
-
     } catch (error) {
-        console.error('[ADD_DOC_KB] Erro ao adicionar documento:', error);
-        return { success: false, error: 'Falha ao salvar o documento na base de conhecimento.' };
+        console.error('[PUBLISH_CONVERSATION_KNOWLEDGE] Erro ao publicar aprendizado:', error);
+        return { success: false, error: 'Falha ao publicar a nota na base de conhecimento.' };
     }
 }

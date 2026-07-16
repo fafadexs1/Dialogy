@@ -13,6 +13,7 @@ import type {
 import type { ToolRegistry } from './tools';
 import { hashValue, isRecord, stableStringify } from './utils';
 import { responseRequestsMoreCustomerInput } from '@/services/autopilot/close-intent';
+import { toolInputSchemaForPrompt } from './tool-arguments';
 
 export type AgentRuntimeContext = {
   config: AgentNodeConfig;
@@ -36,7 +37,9 @@ function buildToolDescription(registry: ToolRegistry) {
   return registry.list().map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: toJsonSchema({ schema: tool.inputSchema }) || {},
+    inputSchema: toolInputSchemaForPrompt(
+      tool.inputJsonSchema || toJsonSchema({ schema: tool.inputSchema }) || {},
+    ),
     riskLevel: tool.riskLevel,
     requiresConfirmation: tool.requiresConfirmation,
   }));
@@ -83,7 +86,7 @@ export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
     '1. Use apenas fatos do contexto, memória, conhecimento e resultados confirmados de ferramentas.',
     '2. Para consultar ou alterar sistemas externos, retorne tool_call; não execute nem invente o resultado.',
     '3. Use somente as ferramentas listadas e forneça todos os argumentos exigidos.',
-    '4. Não repita uma ferramenta com os mesmos argumentos quando o resultado já estiver disponível.',
+    '4. Não repita uma ferramenta com os mesmos argumentos quando o resultado terminal já estiver disponível. Se uma consulta retornar pending, queued, sent, running ou processing, consulte novamente até obter um estado terminal ou atingir o limite.',
     '5. Peça ao usuário apenas informações realmente ausentes.',
     '6. Só retorne final quando os critérios de conclusão forem atendidos.',
     '7. Nunca afirme que uma ação foi concluída antes da confirmação da ferramenta.',
@@ -298,6 +301,38 @@ function unsupportedChoiceReference(
   return { phrase: reference.phrase, subject: reference.subject };
 }
 
+/**
+ * Identifies a complete customer-facing choice turn: the alternatives are
+ * available in the response (or in a recent assistant turn) and the response
+ * asks the customer to select one of them. This is intentionally domain
+ * agnostic so a known broad category (for example, a service family) cannot be
+ * mistaken for the concrete option the customer still needs to choose.
+ */
+function presentedChoiceRequest(
+  response: string,
+  memory?: Record<string, unknown>,
+): UnsupportedChoiceReference | null {
+  const reference = findChoiceReference(response);
+  if (!reference) return null;
+
+  const responseBeforeReference = response.slice(0, reference.index);
+  if (looksLikeChoicePresentation(responseBeforeReference, reference.subject)) {
+    return { phrase: reference.phrase, subject: reference.subject };
+  }
+
+  const recentMessages = Array.isArray(memory?.recentMessages)
+    ? memory.recentMessages.filter(isRecord)
+    : [];
+  const priorAssistantPresentation = recentMessages.some((message) => (
+    message.fromMe === true
+    && typeof message.content === 'string'
+    && looksLikeChoicePresentation(message.content, reference.subject)
+  ));
+  return priorAssistantPresentation
+    ? { phrase: reference.phrase, subject: reference.subject }
+    : null;
+}
+
 function relevantState(context: AgentRuntimeContext, toolState: Record<string, unknown>) {
   return {
     variables: context.execution.variables,
@@ -324,6 +359,49 @@ function toolArgumentSignature(decision: Extract<AgentDecision, { type: 'tool_ca
     toolName: decision.toolName,
     normalizedArguments: decision.arguments,
   });
+}
+
+const TRANSIENT_TOOL_STATUSES = new Set([
+  'accepted',
+  'enqueued',
+  'enqueued_with_sync',
+  'in_progress',
+  'pending',
+  'processing',
+  'queued',
+  'running',
+  'scheduled',
+  'sent',
+]);
+
+function hasTransientToolStatus(value: unknown, depth = 0): boolean {
+  if (depth > 6 || value == null) return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => hasTransientToolStatus(item, depth + 1));
+  }
+  if (!isRecord(value)) return false;
+  for (const [key, item] of Object.entries(value)) {
+    const normalizedKey = normalizeFieldName(key).replace(/ /g, '_');
+    if (
+      (normalizedKey === 'status'
+        || normalizedKey.endsWith('_status')
+        || normalizedKey === 'state'
+        || normalizedKey === 'phase')
+      && TRANSIENT_TOOL_STATUSES.has(
+        String(item || '').trim().toLowerCase().replace(/[\s-]+/g, '_'),
+      )
+    ) {
+      return true;
+    }
+    if ((Array.isArray(item) || isRecord(item)) && hasTransientToolStatus(item, depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasPendingToolOperation(toolState: Record<string, unknown>): boolean {
+  return Object.values(toolState).some((value) => hasTransientToolStatus(value));
 }
 
 function detectsAlternation(history: DecisionHistoryEntry[]): boolean {
@@ -356,7 +434,19 @@ function limitResult(
   context: AgentRuntimeContext,
   reason: string,
   partialResponse?: string,
+  toolState?: Record<string, unknown>,
 ): NodeExecutionResult {
+  if (toolState && hasPendingToolOperation(toolState)) {
+    return {
+      status: 'route',
+      selectedOutput: 'limit_reached',
+      output: {
+        reason,
+        response: 'A solicitação foi enviada ao equipamento e ainda está sendo processada. Não é necessário repetir o pedido; a alteração será aplicada assim que o processamento terminar.',
+        completionStatus: 'partial',
+      },
+    };
+  }
   switch (context.config.onLimitReached) {
     case 'return_partial':
       return {
@@ -448,7 +538,7 @@ export async function executeAgentNode(
         data: { reason: 'MAX_MODEL_CALLS_REACHED' },
       });
       return {
-        ...limitResult(context, 'MAX_MODEL_CALLS_REACHED', lastPartialResponse),
+        ...limitResult(context, 'MAX_MODEL_CALLS_REACHED', lastPartialResponse, toolState),
         toolCalls,
         metrics: {
           durationMs: 0,
@@ -498,7 +588,7 @@ export async function executeAgentNode(
 
     if (occurrence > context.workflow.settings.maxRepeatedDecisionSignatures + 1) {
       return {
-        ...limitResult(context, 'REPEATED_DECISION_SIGNATURE', lastPartialResponse),
+        ...limitResult(context, 'REPEATED_DECISION_SIGNATURE', lastPartialResponse, toolState),
         toolCalls,
         metrics: {
           durationMs: 0,
@@ -510,7 +600,7 @@ export async function executeAgentNode(
     }
     if (detectsAlternation(decisionHistory)) {
       return {
-        ...limitResult(context, 'ALTERNATING_DECISION_LOOP', lastPartialResponse),
+        ...limitResult(context, 'ALTERNATING_DECISION_LOOP', lastPartialResponse, toolState),
         toolCalls,
         metrics: {
           durationMs: 0,
@@ -542,6 +632,26 @@ export async function executeAgentNode(
 
     if (decision.type === 'final') {
       lastPartialResponse = decision.response;
+      const choiceRequest = presentedChoiceRequest(decision.response, context.memory);
+      if (choiceRequest && responseRequestsMoreCustomerInput(decision.response)) {
+        return {
+          status: 'route',
+          selectedOutput: 'needs_input',
+          output: {
+            type: 'needs_input',
+            question: decision.response,
+            missingFields: ['selected_option'],
+          },
+          statePatch: decision.statePatch,
+          toolCalls,
+          metrics: {
+            durationMs: 0,
+            model: fallbackResult.selected.config.model,
+            toolCalls: toolCalls.length,
+            attempts: turn,
+          },
+        };
+      }
       const repeatedKnownFields = requestedKnownFieldsFromResponse(
         decision.response,
         availableFieldState(context),
@@ -601,6 +711,28 @@ export async function executeAgentNode(
     }
 
     if (decision.type === 'needs_input') {
+      if (decision.missingFields.length === 0) {
+        if (turn >= config.maxTurns && hasPendingToolOperation(toolState)) {
+          return {
+            ...limitResult(context, 'PENDING_TOOL_OPERATION', lastPartialResponse, toolState),
+            toolCalls,
+            metrics: {
+              durationMs: 0,
+              model: fallbackResult.selected.config.model,
+              toolCalls: toolCalls.length,
+              attempts: turn,
+            },
+          };
+        }
+        messages.push({
+          role: 'assistant',
+          content: stableStringify(decision),
+        }, {
+          role: 'user',
+          content: 'missingFields está vazio, portanto não há informação a pedir ao cliente. Se uma operação estiver pendente, consulte novamente o status. Se terminou, retorne type=final. Se depender de intervenção humana, retorne type=handoff.',
+        });
+        continue;
+      }
       const availableState = availableFieldState(context);
       const alreadyAvailable = decision.missingFields.filter((field) => hasKnownField(field, availableState));
       if (alreadyAvailable.length > 0) {
@@ -645,7 +777,7 @@ export async function executeAgentNode(
 
     if (toolCalls.length >= config.maxToolCalls || toolCalls.length >= context.workflow.settings.maxToolCalls) {
       return {
-        ...limitResult(context, 'MAX_TOOL_CALLS_REACHED', lastPartialResponse),
+        ...limitResult(context, 'MAX_TOOL_CALLS_REACHED', lastPartialResponse, toolState),
         toolCalls,
         metrics: {
           durationMs: 0,
@@ -659,9 +791,14 @@ export async function executeAgentNode(
     const argumentSignature = toolArgumentSignature(decision);
     const toolOccurrence = (toolArgumentCounts.get(argumentSignature) || 0) + 1;
     toolArgumentCounts.set(argumentSignature, toolOccurrence);
-    if (toolOccurrence > config.maxRepeatedToolCalls + 1) {
+    const definition = context.tools.get(decision.toolName);
+    const isSafePendingPoll = Boolean(
+      definition?.allowRepeatedCallsWhilePending
+      && hasTransientToolStatus(toolState[argumentSignature]),
+    );
+    if (!isSafePendingPoll && toolOccurrence > config.maxRepeatedToolCalls + 1) {
       return {
-        ...limitResult(context, 'REPEATED_TOOL_CALL_LIMIT', lastPartialResponse),
+        ...limitResult(context, 'REPEATED_TOOL_CALL_LIMIT', lastPartialResponse, toolState),
         toolCalls,
         metrics: {
           durationMs: 0,
@@ -671,7 +808,7 @@ export async function executeAgentNode(
         },
       };
     }
-    if (toolOccurrence === config.maxRepeatedToolCalls + 1) {
+    if (!isSafePendingPoll && toolOccurrence === config.maxRepeatedToolCalls + 1) {
       strategyRedirects += 1;
       messages.push({
         role: 'assistant',
@@ -682,7 +819,7 @@ export async function executeAgentNode(
       });
       if (strategyRedirects > 1) {
         return {
-          ...limitResult(context, 'REPEATED_TOOL_CALL_LIMIT', lastPartialResponse),
+          ...limitResult(context, 'REPEATED_TOOL_CALL_LIMIT', lastPartialResponse, toolState),
           toolCalls,
           metrics: {
             durationMs: 0,
@@ -726,6 +863,24 @@ export async function executeAgentNode(
     });
 
     if (toolResult.record.status === 'success') continue;
+    if (
+      toolResult.record.error?.code === 'INVALID_TOOL_ARGUMENTS'
+      && turn < config.maxTurns
+      && Boolean(context.tools.get(decision.toolName)?.inputJsonSchema)
+    ) {
+      messages.push({
+        role: 'user',
+        content: stableStringify({
+          instruction: 'Corrija os argumentos e retorne uma nova tool_call. Use exatamente os nomes e tipos do schema. Nao peca novamente dados que ja estao no contexto.',
+          toolName: decision.toolName,
+          validationError: toolResult.record.error.message,
+          expectedInputSchema: toolInputSchemaForPrompt(
+            definition?.inputJsonSchema || toJsonSchema({ schema: definition?.inputSchema }) || {},
+          ),
+        }),
+      });
+      continue;
+    }
     switch (config.fallbackOnToolError) {
       case 'continue_without_tool':
         messages.push({
@@ -773,7 +928,7 @@ export async function executeAgentNode(
   }
 
   return {
-    ...limitResult(context, 'MAX_AGENT_TURNS_REACHED', lastPartialResponse),
+    ...limitResult(context, 'MAX_AGENT_TURNS_REACHED', lastPartialResponse, toolState),
     toolCalls,
     metrics: {
       durationMs: 0,

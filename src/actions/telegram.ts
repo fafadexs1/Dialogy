@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 
 import { db } from '@/lib/db';
+import { requireWorkspaceAccess, requireWorkspacePermission } from '@/lib/security/access';
 import type { TelegramBotInstance, TelegramBotProfileSettings } from '@/lib/types';
 import {
   buildTelegramWebhookUrl,
@@ -52,6 +53,7 @@ function mapProfileSettings(
 
 async function syncTelegramInstanceMetadata(
   instanceId: string,
+  workspaceId: string,
   payload: {
     dialogyDisplayName?: string;
     botName?: string | null;
@@ -68,7 +70,7 @@ async function syncTelegramInstanceMetadata(
         bot_username = COALESCE($4, bot_username),
         bot_id = COALESCE($5, bot_id),
         updated_at = timezone('utc', now())
-      WHERE id = $1
+      WHERE id = $1 AND workspace_id = $6
     `,
     [
       instanceId,
@@ -76,6 +78,7 @@ async function syncTelegramInstanceMetadata(
       payload.botName || null,
       payload.botUsername || null,
       payload.botId || null,
+      workspaceId,
     ]
   );
 }
@@ -120,6 +123,28 @@ function buildTelegramInstanceStatus(
   return webhookInfo.url === expectedUrl ? 'connected' : 'pending';
 }
 
+async function requireTelegramInstanceById(
+  instanceId: string,
+  permission: 'workspace:settings:edit' | null,
+) {
+  const instance = await getTelegramInstanceById(instanceId);
+  if (!instance) throw new Error('Bot do Telegram nao encontrado.');
+  if (permission) await requireWorkspacePermission(instance.workspace_id, permission);
+  else await requireWorkspaceAccess(instance.workspace_id);
+  return instance;
+}
+
+async function requireTelegramInstanceByName(
+  instanceName: string,
+  permission: 'workspace:settings:edit' | null,
+) {
+  const instance = await getTelegramInstanceByName(instanceName);
+  if (!instance) throw new Error('Bot do Telegram nao encontrado.');
+  if (permission) await requireWorkspacePermission(instance.workspace_id, permission);
+  else await requireWorkspaceAccess(instance.workspace_id);
+  return instance;
+}
+
 export async function getTelegramInstances(
   workspaceId: string
 ): Promise<{ instances: Omit<TelegramBotInstance, 'status'>[] | null; error?: string }> {
@@ -128,6 +153,7 @@ export async function getTelegramInstances(
   }
 
   try {
+    await requireWorkspaceAccess(workspaceId);
     const instances = await listTelegramInstances(workspaceId);
     return { instances };
   } catch (error) {
@@ -146,6 +172,8 @@ export async function createTelegramInstance(
   if (!workspaceId) {
     return { success: false, error: 'ID do workspace nao encontrado.' };
   }
+
+  await requireWorkspacePermission(workspaceId, 'workspace:settings:edit');
 
   const telegramBotToken = normalizeTelegramBotToken(payload.telegramBotToken);
   if (!telegramBotToken) {
@@ -219,10 +247,7 @@ export async function deleteTelegramInstance(instanceId: string): Promise<{ erro
   }
 
   try {
-    const instance = await getTelegramInstanceById(instanceId);
-    if (!instance) {
-      return { error: 'Bot do Telegram nao encontrado.' };
-    }
+    const instance = await requireTelegramInstanceById(instanceId, 'workspace:settings:edit');
 
     if (instance.bot_token) {
       await deleteTelegramWebhook(instance.bot_token).catch((error) => {
@@ -230,7 +255,10 @@ export async function deleteTelegramInstance(instanceId: string): Promise<{ erro
       });
     }
 
-    await db.query('DELETE FROM telegram_bot_instances WHERE id = $1', [instanceId]);
+    await db.query('DELETE FROM telegram_bot_instances WHERE id = $1 AND workspace_id = $2', [
+      instanceId,
+      instance.workspace_id,
+    ]);
     revalidatePath('/integrations/telegram');
     revalidatePath('/integrations');
     return { error: null };
@@ -242,7 +270,7 @@ export async function deleteTelegramInstance(instanceId: string): Promise<{ erro
 
 export async function checkTelegramInstanceStatus(instanceName: string): Promise<TelegramStatusResult> {
   try {
-    const instance = await getTelegramInstanceByName(instanceName);
+    const instance = await requireTelegramInstanceByName(instanceName, null);
     if (!instance?.bot_token) {
       return { status: 'disconnected' };
     }
@@ -258,7 +286,7 @@ export async function checkTelegramInstanceStatus(instanceName: string): Promise
 
 export async function connectTelegramInstance(instanceName: string): Promise<TelegramStatusResult> {
   try {
-    const instance = await getTelegramInstanceByName(instanceName);
+    const instance = await requireTelegramInstanceByName(instanceName, 'workspace:settings:edit');
     if (!instance?.bot_token || !instance.webhook_key) {
       return { status: 'disconnected' };
     }
@@ -274,7 +302,7 @@ export async function connectTelegramInstance(instanceName: string): Promise<Tel
 
 export async function disconnectTelegramInstance(instanceName: string): Promise<TelegramStatusResult> {
   try {
-    const instance = await getTelegramInstanceByName(instanceName);
+    const instance = await requireTelegramInstanceByName(instanceName, 'workspace:settings:edit');
     if (!instance?.bot_token) {
       return { status: 'disconnected' };
     }
@@ -291,7 +319,7 @@ export async function restartTelegramInstance(
   instanceName: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const instance = await getTelegramInstanceByName(instanceName);
+    const instance = await requireTelegramInstanceByName(instanceName, 'workspace:settings:edit');
     if (!instance?.bot_token || !instance.webhook_key) {
       throw new Error('Credenciais Telegram ausentes para este bot.');
     }
@@ -313,13 +341,13 @@ export async function getTelegramInstanceProfile(
   }
 
   try {
-    const instance = await getTelegramInstanceById(instanceId);
+    const instance = await requireTelegramInstanceById(instanceId, null);
     if (!instance?.bot_token) {
       return { profile: null, error: 'Bot do Telegram nao encontrado.' };
     }
 
     const profile = await getTelegramBotProfileState(instance.bot_token);
-    await syncTelegramInstanceMetadata(instance.id, {
+    await syncTelegramInstanceMetadata(instance.id, instance.workspace_id, {
       botName: profile.name,
       botUsername: profile.username,
       botId: profile.bot_id,
@@ -363,7 +391,7 @@ export async function updateTelegramInstanceProfile(
   }
 
   try {
-    const instance = await getTelegramInstanceById(instanceId);
+    const instance = await requireTelegramInstanceById(instanceId, 'workspace:settings:edit');
     if (!instance?.bot_token) {
       return { success: false, error: 'Bot do Telegram nao encontrado.' };
     }
@@ -379,7 +407,7 @@ export async function updateTelegramInstanceProfile(
     }
 
     const profile = await getTelegramBotProfileState(instance.bot_token);
-    await syncTelegramInstanceMetadata(instance.id, {
+    await syncTelegramInstanceMetadata(instance.id, instance.workspace_id, {
       dialogyDisplayName,
       botName: profile.name,
       botUsername: profile.username,
@@ -414,14 +442,14 @@ export async function removeTelegramInstancePhoto(
   }
 
   try {
-    const instance = await getTelegramInstanceById(instanceId);
+    const instance = await requireTelegramInstanceById(instanceId, 'workspace:settings:edit');
     if (!instance?.bot_token) {
       return { success: false, error: 'Bot do Telegram nao encontrado.' };
     }
 
     await removeTelegramBotProfilePhoto(instance.bot_token);
     const profile = await getTelegramBotProfileState(instance.bot_token);
-    await syncTelegramInstanceMetadata(instance.id, {
+    await syncTelegramInstanceMetadata(instance.id, instance.workspace_id, {
       botName: profile.name,
       botUsername: profile.username,
       botId: profile.bot_id,

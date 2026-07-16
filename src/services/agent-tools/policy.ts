@@ -50,17 +50,35 @@ function isShortAffirmativeConfirmation(customerMessage: string): boolean {
   return /^(sim|sim pode|pode|pode sim|pode fazer|pode prosseguir|confirmo|autorizo|ok|okay|prosseguir|prossiga|faca|faz)$/.test(normalized);
 }
 
+function isExplicitAffirmativeConfirmation(customerMessage: string): boolean {
+  const normalized = normalize(customerMessage);
+  if (!normalized || /\b(nao|nunca|cancela|cancelar|pare|parar|desisto)\b/.test(normalized)) {
+    return false;
+  }
+  return /\b(sim|confirmo|confirmado|autorizo|autorizado|pode|pode ser|ta bom|tudo bem|ok|okay|prossiga|pode prosseguir|vou aguardar)\b/.test(normalized);
+}
+
 function hasMatchingRecentConfirmationRequest(
   messages: AgentToolRuntimeContext['recentCustomerVisibleMessages'],
   toolName: string,
 ): boolean {
   const recentMessages = (messages || []).filter((message) => message.content?.trim()).slice(-12);
-  const latestAgentMessage = [...recentMessages].reverse().find((message) => message.fromMe);
-  if (!latestAgentMessage) return false;
-
-  const normalized = normalize(latestAgentMessage.content);
-  const asksForConfirmation = /\b(posso|confirme|confirmar|confirmacao|autoriza|autorizacao|prosseguir|agora)\b/.test(normalized);
-  return asksForConfirmation && confirmationTerms(toolName).test(normalized);
+  let skippedCurrentCustomerMessage = false;
+  for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+    const message = recentMessages[index];
+    if (!message.fromMe) {
+      if (!skippedCurrentCustomerMessage) {
+        skippedCurrentCustomerMessage = true;
+        continue;
+      }
+      break;
+    }
+    if (!skippedCurrentCustomerMessage) continue;
+    const normalized = normalize(message.content);
+    const asksForConfirmation = /\b(posso|confirme|confirmar|confirmacao|autoriza|autorizacao|quer que|prosseguir|agora)\b/.test(normalized);
+    if (asksForConfirmation && confirmationTerms(toolName).test(normalized)) return true;
+  }
+  return false;
 }
 
 function policyReject(riskLevel: AgentToolPolicyRisk, code: string, reason: string): AgentToolPolicyDecision {
@@ -217,9 +235,15 @@ export async function evaluateAgentToolPolicy(input: {
       || hasValidServerCloseAuthorization(input.action, input.context)
     )
   );
+  const conversationalConfirmation = Boolean(
+    input.context.allowRecentConversationalConfirmation
+    && isExplicitAffirmativeConfirmation(input.context.customerMessage)
+    && hasMatchingRecentConfirmationRequest(input.context.recentCustomerVisibleMessages, toolName)
+  );
   if (!explicitlyAuthorizedConversationClose &&
       requiresExplicitConfirmation(input.action, definition, riskLevel) &&
-      input.context.confirmedActionFingerprint !== fingerprintToolAction(input.action)) {
+      input.context.confirmedActionFingerprint !== fingerprintToolAction(input.action) &&
+      !conversationalConfirmation) {
     if (
       isShortAffirmativeConfirmation(input.context.customerMessage) &&
       !hasMatchingRecentConfirmationRequest(input.context.recentCustomerVisibleMessages, toolName)

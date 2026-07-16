@@ -287,7 +287,13 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
   const text = typeof content === 'string' ? content.trim() : '';
   const parsed = parseLmStudioStructuredText(text);
   if (!parsed) {
-    throw new Error(`${provider} returned invalid JSON for ${input.schemaName}.`);
+    const error = new Error(`${provider} returned invalid JSON for ${input.schemaName}.`) as Error & {
+      code?: string;
+      retryable?: boolean;
+    };
+    error.code = 'INVALID_STRUCTURED_OUTPUT';
+    error.retryable = true;
+    throw error;
   }
 
   const result = input.schema.safeParse(parsed);
@@ -296,7 +302,13 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
       .slice(0, 3)
       .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
       .join('; ');
-    throw new Error(`${provider} returned JSON that does not match ${input.schemaName}: ${issueSummary}`);
+    const error = new Error(`${provider} returned JSON that does not match ${input.schemaName}: ${issueSummary}`) as Error & {
+      code?: string;
+      retryable?: boolean;
+    };
+    error.code = 'MODEL_SCHEMA_VALIDATION_FAILED';
+    error.retryable = true;
+    throw error;
   }
 
   return result.data;

@@ -231,6 +231,56 @@ describe('agent tool execution policy', () => {
     expect(result.reason).toContain('[tool_policy:confirmation_required]');
   });
 
+  it('accepts natural confirmation in native_v2 only when it follows a matching visible request', async () => {
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Ta bom, pode ser. Vou aguardar vc riniciar',
+        allowRecentConversationalConfirmation: true,
+        recentCustomerVisibleMessages: [
+          { fromMe: false, content: 'A internet esta lenta.' },
+          { fromMe: true, content: 'Fiz o diagnostico e nao encontrei congestionamento relevante.' },
+          { fromMe: true, content: 'Quer que eu reinicie o roteador daqui? A conexao cai por dois minutos e volta sozinha.' },
+          { fromMe: true, content: 'Me avise se prefere tentar o reboot.' },
+          { fromMe: false, content: 'Ta bom, pode ser. Vou aguardar vc riniciar' },
+        ],
+      },
+      action: {
+        type: 'mcp_call_tool',
+        payload: {
+          toolName: 'mcp:router-server:reboot_router',
+          arguments: { client_ip: '192.0.2.10' },
+        },
+      },
+    });
+
+    expect(result).toEqual({ allowed: true, riskLevel: 'high' });
+  });
+
+  it('keeps native_v2 confirmation blocked when the customer negates the action', async () => {
+    const result = await evaluateAgentToolPolicy({
+      context: {
+        ...context,
+        customerMessage: 'Nao, pode deixar como esta',
+        allowRecentConversationalConfirmation: true,
+        recentCustomerVisibleMessages: [
+          { fromMe: true, content: 'Quer que eu reinicie o roteador daqui?' },
+          { fromMe: false, content: 'Nao, pode deixar como esta' },
+        ],
+      },
+      action: {
+        type: 'mcp_call_tool',
+        payload: {
+          toolName: 'mcp:router-server:reboot_router',
+          arguments: { client_ip: '192.0.2.10' },
+        },
+      },
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('[tool_policy:confirmation_required]');
+  });
+
   it('allows only the exact action whose persisted fingerprint was consumed', async () => {
     const action = {
       type: 'mcp_call_tool' as const,
