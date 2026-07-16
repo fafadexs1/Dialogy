@@ -211,14 +211,14 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
                 capture.code = response.authResponse.code;
                 console.log('[Meta] Auth code received, proceeding with token exchange...');
 
-                // Remove listener - we'll get WABA IDs from the API if not from postMessage
-                window.removeEventListener('message', messageHandler);
-
                 setIsSubmitting(true);
                 setStatusMessage('Autenticando com Meta...');
 
                 try {
-                    const result = await exchangeMetaAuthCode(response.authResponse.code);
+                    const result = await exchangeMetaAuthCode(
+                        response.authResponse.code,
+                        capture.waba_id || undefined
+                    );
 
                     if (result.success && result.accessToken) {
                         // Use WABA IDs from API response (or from postMessage if available)
@@ -276,6 +276,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
                     console.error(error);
                     toast({ title: 'Erro Interno', description: 'Falha ao processar integração.', variant: 'destructive' });
                 } finally {
+                    window.removeEventListener('message', messageHandler);
                     setIsSubmitting(false);
                     setStatusMessage('');
                 }

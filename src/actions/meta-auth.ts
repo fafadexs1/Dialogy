@@ -2,6 +2,16 @@
 
 import { resilientFetch } from '@/lib/http/resilient-fetch';
 
+const META_GRAPH_VERSION = 'v25.0';
+
+function metaGraphUrl(path: string): string {
+    return `https://graph.facebook.com/${META_GRAPH_VERSION}/${path.replace(/^\//, '')}`;
+}
+
+function metaAuthHeaders(accessToken: string): HeadersInit {
+    return { Authorization: `Bearer ${accessToken}` };
+}
+
 export type ExchangeMetaTokenResult = {
     success: boolean;
     accessToken?: string;
@@ -22,14 +32,41 @@ export type ExchangeMetaTokenResult = {
  * Fetches WABA and Phone Number IDs from Graph API using the access token.
  * This is used when the embedded signup postMessage doesn't provide these IDs.
  */
-async function fetchWabaInfo(accessToken: string): Promise<{ wabaId?: string; phoneNumberId?: string; metaInfo?: ExchangeMetaTokenResult['metaInfo'] }> {
+async function fetchPhoneForWaba(
+    accessToken: string,
+    wabaId: string
+): Promise<{ wabaId: string; phoneNumberId?: string; metaInfo?: ExchangeMetaTokenResult['metaInfo'] }> {
+    const phoneResponse = await resilientFetch(
+        metaGraphUrl(`${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name`),
+        { headers: metaAuthHeaders(accessToken) }
+    );
+    const phoneData = await phoneResponse.json().catch(() => ({}));
+    const phone = phoneData.data?.[0];
+    return {
+        wabaId,
+        phoneNumberId: phone?.id,
+        metaInfo: phone ? {
+            displayPhoneNumber: phone.display_phone_number,
+            verifiedName: phone.verified_name,
+        } : undefined,
+    };
+}
+
+async function fetchWabaInfo(
+    accessToken: string,
+    wabaIdHint?: string
+): Promise<{ wabaId?: string; phoneNumberId?: string; metaInfo?: ExchangeMetaTokenResult['metaInfo'] }> {
     try {
+        if (wabaIdHint) {
+            return await fetchPhoneForWaba(accessToken, wabaIdHint);
+        }
+
         // Step 1: Get shared WABA accounts
         const wabaResponse = await resilientFetch(
-            `https://graph.facebook.com/v24.0/me/businesses?fields=id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}&access_token=${accessToken}`
+            metaGraphUrl('me/businesses?fields=id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'),
+            { headers: metaAuthHeaders(accessToken) }
         );
         const wabaData = await wabaResponse.json().catch(() => ({}));
-        console.log('[META_AUTH] WABA fetch response:', JSON.stringify(wabaData, null, 2));
 
         // Try to find WABA from business data
         if (wabaData.data && wabaData.data.length > 0) {
@@ -64,41 +101,24 @@ async function fetchWabaInfo(accessToken: string): Promise<{ wabaId?: string; ph
 
         // Alternative: Try direct WABA query
         const directResponse = await resilientFetch(
-            `https://graph.facebook.com/v24.0/me?fields=id,name&access_token=${accessToken}`
+            metaGraphUrl('me?fields=id,name'),
+            { headers: metaAuthHeaders(accessToken) }
         );
-        const directData = await directResponse.json().catch(() => ({}));
-        console.log('[META_AUTH] Direct me query:', JSON.stringify(directData, null, 2));
+        await directResponse.json().catch(() => ({}));
 
         // Try to fetch WABAs associated with the token
         const sharedWabaResponse = await resilientFetch(
-            `https://graph.facebook.com/v24.0/debug_token?input_token=${accessToken}&access_token=${accessToken}`
+            metaGraphUrl(`debug_token?input_token=${encodeURIComponent(accessToken)}`),
+            { headers: metaAuthHeaders(accessToken) }
         );
         const debugData = await sharedWabaResponse.json().catch(() => ({}));
-        console.log('[META_AUTH] Token debug:', JSON.stringify(debugData, null, 2));
 
         // Check granular scopes for WABA info
         const granularScopes = debugData.data?.granular_scopes || [];
         for (const scope of granularScopes) {
             if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length > 0) {
                 const wabaId = scope.target_ids[0];
-                // Try to get phone numbers for this WABA
-                const phoneResponse = await resilientFetch(
-                    `https://graph.facebook.com/v24.0/${wabaId}/phone_numbers?access_token=${accessToken}`
-                );
-                const phoneData = await phoneResponse.json().catch(() => ({}));
-                console.log('[META_AUTH] Phone numbers for WABA:', JSON.stringify(phoneData, null, 2));
-
-                if (phoneData.data && phoneData.data.length > 0) {
-                    return {
-                        wabaId: wabaId,
-                        phoneNumberId: phoneData.data[0].id,
-                        metaInfo: {
-                            displayPhoneNumber: phoneData.data[0].display_phone_number,
-                            verifiedName: phoneData.data[0].verified_name
-                        }
-                    };
-                }
-                return { wabaId: wabaId };
+                return await fetchPhoneForWaba(accessToken, wabaId);
             }
         }
 
@@ -109,7 +129,18 @@ async function fetchWabaInfo(accessToken: string): Promise<{ wabaId?: string; ph
     }
 }
 
-export async function exchangeMetaAuthCode(code: string): Promise<ExchangeMetaTokenResult> {
+async function subscribeWabaToApp(accessToken: string, wabaId: string): Promise<void> {
+    const response = await resilientFetch(metaGraphUrl(`${encodeURIComponent(wabaId)}/subscribed_apps`), {
+        method: 'POST',
+        headers: metaAuthHeaders(accessToken),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json.success !== true) {
+        throw new Error(json.error?.message || 'Não foi possível assinar os webhooks da conta do WhatsApp.');
+    }
+}
+
+export async function exchangeMetaAuthCode(code: string, wabaIdHint?: string): Promise<ExchangeMetaTokenResult> {
     const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || process.env.NEXT_PUBLIC_META_APP_ID;
     const appSecret = process.env.FACEBOOK_APP_SECRET || process.env.META_APP_SECRET;
 
@@ -118,7 +149,7 @@ export async function exchangeMetaAuthCode(code: string): Promise<ExchangeMetaTo
     }
 
     try {
-        const url = 'https://graph.facebook.com/v24.0/oauth/access_token';
+        const url = metaGraphUrl('oauth/access_token');
         const body = {
             client_id: appId,
             client_secret: appSecret,
@@ -137,13 +168,16 @@ export async function exchangeMetaAuthCode(code: string): Promise<ExchangeMetaTo
         const json = await response.json().catch(() => ({}));
 
         if (!response.ok || !json.access_token) {
-            console.error('[META_AUTH] Exchange Error:', json);
-            return { success: false, error: json.error?.message || 'Meta API Error', debug: json };
+            console.error('[META_AUTH] Exchange failed.', { code: json.error?.code, type: json.error?.type });
+            return { success: false, error: json.error?.message || 'Meta API Error' };
         }
 
         // After getting the token, fetch WABA info
-        const wabaInfo = await fetchWabaInfo(json.access_token);
-        console.log('[META_AUTH] WABA Info fetched:', wabaInfo);
+        const wabaInfo = await fetchWabaInfo(json.access_token, wabaIdHint);
+        if (!wabaInfo.wabaId) {
+            return { success: false, error: 'A Meta não retornou uma conta do WhatsApp Business.' };
+        }
+        await subscribeWabaToApp(json.access_token, wabaInfo.wabaId);
 
         return {
             success: true,

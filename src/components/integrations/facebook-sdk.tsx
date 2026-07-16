@@ -19,7 +19,7 @@ declare global {
 
 export function FacebookSDK({
     appId,
-    version = 'v18.0',
+    version = 'v25.0',
     autoLogAppEvents = true,
     xfbml = true,
 }: FacebookSDKProps) {
