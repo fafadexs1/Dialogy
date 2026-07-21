@@ -85,4 +85,18 @@ describe('retry media messages', () => {
       returnedMimetype: 'video/mp4',
     });
   });
+
+  it('keeps the normalized MIME returned by Dialogy when Evolution omits it', () => {
+    const details = extractRetriedMediaResponseDetails({
+      key: { id: 'provider-2' },
+      tempMediaPublicUrl: 'https://cdn.example.com/audio.mp3',
+      tempMediaMimetype: 'audio/mpeg',
+    }, 'audio');
+
+    expect(details).toEqual({
+      messageIdFromApi: 'provider-2',
+      returnedMediaUrl: 'https://cdn.example.com/audio.mp3',
+      returnedMimetype: 'audio/mpeg',
+    });
+  });
 });

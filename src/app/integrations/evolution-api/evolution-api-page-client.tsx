@@ -8,7 +8,8 @@ import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, PlusCircle, Server, MessageSquare, Trash2, MoreVertical, Wifi, WifiOff, QrCode, Power, PowerOff, Settings, RefreshCw, Save, ArrowLeft, ArrowRight, Lock, Send, ShieldCheck } from 'lucide-react';
+import { Activity, CheckCircle2, Clock3, Loader2, MessageCircle, PlusCircle, Search, Server, MessageSquare, Trash2, MoreVertical, QrCode, Power, PowerOff, Settings, RefreshCw, Save, ArrowLeft, ArrowRight, Lock, Send, ShieldCheck } from 'lucide-react';
+import { FaMeta, FaWhatsapp } from 'react-icons/fa6';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '@/components/ui/dialog';
@@ -853,7 +854,7 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
                 <div className="flex justify-between items-start">
                     <div>
                         <CardTitle className="flex items-center gap-2">
-                            {isTelegram ? <Send className="text-sky-500" /> : instance.status === 'connected' ? <Wifi className="text-green-500" /> : instance.status === 'pending' ? <Loader2 className="animate-spin text-yellow-500" /> : <WifiOff className="text-red-500" />}
+                            {isTelegram ? <Send className="text-sky-500" /> : instance.status === 'pending' ? <Loader2 className="animate-spin text-yellow-500" /> : <FaWhatsapp className={instance.status === 'connected' ? 'text-green-500' : 'text-red-500'} />}
                             {instance.display_name}
                         </CardTitle>
                         <CardDescription>{typeLabel} • {instance.instance_name}</CardDescription>
@@ -941,6 +942,209 @@ function InstanceCard({ instance: initialInstance, onMutate, user }: { instance:
     )
 }
 
+function InstanceRow({
+    initialInstance,
+    onMutate,
+    onStatusChange,
+}: {
+    initialInstance: Omit<EvolutionInstance, 'status' | 'qrCode'>,
+    onMutate: () => void,
+    onStatusChange: (instanceId: string, status: EvolutionInstance['status']) => void,
+}) {
+    const { toast } = useToast();
+    const [instance, setInstance] = useState<EvolutionInstance>({ ...initialInstance, status: 'disconnected' });
+    const [isToggling, setIsToggling] = useState(false);
+    const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+
+    const checkStatus = useCallback(async () => {
+        try {
+            const result = await checkInstanceStatus(instance.instance_name);
+            setInstance((current) => ({ ...current, ...result }));
+            setLastCheckedAt(new Date());
+        } catch (error) {
+            console.error('[InstanceRow] Falha ao atualizar status:', error);
+        }
+    }, [instance.instance_name]);
+
+    useEffect(() => {
+        checkStatus();
+        const intervalId = setInterval(checkStatus, instance.status === 'pending' ? 3000 : 15000);
+        return () => clearInterval(intervalId);
+    }, [checkStatus, instance.status]);
+
+    useEffect(() => {
+        onStatusChange(instance.id, instance.status);
+    }, [instance.id, instance.status, onStatusChange]);
+
+    const handleConnect = async () => {
+        setIsToggling(true);
+        try {
+            const result = await connectInstance(instance.instance_name);
+            setInstance((current) => ({ ...current, ...result }));
+        } finally {
+            setIsToggling(false);
+        }
+    };
+
+    const handleDisconnect = async () => {
+        setIsToggling(true);
+        try {
+            await disconnectInstance(instance.instance_name);
+            await checkStatus();
+        } finally {
+            setIsToggling(false);
+        }
+    };
+
+    const handleRestart = async () => {
+        toast({ title: 'Reiniciando conexão', description: `A instância ${instance.display_name} será reconectada em instantes.` });
+        const result = await restartInstance(instance.instance_name);
+        if (result.error) {
+            toast({ title: 'Erro ao reiniciar', description: result.error, variant: 'destructive' });
+            return;
+        }
+        setTimeout(checkStatus, 3000);
+    };
+
+    const handleDelete = async () => {
+        const result = await deleteEvolutionApiInstance(instance.id);
+        if (result.error) {
+            toast({ title: 'Erro ao excluir', description: result.error, variant: 'destructive' });
+            return;
+        }
+        toast({ title: 'Instância excluída', description: `${instance.display_name} foi removida.` });
+        onMutate();
+    };
+
+    const isTelegram = instance.type === 'telegram';
+    const typeLabel = instance.type === 'wa_cloud'
+        ? 'Cloud API (Oficial)'
+        : isTelegram
+            ? 'Telegram Bot'
+            : 'Baileys (Não Oficial)';
+    const numberLabel = instance.display_phone_number || instance.phone_number_id
+        || (isTelegram && instance.telegram_bot_username ? `@${instance.telegram_bot_username}` : instance.instance_name);
+    const secondaryNumberLabel = instance.type === 'wa_cloud'
+        ? instance.waba_name || instance.waba_id || instance.verified_name || instance.business_name
+        : null;
+    const statusLabel = instance.status === 'connected' ? 'Conectada' : instance.status === 'pending' ? 'Pendente' : 'Desconectada';
+    const statusDescription = instance.status === 'connected'
+        ? isTelegram ? 'Webhook ativo' : 'Operando normalmente'
+        : instance.status === 'pending'
+            ? 'Aguardando leitura do QR Code'
+            : isTelegram ? 'Webhook pausado' : 'Conexão indisponível';
+    const lastCheckedLabel = lastCheckedAt
+        ? lastCheckedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        : 'Verificando...';
+
+    return (
+        <div className="border-b last:border-b-0">
+            <div className="grid min-h-[88px] grid-cols-1 items-center gap-3 px-5 py-4 md:grid-cols-[1.25fr_1fr_1.15fr_.9fr_1fr_auto] md:gap-5 md:px-6">
+                <div className="flex min-w-0 items-center gap-3">
+                    <div className={cn(
+                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-full border',
+                        instance.status === 'connected' && 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                        instance.status === 'pending' && 'border-amber-200 bg-amber-50 text-amber-700',
+                        instance.status === 'disconnected' && 'border-red-200 bg-red-50 text-red-600',
+                    )}>
+                        {isTelegram ? <Send className="h-5 w-5" /> : instance.status === 'pending' ? <Loader2 className="h-5 w-5 animate-spin" /> : <FaWhatsapp className="h-5 w-5" />}
+                    </div>
+                    <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-foreground">{instance.display_name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{instance.instance_name}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <Badge variant="secondary" className={cn('gap-1.5 border font-medium', instance.type === 'wa_cloud' && 'border-emerald-200 bg-emerald-50 text-emerald-700')}>
+                        {instance.type === 'wa_cloud' && <FaMeta aria-hidden="true" className="h-3.5 w-3.5 text-[#0866ff]" />}
+                        {typeLabel}
+                    </Badge>
+                </div>
+
+                <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{numberLabel}</p>
+                    {secondaryNumberLabel && <p className="truncate text-xs text-muted-foreground">{secondaryNumberLabel}</p>}
+                </div>
+
+                <div>
+                    <div className={cn(
+                        'flex items-center gap-2 text-sm font-medium',
+                        instance.status === 'connected' && 'text-emerald-700',
+                        instance.status === 'pending' && 'text-amber-700',
+                        instance.status === 'disconnected' && 'text-red-600',
+                    )}>
+                        <span className={cn('h-2 w-2 shrink-0 rounded-full', instance.status === 'connected' ? 'bg-emerald-500' : instance.status === 'pending' ? 'bg-amber-500' : 'bg-red-500')} />
+                        {statusLabel}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{statusDescription}</p>
+                </div>
+
+                <div>
+                    <p className="text-sm font-medium">{lastCheckedLabel}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Status atualizado</p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                    {instance.status !== 'connected' ? (
+                        <Button size="sm" onClick={handleConnect} disabled={isToggling || instance.status === 'pending'}>
+                            {isToggling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}
+                            {isTelegram ? 'Ativar' : 'Conectar'}
+                        </Button>
+                    ) : (
+                        <Button size="sm" variant="outline" onClick={checkStatus}>
+                            <RefreshCw className="mr-2 h-4 w-4" /> Atualizar
+                        </Button>
+                    )}
+
+                    <AlertDialog>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="icon" aria-label={`Ações de ${instance.display_name}`}><MoreVertical className="h-4 w-4" /></Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                {instance.type === 'baileys' && <EditInstanceDialog instance={instance} onSave={onMutate} />}
+                                {instance.status === 'connected' && (
+                                    <>
+                                        <DropdownMenuItem onClick={handleRestart}><RefreshCw className="mr-2 h-4 w-4" />Reiniciar conexão</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={handleDisconnect}><PowerOff className="mr-2 h-4 w-4" />{isTelegram ? 'Pausar webhook' : 'Desconectar'}</DropdownMenuItem>
+                                    </>
+                                )}
+                                <DropdownMenuSeparator />
+                                <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem className="w-full justify-start text-destructive hover:text-destructive" onSelect={(event) => event.preventDefault()}>
+                                        <Trash2 className="mr-2 h-4 w-4" />Excluir
+                                    </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Excluir instância?</AlertDialogTitle>
+                                <AlertDialogDescription>Esta ação é irreversível e removerá permanentemente a instância <span className="font-bold">{instance.display_name}</span>.</AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={handleDelete}>Excluir</AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                </div>
+            </div>
+
+            {instance.status === 'pending' && instance.qrCode && !isTelegram && (
+                <div className="flex items-center gap-5 border-t bg-muted/30 px-6 py-4">
+                    <Image src={instance.qrCode} alt="QR Code para conectar o WhatsApp" width={112} height={112} />
+                    <div>
+                        <p className="font-semibold">Escaneie o QR Code</p>
+                        <p className="mt-1 max-w-md text-sm text-muted-foreground">Abra o WhatsApp no celular, acesse Aparelhos conectados e escaneie o código para concluir.</p>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channelMode?: ChannelMode }) {
     const { toast } = useToast();
     const user = useCurrentUser();
@@ -949,7 +1153,13 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [initialQrCode, setInitialQrCode] = useState<string | undefined>();
     const [limitStatus, setLimitStatus] = useState<{ reached: boolean, current: number, max: number, plan: string } | null>(null);
+    const [instanceSearch, setInstanceSearch] = useState('');
+    const [instanceStatuses, setInstanceStatuses] = useState<Record<string, EvolutionInstance['status']>>({});
     const isTelegramView = channelMode === 'telegram';
+
+    const handleStatusChange = useCallback((instanceId: string, status: EvolutionInstance['status']) => {
+        setInstanceStatuses((current) => current[instanceId] === status ? current : { ...current, [instanceId]: status });
+    }, []);
 
     const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
@@ -992,12 +1202,22 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
     }
 
     const visibleInstances = instances.filter((instance) => isTelegramView ? instance.type === 'telegram' : instance.type !== 'telegram');
-    const cloudApiInstances = visibleInstances.filter(i => i.type === 'wa_cloud');
-    const pageTitle = isTelegramView ? 'Telegram Bot' : 'Conexao com a Evolution API';
+    const filteredInstances = visibleInstances.filter((instance) => {
+        const query = instanceSearch.trim().toLowerCase();
+        if (!query) return true;
+        return [instance.display_name, instance.instance_name, instance.display_phone_number, instance.verified_name]
+            .filter(Boolean)
+            .some((value) => value!.toLowerCase().includes(query));
+    });
+    const cloudApiInstances = visibleInstances.filter((instance) => instance.type === 'wa_cloud');
+    const connectedCount = visibleInstances.filter((instance) => instanceStatuses[instance.id] === 'connected').length;
+    const disconnectedCount = Math.max(visibleInstances.length - connectedCount, 0);
+    const healthPercentage = visibleInstances.length > 0 ? Math.round((connectedCount / visibleInstances.length) * 100) : 0;
+    const pageTitle = isTelegramView ? 'Telegram Bot' : 'WhatsApp';
     const pageDescription = isTelegramView
         ? 'Gerencie bots do Telegram com webhook automatico e inbox dedicado.'
-        : 'Gerencie instancias de WhatsApp para atendimento.';
-    const primaryActionLabel = isTelegramView ? 'Adicionar Bot' : 'Criar Instancia';
+        : 'Conecte e gerencie suas instâncias de WhatsApp e templates de mensagem.';
+    const primaryActionLabel = isTelegramView ? 'Adicionar Bot' : 'Conectar número';
     const emptyTitle = isTelegramView ? 'Nenhum bot conectado' : 'Nenhuma instancia criada';
     const emptyDescription = isTelegramView
         ? 'Clique em "Adicionar Bot" para conectar seu primeiro bot do Telegram.'
@@ -1005,10 +1225,10 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
 
     return (
         <div className="flex flex-col flex-1 h-full">
-            <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
+            <header className="flex flex-shrink-0 items-center justify-between border-b bg-background px-5 py-5 sm:px-7">
                 <div>
-                    <h1 className="text-2xl font-bold flex items-center gap-2">{isTelegramView ? <Send /> : <Server />} {pageTitle}</h1>
-                    <p className="text-muted-foreground">{pageDescription}</p>
+                    <h1 className="text-2xl font-bold tracking-tight sm:text-[28px]">{pageTitle}</h1>
+                    <p className="mt-1 text-sm text-muted-foreground sm:text-base">{pageDescription}</p>
                 </div>
                 <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                     {limitStatus?.reached ? (
@@ -1020,43 +1240,99 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
                         </div>
                     ) : (
                         <DialogTrigger asChild>
-                            <Button>
+                            <Button className="h-10 px-4 font-semibold shadow-sm">
                                 <PlusCircle className="mr-2 h-4 w-4" />
                                 {primaryActionLabel}
                             </Button>
                         </DialogTrigger>
                     )}
                     <DialogContent className="max-w-3xl">
-                        <DialogTitle className="sr-only">{isTelegramView ? 'Adicionar bot Telegram' : 'Criar nova instancia'}</DialogTitle>
-                        <DialogDescription className="sr-only">{isTelegramView ? 'Cadastre um bot do Telegram com Evolution Channel.' : 'Escolha uma opcao para conectar WhatsApp.'}</DialogDescription>
+                        <DialogTitle className="sr-only">{isTelegramView ? 'Adicionar bot Telegram' : 'Conectar novo número'}</DialogTitle>
+                        <DialogDescription className="sr-only">{isTelegramView ? 'Cadastre um bot do Telegram com Evolution Channel.' : 'Escolha a melhor forma de conectar seu WhatsApp.'}</DialogDescription>
                         <AddInstanceForm workspaceId={user.activeWorkspaceId!} onSuccess={handleSuccess} onClose={() => setIsModalOpen(false)} channelMode={channelMode} />
                     </DialogContent>
                 </Dialog>
             </header>
-            <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 space-y-6">
-                {loading ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        <Skeleton className="h-72" />
-                        <Skeleton className="h-72" />
-                    </div>
-                ) : visibleInstances.length === 0 ? (
-                    <div className="text-center p-10 border-dashed border-2 rounded-lg mt-8">
-                        <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground" />
-                        <h3 className="mt-4 text-lg font-medium">{emptyTitle}</h3>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                            {emptyDescription}
-                        </p>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {visibleInstances.map(instance => <InstanceCard key={instance.id} instance={instance} onMutate={fetchData} user={user} />)}
-                    </div>
+            <main className="flex-1 space-y-5 overflow-y-auto bg-[#f8fafc] p-4 sm:p-6">
+                {!isTelegramView && (
+                    <section aria-label="Resumo das conexões" className="grid grid-cols-2 overflow-hidden rounded-xl border bg-background lg:grid-cols-5">
+                        {[
+                            { label: 'Conectadas', value: connectedCount, detail: `de ${visibleInstances.length}`, icon: MessageCircle, tone: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
+                            { label: 'Desconectadas', value: disconnectedCount, detail: `de ${visibleInstances.length}`, icon: PowerOff, tone: 'text-slate-600 bg-slate-50 border-slate-200' },
+                            { label: 'Saúde geral', value: `${healthPercentage}%`, detail: visibleInstances.length ? 'das instâncias' : 'sem instâncias', icon: CheckCircle2, tone: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
+                            { label: 'Sincronizadas', value: connectedCount, detail: 'nas últimas 24h', icon: Activity, tone: 'text-slate-600 bg-slate-50 border-slate-200' },
+                            { label: 'Última atualização', value: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), detail: 'Atualizado agora', icon: Clock3, tone: 'text-slate-600 bg-slate-50 border-slate-200' },
+                        ].map((stat) => (
+                            <div key={stat.label} className="flex min-h-[104px] items-center gap-3 border-b border-r p-4 last:border-r-0 lg:border-b-0">
+                                <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full border', stat.tone)}>
+                                    <stat.icon className="h-5 w-5" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="truncate text-xs font-medium text-muted-foreground">{stat.label}</p>
+                                    <p className="mt-0.5 text-xl font-semibold tracking-tight text-foreground">{stat.value}</p>
+                                    <p className="truncate text-xs text-muted-foreground">{stat.detail}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </section>
                 )}
+
+                <section className="overflow-hidden rounded-xl border bg-background">
+                    <div className="flex flex-col gap-4 border-b px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                        <div>
+                            <h2 className="text-base font-semibold">{isTelegramView ? 'Seus bots' : 'Suas instâncias'}</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">Monitore o status de conexão e gerencie seus canais.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    value={instanceSearch}
+                                    onChange={(event) => setInstanceSearch(event.target.value)}
+                                    placeholder={isTelegramView ? 'Buscar bot...' : 'Buscar instância...'}
+                                    className="h-10 pl-9"
+                                    aria-label={isTelegramView ? 'Buscar bot' : 'Buscar instância'}
+                                />
+                            </div>
+                            <Button variant="outline" onClick={fetchData} disabled={loading} className="h-10">
+                                <RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} /> Atualizar
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="hidden grid-cols-[1.25fr_1fr_1.15fr_.9fr_1fr_auto] gap-5 border-b bg-muted/20 px-6 py-3 text-xs font-medium text-muted-foreground md:grid">
+                        <span>Nome da instância</span>
+                        <span>Tipo de conexão</span>
+                        <span>Número</span>
+                        <span>Status</span>
+                        <span>Última verificação</span>
+                        <span className="pr-12 text-right">Ações</span>
+                    </div>
+
+                    {loading ? (
+                        <div className="space-y-1 p-4">
+                            <Skeleton className="h-20 w-full" />
+                            <Skeleton className="h-20 w-full" />
+                        </div>
+                    ) : visibleInstances.length === 0 ? (
+                        <div className="px-6 py-12 text-center">
+                            <MessageSquare className="mx-auto h-10 w-10 text-muted-foreground" />
+                            <h3 className="mt-4 text-base font-semibold">{emptyTitle}</h3>
+                            <p className="mt-2 text-sm text-muted-foreground">{emptyDescription}</p>
+                            <Button className="mt-5" onClick={() => setIsModalOpen(true)}><PlusCircle className="mr-2 h-4 w-4" />{primaryActionLabel}</Button>
+                        </div>
+                    ) : filteredInstances.length === 0 ? (
+                        <div className="px-6 py-10 text-center text-sm text-muted-foreground">Nenhuma instância corresponde à sua busca.</div>
+                    ) : (
+                        filteredInstances.map((instance) => (
+                            <InstanceRow key={instance.id} initialInstance={instance} onMutate={fetchData} onStatusChange={handleStatusChange} />
+                        ))
+                    )}
+                </section>
 
                 {cloudApiInstances.length > 0 && user.activeWorkspaceId && (
                     <TemplateManager instances={cloudApiInstances} />
                 )}
-
             </main>
         </div>
     );

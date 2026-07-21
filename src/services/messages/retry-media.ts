@@ -96,7 +96,10 @@ export function extractRetriedMediaResponseDetails(
     cleanString(apiResponse?.tempMediaPublicUrl) ||
     null;
 
-  let returnedMimetype = cleanString(message?.[messageTypeKey]?.mimetype) || null;
+  let returnedMimetype =
+    cleanString(message?.[messageTypeKey]?.mimetype) ||
+    cleanString(apiResponse?.tempMediaMimetype) ||
+    null;
 
   if (mediatype === 'audio') {
     returnedMediaUrl =

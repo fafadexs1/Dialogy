@@ -2,6 +2,8 @@
 
 import { fetchEvolutionAPI } from "@/lib/whatsapp/evolution-api-client";
 import type { EvolutionApiConfig } from "@/lib/types";
+import { normalizeAudioForWhatsApp } from './normalize-outbound-media';
+import { uploadTempMedia } from './upload-temp-media';
 
 interface AudioPayload {
     number: string;
@@ -12,7 +14,7 @@ interface AudioPayload {
 
 /**
  * Sends a recorded audio message as a native WhatsApp voice note.
- * Sends the audio URL directly to the Evolution API without conversion.
+ * Normalizes browser recordings to MP3 before handing the public URL to Evolution.
  * 
  * @param apiConfig - The API configuration.
  * @param instanceName - The name of the Evolution API instance.
@@ -24,7 +26,13 @@ export async function sendAudioMessage(
     instanceName: string,
     payload: AudioPayload
 ) {
-    const audioUrl = payload.audio;
+    const normalized = await normalizeAudioForWhatsApp(payload.audio, payload.mimetype, payload.fileName);
+    const uploaded = await uploadTempMedia({
+        media: normalized.media,
+        mimetype: normalized.mimetype,
+        fileName: normalized.fileName,
+    });
+    const audioUrl = uploaded.publicUrl;
 
     // Use /message/sendWhatsAppAudio endpoint - only requires number and audio
     // Evolution API often prefers pure numbers for this endpoint
@@ -44,7 +52,12 @@ export async function sendAudioMessage(
                 body: JSON.stringify(apiPayload),
             }
         );
-        return response;
+        return {
+            ...response,
+            tempMediaPublicUrl: audioUrl,
+            tempMediaMimetype: normalized.mimetype,
+            tempMediaFileName: normalized.fileName,
+        };
     } catch (error: any) {
         console.error(`[SEND_AUDIO_ERROR] Error sending audio:`, error);
         if (error?.response?.data) {

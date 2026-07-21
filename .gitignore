@@ -11,15 +11,15 @@ node_modules
 
 # build artifacts
 .next
-.next-codex-dev
-.next-perf
+.next-*
 out
 build
 dist
 
-# testing
+# testing & temporary
 coverage
-tmp/qa-auth-*.png
+tmp/
+scratch/
 
 # logs
 *.log
@@ -57,6 +57,7 @@ ffmpeg-2026-*
 
 # agents / temp
 .agent
+.artifacts
 .temp_ag_kit
 .genkit
 .gemini

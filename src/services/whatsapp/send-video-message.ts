@@ -4,6 +4,7 @@
 import { fetchEvolutionAPI } from "@/lib/whatsapp/evolution-api-client";
 import type { EvolutionApiConfig } from "@/lib/types";
 import { uploadTempMedia } from "./upload-temp-media";
+import { normalizeVideoForWhatsApp } from './normalize-outbound-media';
 
 interface VideoPayload {
     number: string;
@@ -25,25 +26,21 @@ export async function sendVideoMessage(
     instanceName: string,
     payload: VideoPayload
 ) {
-    let mediaUrl = payload.media;
-
-    // Se não for URL (assumindo base64), faz upload para gerar link
-    if (!payload.media.startsWith('http')) {
-        const result = await uploadTempMedia({
-            media: payload.media,
-            mimetype: payload.mimetype,
-            fileName: payload.filename,
-        });
-        mediaUrl = result.publicUrl;
-    }
+    const normalized = await normalizeVideoForWhatsApp(payload.media, payload.mimetype, payload.filename);
+    const uploaded = await uploadTempMedia({
+        media: normalized.media,
+        mimetype: normalized.mimetype,
+        fileName: normalized.fileName,
+    });
+    const mediaUrl = uploaded.publicUrl;
 
     const apiPayload = {
         number: payload.number,
         mediatype: 'video',
-        mimetype: payload.mimetype,
+        mimetype: normalized.mimetype,
         media: mediaUrl,
         caption: payload.caption,
-        fileName: payload.filename,
+        fileName: normalized.fileName,
     };
 
     const response = await fetchEvolutionAPI(
@@ -55,5 +52,10 @@ export async function sendVideoMessage(
         }
     );
 
-    return { ...response, tempMediaPublicUrl: mediaUrl };
+    return {
+        ...response,
+        tempMediaPublicUrl: mediaUrl,
+        tempMediaMimetype: normalized.mimetype,
+        tempMediaFileName: normalized.fileName,
+    };
 }

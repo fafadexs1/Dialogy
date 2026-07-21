@@ -521,6 +521,7 @@ export default function ChatPanel({
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const messageTimelineRef = useRef<HTMLDivElement>(null);
     const scrollToLatestFrameRef = useRef<number | null>(null);
+    const finishInitialPositionTimerRef = useRef<number | null>(null);
     const initiallyPositionedChatRef = useRef<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const contentEditableRef = useRef<any>(null);
@@ -934,19 +935,36 @@ export default function ChatPanel({
         });
     }, [cancelPremiumWheelAnimation]);
 
+    const settleInitialPositionAtLatest = useCallback(() => {
+        if (!chat?.id || isLoadingInitialMessages || visibleMessages.length === 0) return;
+        if (initiallyPositionedChatRef.current === chat.id) return;
+
+        scrollToLatestMessage('auto');
+
+        // Message rows can change height after Virtuoso's first measurement
+        // (images, audio metadata, fonts, etc.). Keep the initial viewport pinned
+        // to the latest message until the list height has been quiet for a moment.
+        if (finishInitialPositionTimerRef.current !== null) {
+            window.clearTimeout(finishInitialPositionTimerRef.current);
+        }
+        finishInitialPositionTimerRef.current = window.setTimeout(() => {
+            initiallyPositionedChatRef.current = chat.id;
+            finishInitialPositionTimerRef.current = null;
+        }, 400);
+    }, [chat?.id, isLoadingInitialMessages, scrollToLatestMessage, visibleMessages.length]);
+
     useEffect(() => () => {
         if (scrollToLatestFrameRef.current !== null) {
             window.cancelAnimationFrame(scrollToLatestFrameRef.current);
         }
+        if (finishInitialPositionTimerRef.current !== null) {
+            window.clearTimeout(finishInitialPositionTimerRef.current);
+        }
     }, []);
 
-    useEffect(() => {
-        if (!chat?.id || isLoadingInitialMessages || visibleMessages.length === 0) return;
-        if (initiallyPositionedChatRef.current === chat.id) return;
-
-        initiallyPositionedChatRef.current = chat.id;
-        scrollToLatestMessage('auto');
-    }, [chat?.id, isLoadingInitialMessages, scrollToLatestMessage, visibleMessages.length]);
+    useLayoutEffect(() => {
+        settleInitialPositionAtLatest();
+    }, [settleInitialPositionAtLatest]);
 
     const startIndex = 0;
     const padTop = 0;
@@ -1572,6 +1590,9 @@ export default function ChatPanel({
                         filename: mf.name,
                         mediatype: mf.mediatype,
                         thumbnail: mf.thumbnail,
+                        deleteAfterSend: true,
+                        storageBucket: 'temp-media',
+                        storagePath: fileName,
                     }];
 
                     const currentCaption = i === 0 ? captionForFirst : '';
@@ -2391,7 +2412,7 @@ export default function ChatPanel({
                     style={{ height: '100%', width: '100%' }}
                     data={visibleMessages}
                     firstItemIndex={firstItemIndex}
-                    initialTopMostItemIndex={{ index: Math.max(0, visibleMessages.length - 1), align: 'end' }}
+                    initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
                     increaseViewportBy={{ top: 480, bottom: 240 }}
                     minOverscanItemCount={{ top: 4, bottom: 2 }}
                     defaultItemHeight={96}
@@ -2409,6 +2430,7 @@ export default function ChatPanel({
                     }}
                     rangeChanged={handleMessageRangeChanged}
                     startReached={tryLoadOlder}
+                    totalListHeightChanged={settleInitialPositionAtLatest}
                     components={{
                         Header: () => <div className="h-4" aria-hidden="true" />,
                         Footer: () => (

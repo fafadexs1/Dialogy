@@ -181,7 +181,7 @@ export function AudioRecorder({ onSend }: AudioRecorderProps) {
     if (!audioBlob) return;
     setIsSending(true);
     try {
-      await onSend(audioBlob, recordingTime, 'audio/webm');
+      await onSend(audioBlob, recordingTime, audioBlob.type || 'audio/webm');
       handleCancel();
     } catch (error) {
       console.error(error);

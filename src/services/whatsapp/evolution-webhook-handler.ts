@@ -1167,6 +1167,7 @@ async function handleMessagesUpdate(payload: any) {
                         true
                      )
                  WHERE message_id_from_api = $2
+                   AND UPPER(COALESCE(api_message_status, '')) NOT IN ('DELIVERED', 'READ', 'PLAYED')
                  RETURNING chat_id, created_at, from_me`,
                 [
                     normalizedStatus,
@@ -1206,7 +1207,8 @@ async function handleMessagesUpdate(payload: any) {
             if (from_me) {
                 const olderMessagesRes = await client.query(
                     `UPDATE messages 
-                     SET api_message_status = 'READ' 
+                     SET api_message_status = 'READ',
+                         metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
                      WHERE chat_id = $1 
                        AND from_me = TRUE 
                        AND created_at <= $2 

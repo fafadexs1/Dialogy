@@ -1,4 +1,0 @@
-2026/07/01 02:28:12 Servidor MCP inicializado com sucesso
-2026/07/01 02:28:12 MCP HTTP escutando em :8090
-2026/07/01 02:28:12 Endpoint principal: http://localhost:8090/mcp
-2026/07/01 02:28:12 Healthcheck: http://localhost:8090/health

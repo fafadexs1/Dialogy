@@ -195,3 +195,62 @@ final result: blocked
 - [ ] Run normalized side-by-side design comparison and fix any P1/P2 drift.
 
 final result: blocked
+
+---
+
+# Design QA - CRM List / white theme
+
+## Visual source
+
+- Selected direction: `.artifacts/crm-list-audit/option-2-source.png`
+- Validated implementation: `.artifacts/crm-list-audit/12-local-crm-list-light-header.png`
+- Full comparison: `.artifacts/crm-list-audit/13-option2-vs-implementation-final.png`
+- Focused header, command bar, and table comparison: `.artifacts/crm-list-audit/17-option2-vs-implementation-focused.png`
+
+## Viewport and state
+
+- Generated reference: 1880 x 837 px.
+- Implementation: 1920 x 855 px, also compared in a normalized focused crop.
+- Route: `/crm`, **Lista** tab, **Claro** theme, **Todos os contatos** list, **Todos** date filter.
+- Data: authenticated session with real workspace data; default 25 rows per page.
+
+## Visual comparison
+
+### Iteration 1
+
+- Finding: list content and controls still used black surfaces in the light theme.
+- Severity: P1.
+- Fix: surfaces, typography, borders, selected states, table, pagination, and menus now use light tokens with `dark:` variants.
+
+### Iteration 2
+
+- Finding: the smart-list modal still opened dark in the light theme.
+- Severity: P2.
+- Fix: modal, fields, rules, and actions received complete light and dark styles.
+
+### Iteration 3
+
+- Finding: the global CRM header remained black and broke the selected direction.
+- Severity: P2.
+- Fix: CRM header, tabs, and actions are light in the white theme while preserving dark mode.
+
+### Final iteration
+
+- Hierarchy, proportions, density, subtle borders, white surfaces, and emerald accents match the selected direction.
+- The table uses available real data, so owners, tags, avatars, and identifiers intentionally differ from the fictional reference data.
+- No actionable P0, P1, or P2 visual mismatch remained in the focused comparison.
+
+## Interactions and regressions
+
+- Lista tab: passed.
+- Todos and 7 dias filters: passed.
+- Search and clear: passed.
+- Novo contato: modal opened and canceled without submission.
+- Nova lista inteligente: modal opened and canceled without saving.
+- Browser console: no errors; informational Fast Refresh messages only.
+- `npm run typecheck`: passed.
+- `npm test -- tests/crm-segment-audience.spec.ts tests/crm-pipeline.spec.ts`: 2 files and 5 tests passed.
+
+## Final result
+
+passed

@@ -95,7 +95,7 @@ function formatLastActivity(value?: string | null) {
         return {
             label: 'Sem registro',
             detail: 'Nenhuma mensagem ou atividade',
-            tone: 'border-white/10 bg-white/[0.03] text-zinc-500',
+            tone: 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500',
         };
     }
 
@@ -104,16 +104,16 @@ function formatLastActivity(value?: string | null) {
         return {
             label: 'Data invalida',
             detail: String(value),
-            tone: 'border-white/10 bg-white/[0.03] text-zinc-500',
+            tone: 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500',
         };
     }
 
     const days = Math.floor((Date.now() - date.getTime()) / 86400000);
     const tone = days <= 7
-        ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-200'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-400/10 dark:text-emerald-200'
         : days <= 30
-            ? 'border-amber-400/30 bg-amber-400/10 text-amber-100'
-            : 'border-rose-400/30 bg-rose-400/10 text-rose-100';
+            ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100'
+            : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-100';
 
     return {
         label: formatDistanceToNow(date, { addSuffix: true, locale: ptBR }),
@@ -152,24 +152,24 @@ function TableActions({ contact, onSelect }: { contact: Contact; onSelect: (acti
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-zinc-400 hover:bg-white/10 hover:text-white">
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white">
                     <MoreHorizontal className="h-4 w-4" />
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="border-white/10 bg-zinc-950 text-zinc-100 shadow-2xl">
-                <DropdownMenuItem onClick={() => onSelect('view', contact)} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+            <DropdownMenuContent align="end" className="border-slate-200 bg-white text-slate-700 shadow-xl dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-100">
+                <DropdownMenuItem onClick={() => onSelect('view', contact)} className="focus:bg-emerald-50 focus:text-emerald-800 dark:focus:bg-emerald-400/10 dark:focus:text-emerald-100">
                     <Eye className="mr-2 h-4 w-4" /> Ver detalhes
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+                <DropdownMenuItem onClick={() => onSelect('logAttempt', contact)} className="focus:bg-emerald-50 focus:text-emerald-800 dark:focus:bg-emerald-400/10 dark:focus:text-emerald-100">
                     <PhoneOff className="mr-2 h-4 w-4" /> Registrar tentativa
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelect('addActivity', contact)} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+                <DropdownMenuItem onClick={() => onSelect('addActivity', contact)} className="focus:bg-emerald-50 focus:text-emerald-800 dark:focus:bg-emerald-400/10 dark:focus:text-emerald-100">
                     <PlusCircle className="mr-2 h-4 w-4" /> Adicionar atividade
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact); }} className="focus:bg-emerald-400/10 focus:text-emerald-100">
+                <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSelect('edit', contact); }} className="focus:bg-emerald-50 focus:text-emerald-800 dark:focus:bg-emerald-400/10 dark:focus:text-emerald-100">
                     <Edit className="mr-2 h-4 w-4" /> Editar contato
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-rose-300 focus:bg-rose-500/10 focus:text-rose-200">
+                <DropdownMenuItem onClick={() => onSelect('delete', contact)} className="text-rose-600 focus:bg-rose-50 focus:text-rose-700 dark:text-rose-300 dark:focus:bg-rose-500/10 dark:focus:text-rose-200">
                     <Trash2 className="mr-2 h-4 w-4" /> Excluir contato
                 </DropdownMenuItem>
             </DropdownMenuContent>
@@ -404,17 +404,17 @@ export default function CustomerList({ user }: { user: User }) {
     };
 
     return (
-        <div className="flex h-full flex-1 overflow-hidden bg-black text-zinc-100">
-            <aside className="hidden w-[292px] shrink-0 border-r border-white/10 bg-[#050807] p-5 lg:flex lg:flex-col">
+        <div className="flex h-full flex-1 overflow-hidden bg-slate-50 text-slate-900 dark:bg-black dark:text-zinc-100">
+            <aside className="hidden w-[292px] shrink-0 border-r border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#050807] lg:flex lg:flex-col">
                 <div className="mb-6 flex items-center justify-between">
                     <div>
-                        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-300">CRM Dialogy</p>
-                        <h2 className="mt-1 text-xl font-semibold text-white">Listas</h2>
+                        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-300">CRM Dialogy</p>
+                        <h2 className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">Listas</h2>
                     </div>
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-9 w-9 rounded-full border border-emerald-400/25 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20 hover:text-white"
+                        className="h-9 w-9 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-200 dark:hover:bg-emerald-400/20 dark:hover:text-white"
                         onClick={() => setIsSegmentBuilderOpen(true)}
                     >
                         <Plus className="h-4 w-4" />
@@ -424,20 +424,20 @@ export default function CustomerList({ user }: { user: User }) {
                 <Button
                     variant="ghost"
                     className={cn(
-                        'mb-5 h-12 w-full justify-start rounded-2xl border px-4 text-sm font-semibold',
+                        'mb-5 h-12 w-full justify-start rounded-xl border px-4 text-sm font-semibold',
                         selectedSegmentId === null
-                            ? 'border-emerald-400/35 bg-emerald-400/15 text-emerald-100 shadow-[0_0_26px_rgba(16,185,129,0.12)]'
-                            : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:bg-white/[0.06] hover:text-white'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-400/15 dark:text-emerald-100'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
                     )}
                     onClick={() => setSelectedSegmentId(null)}
                 >
                     <Users className="mr-3 h-4 w-4" />
                     Todos os contatos
-                    <span className="ml-auto rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-zinc-300">{totalItems}</span>
+                    <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-white/10 dark:text-zinc-300">{totalItems}</span>
                 </Button>
 
                 <div className="mb-5">
-                    <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                    <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">
                         <CalendarClock className="h-3.5 w-3.5" />
                         Atalhos por data
                     </div>
@@ -451,28 +451,28 @@ export default function CustomerList({ user }: { user: User }) {
                                     type="button"
                                     onClick={() => setDateFilter(filter.id)}
                                     className={cn(
-                                        'rounded-2xl border p-3 text-left transition',
+                                        'rounded-xl border p-3 text-left transition',
                                         isActive
-                                            ? 'border-emerald-400/45 bg-emerald-400/15 text-white'
-                                            : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-100'
+                                            ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-400/45 dark:bg-emerald-400/15 dark:text-white'
+                                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:border-white/20 dark:hover:bg-white/[0.06] dark:hover:text-zinc-100'
                                     )}
                                 >
-                                    <Icon className={cn('mb-2 h-4 w-4', isActive ? 'text-emerald-300' : 'text-zinc-500')} />
+                                    <Icon className={cn('mb-2 h-4 w-4', isActive ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-400 dark:text-zinc-500')} />
                                     <div className="text-xs font-bold">{filter.label}</div>
-                                    <div className="mt-0.5 text-[10px] text-zinc-500">{filter.description}</div>
+                                    <div className="mt-0.5 text-[10px] text-slate-500 dark:text-zinc-500">{filter.description}</div>
                                 </button>
                             );
                         })}
                     </div>
                 </div>
 
-                <div className="mb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                <div className="mb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">
                     <span>Listas inteligentes</span>
                     <span>{segments.length}</span>
                 </div>
                 <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                     {segments.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-4 text-sm text-zinc-500">
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.02] dark:text-zinc-500">
                             Crie listas por tag, vendedor, data de contato ou campos personalizados.
                         </div>
                     ) : segments.map((segment) => (
@@ -480,10 +480,10 @@ export default function CustomerList({ user }: { user: User }) {
                             <Button
                                 variant="ghost"
                                 className={cn(
-                                    'h-auto min-h-12 w-full justify-start rounded-2xl border px-4 py-3 pr-10 text-left text-sm font-semibold',
+                                    'h-auto min-h-12 w-full justify-start rounded-xl border px-4 py-3 pr-10 text-left text-sm font-semibold',
                                     selectedSegmentId === segment.id
-                                        ? 'border-emerald-400/35 bg-emerald-400/15 text-emerald-100'
-                                        : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:bg-white/[0.06] hover:text-white'
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-400/15 dark:text-emerald-100'
+                                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
                                 )}
                                 onClick={() => setSelectedSegmentId(segment.id)}
                             >
@@ -493,7 +493,7 @@ export default function CustomerList({ user }: { user: User }) {
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="absolute right-2 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-zinc-500 opacity-0 hover:bg-rose-500/10 hover:text-rose-300 group-hover:opacity-100"
+                                className="absolute right-2 top-1/2 h-7 w-7 -translate-y-1/2 rounded-lg text-slate-400 opacity-0 hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:text-zinc-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-300"
                                 onClick={(event) => handleDeleteSegment(event, segment.id)}
                             >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -503,22 +503,12 @@ export default function CustomerList({ user }: { user: User }) {
                 </div>
             </aside>
 
-            <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.13),transparent_34%),linear-gradient(180deg,#07100d_0%,#030504_44%,#000_100%)]">
-                <div className="shrink-0 border-b border-white/10 bg-black/40 px-5 py-4 backdrop-blur-xl lg:px-7">
+            <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-black">
+                <div className="shrink-0 bg-slate-50 px-5 pb-0 pt-5 dark:bg-black lg:px-7">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                         <div>
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                                <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 font-semibold text-emerald-200">
-                                    {selectedSegment?.name || 'Todos os contatos'}
-                                </span>
-                                {dateFilter !== 'all' && (
-                                    <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-zinc-300">
-                                        {DATE_FILTERS.find((filter) => filter.id === dateFilter)?.description}
-                                    </span>
-                                )}
-                            </div>
-                            <h1 className="mt-2 text-2xl font-bold tracking-tight text-white">Lista do CRM</h1>
-                            <p className="mt-1 text-sm text-zinc-400">
+                            <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">Lista do CRM</h1>
+                            <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
                                 Organize contatos por comportamento, responsavel e recencia de atendimento.
                             </p>
                         </div>
@@ -527,7 +517,7 @@ export default function CustomerList({ user }: { user: User }) {
                             {selectedSegment && (
                                 <Button
                                     variant="outline"
-                                    className="h-10 rounded-full border-white/10 bg-white/[0.04] px-4 text-zinc-200 hover:bg-white/10 hover:text-white"
+                                    className="h-10 rounded-lg border-slate-200 bg-white px-4 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200 dark:hover:bg-white/10 dark:hover:text-white"
                                     disabled={exportingSegmentId === selectedSegment.id}
                                     onClick={() => handleExportSegment(selectedSegment)}
                                 >
@@ -539,7 +529,7 @@ export default function CustomerList({ user }: { user: User }) {
                             )}
                             <Button
                                 variant="outline"
-                                className="h-10 rounded-full border-emerald-400/25 bg-emerald-400/10 px-4 text-emerald-100 hover:bg-emerald-400/20 hover:text-white"
+                                className="h-10 rounded-lg border-slate-200 bg-white px-4 text-emerald-700 shadow-sm hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-100 dark:hover:bg-emerald-400/20 dark:hover:text-white"
                                 onClick={() => setIsSegmentBuilderOpen(true)}
                             >
                                 <Filter className="mr-2 h-4 w-4" />
@@ -550,13 +540,13 @@ export default function CustomerList({ user }: { user: User }) {
                                     variant="outline"
                                     size="icon"
                                     title="Configuracoes do CRM"
-                                    className="h-10 w-10 rounded-full border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/10 hover:text-white"
+                                    className="h-10 w-10 rounded-lg border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white"
                                 >
                                     <Settings className="h-4 w-4" />
                                 </Button>
                             </CrmSettings>
                             <Button
-                                className="h-10 rounded-full bg-white px-5 font-bold text-black hover:bg-emerald-100"
+                                className="h-10 rounded-lg bg-emerald-600 px-5 font-bold text-white shadow-sm hover:bg-emerald-700 dark:bg-white dark:text-black dark:hover:bg-emerald-100"
                                 onClick={() => { setEditingContact(null); setIsAddEditModalOpen(true); }}
                             >
                                 <Plus className="mr-2 h-4 w-4" />
@@ -565,63 +555,25 @@ export default function CustomerList({ user }: { user: User }) {
                         </div>
                     </div>
 
-                    <div className="mt-5 grid gap-3 md:grid-cols-3">
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
-                                    <Users className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Resultado</p>
-                                    <p className="text-2xl font-bold text-white">{totalItems}</p>
-                                </div>
+                    <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#070b09]">
+                        <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2.5 dark:border-white/10">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200">
+                                    <ListFilter className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+                                    {selectedSegment?.name || 'Todos os contatos'}
+                                </span>
+                                {dateFilter !== 'all' && (
+                                    <span className="text-xs text-slate-500 dark:text-zinc-500">
+                                        {DATE_FILTERS.find((filter) => filter.id === dateFilter)?.description}
+                                    </span>
+                                )}
                             </div>
-                        </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
-                                    <MessageCircle className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Ativos na pagina</p>
-                                    <p className="text-2xl font-bold text-white">{recentContacts}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 text-zinc-300">
-                                    <PhoneOff className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Sem atividade na pagina</p>
-                                    <p className="text-2xl font-bold text-white">{withoutActivity}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="shrink-0 border-b border-white/10 bg-black/25 px-5 py-4 lg:px-7">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:items-center">
-                            <div className="relative w-full md:max-w-md">
-                                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                                <Input
-                                    type="text"
-                                    placeholder="Buscar por nome, telefone, JID ou email..."
-                                    className="h-11 rounded-2xl border-white/10 bg-white/[0.05] pl-11 text-sm text-white placeholder:text-zinc-500 focus-visible:ring-emerald-400/30"
-                                    value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
-                                />
-                            </div>
-
                             <div className="lg:hidden">
                                 <Select value={selectedSegmentId || 'all'} onValueChange={(value) => setSelectedSegmentId(value === 'all' ? null : value)}>
-                                    <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-white/[0.05] text-white">
+                                    <SelectTrigger className="h-9 rounded-lg border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white">
                                         <SelectValue placeholder="Listas" />
                                     </SelectTrigger>
-                                    <SelectContent className="border-white/10 bg-zinc-950 text-zinc-100">
+                                    <SelectContent className="border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-100">
                                         <SelectItem value="all">Todos os contatos</SelectItem>
                                         {segments.map((segment) => (
                                             <SelectItem key={segment.id} value={segment.id}>{segment.name}</SelectItem>
@@ -631,63 +583,93 @@ export default function CustomerList({ user }: { user: User }) {
                             </div>
                         </div>
 
-                        <div className="flex gap-2 overflow-x-auto pb-1 lg:pb-0">
-                            {DATE_FILTERS.map((filter) => {
-                                const Icon = filter.icon;
-                                const isActive = dateFilter === filter.id;
-                                return (
-                                    <Button
-                                        key={filter.id}
-                                        variant="outline"
-                                        className={cn(
-                                            'h-10 shrink-0 rounded-full border px-4 text-sm',
-                                            isActive
-                                                ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-100'
-                                                : 'border-white/10 bg-white/[0.04] text-zinc-400 hover:bg-white/10 hover:text-white'
-                                        )}
-                                        onClick={() => setDateFilter(filter.id)}
-                                    >
-                                        <Icon className="mr-2 h-4 w-4" />
-                                        {filter.label}
-                                    </Button>
-                                );
-                            })}
+                        <div className="flex flex-col divide-y divide-slate-200 dark:divide-white/10 xl:flex-row xl:divide-x xl:divide-y-0">
+                            <div className="flex min-w-[280px] flex-1 items-center px-4 py-3">
+                                <div className="relative w-full max-w-md">
+                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-zinc-500" />
+                                <Input
+                                    type="text"
+                                    placeholder="Buscar por nome, telefone, JID ou email..."
+                                    className="h-10 rounded-lg border-slate-200 bg-white pl-10 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-400 focus-visible:ring-emerald-400/20 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:placeholder:text-zinc-500"
+                                    value={searchTerm}
+                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                />
+                                </div>
+                            </div>
+
+                            <div className="grid shrink-0 grid-cols-3 divide-x divide-slate-200 dark:divide-white/10">
+                                <div className="min-w-[128px] px-4 py-3">
+                                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Resultado</p>
+                                    <p className="mt-0.5 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><Users className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />{totalItems}</p>
+                                </div>
+                                <div className="min-w-[142px] px-4 py-3">
+                                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Ativos na pagina</p>
+                                    <p className="mt-0.5 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><MessageCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />{recentContacts}</p>
+                                </div>
+                                <div className="min-w-[178px] px-4 py-3">
+                                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Sem atividade na pagina</p>
+                                    <p className="mt-0.5 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><PhoneOff className="h-4 w-4 text-slate-400 dark:text-zinc-400" />{withoutActivity}</p>
+                                </div>
+                            </div>
+
+                            <div className="flex shrink-0 gap-2 overflow-x-auto px-4 py-3">
+                                {DATE_FILTERS.map((filter) => {
+                                    const Icon = filter.icon;
+                                    const isActive = dateFilter === filter.id;
+                                    return (
+                                        <Button
+                                            key={filter.id}
+                                            variant="outline"
+                                            className={cn(
+                                                'h-10 shrink-0 rounded-lg border px-3.5 text-sm',
+                                                isActive
+                                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-400/40 dark:bg-emerald-400/15 dark:text-emerald-100'
+                                                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white'
+                                            )}
+                                            onClick={() => setDateFilter(filter.id)}
+                                        >
+                                            <Icon className="mr-2 h-4 w-4" />
+                                            {filter.label}
+                                        </Button>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-7">
-                    <section className="overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#070b09]/92 shadow-[0_24px_80px_-44px_rgba(16,185,129,0.35)]">
+                    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#070b09]">
                         <Table>
-                            <TableHeader className="bg-white/[0.04]">
-                                <TableRow className="border-white/10 hover:bg-transparent">
-                                    <TableHead className="w-12 text-zinc-500">
-                                        <Checkbox className="border-white/20 data-[state=checked]:border-emerald-400 data-[state=checked]:bg-emerald-500" />
+                            <TableHeader className="bg-slate-50/80 dark:bg-white/[0.04]">
+                                <TableRow className="border-slate-200 hover:bg-transparent dark:border-white/10">
+                                    <TableHead className="w-12 text-slate-400 dark:text-zinc-500">
+                                        <Checkbox className="border-slate-300 data-[state=checked]:border-emerald-500 data-[state=checked]:bg-emerald-600 dark:border-white/20 dark:data-[state=checked]:border-emerald-400 dark:data-[state=checked]:bg-emerald-500" />
                                     </TableHead>
-                                    <TableHead className="min-w-[280px] text-zinc-400">Contato</TableHead>
-                                    <TableHead className="min-w-[190px] text-zinc-400">Canal</TableHead>
-                                    <TableHead className="min-w-[180px] text-zinc-400">Responsavel</TableHead>
-                                    <TableHead className="min-w-[180px] text-zinc-400">Tags</TableHead>
-                                    <TableHead className="min-w-[210px] text-zinc-400">Ultima atividade</TableHead>
-                                    <TableHead className="w-20 text-center text-zinc-400">Acoes</TableHead>
+                                    <TableHead className="min-w-[280px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Contato</TableHead>
+                                    <TableHead className="min-w-[190px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Canal</TableHead>
+                                    <TableHead className="min-w-[180px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Responsavel</TableHead>
+                                    <TableHead className="min-w-[180px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Tags</TableHead>
+                                    <TableHead className="min-w-[210px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Ultima atividade</TableHead>
+                                    <TableHead className="w-20 text-center text-xs font-semibold text-slate-600 dark:text-zinc-400">Acoes</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {loading ? (
-                                    <TableRow className="border-white/10 hover:bg-white/[0.02]">
+                                    <TableRow className="border-slate-200 hover:bg-slate-50/60 dark:border-white/10 dark:hover:bg-white/[0.02]">
                                         <TableCell colSpan={7} className="h-56 text-center">
-                                            <Loader2 className="mx-auto h-7 w-7 animate-spin text-emerald-300" />
-                                            <p className="mt-3 text-sm text-zinc-500">Carregando contatos...</p>
+                                            <Loader2 className="mx-auto h-7 w-7 animate-spin text-emerald-600 dark:text-emerald-300" />
+                                            <p className="mt-3 text-sm text-slate-500 dark:text-zinc-500">Carregando contatos...</p>
                                         </TableCell>
                                     </TableRow>
                                 ) : customers.length === 0 ? (
-                                    <TableRow className="border-white/10 hover:bg-white/[0.02]">
+                                    <TableRow className="border-slate-200 hover:bg-slate-50/60 dark:border-white/10 dark:hover:bg-white/[0.02]">
                                         <TableCell colSpan={7} className="h-56 text-center">
-                                            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-500">
+                                            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-400 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-500">
                                                 <Search className="h-6 w-6" />
                                             </div>
-                                            <p className="mt-4 text-base font-semibold text-white">Nenhum contato encontrado</p>
-                                            <p className="mt-1 text-sm text-zinc-500">Ajuste a busca, data ou lista selecionada.</p>
+                                            <p className="mt-4 text-base font-semibold text-slate-900 dark:text-white">Nenhum contato encontrado</p>
+                                            <p className="mt-1 text-sm text-slate-500 dark:text-zinc-500">Ajuste a busca, data ou lista selecionada.</p>
                                         </TableCell>
                                     </TableRow>
                                 ) : customers.map((customer) => {
@@ -695,16 +677,16 @@ export default function CustomerList({ user }: { user: User }) {
                                     return (
                                         <TableRow
                                             key={customer.id}
-                                            className="group border-white/10 transition-colors hover:bg-emerald-400/[0.045]"
+                                            className="group border-slate-200 transition-colors hover:bg-emerald-50/50 dark:border-white/10 dark:hover:bg-emerald-400/[0.045]"
                                         >
-                                            <TableCell>
-                                                <Checkbox className="border-white/20 data-[state=checked]:border-emerald-400 data-[state=checked]:bg-emerald-500" />
+                                            <TableCell className="py-3">
+                                                <Checkbox className="border-slate-300 data-[state=checked]:border-emerald-500 data-[state=checked]:bg-emerald-600 dark:border-white/20 dark:data-[state=checked]:border-emerald-400 dark:data-[state=checked]:bg-emerald-500" />
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="py-3">
                                                 <div className="flex items-center gap-3">
-                                                    <Avatar className="h-11 w-11 border border-white/10 bg-white/[0.04]">
+                                                    <Avatar className="h-10 w-10 border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/[0.04]">
                                                         <AvatarImage src={customer.avatar_url || undefined} alt={customer.name} />
-                                                        <AvatarFallback className="bg-emerald-400/12 font-bold text-emerald-100">
+                                                        <AvatarFallback className="bg-emerald-50 font-bold text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-100">
                                                             {getInitials(customer.name)}
                                                         </AvatarFallback>
                                                     </Avatar>
@@ -712,37 +694,37 @@ export default function CustomerList({ user }: { user: User }) {
                                                         <button
                                                             type="button"
                                                             onClick={() => handleAction('view', customer)}
-                                                            className="block max-w-[280px] truncate text-left text-sm font-bold text-white underline-offset-4 hover:text-emerald-200 hover:underline"
+                                                            className="block max-w-[280px] truncate text-left text-sm font-bold text-slate-900 underline-offset-4 hover:text-emerald-700 hover:underline dark:text-white dark:hover:text-emerald-200"
                                                         >
                                                             {customer.name || 'Contato sem nome'}
                                                         </button>
-                                                        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+                                                        <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-500">
                                                             <Phone className="h-3.5 w-3.5" />
                                                             <span className="truncate">{getPhoneLabel(customer)}</span>
                                                         </div>
                                                     </div>
                                                 </div>
                                             </TableCell>
-                                            <TableCell>
-                                                <div className="inline-flex max-w-[260px] items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
-                                                    <MessageCircle className="h-3.5 w-3.5" />
+                                            <TableCell className="py-3">
+                                                <div className="inline-flex max-w-[260px] items-center gap-2 text-xs font-semibold text-slate-600 dark:text-zinc-300">
+                                                    <MessageCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
                                                     <span className="truncate">{customer.phone_number_jid || customer.phone || 'Sem canal'}</span>
                                                 </div>
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="py-3">
                                                 {customer.owner?.name ? (
-                                                    <div className="flex items-center gap-2 text-sm text-zinc-200">
-                                                        <UserRound className="h-4 w-4 text-emerald-300" />
+                                                    <div className="flex items-center gap-2 text-sm text-slate-700 dark:text-zinc-200">
+                                                        <UserRound className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
                                                         <span className="truncate">{customer.owner.name}</span>
                                                     </div>
                                                 ) : (
-                                                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-zinc-500">
+                                                    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500">
                                                         <BriefcaseBusiness className="h-3.5 w-3.5" />
                                                         Sem vendedor
                                                     </span>
                                                 )}
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="py-3">
                                                 {customer.tags?.length ? (
                                                     <div className="flex max-w-[240px] flex-wrap gap-1.5">
                                                         {customer.tags.slice(0, 3).map((tag) => (
@@ -755,25 +737,25 @@ export default function CustomerList({ user }: { user: User }) {
                                                             </Badge>
                                                         ))}
                                                         {customer.tags.length > 3 && (
-                                                            <Badge className="rounded-full border border-white/10 bg-white/[0.04] text-[11px] text-zinc-400">
+                                                            <Badge className="rounded-full border border-slate-200 bg-slate-50 text-[11px] text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
                                                                 +{customer.tags.length - 3}
                                                             </Badge>
                                                         )}
                                                     </div>
                                                 ) : (
-                                                    <span className="inline-flex items-center gap-2 text-xs text-zinc-500">
+                                                    <span className="inline-flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-500">
                                                         <Tags className="h-3.5 w-3.5" />
                                                         Sem tags
                                                     </span>
                                                 )}
                                             </TableCell>
-                                            <TableCell>
-                                                <div className={cn('inline-flex flex-col rounded-2xl border px-3 py-2 text-xs', activity.tone)}>
+                                            <TableCell className="py-3">
+                                                <div className={cn('inline-flex flex-col rounded-lg border px-3 py-1.5 text-xs', activity.tone)}>
                                                     <span className="font-bold">{activity.label}</span>
                                                     <span className="mt-0.5 text-[11px] opacity-70">{activity.detail}</span>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-center">
+                                            <TableCell className="py-3 text-center">
                                                 <TableActions contact={customer} onSelect={handleAction} />
                                             </TableCell>
                                         </TableRow>
@@ -782,16 +764,16 @@ export default function CustomerList({ user }: { user: User }) {
                             </TableBody>
                         </Table>
 
-                        <div className="flex flex-col gap-3 border-t border-white/10 bg-white/[0.025] p-4 text-sm text-zinc-500 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.025] dark:text-zinc-500 lg:flex-row lg:items-center lg:justify-between">
                             <span>{`Mostrando ${startItem}-${endItem} de ${totalItems} contatos`}</span>
                             <div className="flex flex-wrap items-center gap-2">
                                 <div className="flex items-center gap-2">
                                     <span>Linhas:</span>
                                     <Select value={String(itemsPerPage)} onValueChange={(value) => setItemsPerPage(Number(value))}>
-                                        <SelectTrigger className="h-9 w-20 rounded-full border-white/10 bg-black/30 text-zinc-200">
+                                        <SelectTrigger className="h-9 w-20 rounded-lg border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-black/30 dark:text-zinc-200">
                                             <SelectValue placeholder={itemsPerPage} />
                                         </SelectTrigger>
-                                        <SelectContent className="border-white/10 bg-zinc-950 text-zinc-100">
+                                        <SelectContent className="border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-100">
                                             <SelectItem value="10">10</SelectItem>
                                             <SelectItem value="25">25</SelectItem>
                                             <SelectItem value="50">50</SelectItem>
@@ -799,13 +781,13 @@ export default function CustomerList({ user }: { user: User }) {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 font-semibold text-zinc-200">
+                                <span className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 dark:border-white/10 dark:bg-black/30 dark:text-zinc-200">
                                     Pagina {currentPage} de {totalPages || 1}
                                 </span>
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-9 w-9 rounded-full border border-white/10 text-zinc-400 hover:bg-white/10 hover:text-white"
+                                    className="h-9 w-9 rounded-lg border border-slate-200 text-slate-400 hover:bg-white hover:text-slate-700 dark:border-white/10 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
                                     onClick={() => setCurrentPage((page) => page - 1)}
                                     disabled={currentPage === 1}
                                 >
@@ -814,7 +796,7 @@ export default function CustomerList({ user }: { user: User }) {
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-9 w-9 rounded-full border border-white/10 text-zinc-400 hover:bg-white/10 hover:text-white"
+                                    className="h-9 w-9 rounded-lg border border-slate-200 text-slate-400 hover:bg-white hover:text-slate-700 dark:border-white/10 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
                                     onClick={() => setCurrentPage((page) => page + 1)}
                                     disabled={currentPage === totalPages || totalPages === 0}
                                 >
@@ -838,7 +820,7 @@ export default function CustomerList({ user }: { user: User }) {
                 )}
 
                 {user.activeWorkspaceId && isSegmentBuilderOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm dark:bg-black/85">
                         <div className="w-full max-w-3xl animate-in fade-in zoom-in duration-200">
                             <SegmentBuilder
                                 tags={tags}
