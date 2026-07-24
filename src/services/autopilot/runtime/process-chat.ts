@@ -36,6 +36,7 @@ import {
     type OrchestratorRunHandle,
 } from '@/services/orchestrator/runtime';
 import { analyzeMediaForAutopilot } from '@/ai/flows/analyze-media';
+import { createPrivateObjectDownloadUrl } from '@/lib/storage/private-s3';
 import {
     buildMcpCustomerResponseFromToolResults,
     buildRouterRebootActionFromSgpResults,
@@ -715,7 +716,14 @@ async function buildMediaAnalysisContext(input: {
         metadata = {};
     }
 
-    const mediaUrl = metadata.mediaUrl || message.media_url;
+    let mediaUrl = metadata.mediaUrl || message.media_url;
+    if (metadata.storageKey) {
+        try {
+            mediaUrl = await createPrivateObjectDownloadUrl(metadata.storageKey);
+        } catch (error) {
+            console.error('[AUTOPILOT_MEDIA_ANALYSIS] Failed to sign private media:', error);
+        }
+    }
     if (!mediaUrl) {
         return `[Midia recebida: ${type}. Nao foi possivel localizar URL publica para analise automatica.]`;
     }

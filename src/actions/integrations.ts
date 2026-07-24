@@ -491,6 +491,18 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
         is_active: activeProviders.has('telegram') || telegramCurrentCount > 0,
       },
       {
+        id: 'webchat',
+        name: 'Chat do site',
+        description: 'Adicione um popup de atendimento ao seu site e receba as conversas na Dialogy.',
+        icon_url: '/icons/webchat.svg',
+        tag: 'Webchat',
+        tag_type: 'primary',
+        href: '/integrations/webchat',
+        status: 'active',
+        provider: 'webchat',
+        is_active: activeProviders.has('webchat'),
+      },
+      {
         id: 'meta-messenger',
         name: 'Meta Messenger',
         description: 'Gerencie mensagens do Facebook Messenger.',

@@ -182,9 +182,22 @@ export type MessageMetadata = {
     vcard?: string;
   }>;
   mediaUrl?: string;
+  originalMediaUrl?: string;
+  originalThumbnailUrl?: string;
   mimetype?: string;
   fileName?: string;
   thumbnail?: string; // Base64 encoded thumbnail
+  storageProvider?: 'minio';
+  storageKey?: string;
+  archivedContentType?: string;
+  archivedSize?: number;
+  mediaArchiveKind?: 'attachment' | 'reel_preview';
+  mediaArchiveStatus?: 'failed';
+  mediaArchivedAt?: string;
+  metaAttachmentType?: string;
+  metaAttachmentTitle?: string;
+  metaReelVideoId?: string;
+  metaLocationUnavailable?: boolean;
   latitude?: number;
   longitude?: number;
   address?: string;

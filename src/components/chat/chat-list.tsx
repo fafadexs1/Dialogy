@@ -926,6 +926,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           } else if (platform === 'telegram') {
             icon = <FaTelegram size={10} />;
             bg = 'bg-sky-500';
+          } else if (platform === 'webchat') {
+            icon = <MessageCircle size={10} />;
+            bg = 'bg-blue-600';
           }
 
           return (

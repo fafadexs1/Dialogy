@@ -3209,50 +3209,69 @@ export async function getChatMessagesWindow({
     if (before && beforeId) {
         params.push(before, beforeId);
         // Use timestamptz for proper comparison with timestamp with time zone column
-        beforeClause = 'AND (m.created_at, m.id) < ($3::timestamptz, $4::uuid)';
+        beforeClause = 'AND (message.created_at, message.id) < ($3::timestamptz, $4::uuid)';
     } else if (before) {
         params.push(before);
-        beforeClause = 'AND m.created_at < $3::timestamptz';
+        beforeClause = 'AND message.created_at < $3::timestamptz';
     }
 
     // console.log('[GET_CHAT_MESSAGES_WINDOW] Query params:', { chatId, limit, before, beforeId, beforeClause });
 
+    // Keep the identity sets materialized and split direct/related matches with
+    // UNION so PostgreSQL can use the workspace/contact indexes for each path.
+    // The lateral query reads at most `limit` rows per related chat. This still
+    // yields the exact global top `limit`: a row ranked below `limit` inside its
+    // own chat can never belong to the global top `limit`.
     const contactIdsCTE = chatOnly
-        ? `SELECT tc.contact_id FROM target_chat tc WHERE tc.contact_id IS NOT NULL`
-        : `SELECT c.id
+        ? `SELECT tc.contact_id AS id
+           FROM target_chat tc
+           WHERE tc.contact_id IS NOT NULL`
+        : `SELECT tc.contact_id AS id
+           FROM target_chat tc
+           WHERE tc.contact_id IS NOT NULL
+
+           UNION
+
+           SELECT c.id
            FROM contacts c
            JOIN target_chat tc
-             ON tc.workspace_id = c.workspace_id
-           LEFT JOIN contacts target_contact
-             ON target_contact.id = tc.contact_id
-            AND target_contact.workspace_id = tc.workspace_id
-           WHERE c.id = tc.contact_id
-              OR (
-                target_contact.phone_canonical IS NOT NULL
-                AND c.phone_canonical IS NOT NULL
-                AND c.phone_canonical = target_contact.phone_canonical
-              )`;
+             ON c.workspace_id = tc.workspace_id
+            AND c.phone_canonical = tc.phone_canonical
+           WHERE tc.phone_canonical IS NOT NULL`;
 
     const chatIdsCTE = chatOnly
-        ? `SELECT tc.id FROM target_chat tc`
-        : `SELECT ch.id
-           FROM chats ch
+        ? `SELECT tc.id, tc.workspace_id, tc.contact_id
+           FROM target_chat tc`
+        : `SELECT tc.id, tc.workspace_id, tc.contact_id
+           FROM target_chat tc
+
+           UNION
+
+           SELECT ch.id, ch.workspace_id, ch.contact_id
+           FROM matching_contact_ids mci
+           JOIN chats ch
+             ON ch.contact_id = mci.id
            JOIN target_chat tc
-             ON tc.workspace_id = ch.workspace_id
-           WHERE ch.id = tc.id
-              OR ch.contact_id IN (SELECT id FROM matching_contact_ids)`;
+             ON tc.workspace_id = ch.workspace_id`;
 
     const { rows } = await db.query(
         `
-        WITH target_chat AS (
-            SELECT id, workspace_id, contact_id
-            FROM chats
-            WHERE id = $1
+        WITH target_chat AS MATERIALIZED (
+            SELECT
+                ch.id,
+                ch.workspace_id,
+                ch.contact_id,
+                target_contact.phone_canonical
+            FROM chats ch
+            LEFT JOIN contacts target_contact
+              ON target_contact.id = ch.contact_id
+             AND target_contact.workspace_id = ch.workspace_id
+            WHERE ch.id = $1
         ),
-        matching_contact_ids AS (
+        matching_contact_ids AS MATERIALIZED (
             ${contactIdsCTE}
         ),
-        matching_chat_ids AS (
+        matching_chats AS MATERIALIZED (
             ${chatIdsCTE}
         )
         SELECT 
@@ -3264,18 +3283,19 @@ export async function getChatMessagesWindow({
             cont.email AS contact_email,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address
-        FROM matching_chat_ids mci
-        JOIN chats c
-          ON c.id = mci.id
-         AND c.workspace_id = (SELECT workspace_id FROM target_chat)
+        FROM matching_chats c
         LEFT JOIN contacts cont
           ON cont.id = c.contact_id
          AND cont.workspace_id = c.workspace_id
-        JOIN messages m
-          ON m.chat_id = c.id
-         AND m.workspace_id = c.workspace_id
-        WHERE c.workspace_id = (SELECT workspace_id FROM target_chat)
-        ${beforeClause}
+        CROSS JOIN LATERAL (
+            SELECT message.*
+            FROM messages message
+            WHERE message.chat_id = c.id
+              AND message.workspace_id = c.workspace_id
+              ${beforeClause}
+            ORDER BY message.created_at DESC, message.id DESC
+            LIMIT $2
+        ) m
         ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2
         `,

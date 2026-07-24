@@ -6,6 +6,7 @@ import {
   persistNormalizedMessage,
   logWebhookEvent,
 } from './meta-channel.service';
+import { archiveInboundMetaMedia } from './archive-inbound-media';
 
 type MessagingEvent = {
   sender?: { id: string; username?: string };
@@ -17,17 +18,78 @@ type MessagingEvent = {
     is_echo?: boolean;
     attachments?: Array<{
       type: string;
-      payload?: { url?: string; title?: string };
+      payload?: {
+        url?: string;
+        title?: string;
+        reel_video_id?: string;
+        coordinates?: { lat?: number | string; long?: number | string; latitude?: number | string; longitude?: number | string };
+        generic?: {
+          elements?: Array<{
+            title?: string;
+            subtitle?: string;
+            image_url?: string;
+            default_action?: { url?: string };
+          }>;
+        };
+      };
     }>;
   };
 };
+
+function finiteCoordinate(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function coordinatesFromMapUrl(rawUrl?: string): { latitude?: number; longitude?: number } {
+  if (!rawUrl) return {};
+  try {
+    const url = new URL(rawUrl);
+    const query = url.searchParams.get('q') || url.searchParams.get('query') || url.searchParams.get('markers');
+    const match = query?.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (!match) return {};
+    return { latitude: finiteCoordinate(match[1]), longitude: finiteCoordinate(match[2]) };
+  } catch {
+    return {};
+  }
+}
+
+export async function fetchInstagramLocationDetails(
+  accessToken: string,
+  messageId: string,
+): Promise<{
+  title?: string;
+  subtitle?: string;
+  thumbnail?: string;
+  latitude?: number;
+  longitude?: number;
+} | null> {
+  const url = new URL(`https://graph.facebook.com/v24.0/${encodeURIComponent(messageId)}`);
+  url.searchParams.set('fields', 'attachments');
+  url.searchParams.set('access_token', accessToken);
+
+  const response = await resilientFetch(url, {}, { timeoutMs: 10_000 });
+  if (!response.ok) return null;
+  const body = await response.json().catch(() => ({}));
+  const template = body?.attachments?.data?.find((item: any) => item?.generic_template)?.generic_template;
+  if (!template) return null;
+
+  const thumbnail = typeof template.media_url === 'string' ? template.media_url : undefined;
+  const coordinates = coordinatesFromMapUrl(thumbnail);
+  return {
+    title: typeof template.title === 'string' ? template.title : undefined,
+    subtitle: typeof template.subtitle === 'string' ? template.subtitle : undefined,
+    thumbnail,
+    ...coordinates,
+  };
+}
 
 function isEchoMessage(message?: { is_echo?: unknown }): boolean {
   if (!message) return false;
   return message.is_echo === true || message.is_echo === 'true' || message.is_echo === 1 || message.is_echo === '1';
 }
 
-function normalizeInstagramMessage(event: MessagingEvent): {
+export function normalizeInstagramMessage(event: MessagingEvent): {
   type: Message['type'];
   content: string | null;
   mediaUrl: string | null;
@@ -47,6 +109,41 @@ function normalizeInstagramMessage(event: MessagingEvent): {
   if (attachment) {
     mediaUrl = attachment.payload?.url || null;
     metadata.mediaUrl = mediaUrl || undefined;
+    metadata.originalMediaUrl = mediaUrl || undefined;
+    metadata.metaAttachmentType = attachment.type;
+    metadata.metaAttachmentTitle = attachment.payload?.title;
+    metadata.metaReelVideoId = attachment.payload?.reel_video_id;
+
+    const genericElement = attachment.payload?.generic?.elements?.[0];
+    const emptyGenericTemplate = attachment.type === 'template'
+      && Array.isArray(attachment.payload?.generic?.elements)
+      && attachment.payload.generic.elements.length === 0;
+    const isLocation = attachment.type === 'location' || emptyGenericTemplate;
+    if (isLocation) {
+      const coordinates = attachment.payload?.coordinates;
+      const mapUrl = attachment.payload?.url || genericElement?.default_action?.url;
+      const parsedFromUrl = coordinatesFromMapUrl(mapUrl);
+      const latitude = finiteCoordinate(coordinates?.lat ?? coordinates?.latitude) ?? parsedFromUrl.latitude;
+      const longitude = finiteCoordinate(coordinates?.long ?? coordinates?.longitude) ?? parsedFromUrl.longitude;
+      const locationUnavailable = latitude === undefined && longitude === undefined && !mapUrl;
+
+      type = 'location';
+      content = genericElement?.title
+        || attachment.payload?.title
+        || (locationUnavailable
+          ? 'Localização compartilhada (dados não fornecidos pela Meta)'
+          : 'Localização compartilhada');
+      mediaUrl = null;
+      delete metadata.mediaUrl;
+      metadata.locationName = genericElement?.title || attachment.payload?.title;
+      metadata.locationDescription = genericElement?.subtitle;
+      metadata.thumbnail = genericElement?.image_url;
+      metadata.mapUrl = mapUrl;
+      metadata.latitude = latitude;
+      metadata.longitude = longitude;
+      metadata.metaLocationUnavailable = locationUnavailable;
+      return { type, content, mediaUrl, metadata };
+    }
 
     switch (attachment.type) {
       case 'image':
@@ -153,6 +250,73 @@ export async function handleInstagramWebhook(channel: MetaChannelRecord, payload
       });
 
       const normalized = normalizeInstagramMessage(event);
+      const attachment = event.message.attachments?.[0];
+      if (normalized.metadata.metaLocationUnavailable && event.message.mid) {
+        try {
+          const location = await fetchInstagramLocationDetails(channel.access_token, event.message.mid);
+          if (location) {
+            const hasCoordinates = location.latitude !== undefined && location.longitude !== undefined;
+            normalized.content = location.title || 'Localização compartilhada';
+            normalized.metadata = {
+              ...normalized.metadata,
+              locationName: location.title,
+              locationDescription: location.subtitle,
+              latitude: location.latitude,
+              longitude: location.longitude,
+              mapUrl: hasCoordinates
+                ? `https://www.google.com/maps?q=${location.latitude},${location.longitude}`
+                : undefined,
+              thumbnail: location.thumbnail,
+              metaLocationUnavailable: !hasCoordinates && !location.thumbnail,
+            };
+          }
+        } catch (error) {
+          console.error('[INSTAGRAM_LOCATION_ENRICHMENT] Failed to fetch message attachments:',
+            error instanceof Error ? error.message : error);
+        }
+      }
+
+      const archiveSourceUrl = normalized.mediaUrl
+        || (normalized.type === 'location' ? normalized.metadata.thumbnail : undefined);
+      if (archiveSourceUrl) {
+        try {
+          const archived = await archiveInboundMetaMedia({
+            workspaceId: channel.workspace_id,
+            sourceUrl: archiveSourceUrl,
+            attachmentType: normalized.type === 'location' ? 'image' : attachment?.type,
+          });
+          if (normalized.type === 'location') {
+            normalized.metadata = {
+              ...normalized.metadata,
+              originalThumbnailUrl: archiveSourceUrl,
+              thumbnail: archived.url,
+              storageProvider: 'minio',
+              storageKey: archived.key,
+              archivedContentType: archived.contentType,
+              archivedSize: archived.size,
+              mediaArchiveKind: archived.kind,
+              mediaArchivedAt: new Date().toISOString(),
+            };
+          } else {
+            normalized.mediaUrl = archived.url;
+            normalized.metadata = {
+              ...normalized.metadata,
+              mediaUrl: archived.url,
+              mimetype: archived.contentType,
+              storageProvider: 'minio',
+              storageKey: archived.key,
+              archivedContentType: archived.contentType,
+              archivedSize: archived.size,
+              mediaArchiveKind: archived.kind,
+              mediaArchivedAt: new Date().toISOString(),
+            };
+          }
+        } catch (error) {
+          console.error('[INSTAGRAM_MEDIA_ARCHIVE] Failed to archive inbound media:',
+            error instanceof Error ? error.message : error);
+          normalized.metadata.mediaArchiveStatus = 'failed';
+        }
+      }
 
       await persistNormalizedMessage({
         channel,

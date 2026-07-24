@@ -1451,6 +1451,8 @@ export default function ContactPanel({
     const contactChannelLabel =
         resolvedPlatform === 'telegram'
             ? 'Telegram'
+            : resolvedPlatform === 'webchat'
+                ? 'Chat do site'
             : resolvedPlatform === 'instagram'
                 ? 'Instagram'
                 : resolvedPlatform === 'messenger'

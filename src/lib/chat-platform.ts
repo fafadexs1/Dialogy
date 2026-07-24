@@ -1,6 +1,6 @@
 import type { Chat, Contact, Message } from '@/lib/types';
 
-export type ResolvedChatPlatform = 'instagram' | 'messenger' | 'telegram' | 'wa_cloud' | 'baileys';
+export type ResolvedChatPlatform = 'instagram' | 'messenger' | 'telegram' | 'webchat' | 'wa_cloud' | 'baileys';
 
 function normalizeSignal(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -25,6 +25,10 @@ function isTelegramSignal(signal: string): boolean {
 
 function isCloudApiSignal(signal: string): boolean {
   return signal === 'wa_cloud' || signal.includes('wa_cloud');
+}
+
+function isWebchatSignal(signal: string): boolean {
+  return signal === 'webchat' || signal.includes('webchat') || signal.includes('chat do site');
 }
 
 function collectMessageSignals(messages: Message[] | undefined): string[] {
@@ -94,6 +98,10 @@ export function resolveChatPlatform(chat: Chat | null | undefined): ResolvedChat
     return 'telegram';
   }
 
+  if (chatSignals.some(isWebchatSignal)) {
+    return 'webchat';
+  }
+
   if (chatSignals.some(isCloudApiSignal)) {
     return 'wa_cloud';
   }
@@ -109,6 +117,8 @@ export function getChatPlatformLabel(platform: ResolvedChatPlatform): string {
       return 'Messenger';
     case 'telegram':
       return 'Telegram';
+    case 'webchat':
+      return 'Chat do site';
     case 'wa_cloud':
       return 'Cloud API';
     default:
@@ -173,7 +183,7 @@ export function getChatIdentityDisplayValue(
 }
 
 export function getChatContactDisplayValue(
-  contact: Pick<Contact, 'phone' | 'phone_number_jid'> | undefined,
+  contact: Pick<Contact, 'phone' | 'phone_number_jid' | 'email'> | undefined,
   platform: ResolvedChatPlatform
 ): string | null {
   const rawValue = (contact?.phone_number_jid || contact?.phone || '').trim();
@@ -183,6 +193,10 @@ export function getChatContactDisplayValue(
 
   if (platform === 'telegram') {
     return rawValue.replace(/^telegram:/i, '');
+  }
+
+  if (platform === 'webchat') {
+    return contact?.email?.trim() || contact?.phone?.trim() || null;
   }
 
   if (isMetaPlatform(platform) && (isWhatsappIdentity(rawValue) || isPlainPhoneIdentity(rawValue))) {

@@ -5,6 +5,7 @@ import {
   persistNormalizedMessage,
   logWebhookEvent,
 } from './meta-channel.service';
+import { archiveInboundMetaMedia } from './archive-inbound-media';
 
 type MessengerEvent = {
   sender?: { id: string };
@@ -46,6 +47,9 @@ function normalizeMessengerMessage(event: MessengerEvent): {
   if (attachment) {
     mediaUrl = attachment.payload?.url || null;
     metadata.mediaUrl = mediaUrl || undefined;
+    metadata.originalMediaUrl = mediaUrl || undefined;
+    metadata.metaAttachmentType = attachment.type;
+    metadata.metaAttachmentTitle = attachment.payload?.title;
 
     switch (attachment.type) {
       case 'image':
@@ -123,6 +127,32 @@ export async function handleMessengerWebhook(channel: MetaChannelRecord, payload
       });
 
       const normalized = normalizeMessengerMessage(event);
+      const attachment = event.message.attachments?.[0];
+      if (normalized.mediaUrl) {
+        try {
+          const archived = await archiveInboundMetaMedia({
+            workspaceId: channel.workspace_id,
+            sourceUrl: normalized.mediaUrl,
+            attachmentType: attachment?.type,
+          });
+          normalized.mediaUrl = archived.url;
+          normalized.metadata = {
+            ...normalized.metadata,
+            mediaUrl: archived.url,
+            mimetype: archived.contentType,
+            storageProvider: 'minio',
+            storageKey: archived.key,
+            archivedContentType: archived.contentType,
+            archivedSize: archived.size,
+            mediaArchiveKind: archived.kind,
+            mediaArchivedAt: new Date().toISOString(),
+          };
+        } catch (error) {
+          console.error('[MESSENGER_MEDIA_ARCHIVE] Failed to archive inbound media:',
+            error instanceof Error ? error.message : error);
+          normalized.metadata.mediaArchiveStatus = 'failed';
+        }
+      }
 
       await persistNormalizedMessage({
         channel,

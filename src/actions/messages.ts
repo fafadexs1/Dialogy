@@ -849,6 +849,8 @@ async function internalSendMessage(
                     ? 'messenger'
                     : isTelegramSource
                         ? 'telegram'
+                        : normalizedSource === 'webchat'
+                            ? 'webchat'
                         : normalizedSource === 'wa_cloud'
                             ? 'wa_cloud'
                             : null;
@@ -994,8 +996,16 @@ async function internalSendMessage(
             let apiResponse: any;
             let externalId: string | null = null;
 
+            // -- Chat incorporado em sites --
+            // A mensagem já está persistida. O widget a recebe pela API de sessão,
+            // portanto não há provedor externo para chamar.
+            if (source === 'webchat') {
+                apiResponse = { delivered: true, channel: 'webchat' };
+                externalId = messageId;
+            }
+
             // -- Mercado Livre --
-            if (chatInfo.source === 'mercadolivre') {
+            else if (chatInfo.source === 'mercadolivre') {
                 const { MercadoLivreMessagingService } = await import('@/services/mercadolivre/messaging-service');
                 // Busca conta ML
                 const accountRes = await db.query(

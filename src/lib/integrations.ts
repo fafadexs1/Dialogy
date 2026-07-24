@@ -2,6 +2,16 @@ import type { Integration } from './types';
 
 export const availableIntegrations: Integration[] = [
   {
+    id: 'webchat',
+    name: 'Chat do site',
+    description: 'Adicione um popup de atendimento ao site e receba as conversas na Dialogy.',
+    icon_url: '/icons/webchat.svg',
+    tag: 'Webchat',
+    tag_type: 'primary',
+    href: '/integrations/webchat',
+    status: 'active',
+  },
+  {
     id: 'evolution-api',
     name: 'Evolution API',
     description: 'Gerencie instancias de WhatsApp com QR Code ou Cloud API pela Evolution API.',

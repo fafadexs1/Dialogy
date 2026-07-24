@@ -1281,6 +1281,8 @@ export default function ChatPanel({
                 ? <FaFacebookMessenger className="h-3 w-3 text-blue-500" />
                 : resolvedPlatform === 'telegram'
                     ? <FaTelegram className="h-3 w-3 text-sky-500" />
+                    : resolvedPlatform === 'webchat'
+                        ? <Globe className="h-3 w-3 text-blue-500" />
                     : <FaWhatsapp className="h-3 w-3 text-green-500" />;
 
     const processTextSendQueue = useCallback(async () => {
@@ -2016,6 +2018,8 @@ export default function ChatPanel({
             ? 'Messenger'
             : resolvedPlatform === 'telegram'
                 ? 'Telegram'
+                : resolvedPlatform === 'webchat'
+                    ? 'Chat do site'
                 : 'WhatsApp';
     const headerServiceStartedAt = chat.assigned_at || chat.updatedAt;
     const headerServiceStartedAtMs = headerServiceStartedAt ? new Date(headerServiceStartedAt).getTime() : Number.NaN;
