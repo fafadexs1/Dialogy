@@ -2697,6 +2697,13 @@ async function fetchChatsDelta({
     const { rows } = await db.query(
         `
         WITH changed_chats AS (
+            -- O OR entre updated_at e last_activity_at depende de haver indice
+            -- para AMBAS as colunas: com apenas uma indexada o planner cai em
+            -- Parallel Seq Scan (162k linhas, 6.283 buffers, 51,7 ms).
+            -- Com idx_chats_workspace_updated_at criado, ele resolve por BitmapOr.
+            -- Nao trocar por UNION: medido, o UNION obriga a materializar os ids,
+            -- deduplicar e rebuscar cada linha pela PK — 19x mais lento e 72x mais
+            -- buffers numa janela de 24h (55,8 ms vs 2,9 ms / 105.344 vs 1.466).
             SELECT c.*
             FROM chats c
             WHERE c.workspace_id = $1

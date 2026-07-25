@@ -514,12 +514,52 @@ export async function touchUserPresenceFromChat(
   await touchUserPresenceActivity(userId, workspaceId, tabId, source);
 }
 
+// Toda mudanca de presenca faz broadcast, e cada cliente do workspace responde
+// refazendo esta consulta — o custo cresce com o quadrado do numero de agentes
+// conectados (~1 query/s com 6 agentes, ~89 query/s com 400).
+//
+// O TTL corta isso para no maximo uma execucao por janela, independente de
+// quantos clientes pediram. Deliberadamente NAO invalidamos no broadcast: seria
+// justamente no instante em que os N clientes chegam juntos, e todos errariam o
+// cache de uma vez. Presenca tolera 5s de defasagem; um thundering herd nao.
+const ONLINE_AGENTS_TTL_MS = 5_000;
+const onlineAgentsCache = new Map<string, { expiresAt: number; agents: OnlineAgent[] }>();
+// Requisicoes simultaneas que erram o cache compartilham a mesma query em voo.
+const onlineAgentsInFlight = new Map<string, Promise<OnlineAgent[]>>();
+
 export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[]> {
   if (!workspaceId) {
     console.error('[GET_ONLINE_AGENTS] Workspace ID nao fornecido.');
     return [];
   }
 
+  const cached = onlineAgentsCache.get(workspaceId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.agents;
+  }
+
+  const inFlight = onlineAgentsInFlight.get(workspaceId);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = queryOnlineAgents(workspaceId)
+    .then((agents) => {
+      onlineAgentsCache.set(workspaceId, {
+        expiresAt: Date.now() + ONLINE_AGENTS_TTL_MS,
+        agents,
+      });
+      return agents;
+    })
+    .finally(() => {
+      onlineAgentsInFlight.delete(workspaceId);
+    });
+
+  onlineAgentsInFlight.set(workspaceId, request);
+  return request;
+}
+
+async function queryOnlineAgents(workspaceId: string): Promise<OnlineAgent[]> {
   try {
     const ttlSeconds = getPresenceTtlSeconds();
     const recentActivitySeconds = getPresenceRecentActivitySeconds();

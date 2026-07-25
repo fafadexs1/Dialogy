@@ -174,7 +174,7 @@ services:
   # as uid 1001, so initialise the shared Hugging Face/ONNX cache before either
   # process can load a local embedding or reranking model.
   ai-cache-init:
-    image: fafadexs/dialogy-worker-ai:PDC-1.30
+    image: fafadexs/dialogy-worker-ai:PDC-1.31
     restart: "no"
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
@@ -187,7 +187,7 @@ services:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
 
   dialogy:
-    image: fafadexs/dialogy:PDC-1.30
+    image: fafadexs/dialogy:PDC-1.31
     restart: unless-stopped
     init: true
     depends_on:
@@ -195,6 +195,10 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *app-environment
+      # Orcamento de conexoes: o Postgres tem max_connections=100 e o Supabase
+      # self-hosted ja consome ~45, deixando ~41 livres. A soma dos 5 servicos
+      # abaixo da 33, com folga para migrations e diagnostico.
+      DB_POOL_MAX: ${DIALOGY_DB_POOL_MAX:-15}
     volumes:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
     ports:
@@ -214,7 +218,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PDC-1.30
+    image: fafadexs/dialogy-worker:PDC-1.31
     restart: unless-stopped
     init: true
     depends_on:
@@ -222,10 +226,12 @@ services:
         condition: service_healthy
     environment:
       <<: *worker-environment
+      # QUEUE_WORKER_CONCURRENCY=8 — o pool nao precisa passar disso.
+      DB_POOL_MAX: ${WORKER_DB_POOL_MAX:-8}
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PDC-1.30
+    image: fafadexs/dialogy-worker-ai:PDC-1.31
     restart: unless-stopped
     init: true
     depends_on:
@@ -235,12 +241,14 @@ services:
         condition: service_healthy
     environment:
       <<: *worker-ai-environment
+      # AI_QUEUE_WORKER_CONCURRENCY=2.
+      DB_POOL_MAX: ${WORKER_AI_DB_POOL_MAX:-3}
     volumes:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
     stop_grace_period: 30s
 
   worker-campaign:
-    image: fafadexs/dialogy-worker:PDC-1.30
+    image: fafadexs/dialogy-worker:PDC-1.31
     command: ["node", "dist/worker-campaign.js"]
     restart: unless-stopped
     init: true
@@ -249,10 +257,12 @@ services:
         condition: service_healthy
     environment:
       <<: *worker-campaign-environment
+      # CAMPAIGN_WORKER_CONCURRENCY=2.
+      DB_POOL_MAX: ${WORKER_CAMPAIGN_DB_POOL_MAX:-3}
     stop_grace_period: 30s
 
   worker-meta-relay:
-    image: fafadexs/dialogy-worker:PDC-1.30
+    image: fafadexs/dialogy-worker:PDC-1.31
     command: ["node", "dist/worker-meta-relay.js"]
     restart: unless-stopped
     init: true
@@ -261,6 +271,8 @@ services:
         condition: service_healthy
     environment:
       <<: *app-environment
+      # META_RELAY_CONCURRENCY=5.
+      DB_POOL_MAX: ${WORKER_META_RELAY_DB_POOL_MAX:-4}
     stop_grace_period: 30s
 
 volumes:
