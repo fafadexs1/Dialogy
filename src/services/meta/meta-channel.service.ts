@@ -702,8 +702,10 @@ export async function persistNormalizedMessage(params: {
       console.error('[META_WEBHOOK_DISPATCH] Failed to dispatch incoming message', error);
     });
 
+    // Covers both runtimes: an Intelligent Attendant answering on its own and the
+    // copilot drafting a reply for the human who owns the conversation. The
+    // orchestrator decides which one applies.
     const shouldProcessAi =
-      Boolean(chat.assigned_system_agent_id) &&
       Boolean(chat.is_autopilot_active) &&
       Boolean(message.content?.trim());
 

@@ -8,10 +8,17 @@ import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact
 import { retrieveHybridSupportContext, type KnowledgeRetrievalStrategy } from '@/services/rag/hybrid-retrieval';
 import { partitionKnowledgeDocuments } from '@/services/rag/knowledge-document';
 import { runAgentTools } from '@/services/agent-tools/runtime';
+import {
+    publishCopilotSuggestion,
+    type CopilotSuggestionInsights,
+    type CopilotSuggestionStage,
+    type CopilotToolTrace,
+} from '@/services/autopilot/runtime/copilot-suggestion';
+import { filterNonMutatingToolNames } from '@/services/autopilot/runtime/copilot-tool-guard';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from '@/services/agent-tools/types';
 import { fingerprintToolAction } from '@/services/agent-tools/action-fingerprint';
 import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/tool-safety';
-import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
+import { getAgentToolDefinition, listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import { extractKnowledgeToolProcedures, formatKnowledgeToolProcedures } from '@/services/agent-tools/knowledge-procedures';
 import { listMcpToolsForWorkspace } from '@/services/mcp/store';
@@ -536,6 +543,49 @@ async function broadcastAiProcessing(chatId: string, event: 'ai_processing_start
     }
 }
 
+/**
+ * Tools this turn actually ran, so the copilot card can show what the agent
+ * consulted (contracts, invoices, MCP servers) before proposing a reply.
+ */
+async function loadTurnToolTraces(input: {
+    chatId: string;
+    since: Date;
+}): Promise<CopilotToolTrace[]> {
+    try {
+        const { rows } = await db.query(
+            `SELECT tool_name, status
+               FROM agent_tool_executions
+              WHERE chat_id = $1
+                AND created_at >= $2
+              ORDER BY created_at ASC
+              LIMIT 12`,
+            [input.chatId, input.since],
+        );
+        const seen = new Set<string>();
+        const traces: CopilotToolTrace[] = [];
+        for (const row of rows) {
+            const name = String(row.tool_name || '').trim();
+            if (!name || seen.has(name)) continue;
+            seen.add(name);
+            const definition = getAgentToolDefinition(name as any);
+            const status = String(row.status || '').toLowerCase();
+            traces.push({
+                name,
+                displayName: definition?.displayName || null,
+                status: status === 'success'
+                    ? 'success'
+                    : status === 'error' || status === 'failed'
+                        ? 'error'
+                        : 'skipped',
+            });
+        }
+        return traces;
+    } catch (error) {
+        console.warn('[COPILOT_SUGGESTION] Failed to load tool traces:', error);
+        return [];
+    }
+}
+
 async function insertAiAnalysisMessage(input: {
     workspaceId: string;
     chatId: string;
@@ -1039,41 +1089,79 @@ export async function processAutopilotForChat(
         console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} nao encontrado no workspace ${workspaceId}. Ignorando.`);
         return;
     }
-    const currentCopilotMode = chatConfig?.copilot_mode || 'auto';
     const rawIsActive = chatConfig?.is_autopilot_active ?? chat.is_autopilot_active;
     const currentIsActive = rawIsActive === true;
-    const assignedSystemAgentId = chatConfig?.assigned_system_agent_id || null;
-    const assignedSystemAgentName = chatConfig?.assigned_system_agent_name || 'Atendente Inteligente';
-    const assignedAutopilotConfigId = chatConfig?.assigned_config_id || null;
+    let assignedSystemAgentId = chatConfig?.assigned_system_agent_id || null;
+    let assignedSystemAgentName = chatConfig?.assigned_system_agent_name || 'Atendente Inteligente';
+    let effectiveAutopilotConfigId = chatConfig?.assigned_config_id || null;
 
-    if (!assignedSystemAgentId || chatConfig?.assigned_system_agent_type !== 'intelligent_attendant') {
-        console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} nao esta atribuido a um Atendente Inteligente. Ignorando.`);
-        return;
-    }
+    // Two runtimes share this orchestrator:
+    //  - "attendant": the chat belongs to an Intelligent Attendant that answers the customer.
+    //  - "copilot": a human still owns the chat and turned the AI on from the inbox. Same
+    //    reasoning, knowledge and tools, but the reply is proposed to the operator instead
+    //    of being delivered, so the human keeps the conversation.
+    const isAttendantRuntime = Boolean(assignedSystemAgentId)
+        && chatConfig?.assigned_system_agent_type === 'intelligent_attendant'
+        && chatConfig?.assigned_system_agent_active !== false
+        && Boolean(effectiveAutopilotConfigId);
+    const runtimeMode: 'attendant' | 'copilot' = isAttendantRuntime ? 'attendant' : 'copilot';
 
-    if (chatConfig?.assigned_system_agent_active === false) {
-        console.log(`[AUTOPILOT_SERVICE] Atendente Inteligente atribuido esta inativo. Chat ${chat.id}.`);
-        return;
-    }
+    if (runtimeMode === 'attendant') {
+        if (chatConfig.autopilot_config_id !== effectiveAutopilotConfigId) {
+            await db.query(
+                `UPDATE chats
+                 SET autopilot_config_id = $1
+                 WHERE id = $2
+                   AND workspace_id = $3`,
+                [effectiveAutopilotConfigId, chat.id, workspaceId]
+            );
+            chat = {
+                ...chat,
+                autopilot_config_id: effectiveAutopilotConfigId,
+            };
+        }
+    } else {
+        if (assignedSystemAgentId) {
+            console.log(
+                `[AUTOPILOT_SERVICE] Chat ${chat.id} esta atribuido a um agente do sistema que nao responde conversas. Ignorando.`
+            );
+            return;
+        }
+        if (!currentIsActive) {
+            console.log(`[AUTOPILOT_SERVICE] Copiloto desativado para o chat ${chat.id}. Ignorando.`);
+            return;
+        }
 
-    if (!assignedAutopilotConfigId) {
-        console.log(`[AUTOPILOT_SERVICE] Atendente Inteligente sem configuracao de IA vinculada. Chat ${chat.id}.`);
-        return;
-    }
+        const copilotConfigId = chatConfig?.autopilot_config_id || chat.autopilot_config_id || null;
+        if (!copilotConfigId) {
+            console.log(`[AUTOPILOT_SERVICE] Copiloto ativo sem agente de IA selecionado. Chat ${chat.id}.`);
+            return;
+        }
+        effectiveAutopilotConfigId = copilotConfigId;
 
-    if (chatConfig.autopilot_config_id !== assignedAutopilotConfigId) {
-        await db.query(
-            `UPDATE chats
-             SET autopilot_config_id = $1
-             WHERE id = $2
-               AND workspace_id = $3`,
-            [assignedAutopilotConfigId, chat.id, workspaceId]
+        // Tool executions, notes and logs are attributed to the Intelligent Attendant that
+        // shares this AI configuration when one exists. It is optional: the copilot works
+        // even for configurations that were never published as a system agent.
+        const attributionRes = await db.query(
+            `SELECT id, name
+               FROM system_agents
+              WHERE workspace_id = $1
+                AND autopilot_config_id = $2
+                AND type = 'intelligent_attendant'
+              ORDER BY is_active DESC, created_at ASC
+              LIMIT 1`,
+            [workspaceId, copilotConfigId]
         );
-        chat = {
-            ...chat,
-            autopilot_config_id: assignedAutopilotConfigId,
-        };
+        assignedSystemAgentId = attributionRes.rows[0]?.id || null;
+        assignedSystemAgentName = attributionRes.rows[0]?.name || assignedSystemAgentName;
     }
+
+    // The copilot never speaks to the customer on its own: whatever the pipeline produces
+    // is delivered to the operator as a suggestion.
+    const currentCopilotMode = runtimeMode === 'copilot'
+        ? 'suggest'
+        : (chatConfig?.copilot_mode || 'auto');
+    const isSuggestionOnlyRuntime = currentCopilotMode === 'suggest';
 
     console.error(
         `[AUTOPILOT_DEBUG] *** DB FETCH -> copilot_mode: ${currentCopilotMode}, is_autopilot_active (RAW): ${rawIsActive}, (RESOLVED): ${currentIsActive} ***`
@@ -1081,16 +1169,20 @@ export async function processAutopilotForChat(
     logToDebugFile(`[processAutopilotForChat] ChatId=${chat.id}, CopilotMode=${currentCopilotMode}, IsActive=${currentIsActive} (Raw: ${rawIsActive})`);
 
     const { config: autopilotConfig, rules: autopilotRules, agents: autopilotAgents } =
-        await getAutopilotConfigService(workspaceId, assignedAutopilotConfigId || undefined);
+        await getAutopilotConfigService(workspaceId, effectiveAutopilotConfigId || undefined);
 
     if (!autopilotConfig || !autopilotConfig.is_active) {
         console.log(`[AUTOPILOT_SERVICE] Autopilot desativado ou nao configurado para workspace ${workspaceId}`);
         return;
     }
 
-    if (assignedAutopilotConfigId && autopilotConfig.id !== assignedAutopilotConfigId) {
-        console.log(`[AUTOPILOT_SERVICE] Configuracao de IA atribuida nao confere com o Atendente Inteligente. Chat ${chat.id}.`);
+    if (effectiveAutopilotConfigId && autopilotConfig.id !== effectiveAutopilotConfigId) {
+        console.log(`[AUTOPILOT_SERVICE] Configuracao de IA atribuida nao confere com o agente selecionado. Chat ${chat.id}.`);
         return;
+    }
+
+    if (runtimeMode === 'copilot' && !assignedSystemAgentId) {
+        assignedSystemAgentName = autopilotConfig.name || assignedSystemAgentName;
     }
 
     if (!currentIsActive) {
@@ -1124,7 +1216,79 @@ export async function processAutopilotForChat(
         sourceMessageId: sourceMessageId ?? null,
         orchestratorRunId: orchestratorRun.id,
     };
+
+    const turnStartedAt = new Date();
+    // Reasoning trail collected while the turn runs. It is what turns a suggestion from a
+    // wall of text into something the operator can trust: which intent was detected, what
+    // the agent read and which systems it consulted before proposing the reply.
+    const copilotTrace: { stage: CopilotSuggestionStage; insights: CopilotSuggestionInsights } = {
+        stage: 'model_response',
+        insights: { model: resolvedAiModel.model },
+    };
+    const traceCopilotInsights = (
+        patch: Partial<CopilotSuggestionInsights>,
+        stage?: CopilotSuggestionStage,
+    ) => {
+        copilotTrace.insights = { ...copilotTrace.insights, ...patch };
+        if (stage) copilotTrace.stage = stage;
+    };
+
+    // A turn can produce more than one message (an acknowledgement then the answer).
+    // The operator should see every one of them, so drafts accumulate instead of
+    // overwriting each other.
+    const turnSuggestionBlocks: string[] = [];
+    const publishSuggestion = async (input: {
+        response: string;
+        blocks?: string[] | null;
+        stage?: CopilotSuggestionStage;
+        insights?: Partial<CopilotSuggestionInsights>;
+    }) => {
+        const incoming = (input.blocks && input.blocks.length > 0 ? input.blocks : [input.response])
+            .map((block) => (typeof block === 'string' ? block.trim() : ''))
+            .filter((block) => block.length > 0);
+        for (const block of incoming) {
+            if (!turnSuggestionBlocks.includes(block)) {
+                turnSuggestionBlocks.push(block);
+            }
+        }
+        if (turnSuggestionBlocks.length === 0) return;
+
+        const toolsUsed = await loadTurnToolTraces({
+            chatId: chat.id,
+            since: turnStartedAt,
+        });
+        await publishCopilotSuggestion({
+            workspaceId,
+            chatId: chat.id,
+            autopilotConfigId: autopilotConfig.id,
+            autopilotConfigName: autopilotConfig.name || assignedSystemAgentName,
+            systemAgentId: assignedSystemAgentId,
+            sourceMessageId: sourceMessageId ?? null,
+            orchestratorRunId: orchestratorRun.id,
+            stage: input.stage || copilotTrace.stage,
+            suggestion: turnSuggestionBlocks.join('\n\n'),
+            messageBlocks: turnSuggestionBlocks,
+            insights: {
+                ...copilotTrace.insights,
+                ...(input.insights || {}),
+                ...(toolsUsed.length > 0 ? { toolsUsed } : {}),
+                latencyMs: Date.now() - turnStartedAt.getTime(),
+            },
+        });
+    };
+
     const sendMultiBlockResponse: typeof sendMultiBlockResponseRaw = async (...args) => {
+        // Single delivery choke point. In suggestion mode nothing reaches the customer:
+        // every branch of the orchestrator routes its reply to the operator's copilot card.
+        if (isSuggestionOnlyRuntime) {
+            const [, formattedResponse, , , , aiMessageBlocks] = args;
+            await publishSuggestion({
+                response: formattedResponse,
+                blocks: aiMessageBlocks,
+            });
+            return { success: true };
+        }
+
         const result = await sendMultiBlockResponseRaw(...args);
         if (result.success) {
             scheduleAutopilotInactivityClose({
@@ -1554,6 +1718,12 @@ export async function processAutopilotForChat(
         }
     }
 
+    traceCopilotInsights({
+        intent: intentResolution.intent,
+        intentConfidence: intentResolution.confidence ?? null,
+        workflowId: intentResolution.workflowId ?? null,
+    });
+
     let activeFlowIntentScope = resolveActiveFlowIntentScope(autopilotConfig, intentResolution.intent);
     const persistedFlowState = await getAutopilotConversationState(chat.id).catch((error) => {
         console.warn('[AUTOPILOT_FLOW_STATE] Failed to load persisted state:', error);
@@ -1577,12 +1747,25 @@ export async function processAutopilotForChat(
     }
     const effectivePersistedActiveNodeId = switchResolution?.targetNodeId || persistedFlowState?.activeNodeId;
     const scopedStaticKnowledgeDocuments = filterKnowledgeDocumentsForScope(autopilotConfig, staticKnowledgeDocuments, activeFlowIntentScope);
-    const turnPolicy = compileAutopilotTurnPolicy({
+    const compiledTurnPolicy = compileAutopilotTurnPolicy({
         config: autopilotConfig,
         documents: staticKnowledgeDocuments,
         intentScope: activeFlowIntentScope,
         persistedActiveNodeId: effectivePersistedActiveNodeId,
     });
+    // A proposal must never change the customer's world before a human approves it.
+    // In suggestion mode the agent may still read (contracts, invoices, panels) so the
+    // draft is grounded in real data, but every write, handoff or lifecycle tool is off.
+    const turnPolicy = isSuggestionOnlyRuntime
+        ? {
+            ...compiledTurnPolicy,
+            allowedToolNames: filterNonMutatingToolNames(compiledTurnPolicy.allowedToolNames, runtimeToolCatalog),
+            globallyEnabledToolNames: filterNonMutatingToolNames(
+                compiledTurnPolicy.globallyEnabledToolNames,
+                runtimeToolCatalog,
+            ),
+        }
+        : compiledTurnPolicy;
     enabledToolNames = turnPolicy.allowedToolNames;
     const flowCompletionPlan = resolveFlowCompletionPlan(autopilotConfig, turnPolicy.activeNodeId);
     const allowedDocumentIds = resolveAllowedKnowledgeDocumentIds({
@@ -2611,12 +2794,9 @@ export async function processAutopilotForChat(
         const finalResponse = formatCustomerFacingAiResponse(deterministicRouting.responseHint);
 
         if (currentCopilotMode === 'suggest') {
-            const { getSupabaseAdmin } = await import('@/lib/supabase');
-            const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
-                    suggestion: finalResponse,
-                    chatId: chat.id,
-                    configName: autopilotConfig.name,
+            await publishSuggestion({
+                response: finalResponse,
+                stage: 'deterministic_routing',
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -2927,6 +3107,16 @@ export async function processAutopilotForChat(
             },
         });
     }
+    traceCopilotInsights({
+        ragStrategy,
+        knowledgeCoverage,
+        knowledgeSources: ragDocuments.slice(0, 6).map((document) => ({
+            id: document.id,
+            name: document.name,
+            kind: 'document' as const,
+        })),
+    });
+
     const knowledgePartitions = partitionKnowledgeDocuments(ragDocuments);
     const factKnowledgeDocuments = knowledgePartitions.facts;
     const procedureKnowledgeDocuments = knowledgePartitions.procedures;
@@ -3380,12 +3570,9 @@ export async function processAutopilotForChat(
 
     if (deterministicFlowMessage) {
         if (currentCopilotMode === 'suggest') {
-            const { getSupabaseAdmin } = await import('@/lib/supabase');
-            const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
-                    suggestion: deterministicFlowMessage,
-                    chatId: chat.id,
-                    configName: autopilotConfig.name,
+            await publishSuggestion({
+                response: deterministicFlowMessage,
+                stage: 'flow_message',
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -3558,12 +3745,9 @@ export async function processAutopilotForChat(
         }
 
         if (currentCopilotMode === 'suggest') {
-            const { getSupabaseAdmin } = await import('@/lib/supabase');
-            const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
-                    suggestion: finalResponse,
-                    chatId: chat.id,
-                    configName: autopilotConfig.name,
+            await publishSuggestion({
+                response: finalResponse,
+                stage: 'tool_memory',
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -3731,12 +3915,9 @@ export async function processAutopilotForChat(
         }
 
         if (currentCopilotMode === 'suggest') {
-            const { getSupabaseAdmin } = await import('@/lib/supabase');
-            const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
-                    suggestion: finalResponse,
-                    chatId: chat.id,
-                    configName: autopilotConfig.name,
+            await publishSuggestion({
+                response: finalResponse,
+                stage: 'workflow_response',
             });
             await logIntelligentAttendantResponse({
                 configId: autopilotConfig.id,
@@ -4071,12 +4252,9 @@ export async function processAutopilotForChat(
             }
 
             if (currentCopilotMode === 'suggest') {
-                const { getSupabaseAdmin } = await import('@/lib/supabase');
-                const supabase = getSupabaseAdmin();
-                await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
-                    suggestion: finalResponse,
-                    chatId: chat.id,
-                    configName: autopilotConfig.name,
+                await publishSuggestion({
+                    response: finalResponse,
+                    stage: 'post_tool_response',
                 });
             } else {
                 const sourceMessageStillCurrent = await isAutopilotSourceMessageStillCurrent({
@@ -5360,12 +5538,9 @@ export async function processAutopilotForChat(
                 }
 
                 if (currentCopilotMode === 'suggest') {
-                    const { getSupabaseAdmin } = await import('@/lib/supabase');
-                    const supabase = getSupabaseAdmin();
-                    await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
-                            suggestion: finalResponse,
-                            chatId: chat.id,
-                            configName: autopilotConfig.name,
+                    await publishSuggestion({
+                        response: finalResponse,
+                        stage: 'procedure_runtime',
                     });
                 } else {
                     await sendMultiBlockResponse(
@@ -5590,12 +5765,10 @@ export async function processAutopilotForChat(
 
             if (currentCopilotMode === 'suggest') {
                 console.log(`[AUTOPILOT_SERVICE] Modo sugestao - enviando para agente: ${finalResponse.substring(0, 50)}...`);
-                const { getSupabaseAdmin } = await import('@/lib/supabase');
-                const supabase = getSupabaseAdmin();
-                await supabase.channel(`chat:${chat.id}`).httpSend('ai_suggestion', {
-                        suggestion: finalResponse,
-                        chatId: chat.id,
-                        configName: autopilotConfig.name
+                await publishSuggestion({
+                    response: finalResponse,
+                    blocks: aiMessageBlocks,
+                    stage: 'model_response',
                 });
                 await logIntelligentAttendantResponse({
                     configId: autopilotConfig.id,

@@ -124,6 +124,23 @@ export default {
             transform: "translate(-50%,-40%) scale(1)",
           },
         },
+        blob: {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '33%': { transform: 'translate(24px, -32px) scale(1.08)' },
+          '66%': { transform: 'translate(-20px, 18px) scale(0.94)' },
+        },
+        'marquee-reverse': {
+          from: { transform: 'translateX(-50%)' },
+          to: { transform: 'translateX(0)' },
+        },
+        wiggle: {
+          '0%, 100%': { transform: 'rotate(-2.5deg)' },
+          '50%': { transform: 'rotate(2.5deg)' },
+        },
+        'typing-dot': {
+          '0%, 60%, 100%': { transform: 'translateY(0)', opacity: '0.35' },
+          '30%': { transform: 'translateY(-4px)', opacity: '1' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -133,6 +150,11 @@ export default {
         shine: 'shine 8s ease-in-out infinite',
         'spin-slow': 'spin-slow 20s linear infinite',
         spotlight: "spotlight 2s ease .75s 1 forwards",
+        blob: 'blob 14s ease-in-out infinite',
+        'marquee-slow': 'marquee 45s linear infinite',
+        'marquee-reverse': 'marquee-reverse 45s linear infinite',
+        wiggle: 'wiggle 4s ease-in-out infinite',
+        'typing-dot': 'typing-dot 1.2s ease-in-out infinite',
       },
     },
   },

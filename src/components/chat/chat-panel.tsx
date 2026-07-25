@@ -66,8 +66,6 @@ import { createClient } from '@/lib/supabase/client';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
-import { generateAgentResponse } from '@/ai/flows/auto-responder';
-import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useToast } from '@/hooks/use-toast';
@@ -76,7 +74,17 @@ import { useInboxStore } from '@/hooks/use-inbox-store';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
-import { getContactMessages, toggleChatAutopilot, updateChatCopilotModeAction } from '@/actions/chats';
+import { getContactMessages, transferChatToIntelligentAgentAction } from '@/actions/chats';
+import {
+    activateChatCopilot,
+    deactivateChatCopilot,
+    getPendingCopilotSuggestion,
+    listInboxAiAgents,
+    requestCopilotSuggestion,
+    resolveCopilotSuggestionAction,
+    type InboxAiAgent,
+} from '@/actions/copilot';
+import { CopilotSuggestionCard, type CopilotSuggestionView } from './copilot-suggestion-card';
 import { useFormStatus } from 'react-dom';
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction, getMessageStatusBatchAction, retryMessageAction } from '@/actions/messages';
@@ -495,13 +503,14 @@ export default function ChatPanel({
     const sendBurstTimeoutRef = useRef<number | null>(null);
 
     // AI Copilot Suggestion State
-    const [aiSuggestion, setAiSuggestion] = useState<{ text: string; configName: string } | null>(null);
+    const [aiSuggestion, setAiSuggestion] = useState<CopilotSuggestionView | null>(null);
+    const [inboxAiAgents, setInboxAiAgents] = useState<InboxAiAgent[]>([]);
+    const [isRequestingSuggestion, setIsRequestingSuggestion] = useState(false);
 
     // Virtualization refs/state removed
     // const messageHeightsRef = useRef<Map<string, number>>(new Map()); 
 
     const [autopilotConfig, setAutopilotConfig] = useState<AutopilotConfig | null>(null);
-    const [autopilotRules, setAutopilotRules] = useState<NexusFlowInstance[]>([]);
     const [autopilotAgents, setAutopilotAgents] = useState<AutopilotConfig[]>([]);
     const activeAutopilotConfig = useMemo(() => {
         const chatConfigId = chat?.autopilot_config_id;
@@ -525,8 +534,6 @@ export default function ChatPanel({
     const initiallyPositionedChatRef = useRef<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const contentEditableRef = useRef<any>(null);
-    const processedMessageIds = useRef(new Set<string>());
-    const observedLastMessageIdByChatRef = useRef<Record<string, string>>({});
     const savedRange = useRef<Range | null>(null);
     const userScrolledUpRef = useRef(false);
     const isFetchingHistoryRef = useRef(false);
@@ -575,59 +582,140 @@ export default function ChatPanel({
         };
     }, []);
 
-    const handleAiSwitchChange = async (checked: boolean) => {
+    // Turning the copilot on runs the same orchestrator the Intelligent Attendant uses,
+    // on the server, and drafts a reply for the message that is already waiting.
+    const enableCopilot = useCallback(async (agentId: string) => {
+        if (!chat) return;
         autopilotSwitchTouchedRef.current = true;
-        setIsAiAgentActive(checked);
+        setIsAiAgentActive(true);
+        updateChat(chat.id, {
+            is_autopilot_active: true,
+            autopilot_config_id: agentId,
+            copilot_mode: 'suggest',
+        });
 
-        let agentId = chat?.autopilot_config_id || undefined;
-        if (checked && !agentId) {
-            const primary = autopilotAgents.find(a => a.is_primary) || autopilotAgents[0] || autopilotConfig;
-            if (primary) {
-                agentId = primary.id;
-            }
-        }
+        const selected = autopilotAgents.find(a => a.id === agentId) || (autopilotConfig?.id === agentId ? autopilotConfig : null);
+        if (selected) setAutopilotConfig(selected);
 
-        if (chat) {
-            updateChat(chat.id, {
-                is_autopilot_active: checked,
-                autopilot_config_id: agentId,
-                copilot_mode: checked ? 'suggest' : 'off'
+        setIsRequestingSuggestion(true);
+        const result = await activateChatCopilot(chat.id, agentId);
+        setIsRequestingSuggestion(false);
+
+        if (!result.success) {
+            setIsAiAgentActive(false);
+            updateChat(chat.id, { is_autopilot_active: false, copilot_mode: 'off' });
+            toast({
+                title: 'Não foi possível ativar o copiloto',
+                description: result.error,
+                variant: 'destructive',
             });
-            await toggleChatAutopilot(chat.id, checked, agentId || null);
-
-            if (checked && agentId) {
-                const selected = autopilotAgents.find(a => a.id === agentId) || (autopilotConfig?.id === agentId ? autopilotConfig : null);
-                if (selected) setAutopilotConfig(selected);
-            }
         }
+    }, [autopilotAgents, autopilotConfig, chat, toast, updateChat]);
+
+    const disableCopilot = useCallback(async () => {
+        if (!chat) return;
+        autopilotSwitchTouchedRef.current = true;
+        setIsAiAgentActive(false);
+        setAiSuggestion(null);
+        updateChat(chat.id, { is_autopilot_active: false, copilot_mode: 'off' });
+        await deactivateChatCopilot(chat.id);
+    }, [chat, updateChat]);
+
+    const handleAiSwitchChange = async (checked: boolean) => {
+        if (!chat) return;
+        if (!checked) {
+            await disableCopilot();
+            return;
+        }
+
+        const agentId = chat.autopilot_config_id
+            || autopilotAgents.find(a => a.is_primary)?.id
+            || autopilotAgents[0]?.id
+            || autopilotConfig?.id;
+
+        if (!agentId) {
+            toast({
+                title: 'Nenhum agente de IA disponível',
+                description: 'Crie um agente de IA no Autopilot para usar o copiloto nas conversas.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        await enableCopilot(agentId);
     };
 
     const handleAgentChange = async (agentId: string) => {
-        autopilotSwitchTouchedRef.current = true;
-        setIsAiAgentActive(true);
-        if (chat) {
-            updateChat(chat.id, { is_autopilot_active: true, autopilot_config_id: agentId });
-            await toggleChatAutopilot(chat.id, true, agentId);
-
-            const selected = autopilotAgents.find(a => a.id === agentId) || (autopilotConfig?.id === agentId ? autopilotConfig : null);
-            if (selected) setAutopilotConfig(selected);
-        }
+        await enableCopilot(agentId);
     };
 
-    const handleCopilotModeChange = async (mode: 'auto' | 'suggest') => {
-        if (chat) {
-            updateChat(chat.id, { copilot_mode: mode });
-            await updateChatCopilotModeAction(chat.id, mode);
-            toast({ title: `Modo alterado para ${mode === 'auto' ? 'Automático' : 'Sugestão'}` });
+    /**
+     * "Assumir a conversa" hands the chat over to the Intelligent Attendant that publishes
+     * this AI configuration — the same runtime, now answering the customer directly.
+     */
+    const handleAiTakeOver = useCallback(async () => {
+        if (!chat) return;
+        const configId = chat.autopilot_config_id || autopilotConfig?.id;
+        const agent = inboxAiAgents.find(item => item.id === configId);
+
+        if (!agent?.systemAgentId || !agent.canTakeOverConversation) {
+            toast({
+                title: 'Este agente ainda não atende sozinho',
+                description: 'Publique-o como Atendente Inteligente em Agentes do Sistema para que ele assuma conversas.',
+                variant: 'destructive',
+            });
+            return;
         }
-    };
+
+        const result = await transferChatToIntelligentAgentAction({
+            chatId: chat.id,
+            systemAgentId: agent.systemAgentId,
+        });
+
+        if (!result.success) {
+            toast({
+                title: 'Não foi possível transferir para a IA',
+                description: result.error,
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        setAiSuggestion(null);
+        toast({
+            title: `${agent.systemAgentName || agent.name} assumiu a conversa`,
+            description: 'A IA passa a responder o cliente diretamente.',
+        });
+        onActionSuccess();
+    }, [autopilotConfig?.id, chat, inboxAiAgents, onActionSuccess, toast]);
+
+    const handleRequestSuggestion = useCallback(async () => {
+        if (!chat) return;
+        setIsRequestingSuggestion(true);
+        setAiSuggestion(null);
+        const result = await requestCopilotSuggestion(chat.id);
+        setIsRequestingSuggestion(false);
+        if (!result.success) {
+            toast({
+                title: 'Sem sugestão agora',
+                description: result.error,
+                variant: 'destructive',
+            });
+        }
+    }, [chat, toast]);
+
+    const resolveSuggestion = useCallback((outcome: 'sent' | 'edited' | 'dismissed') => {
+        if (!chat) return;
+        const suggestionId = aiSuggestion?.id ?? null;
+        setAiSuggestion(null);
+        void resolveCopilotSuggestionAction({ chatId: chat.id, suggestionId, outcome });
+    }, [aiSuggestion?.id, chat]);
 
     const fetchAutopilotData = useCallback(async () => {
         if (!currentUser.activeWorkspaceId) return;
         const data = await getAutopilotConfig(currentUser.activeWorkspaceId, chat?.autopilot_config_id || undefined);
         if (!data.error) {
             setAutopilotConfig(data.config);
-            setAutopilotRules(data.rules || []);
             setAutopilotAgents(data.agents || []);
         } else {
             console.error("Failed to fetch autopilot config:", data.error);
@@ -653,9 +741,48 @@ export default function ChatPanel({
         setAiSuggestion(null); // Clear suggestion when chat changes
     }, [chat?.id, chat?.is_autopilot_active]);
 
+    // A draft that arrived while the operator was elsewhere is still waiting for them.
+    useEffect(() => {
+        const chatId = chat?.id;
+        if (!chatId || !chat?.is_autopilot_active || chat?.assigned_system_agent_id) return;
+
+        let cancelled = false;
+        getPendingCopilotSuggestion(chatId)
+            .then((result) => {
+                if (cancelled || !result.suggestion) return;
+                setAiSuggestion({
+                    id: result.suggestion.id,
+                    agentName: result.suggestion.agentName,
+                    text: result.suggestion.suggestion,
+                    blocks: result.suggestion.messageBlocks,
+                    stage: result.suggestion.stage,
+                    insights: result.suggestion.insights,
+                    createdAt: result.suggestion.createdAt,
+                });
+            })
+            .catch((error) => console.error('[CHAT_PANEL] Failed to hydrate copilot suggestion', error));
+
+        return () => {
+            cancelled = true;
+        };
+    }, [chat?.id, chat?.is_autopilot_active, chat?.assigned_system_agent_id]);
+
+    useEffect(() => {
+        const workspaceId = currentUser.activeWorkspaceId;
+        if (!workspaceId) return;
+        let cancelled = false;
+        listInboxAiAgents(workspaceId)
+            .then((result) => {
+                if (!cancelled) setInboxAiAgents(result.agents);
+            })
+            .catch((error) => console.error('[CHAT_PANEL] Failed to load inbox AI agents', error));
+        return () => {
+            cancelled = true;
+        };
+    }, [currentUser.activeWorkspaceId]);
+
     // Subscribe to AI processing events and suggestions via Realtime
     useEffect(() => {
-        console.log('[CHAT_PANEL] Checking copilot subscription. Mode:', chat?.copilot_mode, 'ID:', chat?.id);
         if (!chat?.id) return;
 
         let cancelled = false;
@@ -670,21 +797,31 @@ export default function ChatPanel({
                 if (cancelled) return;
                 if (payload.payload?.chatId && payload.payload.chatId !== chat.id) return;
                 setIsAiTyping(false);
+                setIsRequestingSuggestion(false);
+            })
+            .on('broadcast', { event: 'ai_suggestion_cleared' }, (payload) => {
+                if (cancelled) return;
+                if (!shouldAcceptAiSuggestion(chat.id, payload.payload?.chatId)) return;
+                setAiSuggestion(null);
             })
             .on('broadcast', { event: 'ai_suggestion' }, (payload) => {
                 if (cancelled) return; // Guard against updates after unmount
-                console.log('[CHAT_PANEL] Received AI suggestion:', payload);
                 setIsAiTyping(false);
+                setIsRequestingSuggestion(false);
                 if (!shouldAcceptAiSuggestion(chat.id, payload.payload?.chatId)) {
                     return;
                 }
-                if (chat.copilot_mode !== 'suggest') return;
-                if (payload.payload?.suggestion) {
-                    setAiSuggestion({
-                        text: payload.payload.suggestion,
-                        configName: payload.payload.configName || 'IA'
-                    });
-                }
+                const data = payload.payload;
+                if (!data?.suggestion) return;
+                setAiSuggestion({
+                    id: data.id ?? null,
+                    agentName: data.agentName || data.configName || 'IA',
+                    text: data.suggestion,
+                    blocks: Array.isArray(data.messageBlocks) ? data.messageBlocks : [],
+                    stage: data.stage || 'model_response',
+                    insights: data.insights || {},
+                    createdAt: data.createdAt || new Date().toISOString(),
+                });
             })
             .subscribe();
 
@@ -970,101 +1107,6 @@ export default function ChatPanel({
     const padTop = 0;
     const padBottom = 0;
 
-    const runAiAgent = useCallback(async () => {
-        const storeMessages = chat?.id
-            ? (messagesByChat[chat.id] || []).filter((message) => !isToolExecutionMessage(message))
-            : [];
-        const lastMessage = storeMessages.length ? storeMessages[storeMessages.length - 1] : null;
-        const chatId = chat?.id;
-
-        if (!chatId || !lastMessage) {
-            return;
-        }
-
-        const observedLastMessageId = observedLastMessageIdByChatRef.current[chatId];
-        if (!observedLastMessageId) {
-            observedLastMessageIdByChatRef.current[chatId] = lastMessage.id;
-            return;
-        }
-
-        if (observedLastMessageId === lastMessage.id || processedMessageIds.current.has(lastMessage.id)) {
-            return;
-        }
-
-        observedLastMessageIdByChatRef.current[chatId] = lastMessage.id;
-
-        const copilotMode = chat?.copilot_mode || 'off';
-        const shouldRun = isAiAgentActive &&
-            !!chat &&
-            !chat.assigned_system_agent_id &&
-            copilotMode === 'suggest' &&
-            lastMessage?.sender?.id !== currentUser.id &&
-            !lastMessage?.metadata?.sentBy &&
-            !isAiTyping;
-
-        if (!shouldRun) {
-            return;
-        }
-
-        try {
-            setIsAiTyping(true);
-            processedMessageIds.current.add(lastMessage.id);
-            const chatHistoryForAI = storeMessages.map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n');
-            const activeRules = autopilotRules.filter(rule => rule.enabled);
-
-            if (!activeAutopilotConfig) {
-                console.warn("[AUTOPILOT] Configuração não carregada. Abortando.");
-                return;
-            }
-
-            const sanitizedContact: Contact = {
-                ...(chat.contact as Contact),
-                email: chat.contact?.email || '',
-            };
-
-            const result = await generateAgentResponse({
-                config: activeAutopilotConfig,
-                chatId: chat.id,
-                customerMessage: lastMessage.content || '',
-                chatHistory: chatHistoryForAI,
-                rules: activeRules,
-                knowledgeBase: activeAutopilotConfig.knowledge_base || '',
-                knowledgeBaseDocuments: activeAutopilotConfig.knowledge_base_documents || [],
-                fallbackReply: activeAutopilotConfig.default_fallback_reply || '',
-                model: activeAutopilotConfig.ai_model || DEFAULT_AUTOPILOT_MODEL,
-                contact: sanitizedContact
-            });
-
-            if (result?.response) {
-                if (copilotMode === 'suggest') {
-                    setAiSuggestion({
-                        text: result.response,
-                        configName: activeAutopilotConfig.name || 'IA',
-                    });
-                    return;
-                }
-
-                if (copilotMode === 'off') {
-                    return;
-                }
-
-                return;
-            }
-        } catch (error: any) {
-            console.error('[AUTOPILOT] Erro ao gerar resposta:', error);
-            toast({
-                title: 'Erro do Agente de IA',
-                description: error?.message || 'Não foi possível gerar a resposta automática.',
-                variant: 'destructive',
-            });
-        } finally {
-            setIsAiTyping(false);
-        }
-    }, [activeAutopilotConfig, autopilotRules, chat, currentUser.id, isAiAgentActive, isAiTyping, onActionSuccess, toast, messagesByChat]);
-
-    useEffect(() => {
-        runAiAgent();
-    }, [runAiAgent]);
 
     useEffect(() => {
         setIsAiTyping(false);
@@ -2001,6 +2043,13 @@ export default function ChatPanel({
         null;
     const currentCopilotMode = chat.copilot_mode === 'auto' ? 'auto' : 'suggest';
     const hasAutopilotAvailable = availableAutopilotAgents.length > 0;
+    // The copilot assists a chat a human still owns. Once an Intelligent Attendant takes
+    // over, the AI answers the customer directly and there is nothing to suggest.
+    const isCopilotActive = isAiAgentActive && !chat.assigned_system_agent_id;
+    const selectedInboxAiAgent = inboxAiAgents.find(agent => agent.id === selectedAutopilotAgentId) || null;
+    const copilotAgentName = selectedInboxAiAgent?.name || selectedAutopilotAgent?.name || 'IA Dialogy';
+    const copilotAgentAvatarUrl = selectedInboxAiAgent?.systemAgentAvatarUrl || null;
+    const canAiTakeOverConversation = Boolean(selectedInboxAiAgent?.canTakeOverConversation);
     const headerAssigneeName = chat.agent?.name || chat.assignedSystemAgent?.name || 'Não atribuído';
     const headerStatusLabel = chat.status === 'atendimentos'
         ? 'Em atendimento'
@@ -2224,27 +2273,36 @@ export default function ChatPanel({
                                     )}
                                 </DropdownMenuItem>
                                 <DropdownMenuCheckboxItem
-                                    checked={isAiAgentActive}
+                                    checked={isCopilotActive}
                                     onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
                                     onSelect={(event) => event.preventDefault()}
-                                    disabled={isAiTyping || (!isAiAgentActive && !hasAutopilotAvailable)}
+                                    disabled={isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
                                     className="items-start py-2"
                                 >
                                     <div className="min-w-0">
-                                        <p className="text-sm font-medium">Agente IA</p>
-                                        <p className="max-w-[160px] truncate text-[10px] text-muted-foreground">{selectedAutopilotAgent?.name || 'Não configurado'}</p>
+                                        <p className="text-sm font-medium">Copiloto de IA</p>
+                                        <p className="max-w-[180px] truncate text-[10px] text-muted-foreground">
+                                            {chat.assigned_system_agent_id
+                                                ? 'A IA já está conduzindo esta conversa'
+                                                : selectedAutopilotAgent?.name || 'Nenhum agente configurado'}
+                                        </p>
                                     </div>
-                                    <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isAiAgentActive ? 'Ativo' : 'Inativo'}</span>
+                                    <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isCopilotActive ? 'Ativo' : 'Inativo'}</span>
                                 </DropdownMenuCheckboxItem>
-                                <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('suggest')}>
+                                <DropdownMenuItem
+                                    disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
+                                    onSelect={() => { void handleRequestSuggestion(); }}
+                                >
                                     <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                    <span>Modo sugestão</span>
-                                    {currentCopilotMode === 'suggest' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
+                                    <span>Sugerir resposta agora</span>
                                 </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('auto')}>
+                                <DropdownMenuItem
+                                    disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation}
+                                    onSelect={() => { void handleAiTakeOver(); }}
+                                >
                                     <Bot className="mr-2 h-4 w-4" />
-                                    <span>Modo automático</span>
-                                    {currentCopilotMode === 'auto' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
+                                    <span>Deixar a IA assumir</span>
+                                    {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
                                 </DropdownMenuItem>
 
 
@@ -2335,27 +2393,36 @@ export default function ChatPanel({
                                         )}
                                     </DropdownMenuItem>
                                     <DropdownMenuCheckboxItem
-                                        checked={isAiAgentActive}
+                                        checked={isCopilotActive}
                                         onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
                                         onSelect={(event) => event.preventDefault()}
-                                        disabled={isAiTyping || (!isAiAgentActive && !hasAutopilotAvailable)}
+                                        disabled={isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
                                         className="items-start py-2"
                                     >
                                         <div className="min-w-0">
-                                            <p className="text-sm font-medium">Agente IA</p>
-                                            <p className="max-w-[160px] truncate text-[10px] text-muted-foreground">{selectedAutopilotAgent?.name || 'Não configurado'}</p>
+                                            <p className="text-sm font-medium">Copiloto de IA</p>
+                                            <p className="max-w-[180px] truncate text-[10px] text-muted-foreground">
+                                                {chat.assigned_system_agent_id
+                                                    ? 'A IA já está conduzindo esta conversa'
+                                                    : selectedAutopilotAgent?.name || 'Nenhum agente configurado'}
+                                            </p>
                                         </div>
-                                        <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isAiAgentActive ? 'Ativo' : 'Inativo'}</span>
+                                        <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isCopilotActive ? 'Ativo' : 'Inativo'}</span>
                                     </DropdownMenuCheckboxItem>
-                                    <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('suggest')}>
+                                    <DropdownMenuItem
+                                        disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
+                                        onSelect={() => { void handleRequestSuggestion(); }}
+                                    >
                                         <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                        <span>Modo sugestão</span>
-                                        {currentCopilotMode === 'suggest' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
+                                        <span>Sugerir resposta agora</span>
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem disabled={!isAiAgentActive || isAiTyping} onSelect={() => handleCopilotModeChange('auto')}>
+                                    <DropdownMenuItem
+                                        disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation}
+                                        onSelect={() => { void handleAiTakeOver(); }}
+                                    >
                                         <Bot className="mr-2 h-4 w-4" />
-                                        <span>Modo automático</span>
-                                        {currentCopilotMode === 'auto' && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
+                                        <span>Deixar a IA assumir</span>
+                                        {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
                                     </DropdownMenuItem>
                                     {isChatOpen && isChatAssignedToMe && (
                                         <>
@@ -2524,59 +2591,28 @@ export default function ChatPanel({
                         />
                     )} */}
 
-                        {/* AI Copilot Suggestion Bubble */}
-                        {aiSuggestion && (
-                            <div className="animate-in slide-in-from-bottom-2 duration-300 mb-3">
-                                <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center">
-                                            <Brain className="w-4 h-4 text-white" />
-                                        </div>
-                                        <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                                            Sugestão do {aiSuggestion.configName}
-                                        </span>
-                                    </div>
-                                    <p className="text-sm text-foreground mb-3 whitespace-pre-wrap line-clamp-4">
-                                        {aiSuggestion.text}
-                                    </p>
-                                    <div className="flex gap-2">
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            className="bg-green-600 hover:bg-green-700 text-white"
-                                            onClick={() => {
-                                                handleFormSubmit(aiSuggestion.text);
-                                                setAiSuggestion(null);
-                                            }}
-                                        >
-                                            <Check className="w-4 h-4 mr-1" />
-                                            Enviar
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => {
-                                                syncComposerPlainText(aiSuggestion.text, true);
-                                                setAiSuggestion(null);
-                                            }}
-                                        >
-                                            <Pencil className="w-4 h-4 mr-1" />
-                                            Editar
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="ghost"
-                                            className="text-muted-foreground hover:text-red-500"
-                                            onClick={() => setAiSuggestion(null)}
-                                        >
-                                            <X className="w-4 h-4 mr-1" />
-                                            Ignorar
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
+                        {/* AI Copilot draft: same orchestrator as the Intelligent Attendant,
+                            proposed to the operator instead of sent to the customer. */}
+                        {isCopilotActive && (
+                            <CopilotSuggestionCard
+                                suggestion={aiSuggestion}
+                                isThinking={isAiTyping || isRequestingSuggestion}
+                                agentName={copilotAgentName}
+                                agentAvatarUrl={copilotAgentAvatarUrl}
+                                canRequest={hasAutopilotAvailable}
+                                onSend={(text) => {
+                                    // Send exactly what the preview showed: one message per block.
+                                    const blocks = aiSuggestion?.blocks?.length ? aiSuggestion.blocks : [text];
+                                    blocks.forEach((block) => { void handleFormSubmit(block); });
+                                    resolveSuggestion('sent');
+                                }}
+                                onEdit={(text) => {
+                                    syncComposerPlainText(text, true);
+                                    resolveSuggestion('edited');
+                                }}
+                                onRegenerate={handleRequestSuggestion}
+                                onDismiss={() => resolveSuggestion('dismissed')}
+                            />
                         )}
 
                         <div className="space-y-2.5 md:space-y-3">
