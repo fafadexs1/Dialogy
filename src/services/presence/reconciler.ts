@@ -58,7 +58,7 @@ export async function reconcilePresenceOnce(): Promise<{
             user_id, workspace_id, is_online, online_since, last_seen,
             last_event_at, last_event_source, metadata
           )
-          SELECT s.user_id, s.workspace_id, TRUE, s.last_seen, s.last_seen,
+          SELECT s.user_id, w.workspace_id, TRUE, s.last_seen, s.last_seen,
                  NOW(), 'reconciler', '{}'::jsonb
           FROM unnest($1::uuid[], $2::timestamptz[]) AS s(user_id, last_seen)
           CROSS JOIN (SELECT $3::uuid AS workspace_id) w
