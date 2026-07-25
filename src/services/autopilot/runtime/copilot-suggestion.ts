@@ -211,9 +211,8 @@ async function broadcastCopilotSuggestion(input: {
   sourceMessageId: string | null;
 }): Promise<void> {
   try {
-    const { getSupabaseAdmin } = await import('@/lib/supabase');
-    const supabase = getSupabaseAdmin();
-    await supabase.channel(`chat:${input.chatId}`).httpSend('ai_suggestion', {
+    const { broadcastRealtimeEvent } = await import('@/lib/realtime/broadcast');
+    await broadcastRealtimeEvent(`chat:${input.chatId}`, 'ai_suggestion', {
       // Legacy fields kept so older clients keep working during a rollout.
       suggestion: input.suggestion,
       chatId: input.chatId,
@@ -304,9 +303,8 @@ export async function discardPendingCopilotSuggestions(chatId: string): Promise<
     console.warn('[COPILOT_SUGGESTION] Failed to discard pending suggestions:', error);
   }
   try {
-    const { getSupabaseAdmin } = await import('@/lib/supabase');
-    const supabase = getSupabaseAdmin();
-    await supabase.channel(`chat:${chatId}`).httpSend('ai_suggestion_cleared', { chatId });
+    const { broadcastRealtimeEvent } = await import('@/lib/realtime/broadcast');
+    await broadcastRealtimeEvent(`chat:${chatId}`, 'ai_suggestion_cleared', { chatId });
   } catch (error) {
     console.warn('[COPILOT_SUGGESTION] Failed to broadcast suggestion clear:', error);
   }

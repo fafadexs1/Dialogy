@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { getSupabaseAdmin } from '@/lib/supabase';
+import { broadcastRealtimeEvent } from '@/lib/realtime/broadcast';
 
 export async function broadcastChatUpdate(
   workspaceId: string,
@@ -8,7 +8,7 @@ export async function broadcastChatUpdate(
 ) {
   try {
     const topic = `workspace:${workspaceId}:chats`;
-    await getSupabaseAdmin().channel(topic).httpSend('UPDATE', {
+    await broadcastRealtimeEvent(topic, 'UPDATE', {
         id: chatId,
         schema: 'public',
         table: 'chats',

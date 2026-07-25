@@ -532,11 +532,10 @@ function resolveAnalysisKind(type: Message['type']): MessageMetadata['analysisKi
 
 async function broadcastAiProcessing(chatId: string, event: 'ai_processing_start' | 'ai_processing_stop', payload: Record<string, unknown> = {}) {
     try {
-        const { getSupabaseAdmin } = await import('@/lib/supabase');
-        const supabase = getSupabaseAdmin();
-        await supabase.channel(`chat:${chatId}`).httpSend(event, {
-                chatId,
-                ...payload,
+        const { broadcastRealtimeEvent } = await import('@/lib/realtime/broadcast');
+        await broadcastRealtimeEvent(`chat:${chatId}`, event, {
+            chatId,
+            ...payload,
         });
     } catch (error) {
         console.error(`[AUTOPILOT_SERVICE] Failed to broadcast ${event}:`, error);
@@ -714,9 +713,8 @@ async function insertAgentToolStatusMessage(input: {
 
         // Broadcast tool status in real-time so the operator panel updates instantly
         try {
-            const { getSupabaseAdmin } = await import('@/lib/supabase');
-            const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${input.chatId}`).httpSend('agent_tool_status', {
+            const { broadcastRealtimeEvent } = await import('@/lib/realtime/broadcast');
+            await broadcastRealtimeEvent(`chat:${input.chatId}`, 'agent_tool_status', {
                     chatId: input.chatId,
                     toolName: input.toolName,
                     status: input.status,

@@ -26,7 +26,21 @@ function getServiceRoleKey(): string {
   return candidates[0] || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 }
 
-export const getSupabaseAdmin = () => createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!,
-  getServiceRoleKey(),
-);
+export const getSupabaseAdmin = () => {
+  const key = getServiceRoleKey();
+  const client = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!,
+    key,
+  );
+
+  // realtime-js only attaches `Authorization: Bearer <token>` to REST broadcasts when
+  // an access token was set. A server-side client never opens the socket, so without
+  // this the request carries only `apikey` — and Realtime answers 500 (MatchError in
+  // AuthTenant.access_token/1) instead of a useful error, silently killing every
+  // server-originated event. Setting an explicit token assigns it synchronously.
+  if (key) {
+    void client.realtime.setAuth(key);
+  }
+
+  return client;
+};
