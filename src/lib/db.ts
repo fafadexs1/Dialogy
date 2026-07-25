@@ -34,3 +34,36 @@ export const db = new Pool({
 db.on('error', (error) => {
   console.error('[DB_POOL] Erro em cliente ocioso:', error);
 });
+
+export type PoolStats = {
+  /** Conexões abertas no momento. */
+  total: number;
+  /** Abertas e livres. */
+  idle: number;
+  /** Em uso. */
+  inUse: number;
+  /** Requisições esperando por conexão — acima de zero significa pool saturado. */
+  waiting: number;
+  max: number;
+  /** Fração do pool em uso, 0 a 1. */
+  utilization: number;
+};
+
+/**
+ * Estado do pool. `waiting` é a métrica que importa sob carga: enquanto for
+ * zero, o pool não é o gargalo, por mais alta que esteja a latência.
+ */
+export function getPoolStats(): PoolStats {
+  const max = resolvePoolMax();
+  const total = db.totalCount;
+  const idle = db.idleCount;
+
+  return {
+    total,
+    idle,
+    inUse: total - idle,
+    waiting: db.waitingCount,
+    max,
+    utilization: max > 0 ? Number(((total - idle) / max).toFixed(3)) : 0,
+  };
+}

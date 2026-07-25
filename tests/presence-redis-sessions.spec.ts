@@ -32,7 +32,39 @@ let cliente: import('ioredis').default;
 const WORKSPACE = 'ws-teste';
 const USUARIO = 'user-teste';
 
+/**
+ * Sem o Redis de teste no ar, a suite PULA em vez de falhar: quebrar o
+ * `npm test` de quem nao subiu o container seria ruido, nao sinal.
+ */
+async function redisDisponivel(): Promise<boolean> {
+  try {
+    const { default: IORedis } = await import('ioredis');
+    const sonda = new IORedis(TEST_REDIS_URL, {
+      maxRetriesPerRequest: 0,
+      connectTimeout: 1000,
+      lazyConnect: true,
+      retryStrategy: () => null,
+    });
+    await sonda.connect();
+    await sonda.ping();
+    await sonda.quit();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const temRedis = await redisDisponivel();
+
+if (!temRedis) {
+  console.warn(
+    `\n[presenca] Redis de teste ausente em ${TEST_REDIS_URL} — suite pulada.\n` +
+      '  docker run -d --name dialogy-test-redis -p 6399:6379 redis:7-alpine\n',
+  );
+}
+
 beforeAll(async () => {
+  if (!temRedis) return;
   presenca = await import('@/lib/presence-redis');
   const client = presenca.getPresenceRedis();
   if (!client) throw new Error('Redis de teste indisponivel na porta 6399.');
@@ -44,6 +76,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  if (!temRedis) return;
   await cliente.flushdb();
 });
 
@@ -53,7 +86,7 @@ const toque = (sessionId: string) =>
 const solta = (sessionId: string, forceAll = false) =>
   presenca.releasePresenceSession({ workspaceId: WORKSPACE, userId: USUARIO, sessionId, forceAll });
 
-describe('presenca no Redis — transicoes', () => {
+describe.skipIf(!temRedis)('presenca no Redis — transicoes', () => {
   it('a primeira aba marca transicao para online', async () => {
     const resultado = await toque('aba-1');
     expect(resultado).toMatchObject({ sessionsBefore: 0, sessionsAfter: 1, changed: true, isOnline: true });
@@ -131,7 +164,7 @@ describe('presenca no Redis — transicoes', () => {
   });
 });
 
-describe('presenca no Redis — leitura para o reconciliador', () => {
+describe.skipIf(!temRedis)('presenca no Redis — leitura para o reconciliador', () => {
   it('o snapshot lista quem esta online por workspace', async () => {
     await toque('aba-1');
     await presenca.touchPresenceSession({
