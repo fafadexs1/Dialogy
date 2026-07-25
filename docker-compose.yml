@@ -133,6 +133,9 @@
   PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-}
   PRESENCE_RECENT_ACTIVITY_SECONDS: ${PRESENCE_RECENT_ACTIVITY_SECONDS:-}
   PRESENCE_HEARTBEAT_MS: ${PRESENCE_HEARTBEAT_MS:-}
+  # 'postgres' (padrao) mantem o comportamento atual; 'redis' tira o heartbeat
+  # do banco. A virada e reversivel a quente: basta trocar e reiniciar.
+  PRESENCE_BACKEND: ${PRESENCE_BACKEND:-postgres}
   BUILD_ID: ${BUILD_ID:-}
   NEXT_BUILD_ID: ${NEXT_BUILD_ID:-}
   VERCEL_GIT_COMMIT_SHA: ${VERCEL_GIT_COMMIT_SHA:-}
@@ -174,7 +177,7 @@ services:
   # as uid 1001, so initialise the shared Hugging Face/ONNX cache before either
   # process can load a local embedding or reranking model.
   ai-cache-init:
-    image: fafadexs/dialogy-worker-ai:PDC-1.31
+    image: fafadexs/dialogy-worker-ai:PDC-1.32
     restart: "no"
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
@@ -187,7 +190,7 @@ services:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
 
   dialogy:
-    image: fafadexs/dialogy:PDC-1.31
+    image: fafadexs/dialogy:PDC-1.32
     restart: unless-stopped
     init: true
     depends_on:
@@ -218,7 +221,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PDC-1.31
+    image: fafadexs/dialogy-worker:PDC-1.32
     restart: unless-stopped
     init: true
     depends_on:
@@ -231,7 +234,7 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PDC-1.31
+    image: fafadexs/dialogy-worker-ai:PDC-1.32
     restart: unless-stopped
     init: true
     depends_on:
@@ -248,7 +251,7 @@ services:
     stop_grace_period: 30s
 
   worker-campaign:
-    image: fafadexs/dialogy-worker:PDC-1.31
+    image: fafadexs/dialogy-worker:PDC-1.32
     command: ["node", "dist/worker-campaign.js"]
     restart: unless-stopped
     init: true
@@ -262,7 +265,7 @@ services:
     stop_grace_period: 30s
 
   worker-meta-relay:
-    image: fafadexs/dialogy-worker:PDC-1.31
+    image: fafadexs/dialogy-worker:PDC-1.32
     command: ["node", "dist/worker-meta-relay.js"]
     restart: unless-stopped
     init: true

@@ -1,4 +1,5 @@
 import { createQueueWorker } from '@/lib/queue/worker';
+import { startPresenceReconciler, stopPresenceReconciler } from '@/services/presence/reconciler';
 
 async function loadEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -16,10 +17,15 @@ async function main() {
   await loadEnvironment();
   const { worker, connection } = createQueueWorker();
 
+  // Mantem user_workspace_presence fresca em lote. Sem efeito quando
+  // PRESENCE_BACKEND != redis.
+  startPresenceReconciler();
+
   const shutdown = async (signal: string) => {
     console.log(`[QUEUE_WORKER] Received ${signal}. Shutting down gracefully...`);
 
     try {
+      stopPresenceReconciler();
       await worker.close();
       await connection.quit();
       process.exit(0);
