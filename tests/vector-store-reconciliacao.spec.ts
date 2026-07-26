@@ -201,3 +201,65 @@ describe.skipIf(!temPostgres)('VectorStore.deleteEmbeddingsNotIn', () => {
     ).rejects.toThrow(/workspaceId/);
   });
 });
+
+describe.skipIf(!temPostgres)('VectorStore.listDocumentIdsWithoutEmbeddings', () => {
+  it('aponta so quem nao tem embedding', async () => {
+    await semear([{ doc: VIVO }]);
+
+    const semIndice = await VectorStore.listDocumentIdsWithoutEmbeddings({
+      workspaceId: WS,
+      autopilotConfigId: CFG,
+      documentIds: [VIVO, ORFAO, ORFAO2],
+    });
+
+    expect(semIndice.sort()).toEqual([ORFAO, ORFAO2].sort());
+  });
+
+  it('lista vazia devolve vazio sem consultar', async () => {
+    await expect(
+      VectorStore.listDocumentIdsWithoutEmbeddings({
+        workspaceId: WS,
+        autopilotConfigId: CFG,
+        documentIds: [],
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it('embedding de OUTRO workspace nao conta como indexado', async () => {
+    // Sem o filtro de workspace, o documento pareceria indexado e ficaria
+    // invisivel para a IA neste workspace — falha silenciosa.
+    await semear([{ doc: VIVO, ws: OUTRO_WS }]);
+
+    const semIndice = await VectorStore.listDocumentIdsWithoutEmbeddings({
+      workspaceId: WS,
+      autopilotConfigId: CFG,
+      documentIds: [VIVO],
+    });
+
+    expect(semIndice).toEqual([VIVO]);
+  });
+
+  it('embedding de OUTRO agente nao conta como indexado', async () => {
+    await semear([{ doc: VIVO, cfg: OUTRA_CFG }]);
+
+    const semIndice = await VectorStore.listDocumentIdsWithoutEmbeddings({
+      workspaceId: WS,
+      autopilotConfigId: CFG,
+      documentIds: [VIVO],
+    });
+
+    expect(semIndice).toEqual([VIVO]);
+  });
+
+  it('id nao-uuid nao aborta a verificacao', async () => {
+    await semear([{ doc: VIVO }]);
+
+    const semIndice = await VectorStore.listDocumentIdsWithoutEmbeddings({
+      workspaceId: WS,
+      autopilotConfigId: CFG,
+      documentIds: [VIVO, 'manual-1783746248257'],
+    });
+
+    expect(semIndice).toEqual(['manual-1783746248257']);
+  });
+});

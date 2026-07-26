@@ -425,11 +425,54 @@ async function reindexChangedKnowledgeDocuments({
     const nextById = new Map(nextDocs.map((doc) => [doc.id, doc]));
 
     const removedDocs = previousDocs.filter((doc) => !nextById.has(doc.id));
-    const changedDocs = nextDocs.filter((doc) => {
+    const failedDocumentNames = new Set<string>();
+
+    const alteradosDesdeOUltimoSalvamento = nextDocs.filter((doc) => {
         const previous = previousById.get(doc.id);
         return hasKnowledgeDocumentIndexChanged(previous, doc);
     });
-    const failedDocumentNames = new Set<string>();
+
+    // Um id que nao e uuid explode no INSERT com "invalid input syntax for type
+    // uuid" — erro que so aparecia no log do worker, deixando o documento
+    // silenciosamente invisivel para a IA. Aqui ele vira falha reportada.
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const comIdInvalido = nextDocs.filter((doc) => doc.id && !UUID.test(doc.id));
+    for (const doc of comIdInvalido) {
+        console.error(`[RAG] Documento com id fora do formato uuid, nao indexavel: ${doc.id}`);
+        failedDocumentNames.add(doc.name || doc.id);
+    }
+
+    // Reindexa tambem o que nunca chegou a ser indexado. Sem isto, um documento
+    // adicionado enquanto a ingestao estava fora fica invisivel para sempre: no
+    // salvamento seguinte ele nao conta como alterado, e nada o retenta.
+    const jaNaFila = new Set(alteradosDesdeOUltimoSalvamento.map((doc) => doc.id));
+    const invalidos = new Set(comIdInvalido.map((doc) => doc.id));
+    let nuncaIndexados: KnowledgeBaseDocument[] = [];
+    try {
+        const candidatos = nextDocs.filter(
+            (doc) => doc.id && !jaNaFila.has(doc.id) && !invalidos.has(doc.id) && (doc.content || '').trim(),
+        );
+        if (candidatos.length > 0) {
+            const semIndice = new Set(
+                await VectorStore.listDocumentIdsWithoutEmbeddings({
+                    workspaceId,
+                    autopilotConfigId: configId,
+                    documentIds: candidatos.map((doc) => doc.id),
+                }),
+            );
+            nuncaIndexados = candidatos.filter((doc) => semIndice.has(doc.id));
+            if (nuncaIndexados.length > 0) {
+                console.info(
+                    `[RAG] ${nuncaIndexados.length} documento(s) sem embedding serao reindexados no agente ${configId}.`,
+                );
+            }
+        }
+    } catch (ragError) {
+        // Nao impede o salvamento nem a reindexacao do que mudou.
+        console.error('[RAG] Falha ao detectar documentos sem embedding:', ragError);
+    }
+
+    const changedDocs = [...alteradosDesdeOUltimoSalvamento, ...nuncaIndexados];
 
     await Promise.all(
         removedDocs.map((doc) =>
