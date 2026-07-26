@@ -2,7 +2,6 @@ import 'server-only';
 
 import { db } from '@/lib/db';
 import { getPresenceTtlSeconds } from '@/lib/presence';
-import { sweepStalePresence } from '@/lib/presence-server';
 import {
   acquireReconcilerLock,
   isRedisPresenceEnabled,
@@ -95,9 +94,28 @@ export async function reconcilePresenceOnce(): Promise<{
     desligados += derrubados.rowCount ?? 0;
   }
 
-  // Rede de segurança para workspaces que o Redis nunca viu — inclui linhas
-  // deixadas para trás pelo modelo antigo, na virada da flag.
-  await sweepStalePresence();
+  // Workspaces que sumiram do Redis (ou que nunca entraram, como as linhas
+  // deixadas pelo modelo antigo na virada da flag) nao aparecem no laco acima.
+  //
+  // NAO usar sweepStalePresence aqui: ela decide quem esta online consultando
+  // `presence_sessions`, que no modo Redis ninguem popula. O NOT EXISTS dela
+  // seria sempre verdadeiro e derrubaria justamente quem o UPSERT acabou de
+  // marcar online — o reconciliador desfazendo o proprio trabalho a cada ciclo.
+  const conhecidos = snapshots.map((s) => s.workspaceId);
+  const orfaos = await db.query(
+    `
+      UPDATE user_workspace_presence
+      SET is_online = FALSE,
+          online_since = NULL,
+          last_event_at = NOW(),
+          last_event_source = 'reconciler'
+      WHERE is_online = TRUE
+        AND NOT (workspace_id = ANY($1::uuid[]))
+        AND last_seen < NOW() - ($2 * interval '1 second')
+    `,
+    [conhecidos, getPresenceTtlSeconds()],
+  );
+  desligados += orfaos.rowCount ?? 0;
 
   return { workspaces: snapshots.length, online, desligados };
 }

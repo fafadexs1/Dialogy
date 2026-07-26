@@ -156,4 +156,22 @@ describe('dispatchMessageToWebhooks', () => {
     expect(body.conversation.channel).toBe('Telegram');
     expect(body.conversation.instance_type).toBe('telegram');
   });
+
+  it('handles HTML 502 error response without throwing invalid JSON error in logWebhookAttempt', async () => {
+    mockDatabase('wa_cloud');
+    const htmlResponse = '<html><body>502 Bad Gateway</body></html>';
+    globalThis.fetch = vi.fn(
+      async () => new Response(htmlResponse, { status: 502, headers: { 'content-type': 'text/html' } }),
+    ) as unknown as typeof fetch;
+
+    await dispatchMessageToWebhooks(baseChat, baseMessage, 'zap1');
+
+    const logCalls = queryMock.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('INSERT INTO webhook_logs'),
+    );
+    expect(logCalls.length).toBe(1);
+    const [, params] = logCalls[0];
+    expect(params[3]).toBe(502);
+    expect(params[6]).toEqual({ raw: htmlResponse });
+  });
 });

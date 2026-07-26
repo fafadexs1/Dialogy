@@ -81,6 +81,11 @@ async function logWebhookAttempt({
     headers?: Record<string, any>;
 }) {
     try {
+        const safeResponseBody =
+            typeof responseBody === 'object' && responseBody !== null
+                ? responseBody
+                : { raw: String(responseBody ?? '') };
+
         await db.query(
             `INSERT INTO webhook_logs (source, direction, event, status_code, payload, headers, response_body)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -91,7 +96,7 @@ async function logWebhookAttempt({
                 statusCode,
                 payload,
                 headers || {},
-                responseBody || {}
+                safeResponseBody,
             ]
         );
     } catch (err) {
