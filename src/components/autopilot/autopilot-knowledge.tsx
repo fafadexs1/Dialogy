@@ -316,6 +316,32 @@ export function AutopilotKnowledge({
                     <div className="text-muted-foreground">pendentes</div>
                   </div>
                 </div>
+                {ragHealth.blockedAsRawConversation > 0 && (
+                  <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/40">
+                    <p className="font-semibold text-amber-800 dark:text-amber-200">
+                      {ragHealth.blockedAsRawConversation} documento
+                      {ragHealth.blockedAsRawConversation > 1 ? 's nao serao usados' : ' nao sera usado'} pela IA
+                    </p>
+                    <p className="mt-1 text-amber-700 dark:text-amber-300">
+                      {ragHealth.blockedAsRawConversation > 1 ? 'Eles parecem ser historico' : 'Ele parece ser historico'}
+                      {' '}de conversa colado direto na base. A IA nao indexa transcricao crua para nao repetir
+                      dados de um cliente ao responder outro. Reescreva como orientacao reutilizavel, com resumo
+                      e resposta sugerida.
+                    </p>
+                    {ragHealth.blockedDocumentNames.length > 0 && (
+                      <ul className="mt-2 space-y-0.5 text-amber-700 dark:text-amber-300">
+                        {ragHealth.blockedDocumentNames.slice(0, 5).map((nome) => (
+                          <li key={nome} className="truncate">- {nome}</li>
+                        ))}
+                        {ragHealth.blockedDocumentNames.length > 5 && (
+                          <li className="opacity-70">
+                            e mais {ragHealth.blockedDocumentNames.length - 5}
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {ragHealth.collections.map((collection) => (
                     <Badge key={collection.id} variant="outline" className="rounded-full text-[10px]">

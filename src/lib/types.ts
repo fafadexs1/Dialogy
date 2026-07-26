@@ -605,7 +605,16 @@ export interface AutopilotRagHealth {
   configuredDocuments: number;
   indexedDocuments: number;
   indexedChunks: number;
+  /** Nao indexados por qualquer motivo — inclui os bloqueados abaixo. */
   missingDocuments: number;
+  /**
+   * Subconjunto de missingDocuments recusado de proposito pela ingestao por
+   * parecer transcricao bruta de conversa. Nao e defeito: indexar historico de
+   * um cliente faria a IA repetir dados dele ao responder outro. O caminho e
+   * reescrever como orientacao reutilizavel, com resumo e resposta sugerida.
+   */
+  blockedAsRawConversation: number;
+  blockedDocumentNames: string[];
   quarantinedDocuments: number;
   staleDocuments: number;
   wrongDimensionChunks: number;

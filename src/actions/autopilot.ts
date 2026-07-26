@@ -647,12 +647,31 @@ export async function getAutopilotRagHealth(configId: string): Promise<{
             ? collections
             : [{ id: 'general', name: 'Geral', isDefault: true }, ...collections];
 
+        // "Nao indexado" tem duas causas opostas, e junta-las esconde as duas.
+        // A ingestao recusa de proposito transcricao bruta de conversa
+        // (isUnsafeAsCustomerFacingKnowledge): indexar historico de um cliente
+        // faria a IA repetir dados pessoais dele ao responder outro. O job
+        // completa com status 'skipped_unsafe', sem erro — entao o documento
+        // some da contagem de indexados sem nada explicar.
+        //
+        // Auditoria de 26/07/2026: dos 51 nao indexados, 50 eram exatamente
+        // isso — conversas coladas na base esperando virar conhecimento. So 1
+        // era falha real. Sem separar, o numero em ambar sugeria 51 defeitos.
+        const naoIndexados = documents.filter((document) => !indexedIds.has(document.id));
+        const bloqueadosPorSeguranca = naoIndexados.filter((document) =>
+            isUnsafeAsCustomerFacingKnowledge(document),
+        );
+
         return {
             health: {
                 configuredDocuments: documents.length,
                 indexedDocuments: indexedIds.size,
                 indexedChunks,
-                missingDocuments: documents.filter((document) => !indexedIds.has(document.id)).length,
+                missingDocuments: naoIndexados.length,
+                blockedAsRawConversation: bloqueadosPorSeguranca.length,
+                blockedDocumentNames: bloqueadosPorSeguranca
+                    .map((document) => document.name || document.id)
+                    .slice(0, 20),
                 quarantinedDocuments: quarantinedDocuments.length,
                 staleDocuments: Number(staleRes.rows[0]?.documents || 0),
                 wrongDimensionChunks,
