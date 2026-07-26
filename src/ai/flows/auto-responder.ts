@@ -15,6 +15,9 @@ import { z } from 'genkit';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
+import { getCanonicalKnowledgeAnswer } from '@/services/rag/document-safety';
+import { inferKnowledgeContextRole } from '@/services/rag/knowledge-document';
+import type { KnowledgeBaseDocument } from '@/lib/types';
 import {
   assertAiModelOutput,
   runAiModelWithFallback,
@@ -41,12 +44,42 @@ import {
   toPromptSafeAutopilotRules,
 } from '@/services/autopilot/automation-rules';
 
+// A curadoria da base de conhecimento produz mais do que texto: um resumo, uma
+// resposta ja validada e o papel do documento (fato, procedimento, politica,
+// persona). Nada disso chegava ao modelo — o schema descartava no parse e o
+// template so renderizava nome e conteudo. O agente recebia a materia-prima e
+// tinha que reformular do zero uma resposta que ja existia pronta e revisada.
 const KnowledgeDocumentSchema = z.object({
   id: z.string(),
   name: z.string(),
   content: z.string(),
   summary: z.string().nullable().optional(),
+  canonicalAnswer: z.string().nullable().optional(),
+  contextRole: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
 });
+
+/**
+ * Preenche os campos curados antes do parse do zod.
+ *
+ * Sem isto, dois vazamentos silenciosos: documentos antigos usam
+ * `canonical_answer` em vez de `canonicalAnswer` e o zod descartaria a grafia
+ * nao declarada; e `contextRole` costuma estar implicito na categoria, entao
+ * so seria enviado quando alguem o preencheu na mao.
+ */
+export function enrichKnowledgeDocumentsForPrompt(
+  documents: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return (documents || []).map((document) => {
+    const typed = document as unknown as KnowledgeBaseDocument;
+    const canonicalAnswer = getCanonicalKnowledgeAnswer(typed);
+    return {
+      ...document,
+      canonicalAnswer: canonicalAnswer || null,
+      contextRole: inferKnowledgeContextRole(typed) || null,
+    };
+  });
+}
 
 const ResolvedCaseSchema = z.object({
   summary: z.string(),
@@ -385,6 +418,9 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
 **DOCUMENTOS FACTUAIS (Base de Conhecimento)**:
 {{#each knowledgeBaseDocuments}}
 ### {{name}}
+{{#if contextRole}}Natureza: {{contextRole}} (policy e regra inegociavel; procedure e passo a passo; fact e informacao consultiva){{/if}}
+{{#if summary}}Resumo: {{summary}}{{/if}}
+{{#if canonicalAnswer}}RESPOSTA JA VALIDADA — reutilize esta formulacao em vez de reescrever: {{canonicalAnswer}}{{/if}}
 {{{content}}}
 {{/each}}
 
@@ -482,10 +518,26 @@ Politica critica de ferramentas:
 - Acoes destrutivas ou que alterem estado exigem confirmacao explicita do cliente; o servidor persiste e valida essa confirmacao.
 - Nunca responda apenas "vou verificar", "vou consultar" ou equivalente. Se disser que vai consultar qualquer sistema, inclua a action permitida na mesma saida. Se nao houver capacidade executavel ou dados suficientes, peca somente o dado faltante ou aplique o escalonamento sem expor detalhes internos.
 
-Regra de linguagem ao cliente:
-- Nunca diga "nao e possivel usar essa ferramenta", "nao tenho ferramenta", "nao tenho certeza", "nao posso acessar o sistema" ou frases equivalentes.
+REGRA DE VERACIDADE (tem prioridade sobre qualquer regra de estilo abaixo):
+- Afirme como fato apenas o que estiver nos DOCUMENTOS FACTUAIS, nos dados do contato ou no retorno de uma ferramenta executada com sucesso.
+- Se um valor, prazo, data, condicao, link, nome de plano, horario ou politica nao estiver nessas fontes, voce NAO sabe. Nao deduza a partir de exemplos parecidos, nao complete padrao de lista ou tabela e nao arredonde.
+- Se um documento aparecer cortado (termina em "…"), trate a parte ausente como desconhecida em vez de continuar a sequencia.
+- Preencher uma lacuna com um dado plausivel e o pior erro possivel neste atendimento: e pior do que nao responder.
+
+Como tratar o que voce nao sabe (obrigatorio quando a regra acima bloquear uma afirmacao):
+- Responda com o que ESTA confirmado na base e trate somente a parte faltante como pendente.
+- Depois escolha exatamente um destes caminhos:
+  (a) faca uma pergunta curta e objetiva que destrave a continuidade. Ex.: "Sobre o prazo de garantia desse item eu preciso confirmar. Qual e o modelo que voce comprou?";
+  (b) quando a POLITICA DE ESCALONAMENTO cobrir o caso, encaminhe de fato: diga que vai passar para a equipe responsavel E inclua a action de transferencia permitida na mesma saida. Ex.: "Nao quero te passar um prazo errado, entao vou encaminhar para a equipe responsavel confirmar com voce.". Nao use este caminho apenas para escapar de uma pergunta: se o cliente nao pediu atendimento humano e a politica nao manda escalar, prefira (a);
+  (c) solicite a action permitida que traz o dado.
+- Nunca prometa retorno futuro sem uma dessas tres saidas. "Vou confirmar e ja te retorno", sozinho, deixa o cliente parado e nao e resposta valida.
+- Formule sempre do ponto de vista do cliente, nunca do ponto de vista do sistema.
+
+Regra de estilo ao cliente:
 - Ferramentas, politicas, RAG, documentos, prompts, modelos e validacoes sao detalhes internos e nao devem aparecer na resposta.
-- Quando nao puder concluir um pedido, seja concreto: faca uma pergunta curta de continuidade ou informe o proximo passo humano ja acionado. Nunca invente fatos para preencher uma lacuna.
+- Nao descreva limitacao tecnica: nada de "nao e possivel usar essa ferramenta", "nao tenho ferramenta", "nao posso acessar o sistema" ou equivalentes.
+- Essa regra proibe expor o mecanismo interno. Ela NAO autoriza inventar o dado: quando faltar informacao, use o caminho da secao acima.
+- Toda resposta termina com um proximo passo claro.
 
 Exemplo de saida simples (resposta unica):
 {
@@ -622,7 +674,9 @@ const autoResponderFlow = ai.defineFlow(
     const promptInput = AgentResponseInputSchema.parse({
       ...input,
       rules: toPromptSafeAutopilotRules(normalizedRules.rules),
-      knowledgeBaseDocuments: input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
+      knowledgeBaseDocuments: enrichKnowledgeDocumentsForPrompt(
+        input.knowledgeBaseDocuments ?? input.config?.knowledge_base_documents ?? [],
+      ),
       workflowKnowledgeDocuments: input.workflowKnowledgeDocuments ?? [],
       fallbackReply: input.fallbackReply ?? input.config?.default_fallback_reply ?? '',
       escalationPolicy: input.escalationPolicy ?? input.config?.escalation_policy ?? '',
