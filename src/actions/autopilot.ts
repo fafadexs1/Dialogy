@@ -500,6 +500,33 @@ async function reindexChangedKnowledgeDocuments({
             failedDocumentNames.add(doc.name || doc.id);
         }
     }
+
+    // O diff acima cobre o que saiu ENTRE estes dois estados. Isto aqui cobre o
+    // que ja estava orfao antes: embeddings cujo documento nao existe mais na
+    // configuracao, vindos de reenvio do mesmo arquivo (id novo a cada upload),
+    // exclusao que falhou, ou salvamento de um cliente defasado.
+    //
+    // Sem isto o vazamento e permanente — um id que cai fora de `previousDocs`
+    // nunca mais volta a ser comparado. Auditoria de 26/07/2026 encontrou 149
+    // documentos orfaos com 251 chunks ainda marcados como ativos, ou seja,
+    // recuperaveis pela busca semantica e passiveis de virar resposta da IA.
+    try {
+        const removidos = await VectorStore.deleteEmbeddingsNotIn({
+            workspaceId,
+            autopilotConfigId: configId,
+            keepDocumentIds: nextDocs.map((doc) => doc.id).filter(Boolean),
+        });
+        if (removidos > 0) {
+            console.info(
+                `[RAG] Reconciliacao removeu ${removidos} embedding(s) orfao(s) do agente ${configId}.`,
+            );
+        }
+    } catch (ragError) {
+        // Nao falha o salvamento: orfao e desperdicio e risco de resposta velha,
+        // nao motivo para impedir o usuario de salvar a base de conhecimento.
+        console.error('[RAG] Falha ao reconciliar embeddings orfaos:', ragError);
+    }
+
     return { failedDocumentNames: [...failedDocumentNames] };
 }
 

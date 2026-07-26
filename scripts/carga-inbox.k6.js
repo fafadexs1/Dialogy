@@ -34,25 +34,39 @@ const latenciaOnline = new Trend('dialogy_agentes_online_ms', true);
 const naoAutorizado = new Counter('dialogy_401');
 const erros = new Rate('dialogy_erros');
 
+// Perfil configuravel. O padrao e a rampa longa; PERFIL=curto faz 5 minutos
+// indo direto ao pico, para achar o teto sem esperar.
+const PICO = Number(__ENV.PICO || 600);
+const CURTO = (__ENV.PERFIL || '').toLowerCase() === 'curto';
+
+const estagios = CURTO
+  ? [
+      { duration: '30s', target: Math.round(PICO / 3) },
+      { duration: '30s', target: PICO },
+      { duration: '3m30s', target: PICO }, // patamar: e daqui que sai a medicao
+      { duration: '30s', target: 0 },
+    ]
+  : [
+      { duration: '1m', target: 50 },
+      { duration: '2m', target: 50 },
+      { duration: '2m', target: Math.round(PICO * 0.67) },
+      { duration: '5m', target: Math.round(PICO * 0.67) },
+      { duration: '2m', target: PICO },
+      { duration: '3m', target: PICO },
+      { duration: '1m', target: 0 },
+    ];
+
 export const options = {
   scenarios: {
     agentes: {
       executor: 'ramping-vus',
       startVUs: 0,
-      stages: [
-        { duration: '1m', target: 50 },   // aquecimento
-        { duration: '2m', target: 50 },   // patamar de referencia
-        { duration: '2m', target: 400 },  // rampa ate o alvo
-        { duration: '5m', target: 400 },  // patamar do alvo — a medicao que importa
-        { duration: '2m', target: 600 },  // alem do alvo, para achar o teto
-        { duration: '3m', target: 600 },
-        { duration: '1m', target: 0 },
-      ],
-      gracefulRampDown: '30s',
+      stages: estagios,
+      gracefulRampDown: '20s',
     },
   },
   thresholds: {
-    // Presenca e caminho de fundo: se ela passa de 1s, o pool esta sofrendo.
+    // Presenca e caminho de fundo: se ela passa de 1s, algo esta sofrendo.
     dialogy_heartbeat_ms: ['p(95)<1000'],
     dialogy_agentes_online_ms: ['p(95)<1500'],
     http_req_failed: ['rate<0.01'],

@@ -134,6 +134,53 @@ export const VectorStore = {
         );
     },
 
+    /**
+     * Remove embeddings de documentos que nao existem mais na configuracao.
+     *
+     * A sincronizacao por diff (previousDocs x nextDocs) so consegue apagar o
+     * que ela sabe que existiu. Quando um documento sai da lista sem que a
+     * exclusao acontecca — salvamento vindo de um cliente defasado, DELETE que
+     * falhou, reenvio do mesmo arquivo gerando id novo — o id antigo nunca mais
+     * aparece em `previousDocs`, e os embeddings ficam orfaos para sempre.
+     *
+     * Isto aqui compara contra o estado real da tabela em vez de contra um
+     * evento, entao se cura sozinho: qualquer orfao acumulado no passado cai no
+     * proximo salvamento.
+     *
+     * Devolve quantas linhas foram removidas.
+     */
+    async deleteEmbeddingsNotIn(input: {
+        workspaceId: string;
+        autopilotConfigId: string | null;
+        keepDocumentIds: string[];
+    }): Promise<number> {
+        if (!input.workspaceId?.trim()) {
+            throw new Error('workspaceId is required to reconcile document embeddings.');
+        }
+
+        const params: Array<string | string[]> = [input.workspaceId, input.keepDocumentIds];
+        const filters = [
+            'workspace_id = $1',
+            // Comparacao em texto: os ids vem de JSON e nem todo valor historico
+            // e um uuid valido — o cast direto abortaria a limpeza inteira.
+            'NOT (document_id::text = ANY($2::text[]))',
+        ];
+
+        if (input.autopilotConfigId === null) {
+            filters.push('autopilot_config_id IS NULL');
+        } else {
+            params.push(input.autopilotConfigId);
+            filters.push(`autopilot_config_id = $${params.length}`);
+        }
+
+        const { rowCount } = await db.query(
+            `DELETE FROM embeddings_documents WHERE ${filters.join(' AND ')}`,
+            params,
+        );
+
+        return rowCount ?? 0;
+    },
+
     async addDocumentEmbedding(input: AddDocumentEmbeddingInput) {
         assertDocumentVectorDimensions(input.vector);
         const vectorStr = toVectorString(input.vector);
