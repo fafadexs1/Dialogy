@@ -11,6 +11,7 @@ import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 function envModelForRole(role: AiDecisionModelRole): string | undefined {
   if (role === 'toolIntentGate') return process.env.AI_TOOL_INTENT_GATE_MODEL?.trim() || undefined;
   if (role === 'intentClassifier') return process.env.AI_INTENT_CLASSIFIER_MODEL?.trim() || undefined;
+  if (role === 'fieldExtractor') return process.env.AI_FIELD_EXTRACTOR_MODEL?.trim() || undefined;
   return process.env.AI_WORKFLOW_CLASSIFIER_MODEL?.trim() || undefined;
 }
 
@@ -19,7 +20,9 @@ function envTimeoutForRole(role: AiDecisionModelRole): number | undefined {
     ? process.env.AI_TOOL_INTENT_GATE_TIMEOUT_MS
     : role === 'intentClassifier'
       ? process.env.AI_INTENT_CLASSIFIER_TIMEOUT_MS
-      : process.env.AI_WORKFLOW_CLASSIFIER_TIMEOUT_MS;
+      : role === 'fieldExtractor'
+        ? process.env.AI_FIELD_EXTRACTOR_TIMEOUT_MS
+        : process.env.AI_WORKFLOW_CLASSIFIER_TIMEOUT_MS;
   const parsed = Number.parseInt(raw || '', 10);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -37,6 +40,10 @@ function buildEnvFallbackConfig(): AiDecisionModelConfig {
     workflowClassifier: {
       model: envModelForRole('workflowClassifier') || DEFAULT_AI_DECISION_MODEL_CONFIG.workflowClassifier.model || DEFAULT_AUTOPILOT_MODEL,
       timeoutMs: envTimeoutForRole('workflowClassifier') || DEFAULT_AI_DECISION_MODEL_CONFIG.workflowClassifier.timeoutMs,
+    },
+    fieldExtractor: {
+      model: envModelForRole('fieldExtractor') || DEFAULT_AI_DECISION_MODEL_CONFIG.fieldExtractor.model || DEFAULT_AUTOPILOT_MODEL,
+      timeoutMs: envTimeoutForRole('fieldExtractor') || DEFAULT_AI_DECISION_MODEL_CONFIG.fieldExtractor.timeoutMs,
     },
   };
 }

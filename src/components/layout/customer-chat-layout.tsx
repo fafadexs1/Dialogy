@@ -258,10 +258,12 @@ export default function CustomerChatLayout({
   initialUser,
   chatId: initialChatId,
   initialData,
+  preserveClientState = false,
 }: {
   initialUser: User | null;
   chatId: string | null;
   initialData?: InitialChatsPayload | null;
+  preserveClientState?: boolean;
 }) {
   const router = useRouter();
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
@@ -341,10 +343,15 @@ export default function CustomerChatLayout({
     // This prevents double-reset on dev hot-reloads/strict mode remounts.
     if (!initialResetDoneRef.current) {
       initialResetDoneRef.current = true;
-      useInboxStore.getState().reset();
-      inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+      if (!preserveClientState) {
+        useInboxStore.getState().reset();
+        inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+      } else {
+        selectedChatIdRef.current = useInboxStore.getState().selectedChatId;
+        inboxDebug('[NOTIFICATION] Layout changed breakpoint. Preserving inbox store state.');
+      }
     }
-  }, []);
+  }, [preserveClientState]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -695,14 +702,14 @@ export default function CustomerChatLayout({
       inboxDebug('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
       const state = useInboxStore.getState();
       const activeChat = state.chats.find((candidate) => candidate.id === chatId);
-      const chatOnly = !!(activeChat as any)?.protocolScoped;
+      const replaceMessageWindow = !!(activeChat as any)?.protocolScoped;
       const result = await getChatMessagesWindow({
         chatId,
         before: beforeDate ?? undefined,
         beforeId: beforeId ?? undefined,
         limit: 50,
         timezone: workspaceTimezone,
-        chatOnly,
+        chatOnly: replaceMessageWindow,
       });
       inboxDebug('[LOAD_MESSAGES] Result:', {
         messagesCount: result.messages.length,
@@ -720,7 +727,7 @@ export default function CustomerChatLayout({
           result.oldestMessageDate,
           result.oldestMessageId,
           result.hasMoreHistory,
-          chatOnly
+          replaceMessageWindow
         );
       }
       if (result.contact) {
@@ -1558,6 +1565,12 @@ export default function CustomerChatLayout({
     updateChatContact(contact);
   }, [initialUser?.activeWorkspaceId, updateChatContact]);
 
+  const handleRealtimeMessageOutsideList = useCallback(() => {
+    // The workspace message exists, but its chat is not in the current list yet.
+    // Force a delta sync so a newly-created customer appears immediately.
+    void runDeltaSyncRef.current?.();
+  }, []);
+
   // Use centralized Realtime hook
   const { isChatsConnected, isMessagesConnected } = useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
@@ -1566,6 +1579,7 @@ export default function CustomerChatLayout({
     messagesListChatIdsCsv: ownershipFilter === 'mine' ? messagesListChatIdsCsv : undefined,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
+    onMessageOutsideList: handleRealtimeMessageOutsideList,
     onContactUpdate: handleRealtimeContactUpdate,
     onStatusChange: handleRealtimeStatusChange,
   });
@@ -1573,6 +1587,12 @@ export default function CustomerChatLayout({
   realtimeHealthyRef.current = isRealtimeHealthy;
 
   useEffect(() => {
+    if (preserveClientState) {
+      selectedChatIdRef.current = useInboxStore.getState().selectedChatId;
+      isHydratedRef.current = true;
+      setIsLoading(false);
+      return;
+    }
     if (initialData) {
       setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
 
@@ -1650,7 +1670,7 @@ export default function CustomerChatLayout({
       isHydratedRef.current = true;
       setIsLoading(false);
     }
-  }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
+  }, [initialData, initialUser, initializeInbox, preserveClientState, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
     if (selectedChatId) {

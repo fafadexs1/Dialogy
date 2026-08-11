@@ -81,9 +81,33 @@ export async function GET(request: NextRequest) {
     });
     const disposition = upstream.headers.get('content-disposition');
     if (disposition) responseHeaders.set('Content-Disposition', disposition);
+
+    // Repassa a semântica de range do upstream.
+    //
+    // Antes esta rota encaminhava o `Range` do cliente mas devolvia sempre 200,
+    // sem `Accept-Ranges` e sem `Content-Range`. Para o navegador isso significa
+    // "este servidor não suporta range": ele desabilita o seek e, quando o corpo
+    // recebido era só um pedaço rotulado como 200, não conseguia deduzir o
+    // tamanho total — daí a duração aparecer como 0 em áudio e vídeo.
+    const upstreamAcceptRanges = upstream.headers.get('accept-ranges');
+    const upstreamContentRange = upstream.headers.get('content-range');
+    const isPartial = upstream.status === 206 && Boolean(upstreamContentRange);
+
+    if (isPartial) {
+      responseHeaders.set('Content-Range', upstreamContentRange as string);
+      responseHeaders.set('Accept-Ranges', 'bytes');
+    } else if (upstreamAcceptRanges && upstreamAcceptRanges !== 'none') {
+      // Sem range nesta resposta, mas a origem aceita: anunciar permite ao
+      // player pedir os trechos que precisa para navegar na linha do tempo.
+      responseHeaders.set('Accept-Ranges', upstreamAcceptRanges);
+    }
+
     const responseBody = new Uint8Array(body.byteLength);
     responseBody.set(body);
-    return new NextResponse(responseBody.buffer, { status: 200, headers: responseHeaders });
+    return new NextResponse(responseBody.buffer, {
+      status: isPartial ? 206 : 200,
+      headers: responseHeaders,
+    });
   } catch (error) {
     console.warn('[MEDIA_PROXY] Rejected or failed upstream request:', error instanceof Error ? error.message : error);
     return kind === 'image'

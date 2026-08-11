@@ -4,6 +4,7 @@ import { googleAI } from '@genkit-ai/googleai';
 
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';
+import { withTimeout } from '../utils';
 import type {
   GenerateRequest,
   GenerateResult,
@@ -56,14 +57,20 @@ export class RuntimeProviderModelAdapter implements ModelAdapter {
       plugins: [googleAI({ apiKey: this.options.apiKey })],
       model: this.options.model,
     });
-    const response = await ai.generate({
-      model: this.options.model,
-      prompt: promptText(request),
-      config: {
-        temperature: request.temperature,
-        maxOutputTokens: request.maxOutputTokens,
-      },
-    });
+    const response = await withTimeout(
+      (signal) => ai.generate({
+        model: this.options.model,
+        prompt: promptText(request),
+        config: {
+          temperature: request.temperature,
+          maxOutputTokens: request.maxOutputTokens,
+        },
+        abortSignal: signal,
+      }),
+      Math.min(request.timeoutMs || this.timeoutMs, this.timeoutMs),
+      request.signal,
+      'MODEL_TIMEOUT',
+    );
     return {
       model: this.options.model,
       text: response.text,
@@ -99,15 +106,21 @@ export class RuntimeProviderModelAdapter implements ModelAdapter {
       plugins: [googleAI({ apiKey: this.options.apiKey })],
       model: this.options.model,
     });
-    const response = await ai.generate({
-      model: this.options.model,
-      prompt: promptText(request),
-      config: {
-        temperature: request.temperature,
-        maxOutputTokens: request.maxOutputTokens,
-      },
-      output: { schema: request.schema },
-    });
+    const response = await withTimeout(
+      (signal) => ai.generate({
+        model: this.options.model,
+        prompt: promptText(request),
+        config: {
+          temperature: request.temperature,
+          maxOutputTokens: request.maxOutputTokens,
+        },
+        output: { schema: request.schema },
+        abortSignal: signal,
+      }),
+      Math.min(request.timeoutMs || this.timeoutMs, this.timeoutMs),
+      request.signal,
+      'MODEL_TIMEOUT',
+    );
     const parsed = request.schema.safeParse(response.output);
     if (!parsed.success) {
       const error = new Error(`Model output failed ${request.schemaName} validation.`) as Error & { code?: string; retryable?: boolean };

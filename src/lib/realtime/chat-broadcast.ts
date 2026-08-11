@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { buildChatTeamLateralSql } from '@/lib/chat-team-resolution';
 import { broadcastRealtimeEvent } from '@/lib/realtime/broadcast';
 
 export async function broadcastChatUpdate(
@@ -42,26 +43,16 @@ export async function broadcastHydratedChatUpdate(workspaceId: string, chatId: s
         c.color,
         u.full_name AS agent_name,
         u.avatar_url AS agent_avatar_url,
-        COALESCE(system_team.id, human_team.id) AS team_id,
-        COALESCE(system_team.name, human_team.name) AS team_name,
-        COALESCE(system_team.color, human_team.color) AS team_color,
+        t.id AS team_id,
+        t.name AS team_name,
+        t.color AS team_color,
         sa.name AS assigned_system_agent_name,
         sa.avatar_url AS assigned_system_agent_avatar_url,
         sa.type AS assigned_system_agent_type
      FROM chats c
      LEFT JOIN users u ON u.id = c.agent_id
      LEFT JOIN system_agents sa ON sa.id = c.assigned_system_agent_id
-     LEFT JOIN LATERAL (
-       SELECT t.id, t.name, t.color
-       FROM team_members tm
-       JOIN teams t ON t.id = tm.team_id AND t.workspace_id = c.workspace_id
-       WHERE tm.user_id = c.agent_id
-       ORDER BY t.name ASC, t.id ASC
-       LIMIT 1
-     ) human_team ON TRUE
-     LEFT JOIN teams system_team
-       ON system_team.id = sa.team_id
-      AND system_team.workspace_id = c.workspace_id
+     ${buildChatTeamLateralSql({ chatAlias: 'c' })}
      WHERE c.id = $1 AND c.workspace_id = $2
      LIMIT 1`,
       [chatId, workspaceId],

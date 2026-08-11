@@ -632,26 +632,6 @@ export async function executeAgentNode(
 
     if (decision.type === 'final') {
       lastPartialResponse = decision.response;
-      const choiceRequest = presentedChoiceRequest(decision.response, context.memory);
-      if (choiceRequest && responseRequestsMoreCustomerInput(decision.response)) {
-        return {
-          status: 'route',
-          selectedOutput: 'needs_input',
-          output: {
-            type: 'needs_input',
-            question: decision.response,
-            missingFields: ['selected_option'],
-          },
-          statePatch: decision.statePatch,
-          toolCalls,
-          metrics: {
-            durationMs: 0,
-            model: fallbackResult.selected.config.model,
-            toolCalls: toolCalls.length,
-            attempts: turn,
-          },
-        };
-      }
       const repeatedKnownFields = requestedKnownFieldsFromResponse(
         decision.response,
         availableFieldState(context),

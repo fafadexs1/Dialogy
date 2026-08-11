@@ -4,7 +4,7 @@
 import { db } from '@/lib/db';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import { revalidatePath } from 'next/cache';
-import type { Campaign, CampaignChannel, CampaignDetails, CampaignMediaAttachment, CampaignRecipientDetail, CampaignScheduleConfig, CampaignTemplate } from '@/lib/types';
+import type { Campaign, CampaignChannel, CampaignDetails, CampaignInteractivePayload, CampaignMediaAttachment, CampaignRecipientDetail, CampaignScheduleConfig, CampaignTemplate } from '@/lib/types';
 import { sendAgentTemplateAction, sendAutomatedMessageAction } from './messages';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
@@ -27,6 +27,7 @@ import {
     buildCampaignTemplateSendComponents,
     renderCampaignMessage,
 } from '@/lib/campaigns/personalization';
+import { MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
 
 export type CampaignDeliveryTarget = {
     channel: CampaignChannel;
@@ -72,6 +73,56 @@ function normalizeCampaignMediaAttachment(
         storageBucket: attachment.storageBucket,
         storagePath: attachment.storagePath,
     };
+}
+
+function normalizeCampaignInteractivePayload(
+    payload?: CampaignInteractivePayload | null
+): CampaignInteractivePayload | null {
+    if (!payload) return null;
+
+    const title = String(payload.title || '').trim();
+    if (!title) return null;
+
+    const description = String(payload.description || '').trim() || undefined;
+    const footer = String(payload.footer || '').trim() || undefined;
+
+    if (payload.kind === 'buttons') {
+        const buttons = (payload.buttons || [])
+            .map((button) => ({
+                type: 'reply' as const,
+                displayText: String(button?.displayText || '').trim().slice(0, 20),
+                id: String(button?.id || '').trim().slice(0, 200),
+            }))
+            .filter((button) => button.displayText.length > 0 && button.id.length > 0);
+
+        if (buttons.length === 0 || buttons.length > MAX_CAMPAIGN_REPLY_BUTTONS) return null;
+
+        return { kind: 'buttons', title, description, footer, buttons };
+    }
+
+    if (payload.kind === 'list') {
+        const buttonText = String(payload.buttonText || '').trim();
+        if (!buttonText) return null;
+
+        const sections = (payload.sections || [])
+            .map((section) => ({
+                title: String(section?.title || '').trim() || 'Opções',
+                rows: (section?.rows || [])
+                    .map((row) => ({
+                        title: String(row?.title || '').trim().slice(0, 24),
+                        description: String(row?.description || '').trim().slice(0, 72) || undefined,
+                        rowId: String(row?.rowId || '').trim().slice(0, 200),
+                    }))
+                    .filter((row) => row.title.length > 0 && row.rowId.length > 0),
+            }))
+            .filter((section) => section.rows.length > 0);
+
+        if (sections.length === 0) return null;
+
+        return { kind: 'list', title, description, footer, buttonText, sections };
+    }
+
+    return null;
 }
 
 function revalidateCampaignsSafely() {
@@ -265,6 +316,7 @@ export async function createCampaign(
     segmentIds: string[] = [],
     requestedSchedule?: Partial<CampaignScheduleConfig>,
     mediaAttachment?: CampaignMediaAttachment | null,
+    interactivePayload?: CampaignInteractivePayload | null,
 ): Promise<{ campaign: Campaign | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -279,6 +331,7 @@ export async function createCampaign(
     const selectedSegmentIds = [...new Set(segmentIds.filter(Boolean))];
     const scheduleConfig = normalizeCampaignScheduleConfig(requestedSchedule);
     const normalizedMediaAttachment = normalizeCampaignMediaAttachment(mediaAttachment);
+    const normalizedInteractivePayload = normalizeCampaignInteractivePayload(interactivePayload);
 
     if (!workspaceId || !destinationId || !message || (contactIdentifiers.length === 0 && selectedSegmentIds.length === 0)) {
         return { campaign: null, error: 'Dados da campanha incompletos.' };
@@ -294,6 +347,18 @@ export async function createCampaign(
     }
     if (normalizedMediaAttachment && target.channel !== 'whatsapp_baileys') {
         return { campaign: null, error: 'Anexos de imagem e audio estao disponiveis apenas para WhatsApp conectado.' };
+    }
+    if (interactivePayload && !normalizedInteractivePayload) {
+        return {
+            campaign: null,
+            error: `Mensagem interativa invalida. Informe um titulo e ate ${MAX_CAMPAIGN_REPLY_BUTTONS} botoes (ou uma lista com opcoes).`,
+        };
+    }
+    if (normalizedInteractivePayload && target.channel !== 'whatsapp_baileys') {
+        return { campaign: null, error: 'Botoes e listas estao disponiveis apenas para WhatsApp conectado.' };
+    }
+    if (normalizedInteractivePayload && normalizedMediaAttachment) {
+        return { campaign: null, error: 'Nao e possivel combinar anexo de midia com botoes ou lista na mesma campanha.' };
     }
     if (!target.channel.startsWith('whatsapp') && contactIdentifiers.some(contact => contact.id.startsWith('csv-'))) {
         return { campaign: null, error: 'A importacao CSV esta disponivel apenas para campanhas de WhatsApp.' };
@@ -352,9 +417,9 @@ export async function createCampaign(
             `INSERT INTO campaigns (
                 workspace_id, created_by_id, name, message, instance_name, status,
                 delivery_channel, destination_id, template_payload, media_payload, schedule_config,
-                scheduled_end_at, started_at
+                scheduled_end_at, interactive_payload, started_at
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                      CASE WHEN $6 = 'sending' THEN NOW() ELSE NULL END)
              RETURNING *`,
             [
@@ -370,6 +435,7 @@ export async function createCampaign(
                 normalizedMediaAttachment ? JSON.stringify(normalizedMediaAttachment) : null,
                 JSON.stringify(scheduleConfig),
                 scheduleConfig.endAt || null,
+                normalizedInteractivePayload ? JSON.stringify(normalizedInteractivePayload) : null,
             ]
         );
         const newCampaign = campaignRes.rows[0];
@@ -495,6 +561,7 @@ export async function createCampaign(
                 ...newCampaign,
                 opted_out_count: optedOutCount,
                 media_payload: normalizedMediaAttachment,
+                interactive_payload: normalizedInteractivePayload,
                 schedule_config: scheduleConfig,
             },
         };

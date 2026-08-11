@@ -74,10 +74,15 @@ export async function POST(request: Request) {
             // 3. Resolve Tag Info
             let tagInfo = { label: null as string | null, color: null as string | null };
             if (reasonTagId) {
-                const tagRes = await client.query('SELECT label, color FROM tags WHERE id = $1', [reasonTagId]);
-                if ((tagRes.rowCount ?? 0) > 0) {
-                    tagInfo = tagRes.rows[0];
+                const tagRes = await client.query(
+                    'SELECT label, color FROM tags WHERE id = $1 AND workspace_id = $2',
+                    [reasonTagId, workspace_id]
+                );
+                if ((tagRes.rowCount ?? 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return NextResponse.json({ error: 'Invalid close reason for this workspace.' }, { status: 400 });
                 }
+                tagInfo = tagRes.rows[0];
             }
 
             // 4. Update Chat Status

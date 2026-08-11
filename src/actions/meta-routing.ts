@@ -8,26 +8,13 @@ import fs from 'fs';
 import path from 'path';
 import { decryptPayload as decryptMetaPayload } from '@/services/meta/meta-payload-crypto';
 
-// Encryption config
+// Legacy mock-file support. These helpers stay private to this module so they
+// are not exposed as Server Actions.
 const ALGORITHM = 'aes-256-gcm';
 function getSecretKey() {
   const envKey = process.env.META_ROUTING_DECRYPT_KEY;
   if (!envKey) throw new Error('META_ROUTING_DECRYPT_KEY is not configured');
-  return crypto.createHash('sha256').update(envKey).digest(); // guarantees 32 bytes
-}
-
-export async function encryptPayload(text: string): Promise<string> {
-  const iv = crypto.randomBytes(12);
-  const key = getSecretKey();
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  const authTag = cipher.getAuthTag().toString('hex');
-  return `${iv.toString('hex')}:${encrypted}:${authTag}`;
-}
-
-export async function decryptPayloadText(encryptedText: string): Promise<string> {
-  return decryptMetaPayload(encryptedText);
+  return crypto.createHash('sha256').update(envKey).digest();
 }
 
 // User access check
@@ -784,7 +771,7 @@ export async function decryptPayloadAction(payload: {
         ]
       );
 
-    const decryptedPayload = await decryptPayloadText(encryptedPayload);
+    const decryptedPayload = decryptMetaPayload(encryptedPayload);
 
     return { success: true, decryptedPayload };
   } catch (err: any) {

@@ -10,6 +10,7 @@ import { ptBR } from 'date-fns/locale';
 import { sendAutomatedMessageAction } from './messages';
 import { logAction, withDebug } from '@/lib/observability/logger';
 import { buildChatProtocol, formatMessageDate } from '@/lib/utils';
+import { buildChatTeamLateralSql } from '@/lib/chat-team-resolution';
 import { randomUUID } from 'crypto';
 import { consumeRateLimit } from '@/lib/ratelimit';
 import { assignChatSchema, closeChatSchema, transferChatSchema } from '@/lib/validation/chat-schemas';
@@ -17,6 +18,7 @@ import { reportServerError } from '@/lib/observability/errors';
 import { getWorkspaceTemplates, getWorkspaceTimezone } from '@/lib/workspace-config';
 import { touchUserPresenceActivity } from '@/lib/presence-server';
 import { dedupeActiveWhatsappChatsByIdentity } from '@/lib/whatsapp/chat-dedupe';
+import { scopeMessagesToChatThread } from '@/lib/chat-thread-messages';
 import { mergeEquivalentContacts } from '@/lib/whatsapp/contact-thread';
 import { enqueueAiAutopilotProcess, enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
@@ -26,6 +28,11 @@ import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { recordDecisionOutcomesForChat } from '@/services/autopilot/outcome-tracker';
 import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
 import { selectFairAgentForTeam } from '@/services/chat-distribution/fair-distribution';
+import {
+    describeTeamUnavailability,
+    evaluateTeamBusinessHours,
+    type TeamAvailabilityReason,
+} from '@/services/chat-distribution/team-availability';
 import {
     isTrustedActorContext,
     isTrustedUserContext,
@@ -82,7 +89,16 @@ export const assignChatToSelfAction = withDebug(
                      copilot_mode = 'off',
                      status = 'atendimentos',
                      assigned_at = clock_timestamp(),
-                     updated_at = clock_timestamp()
+                     updated_at = clock_timestamp(),
+                     -- Quem assume da fila so herda a equipe se pertencer a ela.
+                     team_id = CASE
+                         WHEN chats.team_id IS NOT NULL AND EXISTS (
+                             SELECT 1 FROM team_members tm
+                             WHERE tm.team_id = chats.team_id
+                               AND tm.user_id = $1
+                         ) THEN chats.team_id
+                         ELSE NULL
+                     END
                  WHERE id = $2 AND status = 'gerais'
                  RETURNING workspace_id`,
                 [currentAgentId, chatId]
@@ -145,7 +161,19 @@ export const transferChatAction = withDebug(
     async function transferChatAction(
         input: { chatId: string; teamId?: string; agentId?: string },
         trustedContext?: TrustedActorContext
-    ): Promise<{ success: boolean; error?: string; chat?: Chat; assignedAgent?: { id: string; name: string } }> {
+    ): Promise<{
+        success: boolean;
+        error?: string;
+        /**
+         * Motivo legível por máquina quando a transferência falha por
+         * indisponibilidade. Os chamadores devem ramificar por aqui — comparar
+         * o texto de `error` foi o que fez o atendente de IA anunciar "fora do
+         * expediente" para clientes quando a causa real era outra.
+         */
+        reasonCode?: TeamAvailabilityReason;
+        chat?: Chat;
+        assignedAgent?: { id: string; name: string };
+    }> {
         const trustedCall = isTrustedActorContext(trustedContext);
         let sessionToUse: {
             user: { id: string; name?: string | null; email?: string | null };
@@ -257,73 +285,43 @@ export const transferChatAction = withDebug(
                      JOIN workspaces w ON t.workspace_id = w.id
                      LEFT JOIN tags team_tag ON team_tag.id = t.tag_id AND team_tag.workspace_id = t.workspace_id
                      LEFT JOIN business_hours bh ON t.id = bh.team_id
-                     LEFT JOIN schedule_exceptions se ON t.id = se.team_id AND se.date = CURRENT_DATE
+                     LEFT JOIN schedule_exceptions se
+                       ON t.id = se.team_id
+                      AND se.date BETWEEN CURRENT_DATE - 1 AND CURRENT_DATE + 1
                      WHERE t.id = $1 AND t.workspace_id = $2
                      GROUP BY t.id, w.timezone, team_tag.label, team_tag.color`,
                     [teamId, workspaceId]
                 );
 
-                if ((teamStatusRes.rowCount ?? 0) > 0) {
-                    const team = teamStatusRes.rows[0];
-                    automaticTeamTag = team.automatic_tag_label || null;
-                    automaticTeamTagColor = team.automatic_tag_color || null;
-                    const timezone = team.timezone || 'America/Sao_Paulo';
-                    const now = toZonedTime(new Date(), timezone);
+                const teamRow = teamStatusRes.rows[0];
+                const teamName: string | null = teamRow?.name || null;
 
-                    const currentDate = formatInTimeZone(now, 'yyyy-MM-dd', { timeZone: timezone });
-                    const currentTime = formatInTimeZone(now, 'HH:mm', { timeZone: timezone });
-                    const currentDayOfWeek = formatInTimeZone(now, 'EEEE', { locale: ptBR, timeZone: timezone }); // 'Segunda-feira', 'Terça-feira', etc.
+                if (teamRow) {
+                    automaticTeamTag = teamRow.automatic_tag_label || null;
+                    automaticTeamTagColor = teamRow.automatic_tag_color || null;
 
-                    let isOpen = false;
-
-                    const timeToMinutes = (timeStr: string | null): number | null => {
-                        if (!timeStr) return null;
-                        const [hoursPart, minutesPart] = timeStr.split(':');
-                        const hours = Number(hoursPart);
-                        const minutes = Number(minutesPart);
-                        if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
-                        return hours * 60 + minutes;
-                    };
-
-                    const isTimeInRange = (timeStr: string, startStr: string | null, endStr: string | null): boolean => {
-                        const time = timeToMinutes(timeStr);
-                        const start = timeToMinutes(startStr);
-                        const end = timeToMinutes(endStr);
-                        if (time === null || start === null || end === null) return false;
-                        return time >= start && time < end;
-                    };
-
-                    const todayException = team.scheduleExceptions.find((ex: any) => {
-                        const exDate = ex.date instanceof Date ? ex.date.toISOString().split('T')[0] : String(ex.date).split('T')[0];
-                        return exDate === currentDate;
+                    const schedule = evaluateTeamBusinessHours({
+                        businessHours: teamRow.businessHours,
+                        scheduleExceptions: teamRow.scheduleExceptions,
+                        timezone: teamRow.timezone,
                     });
 
-                    if (todayException) {
-                        if (todayException.is_closed) {
-                            isOpen = false;
-                        } else {
-                            isOpen = isTimeInRange(currentTime, todayException.start_time, todayException.end_time);
-                        }
-                    } else {
-                        const todayBusinessHour = team.businessHours.find((bh: any) =>
-                            bh.day_of_week.toLowerCase() === currentDayOfWeek.toLowerCase()
+                    if (!schedule.isOpen) {
+                        console.log(
+                            `[TRANSFER_CHAT] Setor ${teamRow.name} fora do expediente (${schedule.verdict}) em ${schedule.currentDayOfWeek} ${schedule.currentTime}.`
                         );
-
-                        if (todayBusinessHour && todayBusinessHour.is_enabled) {
-                            isOpen = isTimeInRange(currentTime, todayBusinessHour.start_time, todayBusinessHour.end_time);
-                        }
-                    }
-
-                    if (!isOpen) {
-                        console.log(`[TRANSFER_CHAT] Setor ${team.name} está fora do expediente comercial no momento.`);
                         await client.query('ROLLBACK');
-                        return { success: false, error: "Nenhum agente disponível nesta equipe no momento." };
+                        return {
+                            success: false,
+                            reasonCode: 'outside_business_hours',
+                            error: describeTeamUnavailability('outside_business_hours', teamRow.name),
+                        };
                     }
                 }
 
                 console.log(`[TRANSFER_CHAT] Transferindo para equipe ${teamId}. Buscando agente por carga efetiva e justiça...`);
                 console.log('[TRANSFER_CHAT] Params:', teamId, currentAgentId);
-                const selectedAgent = await selectFairAgentForTeam(client, {
+                const distribution = await selectFairAgentForTeam(client, {
                     workspaceId,
                     teamId,
                     chatId,
@@ -331,9 +329,15 @@ export const transferChatAction = withDebug(
                     excludeAgentId: isSystemAgent ? null : currentAgentId,
                 });
 
+                const selectedAgent = distribution.selection;
                 if (!selectedAgent) {
+                    console.log(`[TRANSFER_CHAT] Equipe ${teamId} sem agente elegível: ${distribution.reason}.`);
                     await client.query('ROLLBACK');
-                    return { success: false, error: "Nenhum agente disponível nesta equipe no momento." };
+                    return {
+                        success: false,
+                        reasonCode: distribution.reason,
+                        error: describeTeamUnavailability(distribution.reason, teamName),
+                    };
                 }
                 finalAgentId = selectedAgent.agentId;
                 transferTargetName = selectedAgent.teamName;
@@ -344,6 +348,7 @@ export const transferChatAction = withDebug(
                     occupancy: selectedAgent.occupancy,
                     portfolioCount: selectedAgent.portfolioCount,
                     fairnessScoreBefore: selectedAgent.fairnessScoreBefore,
+                    overflow: selectedAgent.overflow,
                 });
             } else if (agentId) {
                 const agentRes = await client.query(
@@ -384,7 +389,7 @@ export const transferChatAction = withDebug(
             // Update chat with the new agent and status
             await client.query(`
             UPDATE chats
-            SET 
+            SET
                 agent_id = $1,
                 assigned_system_agent_id = NULL,
                 is_autopilot_active = FALSE,
@@ -393,9 +398,22 @@ export const transferChatAction = withDebug(
                 assigned_at = clock_timestamp(),
                 updated_at = clock_timestamp(),
                 tag = COALESCE($3, tag),
-                color = COALESCE($4, color)
+                color = COALESCE($4, color),
+                -- A equipe vira um fato gravado. Numa atribuicao direta a um
+                -- agente, a equipe atual so continua valendo se ele pertencer a
+                -- ela; caso contrario zera, e a etiqueta deixa de mostrar uma
+                -- equipe a qual o responsavel nao pertence.
+                team_id = CASE
+                    WHEN $5::uuid IS NOT NULL THEN $5::uuid
+                    WHEN chats.team_id IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM team_members tm
+                        WHERE tm.team_id = chats.team_id
+                          AND tm.user_id = $1
+                    ) THEN chats.team_id
+                    ELSE NULL
+                END
             WHERE id = $2
-        `, [finalAgentId, chatId, automaticTeamTag, automaticTeamTagColor]);
+        `, [finalAgentId, chatId, automaticTeamTag, automaticTeamTagColor, teamId ?? null]);
 
             // Log system message
             const systemMessageContent = isHumanTakingFromAi ? `Atendimento reassumido por ${transferTargetName}.` : !isFirstAssignment
@@ -584,7 +602,12 @@ export const transferChatToIntelligentAgentAction = withDebug(
                      copilot_mode = 'auto',
                      status = 'atendimentos',
                      assigned_at = clock_timestamp(),
-                     updated_at = clock_timestamp()
+                     updated_at = clock_timestamp(),
+                     -- A equipe do atendente inteligente vira a equipe do chat.
+                     -- Antes so o broadcast em tempo real conhecia esse vinculo,
+                     -- e a consulta de listagem nao — a etiqueta trocava a cada
+                     -- refetch.
+                     team_id = (SELECT sa.team_id FROM system_agents sa WHERE sa.id = $1)
                  WHERE id = $3`,
                 [systemAgentId, intelligentAgent.autopilot_config_id, chatId]
             );
@@ -736,10 +759,15 @@ export const closeChatAction = withDebug(
 
             let tagInfo = { label: null as string | null, color: null as string | null };
             if (reasonTagId) {
-                const tagRes = await client.query('SELECT label, color FROM tags WHERE id = $1', [reasonTagId]);
-                if ((tagRes.rowCount ?? 0) > 0) {
-                    tagInfo = tagRes.rows[0];
+                const tagRes = await client.query(
+                    'SELECT label, color FROM tags WHERE id = $1 AND workspace_id = $2',
+                    [reasonTagId, workspace_id]
+                );
+                if ((tagRes.rowCount ?? 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: 'Motivo de encerramento invalido para este workspace.' };
                 }
+                tagInfo = tagRes.rows[0];
             }
 
             await client.query(
@@ -1035,6 +1063,10 @@ export type InitialChatsPayload = {
     hasMoreChats: boolean;
     timezone: string;
     nextCursor?: { lastActivityAt: string; id: string } | null;
+    chatPagination?: {
+        active: { hasMore: boolean; cursor: { lastActivityAt: string; id: string } | null };
+        closed: { hasMore: boolean; cursor: { lastActivityAt: string; id: string } | null };
+    };
     selectedMessageWindow?: {
         messages: Message[];
         oldestMessageDate: string | null;
@@ -1048,6 +1080,10 @@ type ChatRow = {
     id: string;
     status: Chat['status'];
     workspace_id: string;
+    ad_source?: string | null;
+    ad_campaign?: string | null;
+    ad_campaign_id?: string | null;
+    ad_confidence?: string | null;
     assigned_at: string | null;
     tag: string | null;
     color: string | null;
@@ -1428,16 +1464,7 @@ async function fetchChats({
             ORDER BY mct2.created_at DESC
             LIMIT 1
         ) mct_stable ON true
-        LEFT JOIN LATERAL (
-            SELECT t.id, t.name, t.color
-            FROM team_members tm
-            JOIN teams t
-              ON t.id = tm.team_id
-             AND t.workspace_id = c.workspace_id
-            WHERE tm.user_id = c.agent_id
-            ORDER BY t.name ASC, t.id ASC
-            LIMIT 1
-        ) t ON true
+        ${buildChatTeamLateralSql({ chatAlias: 'c' })}
         LEFT JOIN LATERAL (
             SELECT type
             FROM (
@@ -1477,11 +1504,18 @@ export const getInitialChatsData = withDebug(
         selectedChatId,
         ownership = 'mine',
         workspaceTimezone,
+        pagination,
     }: {
         workspaceId: string;
         selectedChatId: string | null;
         ownership?: 'mine' | 'everyone';
         workspaceTimezone?: string | null;
+        pagination?: {
+            before: string;
+            beforeId: string | null;
+            statuses: Chat['status'][];
+            limit?: number;
+        };
     }, trustedContext?: TrustedUserContext): Promise<InitialChatsPayload> {
         let userId = isTrustedUserContext(trustedContext) ? trustedContext.userId : undefined;
 
@@ -1523,6 +1557,38 @@ export const getInitialChatsData = withDebug(
                     hasMoreChats: false,
                     timezone: DEFAULT_TIMEZONE,
                     error: access.error,
+                };
+            }
+
+            if (pagination) {
+                const limit = Math.min(Math.max(pagination.limit ?? 25, 1), 50);
+                const rows = await fetchChats({
+                    workspaceId,
+                    userId,
+                    limit,
+                    includeChatId: null,
+                    before: pagination.before,
+                    beforeId: pagination.beforeId,
+                    ownership,
+                    statuses: pagination.statuses,
+                });
+                const timezone = workspaceTimezone || await getWorkspaceTimezone(workspaceId);
+                const { chats, lastSyncChats } = await hydrateChats(rows, timezone);
+                const cursorRow = rows.at(-1);
+                return {
+                    chats,
+                    messages: [],
+                    selectedChatId: null,
+                    lastSyncChats,
+                    lastSyncMessageForSelected: null,
+                    oldestMessageDate: null,
+                    oldestMessageId: null,
+                    hasMoreHistory: false,
+                    hasMoreChats: rows.length === limit,
+                    timezone,
+                    nextCursor: cursorRow?.chat_activity_at
+                        ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                        : null,
                 };
             }
 
@@ -1595,6 +1661,7 @@ export const getInitialChatsData = withDebug(
 
             const hasMoreChats = closedChatsDegraded || activeChatRows.length === activeChatsLimit || closedChatRows.length === closedChatsLimit;
             const cursorRow = activeChatRows.at(-1);
+            const closedCursorRow = closedChatRows.at(-1);
 
             const messages: Message[] = [];
             const lastSyncMessageForSelected: string | null = null;
@@ -1616,6 +1683,20 @@ export const getInitialChatsData = withDebug(
                 nextCursor: cursorRow?.chat_activity_at
                     ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
                     : null,
+                chatPagination: {
+                    active: {
+                        hasMore: activeChatRows.length === activeChatsLimit,
+                        cursor: cursorRow?.chat_activity_at
+                            ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                            : null,
+                    },
+                    closed: {
+                        hasMore: closedChatsDegraded || closedChatRows.length === closedChatsLimit,
+                        cursor: closedCursorRow?.chat_activity_at
+                            ? { lastActivityAt: closedCursorRow.chat_activity_at, id: closedCursorRow.id }
+                            : null,
+                    },
+                },
             };
 
         } catch (error) {
@@ -1811,16 +1892,7 @@ export const searchChatsAndContacts = withDebug(
                     LEFT JOIN contacts cont
                       ON c.contact_id = cont.id
                      AND cont.workspace_id = c.workspace_id
-                    LEFT JOIN LATERAL (
-                        SELECT t.name, t.color
-                        FROM team_members tm
-                        JOIN teams t
-                          ON t.id = tm.team_id
-                         AND t.workspace_id = c.workspace_id
-                        WHERE tm.user_id = c.agent_id
-                        ORDER BY t.name ASC, t.id ASC
-                        LIMIT 1
-                    ) t ON true
+                    ${buildChatTeamLateralSql({ chatAlias: 'c' })}
                     WHERE c.workspace_id = $1
                       AND c.protocol ILIKE $2
                     LIMIT 1
@@ -1957,16 +2029,7 @@ export const searchChatsAndContacts = withDebug(
                 LEFT JOIN contacts cont
                   ON c.contact_id = cont.id
                  AND cont.workspace_id = c.workspace_id
-                LEFT JOIN LATERAL (
-                    SELECT t.name, t.color
-                    FROM team_members tm
-                    JOIN teams t
-                      ON t.id = tm.team_id
-                     AND t.workspace_id = c.workspace_id
-                    WHERE tm.user_id = c.agent_id
-                    ORDER BY t.name ASC, t.id ASC
-                    LIMIT 1
-                ) t ON true
+                ${buildChatTeamLateralSql({ chatAlias: 'c' })}
                 WHERE c.workspace_id = $1
                   AND (
                       cont.name ILIKE $2
@@ -2486,16 +2549,7 @@ export const getMergedContactThreadAction = withDebug(
                     ORDER BY mct2.created_at DESC
                     LIMIT 1
                 ) mct_stable ON true
-                LEFT JOIN LATERAL (
-                    SELECT t.id, t.name, t.color
-                    FROM team_members tm
-                    JOIN teams t
-                      ON t.id = tm.team_id
-                     AND t.workspace_id = c.workspace_id
-                    WHERE tm.user_id = c.agent_id
-                    ORDER BY t.name ASC, t.id ASC
-                    LIMIT 1
-                ) t ON true
+                ${buildChatTeamLateralSql({ chatAlias: 'c' })}
                 LEFT JOIN LATERAL (
                     SELECT type
                     FROM (
@@ -2813,8 +2867,23 @@ async function fetchChatsDelta({
             lmd.api_message_status AS last_message_api_message_status,
             lmd.is_read AS last_message_is_read,
             lmd.sent_by_tab AS last_message_sent_by_tab,
-            ccf.contact_custom_fields AS contact_custom_fields
+            ccf.contact_custom_fields AS contact_custom_fields,
+            ad_attr.source AS ad_source,
+            ad_attr.campaign AS ad_campaign,
+            ad_attr.campaign_id AS ad_campaign_id,
+            ad_attr.confidence AS ad_confidence
         FROM changed_chats c
+        LEFT JOIN LATERAL (
+            SELECT aa.source, aa.campaign, aa.campaign_id, aa.confidence
+            FROM ad_attributions aa
+            -- ad_attributions.chat_id e text (migration do Google Ads) e chats.id
+            -- e uuid: sem cast o Postgres nao acha operador (42883). Castamos o
+            -- lado uuid para text, nao o contrario, para o idx_ad_attributions_chat
+            -- continuar servindo a busca.
+            WHERE aa.chat_id = c.id::text
+            ORDER BY aa.attributed_at DESC
+            LIMIT 1
+        ) ad_attr ON true
         LEFT JOIN last_message_details lmd ON lmd.chat_id = c.id
         LEFT JOIN latest_channel_message lci ON lci.chat_id = c.id
         LEFT JOIN unread_counts uc ON uc.chat_id = c.id
@@ -2823,16 +2892,7 @@ async function fetchChatsDelta({
         LEFT JOIN contacts cont
           ON cont.id = c.contact_id
          AND cont.workspace_id = c.workspace_id
-        LEFT JOIN LATERAL (
-            SELECT t.id, t.name, t.color
-            FROM team_members tm
-            JOIN teams t
-              ON t.id = tm.team_id
-             AND t.workspace_id = c.workspace_id
-            WHERE tm.user_id = c.agent_id
-            ORDER BY t.name ASC, t.id ASC
-            LIMIT 1
-        ) t ON true
+        ${buildChatTeamLateralSql({ chatAlias: 'c' })}
         LEFT JOIN LATERAL (
             SELECT type
             FROM (
@@ -3021,6 +3081,14 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             metaContactExternalId: row.meta_contact_external_id || undefined,
             metaContactUsername: row.meta_contact_username || undefined,
             metaPlatform: (row.meta_platform as any) || undefined,
+            adAttribution: row.ad_confidence
+                ? {
+                    source: row.ad_source || 'google',
+                    campaign: row.ad_campaign || undefined,
+                    campaignId: row.ad_campaign_id || undefined,
+                    confidence: row.ad_confidence,
+                }
+                : undefined,
         };
     });
 
@@ -3319,9 +3387,12 @@ export async function getChatMessagesWindow({
         fetchSystemAgentsMap(systemAgentIds as string[]),
     ]);
 
-    const messages = rows
-        .map((row: MessageRow) => mapMessageFromRow(row, timezone, targetContact, agentsMap, systemAgentsMap))
-        .reverse();
+    const messages = scopeMessagesToChatThread(
+        chatId,
+        rows
+            .map((row: MessageRow) => mapMessageFromRow(row, timezone, targetContact, agentsMap, systemAgentsMap))
+            .reverse(),
+    );
 
     const lastSyncMessage = rows.reduce<string | null>((acc, row) => maxIsoDate(acc, row.created_at), null);
     const oldestRow = rows[rows.length - 1];

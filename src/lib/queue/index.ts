@@ -31,6 +31,11 @@ export type EnqueueOptions = {
   priority?: number;
   maxAttempts?: number;
   client?: { query: (query: string, params?: any[]) => Promise<any> };
+  // Sobrescreve o jobId deterministico de getJobId. O id deterministico existe
+  // para deduplicar reenvios acidentais do mesmo envio; quem pede explicitamente
+  // um novo disparo do mesmo messageId (retry manual) precisa de um id distinto,
+  // senao o BullMQ devolve o job antigo e nao enfileira nada.
+  jobId?: string;
 };
 
 const QUEUE_DISABLED_MESSAGE = 'Queue system disabled.';
@@ -153,7 +158,10 @@ function getDefaultMaxAttemptsForType(type: QueueJobType) {
     case 'evolution_webhook_process':
       return 5;
     case 'whatsapp_send':
-      return 1;
+      // A segunda tentativa nao reenvia direto: o handler reconcilia com a
+      // Evolution antes e so segue se confirmar que a mensagem nao saiu.
+      // Poucas tentativas de proposito -- cada uma custa uma consulta extra.
+      return 2;
     case 'ai_document_ingest':
     case 'ai_autopilot_process':
     case 'ai_autopilot_learning_cycle':
@@ -175,12 +183,14 @@ export async function enqueueJob(
 
   const runAt = options?.runAt;
   const delay = runAt ? Math.max(runAt.getTime() - Date.now(), 0) : 0;
+  // whatsapp_send nao herda QUEUE_MAX_ATTEMPTS: cada tentativa extra custa uma
+  // consulta de reconciliacao a Evolution, entao o teto e proprio e baixo.
   const attempts = type === 'whatsapp_send'
-    ? 1
+    ? (options?.maxAttempts ?? getDefaultMaxAttemptsForType(type))
     : getQueueMaxAttempts(options?.maxAttempts ?? getDefaultMaxAttemptsForType(type));
 
   const job = await getDialogyQueue(type).add(type, payload, {
-    jobId: getJobId(type, payload),
+    jobId: options?.jobId ?? getJobId(type, payload),
     delay,
     priority: options?.priority,
     attempts,

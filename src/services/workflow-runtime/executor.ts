@@ -293,6 +293,7 @@ export class WorkflowExecutor {
   private readonly defaultNodeTimeoutMs: number;
   private readonly lockLeaseMs: number;
   private readonly validateBeforeRun: boolean;
+  private readonly timeWaitTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly persistence: WorkflowPersistence,
@@ -343,13 +344,27 @@ export class WorkflowExecutor {
     execution = locked;
 
     try {
+      if (execution.status === 'waiting') {
+        const expiresAt = this.waitExpiration(execution);
+        if (expiresAt == null || expiresAt > Date.now()) {
+          this.scheduleTimeWaitExpiration(execution);
+          return execution;
+        }
+        execution = await this.routeWaitingExecution(
+          execution,
+          workflow,
+          'expired',
+          { resumeToken: execution.resumeToken || '', input: {} },
+        );
+      }
       if (execution.status === 'queued') {
         execution.status = 'running';
         execution.updatedAt = now();
         execution = await this.persistence.saveExecution(execution, execution.version);
       }
       while (execution.status === 'running') {
-        await this.persistence.renewExecutionLock(executionId, workerId, leaseMs);
+        const renewed = await this.persistence.renewExecutionLock(executionId, workerId, leaseMs);
+        if (!renewed) throw new WorkflowExecutionLockError(executionId);
         if (options.signal?.aborted) {
           execution = await this.markCancelled(execution, 'Execution aborted by caller.');
           break;
@@ -388,48 +403,121 @@ export class WorkflowExecutor {
     }
   }
 
-  async resume(input: WorkflowResumeInput): Promise<WorkflowExecution> {
+  private waitExpiration(execution: WorkflowExecution): number | null {
+    if (execution.status !== 'waiting' || execution.waitingReason !== 'time' || !execution.currentNodeId) {
+      return null;
+    }
+    const output = execution.nodeResults[execution.currentNodeId]?.output;
+    if (!isRecord(output) || typeof output.expiresAt !== 'string') return null;
+    const expiresAt = new Date(output.expiresAt).getTime();
+    return Number.isFinite(expiresAt) ? expiresAt : null;
+  }
+
+  private scheduleTimeWaitExpiration(execution: WorkflowExecution) {
+    const resumeToken = execution.resumeToken;
+    const expiresAt = this.waitExpiration(execution);
+    if (!resumeToken || expiresAt == null || this.timeWaitTimers.has(resumeToken)) return;
+    const maximumTimerDelay = 2_147_000_000;
+    const delayMs = Math.min(Math.max(expiresAt - Date.now(), 0), maximumTimerDelay);
+    const timer = setTimeout(() => {
+      this.timeWaitTimers.delete(resumeToken);
+      void this.expireTimeWait(resumeToken).catch((error) => {
+        console.error('[WORKFLOW_TIME_WAIT] Failed to expire waiting execution:', error);
+      });
+    }, delayMs);
+    const maybeTimer = timer as unknown as { unref?: () => void };
+    if (typeof maybeTimer.unref === 'function') maybeTimer.unref();
+    this.timeWaitTimers.set(resumeToken, timer);
+  }
+
+  private async routeWaitingExecution(
+    locked: WorkflowExecution,
+    workflow: WorkflowDefinition,
+    selectedOutput: 'resumed' | 'expired',
+    input: WorkflowResumeInput,
+  ): Promise<WorkflowExecution> {
+    const waitingNode = locked.currentNodeId ? nodeById(workflow, locked.currentNodeId) : null;
+    if (!waitingNode) throw new Error('Waiting node not found.');
+    const waitingResult = locked.nodeResults[waitingNode.id];
+    const nextNodeIds = waitingResult
+      ? selectedConnections(workflow, waitingNode, {
+          ...waitingResult,
+          status: 'route',
+          selectedOutput,
+        })
+      : [];
+    if (nextNodeIds.length === 0) {
+      throw new Error(`Waiting node ${waitingNode.id} has no ${selectedOutput} route.`);
+    }
+    locked.status = 'running';
+    locked.previousNodeId = waitingNode.id;
+    locked.currentNodeId = nextNodeIds[0]!;
+    locked.pendingNodeIds.push(...nextNodeIds.slice(1));
+    locked.waitingReason = undefined;
+    locked.resumeToken = undefined;
+    locked.context = mergeStatePatch(locked.context, {
+      ...(input.contextPatch || {}),
+      __resumeInput: input.input || {},
+      __waitOutcome: selectedOutput,
+    });
+    locked.updatedAt = now();
+    const saved = await this.persistence.saveExecution(locked, locked.version);
+    await this.emit(saved, {
+      type: 'execution.resumed',
+      safeSummary: selectedOutput === 'expired'
+        ? 'Execução retomada por expiração'
+        : 'Execução retomada',
+      data: { selectedOutput },
+    });
+    return saved;
+  }
+
+  private async continueWaitingExecution(
+    input: WorkflowResumeInput,
+    selectedOutput: 'resumed' | 'expired',
+    missingIsNoop = false,
+  ): Promise<WorkflowExecution | null> {
     const waiting = await this.persistence.getExecutionByResumeToken(input.resumeToken);
-    if (!waiting) throw new Error('Waiting execution not found for the supplied resume token.');
+    if (!waiting) {
+      if (missingIsNoop) return null;
+      throw new Error('Waiting execution not found for the supplied resume token.');
+    }
+    const timer = this.timeWaitTimers.get(input.resumeToken);
+    if (timer) clearTimeout(timer);
+    this.timeWaitTimers.delete(input.resumeToken);
     const workerId = input.workerId || `worker_${randomUUID()}`;
     const locked = await this.persistence.acquireExecutionLock(waiting.executionId, workerId, this.lockLeaseMs);
     if (!locked) throw new WorkflowExecutionLockError(waiting.executionId);
     try {
+      if (locked.status !== 'waiting' || locked.resumeToken !== input.resumeToken) {
+        if (missingIsNoop) return locked;
+        throw new Error('Waiting execution changed before it could be resumed.');
+      }
       const workflow = await this.persistence.getWorkflowDefinition(locked.workflowId, locked.workflowVersion);
       if (!workflow) throw new Error(`Workflow ${locked.workflowId}@${locked.workflowVersion} not found.`);
-      const waitingNode = locked.currentNodeId ? nodeById(workflow, locked.currentNodeId) : null;
-      if (!waitingNode) throw new Error('Waiting node not found.');
-      const waitingResult = locked.nodeResults[waitingNode.id];
-      const nextNodeIds = waitingResult
-        ? selectedConnections(workflow, waitingNode, {
-            ...waitingResult,
-            status: 'route',
-            selectedOutput: waitingResult.selectedOutput || 'resumed',
-          })
-        : [];
-      if (nextNodeIds.length === 0) {
-        throw new Error(`Waiting node ${waitingNode.id} has no resume route.`);
-      }
-      locked.status = 'running';
-      locked.previousNodeId = waitingNode.id;
-      locked.currentNodeId = nextNodeIds[0]!;
-      locked.pendingNodeIds.push(...nextNodeIds.slice(1));
-      locked.waitingReason = undefined;
-      locked.resumeToken = undefined;
-      locked.context = mergeStatePatch(locked.context, {
-        ...(input.contextPatch || {}),
-        __resumeInput: input.input || {},
-      });
-      locked.updatedAt = now();
-      const saved = await this.persistence.saveExecution(locked, locked.version);
-      await this.emit(saved, {
-        type: 'execution.resumed',
-        safeSummary: 'Execução retomada',
-      });
+      await this.routeWaitingExecution(locked, workflow, selectedOutput, input);
     } finally {
       await this.persistence.releaseExecutionLock(waiting.executionId, workerId);
     }
     return this.runExecution(waiting.executionId, { workerId });
+  }
+
+  private async expireTimeWait(resumeToken: string): Promise<WorkflowExecution | null> {
+    const waiting = await this.persistence.getExecutionByResumeToken(resumeToken);
+    if (!waiting) return null;
+    const expiresAt = this.waitExpiration(waiting);
+    if (expiresAt == null) return null;
+    if (expiresAt > Date.now()) {
+      this.scheduleTimeWaitExpiration(waiting);
+      return waiting;
+    }
+    return this.continueWaitingExecution({ resumeToken, input: {} }, 'expired', true);
+  }
+
+  async resume(input: WorkflowResumeInput): Promise<WorkflowExecution> {
+    const resumed = await this.continueWaitingExecution(input, 'resumed');
+    if (!resumed) throw new Error('Waiting execution not found for the supplied resume token.');
+    return resumed;
   }
 
   async cancel(executionId: string, reason = 'Cancelled by request.'): Promise<WorkflowExecution> {
@@ -572,6 +660,7 @@ export class WorkflowExecutor {
         safeSummary: 'Execução aguardando retomada',
         data: { reason: finalResult.waitingReason },
       });
+      this.scheduleTimeWaitExpiration(execution);
       return execution;
     }
 

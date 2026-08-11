@@ -551,6 +551,10 @@ export default function ChatPanel({
     }, [canLoadOlder, chat]);
 
     const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+    // Passar a conversa para a IA tira o atendimento do humano; exige confirmação
+    // explícita para não acontecer por um clique errado.
+    const [isAiTakeOverDialogOpen, setIsAiTakeOverDialogOpen] = useState(false);
+    const [isTakingOverWithAi, setIsTakingOverWithAi] = useState(false);
     const [isChatDetailsOpen, setIsChatDetailsOpen] = useState(false);
     const mobileMoreActionsRef = useRef<HTMLButtonElement>(null);
     const desktopMoreActionsRef = useRef<HTMLButtonElement>(null);
@@ -667,10 +671,12 @@ export default function ChatPanel({
             return;
         }
 
+        setIsTakingOverWithAi(true);
         const result = await transferChatToIntelligentAgentAction({
             chatId: chat.id,
             systemAgentId: agent.systemAgentId,
         });
+        setIsTakingOverWithAi(false);
 
         if (!result.success) {
             toast({
@@ -681,6 +687,7 @@ export default function ChatPanel({
             return;
         }
 
+        setIsAiTakeOverDialogOpen(false);
         setAiSuggestion(null);
         toast({
             title: `${agent.systemAgentName || agent.name} assumiu a conversa`,
@@ -880,17 +887,25 @@ export default function ChatPanel({
     useEffect(() => {
         if (isProtocolScoped) return;
         if (showFullHistory && chat?.contact?.id && currentUser.activeWorkspaceId) {
+            let cancelled = false;
             setIsLoadingHistory(true);
+            setAllContactMessages([]);
             getContactMessages({
                 contactId: chat.contact.id,
                 workspaceId: currentUser.activeWorkspaceId,
                 limit: 1000
             })
                 .then(res => {
-                    if (res.messages) setAllContactMessages(res.messages);
+                    if (!cancelled && res.messages) setAllContactMessages(res.messages);
                 })
                 .catch(err => console.error('[CHAT_PANEL] Failed to load full history', err))
-                .finally(() => setIsLoadingHistory(false));
+                .finally(() => {
+                    if (!cancelled) setIsLoadingHistory(false);
+                });
+
+            return () => {
+                cancelled = true;
+            };
         }
     }, [showFullHistory, chat?.contact?.id, currentUser.activeWorkspaceId, isProtocolScoped]);
 
@@ -2232,6 +2247,31 @@ export default function ChatPanel({
                         />
                     )}
 
+                    <AlertDialog open={isAiTakeOverDialogOpen} onOpenChange={setIsAiTakeOverDialogOpen}>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Deixar a IA assumir esta conversa?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    {selectedInboxAiAgent?.name || 'O agente de IA'} passa a responder {chat.contact?.name || 'o cliente'} diretamente
+                                    e o atendimento sai da sua fila. Para apenas finalizar o atendimento, use &quot;Encerrar Atendimento&quot;.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel disabled={isTakingOverWithAi}>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction
+                                    disabled={isTakingOverWithAi}
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        void handleAiTakeOver();
+                                    }}
+                                >
+                                    {isTakingOverWithAi && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    Sim, passar para a IA
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+
                     {/* MOBILE MENU */}
                     <div className="md:hidden">
                         <DropdownMenu>
@@ -2257,56 +2297,9 @@ export default function ChatPanel({
                                     <FileText className="mr-2 h-4 w-4" />
                                     <span>Salvar conversa</span>
                                 </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={handleLearnFromConversation}>
-                                    <Brain className="mr-2 h-4 w-4" />
-                                    <span>Aprender com esta conversa</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
-                                    <Activity className="mr-2 h-4 w-4" />
-                                    <span>Execuções da IA</span>
-                                    {toolExecutionEntries.length > 0 && (
-                                        <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
-                                            {toolExecutionEntries.length}
-                                        </Badge>
-                                    )}
-                                </DropdownMenuItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={isCopilotActive}
-                                    onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
-                                    onSelect={(event) => event.preventDefault()}
-                                    disabled={isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
-                                    className="items-start py-2"
-                                >
-                                    <div className="min-w-0">
-                                        <p className="text-sm font-medium">Copiloto de IA</p>
-                                        <p className="max-w-[180px] truncate text-[10px] text-muted-foreground">
-                                            {chat.assigned_system_agent_id
-                                                ? 'A IA já está conduzindo esta conversa'
-                                                : selectedAutopilotAgent?.name || 'Nenhum agente configurado'}
-                                        </p>
-                                    </div>
-                                    <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isCopilotActive ? 'Ativo' : 'Inativo'}</span>
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuItem
-                                    disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
-                                    onSelect={() => { void handleRequestSuggestion(); }}
-                                >
-                                    <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                    <span>Sugerir resposta agora</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation}
-                                    onSelect={() => { void handleAiTakeOver(); }}
-                                >
-                                    <Bot className="mr-2 h-4 w-4" />
-                                    <span>Deixar a IA assumir</span>
-                                    {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
-                                </DropdownMenuItem>
-
-
-
+                                {/* Ações de IA vivem no menu "IA" do campo de mensagem.
+                                    Ficavam aqui coladas em "Encerrar Atendimento" e eram
+                                    acionadas por engano no lugar dele. */}
                                 {isChatOpen && isChatAssignedToMe && (
                                     <>
                                         <DropdownMenuSeparator />
@@ -2377,53 +2370,7 @@ export default function ChatPanel({
                                         <FileText className="mr-2 h-4 w-4" />
                                         <span>Salvar conversa</span>
                                     </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={handleLearnFromConversation}>
-                                        <Brain className="mr-2 h-4 w-4" />
-                                        <span>Aprender com esta conversa</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
-                                        <Activity className="mr-2 h-4 w-4" />
-                                        <span>Execuções da IA</span>
-                                        {toolExecutionEntries.length > 0 && (
-                                            <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
-                                                {toolExecutionEntries.length}
-                                            </Badge>
-                                        )}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuCheckboxItem
-                                        checked={isCopilotActive}
-                                        onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
-                                        onSelect={(event) => event.preventDefault()}
-                                        disabled={isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
-                                        className="items-start py-2"
-                                    >
-                                        <div className="min-w-0">
-                                            <p className="text-sm font-medium">Copiloto de IA</p>
-                                            <p className="max-w-[180px] truncate text-[10px] text-muted-foreground">
-                                                {chat.assigned_system_agent_id
-                                                    ? 'A IA já está conduzindo esta conversa'
-                                                    : selectedAutopilotAgent?.name || 'Nenhum agente configurado'}
-                                            </p>
-                                        </div>
-                                        <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isCopilotActive ? 'Ativo' : 'Inativo'}</span>
-                                    </DropdownMenuCheckboxItem>
-                                    <DropdownMenuItem
-                                        disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
-                                        onSelect={() => { void handleRequestSuggestion(); }}
-                                    >
-                                        <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                        <span>Sugerir resposta agora</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation}
-                                        onSelect={() => { void handleAiTakeOver(); }}
-                                    >
-                                        <Bot className="mr-2 h-4 w-4" />
-                                        <span>Deixar a IA assumir</span>
-                                        {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
-                                    </DropdownMenuItem>
+                                    {/* Ações de IA vivem no menu "IA" do campo de mensagem. */}
                                     {isChatOpen && isChatAssignedToMe && (
                                         <>
                                             <DropdownMenuSeparator />
@@ -2850,7 +2797,7 @@ export default function ChatPanel({
                                                         <span>IA</span>
                                                     </button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" className="w-72">
+                                                <DropdownMenuContent align="start" side="top" className="w-80 max-h-[70vh] overflow-y-auto">
                                                     <div className="px-2 py-2">
                                                         <div className="flex items-center justify-between gap-3">
                                                             <div className="flex min-w-0 items-center gap-2">
@@ -2858,20 +2805,22 @@ export default function ChatPanel({
                                                                 <div className="min-w-0">
                                                                     <p className="truncate text-sm font-medium">Copiloto IA</p>
                                                                     <p className="truncate text-xs text-muted-foreground">
-                                                                        {selectedAutopilotAgent?.name || 'Nenhum agente selecionado'}
+                                                                        {chat.assigned_system_agent_id
+                                                                            ? 'A IA já está conduzindo esta conversa'
+                                                                            : selectedAutopilotAgent?.name || 'Nenhum agente selecionado'}
                                                                     </p>
                                                                 </div>
                                                             </div>
                                                             <Switch
-                                                                checked={isAiAgentActive}
+                                                                checked={isCopilotActive}
                                                                 onCheckedChange={handleAiSwitchChange}
-                                                                disabled={isAiTyping || !hasAutopilotAvailable}
+                                                                disabled={isAiTyping || isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
                                                             />
                                                         </div>
                                                     </div>
                                                     <DropdownMenuSeparator />
                                                     <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Agente responsavel
+                                                        Agente responsável
                                                     </div>
                                                     {!hasAutopilotAvailable ? (
                                                         <DropdownMenuItem disabled>
@@ -2891,10 +2840,61 @@ export default function ChatPanel({
                                                             </DropdownMenuItem>
                                                         ))
                                                     )}
+
                                                     <DropdownMenuSeparator />
+                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                                                        Nesta mensagem
+                                                    </div>
                                                     <DropdownMenuItem onSelect={handleSpellCheck} disabled={isSpellChecking || isComposerTextEmpty}>
                                                         {isSpellChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SpellCheck2 className="mr-2 h-4 w-4" />}
-                                                        Corretor Ortográfico
+                                                        Corretor ortográfico
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                        disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
+                                                        onSelect={() => { void handleRequestSuggestion(); }}
+                                                    >
+                                                        {isRequestingSuggestion ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquareQuote className="mr-2 h-4 w-4" />}
+                                                        Sugerir resposta agora
+                                                    </DropdownMenuItem>
+
+                                                    <DropdownMenuSeparator />
+                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                                                        Esta conversa
+                                                    </div>
+                                                    <DropdownMenuItem onSelect={handleLearnFromConversation}>
+                                                        <Brain className="mr-2 h-4 w-4" />
+                                                        Aprender com esta conversa
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onSelect={() => setIsToolExecutionsOpen(true)}>
+                                                        <Activity className="mr-2 h-4 w-4" />
+                                                        Execuções da IA
+                                                        {toolExecutionEntries.length > 0 && (
+                                                            <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
+                                                                {toolExecutionEntries.length}
+                                                            </Badge>
+                                                        )}
+                                                    </DropdownMenuItem>
+
+                                                    {/* Passa o atendimento para a IA: fica isolado no fim, com
+                                                        confirmação, porque tira a conversa das mãos do atendente. */}
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem
+                                                        disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation || isTakingOverWithAi}
+                                                        onSelect={() => setIsAiTakeOverDialogOpen(true)}
+                                                        className="items-start py-2"
+                                                    >
+                                                        <Bot className="mr-2 mt-0.5 h-4 w-4 text-cyan-500" />
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-medium">Deixar a IA assumir</p>
+                                                            <p className="text-[10px] text-muted-foreground">
+                                                                {chat.assigned_system_agent_id
+                                                                    ? 'A IA já assumiu esta conversa'
+                                                                    : canAiTakeOverConversation
+                                                                        ? 'Você sai do atendimento e a IA responde'
+                                                                        : 'Agente não publicado como Atendente Inteligente'}
+                                                            </p>
+                                                        </div>
+                                                        {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
                                                     </DropdownMenuItem>
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
@@ -2950,4 +2950,3 @@ export default function ChatPanel({
         </div >
     );
 }
-

@@ -448,16 +448,25 @@ const parallelHandler: NodeHandler = {
 
 const waitHandler: NodeHandler = {
   type: 'logic.wait',
-  execute: async (input) => ({
-    status: 'waiting',
-    selectedOutput: 'resumed',
-    waitingReason: String(input.node.config.mode || 'event'),
-    resumeToken: createId(`resume_${input.execution.executionId}_${input.node.id}`),
-    output: {
-      waitingSince: new Date().toISOString(),
-      resumeEvent: input.node.config.resumeEvent,
-    },
-  }),
+  execute: async (input) => {
+    const mode = String(input.node.config.mode || 'event');
+    const waitingSince = new Date();
+    const timeoutMs = Math.max(1, Number(input.node.config.timeoutMs || 86_400_000));
+    return {
+      status: 'waiting',
+      selectedOutput: 'resumed',
+      waitingReason: mode,
+      resumeToken: createId(`resume_${input.execution.executionId}_${input.node.id}`),
+      output: {
+        waitingSince: waitingSince.toISOString(),
+        resumeEvent: input.node.config.resumeEvent,
+        ...(mode === 'time' ? {
+          timeoutMs,
+          expiresAt: new Date(waitingSince.getTime() + timeoutMs).toISOString(),
+        } : {}),
+      },
+    };
+  },
 };
 
 const loopHandler: NodeHandler = {
@@ -727,7 +736,7 @@ export function createDefaultNodeHandlerRegistry(
           }, undefined, 'recovered');
         }
         return {
-          status: 'error',
+          status: 'route',
           selectedOutput: 'failed',
           error: {
             code: 'HANDLED_WORKFLOW_ERROR',

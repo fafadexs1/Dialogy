@@ -52,6 +52,20 @@ export type InboxBootstrap = {
   user: User;
   chats: Chat[];
   messagesByChatId: Record<string, Message[]>;
+  chatPagination?: ChatPagination;
+};
+
+export type ChatPageCursor = { lastActivityAt: string; id: string };
+
+export type ChatPagination = {
+  active: { hasMore: boolean; cursor: ChatPageCursor | null };
+  closed: { hasMore: boolean; cursor: ChatPageCursor | null };
+};
+
+export type ChatsPage = {
+  chats: Chat[];
+  hasMore: boolean;
+  nextCursor: ChatPageCursor | null;
 };
 
 export type ChatMessagesPage = {
@@ -66,6 +80,7 @@ export type ChatMessagesPage = {
 export type SendMessageInput = {
   chatId: string;
   content: string;
+  messageId?: string;
 };
 
 export type LoginInput = {

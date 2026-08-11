@@ -179,24 +179,35 @@ export async function addPublicMessage(session: any, content: string) {
 
 export async function listPublicMessages(session: any, after?: string | null) {
   if (!session.chat_id) return [];
-  const values: unknown[] = [session.chat_id, session.id];
-  let afterClause = '';
-  if (after) {
-    values.push(after);
-    afterClause = `AND m.created_at > $${values.length}::timestamptz`;
-  }
-  const result = await db.query(
-    `SELECT m.id,m.type,m.content,m.from_me,m.api_message_status,m.created_at
-     FROM messages m WHERE m.chat_id=$1
-       AND COALESCE((m.metadata->>'isInternalNote')::boolean,FALSE)=FALSE
-       AND (m.from_me=TRUE OR m.metadata->>'webchatSessionId'=$2)
-       ${afterClause} ORDER BY m.created_at ASC LIMIT 200`,
-    values,
-  );
+  const result = after
+    ? await db.query(
+        `SELECT m.id,m.type,m.content,m.from_me,m.api_message_status,m.created_at
+           FROM messages m
+          WHERE m.chat_id=$1
+            AND COALESCE((m.metadata->>'isInternalNote')::boolean,FALSE)=FALSE
+            AND (m.from_me=TRUE OR m.metadata->>'webchatSessionId'=$2)
+            AND m.created_at > $3::timestamptz
+          ORDER BY m.created_at ASC, m.id ASC
+          LIMIT 200`,
+        [session.chat_id, session.id, after],
+      )
+    : await db.query(
+        `SELECT recent.id,recent.type,recent.content,recent.from_me,recent.api_message_status,recent.created_at
+           FROM (
+             SELECT m.id,m.type,m.content,m.from_me,m.api_message_status,m.created_at
+               FROM messages m
+              WHERE m.chat_id=$1
+                AND COALESCE((m.metadata->>'isInternalNote')::boolean,FALSE)=FALSE
+                AND (m.from_me=TRUE OR m.metadata->>'webchatSessionId'=$2)
+              ORDER BY m.created_at DESC, m.id DESC
+              LIMIT 200
+           ) recent
+          ORDER BY recent.created_at ASC, recent.id ASC`,
+        [session.chat_id, session.id],
+      );
   await db.query('UPDATE webchat_sessions SET last_seen_at=NOW() WHERE id=$1', [session.id]);
   return result.rows.map((row) => ({
     id: row.id, type: row.type, content: row.content || '', fromMe: Boolean(row.from_me),
     status: row.api_message_status, createdAt: new Date(row.created_at).toISOString(),
   }));
 }
-

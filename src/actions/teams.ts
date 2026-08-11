@@ -5,8 +5,9 @@ import { db } from '@/lib/db';
 import type { Team, User, BusinessHour, Role, ScheduleException } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { buildPresenceAvailabilitySql, getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
+import type { TeamAvailabilityReason } from '@/services/chat-distribution/team-availability';
+import { getWorkspaceTeamAvailability } from '@/services/chat-distribution/team-availability-server';
 
 export async function getTeams(workspaceId: string): Promise<{ teams: Team[], error?: string }> {
     const supabase = await createClient();
@@ -436,7 +437,26 @@ export async function updateBusinessHours(teamId: string, businessHourId: string
     }
 }
 
-export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: (Omit<Team, 'businessHours' | 'scheduleExceptions' | 'members'> & { onlineMembersCount: number })[], error?: string }> {
+export type TeamTransferAvailability = Omit<Team, 'businessHours' | 'scheduleExceptions' | 'members'> & {
+    /** Quantos membros da equipe estão presentes agora. */
+    onlineMembersCount: number;
+    /** Quantos desses realmente podem receber uma transferência agora. */
+    assignableMembersCount: number;
+    isWithinBusinessHours: boolean;
+    availability: TeamAvailabilityReason;
+};
+
+/**
+ * Estado de transferência por equipe, avaliado com exatamente as mesmas regras
+ * do balanceador.
+ *
+ * Esta consulta existia apenas para contar quem estava online, e a tela
+ * mostrava esse número ao lado de um botão "Transferir" habilitado. Como o
+ * balanceador aplica também expediente, pausa de distribuição e teto de
+ * carteira, a interface prometia uma transferência que o servidor recusava.
+ * Agora ela devolve o veredito completo, e a tela mostra o motivo real.
+ */
+export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ teams: TeamTransferAvailability[], error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { teams: [], error: "Usuário não autenticado." };
@@ -447,38 +467,18 @@ export async function getTeamsWithOnlineMembers(workspaceId: string): Promise<{ 
     }
 
     try {
-        const ttlSeconds = getPresenceTtlSeconds();
-        const recentActivitySeconds = getPresenceRecentActivitySeconds();
-        const availabilitySql = buildPresenceAvailabilitySql('uwp', '$2', '$3');
-        const res = await db.query(`
-            SELECT 
-                t.id, 
-                t.name, 
-                t.color, 
-                t.role_id,
-                t.tag_id,
-                COALESCE((
-                    SELECT COUNT(*)
-                    FROM team_members tm
-                    JOIN user_workspace_presence uwp
-                        ON tm.user_id = uwp.user_id
-                        AND uwp.workspace_id = t.workspace_id
-                    WHERE tm.team_id = t.id
-                      AND ${availabilitySql}
-                ), 0) as "membersCount"
-            FROM teams t
-            WHERE t.workspace_id = $1
-            GROUP BY t.id
-            ORDER BY t.name;
-        `, [workspaceId, ttlSeconds, recentActivitySeconds]);
+        const availability = await getWorkspaceTeamAvailability(workspaceId);
 
-        const teams = res.rows.map(row => ({
-            id: row.id,
-            name: row.name,
-            color: row.color,
-            roleId: row.role_id,
-            tagId: row.tag_id,
-            onlineMembersCount: parseInt(row.membersCount, 10) || 0,
+        const teams = availability.map(team => ({
+            id: team.teamId,
+            name: team.teamName,
+            color: team.color as Team['color'],
+            roleId: team.roleId as Team['roleId'],
+            tagId: team.tagId as Team['tagId'],
+            onlineMembersCount: team.onlineMembers,
+            assignableMembersCount: team.assignableMembers,
+            isWithinBusinessHours: team.isWithinBusinessHours,
+            availability: team.availability,
         }));
 
         return { teams };

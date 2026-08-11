@@ -56,7 +56,7 @@ describe('fair chat distribution', () => {
     expect(late?.fairnessScoreBefore).toBe(15);
   });
 
-  it('enforces simultaneous capacity and total portfolio limits independently', () => {
+  it('prefers agents below capacity and never exceeds the hard portfolio ceiling', () => {
     const selected = rankDistributionCandidates([
       candidate({ agentId: 'at-load-capacity', effectiveLoad: 6, capacity: 6 }),
       candidate({ agentId: 'at-portfolio-capacity', portfolioCount: 25, maxPortfolio: 25 }),
@@ -64,6 +64,36 @@ describe('fair chat distribution', () => {
     ]);
 
     expect(selected?.agentId).toBe('available');
+    expect(selected?.overflow).toBe(false);
+  });
+
+  it('overflows to the least occupied agent instead of reporting nobody available', () => {
+    const selected = rankDistributionCandidates([
+      candidate({ agentId: 'swamped', effectiveLoad: 11, capacity: 6, portfolioCount: 12 }),
+      candidate({ agentId: 'busy', effectiveLoad: 7, capacity: 6, portfolioCount: 8 }),
+    ]);
+
+    expect(selected?.agentId).toBe('busy');
+    expect(selected?.overflow).toBe(true);
+  });
+
+  it('keeps the hard portfolio ceiling even when every agent is over capacity', () => {
+    const selected = rankDistributionCandidates([
+      candidate({ agentId: 'full', effectiveLoad: 7, capacity: 6, portfolioCount: 25, maxPortfolio: 25 }),
+      candidate({ agentId: 'also-full', effectiveLoad: 9, capacity: 6, portfolioCount: 30, maxPortfolio: 25 }),
+    ]);
+
+    expect(selected).toBeNull();
+  });
+
+  it('honours allowOverflow: false for callers that prefer queueing', () => {
+    const selected = rankDistributionCandidates(
+      [candidate({ agentId: 'busy', effectiveLoad: 7, capacity: 6 })],
+      null,
+      { allowOverflow: false }
+    );
+
+    expect(selected).toBeNull();
   });
 
   it('avoids the transferring agent when possible but permits the only eligible member', () => {
@@ -113,20 +143,59 @@ describe('fair chat distribution', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
 
-    const selected = await selectFairAgentForTeam({ query } as any, {
+    const { selection, reason } = await selectFairAgentForTeam({ query } as any, {
       workspaceId: 'workspace-1',
       teamId: 'team-1',
       chatId: 'chat-1',
       source: 'test',
     });
 
-    expect(selected?.agentId).toBe('agent-a');
+    expect(selection?.agentId).toBe('agent-a');
+    expect(reason).toBe('available');
     expect(query).toHaveBeenCalledTimes(4);
     expect(query.mock.calls[0][0]).toContain('pg_advisory_xact_lock');
     expect(query.mock.calls[1][0]).toContain('assigned_chat.workspace_id = t.workspace_id');
+    // Mesmo predicado de presenca da interface: is_online + last_seen OU
+    // atividade recente. Divergir disso e o que fazia a tela mostrar agentes
+    // que o balanceador nao enxergava.
     expect(query.mock.calls[1][0]).toContain('uwp.is_online = TRUE');
+    expect(query.mock.calls[1][0]).toContain('uwp.recent_activity_at');
     expect(query.mock.calls[2][0]).toContain('team_agent_distribution_state');
     expect(query.mock.calls[3][0]).toContain('chat_assignment_events');
+  });
+
+  it('reports why the team had no candidates instead of a generic failure', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ members: 3, online: 0, accepting: 0 }] });
+
+    const { selection, reason } = await selectFairAgentForTeam({ query } as any, {
+      workspaceId: 'workspace-1',
+      teamId: 'team-1',
+      chatId: 'chat-1',
+      source: 'test',
+    });
+
+    expect(selection).toBeNull();
+    expect(reason).toBe('all_offline');
+    expect(query.mock.calls[2][0]).toContain('accepting_assignments');
+  });
+
+  it('separates a paused team from an offline one', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ members: 2, online: 2, accepting: 0 }] });
+
+    const { reason } = await selectFairAgentForTeam({ query } as any, {
+      workspaceId: 'workspace-1',
+      teamId: 'team-1',
+      chatId: 'chat-1',
+      source: 'test',
+    });
+
+    expect(reason).toBe('not_accepting');
   });
 });
 

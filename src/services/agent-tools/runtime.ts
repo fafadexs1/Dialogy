@@ -439,7 +439,11 @@ async function runTransferChatTool(
     );
 
     if (!result.success) {
-      if (result.error === 'Nenhum agente disponível nesta equipe no momento.' && target.teamId) {
+      // Ramificar por `reasonCode`, nunca pelo texto do erro: com a comparacao
+      // por string, todo motivo de indisponibilidade virava o aviso de "fora do
+      // expediente" para o cliente — inclusive quando a equipe estava aberta e
+      // apenas ocupada.
+      if (result.reasonCode && target.teamId) {
         try {
           const { rows: teamRows } = await db.query(
             'SELECT name, color, tag_id FROM teams WHERE id = $1', 
@@ -460,18 +464,15 @@ async function runTransferChatTool(
             }
           }
 
-          const businessHoursText = await formatTeamBusinessHours(target.teamId);
+          let messageText: string;
+          if (result.reasonCode === 'outside_business_hours') {
+            const businessHoursText = await formatTeamBusinessHours(target.teamId);
+            messageText = `Agradeço o seu contato! No momento, a nossa equipe do setor ${teamName} está fora do expediente (${businessHoursText}). Vou transferir seu atendimento para este setor assim que o expediente iniciar. Seu chat já foi colocado na fila de espera para que nossa equipe te atenda logo no início das atividades!`;
+          } else {
+            messageText = `Agradeço o seu contato! No momento, todos os atendentes do setor ${teamName} estão ocupados. Seu atendimento já está na fila de espera e assim que um atendente ficar disponível você será atendido!`;
+          }
 
-          const messageText = `Agradeço o seu contato! No momento, a nossa equipe do setor ${teamName} está fora do expediente (${businessHoursText}). Vou transferir seu atendimento para este setor assim que o expediente iniciar. Seu chat já foi colocado na fila de espera para que nossa equipe te atenda logo no início das atividades!`;
-
-          await sendAutomatedMessageAction(
-            context.chat.id,
-            messageText,
-            context.systemAgentId,
-            true
-          );
-
-          await db.query(
+          const queueUpdate = await db.query(
             `UPDATE chats
              SET agent_id = NULL,
                  assigned_system_agent_id = NULL,
@@ -482,9 +483,34 @@ async function runTransferChatTool(
                  color = $2,
                  assigned_at = NULL,
                  updated_at = clock_timestamp()
-             WHERE id = $3`,
-            [chatTag, chatColor, context.chat.id]
+             WHERE id = $3
+               AND workspace_id = $4
+               AND agent_id IS NULL
+               AND assigned_system_agent_id = $5
+               AND is_autopilot_active = TRUE
+             RETURNING id`,
+            [chatTag, chatColor, context.chat.id, context.workspaceId, context.systemAgentId]
           );
+          if ((queueUpdate.rowCount ?? 0) === 0) {
+            throw new Error('Chat mudou de responsavel antes da transferencia para a fila.');
+          }
+
+          let notificationDelivered = true;
+          try {
+            const notification = await sendAutomatedMessageAction(
+              context.chat.id,
+              messageText,
+              context.systemAgentId,
+              true
+            );
+            notificationDelivered = notification.success === true;
+            if (!notificationDelivered) {
+              console.error('[TRANSFER_CHAT_FALLBACK] Queue transition succeeded but customer notice failed:', notification.error);
+            }
+          } catch (notificationError) {
+            notificationDelivered = false;
+            console.error('[TRANSFER_CHAT_FALLBACK] Queue transition succeeded but customer notice failed:', notificationError);
+          }
 
           await broadcastChatUpdate(context.workspaceId, context.chat.id, {
             agent_id: null,
@@ -495,8 +521,12 @@ async function runTransferChatTool(
             tag: chatTag,
             color: chatColor,
             assigned_at: null,
+          }).catch((broadcastError) => {
+            console.error('[TRANSFER_CHAT_FALLBACK] Queue transition succeeded but realtime broadcast failed:', broadcastError);
           });
-          await abortActiveProcedures(context.chat.id);
+          await abortActiveProcedures(context.chat.id).catch((abortError) => {
+            console.error('[TRANSFER_CHAT_FALLBACK] Queue transition succeeded but procedure cleanup failed:', abortError);
+          });
 
           return {
             toolName: 'transfer_chat',
@@ -505,8 +535,10 @@ async function runTransferChatTool(
             output: {
               transferred: false,
               fallbackExecuted: true,
+              notificationDelivered,
               target,
-              reason: 'Nenhum agente disponível no momento. Fila com horário de expediente ativada.',
+              reasonCode: result.reasonCode,
+              reason: result.error || 'Equipe indisponível no momento. Fila de espera ativada.',
             },
           };
         } catch (fallbackError) {
@@ -679,9 +711,12 @@ async function runCloseChatTool(
     await client.query("SET LOCAL statement_timeout = '20s'");
 
     const chatRes = await client.query(
-      `SELECT
+       `SELECT
           workspace_id,
           status,
+          agent_id,
+          assigned_system_agent_id,
+          is_autopilot_active,
           tag AS current_tag,
           color AS current_color,
           (
@@ -713,6 +748,15 @@ async function runCloseChatTool(
       };
     }
 
+    if (
+      chatRow.agent_id
+      || chatRow.is_autopilot_active !== true
+      || chatRow.assigned_system_agent_id !== context.systemAgentId
+    ) {
+      await client.query('ROLLBACK');
+      return reject(action, 'Chat nao esta mais atribuido a este Atendente Inteligente.');
+    }
+
     workspaceId = chatRow.workspace_id;
     lastInstanceName = chatRow.last_instance_name || null;
 
@@ -742,7 +786,11 @@ async function runCloseChatTool(
           is_autopilot_active = FALSE,
           copilot_mode = 'off',
           updated_at = clock_timestamp()
-       WHERE id = $5 AND workspace_id = $6
+       WHERE id = $5
+         AND workspace_id = $6
+         AND agent_id IS NULL
+         AND assigned_system_agent_id = $7
+         AND is_autopilot_active = TRUE
        RETURNING closed_at, close_reason_tag_id, close_notes, tag, color`,
       [
         reasonTagId,
@@ -751,8 +799,14 @@ async function runCloseChatTool(
         tagInfo.color ?? chatRow.current_color ?? '',
         context.chat.id,
         workspaceId,
+        context.systemAgentId,
       ]
     );
+
+    if ((closeUpdateRes.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      return reject(action, 'Chat mudou de responsavel antes do encerramento.');
+    }
 
     await client.query(
       `UPDATE meta_conversations
@@ -905,6 +959,7 @@ async function runCloseChatTool(
         },
       };
     }
+
     return {
       toolName: 'close_chat',
       status: 'error',
@@ -1133,6 +1188,12 @@ export async function runAgentTools(
   let transferExecuted = false;
   for (const action of normalizedActions) {
     const startedAt = Date.now();
+    if (!(await ensureChatStillAssignedToAgent(runtimeContext))) {
+      const result = reject(action, 'Chat nao esta mais atribuido a este Atendente Inteligente.');
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
+      results.push(result);
+      break;
+    }
     if (!ALLOWED_TOOLS.has(action.type)) {
       const result = reject(action, 'Ferramenta nao permitida para Atendente Inteligente.');
       await auditToolResult(runtimeContext, result, Date.now() - startedAt);
@@ -1283,6 +1344,9 @@ export async function runAgentTools(
       });
     }
     results.push(result);
+    if (result.status === 'success' && (action.type === 'transfer_chat' || action.type === 'close_chat')) {
+      break;
+    }
   }
 
   return results;

@@ -13,6 +13,7 @@ interface VideoPlayerProProps {
 }
 
 const formatTime = (seconds: number) => {
+    if (!isFinite(seconds) || seconds < 0) return "0:00";
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
@@ -55,7 +56,53 @@ const VideoPlayerPro: React.FC<VideoPlayerProProps> = ({ src }) => {
         const prog = (videoRef.current.currentTime / videoRef.current.duration) * 100;
         setProgress(isFinite(prog) ? prog : 0);
         setCurrentTime(videoRef.current.currentTime);
-        setDuration(videoRef.current.duration || 0);
+    };
+
+    // A duracao precisa vir de `loadedmetadata`/`durationchange`, nao do
+    // `timeupdate`: esse ultimo so dispara durante a reproducao, entao antes do
+    // primeiro play o tempo total ficava sempre 0 — e sem tempo total nao ha
+    // como calcular a posicao de um clique na barra, o que travava o seek.
+    const durationProbeStateRef = useRef<'idle' | 'probing' | 'done'>('idle');
+
+    const handleLoadedMetadata = () => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        if (isFinite(video.duration) && video.duration > 0) {
+            durationProbeStateRef.current = 'done';
+            setDuration(video.duration);
+            return;
+        }
+
+        // Container sem duracao no cabecalho (webm/ogg de gravador): forcar um
+        // seek para o fim obriga o navegador a calcular o tempo total.
+        if (durationProbeStateRef.current === 'idle') {
+            durationProbeStateRef.current = 'probing';
+            try {
+                video.currentTime = 1e101;
+            } catch {
+                durationProbeStateRef.current = 'done';
+            }
+        }
+    };
+
+    const handleDurationChange = () => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (!isFinite(video.duration) || video.duration <= 0) return;
+
+        setDuration(video.duration);
+
+        if (durationProbeStateRef.current === 'probing') {
+            durationProbeStateRef.current = 'done';
+            try {
+                video.currentTime = 0;
+                setCurrentTime(0);
+                setProgress(0);
+            } catch {
+                /* rewind recusado; a duracao ja foi obtida */
+            }
+        }
     };
 
     // Video ended
@@ -67,8 +114,9 @@ const VideoPlayerPro: React.FC<VideoPlayerProProps> = ({ src }) => {
     // Seek
     const handleSeek = (percent: number) => {
         if (!videoRef.current) return;
-        const time = (percent / 100) * (videoRef.current.duration || 0);
-        if (isFinite(time)) videoRef.current.currentTime = time;
+        const total = videoRef.current.duration;
+        if (!isFinite(total) || total <= 0) return;
+        videoRef.current.currentTime = (percent / 100) * total;
         setProgress(percent);
     };
 
@@ -140,7 +188,10 @@ const VideoPlayerPro: React.FC<VideoPlayerProProps> = ({ src }) => {
                 ref={videoRef}
                 className={cn("w-auto h-auto max-h-[85vh] max-w-full mx-auto block", hasError && "hidden")}
                 src={src}
+                preload="metadata"
                 onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleLoadedMetadata}
+                onDurationChange={handleDurationChange}
                 onEnded={handleEnded}
                 onError={() => setHasError(true)}
                 onClick={togglePlay}

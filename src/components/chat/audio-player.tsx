@@ -85,11 +85,50 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
         }
     }, []);
 
+    // Arquivos gerados pelo MediaRecorder (ogg/webm do gravador do navegador) e
+    // varios audios do WhatsApp nao trazem a duracao no cabecalho: o navegador
+    // devolve `Infinity` ate percorrer o arquivo. Forcar um seek para um tempo
+    // absurdo obriga esse calculo; o `durationchange` seguinte traz o valor real.
+    const durationProbeStateRef = useRef<'idle' | 'probing' | 'done'>('idle');
+
     const handleLoadedMetadata = useCallback(() => {
-        if (audioRef.current) {
-            const newDuration = audioRef.current.duration;
-            if (isFinite(newDuration)) {
-                setDuration(newDuration);
+        const audio = audioRef.current;
+        if (!audio) return;
+
+        const newDuration = audio.duration;
+        if (isFinite(newDuration) && newDuration > 0) {
+            durationProbeStateRef.current = 'done';
+            setDuration(newDuration);
+            return;
+        }
+
+        if (durationProbeStateRef.current === 'idle') {
+            durationProbeStateRef.current = 'probing';
+            try {
+                audio.currentTime = 1e101;
+            } catch {
+                durationProbeStateRef.current = 'done';
+            }
+        }
+    }, []);
+
+    const handleDurationChange = useCallback(() => {
+        const audio = audioRef.current;
+        if (!audio) return;
+
+        const newDuration = audio.duration;
+        if (!isFinite(newDuration) || newDuration <= 0) return;
+
+        setDuration(newDuration);
+
+        if (durationProbeStateRef.current === 'probing') {
+            durationProbeStateRef.current = 'done';
+            // Desfaz o seek da sondagem para o player voltar ao inicio.
+            try {
+                audio.currentTime = 0;
+                setCurrentTime(0);
+            } catch {
+                /* navegador recusou o rewind; a duracao ja foi obtida */
             }
         }
     }, []);
@@ -146,24 +185,32 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
         const audio = audioRef.current;
         if (!audio) return;
 
+        // `ended` precisa de referencia estavel: com a arrow inline o
+        // removeEventListener nao removia nada e o listener vazava a cada render.
+        const handleEnded = () => setIsPlaying(false);
+
         audio.addEventListener('timeupdate', handleTimeUpdate);
         audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-        audio.addEventListener('ended', () => setIsPlaying(false));
+        audio.addEventListener('durationchange', handleDurationChange);
+        audio.addEventListener('ended', handleEnded);
 
         if (initialDuration && isFinite(initialDuration)) {
             setDuration(initialDuration);
-        } else {
-            if (audio.readyState > 0) {
-                handleLoadedMetadata();
-            }
+        }
+
+        // A duracao do metadado ainda e consultada mesmo com `initialDuration`:
+        // o valor vindo do provedor costuma ser arredondado e as vezes vem zerado.
+        if (audio.readyState > 0) {
+            handleLoadedMetadata();
         }
 
         return () => {
             audio.removeEventListener('timeupdate', handleTimeUpdate);
             audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-            audio.removeEventListener('ended', () => setIsPlaying(false));
+            audio.removeEventListener('durationchange', handleDurationChange);
+            audio.removeEventListener('ended', handleEnded);
         };
-    }, [handleTimeUpdate, handleLoadedMetadata, initialDuration]);
+    }, [handleTimeUpdate, handleLoadedMetadata, handleDurationChange, initialDuration]);
 
     const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
 

@@ -38,7 +38,6 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspa
     const [error, setError] = useState<string | null>(null);
     const [resultFilter, setResultFilter] = useState<SearchResultFilter>('all');
     const upsertChats = useInboxStore((state) => state.upsertChats);
-    const setMessagesForChat = useInboxStore((state) => state.setMessagesForChat);
     const { toast } = useToast();
 
     const isProtocolSearch = searchQuery.trim().toUpperCase().startsWith('PRT-');
@@ -89,19 +88,6 @@ export function SearchDetailsDialog({ isOpen, onOpenChange, searchQuery, workspa
 
     const handleSelectChat = (chat: Chat) => {
         upsertChats([chat]);
-        if (chat.messages?.length) {
-            const firstMessage = chat.messages[0];
-            const lastMessage = chat.messages[chat.messages.length - 1];
-            setMessagesForChat(
-                chat.id,
-                chat.messages,
-                lastMessage?.createdAt ?? null,
-                firstMessage?.createdAt ?? null,
-                firstMessage?.id ?? null,
-                false,
-                true
-            );
-        }
         onSelectChat(chat);
         onOpenChange(false);
     };

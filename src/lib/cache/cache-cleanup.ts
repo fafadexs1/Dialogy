@@ -2,6 +2,9 @@ import { subDays } from 'date-fns';
 import { cacheService } from './cache-service';
 
 const DAYS_TO_KEEP = 5;
+// Chats sobrevivem mais que mensagens: a lista precisa abrir preenchida offline,
+// mas não a ponto de guardar todo chat já visto.
+const CHAT_DAYS_TO_KEEP = 30;
 
 /**
  * Run cache cleanup for old messages
@@ -11,6 +14,7 @@ export async function runCacheCleanup(previousWorkspaceId?: string): Promise<voi
     try {
         const cutoffDate = subDays(new Date(), DAYS_TO_KEEP);
         await cacheService.clearOldMessages(cutoffDate);
+        await cacheService.clearOldChats(subDays(new Date(), CHAT_DAYS_TO_KEEP));
 
         if (previousWorkspaceId) {
             await cacheService.clearWorkspace(previousWorkspaceId);

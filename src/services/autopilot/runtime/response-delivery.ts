@@ -18,6 +18,7 @@ export type PreparedAutopilotResponseDelivery = {
   id: string;
   blocks: string[];
   deliveredBlockIndexes: Set<number>;
+  uncertainBlockIndexes: Set<number>;
   status: 'pending' | 'sending' | 'sent' | 'error';
 };
 
@@ -94,26 +95,32 @@ export async function prepareAutopilotResponseDelivery(input: {
     throw new Error(`Durable autopilot response ${row.id} has no valid message blocks.`);
   }
 
-  const delivered = await database.query(
-    `SELECT metadata->>'autopilotResponseBlockIndex' AS block_index
+  const attempts = await database.query(
+    `SELECT metadata->>'autopilotResponseBlockIndex' AS block_index,
+            upper(COALESCE(api_message_status, '')) AS message_status
      FROM messages
      WHERE chat_id = $1
        AND from_me = true
-       AND upper(COALESCE(api_message_status, '')) IN (
-         'SENT',
-         'DELIVERY_ACK',
-         'DELIVERED',
-         'READ',
-         'PLAYED'
-       )
        AND metadata->>'autopilotResponseDeliveryId' = $2`,
     [input.chatId, row.id],
   );
   const deliveredBlockIndexes = new Set<number>();
-  for (const deliveredRow of delivered.rows) {
-    const blockIndex = Number(deliveredRow.block_index);
+  const uncertainBlockIndexes = new Set<number>();
+  const acceptedStatuses = new Set(['SENT', 'DELIVERY_ACK', 'DELIVERED', 'READ', 'PLAYED']);
+  const rejectedStatuses = new Set(['FAILED', 'ERROR']);
+  for (const attempt of attempts.rows) {
+    const blockIndex = Number(attempt.block_index);
     if (Number.isInteger(blockIndex) && blockIndex >= 0 && blockIndex < storedBlocks.length) {
-      deliveredBlockIndexes.add(blockIndex);
+      const status = String(attempt.message_status || '').trim().toUpperCase();
+      if (acceptedStatuses.has(status)) {
+        deliveredBlockIndexes.add(blockIndex);
+        uncertainBlockIndexes.delete(blockIndex);
+      } else if (!rejectedStatuses.has(status) && !deliveredBlockIndexes.has(blockIndex)) {
+        // A persisted attempt without a definitive receipt may already have
+        // reached the provider before the worker crashed. Never resend it
+        // automatically until a receipt or explicit rejection resolves it.
+        uncertainBlockIndexes.add(blockIndex);
+      }
     }
   }
 
@@ -134,6 +141,7 @@ export async function prepareAutopilotResponseDelivery(input: {
     id: String(row.id),
     blocks: storedBlocks,
     deliveredBlockIndexes,
+    uncertainBlockIndexes,
     status: deliveredBlockIndexes.size === storedBlocks.length
       ? 'sent'
       : row.status,

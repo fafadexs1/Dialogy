@@ -39,6 +39,7 @@ stripe.exe
 
 # misc
 .DS_Store
+.eslintcache
 *.pem
 
 # vercel

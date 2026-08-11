@@ -46,6 +46,12 @@
   GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
   GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v24}
   GOOGLE_ADS_EXPORT_SECRET: ${GOOGLE_ADS_EXPORT_SECRET:-}
+  # Cifra o refresh token do Google Ads guardado em workspace_integrations.
+  # Sem esta chave o sistema usa META_PAYLOAD_ENCRYPTION_KEY.
+  GOOGLE_ADS_SECRET_ENCRYPTION_KEY: ${GOOGLE_ADS_SECRET_ENCRYPTION_KEY:-}
+  GOOGLE_ADS_EXPORT_BATCH_SIZE: ${GOOGLE_ADS_EXPORT_BATCH_SIZE:-25}
+  GOOGLE_ADS_EXPORT_INTERVAL_MS: ${GOOGLE_ADS_EXPORT_INTERVAL_MS:-60000}
+  GOOGLE_ADS_EXPORT_LEASE_MS: ${GOOGLE_ADS_EXPORT_LEASE_MS:-120000}
   GOOGLE_GENAI_API_KEY: ${GOOGLE_GENAI_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   # Whisper Transcription API
@@ -177,7 +183,7 @@ services:
   # as uid 1001, so initialise the shared Hugging Face/ONNX cache before either
   # process can load a local embedding or reranking model.
   ai-cache-init:
-    image: fafadexs/dialogy-worker-ai:PDC-1.32
+    image: fafadexs/dialogy-worker-ai:PDC-1.47
     restart: "no"
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
@@ -190,7 +196,7 @@ services:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
 
   dialogy:
-    image: fafadexs/dialogy:PDC-1.32
+    image: fafadexs/dialogy:PDC-1.47
     restart: unless-stopped
     init: true
     depends_on:
@@ -218,10 +224,11 @@ services:
       interval: 30s
       retries: 5
       start_period: 40s
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PDC-1.32
+    image: fafadexs/dialogy-worker:PDC-1.47
     restart: unless-stopped
     init: true
     depends_on:
@@ -231,10 +238,11 @@ services:
       <<: *worker-environment
       # QUEUE_WORKER_CONCURRENCY=8 — o pool nao precisa passar disso.
       DB_POOL_MAX: ${WORKER_DB_POOL_MAX:-8}
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PDC-1.32
+    image: fafadexs/dialogy-worker-ai:PDC-1.47
     restart: unless-stopped
     init: true
     depends_on:
@@ -248,10 +256,11 @@ services:
       DB_POOL_MAX: ${WORKER_AI_DB_POOL_MAX:-3}
     volumes:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker-campaign:
-    image: fafadexs/dialogy-worker:PDC-1.32
+    image: fafadexs/dialogy-worker:PDC-1.47
     command: ["node", "dist/worker-campaign.js"]
     restart: unless-stopped
     init: true
@@ -262,10 +271,11 @@ services:
       <<: *worker-campaign-environment
       # CAMPAIGN_WORKER_CONCURRENCY=2.
       DB_POOL_MAX: ${WORKER_CAMPAIGN_DB_POOL_MAX:-3}
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker-meta-relay:
-    image: fafadexs/dialogy-worker:PDC-1.32
+    image: fafadexs/dialogy-worker:PDC-1.47
     command: ["node", "dist/worker-meta-relay.js"]
     restart: unless-stopped
     init: true
@@ -276,7 +286,35 @@ services:
       <<: *app-environment
       # META_RELAY_CONCURRENCY=5.
       DB_POOL_MAX: ${WORKER_META_RELAY_DB_POOL_MAX:-4}
+    networks: [default, supabase]
+    stop_grace_period: 30s
+
+  worker-google-ads:
+    image: fafadexs/dialogy-worker:PDC-1.37
+    command: ["node", "dist/worker-google-ads.js"]
+    restart: unless-stopped
+    init: true
+    depends_on:
+      dialogy:
+        condition: service_healthy
+    environment:
+      <<: *app-environment
+      # Fila de conversoes offline: baixo volume, pool pequeno basta.
+      DB_POOL_MAX: ${WORKER_GOOGLE_ADS_DB_POOL_MAX:-2}
+    networks: [default, supabase]
     stop_grace_period: 30s
 
 volumes:
   dialogy-transformers-cache:
+
+networks:
+  # Rede interna do proprio stack.
+  default:
+  # Rede da stack Supabase, para alcancar o Supavisor pelo nome do servico.
+  # Com isto o DATABASE_URL passa a ser:
+  #   postgresql://postgres.dialogy:SENHA@supavisor:6543/postgres
+  # Repare na porta 6543 — a interna do container. A 6547 e a publicacao no
+  # host, que deixa de ser necessaria e deveria ser fechada.
+  supabase:
+    external: true
+    name: dialogy_supabase_default

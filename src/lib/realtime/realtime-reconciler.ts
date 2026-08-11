@@ -83,6 +83,29 @@ export function shouldDeliverMessagePayload(
   return !payloadChatId || visibleChatIds.has(payloadChatId);
 }
 
+export type WorkspaceMessageDisposition = 'ignore-selected' | 'deliver' | 'reconcile-list';
+
+export function getWorkspaceMessageDisposition(
+  payload: RealtimePostgresChangesPayload<RealtimeRow>,
+  visibleChatIds: Set<string> | null,
+  selectedChatId: string | null,
+): WorkspaceMessageDisposition {
+  const payloadChatId = getPayloadChatId(payload);
+
+  // The room-scoped subscription already delivers the selected thread.
+  if (selectedChatId && payloadChatId === selectedChatId) {
+    return 'ignore-selected';
+  }
+
+  // A message for a chat that is not in the current list is precisely the signal
+  // that the list must be reconciled (for example, a brand-new customer).
+  if (visibleChatIds && payloadChatId && !visibleChatIds.has(payloadChatId)) {
+    return 'reconcile-list';
+  }
+
+  return 'deliver';
+}
+
 const hasOwn = (record: RealtimeRow, key: string) =>
   Object.prototype.hasOwnProperty.call(record, key);
 

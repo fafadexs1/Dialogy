@@ -8,10 +8,11 @@ import { findWhatsappTemplates, getEvolutionApiInstances } from '@/actions/evolu
 import { getTelegramInstances as fetchTelegramInstances } from '@/actions/telegram';
 import { listMetaChannels as fetchMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
+import { MAX_CAMPAIGN_LIST_ROWS, MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
 import { parseCampaignContactsCsv } from '@/lib/campaigns/csv-import';
 import { renderCampaignMessage } from '@/lib/campaigns/personalization';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
-import type { CampaignChannel, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
+import type { CampaignChannel, CampaignInteractivePayload, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CalendarClock, Clock3, Gauge, ImageIcon, ListFilter, Music2, ShieldCheck, X } from 'lucide-react';
 
@@ -244,6 +245,13 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const maxChars = 1000;
   const [mediaAttachment, setMediaAttachment] = useState<CampaignMediaAttachment | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [interactiveKind, setInteractiveKind] = useState<'none' | 'buttons' | 'list'>('none');
+  const [interactiveTitle, setInteractiveTitle] = useState('');
+  const [interactiveFooter, setInteractiveFooter] = useState('');
+  const [interactiveListButtonText, setInteractiveListButtonText] = useState('Ver opções');
+  const [interactiveOptions, setInteractiveOptions] = useState<Array<{ id: string; label: string }>>([
+    { id: 'opt_1', label: '' },
+  ]);
   const [csvImportSummary, setCsvImportSummary] = useState<CsvImportSummary | null>(null);
   const [scheduleMode, setScheduleMode] = useState<CampaignScheduleConfig['mode']>('immediate');
   const [scheduleEndAt, setScheduleEndAt] = useState('');
@@ -611,6 +619,78 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     }
   }
 
+  // Botoes/lista so existem no WhatsApp conectado. Se o canal mudar, a config
+  // fica ignorada em vez de bloquear o envio com um bloco que nem esta na tela.
+  const interactiveEnabled = deliveryChannel === 'whatsapp_baileys' && interactiveKind !== 'none';
+  const filledInteractiveOptions = interactiveOptions.filter(
+    (option) => option.label.trim().length > 0 && option.id.trim().length > 0
+  );
+  const interactiveOptionLimit = interactiveKind === 'buttons' ? MAX_CAMPAIGN_REPLY_BUTTONS : MAX_CAMPAIGN_LIST_ROWS;
+  const interactiveError = (() => {
+    if (!interactiveEnabled) return null;
+    if (!interactiveTitle.trim()) return 'Informe o titulo da mensagem interativa.';
+    if (interactiveKind === 'list' && !interactiveListButtonText.trim()) {
+      return 'Informe o texto do botao da lista.';
+    }
+    if (filledInteractiveOptions.length === 0) {
+      return 'Preencha ao menos uma opcao com rotulo e id.';
+    }
+    if (filledInteractiveOptions.length > interactiveOptionLimit) {
+      return `Voce tem ${filledInteractiveOptions.length} opcoes preenchidas e o limite e ${interactiveOptionLimit}. Remova as excedentes.`;
+    }
+    if (mediaAttachment) {
+      return 'Remova o anexo de midia para enviar botoes ou lista.';
+    }
+    return null;
+  })();
+
+  function buildInteractivePayload(): CampaignInteractivePayload | null {
+    if (!interactiveEnabled || filledInteractiveOptions.length === 0) return null;
+
+    if (interactiveKind === 'buttons') {
+      return {
+        kind: 'buttons',
+        title: interactiveTitle.trim(),
+        footer: interactiveFooter.trim() || undefined,
+        buttons: filledInteractiveOptions.map((option) => ({
+          type: 'reply' as const,
+          displayText: option.label.trim(),
+          id: option.id.trim(),
+        })),
+      };
+    }
+
+    return {
+      kind: 'list',
+      title: interactiveTitle.trim(),
+      footer: interactiveFooter.trim() || undefined,
+      buttonText: interactiveListButtonText.trim(),
+      sections: [
+        {
+          title: 'Opções',
+          rows: filledInteractiveOptions.map((option) => ({
+            title: option.label.trim(),
+            rowId: option.id.trim(),
+          })),
+        },
+      ],
+    };
+  }
+
+  function updateInteractiveOption(index: number, changes: Partial<{ id: string; label: string }>) {
+    setInteractiveOptions((previous) =>
+      previous.map((option, optionIndex) => (optionIndex === index ? { ...option, ...changes } : option))
+    );
+  }
+
+  function addInteractiveOption() {
+    setInteractiveOptions((previous) => [...previous, { id: `opt_${previous.length + 1}`, label: '' }]);
+  }
+
+  function removeInteractiveOption(index: number) {
+    setInteractiveOptions((previous) => previous.filter((_, optionIndex) => optionIndex !== index));
+  }
+
   async function handleSendCampaign() {
     if (!user?.activeWorkspaceId || !destinationId || !campaignMessage || selectedCount === 0) {
       toast({ title: 'Dados Incompletos', description: 'Selecione o canal, a conta de envio e pelo menos um contato.', variant: 'destructive' });
@@ -622,6 +702,10 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     }
     if (!customScheduleIsValid) {
       toast({ title: 'Agendamento incompleto', description: 'Revise a data limite, os dias, a janela e os intervalos.', variant: 'destructive' });
+      return;
+    }
+    if (interactiveError) {
+      toast({ title: 'Mensagem interativa incompleta', description: interactiveError, variant: 'destructive' });
       return;
     }
     setIsSubmitting(true);
@@ -654,7 +738,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       instanceName: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? undefined : destinationId,
       metaChannelId: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? destinationId : undefined,
       template: selectedTemplate,
-    }, campaignMessage, allContactsToSend, [...selectedSegmentIds], scheduleConfig, mediaAttachment);
+    }, campaignMessage, allContactsToSend, [...selectedSegmentIds], scheduleConfig, mediaAttachment, buildInteractivePayload());
 
     if (result.error) {
       toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
@@ -802,6 +886,115 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                           onChange={handleMediaInputChange}
                         />
                       </label>
+                    )}
+                  </div>
+                )}
+                {deliveryChannel === 'whatsapp_baileys' && (
+                  <div className="space-y-3 mt-6 rounded-xl border bg-muted/20 p-4">
+                    <div>
+                      <p className="text-sm font-medium leading-none">Resposta rapida (opcional)</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Envie a campanha com botoes ou com um menu de lista. A mensagem acima vira o corpo do card.
+                      </p>
+                    </div>
+
+                    <Select
+                      value={interactiveKind}
+                      onValueChange={(value) => setInteractiveKind(value as 'none' | 'buttons' | 'list')}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Somente texto</SelectItem>
+                        <SelectItem value="buttons">Botoes de resposta (max. {MAX_CAMPAIGN_REPLY_BUTTONS})</SelectItem>
+                        <SelectItem value="list">Lista de opcoes</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {interactiveKind !== 'none' && (
+                      <div className="space-y-3">
+                        {interactiveError && (
+                          <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                            {interactiveError}
+                          </p>
+                        )}
+
+                        <div className="space-y-2">
+                          <label htmlFor="interactive-title" className="text-sm font-medium leading-none">Titulo</label>
+                          <Input
+                            id="interactive-title"
+                            value={interactiveTitle}
+                            onChange={(e) => setInteractiveTitle(e.target.value)}
+                            placeholder="Ex: Resposta Rapida"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label htmlFor="interactive-footer" className="text-sm font-medium leading-none">Rodape (opcional)</label>
+                          <Input
+                            id="interactive-footer"
+                            value={interactiveFooter}
+                            onChange={(e) => setInteractiveFooter(e.target.value)}
+                            placeholder="Ex: Escolha uma opcao para continuar"
+                          />
+                        </div>
+
+                        {interactiveKind === 'list' && (
+                          <div className="space-y-2">
+                            <label htmlFor="interactive-buttontext" className="text-sm font-medium leading-none">Texto do botao da lista</label>
+                            <Input
+                              id="interactive-buttontext"
+                              value={interactiveListButtonText}
+                              onChange={(e) => setInteractiveListButtonText(e.target.value)}
+                              placeholder="Ver opcoes"
+                            />
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium leading-none">Opcoes</p>
+                          {interactiveOptions.map((option, index) => (
+                            <div key={index} className="flex items-center gap-2">
+                              <Input
+                                value={option.label}
+                                onChange={(e) => updateInteractiveOption(index, { label: e.target.value })}
+                                placeholder={`Opcao ${index + 1}`}
+                                className="flex-1"
+                              />
+                              <Input
+                                value={option.id}
+                                onChange={(e) => updateInteractiveOption(index, { id: e.target.value })}
+                                placeholder="id"
+                                className="w-32 font-mono text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeInteractiveOption(index)}
+                                disabled={interactiveOptions.length <= 1}
+                                className="rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-40"
+                                aria-label="Remover opcao"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={addInteractiveOption}
+                              disabled={interactiveOptions.length >= interactiveOptionLimit}
+                            >
+                              Adicionar opcao
+                            </Button>
+                            <span className="text-xs text-muted-foreground">
+                              {filledInteractiveOptions.length}/{interactiveOptionLimit}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            O <code className="rounded bg-muted px-1">id</code> e o valor que volta no webhook quando o contato responde.
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1356,8 +1549,46 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                       </div>
                     )}
                     <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-emerald-600 text-white px-3 py-2 text-sm shadow">
-                      {preview.message ? applyPlaceholder(preview.message) : "Sua mensagem aparecerá aqui..."}
+                      {interactiveEnabled && interactiveTitle.trim() && (
+                        <p className="font-semibold">{applyPlaceholder(interactiveTitle)}</p>
+                      )}
+                      <p className={cx(interactiveEnabled && interactiveTitle.trim() ? 'mt-1' : undefined)}>
+                        {preview.message ? applyPlaceholder(preview.message) : "Sua mensagem aparecerá aqui..."}
+                      </p>
+                      {interactiveEnabled && interactiveFooter.trim() && (
+                        <p className="mt-1.5 text-[10px] text-white/75">{applyPlaceholder(interactiveFooter)}</p>
+                      )}
                     </div>
+
+                    {interactiveEnabled && interactiveKind === 'buttons' && filledInteractiveOptions.length > 0 && (
+                      <div className="max-w-[85%] space-y-1">
+                        {filledInteractiveOptions.map((option, index) => (
+                          <div
+                            key={`${option.id}:${index}`}
+                            className="rounded-xl border bg-background px-3 py-2 text-center text-sm font-medium text-emerald-700 shadow-sm"
+                          >
+                            {option.label.trim()}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {interactiveEnabled && interactiveKind === 'list' && filledInteractiveOptions.length > 0 && (
+                      <div className="max-w-[85%] space-y-1">
+                        <div className="flex items-center justify-center gap-2 rounded-xl border bg-background px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm">
+                          <ListFilter className="h-4 w-4" />
+                          {interactiveListButtonText.trim() || 'Ver opções'}
+                        </div>
+                        <div className="rounded-xl border bg-muted/40 px-3 py-2">
+                          {filledInteractiveOptions.map((option, index) => (
+                            <p key={`${option.id}:${index}`} className="truncate text-xs text-muted-foreground">
+                              • {option.label.trim()}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <p className="text-[10px] text-muted-foreground">Previa com {PREVIEW_CONTACT_NAME}, primeiro nome e saudacao atual.</p>
                   </div>
                 </div>

@@ -16,6 +16,7 @@ import ContactTimeline from './contact-timeline';
 import DealForm from './deal-form';
 import LeadScoreBadge from './lead-score-badge';
 import { calculateLeadScore } from '@/actions/lead-scoring';
+import { badgeColorStyle } from '@/lib/color-contrast';
 
 interface CustomerProfileProps {
     contact: Contact | null;
@@ -54,7 +55,8 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
 
     const getTagStyle = (tagValue: string) => {
         const tag = tags.find(t => t.value === tagValue);
-        return tag ? { backgroundColor: tag.color, color: tag.color.startsWith('#FEE2E2') || tag.color.startsWith('#FEF9C3') ? '#000' : '#fff', borderColor: 'transparent' } : {};
+        const style = badgeColorStyle(tag?.color);
+        return style ? { ...style, borderColor: 'transparent' } : {};
     };
 
     const customFieldsToDisplay = customFieldDefs.filter(def => contact.custom_fields && contact.custom_fields[def.id]);

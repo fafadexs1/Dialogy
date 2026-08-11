@@ -2,20 +2,18 @@
 
 import { db } from '@/lib/db';
 import { createClient } from '@/lib/supabase/server';
-import { randomBytes, createHmac } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { Buffer } from 'node:buffer';
+import {
+    buildExistingAccountSettings,
+    buildWorkspaceManagedSettings,
+    normalizeNexusSettings,
+    type NexusLinkMode,
+    type NexusSettings,
+    type VerifiedNsxdUser,
+} from '@/lib/nexus-settings';
 
-export type NexusLinkMode = 'workspace_managed' | 'existing_account';
-
-type NexusSettings = {
-    mode?: NexusLinkMode;
-    email?: string;
-    username?: string;
-    autoProvisioned?: boolean;
-    nexusUserId?: string;
-    createdAt?: string;
-    updatedAt?: string;
-};
+export type { NexusLinkMode };
 
 type NexusConfigActionState = {
     success: boolean;
@@ -23,84 +21,8 @@ type NexusConfigActionState = {
     config: NexusSettings | null;
 };
 
-type VerifiedNsxdUser = {
-    id: string;
-    email: string;
-    username?: string;
-    full_name?: string;
-};
-
-const FALLBACK_NEXUS_DOMAIN = 'nexus.dialogy.local';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const SSO_SOURCE = 'dialogy';
-
-function buildWorkspaceIdentity(workspaceId: string) {
-    const domain = (process.env.NEXUS_WORKSPACE_EMAIL_DOMAIN || FALLBACK_NEXUS_DOMAIN)
-        .trim()
-        .toLowerCase();
-    const workspaceKey = workspaceId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 12) || 'workspace';
-    const randomSuffix = randomBytes(6).toString('hex');
-    const username = `ws_${workspaceKey}_${randomSuffix}`;
-    const email = `${username}@${domain}`;
-    return { username, email };
-}
-
-function normalizeNexusSettings(raw: unknown): NexusSettings {
-    const value = (raw && typeof raw === 'object') ? (raw as NexusSettings) : {};
-
-    let mode: NexusLinkMode;
-    if (value.mode === 'workspace_managed' || value.mode === 'existing_account') {
-        mode = value.mode;
-    } else if (value.email && !value.autoProvisioned) {
-        mode = 'existing_account';
-    } else {
-        mode = 'workspace_managed';
-    }
-
-    return {
-        mode,
-        email: value.email,
-        username: value.username,
-        autoProvisioned: value.autoProvisioned,
-        nexusUserId: value.nexusUserId,
-        createdAt: value.createdAt,
-        updatedAt: value.updatedAt,
-    };
-}
-
-function buildWorkspaceManagedSettings(workspaceId: string, currentSettings: NexusSettings): NexusSettings {
-    const now = new Date().toISOString();
-    const isReusableAuto = !!(currentSettings.autoProvisioned && currentSettings.email);
-    const generatedIdentity = isReusableAuto
-        ? { email: currentSettings.email as string, username: currentSettings.username }
-        : buildWorkspaceIdentity(workspaceId);
-
-    return {
-        mode: 'workspace_managed',
-        email: generatedIdentity.email,
-        username: generatedIdentity.username || currentSettings.username,
-        autoProvisioned: true,
-        nexusUserId: undefined,
-        createdAt: currentSettings.createdAt || now,
-        updatedAt: now,
-    };
-}
-
-function buildExistingAccountSettings(verifiedUser: VerifiedNsxdUser, currentSettings: NexusSettings): NexusSettings {
-    const now = new Date().toISOString();
-    const normalizedEmail = verifiedUser.email.trim().toLowerCase();
-    const normalizedUsername = (verifiedUser.username || normalizedEmail.split('@')[0]).trim();
-
-    return {
-        mode: 'existing_account',
-        email: normalizedEmail,
-        username: normalizedUsername,
-        autoProvisioned: false,
-        nexusUserId: verifiedUser.id,
-        createdAt: currentSettings.createdAt || now,
-        updatedAt: now,
-    };
-}
 
 async function getAuthenticatedUserId() {
     const supabase = await createClient();
@@ -241,9 +163,11 @@ export async function getNexusConfig(workspaceId: string): Promise<NexusSettings
 
         if (currentEmail && currentSettings.autoProvisioned) {
             await client.query('COMMIT');
-            return { ...currentSettings, mode: 'workspace_managed' };
+            return currentSettings;
         }
 
+        // Linha legada (ou ainda nao provisionada): normaliza e persiste, mantendo
+        // o e-mail que ja estava gravado.
         const nextSettings = buildWorkspaceManagedSettings(workspaceId, currentSettings);
 
         await client.query(

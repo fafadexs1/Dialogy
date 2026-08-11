@@ -14,6 +14,7 @@ import {
 } from '@/lib/queue';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
+import { normalizeStoredMediaUrl } from '@/lib/storage-url';
 import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
 import { normalizeImageThumbnailSource } from '@/lib/storage-url';
 import {
@@ -28,12 +29,16 @@ import {
     shouldAppendInboundToClosedWhatsappChat,
 } from '@/lib/whatsapp/evolution-inbound-message';
 import { extractAttributionToken } from '@/lib/marketing-attribution';
-import { attributeInboundWhatsappMessageByToken } from '@/lib/marketing-attribution-server';
+import {
+    attributeInboundWhatsappMessageByProximity,
+    attributeInboundWhatsappMessageByToken,
+} from '@/lib/marketing-attribution-server';
 import {
     findOrCreateWhatsappContact,
     findWhatsappChatByIdentity,
     lockWhatsappIdentityTransaction,
 } from '@/lib/whatsapp/contact-identity';
+import { rememberSendDigits } from '@/lib/whatsapp/number-form-memory';
 import {
     claimEvolutionWebhookEvent,
     markEvolutionWebhookEventFailed,
@@ -1472,6 +1477,12 @@ async function handleMessagesUpsert(payload: any) {
         hasData: Boolean(payload?.data),
     });
 
+    // O JID com que o WhatsApp entregou e a fonte mais confiavel sobre qual
+    // forma do numero (com/sem nono digito) a conta realmente usa.
+    if (contactJid) {
+        await rememberSendDigits(contactJid, contactJid, 'inbound');
+    }
+
     let content = '';
     let dbMessageType: Message['type'] = 'text';
 
@@ -1514,7 +1525,11 @@ async function handleMessagesUpsert(payload: any) {
     const replyContext = extractReplyContextFromPayload(data, message);
 
     // A URL da midia esta no nivel superior do objeto `message`
-    const mediaUrl = sanitizeUrl(message.mediaUrl) || null;
+    // A Evolution entrega a midia do MinIO como URL assinada de 7 dias
+    // (`presignedGetObject` sem prazo explicito). Guardar a assinatura junto faz
+    // a midia "expirar" com o arquivo intacto no bucket, entao gravamos so o
+    // caminho do objeto — que e de leitura publica e nao vence.
+    const mediaUrl = normalizeStoredMediaUrl(sanitizeUrl(message.mediaUrl)) || null;
     console.log('[WEBHOOK_MSG_UPSERT] Message Object Keys:', Object.keys(message));
     console.log('[WEBHOOK_MSG_UPSERT] Extracted mediaUrl:', mediaUrl);
     console.log('[WEBHOOK_MSG_UPSERT] Message Type:', messageType);
@@ -1859,18 +1874,25 @@ async function handleMessagesUpsert(payload: any) {
         );
 
         const attributionToken = !key.fromMe ? extractAttributionToken(content) : null;
-        if (attributionToken) {
+        if (!key.fromMe) {
             await client.query('SAVEPOINT ad_attribution');
             try {
-                const attribution = await attributeInboundWhatsappMessageByToken({
+                const attributionInput = {
                     client,
                     workspaceId,
                     instanceName,
-                    token: attributionToken,
                     contactId: contactData.id,
                     chatId: chat.id,
                     messageId: messageResult.rows[0].id,
-                });
+                };
+
+                // Token e deterministico. Sem ele, cai no casamento por
+                // proximidade, que ja se recusa a atuar quando o contato tem
+                // atribuicao — caso contrario cada mensagem roubaria um clique.
+                const attribution = attributionToken
+                    ? await attributeInboundWhatsappMessageByToken({ ...attributionInput, token: attributionToken })
+                    : await attributeInboundWhatsappMessageByProximity(attributionInput);
+
                 await client.query('RELEASE SAVEPOINT ad_attribution');
                 if (attribution) {
                     messageResult.rows[0].metadata = {

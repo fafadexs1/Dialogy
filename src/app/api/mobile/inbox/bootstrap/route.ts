@@ -25,5 +25,6 @@ export async function GET(request: NextRequest) {
     user: mapMobileUser(user, workspace),
     chats: payload.chats.map(mapMobileChat),
     messagesByChatId: {},
+    chatPagination: payload.chatPagination,
   });
 }

@@ -73,12 +73,6 @@ export async function GET(request: NextRequest, { params }: Params) {
         WHERE c.id = $1
           AND c.workspace_id = $2
       ),
-      -- Cada OR aqui cruzava dois caminhos de acesso distintos (PK vs telefone,
-      -- PK vs contato), e o planner nao consegue indexar isso: varria todos os
-      -- contatos e todos os chats do workspace a cada requisicao.
-      -- Medido: 4.640 ms e 10.994.137 buffers (~84 GB de I/O logico) para
-      -- devolver 9 mensagens. Como UNION, cada ramo usa o seu indice:
-      -- 0,267 ms e 281 buffers, com resultado identico.
       matching_contacts AS (
         SELECT c.id
         FROM contacts c

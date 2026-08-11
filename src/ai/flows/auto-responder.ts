@@ -15,9 +15,7 @@ import { z } from 'genkit';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
-import { getCanonicalKnowledgeAnswer } from '@/services/rag/document-safety';
-import { inferKnowledgeContextRole } from '@/services/rag/knowledge-document';
-import type { KnowledgeBaseDocument } from '@/lib/types';
+import { enrichKnowledgeDocumentsForPrompt } from '@/services/rag/knowledge-document';
 import {
   assertAiModelOutput,
   runAiModelWithFallback,
@@ -58,28 +56,6 @@ const KnowledgeDocumentSchema = z.object({
   contextRole: z.string().nullable().optional(),
   category: z.string().nullable().optional(),
 });
-
-/**
- * Preenche os campos curados antes do parse do zod.
- *
- * Sem isto, dois vazamentos silenciosos: documentos antigos usam
- * `canonical_answer` em vez de `canonicalAnswer` e o zod descartaria a grafia
- * nao declarada; e `contextRole` costuma estar implicito na categoria, entao
- * so seria enviado quando alguem o preencheu na mao.
- */
-export function enrichKnowledgeDocumentsForPrompt(
-  documents: Array<Record<string, unknown>>,
-): Array<Record<string, unknown>> {
-  return (documents || []).map((document) => {
-    const typed = document as unknown as KnowledgeBaseDocument;
-    const canonicalAnswer = getCanonicalKnowledgeAnswer(typed);
-    return {
-      ...document,
-      canonicalAnswer: canonicalAnswer || null,
-      contextRole: inferKnowledgeContextRole(typed) || null,
-    };
-  });
-}
 
 const ResolvedCaseSchema = z.object({
   summary: z.string(),

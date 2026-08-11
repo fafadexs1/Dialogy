@@ -2,6 +2,8 @@ import { randomBytes } from 'crypto';
 
 export const ATTRIBUTION_TOKEN_PREFIX = 'DGY';
 export const WHATSAPP_MESSAGE_EVENT = 'whatsapp_message_received';
+export const LEAD_QUALIFIED_EVENT = 'lead_qualified';
+export const SALE_WON_EVENT = 'sale_won';
 
 const TOKEN_PATTERN = /\bDGY-[A-Z0-9_-]{5,16}\b/i;
 
@@ -56,8 +58,23 @@ export function collectAdClickParams(searchParams: URLSearchParams): AdClickPara
   };
 }
 
+/**
+ * Alfabeto de 32 simbolos sem I/L/O/U: o token e lido e digitado por pessoas, e
+ * precisa sobreviver ao toUpperCase() da extracao. Base64 nao servia — letras
+ * maiusculas e minusculas colapsavam no mesmo token e podiam colidir no indice
+ * unico, derrubando o redirect do anuncio.
+ */
+const TOKEN_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ0123456789';
+const TOKEN_LENGTH = 8;
+
 export function generateAttributionToken(): string {
-  return `${ATTRIBUTION_TOKEN_PREFIX}-${randomBytes(5).toString('base64url').toUpperCase()}`;
+  const bytes = randomBytes(TOKEN_LENGTH);
+  let token = '';
+  for (let index = 0; index < TOKEN_LENGTH; index += 1) {
+    // 256 e multiplo de 32, entao o modulo continua uniforme.
+    token += TOKEN_ALPHABET[bytes[index] % TOKEN_ALPHABET.length];
+  }
+  return `${ATTRIBUTION_TOKEN_PREFIX}-${token}`;
 }
 
 export function extractAttributionToken(content: string | null | undefined): string | null {

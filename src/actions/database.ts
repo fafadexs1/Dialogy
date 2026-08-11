@@ -4,6 +4,7 @@
 
 import { db } from '@/lib/db';
 import { PERMISSIONS } from '@/lib/permissions-catalog';
+import { getDangerousAdminAccess, getDangerousAdminActionMessage } from '@/lib/security/dangerous-admin';
 
 
 
@@ -1337,6 +1338,11 @@ drop function if exists public._create_updated_at_trigger(regclass);
 
 
 export async function initializeDatabase(): Promise<{ success: boolean; message: string }> {
+  const access = await getDangerousAdminAccess();
+  if (!access.ok) {
+    return { success: false, message: getDangerousAdminActionMessage(access) };
+  }
+
   console.log('[DB_SETUP] Iniciando a configuração completa do banco de dados...');
   const client = await db.connect();
 

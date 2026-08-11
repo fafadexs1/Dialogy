@@ -300,13 +300,42 @@ function PlanIntegrationsManager({ plan, allIntegrations, onUpdate }: { plan: Pl
                 <CardDescription>Habilite e defina os limites e custos para cada integração neste plano.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                {configurations.map(({ integration, config }) => {
-                    const [enabled, setEnabled] = useState(config.is_enabled);
-                    const [included, setIncluded] = useState(config.included_quantity);
-                    const [cost, setCost] = useState(config.additional_cost);
+                {configurations.map(({ integration, config }) => (
+                    <PlanIntegrationCard
+                        key={integration.id}
+                        integration={integration}
+                        config={config}
+                        isSubmitting={isSubmitting === integration.id}
+                        onSave={(enabled, included, cost) => handleIntegrationConfigChange(
+                            integration.id,
+                            enabled,
+                            included,
+                            cost,
+                        )}
+                    />
+                ))}
+            </CardContent>
+        </Card>
+    );
+}
 
-                    return (
-                        <div key={integration.id} className="p-4 border rounded-lg">
+function PlanIntegrationCard({
+    integration,
+    config,
+    isSubmitting,
+    onSave,
+}: {
+    integration: Integration;
+    config: { is_enabled: boolean; included_quantity: number; additional_cost: number };
+    isSubmitting: boolean;
+    onSave: (enabled: boolean, included: number, cost: number) => void;
+}) {
+    const [enabled, setEnabled] = useState(config.is_enabled);
+    const [included, setIncluded] = useState(config.included_quantity);
+    const [cost, setCost] = useState(config.additional_cost);
+
+    return (
+        <div className="p-4 border rounded-lg">
                             <div className="flex justify-between items-start">
                                 <div className="flex items-center gap-3">
                                     <Avatar className="h-10 w-10 border rounded-md">
@@ -335,16 +364,12 @@ function PlanIntegrationsManager({ plan, allIntegrations, onUpdate }: { plan: Pl
                                 </div>
                             </div>
                             <div className="mt-4 flex justify-end">
-                                <Button size="sm" onClick={() => handleIntegrationConfigChange(integration.id, enabled, included, cost)} disabled={isSubmitting === integration.id}>
-                                    {isSubmitting === integration.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                <Button size="sm" onClick={() => onSave(enabled, included, cost)} disabled={isSubmitting}>
+                                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                                     Salvar Configuração
                                 </Button>
                             </div>
-                        </div>
-                    )
-                })}
-            </CardContent>
-        </Card>
+        </div>
     );
 }
 

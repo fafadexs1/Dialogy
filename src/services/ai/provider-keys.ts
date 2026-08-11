@@ -94,7 +94,9 @@ export async function resolveAiProviderKeyCandidates(
   input: ResolveAiProviderKeyCandidatesInput
 ): Promise<AiModelKeyCandidate[]> {
   const workspaceConfigs = await loadWorkspaceProviderConfigs(input.config?.workspace_id);
-  const workspaceGeminiKey = cleanKey(input.workspaceGeminiApiKey) || cleanKey(workspaceConfigs.gemini?.apiKey);
+  const workspaceGeminiKey = cleanKey(input.workspaceGeminiApiKey)
+    || cleanKey(input.config?.gemini_api_key)
+    || cleanKey(workspaceConfigs.gemini?.apiKey);
 
   return [
     candidate('workspace-gemini', 'googleai', workspaceGeminiKey),

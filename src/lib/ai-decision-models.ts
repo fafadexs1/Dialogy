@@ -2,7 +2,11 @@ import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 
 export const SYSTEM_AI_DECISION_MODELS_KEY = 'ai_decision_model_config';
 
-export type AiDecisionModelRole = 'toolIntentGate' | 'intentClassifier' | 'workflowClassifier';
+export type AiDecisionModelRole =
+  | 'toolIntentGate'
+  | 'intentClassifier'
+  | 'workflowClassifier'
+  | 'fieldExtractor';
 
 export type AiDecisionModelSettings = {
   model: string;
@@ -35,6 +39,12 @@ export const AI_DECISION_MODEL_ROLES: Array<{
     description: 'Decide consultas operacionais opcionais antes da resposta.',
     defaultTimeoutMs: 1800,
   },
+  {
+    id: 'fieldExtractor',
+    label: 'Field Extractor',
+    description: 'Le a resposta do cliente e extrai os campos de coleta que as regras deterministicas nao conseguiram identificar.',
+    defaultTimeoutMs: 2500,
+  },
 ];
 
 export const DEFAULT_AI_DECISION_MODEL_CONFIG: AiDecisionModelConfig = {
@@ -49,6 +59,10 @@ export const DEFAULT_AI_DECISION_MODEL_CONFIG: AiDecisionModelConfig = {
   workflowClassifier: {
     model: DEFAULT_AUTOPILOT_MODEL,
     timeoutMs: 1800,
+  },
+  fieldExtractor: {
+    model: DEFAULT_AUTOPILOT_MODEL,
+    timeoutMs: 2500,
   },
 };
 
@@ -93,6 +107,7 @@ export function parseAiDecisionModelConfig(
       toolIntentGate: normalizeRoleSettings(parsed.toolIntentGate, fallback.toolIntentGate),
       intentClassifier: normalizeRoleSettings(parsed.intentClassifier, fallback.intentClassifier),
       workflowClassifier: normalizeRoleSettings(parsed.workflowClassifier, fallback.workflowClassifier),
+      fieldExtractor: normalizeRoleSettings(parsed.fieldExtractor, fallback.fieldExtractor),
     };
   } catch {
     return fallback;
@@ -104,6 +119,7 @@ export function serializeAiDecisionModelConfig(config: AiDecisionModelConfig): s
     toolIntentGate: normalizeRoleSettings(config.toolIntentGate, DEFAULT_AI_DECISION_MODEL_CONFIG.toolIntentGate),
     intentClassifier: normalizeRoleSettings(config.intentClassifier, DEFAULT_AI_DECISION_MODEL_CONFIG.intentClassifier),
     workflowClassifier: normalizeRoleSettings(config.workflowClassifier, DEFAULT_AI_DECISION_MODEL_CONFIG.workflowClassifier),
+    fieldExtractor: normalizeRoleSettings(config.fieldExtractor, DEFAULT_AI_DECISION_MODEL_CONFIG.fieldExtractor),
   }, null, 2);
 }
 

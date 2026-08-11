@@ -4,6 +4,7 @@ import { executeMarketingAutoClose, executeQueueAutoClose } from '@/services/cha
 import { dispatchMessageToWebhooksById } from '@/services/webhook-dispatcher';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
+import { reconcileOutboundMessage } from '@/services/whatsapp/reconcile-outbound';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import type {
@@ -77,32 +78,75 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
 
     if (job.attempts > 0) {
       const messageRes = await db.query(
-        `SELECT api_message_status, message_id_from_api
+        `SELECT api_message_status, message_id_from_api, created_at
          FROM messages
          WHERE id = $1
          LIMIT 1`,
         [payload.messageId]
       );
 
-      if ((messageRes.rowCount ?? 0) > 0) {
-        const row = messageRes.rows[0];
-        const currentStatus = String(row.api_message_status || '').toUpperCase();
-        const currentApiMessageId = row.message_id_from_api;
-
-        if (!currentApiMessageId && !FINAL_MESSAGE_STATUSES.has(currentStatus)) {
-          await db.query(
-            `UPDATE messages
-             SET api_message_status = 'FAILED'
-             WHERE id = $1`,
-            [payload.messageId]
-          );
-        }
+      if ((messageRes.rowCount ?? 0) === 0) {
+        console.warn(`[QUEUE] Mensagem ${payload.messageId} nao encontrada para reconciliar.`);
+        return;
       }
 
-      console.warn(
-        `[QUEUE] Skipping whatsapp_send retry for ${payload.messageId}. Blind retries are disabled to avoid duplicate sends.`
+      const row = messageRes.rows[0];
+      const currentStatus = String(row.api_message_status || '').toUpperCase();
+
+      if (row.message_id_from_api || FINAL_MESSAGE_STATUSES.has(currentStatus)) {
+        return;
+      }
+
+      // Retry cego duplicaria a mensagem quando a falha foi ambigua (timeout,
+      // queda de rede). Antes de decidir, perguntamos a Evolution o que ela
+      // realmente enviou. So reenviamos com a confirmacao de que nao saiu.
+      const markFailed = async (motivo: string) => {
+        await db.query(
+          `UPDATE messages SET api_message_status = 'FAILED' WHERE id = $1`,
+          [payload.messageId]
+        );
+        console.warn(`[QUEUE] whatsapp_send ${payload.messageId} mantido como FAILED. ${motivo}`);
+      };
+
+      const reconcileConfig = await getEvolutionApiConfig(payload.instanceName, {
+        workspaceId: payload.workspaceId,
+      });
+
+      if (!reconcileConfig) {
+        await markFailed('Configuracao da Evolution indisponivel para verificar.');
+        return;
+      }
+
+      const reconciliation = await reconcileOutboundMessage({
+        apiConfig: reconcileConfig,
+        instanceName: payload.instanceName,
+        number: payload.number,
+        content: payload.apiContent || payload.content,
+        sentAfter: new Date(row.created_at),
+      });
+
+      if (reconciliation.status === 'sent') {
+        await db.query(
+          `UPDATE messages
+           SET api_message_status = 'SENT',
+               message_id_from_api = COALESCE(message_id_from_api, $1)
+           WHERE id = $2`,
+          [reconciliation.keyId, payload.messageId]
+        );
+        console.log(
+          `[QUEUE] whatsapp_send ${payload.messageId} ja havia sido entregue (keyId=${reconciliation.keyId ?? 'desconhecido'}). Retry cancelado.`
+        );
+        return;
+      }
+
+      if (reconciliation.status === 'unknown') {
+        await markFailed(`Nao foi possivel verificar se saiu: ${reconciliation.reason}`);
+        return;
+      }
+
+      console.log(
+        `[QUEUE] whatsapp_send ${payload.messageId} confirmado como nao enviado. Reenviando com seguranca.`
       );
-      return;
     }
 
     const lockRes = await db.query(

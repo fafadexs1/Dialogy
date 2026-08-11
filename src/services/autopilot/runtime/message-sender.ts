@@ -10,7 +10,10 @@ import {
   prepareAutopilotResponseDelivery,
   type AutopilotResponseTrace,
 } from '@/services/autopilot/runtime/response-delivery';
-import { waitForAutomatedProviderAcceptance } from '@/services/autopilot/runtime/provider-delivery';
+import {
+  UncertainProviderDeliveryError,
+  waitForAutomatedProviderAcceptance,
+} from '@/services/autopilot/runtime/provider-delivery';
 import { assertAutopilotSourceMessageCurrent } from '@/services/autopilot/runtime/stale-source-guard';
 
 function assertAutomatedMessageSent<T extends { success: boolean; error?: string }>(
@@ -127,6 +130,12 @@ export async function sendMultiBlockResponse(
     if (delivery.status === 'sent') {
       return { success: true };
     }
+    if (delivery.uncertainBlockIndexes?.size > 0) {
+      throw new UncertainProviderDeliveryError(
+        `A entrega ${delivery.id} possui blocos sem confirmacao definitiva do provedor: `
+        + `${[...delivery.uncertainBlockIndexes].join(', ')}. Reenvio automatico bloqueado.`,
+      );
+    }
   }
 
   let lastResult: { success: boolean; error?: string; apiResponse?: any } = { success: true };
@@ -141,6 +150,10 @@ export async function sendMultiBlockResponse(
       maxTypingDelay,
     );
     await new Promise((resolve) => setTimeout(resolve, typingDelay));
+    await assertAutopilotSourceMessageCurrent({
+      chatId,
+      sourceMessageId: responseTrace?.sourceMessageId,
+    });
 
     const deliveryMetadata: MessageMetadata | undefined = delivery && responseTrace
       ? {

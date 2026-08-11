@@ -1,6 +1,6 @@
 import { FontAwesome6, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppShell } from "@/components/AppShell";
 import { colors } from "@/theme/colors";
@@ -12,6 +12,10 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    if (user && !isLoading) router.replace("/inbox");
+  }, [isLoading, user]);
 
   async function handleEnter() {
     try {

@@ -27,6 +27,11 @@ describe('safe remote URL guard', () => {
       .rejects.toThrow('not allowed');
   });
 
+  it('accepts any public host when allowlist contains "*"', async () => {
+    await expect(validateRemoteUrl('https://93.184.216.34/file', { allowedHosts: ['*'] }))
+      .resolves.toBeDefined();
+  });
+
   it('revalidates redirects and rejects a redirect to a private IP', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, {
       status: 302,

@@ -226,6 +226,7 @@ export type MessageMetadata = {
   customerMessage?: string;
   analysisKind?: 'transcription' | 'visual_summary' | 'video_summary' | 'media_summary' | 'routing_context';
   sourceMessageId?: string;
+  sourceChatId?: string;
   sourceType?: 'text' | 'audio' | 'image' | 'video' | 'document' | 'location' | 'system';
   event?: string;
   from_agent_id?: string;
@@ -299,7 +300,7 @@ export type MessageMetadata = {
   packId?: string;
   buyerId?: string;
   questionId?: string;
-  interactiveType?: 'list';
+  interactiveType?: 'list' | 'buttons';
   interactivePayload?: {
     kind: 'list';
     title?: string;
@@ -313,6 +314,33 @@ export type MessageMetadata = {
         description?: string;
         rowId: string;
       }>;
+    }>;
+    delay?: number;
+    quoted?: {
+      key?: {
+        id?: string;
+      };
+      message?: Record<string, any>;
+    };
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+  } | {
+    kind: 'buttons';
+    title: string;
+    description?: string;
+    footer?: string;
+    thumbnailUrl?: string;
+    buttons: Array<{
+      type: 'reply' | 'copy' | 'url' | 'call' | 'pix';
+      displayText?: string;
+      id?: string;
+      url?: string;
+      copyCode?: string;
+      phoneNumber?: string;
+      currency?: string;
+      name?: string;
+      keyType?: 'phone' | 'email' | 'cpf' | 'cnpj' | 'random';
+      key?: string;
     }>;
     delay?: number;
     quoted?: {
@@ -397,6 +425,14 @@ export type Chat = {
   relatedContactThread?: boolean;
   relatedContactIds?: string[];
   relatedChatIds?: string[];
+  /** Preenchido quando o contato chegou por um anuncio rastreado. */
+  adAttribution?: {
+    source: string;
+    campaign?: string;
+    campaignId?: string;
+    /** 'deterministic' veio do codigo na mensagem; 'probabilistic' veio do clique recente. */
+    confidence: string;
+  };
 };
 
 export type InternalChannel = {
@@ -1104,6 +1140,36 @@ export interface CampaignMediaAttachment {
   storagePath?: string;
 }
 
+export type CampaignInteractiveKind = 'buttons' | 'list';
+
+export interface CampaignInteractiveButton {
+  /** Somente respostas rápidas por enquanto; o id volta no webhook de resposta. */
+  type: 'reply';
+  displayText: string;
+  id: string;
+}
+
+export interface CampaignInteractiveListRow {
+  title: string;
+  description?: string;
+  rowId: string;
+}
+
+export interface CampaignInteractivePayload {
+  kind: CampaignInteractiveKind;
+  title: string;
+  description?: string;
+  footer?: string;
+  /** kind = 'buttons' */
+  buttons?: CampaignInteractiveButton[];
+  /** kind = 'list' */
+  buttonText?: string;
+  sections?: Array<{
+    title: string;
+    rows: CampaignInteractiveListRow[];
+  }>;
+}
+
 export type CampaignIntervalMode = 'fixed' | 'variable';
 
 export interface CampaignScheduleConfig {
@@ -1135,6 +1201,7 @@ export interface Campaign {
   destination_id?: string | null;
   template_payload?: CampaignTemplate | null;
   media_payload?: CampaignMediaAttachment | null;
+  interactive_payload?: CampaignInteractivePayload | null;
   created_at: string;
   started_at?: string;
   completed_at?: string;

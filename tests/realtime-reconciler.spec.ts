@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getWorkspaceMessageDisposition,
   parseVisibleIdSet,
   reconcileRealtimeChatAssignment,
   reconcileRealtimeChatPresentation,
@@ -54,6 +55,24 @@ describe('realtime reconciler', () => {
 
     expect(shouldDeliverMessagePayload(visiblePayload, visible)).toBe(true);
     expect(shouldDeliverMessagePayload(hiddenPayload, visible)).toBe(false);
+  });
+
+  it('reconciles the list when a message belongs to a chat not loaded yet', () => {
+    const visible = parseVisibleIdSet('chat-1,chat-2');
+    const newCustomerPayload = toPostgresChangesPayload(
+      broadcastPayload({ id: 'msg-new', chat_id: 'chat-new' }),
+    );
+
+    expect(getWorkspaceMessageDisposition(newCustomerPayload, visible, 'chat-1')).toBe('reconcile-list');
+  });
+
+  it('does not duplicate the selected thread through the workspace channel', () => {
+    const visible = parseVisibleIdSet('chat-1,chat-2');
+    const selectedPayload = toPostgresChangesPayload(
+      broadcastPayload({ id: 'msg-selected', chat_id: 'chat-1' }),
+    );
+
+    expect(getWorkspaceMessageDisposition(selectedPayload, visible, 'chat-1')).toBe('ignore-selected');
   });
 
   it('replaces a stale human agent with the hydrated transfer target', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { enrichKnowledgeDocumentsForPrompt } from '@/ai/flows/auto-responder';
+import { enrichKnowledgeDocumentsForPrompt } from '@/services/rag/knowledge-document';
 
 /**
  * A curadoria da base de conhecimento nao chegava ao modelo.

@@ -32,6 +32,7 @@ export const getInboxBootstrap = cache(async function getInboxBootstrap(chatId: 
           chatId,
           limit: 40,
           timezone: user.activeWorkspaceTimezone || 'America/Sao_Paulo',
+          chatOnly: false,
         })
       : Promise.resolve(null),
   ]);

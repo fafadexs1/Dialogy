@@ -12,6 +12,8 @@ import {
   type AiCredentialProvider,
 } from '@/lib/ai-provider-credentials';
 import { ensureWorkspaceIntegrationsTable } from '@/lib/workspace-integrations';
+import { loadIntegrationConfig } from '@/lib/workspace-integration-config';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import {
   listWorkspaceConfiguredAiModels,
   loadWorkspaceAiCredentialRecords,
@@ -48,7 +50,7 @@ export async function saveIntegrationConfig(
     return { success: false, error: 'Usuario nao autenticado.' };
   }
 
-  if (user.activeWorkspaceId !== workspaceId) {
+  if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:edit')) {
     return { success: false, error: 'Acesso negado ao workspace.' };
   }
 
@@ -81,30 +83,14 @@ export async function getIntegrationConfig(
   provider: string
 ): Promise<{ config: any | null; isActive: boolean }> {
   const user = await getCurrentUser();
-  if (!user) {
+  if (!user || !await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:view')) {
     return { config: null, isActive: false };
   }
 
   try {
-    await ensureWorkspaceIntegrationsTable();
-
-    const res = await db.query(
-      `
-        SELECT config, is_active
-        FROM workspace_integrations
-        WHERE workspace_id = $1
-          AND provider = $2
-      `,
-      [workspaceId, provider]
-    );
-
-    if (res.rows.length === 0) {
-      return { config: null, isActive: false };
-    }
-
-    return {
-      config: res.rows[0].config,
-      isActive: res.rows[0].is_active,
+    return await loadIntegrationConfig(workspaceId, provider) as {
+      config: any | null;
+      isActive: boolean;
     };
   } catch (error) {
     console.error('[GET_INTEGRATION_CONFIG] Error:', error);
@@ -176,7 +162,7 @@ export async function listAiProviderCredentialsAction(
   if (!user) {
     return { credentials: [], error: 'Usuario nao autenticado.' };
   }
-  if (user.activeWorkspaceId !== workspaceId) {
+  if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:view')) {
     return { credentials: [], error: 'Acesso negado ao workspace.' };
   }
 
@@ -204,10 +190,7 @@ export async function getWorkspaceConfiguredAiModelsAction(
   workspaceId: string,
 ): Promise<{ models: ConfiguredWorkspaceAiModel[]; error?: string }> {
   const user = await getCurrentUser();
-  if (!user) {
-    return { models: [], error: 'Usuario nao autenticado.' };
-  }
-  if (user.activeWorkspaceId !== workspaceId) {
+  if (!user || !await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:view')) {
     return { models: [], error: 'Acesso negado ao workspace.' };
   }
 
@@ -231,7 +214,7 @@ export async function saveAiProviderCredentialAction(input: {
   if (!user) {
     return { success: false, error: 'Usuario nao autenticado.' };
   }
-  if (user.activeWorkspaceId !== input.workspaceId) {
+  if (!await hasWorkspacePermission(user.id, input.workspaceId, 'workspace:settings:edit')) {
     return { success: false, error: 'Acesso negado ao workspace.' };
   }
   if (!isAiCredentialProvider(input.provider)) {
@@ -289,7 +272,7 @@ export async function removeAiProviderCredentialAction(input: {
   if (!user) {
     return { success: false, error: 'Usuario nao autenticado.' };
   }
-  if (user.activeWorkspaceId !== input.workspaceId) {
+  if (!await hasWorkspacePermission(user.id, input.workspaceId, 'workspace:settings:edit')) {
     return { success: false, error: 'Acesso negado ao workspace.' };
   }
   if (!isAiCredentialProvider(input.provider)) {
@@ -339,7 +322,7 @@ export async function testAiProviderConnectionAction(input: {
     };
   }
 
-  if (user.activeWorkspaceId !== input.workspaceId) {
+  if (!await hasWorkspacePermission(user.id, input.workspaceId, 'workspace:settings:edit')) {
     return {
       ok: false,
       provider: isAiProvider(input.provider) ? input.provider : 'gemini',

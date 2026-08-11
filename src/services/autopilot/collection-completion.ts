@@ -472,6 +472,19 @@ function isUnsafeCollectionReply(value: string, field: string): boolean {
 }
 
 /**
+ * The single gate every collected value must pass, whatever produced it: the
+ * deterministic reply parser below or the AI field extractor. Returns the
+ * normalized value, or null when it cannot be trusted for that field.
+ */
+export function acceptCollectionFieldValue(field: string, rawValue: unknown): string | null {
+  if (typeof rawValue !== 'string' && typeof rawValue !== 'number') return null;
+  const value = normalizeReplyForField(String(rawValue), field);
+  if (!value) return null;
+  if (isUnsafeCollectionReply(value, field)) return null;
+  return value;
+}
+
+/**
  * Extracts arbitrary, explicitly labelled CRM fields requested in the prior
  * turn. Single-field short replies are accepted; multi-field replies require
  * labels so values cannot be silently assigned to the wrong field.

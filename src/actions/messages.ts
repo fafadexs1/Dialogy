@@ -15,6 +15,7 @@ import { sendVideoMessage } from '@/services/whatsapp/send-video-message';
 import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
 import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
 import { sendListMessage } from '@/services/whatsapp/send-list-message';
+import { sendButtonsMessage } from '@/services/whatsapp/send-buttons-message';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
@@ -50,6 +51,7 @@ import { prependIntelligentAttendantSignature } from '@/lib/message-signature';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { isBillingBlocked, type BillingStatus } from '@/lib/billing-logic';
 import { requireChatAccess } from '@/server/inbox/access';
+import { automatedActorCanAccessChat } from '@/lib/security/system-agent-access';
 import {
     buildRetryMediaPayload,
     extractRetriedMediaResponseDetails,
@@ -57,6 +59,8 @@ import {
     type RetryMediaPayload,
 } from '@/services/messages/retry-media';
 import { RETRY_MEDIA_RETENTION_MS } from '@/services/messages/temp-media-retention';
+import { archiveOutboundMediaSafely, isTemporaryMediaUrl } from '@/services/messages/archive-outbound-media';
+import { normalizeStoredMediaUrl } from '@/lib/storage-url';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -131,6 +135,41 @@ type InteractiveListPayload = {
     mentionsEveryOne?: boolean;
     mentioned?: string[];
 };
+
+type InteractiveButton = {
+    type: 'reply' | 'copy' | 'url' | 'call' | 'pix';
+    displayText?: string;
+    id?: string;
+    url?: string;
+    copyCode?: string;
+    phoneNumber?: string;
+    currency?: string;
+    name?: string;
+    keyType?: 'phone' | 'email' | 'cpf' | 'cnpj' | 'random';
+    key?: string;
+};
+
+type InteractiveButtonsPayload = {
+    title: string;
+    description?: string;
+    footer?: string;
+    thumbnailUrl?: string;
+    buttons: InteractiveButton[];
+    delay?: number;
+    quoted?: {
+        key?: {
+            id?: string;
+        };
+        message?: Record<string, any>;
+    };
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+};
+
+// O WhatsApp renderiza no máximo 3 botões de resposta rápida.
+// Num arquivo "use server" todo export precisa ser uma função async, então
+// esta constante fica local. Se a UI precisar dela, mova para src/lib.
+const MAX_INTERACTIVE_REPLY_BUTTONS = 3;
 
 const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
 
@@ -603,6 +642,45 @@ function buildInteractiveListPreview(list: InteractiveListPayload): string {
         return summary;
     }
     return `[Lista interativa] ${list.buttonText}`;
+}
+
+function buildInteractiveButtonsPreview(payload: InteractiveButtonsPayload): string {
+    const summary = [payload.title, payload.description].filter(Boolean).join(' - ').trim();
+    const labels = payload.buttons
+        .map((button) => (button.displayText || button.name || button.id || '').trim())
+        .filter(Boolean)
+        .join(' | ');
+
+    if (summary && labels) return `${summary}\n\n[Botões] ${labels}`;
+    if (summary) return summary;
+    return `[Botões interativos] ${labels}`;
+}
+
+function isValidInteractiveButtons(
+    payload: InteractiveButtonsPayload | undefined
+): payload is InteractiveButtonsPayload {
+    if (!payload?.title?.trim()) return false;
+    if (!Array.isArray(payload.buttons) || payload.buttons.length === 0) return false;
+
+    return payload.buttons.every((button) => {
+        if (!button || typeof button !== 'object') return false;
+        if (!['reply', 'copy', 'url', 'call', 'pix'].includes(button.type)) return false;
+
+        switch (button.type) {
+            case 'reply':
+                return Boolean(button.displayText?.trim()) && Boolean(button.id?.trim());
+            case 'url':
+                return Boolean(button.displayText?.trim()) && Boolean(button.url?.trim());
+            case 'call':
+                return Boolean(button.displayText?.trim()) && Boolean(button.phoneNumber?.trim());
+            case 'copy':
+                return Boolean(button.displayText?.trim()) && Boolean(button.copyCode?.trim());
+            case 'pix':
+                return Boolean(button.key?.trim()) && Boolean(button.keyType?.trim());
+            default:
+                return false;
+        }
+    });
 }
 
 function isValidInteractiveList(list: InteractiveListPayload | undefined): list is InteractiveListPayload {
@@ -1248,7 +1326,8 @@ async function internalSendMedia(
             apiConfig,
             instanceName,
             remoteJid,
-            chatId
+            chatId,
+            workspaceId
         };
 
         // 2. Insert all as PENDING
@@ -1303,7 +1382,7 @@ async function internalSendMedia(
     (async () => {
         if (pendingMessages.length === 0) return;
 
-        const { apiConfig, instanceName, remoteJid } = backgroundData;
+        const { apiConfig, instanceName, remoteJid, workspaceId } = backgroundData;
 
         for (const item of pendingMessages) {
             const { dbMessage, file } = item;
@@ -1373,10 +1452,35 @@ async function internalSendMedia(
                 // If the API returns a direct URL for the media, we can update it in metadata, but usually we already have our public URL if using S3.
                 // If using base64 pass-through, Evolution might return a URL if it stores it (e.g. WA Cloud).
 
+                // A midia da mensagem precisa sobreviver ao bucket de transferencia.
+                //
+                // `temp-media` e apagado em 24h (RETRY_MEDIA_RETENTION_DAYS), entao
+                // gravar essa URL como registro da conversa fazia a midia "expirar".
+                // Quando a Evolution devolve o link do MinIO dela, ele ja e
+                // permanente e basta usar; senao arquivamos nossa propria copia
+                // agora, enquanto o arquivo ainda existe.
+                const uploadedTempUrl = file.base64?.startsWith('http') ? file.base64 : undefined;
+                // O link do MinIO que a Evolution devolve vem assinado por 7 dias;
+                // guardamos apenas o caminho do objeto, que nao vence.
+                const providerUrl = normalizeStoredMediaUrl(returnedUrl) || null;
+                const permanentFromProvider = providerUrl && !isTemporaryMediaUrl(providerUrl)
+                    ? providerUrl
+                    : null;
+
+                let finalMediaUrl: string | null = permanentFromProvider;
+                if (!finalMediaUrl && uploadedTempUrl) {
+                    const archived = await archiveOutboundMediaSafely({
+                        workspaceId,
+                        sourceUrl: uploadedTempUrl,
+                        mimetype: returnedMimetype || file.mimetype,
+                    });
+                    finalMediaUrl = archived?.url ?? uploadedTempUrl;
+                }
+
                 // Atualiza status e, se houver nova URL, atualiza o metadata
-                if (returnedUrl) {
+                if (finalMediaUrl) {
                     await db.query(`
-                        UPDATE messages 
+                        UPDATE messages
                         SET api_message_status = 'SENT',
                             message_id_from_api = $1,
                             metadata = jsonb_set(
@@ -1384,7 +1488,7 @@ async function internalSendMedia(
                                 '{mimetype}', $3
                             )
                         WHERE id = $4
-                    `, [apiResponse?.key?.id, JSON.stringify(returnedUrl), JSON.stringify(returnedMimetype || file.mimetype), dbMessage.id]);
+                    `, [apiResponse?.key?.id, JSON.stringify(finalMediaUrl), JSON.stringify(returnedMimetype || file.mimetype), dbMessage.id]);
                 } else {
                     await db.query(`
                         UPDATE messages 
@@ -1829,7 +1933,8 @@ export const retryMessageAction = withDebug(
                 await client.query(
                     `UPDATE messages
                      SET api_message_status = 'PENDING',
-                         message_id_from_api = NULL
+                         message_id_from_api = NULL,
+                         metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
                      WHERE id = $1`,
                     [messageId]
                 );
@@ -1849,7 +1954,18 @@ export const retryMessageAction = withDebug(
                         senderType,
                         tabId: messageRow.sent_by_tab,
                     },
-                    { client }
+                    {
+                        client,
+                        // O jobId padrao e whatsapp_send__<messageId>, e o BullMQ guarda
+                        // os jobs concluidos/falhos (removeOnComplete 1000 / removeOnFail
+                        // 5000). Reenviar com o mesmo id fazia o add() devolver o job
+                        // antigo sem enfileirar nada: a mensagem ficava PENDING para
+                        // sempre e a action ainda respondia success. Cada retry manual
+                        // precisa de um id proprio. O envio duplicado continua barrado
+                        // pelo lock em messages (so sai de PENDING/FAILED com
+                        // message_id_from_api NULL) no handler de whatsapp_send.
+                        jobId: `whatsapp_send__${messageId}__retry__${Date.now()}`,
+                    }
                 );
 
                 await client.query('COMMIT');
@@ -1913,6 +2029,9 @@ export async function sendAutomatedMessageAction(
     message?: Message;
 }> {
     chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
+    if (!await automatedActorCanAccessChat({ chatId, actorId: agentId, isSystemAgent })) {
+        return { success: false, error: 'Remetente sem acesso a esta conversa.' };
+    }
     content = await withIntelligentAttendantSignature(content, agentId, isSystemAgent);
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
     const shouldAutoCloseMarketing = !!metadata?.isMarketing;
@@ -2003,6 +2122,11 @@ export const sendMediaAction = withDebug(
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Usuario nao autenticado.' };
+        }
+
+        const access = await requireChatAccess(user.id, chatId);
+        if (!access.ok) {
+            return { success: false, error: access.error };
         }
 
         await touchUserPresenceFromChat(user.id, chatId, tabId, 'activity');
@@ -2124,6 +2248,9 @@ export async function sendAutomatedMediaAction(
     metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string }> {
     chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
+    if (!await automatedActorCanAccessChat({ chatId, actorId: agentId, isSystemAgent: true })) {
+        return { success: false, error: 'Remetente sem acesso a esta conversa.' };
+    }
     const baseMetadata = metadata ?? {};
     // Meta first
     const client = await db.connect();
@@ -2517,6 +2644,92 @@ export const sendAgentTemplateAction = withDebug(
     }
 );
 
+/**
+ * Resolve (ou cria) o chat e o JID de destino de um envio interativo.
+ * Compartilhado por listas e botões; deve rodar dentro de uma transacao aberta.
+ */
+async function resolveInteractiveWhatsappTarget(
+    client: any,
+    params: { workspaceId: string; providedChatId?: string; numberid?: string }
+): Promise<{ chatId: string; fullJid: string }> {
+    const { workspaceId, providedChatId, numberid } = params;
+
+    let chatId = providedChatId
+        ? ((await resolveCanonicalWhatsappChatId(client, providedChatId)) || providedChatId)
+        : providedChatId;
+    let fullJid: string;
+
+    if (chatId) {
+        const chatRes = await client.query(
+            `SELECT ct.phone_number_jid
+             FROM chats c
+             JOIN contacts ct ON ct.id = c.contact_id
+             WHERE c.id = $1 AND c.workspace_id = $2
+             LIMIT 1`,
+            [chatId, workspaceId]
+        );
+
+        if ((chatRes.rowCount ?? 0) === 0) {
+            throw new Error('Chat nao encontrado para o workspace informado.');
+        }
+
+        fullJid = chatRes.rows[0].phone_number_jid;
+        if (!fullJid) {
+            throw new Error('Chat nao possui contato WhatsApp valido.');
+        }
+    } else {
+        await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: numberid! });
+
+        const whatsappContact = await findOrCreateWhatsappContact(client, {
+            workspaceId,
+            phoneOrJid: numberid!,
+            fallbackName: normalizeWhatsappPhoneNumber(numberid!),
+            fallbackPhone: normalizeWhatsappPhoneNumber(numberid!),
+        });
+
+        const contactId = whatsappContact.contact.id;
+        fullJid = whatsappContact.normalizedJid;
+
+        const activeChat = await findWhatsappChatByIdentity(client, {
+            workspaceId,
+            phoneOrJid: numberid!,
+            statuses: ['gerais', 'atendimentos'],
+            preferOpen: true,
+        });
+
+        if (activeChat?.id) {
+            chatId = activeChat.id;
+        } else {
+            const closedChat = await findWhatsappChatByIdentity(client, {
+                workspaceId,
+                phoneOrJid: numberid!,
+                statuses: ['encerrados'],
+            });
+
+            if (closedChat?.id) {
+                chatId = closedChat.id;
+            } else {
+                const newChatId = randomUUID();
+                const protocol = buildChatProtocol(newChatId);
+                const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                if (!chatLimitStatus.allowed) {
+                    throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                }
+                const newChatRes = await client.query(
+                    `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol)
+                     VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4)
+                     RETURNING id`,
+                    [newChatId, workspaceId, contactId, protocol]
+                );
+                chatId = newChatRes.rows[0].id;
+            }
+        }
+    }
+
+    return { chatId: chatId!, fullJid };
+}
+
 export const sendAgentListAction = withDebug(
     'send_agent_list',
     async function sendAgentListAction(
@@ -2540,78 +2753,11 @@ export const sendAgentListAction = withDebug(
         try {
             await client.query('BEGIN');
 
-            let chatId = providedChatId
-                ? ((await resolveCanonicalWhatsappChatId(client, providedChatId)) || providedChatId)
-                : providedChatId;
-            let fullJid: string;
-
-            if (chatId) {
-                const chatRes = await client.query(
-                    `SELECT ct.phone_number_jid
-                     FROM chats c
-                     JOIN contacts ct ON ct.id = c.contact_id
-                     WHERE c.id = $1 AND c.workspace_id = $2
-                     LIMIT 1`,
-                    [chatId, workspaceId]
-                );
-
-                if ((chatRes.rowCount ?? 0) === 0) {
-                    throw new Error('Chat nao encontrado para o workspace informado.');
-                }
-
-                fullJid = chatRes.rows[0].phone_number_jid;
-                if (!fullJid) {
-                    throw new Error('Chat nao possui contato WhatsApp valido.');
-                }
-            } else {
-                await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: numberid! });
-
-                const whatsappContact = await findOrCreateWhatsappContact(client, {
-                    workspaceId,
-                    phoneOrJid: numberid!,
-                    fallbackName: normalizeWhatsappPhoneNumber(numberid!),
-                    fallbackPhone: normalizeWhatsappPhoneNumber(numberid!),
-                });
-
-                const contactId = whatsappContact.contact.id;
-                fullJid = whatsappContact.normalizedJid;
-
-                const activeChat = await findWhatsappChatByIdentity(client, {
-                    workspaceId,
-                    phoneOrJid: numberid!,
-                    statuses: ['gerais', 'atendimentos'],
-                    preferOpen: true,
-                });
-
-                if (activeChat?.id) {
-                    chatId = activeChat.id;
-                } else {
-                    const closedChat = await findWhatsappChatByIdentity(client, {
-                        workspaceId,
-                        phoneOrJid: numberid!,
-                        statuses: ['encerrados'],
-                    });
-
-                    if (closedChat?.id) {
-                        chatId = closedChat.id;
-                    } else {
-                        const newChatId = randomUUID();
-                        const protocol = buildChatProtocol(newChatId);
-                        const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
-                        const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
-                        if (!chatLimitStatus.allowed) {
-                            throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
-                        }
-                        const newChatRes = await client.query(
-                            `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol)
-                             VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4)
-                             RETURNING id`,
-                            [newChatId, workspaceId, contactId, protocol]
-                        );
-                        chatId = newChatRes.rows[0].id;
-                    }
-                }
-            }
+            const { chatId, fullJid } = await resolveInteractiveWhatsappTarget(client, {
+                workspaceId,
+                providedChatId,
+                numberid,
+            });
 
             const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
             if (!apiConfig) {
@@ -2697,6 +2843,131 @@ export const sendAgentListAction = withDebug(
                 hasChatId: Boolean(input.chatId),
                 hasPhoneNumber: Boolean(input.numberid),
                 sections: input.list?.sections?.length ?? 0,
+            }
+        })
+    }
+);
+
+export const sendAgentButtonsAction = withDebug(
+    'send_agent_buttons',
+    async function sendAgentButtonsAction(
+        input: {
+            agentId: string;
+            workspaceId: string;
+            instanceName: string;
+            chatId?: string;
+            numberid?: string;
+            buttons: InteractiveButtonsPayload;
+            metadata?: MessageMetadata;
+        }
+    ): Promise<{ success: boolean; error?: string; apiResponse?: any; chatId?: string }> {
+        const { agentId, workspaceId, instanceName, chatId: providedChatId, numberid, buttons, metadata } = input;
+
+        if (!instanceName || (!providedChatId && !numberid) || !isValidInteractiveButtons(buttons)) {
+            return { success: false, error: 'Campos obrigatorios faltando ou botoes invalidos.' };
+        }
+
+        if (buttons.buttons.length > MAX_INTERACTIVE_REPLY_BUTTONS) {
+            return {
+                success: false,
+                error: `O WhatsApp aceita no maximo ${MAX_INTERACTIVE_REPLY_BUTTONS} botoes por mensagem.`,
+            };
+        }
+
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+
+            const { chatId, fullJid } = await resolveInteractiveWhatsappTarget(client, {
+                workspaceId,
+                providedChatId,
+                numberid,
+            });
+
+            const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
+            if (!apiConfig) {
+                throw new Error(`Configuracao da Evolution API nao encontrada para a instancia ${instanceName}.`);
+            }
+
+            const apiResponse = await sendButtonsMessage(apiConfig, instanceName, {
+                number: fullJid,
+                title: buttons.title,
+                description: buttons.description,
+                footer: buttons.footer,
+                thumbnailUrl: buttons.thumbnailUrl,
+                buttons: buttons.buttons,
+                delay: buttons.delay,
+                quoted: buttons.quoted,
+                mentionsEveryOne: buttons.mentionsEveryOne,
+                mentioned: buttons.mentioned,
+            });
+
+            const apiMessageId = apiResponse?.key?.id ?? apiResponse?.message_id ?? apiResponse?.id ?? null;
+
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me,
+                    message_id_from_api, api_message_status, instance_name,
+                    metadata, is_read, sender_system_agent_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                [
+                    workspaceId,
+                    chatId,
+                    'text',
+                    buildInteractiveButtonsPreview(buttons),
+                    true,
+                    apiMessageId,
+                    'SENT',
+                    instanceName,
+                    {
+                        interactiveType: 'buttons',
+                        interactivePayload: {
+                            kind: 'buttons',
+                            title: buttons.title,
+                            description: buttons.description,
+                            footer: buttons.footer,
+                            thumbnailUrl: buttons.thumbnailUrl,
+                            buttons: buttons.buttons,
+                            delay: buttons.delay,
+                            quoted: buttons.quoted,
+                            mentionsEveryOne: buttons.mentionsEveryOne,
+                            mentioned: buttons.mentioned,
+                        },
+                        ...(metadata ?? {}),
+                    },
+                    true,
+                    agentId,
+                ]
+            );
+
+            await client.query('COMMIT');
+
+            if (metadata?.isMarketing && chatId) {
+                try {
+                    const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
+                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
+                } catch (err) {
+                    console.error('[SEND_AGENT_BUTTONS_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
+                }
+            }
+
+            return { success: true, apiResponse, chatId };
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[SEND_AGENT_BUTTONS_ACTION] Erro:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Ocorreu um erro desconhecido.';
+            return { success: false, error: `Falha ao enviar botoes: ${errorMessage}` };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (input) => ({
+            payload: {
+                instanceName: input.instanceName,
+                hasChatId: Boolean(input.chatId),
+                hasPhoneNumber: Boolean(input.numberid),
+                buttons: input.buttons?.buttons?.length ?? 0,
             }
         })
     }
@@ -2996,6 +3267,11 @@ export const forwardMessageAction = withDebug(
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Usuário não autenticado.' };
+        }
+
+        const access = await requireChatAccess(user.id, targetChatId);
+        if (!access.ok) {
+            return { success: false, error: access.error };
         }
 
         // Determine content and type based on original message

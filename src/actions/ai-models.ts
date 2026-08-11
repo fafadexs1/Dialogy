@@ -16,7 +16,7 @@ import {
   type AiDecisionModelConfig,
 } from '@/lib/ai-decision-models';
 import { getGlobalAiDecisionModelConfig } from '@/services/ai/decision-model-config';
-import { getSystemSettings } from '@/actions/system-settings';
+import { getSystemSettings } from '@/lib/system-settings';
 import { revalidatePath, revalidateTag } from 'next/cache';
 import {
   LM_STUDIO_CONFIG_KEY,

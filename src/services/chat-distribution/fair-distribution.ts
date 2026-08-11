@@ -1,6 +1,13 @@
 import type { PoolClient } from 'pg';
 
-import { getPresenceTtlSeconds } from '@/lib/presence';
+import { getPresenceRecentActivitySeconds, getPresenceTtlSeconds } from '@/lib/presence';
+
+import {
+  buildDistributionPresenceSql,
+  DEFAULT_CAPACITY,
+  DEFAULT_MAX_PORTFOLIO,
+  type TeamAvailabilityReason,
+} from './team-availability';
 
 export type DistributionCandidate = {
   agentId: string;
@@ -19,6 +26,13 @@ export type FairAgentSelection = DistributionCandidate & {
   occupancy: number;
   fairnessScoreBefore: number;
   fairnessScoreAfter: number;
+  /** True quando todo mundo já passou da capacidade e o chat foi para o menos ocupado. */
+  overflow: boolean;
+};
+
+export type TeamDistributionResult = {
+  selection: FairAgentSelection | null;
+  reason: TeamAvailabilityReason;
 };
 
 type SelectFairAgentInput = {
@@ -27,15 +41,26 @@ type SelectFairAgentInput = {
   chatId: string;
   source: string;
   excludeAgentId?: string | null;
+  /**
+   * Quando todos os agentes estão acima da capacidade sugerida, `true` (padrão)
+   * entrega ao menos ocupado em vez de recusar a transferência.
+   */
+  allowOverflow?: boolean;
 };
 
-const DEFAULT_CAPACITY = 6;
-const DEFAULT_MAX_PORTFOLIO = 25;
 const LOAD_EPSILON = 0.000_001;
 
 function finiteNumber(value: unknown, fallback: number): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function capacityOf(candidate: DistributionCandidate): number {
+  return Math.max(1, finiteNumber(candidate.capacity, DEFAULT_CAPACITY));
+}
+
+function maxPortfolioOf(candidate: DistributionCandidate): number {
+  return Math.max(1, finiteNumber(candidate.maxPortfolio, DEFAULT_MAX_PORTFOLIO));
 }
 
 function median(values: number[]): number {
@@ -47,17 +72,41 @@ function median(values: number[]): number {
     : sorted[middle];
 }
 
+/**
+ * Escolhe o agente que recebe o atendimento.
+ *
+ * São dois limites com naturezas diferentes, e tratá-los igual era o que fazia
+ * o balanceador responder "nenhum agente disponível" com a equipe inteira
+ * online:
+ *
+ * - `maxPortfolio` é teto rígido de carteira, definido pelo admin. Nunca é
+ *   ultrapassado.
+ * - `capacity` é a carga simultânea *desejada* (padrão 6 conversas aguardando
+ *   resposta). Numa operação movimentada todo mundo passa disso ao mesmo tempo,
+ *   e recusar a transferência nesse caso não segura o cliente em lugar nenhum —
+ *   só devolve um erro enganoso para quem está transferindo. Acima da
+ *   capacidade o critério vira preferência: entrega ao menos ocupado e marca a
+ *   decisão como `overflow` para ficar visível na auditoria.
+ */
 export function rankDistributionCandidates(
   candidates: DistributionCandidate[],
-  excludeAgentId?: string | null
+  excludeAgentId?: string | null,
+  options?: { allowOverflow?: boolean }
 ): FairAgentSelection | null {
-  const eligible = candidates.filter((candidate) => {
-    const capacity = Math.max(1, finiteNumber(candidate.capacity, DEFAULT_CAPACITY));
-    const maxPortfolio = Math.max(1, finiteNumber(candidate.maxPortfolio, DEFAULT_MAX_PORTFOLIO));
-    return candidate.portfolioCount < maxPortfolio && candidate.effectiveLoad < capacity;
-  });
+  const allowOverflow = options?.allowOverflow ?? true;
 
-  if (eligible.length === 0) return null;
+  const withPortfolioRoom = candidates.filter(
+    (candidate) => candidate.portfolioCount < maxPortfolioOf(candidate)
+  );
+  if (withPortfolioRoom.length === 0) return null;
+
+  const underCapacity = withPortfolioRoom.filter(
+    (candidate) => candidate.effectiveLoad < capacityOf(candidate)
+  );
+  const overflow = underCapacity.length === 0;
+  if (overflow && !allowOverflow) return null;
+
+  const eligible = overflow ? withPortfolioRoom : underCapacity;
 
   const persistedScores = eligible
     .map((candidate) => candidate.fairnessScore)
@@ -72,17 +121,18 @@ export function rankDistributionCandidates(
   const ranked = eligible
     .filter((candidate) => !hasAlternativeToExcluded || candidate.agentId !== excludeAgentId)
     .map((candidate) => {
-      const capacity = Math.max(1, finiteNumber(candidate.capacity, DEFAULT_CAPACITY));
+      const capacity = capacityOf(candidate);
       const fairnessScoreBefore = candidate.fairnessScore ?? neutralEntryScore;
       return {
         ...candidate,
         capacity,
-        maxPortfolio: Math.max(1, finiteNumber(candidate.maxPortfolio, DEFAULT_MAX_PORTFOLIO)),
+        maxPortfolio: maxPortfolioOf(candidate),
         portfolioCount: Math.max(0, finiteNumber(candidate.portfolioCount, 0)),
         effectiveLoad: Math.max(0, finiteNumber(candidate.effectiveLoad, 0)),
         fairnessScoreBefore,
         fairnessScoreAfter: fairnessScoreBefore + 1 / capacity,
         occupancy: Math.max(0, finiteNumber(candidate.effectiveLoad, 0)) / capacity,
+        overflow,
       };
     })
     .sort((left, right) => {
@@ -120,10 +170,52 @@ function mapCandidate(row: any): DistributionCandidate {
   };
 }
 
+/**
+ * Descobre *por que* a equipe ficou sem candidatos. Só roda quando a seleção
+ * falha, então o custo fica fora do caminho quente — e sem isso todo motivo
+ * diferente vira a mesma mensagem genérica na tela do operador.
+ */
+async function diagnoseEmptyTeam(
+  client: PoolClient,
+  input: { workspaceId: string; teamId: string }
+): Promise<TeamAvailabilityReason> {
+  const presenceSql = buildDistributionPresenceSql('uwp', '$3', '$4');
+
+  const { rows } = await client.query(
+    `
+      SELECT
+        COUNT(*)::int AS members,
+        COUNT(*) FILTER (WHERE ${presenceSql})::int AS online,
+        COUNT(*) FILTER (
+          WHERE ${presenceSql}
+            AND COALESCE(ds.accepting_assignments, TRUE) = TRUE
+        )::int AS accepting
+      FROM team_members tm
+      JOIN teams t ON t.id = tm.team_id
+      LEFT JOIN user_workspace_presence uwp
+        ON uwp.user_id = tm.user_id
+       AND uwp.workspace_id = t.workspace_id
+      LEFT JOIN team_agent_distribution_state ds
+        ON ds.workspace_id = t.workspace_id
+       AND ds.team_id = t.id
+       AND ds.user_id = tm.user_id
+      WHERE t.id = $1
+        AND t.workspace_id = $2
+    `,
+    [input.teamId, input.workspaceId, getPresenceTtlSeconds(), getPresenceRecentActivitySeconds()]
+  );
+
+  const stats = rows[0] ?? { members: 0, online: 0, accepting: 0 };
+  if ((stats.members ?? 0) === 0) return 'no_members';
+  if ((stats.online ?? 0) === 0) return 'all_offline';
+  if ((stats.accepting ?? 0) === 0) return 'not_accepting';
+  return 'portfolio_full';
+}
+
 export async function selectFairAgentForTeam(
   client: PoolClient,
   input: SelectFairAgentInput
-): Promise<FairAgentSelection | null> {
+): Promise<TeamDistributionResult> {
   // Serializing by workspace/team makes selection + assignment atomic while the
   // caller's transaction is open. Concurrent requests see the committed load.
   await client.query(
@@ -132,6 +224,9 @@ export async function selectFairAgentForTeam(
   );
 
   const ttlSeconds = getPresenceTtlSeconds();
+  const recentActivitySeconds = getPresenceRecentActivitySeconds();
+  const presenceSql = buildDistributionPresenceSql('uwp', '$3', '$6');
+
   const candidatesRes = await client.query(
     `
       SELECT
@@ -194,16 +289,36 @@ export async function selectFairAgentForTeam(
       WHERE t.id = $1
         AND t.workspace_id = $2
         AND COALESCE(ds.accepting_assignments, TRUE) = TRUE
-        AND uwp.is_online = TRUE
-        AND uwp.last_seen > NOW() - ($3 * interval '1 second')
+        AND ${presenceSql}
       ORDER BY u.id
     `,
-    [input.teamId, input.workspaceId, ttlSeconds, DEFAULT_CAPACITY, DEFAULT_MAX_PORTFOLIO]
+    [
+      input.teamId,
+      input.workspaceId,
+      ttlSeconds,
+      DEFAULT_CAPACITY,
+      DEFAULT_MAX_PORTFOLIO,
+      recentActivitySeconds,
+    ]
   );
 
   const candidates = candidatesRes.rows.map(mapCandidate);
-  const selected = rankDistributionCandidates(candidates, input.excludeAgentId);
-  if (!selected) return null;
+  const selected = rankDistributionCandidates(candidates, input.excludeAgentId, {
+    allowOverflow: input.allowOverflow ?? true,
+  });
+
+  if (!selected) {
+    return {
+      selection: null,
+      reason:
+        candidates.length > 0
+          ? 'portfolio_full'
+          : await diagnoseEmptyTeam(client, {
+              workspaceId: input.workspaceId,
+              teamId: input.teamId,
+            }),
+    };
+  }
 
   await client.query(
     `
@@ -277,9 +392,11 @@ export async function selectFairAgentForTeam(
       selected.fairnessScoreBefore,
       selected.fairnessScoreAfter,
       JSON.stringify(candidates),
-      'lowest_effective_occupancy_then_fairness_then_idle_time',
+      selected.overflow
+        ? 'overflow_least_occupied_all_above_capacity'
+        : 'lowest_effective_occupancy_then_fairness_then_idle_time',
     ]
   );
 
-  return selected;
+  return { selection: selected, reason: 'available' };
 }

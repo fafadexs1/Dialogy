@@ -475,6 +475,15 @@ export const saveContactAction = withDebug(
 
             await client.query('COMMIT');
 
+            // Avanco no funil vira conversao de lead qualificado no Google Ads.
+            // Nunca pode derrubar o salvamento do contato.
+            try {
+                const { maybeEnqueueLeadQualified } = await import('@/services/google-ads/lead-qualification');
+                await maybeEnqueueLeadQualified({ workspaceId, contactId });
+            } catch (error) {
+                console.error('[CRM_GADS_SYNC] Falha ao enfileirar lead qualificado:', error);
+            }
+
             // Dispatch Automations for custom field changes
             try {
                 const { evaluateAutomations } = await import('@/lib/automation-engine');

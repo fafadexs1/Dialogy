@@ -1,5 +1,9 @@
 import { createQueueWorker } from '@/lib/queue/worker';
 import { startPresenceReconciler, stopPresenceReconciler } from '@/services/presence/reconciler';
+import {
+  startEvolutionWebhookRetention,
+  stopEvolutionWebhookRetention,
+} from '@/services/whatsapp/webhook-inbox-retention';
 
 async function loadEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -21,11 +25,15 @@ async function main() {
   // PRESENCE_BACKEND != redis.
   startPresenceReconciler();
 
+  // Poda a caixa de entrada durável de webhooks, que antes só crescia.
+  startEvolutionWebhookRetention();
+
   const shutdown = async (signal: string) => {
     console.log(`[QUEUE_WORKER] Received ${signal}. Shutting down gracefully...`);
 
     try {
       stopPresenceReconciler();
+      stopEvolutionWebhookRetention();
       await worker.close();
       await connection.quit();
       process.exit(0);

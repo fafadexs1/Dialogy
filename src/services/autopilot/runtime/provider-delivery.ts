@@ -152,18 +152,28 @@ export async function waitForAutomatedProviderAcceptance(input: {
   const deadline = Date.now() + timeoutMs;
 
   while (true) {
-    const state = await database.query(
-      `SELECT api_message_status, message_id_from_api, metadata
-       FROM messages
-       WHERE id = $1
-         AND chat_id = $2
-       LIMIT 1`,
-      [messageId, input.chatId],
-    );
+    let state: Awaited<ReturnType<ProviderDeliveryDatabase['query']>>;
+    try {
+      state = await database.query(
+        `SELECT api_message_status, message_id_from_api, metadata
+         FROM messages
+         WHERE id = $1
+           AND chat_id = $2
+         LIMIT 1`,
+        [messageId, input.chatId],
+      );
+    } catch (error) {
+      throw new UncertainProviderDeliveryError(
+        `Nao foi possivel consultar o aceite do provedor para a mensagem automatizada `
+        + `${messageId} do chat ${input.chatId}; reenvio automatico bloqueado. `
+        + `causa=${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     const row = state.rows[0];
     if (!row) {
-      throw new Error(
-        `Mensagem automatizada ${messageId} nao foi encontrada no chat ${input.chatId}.`,
+      throw new UncertainProviderDeliveryError(
+        `Mensagem automatizada ${messageId} nao foi encontrada durante a confirmacao do provedor `
+        + `no chat ${input.chatId}; reenvio automatico bloqueado.`,
       );
     }
 

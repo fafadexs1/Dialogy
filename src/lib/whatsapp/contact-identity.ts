@@ -63,7 +63,11 @@ function isBrazilianMobileWithNinthDigit(digits: string): boolean {
     return /^9[6-9]/.test(subscriberDigits);
 }
 
-function buildAlternateBrazilianDigits(digits: string): string | null {
+/**
+ * Alterna a forma do celular brasileiro entre com e sem o nono dígito.
+ * 556195215930 <-> 5561995215930. Retorna null se não for um celular BR.
+ */
+export function buildAlternateBrazilianDigits(digits: string): string | null {
     if (isBrazilianMobileWithoutNinthDigit(digits)) {
         return `${digits.slice(0, 4)}9${digits.slice(4)}`;
     }

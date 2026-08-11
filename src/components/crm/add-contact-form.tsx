@@ -32,6 +32,7 @@ import { toast } from '@/hooks/use-toast';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
 import { Badge } from '../ui/badge';
 import { uploadToS3Action } from '@/actions/upload-s3';
+import { badgeColorStyle } from '@/lib/color-contrast';
 
 const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
 const LIGHT_DIALOG_SCOPE_CLASS = 'app-shell-light text-foreground';
@@ -102,7 +103,7 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
         >
           <div className="flex flex-wrap gap-1.5 py-1.5">
             {selectedTags.length > 0 ? selectedTags.map(tag => (
-              <Badge key={tag.id} style={{ backgroundColor: tag.color, color: tag.color.startsWith('#FEE') || tag.color === '#FFFFFF' || tag.color.toLowerCase() === '#fff' ? '#000' : '#fff' }} className="rounded-xl border-transparent px-2.5 py-0.5 text-[11px] font-medium shadow-sm transition-transform hover:scale-105" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
+              <Badge key={tag.id} style={badgeColorStyle(tag.color) ?? undefined} className="rounded-xl border-transparent px-2.5 py-0.5 text-[11px] font-medium shadow-sm transition-transform hover:scale-105" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
                 {tag.label}
                 <X className="ml-1.5 h-3 w-3 rounded-full transition-colors hover:bg-slate-200" />
               </Badge>

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://supabase.vps1.klyraai.com.br/mcp?features=docs%2Cdevelopment%2Cdebugging%2Cdatabase"
+    }
+  }
+}

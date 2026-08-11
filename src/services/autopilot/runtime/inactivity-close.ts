@@ -13,6 +13,14 @@ type ScheduleAutopilotInactivityCloseInput = {
   orchestratorRunId?: string | null;
 };
 
+type PersistedInactivitySchedule = Required<Omit<ScheduleAutopilotInactivityCloseInput, 'timeoutSeconds'>> & {
+  timeoutSeconds: number;
+};
+
+const INACTIVITY_SCHEDULE_CLAIM_MS = 120_000;
+const INACTIVITY_SCHEDULE_POLL_MS = 5_000;
+let inactivitySchedulePoller: ReturnType<typeof setInterval> | null = null;
+
 function normalizeTimeoutSeconds(value?: number | null): number {
   if (!Number.isFinite(Number(value)) || Number(value) <= 0) return 0;
   return Math.min(2_592_000, Math.max(1, Math.round(Number(value))));
@@ -256,28 +264,146 @@ export async function executeAutopilotInactivityClose(input: Required<Omit<Sched
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     console.error('[AUTOPILOT_INACTIVITY_CLOSE] Falha ao encerrar chat por inatividade:', error);
+    throw error;
   } finally {
     client.release();
   }
 }
 
-export function scheduleAutopilotInactivityClose(input: ScheduleAutopilotInactivityCloseInput) {
+async function persistInactivitySchedule(input: PersistedInactivitySchedule) {
+  const dueAt = new Date(input.anchorAt.getTime() + (input.timeoutSeconds * 1000));
+  await db.query(
+    `INSERT INTO autopilot_inactivity_schedules (
+       chat_id, workspace_id, autopilot_config_id, system_agent_id,
+       timeout_seconds, anchor_at, due_at, source_message_id, orchestrator_run_id
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (chat_id) DO UPDATE
+     SET workspace_id = EXCLUDED.workspace_id,
+         autopilot_config_id = EXCLUDED.autopilot_config_id,
+         system_agent_id = EXCLUDED.system_agent_id,
+         timeout_seconds = EXCLUDED.timeout_seconds,
+         anchor_at = EXCLUDED.anchor_at,
+         due_at = EXCLUDED.due_at,
+         source_message_id = EXCLUDED.source_message_id,
+         orchestrator_run_id = EXCLUDED.orchestrator_run_id,
+         locked_until = NULL,
+         attempts = 0,
+         last_error = NULL,
+         updated_at = clock_timestamp()`,
+    [
+      input.chatId,
+      input.workspaceId,
+      input.autopilotConfigId,
+      input.systemAgentId,
+      input.timeoutSeconds,
+      input.anchorAt.toISOString(),
+      dueAt.toISOString(),
+      input.sourceMessageId,
+      input.orchestratorRunId,
+    ],
+  );
+}
+
+async function finalizeInactivitySchedule(input: PersistedInactivitySchedule) {
+  await db.query(
+    `DELETE FROM autopilot_inactivity_schedules
+     WHERE chat_id = $1 AND anchor_at = $2`,
+    [input.chatId, input.anchorAt.toISOString()],
+  );
+}
+
+async function executePersistedInactivitySchedule(input: PersistedInactivitySchedule) {
+  try {
+    await executeAutopilotInactivityClose(input);
+    await finalizeInactivitySchedule(input);
+  } catch (error) {
+    await db.query(
+      `UPDATE autopilot_inactivity_schedules
+       SET locked_until = NULL,
+           last_error = LEFT($3, 2000),
+           updated_at = clock_timestamp()
+       WHERE chat_id = $1 AND anchor_at = $2`,
+      [
+        input.chatId,
+        input.anchorAt.toISOString(),
+        error instanceof Error ? error.message : String(error),
+      ],
+    ).catch(() => undefined);
+  }
+}
+
+export async function runDueAutopilotInactivityCloses(limit = 25): Promise<number> {
+  const claimed = await db.query(
+    `WITH due AS (
+       SELECT chat_id
+       FROM autopilot_inactivity_schedules
+       WHERE due_at <= clock_timestamp()
+         AND (locked_until IS NULL OR locked_until <= clock_timestamp())
+       ORDER BY due_at ASC
+       FOR UPDATE SKIP LOCKED
+       LIMIT $1
+     )
+     UPDATE autopilot_inactivity_schedules schedules
+     SET locked_until = clock_timestamp() + ($2::text || ' milliseconds')::interval,
+         attempts = schedules.attempts + 1,
+         updated_at = clock_timestamp()
+     FROM due
+     WHERE schedules.chat_id = due.chat_id
+     RETURNING schedules.*`,
+    [Math.max(1, Math.min(100, Math.floor(limit))), INACTIVITY_SCHEDULE_CLAIM_MS],
+  );
+
+  await Promise.all(claimed.rows.map((row) => executePersistedInactivitySchedule({
+    workspaceId: String(row.workspace_id),
+    chatId: String(row.chat_id),
+    autopilotConfigId: String(row.autopilot_config_id),
+    systemAgentId: String(row.system_agent_id),
+    timeoutSeconds: Number(row.timeout_seconds),
+    anchorAt: new Date(row.anchor_at),
+    sourceMessageId: row.source_message_id ? String(row.source_message_id) : null,
+    orchestratorRunId: row.orchestrator_run_id ? String(row.orchestrator_run_id) : null,
+  })));
+  return claimed.rows.length;
+}
+
+function ensureInactivitySchedulePoller() {
+  if (inactivitySchedulePoller || process.env.NODE_ENV === 'test') return;
+  inactivitySchedulePoller = setInterval(() => {
+    void runDueAutopilotInactivityCloses().catch((error) => {
+      console.error('[AUTOPILOT_INACTIVITY_CLOSE] Falha ao recuperar agendas vencidas:', error);
+    });
+  }, INACTIVITY_SCHEDULE_POLL_MS);
+  const maybePoller = inactivitySchedulePoller as unknown as { unref?: () => void };
+  if (typeof maybePoller.unref === 'function') maybePoller.unref();
+}
+
+export async function scheduleAutopilotInactivityClose(input: ScheduleAutopilotInactivityCloseInput) {
   const timeoutSeconds = normalizeTimeoutSeconds(input.timeoutSeconds);
   if (timeoutSeconds <= 0) return;
   const anchorAt = input.anchorAt || new Date();
-  const handle = setTimeout(() => {
-    void executeAutopilotInactivityClose({
-      workspaceId: input.workspaceId,
-      chatId: input.chatId,
-      autopilotConfigId: input.autopilotConfigId,
-      systemAgentId: input.systemAgentId,
-      timeoutSeconds,
-      anchorAt,
-      sourceMessageId: input.sourceMessageId || null,
-      orchestratorRunId: input.orchestratorRunId || null,
-    });
-  }, timeoutSeconds * 1000);
-
-  const maybeHandle = handle as unknown as { unref?: () => void };
-  if (typeof maybeHandle.unref === 'function') maybeHandle.unref();
+  const persistedInput: PersistedInactivitySchedule = {
+    workspaceId: input.workspaceId,
+    chatId: input.chatId,
+    autopilotConfigId: input.autopilotConfigId,
+    systemAgentId: input.systemAgentId,
+    timeoutSeconds,
+    anchorAt,
+    sourceMessageId: input.sourceMessageId || null,
+    orchestratorRunId: input.orchestratorRunId || null,
+  };
+  try {
+    await persistInactivitySchedule(persistedInput);
+  } catch (error) {
+    console.error('[AUTOPILOT_INACTIVITY_CLOSE] Falha ao persistir agenda; usando fallback local:', error);
+    const fallbackDelay = Math.min(timeoutSeconds * 1000, 2_147_000_000);
+    const fallback = setTimeout(() => {
+      void executeAutopilotInactivityClose(persistedInput).catch(() => undefined);
+    }, fallbackDelay);
+    const maybeFallback = fallback as unknown as { unref?: () => void };
+    if (typeof maybeFallback.unref === 'function') maybeFallback.unref();
+    return;
+  }
+  ensureInactivitySchedulePoller();
 }
+
+ensureInactivitySchedulePoller();

@@ -61,7 +61,9 @@ function formatDuration(seconds: number): string {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
-type InteractiveListPayload = NonNullable<NonNullable<Message['metadata']>['interactivePayload']>;
+type InteractivePayload = NonNullable<NonNullable<Message['metadata']>['interactivePayload']>;
+type InteractiveListPayload = Extract<InteractivePayload, { kind: 'list' }>;
+type InteractiveButtonsPayload = Extract<InteractivePayload, { kind: 'buttons' }>;
 
 function InteractiveListMessage({ payload, isFromMe }: { payload: InteractiveListPayload; isFromMe: boolean }) {
     const [open, setOpen] = React.useState(false);
@@ -122,6 +124,35 @@ function InteractiveListMessage({ payload, isFromMe }: { payload: InteractiveLis
                 </CollapsibleContent>
             </Collapsible>
             {payload.footerText?.trim() && <p className="text-[10px] opacity-65">{payload.footerText}</p>}
+        </div>
+    );
+}
+
+function InteractiveButtonsMessage({ payload, isFromMe }: { payload: InteractiveButtonsPayload; isFromMe: boolean }) {
+    return (
+        <div className="min-w-[220px] max-w-full space-y-2">
+            {payload.title?.trim() && <p className="text-sm font-semibold leading-snug">{payload.title}</p>}
+            {payload.description?.trim() && (
+                <p className={cn('whitespace-pre-wrap text-xs leading-relaxed', isFromMe ? 'text-white/85' : 'text-slate-600 dark:text-zinc-300')}>
+                    {payload.description}
+                </p>
+            )}
+            <div className="space-y-1.5">
+                {payload.buttons.map((button, index) => (
+                    <div
+                        key={`${button.id || button.displayText || button.type}:${index}`}
+                        className={cn(
+                            'flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-center text-xs font-semibold',
+                            isFromMe
+                                ? 'border-white/25 bg-white/10'
+                                : 'border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/5'
+                        )}
+                    >
+                        <span className="truncate">{button.displayText || button.name || button.id}</span>
+                    </div>
+                ))}
+            </div>
+            {payload.footer?.trim() && <p className="text-[10px] opacity-65">{payload.footer}</p>}
         </div>
     );
 }
@@ -769,12 +800,16 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
         const orderDetails = getTemplateOrderDetails(message);
-        const interactiveList = message.metadata?.interactiveType === 'list'
+        const interactivePayload = message.metadata?.interactiveType
             ? message.metadata.interactivePayload
             : undefined;
 
-        if (interactiveList?.kind === 'list' && Array.isArray(interactiveList.sections)) {
-            return <InteractiveListMessage payload={interactiveList} isFromMe={isFromMe} />;
+        if (interactivePayload?.kind === 'list' && Array.isArray(interactivePayload.sections)) {
+            return <InteractiveListMessage payload={interactivePayload} isFromMe={isFromMe} />;
+        }
+
+        if (interactivePayload?.kind === 'buttons' && Array.isArray(interactivePayload.buttons)) {
+            return <InteractiveButtonsMessage payload={interactivePayload} isFromMe={isFromMe} />;
         }
 
         const hasSharedContacts =

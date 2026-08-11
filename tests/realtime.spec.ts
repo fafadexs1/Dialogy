@@ -173,6 +173,29 @@ describe('Inbox store realtime flow', () => {
     expect(state.messagesByChat[chatA.id].map((m) => m.id)).toEqual(['a-1', 'a-2']);
   });
 
+  it('rejects foreign messages when hydrating or updating a chat thread', () => {
+    const chatA = createChat('chat-A');
+    const chatB = createChat('chat-B');
+    const messageA = createMessage('a-1', chatA.id, '2024-01-01T12:00:00Z');
+    const foreignMessage = createMessage('b-foreign', chatB.id, '2024-01-01T12:01:00Z');
+
+    useInboxStore.getState().setInitialData({
+      chats: [chatA, chatB],
+      selectedChatId: chatA.id,
+      messages: [messageA, foreignMessage],
+      lastSyncChats: null,
+      lastSyncMessageForSelected: messageA.createdAt,
+      oldestMessageDate: messageA.createdAt,
+      oldestMessageId: messageA.id,
+      hasMoreHistory: false,
+      hasMoreChats: false,
+    });
+    useInboxStore.getState().appendMessagesToChat(chatA.id, [foreignMessage]);
+    useInboxStore.getState().prependMessagesToChat(chatA.id, [foreignMessage]);
+
+    expect(useInboxStore.getState().messagesByChat[chatA.id].map((message) => message.id)).toEqual(['a-1']);
+  });
+
   it('handles rapid bursts of realtime messages without dropping any', () => {
     const chatB = createChat('chat-B');
     const initial = createMessage('seed', chatB.id, '2024-01-01T12:00:00Z');

@@ -32,7 +32,7 @@ const channelColor: Record<Channel, string> = {
 };
 
 export function InboxScreen() {
-  const { chats, error, isLoading, refresh, selectChat, switchWorkspace, user } = useInbox();
+  const { chats, error, hasMoreChats, isLoading, isLoadingMoreChats, loadMoreChats, refresh, selectChat, switchWorkspace, user } = useInbox();
   const [activeFilter, setActiveFilter] = useState<FilterId>("todos");
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -146,6 +146,11 @@ export function InboxScreen() {
           removeClippedSubviews
           updateCellsBatchingPeriod={80}
           windowSize={7}
+          onEndReached={() => {
+            if (hasMoreChats && !isLoadingMoreChats) void loadMoreChats();
+          }}
+          onEndReachedThreshold={0.35}
+          ListFooterComponent={isLoadingMoreChats ? <ActivityIndicator color={colors.emerald} /> : null}
           ListEmptyComponent={<Text style={styles.emptyList}>Nenhuma conversa neste filtro.</Text>}
         />
       )}

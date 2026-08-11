@@ -5,39 +5,11 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
-import { getPresenceTtlSeconds } from '@/lib/presence';
 import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 
 interface TransferPayload {
     teamId?: string;
     agentId?: string;
-}
-
-async function hasOnlineAgentOnTeam(teamId: string, workspaceId: string): Promise<boolean> {
-    try {
-        const ttlSeconds = getPresenceTtlSeconds();
-        const onlineAgentRes = await db.query(
-            `
-            SELECT 1
-            FROM team_members tm
-            JOIN teams t ON tm.team_id = t.id
-            JOIN user_workspace_presence uwp
-                ON uwp.user_id = tm.user_id
-                AND uwp.workspace_id = t.workspace_id
-            WHERE tm.team_id = $1
-              AND t.workspace_id = $2
-              AND uwp.is_online = TRUE
-              AND uwp.last_seen > NOW() - ($3 * interval '1 second')
-            LIMIT 1;
-            `,
-            [teamId, workspaceId, ttlSeconds]
-        );
-
-        return (onlineAgentRes.rowCount ?? 0) > 0;
-    } catch (error) {
-        console.error('[AGENT_CHAT_TRANSFER_API] Erro ao validar agentes online da equipe:', error);
-        return false;
-    }
 }
 
 /**
@@ -101,15 +73,10 @@ export async function POST(
             return NextResponse.json({ error: 'Either teamId or agentId is required.' }, { status: 400 });
         }
 
-        if (teamId) {
-            const hasOnlineAgent = await hasOnlineAgentOnTeam(teamId, authResult.agent.workspace_id);
-            if (!hasOnlineAgent) {
-                return NextResponse.json(
-                    { error: 'Nenhum agente disponível nesta equipe no momento.' },
-                    { status: 409 }
-                );
-            }
-        }
+        // Sem pré-check de disponibilidade aqui de propósito: `transferChatAction`
+        // já decide isso com as regras completas e devolve `reasonCode`. O
+        // pré-check que existia usava um critério mais estreito e recusava
+        // transferências que o balanceador teria aceitado.
 
         // Mock the session object required by the original `transferChatAction`.
         // This allows us to reuse the exact same business logic.
@@ -148,10 +115,13 @@ export async function POST(
         if (result.success) {
             return NextResponse.json({ success: true, message: 'Chat transferred successfully.' });
         } else {
-            const unavailable = result.error?.includes('Nenhum agente dispon');
             return NextResponse.json(
-                { success: false, error: result.error || 'Failed to transfer chat.' },
-                { status: unavailable ? 409 : 500 }
+                {
+                    success: false,
+                    error: result.error || 'Failed to transfer chat.',
+                    reason: result.reasonCode,
+                },
+                { status: result.reasonCode ? 409 : 500 }
             );
         }
 

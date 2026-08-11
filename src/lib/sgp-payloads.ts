@@ -39,8 +39,35 @@ export interface AgentSendListPayload {
     mentioned?: string[];
 }
 
+export type AgentSendButtonType = 'reply' | 'copy' | 'url' | 'call' | 'pix';
+
+export interface AgentSendButton {
+    type: AgentSendButtonType;
+    displayText?: string;
+    id?: string;
+    url?: string;
+    copyCode?: string;
+    phoneNumber?: string;
+    currency?: string;
+    name?: string;
+    keyType?: 'phone' | 'email' | 'cpf' | 'cnpj' | 'random';
+    key?: string;
+}
+
+export interface AgentSendButtonsPayload {
+    title: string;
+    description?: string;
+    footer?: string;
+    thumbnailUrl?: string;
+    buttons: AgentSendButton[];
+    delay?: number;
+    quoted?: AgentSendQuotedPayload;
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+}
+
 export interface AgentSendPayload {
-    type?: 'text' | 'template' | 'list';
+    type?: 'text' | 'template' | 'list' | 'buttons';
     chatId?: string;
     phoneNumber?: string; // JID format
     content?: string; // For text messages
@@ -53,11 +80,15 @@ export interface AgentSendPayload {
         renderedContent?: string;
     };
     list?: AgentSendListPayload;
+    buttonsPayload?: AgentSendButtonsPayload;
     title?: string;
     description?: string;
     buttonText?: string;
     footerText?: string;
+    footer?: string;
+    thumbnailUrl?: string;
     sections?: AgentSendListPayload['sections'];
+    buttons?: AgentSendButton[];
     delay?: number;
     quoted?: AgentSendQuotedPayload;
     mentionsEveryOne?: boolean;
@@ -87,6 +118,43 @@ export function normalizeAgentListPayload(body: any): AgentSendListPayload | und
     }
 
     return normalized;
+}
+
+export function normalizeAgentButtonsPayload(body: any): AgentSendButtonsPayload | undefined {
+    if (!body || typeof body !== 'object') {
+        return undefined;
+    }
+
+    const source =
+        body.buttonsPayload && typeof body.buttonsPayload === 'object'
+            ? body.buttonsPayload
+            : (body.buttons && !Array.isArray(body.buttons) && typeof body.buttons === 'object' ? body.buttons : {});
+
+    const buttons = Array.isArray(source.buttons)
+        ? source.buttons
+        : (Array.isArray(body.buttons) ? body.buttons : undefined);
+
+    if (!Array.isArray(buttons) || buttons.length === 0) {
+        return undefined;
+    }
+
+    const title = source.title ?? body.title;
+    if (typeof title !== 'string' || title.trim().length === 0) {
+        return undefined;
+    }
+
+    return {
+        title,
+        description: source.description ?? body.description,
+        // A Evolution usa "footer" aqui (e "footerText" em listas).
+        footer: source.footer ?? source.footerText ?? body.footer ?? body.footerText,
+        thumbnailUrl: source.thumbnailUrl ?? body.thumbnailUrl,
+        buttons,
+        delay: source.delay ?? body.delay,
+        quoted: source.quoted ?? body.quoted,
+        mentionsEveryOne: source.mentionsEveryOne ?? body.mentionsEveryOne,
+        mentioned: source.mentioned ?? body.mentioned,
+    };
 }
 
 export function isSGPPayload(body: any): body is SGPPayload {

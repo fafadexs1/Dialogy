@@ -7,7 +7,7 @@ import ChatPanel from '../chat/chat-panel';
 import MobileContactPanel from '../chat/mobile-contact-panel';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
-import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
+import { getInitialChatsData, syncInboxData, getChatMessagesWindow, loadOlderChatsAction } from '@/actions/chats';
 import type { InitialChatsPayload } from '@/actions/chats';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
@@ -226,10 +226,12 @@ export default function MobileChatLayout({
   initialUser,
   chatId: initialChatId,
   initialData,
+  preserveClientState = false,
 }: {
   initialUser: User | null;
   chatId: string | null;
   initialData?: InitialChatsPayload | null;
+  preserveClientState?: boolean;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'chats' | 'crm' | 'settings'>('chats');
@@ -237,6 +239,7 @@ export default function MobileChatLayout({
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMoreChats, setIsLoadingMoreChats] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
@@ -266,6 +269,8 @@ export default function MobileChatLayout({
   const markChatAsReadInStore = useInboxStore((state) => state.markChatAsRead);
   const incrementUnread = useInboxStore((state) => state.incrementUnread);
   const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
+  const appendChats = useInboxStore((state) => state.appendChats);
+  const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
   const removeChat = useInboxStore((state) => state.removeChat);
   const { isOffline } = usePresence();
 
@@ -356,11 +361,12 @@ export default function MobileChatLayout({
         state.reset();
         inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
       } else {
+        if (preserveClientState) selectedChatIdRef.current = state.selectedChatId;
         inboxDebug('[NOTIFICATION] Layout mounted. Preserving existing store state.');
       }
       isHydratedRef.current = true;
     }
-  }, []);
+  }, [preserveClientState]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -685,14 +691,14 @@ export default function MobileChatLayout({
     try {
       const state = useInboxStore.getState();
       const activeChat = state.chats.find((candidate) => candidate.id === chatId);
-      const chatOnly = !!(activeChat as any)?.protocolScoped;
+      const replaceMessageWindow = !!(activeChat as any)?.protocolScoped;
       const result = await getChatMessagesWindow({
         chatId,
         before: beforeDate ?? undefined,
         beforeId: beforeId ?? undefined,
         limit: 50,
         timezone: workspaceTimezone,
-        chatOnly,
+        chatOnly: replaceMessageWindow,
       });
       if (beforeDate) {
         prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
@@ -704,7 +710,7 @@ export default function MobileChatLayout({
           result.oldestMessageDate,
           result.oldestMessageId,
           result.hasMoreHistory,
-          chatOnly
+          replaceMessageWindow
         );
       }
       if (result.contact) {
@@ -728,6 +734,40 @@ export default function MobileChatLayout({
     if (!beforeDate) return;
     await loadChatMessages(selectedChatId, beforeDate, beforeId ?? undefined);
   }, [loadChatMessages, oldestLoadedMessageDate, oldestLoadedMessageId, selectedChatId]);
+
+  const handleLoadMoreChats = useCallback(async (options?: {
+    statuses?: Chat['status'][];
+    ownership?: 'mine' | 'everyone';
+  }) => {
+    if (isLoadingMoreChats || !hasMoreChats || !initialUser?.activeWorkspaceId) return;
+
+    const { statuses = ['gerais', 'atendimentos'], ownership = 'mine' } = options || {};
+    const currentChats = useInboxStore.getState().chats;
+    const filteredChats = currentChats.filter((chat) => {
+      if (!statuses.includes(chat.status)) return false;
+      const chatAgentId = chat.agent?.id || chat.agentId;
+      return ownership === 'everyone' || chatAgentId === initialUser.id || chat.status === 'gerais';
+    });
+    const lastChat = filteredChats.at(-1);
+    if (!lastChat?.updatedAt) return;
+
+    setIsLoadingMoreChats(true);
+    try {
+      const result = await loadOlderChatsAction(
+        initialUser.activeWorkspaceId,
+        lastChat.updatedAt,
+        lastChat.id,
+        statuses,
+        ownership,
+      );
+      if (result.success && result.chats?.length) appendChats(result.chats);
+      if (!result.success && result.error) console.error('[LOAD_MORE_CHATS_MOBILE] Error:', result.error);
+    } catch (error) {
+      console.error('[LOAD_MORE_CHATS_MOBILE] Exception:', error);
+    } finally {
+      setIsLoadingMoreChats(false);
+    }
+  }, [appendChats, hasMoreChats, initialUser, isLoadingMoreChats]);
 
   const ensureMessagesForChat = useCallback(async (chatId: string, options?: { force?: boolean }) => {
     const force = options?.force ?? false;
@@ -1383,6 +1423,10 @@ export default function MobileChatLayout({
     updateChatContact(contact);
   }, [initialUser?.activeWorkspaceId, updateChatContact]);
 
+  const handleRealtimeMessageOutsideList = useCallback(() => {
+    void runDeltaSyncRef.current?.();
+  }, []);
+
   // Use centralized Realtime hook
   const { isChatsConnected, isMessagesConnected } = useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
@@ -1391,6 +1435,7 @@ export default function MobileChatLayout({
     messagesListChatIdsCsv: ownershipFilter === 'mine' ? messagesListChatIdsCsv : undefined,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
+    onMessageOutsideList: handleRealtimeMessageOutsideList,
     onContactUpdate: handleRealtimeContactUpdate,
     onStatusChange: handleRealtimeStatusChange,
   });
@@ -1398,6 +1443,12 @@ export default function MobileChatLayout({
   realtimeHealthyRef.current = isRealtimeHealthy;
 
   useEffect(() => {
+    if (preserveClientState) {
+      selectedChatIdRef.current = useInboxStore.getState().selectedChatId;
+      isHydratedRef.current = true;
+      setIsLoading(false);
+      return;
+    }
     if (initialData) {
       // FIX: Prevent overwriting client-side state with stale/empty server selection during revalidation.
       const clientHasSelection = !!selectedChatIdRef.current;
@@ -1459,7 +1510,7 @@ export default function MobileChatLayout({
       isHydratedRef.current = true;
       setIsLoading(false);
     }
-  }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
+  }, [initialData, initialUser, initializeInbox, preserveClientState, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
     if (selectedChatId) {
@@ -1597,6 +1648,9 @@ export default function MobileChatLayout({
                   onConfirmForward={handleConfirmForward}
                   onCancelForward={handleCancelForward}
                   onPrefetch={prefetchChat}
+                  loadMore={handleLoadMoreChats}
+                  hasMore={hasMoreChats}
+                  isLoadingMore={isLoadingMoreChats}
                   className="w-full h-full"
                   bottomPadding={100}
                 />

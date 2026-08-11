@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import Image from 'next/image';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
+import { badgeColorStyle } from '@/lib/color-contrast';
 import { resolveClientMediaUrl } from '@/lib/storage-url';
 import { Virtuoso } from 'react-virtuoso';
 import { useInboxStore } from '@/hooks/use-inbox-store';
@@ -754,6 +756,14 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       : 'border-blue-100 bg-blue-50 text-blue-700';
   const hasTag = Boolean(chat.tag);
   const tagLabel = hasTag ? chat.tag : 'Sem tag';
+  // Sem cor utilizavel o chip cai para o estilo neutro do tema. Antes o fundo
+  // caia para branco a 10% com texto branco: no tema claro a etiqueta
+  // simplesmente sumia.
+  const teamBadgeStyle = useMemo(() => badgeColorStyle(chat.teamColor), [chat.teamColor]);
+  const tagBadgeStyle = useMemo(
+    () => (hasTag ? badgeColorStyle(chat.color) : null),
+    [hasTag, chat.color]
+  );
   const unreadCount = chat.unreadCount ?? 0;
   const hasUnread = unreadCount > 0;
 
@@ -961,6 +971,35 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </Tooltip>
           </TooltipProvider>
         )}
+        {chat.adAttribution && !isMarketingChat && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="absolute -left-1 -top-1 flex h-[17px] w-[17px] items-center justify-center rounded-full border-2 border-card bg-white shadow-sm dark:bg-zinc-900">
+                  <Image
+                    src="/icons/google-ads.svg"
+                    alt=""
+                    width={9}
+                    height={9}
+                    className="h-[9px] w-[9px]"
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="bg-popover border-border text-popover-foreground">
+                <p className="font-medium">Veio de anúncio do Google Ads</p>
+                {chat.adAttribution.campaign && <p>Campanha: {chat.adAttribution.campaign}</p>}
+                {!chat.adAttribution.campaign && chat.adAttribution.campaignId && (
+                  <p>Campanha: {chat.adAttribution.campaignId}</p>
+                )}
+                <p className="text-muted-foreground">
+                  {chat.adAttribution.confidence === 'deterministic'
+                    ? 'Confirmado pelo código de rastreio'
+                    : 'Inferido pelo clique recente'}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -1077,12 +1116,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         <div className="flex min-h-[15px] flex-nowrap items-center gap-1.5 overflow-hidden">
           {chat.status === 'atendimentos' && chat.teamName ? (
             <Badge
-              style={{
-                backgroundColor: chat.teamColor || 'rgba(255,255,255,0.1)',
-                color: chat.teamColor ? (chat.teamColor.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
-                borderColor: chat.teamColor ? chat.teamColor : 'rgba(255,255,255,0.2)'
-              }}
-              className="flex max-w-[55%] flex-shrink items-center gap-1 truncate border px-1.5 py-0 text-[9px] font-medium shadow-sm"
+              style={teamBadgeStyle ?? undefined}
+              className={cn(
+                "flex max-w-[55%] flex-shrink items-center gap-1 truncate border px-1.5 py-0 text-[9px] font-medium",
+                teamBadgeStyle ? "shadow-sm" : NEUTRAL_BADGE_CLASS
+              )}
               title={chat.teamName}
             >
               <Users className="h-3 w-3" />
@@ -1090,14 +1128,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </Badge>
           ) : (
             <Badge
-              style={hasTag ? {
-                backgroundColor: chat.color || 'rgba(255,255,255,0.1)',
-                color: chat.color ? (chat.color.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
-                borderColor: chat.color ? chat.color : 'rgba(255,255,255,0.2)'
-              } : undefined}
+              style={tagBadgeStyle ?? undefined}
               className={cn(
                 "max-w-[55%] flex-shrink truncate border px-1.5 py-0 text-[9px]",
-                hasTag ? "shadow-sm" : "border-border/70 bg-muted/40 text-muted-foreground"
+                tagBadgeStyle ? "shadow-sm" : NEUTRAL_BADGE_CLASS
               )}
               title={hasTag ? chat.tag : 'Sem tag'}
             >
@@ -1182,6 +1216,8 @@ const getChatPriorityGroup = (chat: Chat, now = Date.now()): ChatPriorityGroupId
   if (waitingForAgent || (chat.unreadCount ?? 0) > 0) return 'waiting';
   return 'recent';
 };
+
+const NEUTRAL_BADGE_CLASS = 'border-border/70 bg-muted/40 text-muted-foreground';
 
 const getChatItemKey = (_index: number, chat: Chat) => chat.id;
 
@@ -1715,9 +1751,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const canLoadMore = Boolean(loadMore) && !isLoadingMore && (hasMore ?? hasMoreChats);
   const handleEndReached = useCallback(() => {
     if (!canLoadMore) return;
-    if (activeTab !== 'encerrados') return;
     if (filteredChats.length === 0) return;
-    loadMore?.({ statuses: ['encerrados'], ownership: ownershipFilter });
+    const statuses: Chat['status'][] = activeTab === 'encerrados'
+      ? ['encerrados']
+      : activeTab === 'atendimentos'
+        ? ['atendimentos']
+        : ['gerais'];
+    loadMore?.({ statuses, ownership: ownershipFilter });
   }, [activeTab, canLoadMore, filteredChats.length, loadMore, ownershipFilter]);
 
   const virtuosoComponents = useMemo(() => ({

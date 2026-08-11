@@ -8,6 +8,7 @@ import {
     ChevronRight,
     Clock3,
     Download,
+    UploadCloud,
     Edit,
     Eye,
     Filter,
@@ -186,6 +187,7 @@ export default function CustomerList({ user }: { user: User }) {
 
     const [loading, setLoading] = useState(true);
     const [exportingSegmentId, setExportingSegmentId] = useState<string | null>(null);
+    const [syncingSegmentId, setSyncingSegmentId] = useState<string | null>(null);
     const [refreshKey, setRefreshKey] = useState(0);
     const [isSegmentBuilderOpen, setIsSegmentBuilderOpen] = useState(false);
 
@@ -352,6 +354,39 @@ export default function CustomerList({ user }: { user: User }) {
             });
         } finally {
             setExportingSegmentId(null);
+        }
+    };
+
+    /**
+     * Sincroniza a lista direto como publico de Customer Match, sem CSV manual.
+     * Os contatos sobem apenas com hash SHA-256.
+     */
+    const handleSyncSegmentToGoogleAds = async (segment: Segment) => {
+        const workspaceId = user.activeWorkspaceId;
+        if (!workspaceId) return;
+        setSyncingSegmentId(segment.id);
+        try {
+            const { syncSegmentToGoogleAdsAudience } = await import('@/actions/google-ads');
+            const { result, error } = await syncSegmentToGoogleAdsAudience(workspaceId, segment.id);
+
+            if (error || !result) {
+                toast({
+                    title: 'Erro ao sincronizar público',
+                    description: error || 'Não foi possível sincronizar com o Google Ads.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            toast({
+                title: 'Público sincronizado',
+                description:
+                    `${result.uploadedCount} contato(s) enviados para "${result.userListName}"` +
+                    `${result.skippedCount > 0 ? `; ${result.skippedCount} sem e-mail ou telefone foram ignorados.` : '.'}` +
+                    ' O Google leva algumas horas para processar a lista.',
+            });
+        } finally {
+            setSyncingSegmentId(null);
         }
     };
 
@@ -524,7 +559,21 @@ export default function CustomerList({ user }: { user: User }) {
                                     {exportingSegmentId === selectedSegment.id
                                         ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                         : <Download className="mr-2 h-4 w-4" />}
-                                    Exportar para Google Ads
+                                    Baixar CSV
+                                </Button>
+                            )}
+                            {selectedSegment && (
+                                <Button
+                                    variant="outline"
+                                    className="h-10 rounded-lg border-slate-200 bg-white px-4 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200 dark:hover:bg-white/10 dark:hover:text-white"
+                                    disabled={syncingSegmentId === selectedSegment.id}
+                                    onClick={() => handleSyncSegmentToGoogleAds(selectedSegment)}
+                                    title="Envia os contatos direto para um público de Customer Match, com hash SHA-256"
+                                >
+                                    {syncingSegmentId === selectedSegment.id
+                                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        : <UploadCloud className="mr-2 h-4 w-4" />}
+                                    Sincronizar com Google Ads
                                 </Button>
                             )}
                             <Button

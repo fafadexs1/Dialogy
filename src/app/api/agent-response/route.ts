@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sendAutomatedMessageAction } from '@/actions/messages';
+import { chatBelongsToWorkspace } from '@/lib/security/system-agent-access';
 
 /**
  * @deprecated Use /api/agent/messages instead. This endpoint will be removed in a future version.
@@ -37,6 +38,9 @@ export async function POST(request: Request) {
 
     if (!chatId || !content) {
       return NextResponse.json({ error: 'chatId and content are required.' }, { status: 400 });
+    }
+    if (!await chatBelongsToWorkspace(chatId, agent.workspace_id)) {
+      return NextResponse.json({ error: 'Chat not found in the agent workspace.' }, { status: 404 });
     }
 
     // We send the message using the agent's ID as the sender

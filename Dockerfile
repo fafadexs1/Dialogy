@@ -66,6 +66,7 @@ RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:build
 RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:ai:build
 RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:campaign:build
 RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:meta-relay:build
+RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:google-ads:build
 RUN rm -f .next/standalone/.env .next/standalone/.env.*
 
 FROM base AS runtime-base
@@ -112,6 +113,7 @@ COPY --from=worker-deps --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/dist/worker.js ./dist/worker.js
 COPY --from=builder --chown=nextjs:nodejs /app/dist/worker-campaign.js ./dist/worker-campaign.js
 COPY --from=builder --chown=nextjs:nodejs /app/dist/worker-meta-relay.js ./dist/worker-meta-relay.js
+COPY --from=builder --chown=nextjs:nodejs /app/dist/worker-google-ads.js ./dist/worker-google-ads.js
 
 RUN node -e "require('fluent-ffmpeg'); require('ffmpeg-static'); require('ffprobe-static')" \
     && ffmpeg -version \

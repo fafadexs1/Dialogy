@@ -422,8 +422,19 @@ function hasCustomerFacingToolRefusal(response: string): boolean {
     /\bnao e possivel\b.{0,80}\b(?:ferramenta|tool|sistema|recurso)\b/,
     /\bnao (?:tenho|posso|consigo)\b.{0,80}\b(?:ferramenta|tool|sistema|acesso|consulta)\b/,
     /\bsem\s+(?:ferramenta|acesso ao sistema|recurso)\b/,
-    /\bnao tenho certeza\b/,
   ].some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * Admitting a knowledge gap is the desired behaviour when the base does not
+ * back a fact — repairing it away pushes the model back toward inventing one.
+ * It is only defective when it dead-ends: no question, no next step, no handoff.
+ */
+function hasDeadEndUncertainty(response: string): boolean {
+  const normalized = normalizeText(response);
+  const admitsUncertainty = /\bnao (?:tenho certeza|sei dizer|tenho essa informacao)\b/.test(normalized);
+  if (!admitsUncertainty) return false;
+  return !hasCustomerFacingNextStep(response) && !hasTransferPromise(response);
 }
 
 function findMissingLookupSlots(input: {
@@ -593,7 +604,7 @@ export function validateAutopilotResponse(input: {
     && !plannedLookup
     && !failedLookup
     && !hasTransferPromise(originalResponse)
-    && hasCustomerFacingToolRefusal(originalResponse)
+    && (hasCustomerFacingToolRefusal(originalResponse) || hasDeadEndUncertainty(originalResponse))
   ) {
     reasons.push('customer_facing_tool_refusal_repaired');
     return {

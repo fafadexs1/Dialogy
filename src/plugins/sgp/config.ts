@@ -1,6 +1,7 @@
 import { getCustomFieldDefinitions as fetchCustomFields } from '@/actions/crm';
-import { saveIntegrationConfig, getIntegrationConfig } from '@/actions/integrations';
+import { saveIntegrationConfig } from '@/actions/integrations';
 import { getCurrentUser } from '@/actions/user';
+import { loadIntegrationConfig as getIntegrationConfig } from '@/lib/workspace-integration-config';
 
 import type { SGPGlobalConfig, SGPUserConfig } from './types';
 

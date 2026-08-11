@@ -80,6 +80,7 @@ import {
     isConversationCloseRequest,
     isPotentialConversationCloseRequest,
 } from '@/services/autopilot/close-intent';
+import { compactKnowledgeDocumentsForPrompt } from '@/services/autopilot/knowledge-prompt-budget';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
@@ -136,8 +137,10 @@ import { runAutopilotWorkflowRuntimeV2Shadow } from '@/services/workflow-runtime
 import { runAutopilotWorkflowRuntimeV2Primary } from '@/services/workflow-runtime/autopilot-primary';
 import {
     canonicalWorkflowFieldName,
+    hasKnownWorkflowField,
     isValidWorkflowGoalCompletionEvidence,
 } from '@/services/workflow-runtime/goal-completion';
+import { extractCollectionFieldsWithAi } from '@/ai/flows/collection-field-extractor';
 import {
     completeProcedureToolReuse,
     planProcedureToolReuse,
@@ -449,61 +452,17 @@ function buildEnabledAgentToolsDescription(
 }
 
 const MAX_AI_ANALYSIS_CHARS = 1000;
-const MAX_PROMPT_DOCUMENT_CHARS = 1200;
-const MAX_PROMPT_DOCUMENT_TOTAL_CHARS = 4500;
+
+/** Kill switch for the AI field extractor; collection falls back to the deterministic parser. */
+function isAiFieldExtractionEnabled(): boolean {
+    const raw = String(process.env.AUTOPILOT_AI_FIELD_EXTRACTION || '').trim().toLowerCase();
+    return !['0', 'off', 'false', 'disabled'].includes(raw);
+}
 
 function compactAiAnalysis(value: string): string {
     const normalized = value.replace(/\s+/g, ' ').trim();
     if (normalized.length <= MAX_AI_ANALYSIS_CHARS) return normalized;
     return `${normalized.slice(0, MAX_AI_ANALYSIS_CHARS - 1).trim()}…`;
-}
-
-function resolvePromptDocumentLimit(document: KnowledgeBaseDocument): number {
-    return typeof document.maxPromptChars === 'number' && Number.isFinite(document.maxPromptChars) && document.maxPromptChars > 0
-        ? Math.floor(document.maxPromptChars)
-        : MAX_PROMPT_DOCUMENT_CHARS;
-}
-
-function resolvePromptDocumentsTotalLimit(documents: KnowledgeBaseDocument[]): number {
-    const configuredExtra = (documents || []).reduce((total, document) => {
-        const limit = resolvePromptDocumentLimit(document);
-        return total + Math.max(0, limit - MAX_PROMPT_DOCUMENT_CHARS);
-    }, 0);
-    return MAX_PROMPT_DOCUMENT_TOTAL_CHARS + configuredExtra;
-}
-
-function compactKnowledgeDocumentsForPrompt(documents: KnowledgeBaseDocument[]): KnowledgeBaseDocument[] {
-    let totalChars = 0;
-    const compacted: KnowledgeBaseDocument[] = [];
-    const totalLimit = resolvePromptDocumentsTotalLimit(documents);
-
-    for (const document of documents || []) {
-        const rawContent = String(document.content || '')
-            .replace(/\r\n?/g, '\n')
-            .split('\n')
-            .map((line) => line.replace(/[ \t]+/g, ' ').trim())
-            .join('\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-        if (!rawContent) continue;
-
-        const remaining = totalLimit - totalChars;
-        if (remaining <= 0) break;
-
-        const configuredDocumentLimit = resolvePromptDocumentLimit(document);
-        const maxForDocument = Math.min(configuredDocumentLimit, remaining);
-        const content = rawContent.length > maxForDocument
-            ? `${rawContent.slice(0, Math.max(0, maxForDocument - 1)).trim()}…`
-            : rawContent;
-
-        compacted.push({
-            ...document,
-            content,
-        });
-        totalChars += content.length;
-    }
-
-    return compacted;
 }
 
 function cleanKnowledgeCatalogContent(content: string): string {
@@ -1289,7 +1248,7 @@ export async function processAutopilotForChat(
 
         const result = await sendMultiBlockResponseRaw(...args);
         if (result.success) {
-            scheduleAutopilotInactivityClose({
+            await scheduleAutopilotInactivityClose({
                 workspaceId,
                 chatId: chat.id,
                 autopilotConfigId: autopilotConfig.id,
@@ -1487,6 +1446,58 @@ export async function processAutopilotForChat(
         })
         : {};
     Object.assign(structuredKnownFields, pendingCollectionReplyFields);
+
+    // The deterministic parser above only accepts "label: value", a single-field
+    // answer, or a lone remaining field. A plain "Joao Silva, 11 99999-8888,
+    // joao@x.com" loses every value and the agent re-asks. Read whatever it left
+    // behind with the model; each value still goes through the same validators.
+    const aiExtractedCollectionFields: Record<string, string> = {};
+    const fieldsMissingAfterDeterministic = activeCollectionCheckpoint
+        ? activeCollectionCheckpoint.pendingFields.filter(
+            (field) => !hasKnownWorkflowField(field, structuredKnownFields),
+        )
+        : [];
+    if (isAiFieldExtractionEnabled() && fieldsMissingAfterDeterministic.length > 0) {
+        try {
+            const extractionStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'collection_field_extractor_ai',
+                () => extractCollectionFieldsWithAi({
+                    customerMessage: enrichedLastMessageContent || '',
+                    pendingFields: fieldsMissingAfterDeterministic,
+                    previousQuestion: previousCollectionQuestion,
+                    chatHistory: chatHistoryForAI,
+                    workspaceId,
+                }),
+                { pendingFields: fieldsMissingAfterDeterministic },
+            );
+            Object.assign(aiExtractedCollectionFields, extractionStage.value);
+            Object.assign(structuredKnownFields, extractionStage.value);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'collection_field_extractor_ai',
+                status: 'success',
+                payload: {
+                    requestedFields: fieldsMissingAfterDeterministic,
+                    extractedFields: Object.keys(extractionStage.value),
+                },
+            });
+        } catch (error) {
+            // Collection must survive an extractor outage: the deterministic
+            // fields already applied and the agent re-asks the rest.
+            console.warn('[AI_FIELD_EXTRACTOR] Stage failed, keeping deterministic fields only:', error);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'collection_field_extractor_ai',
+                status: 'fallback',
+                payload: {
+                    requestedFields: fieldsMissingAfterDeterministic,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+        }
+    }
+
     const messageSlotDetails = currentSlotExtraction.details.filter((detail) => detail.source === 'message');
     const messageSlotsToPersist = Object.fromEntries(
         messageSlotDetails.map((detail) => [detail.name, detail.value]),
@@ -1496,6 +1507,7 @@ export async function processAutopilotForChat(
         ...focusedConversationFields,
         ...recoveredCollectionHistoryFields,
         ...pendingCollectionReplyFields,
+        ...aiExtractedCollectionFields,
     });
     let conversationFieldsPersisted = true;
     if (Object.keys(discoveredConversationFields).length > 0) {
@@ -6289,7 +6301,11 @@ export async function processAutopilotForChat(
                     availableTeams,
                     contact: sanitizedContact,
                     knowledgeCoverage,
-                    knowledgeDocuments: promptKnowledgeDocuments,
+                    // Grounding evidence is the full retrieved set, not the
+                    // prompt-truncated slice: a fact cut for budget is still a
+                    // fact backed by the knowledge base, and flagging it as
+                    // unsupported replaces a correct answer with the fallback.
+                    knowledgeDocuments: factKnowledgeDocuments,
                     source: 'llm',
                     systemAgentName: assignedSystemAgentName,
                 });

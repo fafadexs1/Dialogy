@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { InitialChatsPayload } from '@/actions/chats';
 import type { User } from '@/lib/types';
@@ -27,6 +27,7 @@ export default function ResponsiveInboxLayout({
   initialData: InitialChatsPayload | null;
 }) {
   const [layout, setLayout] = useState<'mobile' | 'desktop' | null>(null);
+  const previousLayoutRef = useRef<'mobile' | 'desktop' | null>(null);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(min-width: 768px)');
@@ -36,9 +37,19 @@ export default function ResponsiveInboxLayout({
     return () => mediaQuery.removeEventListener('change', syncLayout);
   }, []);
 
-  if (!layout) return <InboxLoadingShell />;
+  useEffect(() => {
+    if (layout) previousLayoutRef.current = layout;
+  }, [layout]);
 
-  const sharedProps = { initialUser, chatId: initialChatId, initialData };
+  if (!layout) return <InboxLoadingShell />;
+  const preserveClientState = previousLayoutRef.current !== null && previousLayoutRef.current !== layout;
+
+  const sharedProps = {
+    initialUser,
+    chatId: initialChatId,
+    initialData,
+    preserveClientState,
+  };
   return (
     <div className="flex h-full w-full">
       {layout === 'mobile'

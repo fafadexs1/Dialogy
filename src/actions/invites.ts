@@ -118,32 +118,43 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
     const client = await db.connect();
     try {
         await client.query('BEGIN');
+        const rejectInvite = async (error: string) => {
+            await client.query('ROLLBACK');
+            return { success: false, error };
+        };
 
-        // 1. Validate the invite code
+        // Serialize acceptance of the same invite before checking its counters.
         const inviteRes = await client.query(
             `SELECT 
-                id, workspace_id, expires_at, max_uses, is_revoked, 
-                (SELECT COUNT(*) FROM user_invites WHERE invite_id = wi.id) as use_count
+                id, workspace_id, expires_at, max_uses, is_revoked
              FROM workspace_invites wi 
-             WHERE code = $1`, [inviteCode]
+             WHERE code = $1
+             FOR UPDATE OF wi`, [inviteCode]
         );
 
         if ((inviteRes.rowCount || 0) === 0) {
-            return { success: false, error: "Código de convite inválido." };
+            return rejectInvite("Código de convite inválido.");
         }
         const invite = inviteRes.rows[0];
 
         if (invite.is_revoked) {
-            return { success: false, error: "Este convite foi revogado." };
+            return rejectInvite("Este convite foi revogado.");
         }
         if (new Date(invite.expires_at) < new Date()) {
-            return { success: false, error: "Este convite expirou." };
-        }
-        if (invite.max_uses && invite.use_count >= invite.max_uses) {
-            return { success: false, error: "O limite de usos para este convite foi atingido." };
+            return rejectInvite("Este convite expirou.");
         }
 
         const { workspace_id: workspaceId, id: inviteId } = invite;
+        await client.query('SELECT id FROM workspaces WHERE id = $1 FOR UPDATE', [workspaceId]);
+
+        const inviteUseRes = await client.query(
+            'SELECT COUNT(*)::int AS use_count FROM user_invites WHERE invite_id = $1',
+            [inviteId]
+        );
+        const inviteUseCount = Number(inviteUseRes.rows[0]?.use_count || 0);
+        if (invite.max_uses && inviteUseCount >= Number(invite.max_uses)) {
+            return rejectInvite("O limite de usos para este convite foi atingido.");
+        }
 
         // --- BILLING: Check User Limits ---
         const { checkLimit } = await import('@/lib/billing-logic');
@@ -156,10 +167,9 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
 
         const limitCheck = await checkLimit(workspaceId, 'users', currentUserCount);
         if (!limitCheck.allowed) {
-            return {
-                success: false,
-                error: `O limite de usuários do plano ${limitCheck.plan.toUpperCase()} (${limitCheck.limit}) foi atingido. Faça upgrade para aceitar mais membros.`
-            };
+            return rejectInvite(
+                `O limite de usuários do plano ${limitCheck.plan.toUpperCase()} (${limitCheck.limit}) foi atingido. Faça upgrade para aceitar mais membros.`
+            );
         }
         // ----------------------------------
 
@@ -168,7 +178,7 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
             'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]
         );
         if ((memberCheck.rowCount || 0) > 0) {
-            return { success: false, error: "Você já é membro deste workspace." };
+            return rejectInvite("Você já é membro deste workspace.");
         }
 
         // 3. Add user to the workspace with the default 'Member' role

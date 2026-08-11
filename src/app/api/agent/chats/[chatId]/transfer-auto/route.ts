@@ -4,62 +4,9 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import type { Chat } from '@/lib/types';
-import { getPresenceTtlSeconds } from '@/lib/presence';
 import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
-
-/**
- * Find the team with the lowest normalized live portfolio. Agent selection is
- * delegated to the same fair, atomic allocator used by every team transfer.
- */
-async function findAvailableTeam(workspaceId: string): Promise<{ teamId: string; teamName: string } | null> {
-    try {
-        const ttlSeconds = getPresenceTtlSeconds();
-
-        const result = await db.query(
-            `
-            SELECT
-                t.id AS team_id,
-                t.name AS team_name,
-                COUNT(DISTINCT active_chat.id)::numeric
-                  / GREATEST(COUNT(DISTINCT tm.user_id), 1) AS portfolio_per_available_agent
-            FROM teams t
-            JOIN team_members tm ON tm.team_id = t.id
-            JOIN user_workspace_presence uwp
-              ON uwp.user_id = tm.user_id
-             AND uwp.workspace_id = t.workspace_id
-             AND uwp.is_online = TRUE
-             AND uwp.last_seen > NOW() - ($2 * interval '1 second')
-            LEFT JOIN team_agent_distribution_state ds
-              ON ds.workspace_id = t.workspace_id
-             AND ds.team_id = t.id
-             AND ds.user_id = tm.user_id
-            LEFT JOIN chats active_chat
-              ON active_chat.workspace_id = t.workspace_id
-             AND active_chat.agent_id = tm.user_id
-             AND active_chat.status = 'atendimentos'
-            WHERE t.workspace_id = $1
-              AND COALESCE(ds.accepting_assignments, TRUE) = TRUE
-            GROUP BY t.id, t.name
-            HAVING COUNT(DISTINCT tm.user_id) > 0
-            ORDER BY portfolio_per_available_agent ASC, t.id ASC
-            LIMIT 1
-            `,
-            [workspaceId, ttlSeconds]
-        );
-
-        if (result.rowCount === 0) {
-            return null;
-        }
-
-        return {
-            teamId: result.rows[0].team_id,
-            teamName: result.rows[0].team_name
-        };
-    } catch (error) {
-        console.error('[TRANSFER_AUTO] Error finding available agent:', error);
-        return null;
-    }
-}
+import { describeTeamUnavailability } from '@/services/chat-distribution/team-availability';
+import { rankAssignableTeams } from '@/services/chat-distribution/team-availability-server';
 
 /**
  * Authenticate the system agent and validate the chat.
@@ -96,14 +43,17 @@ async function authenticateAndValidate(request: Request, chatId: string) {
 /**
  * POST /api/agent/chats/[chatId]/transfer-auto
  * 
- * Automatically transfers a chat to any available online agent in the workspace
- * who is a member of at least one team.
- * 
+ * Ranks every team that can receive a chat right now — online members, within
+ * business hours, accepting assignments, with portfolio room — from the least
+ * to the most loaded, then walks that list until one accepts. Agent selection
+ * inside the team is delegated to the same fair, atomic allocator used by every
+ * team transfer.
+ *
  * Authentication: Bearer token from system_agents table
- * 
+ *
  * Response:
- * - 200: { success: true, agentId: string, agentName: string }
- * - 409: No agents available
+ * - 200: { success: true, teamId, teamName, agentId, agentName }
+ * - 409: No team can take the chat right now (body carries the actual reason)
  * - 401/403: Authentication errors
  * - 404: Chat not found
  * - 500: Server error
@@ -122,47 +72,73 @@ export async function POST(
     }
 
     try {
-        // Find an available online agent who is in at least one team
-        const availableTeam = await findAvailableTeam(authResult.agent.workspace_id);
+        // Todas as equipes que podem receber agora, da menos carregada para a
+        // mais carregada. A lista inteira importa: escolher só a primeira e
+        // desistir era o que fazia a transferência automática falhar quando a
+        // equipe mais folgada estava fechada ou lotada.
+        const candidateTeams = await rankAssignableTeams(authResult.agent.workspace_id);
 
-        if (!availableTeam) {
+        if (candidateTeams.length === 0) {
             return NextResponse.json(
                 {
                     success: false,
-                    error: 'Nenhum agente disponível no momento. Todos os agentes estão offline ou não pertencem a nenhuma equipe.'
+                    error: 'Nenhuma equipe pode receber o atendimento agora. Verifique se há agentes online, dentro do expediente e com distribuição ativa.'
                 },
                 { status: 409 }
             );
         }
 
-        // Transfer the chat to the found agent
-        const result = await transferChatAction({
-            chatId,
-            teamId: availableTeam.teamId,
-        }, createTrustedActorContext({
-            user: {
-                id: authResult.agent.id,
-                name: authResult.agent.name,
-            },
-            isSystemAgent: true
-        }));
+        // Corrida entre a leitura e a atribuição é normal: entre listar e
+        // transferir, o agente pode sair ou bater o teto. Por isso tentamos as
+        // equipes em ordem em vez de tratar a primeira recusa como fim.
+        let lastFailure: { error: string; teamName: string } | null = null;
 
-        if (result.success) {
-            return NextResponse.json({
-                success: true,
-                message: 'Chat transferido com sucesso.',
-                teamId: availableTeam.teamId,
-                teamName: availableTeam.teamName,
-                agentId: result.assignedAgent?.id,
-                agentName: result.assignedAgent?.name
-            });
-        } else {
-            const unavailable = result.error?.includes('Nenhum agente dispon');
-            return NextResponse.json(
-                { success: false, error: result.error || 'Falha ao transferir o chat.' },
-                { status: unavailable ? 409 : 500 }
-            );
+        for (const team of candidateTeams) {
+            const result = await transferChatAction({
+                chatId,
+                teamId: team.teamId,
+            }, createTrustedActorContext({
+                user: {
+                    id: authResult.agent.id,
+                    name: authResult.agent.name,
+                },
+                isSystemAgent: true
+            }));
+
+            if (result.success) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'Chat transferido com sucesso.',
+                    teamId: team.teamId,
+                    teamName: team.teamName,
+                    agentId: result.assignedAgent?.id,
+                    agentName: result.assignedAgent?.name
+                });
+            }
+
+            if (!result.reasonCode) {
+                // Falha que não é indisponibilidade (chat encerrado, erro de
+                // servidor): tentar outra equipe não muda nada.
+                return NextResponse.json(
+                    { success: false, error: result.error || 'Falha ao transferir o chat.' },
+                    { status: 500 }
+                );
+            }
+
+            console.log(`[TRANSFER_AUTO] Equipe ${team.teamName} recusou (${result.reasonCode}). Tentando a próxima.`);
+            lastFailure = {
+                error: result.error || describeTeamUnavailability(result.reasonCode, team.teamName),
+                teamName: team.teamName,
+            };
         }
+
+        return NextResponse.json(
+            {
+                success: false,
+                error: lastFailure?.error || 'Nenhuma equipe pode receber o atendimento agora.'
+            },
+            { status: 409 }
+        );
 
     } catch (error: any) {
         console.error('[TRANSFER_AUTO] Error:', error);

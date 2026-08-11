@@ -329,6 +329,14 @@ function validateNodeConfig(
         { nodeId: node.id },
       );
     }
+    if (mode === 'time' && !outgoing.some((connection) => connection.sourcePortId === 'expired')) {
+      error(
+        collector,
+        'wait_missing_expired_route',
+        `O bloco "${node.name}" precisa conectar a saída de expiração.`,
+        { nodeId: node.id },
+      );
+    }
   }
 
   if (node.type === 'logic.subflow' || node.type === 'tool.subflow') {
@@ -610,13 +618,15 @@ export function validateWorkflowDefinition(
     error(collector, 'missing_terminal', 'O workflow precisa de um bloco de finalização.');
   } else {
     const terminalMemo = new Map<string, boolean>();
-    for (const triggerId of triggerIds) {
-      if (!canReachTerminal(triggerId, terminalIds, adjacency, terminalMemo)) {
+    for (const nodeId of reachable) {
+      const node = nodeById.get(nodeId);
+      if (!node || getWorkflowNodeManifest(node.type)?.attachment || terminalIds.has(nodeId)) continue;
+      if (!canReachTerminal(nodeId, terminalIds, adjacency, terminalMemo)) {
         error(
           collector,
           'path_without_terminal',
-          `O caminho iniciado em "${nodeById.get(triggerId)?.name || triggerId}" não alcança uma finalização.`,
-          { nodeId: triggerId },
+          `O caminho iniciado em "${node.name}" não alcança uma finalização.`,
+          { nodeId },
         );
       }
     }

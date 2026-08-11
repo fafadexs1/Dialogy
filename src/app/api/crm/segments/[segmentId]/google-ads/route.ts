@@ -7,6 +7,7 @@ import {
     sanitizeGoogleAdsCsvFilename,
 } from '@/lib/google-ads-customer-match';
 import { createClient } from '@/lib/supabase/server';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 type RouteContext = {
     params: Promise<{ segmentId: string }>;
@@ -44,6 +45,9 @@ export async function GET(_request: Request, { params }: RouteContext) {
         name: string;
         criteria: CriteriaGroup;
     };
+    if (!await hasWorkspacePermission(user.id, segment.workspace_id, 'crm:view')) {
+        return NextResponse.json({ error: 'Lista não encontrada ou acesso não autorizado.' }, { status: 404 });
+    }
     const query = buildSegmentAudienceQuery(segment.workspace_id, segment.criteria);
     const contactsRes = await db.query(query.text, query.values);
     const result = buildGoogleAdsCustomerMatchCsv(contactsRes.rows);

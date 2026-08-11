@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 
 import { getCurrentUser } from '@/actions/user';
+import { db } from '@/lib/db';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import { listMcpServerTools } from '@/services/mcp/client';
 import { getMcpWorkspaceConfig, saveMcpWorkspaceConfig } from '@/services/mcp/store';
 import type { McpServerConfig, McpServerTransport } from '@/services/mcp/types';
@@ -33,8 +35,20 @@ function assertHttpUrl(value: string) {
 async function requireWorkspace(workspaceId: string) {
   const user = await getCurrentUser();
   if (!user) return { user: null, error: 'Usuario nao autenticado.' };
-  if (user.activeWorkspaceId !== workspaceId) return { user: null, error: 'Acesso negado ao workspace.' };
+  if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:edit')) {
+    return { user: null, error: 'Acesso negado ao workspace.' };
+  }
   return { user, error: null };
+}
+
+async function requireStdioOptIn(userId: string): Promise<string | null> {
+  if (process.env.ALLOW_MCP_STDIO !== 'true') {
+    return 'O transporte MCP stdio esta desabilitado neste ambiente.';
+  }
+  const result = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [userId]);
+  return result.rows[0]?.is_superadmin
+    ? null
+    : 'Apenas superadministradores podem executar servidores MCP stdio.';
 }
 
 export async function getMcpServersAction(workspaceId: string) {
@@ -69,6 +83,10 @@ export async function upsertMcpServerAction(input: {
       : input.transport === 'stdio'
         ? 'stdio'
         : 'streamable_http';
+    if (transport === 'stdio') {
+      const stdioError = await requireStdioOptIn(auth.user!.id);
+      if (stdioError) return { success: false, error: stdioError };
+    }
     const nextServer: McpServerConfig = {
       id,
       name: input.name.trim(),
@@ -129,6 +147,11 @@ export async function syncMcpServerToolsAction(workspaceId: string, serverId: st
   const server = config.servers.find((item) => item.id === serverId);
   if (!server) return { success: false, error: 'Servidor MCP nao encontrado.' };
 
+  if (server.transport === 'stdio') {
+    const stdioError = await requireStdioOptIn(auth.user!.id);
+    if (stdioError) return { success: false, error: stdioError };
+  }
+
   const startedAt = Date.now();
   const checkedAt = new Date().toISOString();
   try {
@@ -176,6 +199,11 @@ export async function testMcpServerConnectionAction(workspaceId: string, serverI
   const config = await getMcpWorkspaceConfig(workspaceId);
   const server = config.servers.find((item) => item.id === serverId);
   if (!server) return { success: false, error: 'Servidor MCP nao encontrado.' };
+
+  if (server.transport === 'stdio') {
+    const stdioError = await requireStdioOptIn(auth.user!.id);
+    if (stdioError) return { success: false, error: stdioError };
+  }
 
   const startedAt = Date.now();
   const checkedAt = new Date().toISOString();
