@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Github, Heart, MessageCircle, Twitter } from "lucide-react";
+import { Heart, MessageCircle } from "lucide-react";
+import { FaGithub as Github, FaTwitter as Twitter } from "react-icons/fa6";
 
 import { DeveloperBrand } from '@/components/developer/developer-brand';
 import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';

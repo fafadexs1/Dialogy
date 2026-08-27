@@ -119,6 +119,7 @@ export type WorkflowRunOptions = {
 
 export type WorkflowStartInput = {
   workflow: WorkflowDefinition;
+  triggerNodeId?: string;
   input: Record<string, unknown>;
   context?: Record<string, unknown>;
   variables?: Record<string, unknown>;
@@ -133,4 +134,11 @@ export type WorkflowResumeInput = {
   contextPatch?: Record<string, unknown>;
   workerId?: string;
 };
+
+export type {
+  WorkflowBlockTestFixture,
+  WorkflowBlockTestFixtures,
+  WorkflowTestChatMessage,
+  WorkflowTestExecutionResult,
+} from './block-test';
 

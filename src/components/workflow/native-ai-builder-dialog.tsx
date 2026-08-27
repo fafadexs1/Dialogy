@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import type { WorkflowDefinition } from '@/services/workflow-runtime';
+import type { WorkflowDefinition } from '@/services/workflow-runtime/types';
 import type { NativeWorkflowAiProposal } from '@/services/workflow-runtime/native-ai-builder';
 
 type ConversationMessage = { role: 'user' | 'assistant'; content: string };

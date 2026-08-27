@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   Loader2,
   LayoutDashboard,
@@ -17,9 +17,6 @@ import {
   BrainCircuit,
   RotateCcw,
   TestTube2,
-  BookOpen,
-  X,
-  Wrench,
   GitBranch,
   AlertTriangle,
   RefreshCw,
@@ -64,18 +61,12 @@ import {
   applyAutopilotScoreSuggestion,
   revertAutopilotCausalPatternApplication,
   importAutopilotEcosystemPattern,
-  previewAutopilotNativeWorkflowMigration,
-  applyAutopilotNativeWorkflowMigration,
-  createAutopilotNativeWorkflowDraft,
-  generateAutopilotNativeWorkflowWithAi,
-  runAutopilotNativeWorkflowTest,
   type AutopilotCausalPatternApplicationPreview,
   type AutopilotDecisionInsights,
 } from '@/actions/autopilot';
 import { getAiModelCatalogAction } from '@/actions/ai-models';
 import {
   DEFAULT_AUTOPILOT_MODEL,
-  getAiModelRuntimeProvider,
   getAiModelLabel,
   type AiModelCatalogEntry,
 } from '@/lib/ai-models';
@@ -83,7 +74,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
 import { AutopilotStats } from '@/components/autopilot/autopilot-stats';
 import { AutopilotKnowledge } from '@/components/autopilot/autopilot-knowledge';
 import { AutopilotRules } from '@/components/autopilot/autopilot-rules';
@@ -91,15 +81,13 @@ import { AutopilotSettings } from '@/components/autopilot/autopilot-settings';
 import { AutopilotPlayground } from '@/components/autopilot/autopilot-playground';
 import { AutopilotReadiness } from '@/components/autopilot/autopilot-readiness';
 import { AutopilotDecisionInsightsPanel } from '@/components/autopilot/autopilot-decision-insights';
+import { AgentDomainPackStudio } from '@/components/autopilot/agent-domain-pack-studio';
+import { ProcedureStudio } from '@/components/autopilot/procedure-studio';
 import { AutomationForm } from '@/components/autopilot/automation-form';
-import type { AgentEditorPanel } from '@/components/autopilot/autopilot-flow-builder';
-import { NativeWorkflowBuilder } from '@/components/workflow/native-workflow-builder';
-import { NativeAiBuilderDialog } from '@/components/workflow/native-ai-builder-dialog';
-import type { ModelConfiguration, NativeWorkflowTemplate, WorkflowDefinition } from '@/services/workflow-runtime';
+import type { WorkflowDefinition } from '@/services/workflow-runtime/types';
 import {
   attachNativeToolToPrimaryAgent,
   detachNativeToolFromWorkflow,
-  isNativeAgentControlPlaneTool,
   isNativeAgentToolAttachable,
   listAttachedWorkflowToolNames,
   synchronizeNativeWorkflowToolState,
@@ -112,8 +100,6 @@ import { removeNativeKnowledgeReferences } from '@/services/workflow-runtime/nat
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogTitle,
 } from '@/components/ui/dialog';
 import type { AutopilotPlaygroundTrace } from '@/services/autopilot/playground-trace';
 import type { RagLabReport } from '@/services/rag/evaluation';
@@ -384,9 +370,14 @@ function summarizeVersionChanges(
 export default function AutopilotDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const user = useCurrentUser();
   const agentId = params.id as string;
+  const requestedTab = searchParams.get('tab');
+  const managementTab = ['domain', 'overview', 'knowledge', 'rules', 'analytics', 'decision', 'settings', 'playground', 'versions'].includes(requestedTab || '')
+    ? requestedTab!
+    : 'overview';
 
   const [loading, setLoading] = useState(true);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
@@ -399,7 +390,6 @@ export default function AutopilotDetailPage() {
   const [modelCatalog, setModelCatalog] = useState<AiModelCatalogEntry[]>([]);
   const [configuredAiModels, setConfiguredAiModels] = useState<AiModelCatalogEntry[]>([]);
   const [toolCatalog, setToolCatalog] = useState<AgentToolCatalogItem[]>([]);
-  const [isToolCatalogLoading, setIsToolCatalogLoading] = useState(true);
   const [hasGlobalKey, setHasGlobalKey] = useState(false);
   const [workspaceDefaultAiModel, setWorkspaceDefaultAiModel] = useState<string | null>(null);
   const [workspaceHasGeminiConfig, setWorkspaceHasGeminiConfig] = useState(false);
@@ -489,15 +479,6 @@ export default function AutopilotDetailPage() {
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<NexusFlowInstance | null>(null);
   const [lastPlaygroundTrace, setLastPlaygroundTrace] = useState<AutopilotPlaygroundTrace | null>(null);
-  const [editorPanel, setEditorPanel] = useState<AgentEditorPanel | null>(null);
-  const [nativeSetupOpen, setNativeSetupOpen] = useState(false);
-  const [nativeSetupBusy, setNativeSetupBusy] = useState(false);
-  const [nativeMigrationPreview, setNativeMigrationPreview] = useState<{
-    workflow: WorkflowDefinition;
-    validation: { valid: boolean; errors: Array<{ message: string }> };
-    changes: string[];
-    warnings: string[];
-  } | null>(null);
   const [ragHealth, setRagHealth] = useState<AutopilotRagHealth | null>(null);
   const [isReindexingKnowledge, setIsReindexingKnowledge] = useState(false);
   const [ragLabReport, setRagLabReport] = useState<RagLabReport | null>(null);
@@ -528,29 +509,16 @@ export default function AutopilotDetailPage() {
     [configuredAiModels]
   );
 
-  const nativeDefaultModel = useMemo<ModelConfiguration>(() => ({
-    provider: getAiModelRuntimeProvider(aiModel || DEFAULT_AUTOPILOT_MODEL),
-    model: aiModel || DEFAULT_AUTOPILOT_MODEL,
-    temperature: 0.2,
-    maxOutputTokens: 2048,
-    supportsTools: true,
-    supportsStructuredOutput: true,
-    supportsStreaming: true,
-    timeoutMs: 60_000,
-    maxRetries: 2,
-  }), [aiModel]);
-
   const fetchData = useCallback(async (options?: { showLoading?: boolean }) => {
     if (!user?.activeWorkspaceId || !agentId) return;
 
     const showLoading = options?.showLoading ?? true;
     if (showLoading) setLoading(true);
     setIsRefreshingData(true);
-    setIsToolCatalogLoading(true);
     setLoadFailure(null);
     try {
       // The configuration is the only critical request. Render it first so a
-      // slow catalog or RAG health check can never hold the Flowbuilder blank.
+      // A slow secondary catalog or RAG health check must not block agent settings.
       const autopilotData = await getAutopilotConfig(user.activeWorkspaceId, agentId);
       if (autopilotData.error) {
         setLoadFailure({ kind: 'error', message: autopilotData.error });
@@ -645,7 +613,6 @@ export default function AutopilotDetailPage() {
           message: `${message} As conexões já salvas foram preservadas.`,
         });
       }
-      setIsToolCatalogLoading(false);
 
       if (ragHealthLoad.status === 'fulfilled' && !ragHealthLoad.value.error) {
         setRagHealth(ragHealthLoad.value.health || null);
@@ -672,10 +639,9 @@ export default function AutopilotDetailPage() {
     } catch (error) {
       setLoadFailure({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Não foi possível carregar o Flowbuilder.',
+        message: error instanceof Error ? error.message : 'Não foi possível carregar o agente.',
       });
     } finally {
-      setIsToolCatalogLoading(false);
       if (showLoading) setLoading(false);
       setIsRefreshingData(false);
     }
@@ -1317,16 +1283,6 @@ export default function AutopilotDetailPage() {
     }
   }, [config, fetchData, toast]);
 
-  useEffect(() => {
-    if (
-      editorPanel !== 'decision'
-      || decisionInsights
-      || isLoadingDecisionInsights
-      || hasAttemptedDecisionInsightsLoad
-    ) return;
-    void loadDecisionInsights();
-  }, [decisionInsights, editorPanel, hasAttemptedDecisionInsightsLoad, isLoadingDecisionInsights, loadDecisionInsights]);
-
   const upsertRuleFlowNode = (rule: NexusFlowInstance) => {
     const nodeId = `rule-${rule.id}`;
     setFlowGraph((previous) => {
@@ -1426,8 +1382,10 @@ export default function AutopilotDetailPage() {
       <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
         <div className="flex w-full max-w-lg flex-col items-center rounded-3xl border border-white/10 bg-[#101821] p-10 text-center shadow-2xl">
           <Loader2 className="h-9 w-9 animate-spin text-cyan-400" />
-          <h1 className="mt-5 text-xl font-semibold text-white">Carregando o Flowbuilder</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-400">Buscando a configuração principal e preparando os recursos auxiliares do agente.</p>
+          <h1 className="mt-5 text-xl font-semibold text-white">Carregando o agente</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            Buscando a configuração, o conhecimento e as políticas do agente.
+          </p>
         </div>
       </div>
     );
@@ -1442,7 +1400,7 @@ export default function AutopilotDetailPage() {
             <AlertTriangle className="h-6 w-6" />
           </div>
           <h1 className="mt-5 text-2xl font-semibold text-white">
-            {notFound ? 'Automação não encontrada' : 'Não foi possível abrir o Flowbuilder'}
+            {notFound ? 'Agente não encontrado' : 'Não foi possível abrir o agente'}
           </h1>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-400">{loadFailure.message}</p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
@@ -1512,632 +1470,8 @@ export default function AutopilotDetailPage() {
     </div>
   ) : null;
 
-  const handlePreviewNativeMigration = async () => {
-    if (!config) return;
-    setNativeSetupBusy(true);
-    try {
-      const result = await previewAutopilotNativeWorkflowMigration(config.id);
-      if (!result.workflow || !result.validation) {
-        toast({ title: 'Migração indisponível', description: result.error, variant: 'destructive' });
-        return;
-      }
-      setNativeMigrationPreview({
-        workflow: result.workflow,
-        validation: result.validation,
-        changes: result.changes || [],
-        warnings: result.warnings || [],
-      });
-      setNativeSetupOpen(true);
-    } finally {
-      setNativeSetupBusy(false);
-    }
-  };
-
-  const handleApplyNativeMigration = async () => {
-    if (!config) return;
-    setNativeSetupBusy(true);
-    try {
-      const result = await applyAutopilotNativeWorkflowMigration(config.id);
-      if (!result.success || !result.workflow) {
-        toast({ title: 'Falha ao migrar', description: result.error, variant: 'destructive' });
-        return;
-      }
-      applyWorkflowDefinition(result.workflow);
-      setWorkflowBuilderMode('native_v2');
-      setWorkflowRuntimeV2ShadowEnabled(true);
-      setDraftUpdatedAt(result.updatedAt || new Date().toISOString());
-      setNativeSetupOpen(false);
-      toast({ title: 'Flowbuilder nativo ativado', description: 'O grafo legado foi preservado para rollback.' });
-    } finally {
-      setNativeSetupBusy(false);
-    }
-  };
-
-  const handleCreateNativeTemplate = async (template: NativeWorkflowTemplate) => {
-    if (!config) return;
-    setNativeSetupBusy(true);
-    try {
-      const result = await createAutopilotNativeWorkflowDraft({ configId: config.id, template });
-      if (!result.success || !result.workflow) {
-        toast({ title: 'Falha ao criar automação', description: result.error, variant: 'destructive' });
-        return;
-      }
-      applyWorkflowDefinition(result.workflow);
-      setWorkflowBuilderMode('native_v2');
-      setWorkflowRuntimeV2ShadowEnabled(true);
-      setDraftUpdatedAt(result.updatedAt || new Date().toISOString());
-      setNativeSetupOpen(false);
-      toast({ title: 'Automação nativa criada', description: 'Configure os blocos e publique quando a validação estiver verde.' });
-    } finally {
-      setNativeSetupBusy(false);
-    }
-  };
-
-  const handleOpenEditorPanel = (panel: AgentEditorPanel) => {
-    const inlinePanels: AgentEditorPanel[] = ['knowledge', 'capabilities', 'analytics', 'decision', 'settings'];
-    setEditorPanel((current) => (current === panel && inlinePanels.includes(panel) ? null : panel));
-  };
-
-  const renderInlinePanelFrame = (input: {
-    eyebrow: string;
-    title: string;
-    description: string;
-    icon: React.ReactNode;
-    accentClassName: string;
-    children: React.ReactNode;
-  }) => (
-    <div className="mx-auto flex w-full max-w-[1380px] flex-col gap-5 text-slate-100">
-      <div className="flex flex-col gap-4 rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 px-6 py-5 shadow-2xl backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]', input.accentClassName)}>
-            {input.icon}
-            {input.eyebrow}
-          </div>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">{input.title}</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">
-            {input.description}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setEditorPanel(null)}
-          className="rounded-xl border-white/10 bg-[#111316] text-slate-200 hover:bg-white/5 hover:text-white"
-        >
-          <X className="mr-2 h-4 w-4" />
-          Voltar ao fluxo
-        </Button>
-      </div>
-      {input.children}
-    </div>
-  );
-
-  const inlineEditorPanel = (() => {
-    if (editorPanel === 'knowledge') {
-      return renderInlinePanelFrame({
-        eyebrow: 'Base do agente',
-        title: 'Base de conhecimento',
-        description: 'Organize documentos, colecoes e saude do indice sem sair do fluxo visual do atendente.',
-        icon: <BookOpen className="h-3.5 w-3.5" />,
-        accentClassName: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
-        children: (
-      <AutopilotKnowledge
-        documents={knowledgeDocuments}
-        collections={knowledgeCollections}
-        toolCatalog={toolCatalog}
-        onUpload={handleKnowledgeUpload}
-        onRemove={handleRemoveDoc}
-        onUpdateContent={handleUpdateDoc}
-        onUpdateName={handleUpdateDocName}
-        onUpdateCategory={handleUpdateDocCategory}
-        onUpdateMaxPromptChars={handleUpdateDocMaxPromptChars}
-        onUpdateMetadata={handleUpdateDocMetadata}
-        onUpdateCollections={handleUpdateDocCollections}
-        onAddCollection={handleAddKnowledgeCollection}
-        onRemoveCollection={handleRemoveKnowledgeCollection}
-        onAddManual={handleAddManualDoc}
-        onImproveDocument={handleImproveKnowledgeDocument}
-        isUploading={isUploading}
-        ragHealth={ragHealth}
-        onReindex={handleReindexKnowledgeBase}
-        isReindexing={isReindexingKnowledge}
-        ragLabReport={ragLabReport}
-        onRunRagLab={handleRunRagLab}
-        isRunningRagLab={isRunningRagLab}
-      />
-        ),
-      });
-    }
-
-    if (editorPanel === 'capabilities') {
-      return renderInlinePanelFrame({
-        eyebrow: 'Ferramentas do atendimento',
-        title: 'Ferramentas e habilidades',
-        description: 'Configure tools, automacoes e habilidades que o agente pode acionar durante o atendimento.',
-        icon: <Wrench className="h-3.5 w-3.5" />,
-        accentClassName: 'border-sky-500/25 bg-sky-500/10 text-sky-300',
-        children: (
-          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
-            <AutopilotRules
-              rules={instances}
-              toolCatalog={toolCatalog.filter((tool) => !isNativeAgentControlPlaneTool(tool.name))}
-              enabledToolNames={enabledToolNames}
-              setEnabledToolNames={setEnabledToolNames}
-              onToolToggle={handleCapabilityToolToggle}
-              toolsManagedByWorkflow={workflowBuilderMode === 'native_v2'}
-              onSaveTools={handleSaveConfig}
-              isSavingTools={isSaving}
-              onAdd={() => {
-                setEditingRule(null);
-                setIsRuleModalOpen(true);
-              }}
-              onEdit={(rule) => {
-                setEditingRule(rule);
-                setIsRuleModalOpen(true);
-              }}
-              onDelete={handleDeleteRule}
-              onToggle={handleToggleRule}
-            />
-          </div>
-        ),
-      });
-    }
-
-    if (editorPanel === 'analytics') {
-      return renderInlinePanelFrame({
-        eyebrow: 'Fluxo e desempenho',
-        title: 'Analise do agente',
-        description: 'Acompanhe uso, sinais de execucao e historico operacional sem sair do construtor visual.',
-        icon: <GitBranch className="h-3.5 w-3.5" />,
-        accentClassName: 'border-violet-500/25 bg-violet-500/10 text-violet-300',
-        children: (
-          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
-            <AutopilotStats usageLogs={usageLogs} loading={loading} />
-          </div>
-        ),
-      });
-    }
-
-    if (editorPanel === 'decision') {
-      return renderInlinePanelFrame({
-        eyebrow: 'Motor auto evolutivo',
-        title: 'Ledger, padroes e auto-tune',
-        description: 'Veja decisoes reais, resultados observados e melhorias seguras que o agente pode aplicar no rascunho.',
-        icon: <BrainCircuit className="h-3.5 w-3.5" />,
-        accentClassName: 'border-violet-500/25 bg-violet-500/10 text-violet-300',
-        children: (
-          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
-            {decisionInsightsLoadError && (
-              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100 sm:flex-row sm:items-center sm:justify-between">
-                <span>{decisionInsightsLoadError}</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void loadDecisionInsights()}
-                  disabled={isLoadingDecisionInsights}
-                  className="w-fit rounded-xl border-red-500/30 bg-red-950/30 text-red-100 hover:bg-red-900/35 hover:text-white"
-                >
-                  {isLoadingDecisionInsights ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Tentar novamente
-                </Button>
-              </div>
-            )}
-            <AutopilotDecisionInsightsPanel
-              insights={decisionInsights}
-              loading={isLoadingDecisionInsights}
-              refreshing={isRefreshingDecisionInsights}
-              reviewingPatternId={reviewingPatternId}
-              previewingPatternId={previewingPatternId}
-              applicationPreviewPatternId={applicationPreviewPatternId}
-              applicationPreview={applicationPreview}
-              applyingPatternId={applyingPatternId}
-              revertingPatternId={revertingPatternId}
-              applyingScoreHistoryId={applyingScoreHistoryId}
-              importingEcosystemPatternId={importingEcosystemPatternId}
-              autoTuning={isAutoTuningDecisionInsights}
-              onRefresh={handleRefreshDecisionInsights}
-              onReviewPattern={handleReviewDecisionPattern}
-              onPreviewPattern={handlePreviewDecisionPattern}
-              onClearPreview={() => {
-                setApplicationPreviewPatternId(null);
-                setApplicationPreview(null);
-              }}
-              onApplyPattern={handleApplyDecisionPattern}
-              onRevertPattern={handleRevertDecisionPattern}
-              onApplyScoreHistory={handleApplyDecisionScoreHistory}
-              onImportEcosystemPattern={handleImportDecisionEcosystemPattern}
-              onSafeAutoTune={handleSafeDecisionAutoTune}
-            />
-          </div>
-        ),
-      });
-    }
-
-    if (editorPanel === 'settings') {
-      return renderInlinePanelFrame({
-        eyebrow: 'Controle do agente',
-        title: 'Configuracoes gerais',
-        description: 'Ajuste identidade, modelo, status, privacidade e politicas principais sem sair do construtor visual.',
-        icon: <Settings2 className="h-3.5 w-3.5" />,
-        accentClassName: 'border-slate-500/25 bg-slate-500/10 text-slate-300',
-        children: (
-          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
-            <AutopilotSettings
-              agentName={agentName}
-              setAgentName={setAgentName}
-              aiModel={aiModel}
-              setAiModel={setAiModel}
-              knowledgeBase={knowledgeBase}
-              setKnowledgeBase={setKnowledgeBase}
-              defaultFallbackReply={defaultFallbackReply}
-              setDefaultFallbackReply={setDefaultFallbackReply}
-              escalationPolicy={escalationPolicy}
-              setEscalationPolicy={setEscalationPolicy}
-              closingPolicy={closingPolicy}
-              setClosingPolicy={setClosingPolicy}
-              inactivityTimeoutSeconds={inactivityTimeoutSeconds}
-              setInactivityTimeoutSeconds={setInactivityTimeoutSeconds}
-              isActive={isActive}
-              setIsActive={setIsActive}
-              isPrivate={isPrivate}
-              setIsPrivate={setIsPrivate}
-              workflowRuntimeV2ShadowEnabled={workflowRuntimeV2ShadowEnabled}
-              setWorkflowRuntimeV2ShadowEnabled={setWorkflowRuntimeV2ShadowEnabled}
-              isPrimary={isPrimary}
-              onSetPrimary={handleSetPrimary}
-              modelOptions={selectableModels}
-              onSave={handleSaveConfig}
-              isSaving={isSaving}
-              onDelete={handleDeleteAgent}
-              workspace={workspace}
-              nativeWorkflow={workflowBuilderMode === 'native_v2'}
-            />
-          </div>
-        ),
-      });
-    }
-
-    if (editorPanel === 'playground') {
-      return renderInlinePanelFrame({
-        eyebrow: 'Ambiente de testes',
-        title: 'Playground do agente',
-        description: 'Teste e inspecione o agente sem publicar alterações no atendimento real.',
-        icon: <TestTube2 className="h-3.5 w-3.5" />,
-        accentClassName: 'border-rose-500/25 bg-rose-500/10 text-rose-300',
-        children: (
-          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
-            <AutopilotPlayground
-              workspaceId={user?.activeWorkspaceId}
-              agentId={agentId}
-              disabled={isSaving || isPublishing}
-              stale={hasUnpublishedChanges}
-              draftSnapshot={previewDraftSnapshot}
-              onTrace={setLastPlaygroundTrace}
-            />
-          </div>
-        ),
-      });
-    }
-
-    if (editorPanel === 'versions') {
-      return renderInlinePanelFrame({
-        eyebrow: 'Versionamento',
-        title: 'Histórico de versões',
-        description: 'Restaure configurações anteriores do atendente inteligente.',
-        icon: <History className="h-3.5 w-3.5" />,
-        accentClassName: 'border-slate-500/25 bg-slate-500/10 text-slate-300',
-        children: (
-          <div className="rounded-[28px] border border-white/[0.08] bg-[#15171a]/85 p-5 shadow-2xl backdrop-blur sm:p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <span className="text-sm text-slate-400">Ponto de restauração ativo</span>
-              <Badge variant="outline" className="rounded-full border-slate-700 text-slate-300">
-                {versions[0] ? `Atual: v${versions[0].version_number}` : 'Sem versão'}
-              </Badge>
-            </div>
-            <div className="grid gap-3">
-              {versions.map((version, index) => {
-                const current = index === 0;
-                const restoring = restoringVersionId === version.id;
-                const changes = summarizeVersionChanges(version, versions[index + 1] || null, modelCatalog);
-                return (
-                  <Card key={version.id} className="border-white/10 bg-[#1e222b]">
-                    <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-start">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-white">Versão v{version.version_number}</h3>
-                          {current && <Badge className="bg-emerald-500/15 text-emerald-300 border-0">Atual</Badge>}
-                        </div>
-                        <p className="mt-1 text-xs text-slate-400">
-                          {new Date(version.created_at).toLocaleString('pt-BR')}
-                        </p>
-                        <ul className="mt-3 space-y-1 text-sm text-slate-400">
-                          {changes.slice(0, 3).map((change) => (
-                            <li key={change} className="flex gap-2">
-                              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
-                              <span>{change}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <Button
-                        variant={current ? 'outline' : 'default'}
-                        disabled={current || Boolean(restoringVersionId)}
-                        onClick={() => handleRestoreVersion(version.id, version.version_number)}
-                        className={current ? 'border-white/10 text-slate-400' : 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'}
-                      >
-                        {restoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                        {current ? 'Em uso' : 'Restaurar'}
-                      </Button>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-              {versions.length === 0 && (
-                <div className="rounded-2xl border border-dashed border-white/10 p-10 text-center text-sm text-slate-500">
-                  Publique o agente para criar o primeiro ponto de restauração.
-                </div>
-              )}
-            </div>
-          </div>
-        ),
-      });
-    }
-
-    return null;
-  })();
-
-  const inlineEditorPanelName: AgentEditorPanel | null =
-    editorPanel === 'knowledge' || editorPanel === 'capabilities' || editorPanel === 'analytics' || editorPanel === 'decision' || editorPanel === 'settings' || editorPanel === 'playground' || editorPanel === 'versions'
-      ? editorPanel
-      : null;
-
-  if (workflowDefinition) {
-    return (
-      <div className="relative min-h-0 flex-1 flex flex-col">
-        {loadWarningBanner}
-        <NativeWorkflowBuilder
-        definition={workflowDefinition}
-        activePanelContent={inlineEditorPanel}
-        defaultModel={nativeDefaultModel}
-        modelOptions={selectableModels}
-        knowledgeDocuments={knowledgeDocuments}
-        knowledgeCollections={knowledgeCollections}
-        tools={toolCatalog.map((tool) => ({
-          name: tool.name,
-          displayName: tool.displayName,
-          category: tool.category,
-          description: tool.description,
-          source: tool.source,
-          serverId: tool.serverId,
-          serverName: tool.serverName,
-          version: tool.version,
-          class: tool.class,
-          riskLevel: tool.riskLevel,
-          sideEffect: tool.sideEffect,
-          idempotent: tool.idempotent,
-          timeoutMs: tool.timeoutMs,
-          maxAttempts: tool.maxAttempts,
-          requiresHumanApproval: tool.requiresHumanApproval,
-          customerVisible: tool.customerVisible,
-          enabledByDefault: tool.enabledByDefault,
-          allowedIntents: tool.allowedIntents,
-          requiredSlots: tool.requiredSlots,
-          fallbackAction: tool.fallbackAction,
-          inputSchema: tool.inputSchema,
-          outputSchema: tool.outputSchema,
-        }))}
-        isSaving={isSaving}
-        isPublishing={isPublishing}
-        toolsLoading={isToolCatalogLoading}
-        isDirty={isDirty}
-        hasDraft={hasDraft}
-        onChange={applyWorkflowDefinition}
-        onBack={() => router.push('/autopilot')}
-        onOpenSettings={() => setEditorPanel('settings')}
-        onOpenModelSettings={() => router.push('/integrations/ai')}
-        onOpenPanel={(panel) => setEditorPanel(panel)}
-        onTest={async (payload) => {
-          if (!payload.message.trim() || !config) return null;
-          const result = await runAutopilotNativeWorkflowTest({
-            configId: config.id,
-            customerMessage: payload.message.trim(),
-            workflowDefinition,
-            fixtures: payload.fixtures,
-          });
-          if (!result.success || !result.executionId) {
-            toast({ title: 'Falha no teste', description: result.error, variant: 'destructive' });
-            return null;
-          }
-          return result.executionId;
-        }}
-        onTestNode={async (startNodeId, payload) => {
-          if (!config) return null;
-          const result = await runAutopilotNativeWorkflowTest({
-            configId: config.id,
-            customerMessage: payload.message.trim() || 'Teste isolado iniciado pelo editor.',
-            workflowDefinition,
-            startNodeId,
-            fixtures: payload.fixtures,
-          });
-          if (!result.success || !result.executionId) {
-            toast({ title: 'Falha no teste isolado', description: result.error, variant: 'destructive' });
-            return null;
-          }
-          return result.executionId;
-        }}
-        onSave={handleSaveConfig}
-        onPublish={handlePublishConfig}
-        />
-        <NativeAiBuilderDialog
-          definition={workflowDefinition}
-          disabled={isSaving || isPublishing}
-          configuredModelLabel={selectableModels.find((model) => model.id === aiModel)?.label || aiModel}
-          knowledgeDocumentCount={knowledgeDocuments.length}
-          availableToolCount={toolCatalog.length}
-          onGenerate={(conversation) => generateAutopilotNativeWorkflowWithAi({
-            configId: agentId,
-            conversation,
-            currentWorkflow: workflowDefinition,
-            enabledToolNames,
-          })}
-          onApply={(proposal) => {
-            if (!proposal.validation.valid) {
-              toast({ title: 'Proposta bloqueada', description: 'A proposta nao passou no validador do runtime.', variant: 'destructive' });
-              return;
-            }
-            applyWorkflowDefinition(proposal.workflow);
-            toast({
-              title: 'Proposta aplicada ao rascunho',
-              description: 'Revise o canvas, execute um teste e salve quando estiver pronto.',
-            });
-          }}
-        />
-      </div>
-    );
-  }
-
-  // Native-only onboarding. Configurations without a definition can choose a
-  // supported template, but the legacy editor is no longer reachable.
-  return (
-    <>
-      {loadWarningBanner}
-      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
-        <div className="w-full max-w-3xl rounded-3xl border border-cyan-500/20 bg-[#101821] p-8 text-center shadow-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-400">Flowbuilder agent-first</p>
-          <h1 className="mt-3 text-2xl font-semibold text-white">Crie a definição nativa desta automação</h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-400">Escolha um template executável. O editor anterior foi desativado e nenhum novo fluxo é salvo no formato legado.</p>
-          <Button onClick={() => { setNativeMigrationPreview(null); setNativeSetupOpen(true); }} className="mt-6 bg-cyan-500 text-slate-950 hover:bg-cyan-400">Escolher template</Button>
-        </div>
-      </div>
-
-      <Dialog open={nativeSetupOpen} onOpenChange={setNativeSetupOpen}>
-        <DialogContent className="max-w-3xl border-white/10 bg-[#111419] text-slate-100">
-          <DialogTitle>Flowbuilder agent-first</DialogTitle>
-          <DialogDescription className="text-slate-400">
-            Comece por um template ou migre o fluxo atual. O grafo legado nunca será apagado.
-          </DialogDescription>
-          {nativeMigrationPreview ? (
-            <div className="space-y-5">
-              <div className={cn('rounded-2xl border p-4', nativeMigrationPreview.validation.valid ? 'border-emerald-500/20 bg-emerald-500/[0.06]' : 'border-amber-500/20 bg-amber-500/[0.06]')}>
-                <p className="font-medium">{nativeMigrationPreview.validation.valid ? 'Migração pronta para aplicar' : 'A migração precisa de revisão'}</p>
-                <p className="mt-1 text-sm text-slate-400">{nativeMigrationPreview.workflow.nodes.length} blocos · {nativeMigrationPreview.workflow.connections.length} conexões</p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {nativeMigrationPreview.changes.map((change) => <div key={change} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-slate-300">{change}</div>)}
-              </div>
-              {nativeMigrationPreview.validation.errors.length > 0 && <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] p-4 text-sm text-red-200">{nativeMigrationPreview.validation.errors.map((issue) => issue.message).join(' ')}</div>}
-              <div className="flex justify-end gap-3"><Button variant="ghost" onClick={() => setNativeMigrationPreview(null)}>Voltar aos templates</Button><Button onClick={() => void handleApplyNativeMigration()} disabled={nativeSetupBusy || !nativeMigrationPreview.validation.valid}>Aplicar migração</Button></div>
-            </div>
-          ) : (
-            <div className="grid gap-4 py-3 sm:grid-cols-3">
-              {[
-                ['single_agent', 'Agente único', 'Atendimento completo com modelo, memória, RAG e guardrail.'],
-                ['routed_team', 'Equipe roteada', 'AI Router direcionando suporte e comercial.'],
-                ['blank', 'Em branco', 'Canvas livre, inicialmente bloqueado para publicação.'],
-              ].map(([template, title, description]) => (
-                <button key={template} type="button" onClick={() => void handleCreateNativeTemplate(template as NativeWorkflowTemplate)} disabled={nativeSetupBusy} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-cyan-400/40 hover:bg-cyan-500/[0.06]">
-                  <span className="block font-semibold text-slate-100">{title}</span><span className="mt-2 block text-sm leading-6 text-slate-400">{description}</span>
-                </button>
-              ))}
-              {flowGraph && <Button variant="outline" onClick={() => void handlePreviewNativeMigration()} disabled={nativeSetupBusy} className="sm:col-span-3">Visualizar migração do flow atual</Button>}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={editorPanel !== null && !inlineEditorPanelName} onOpenChange={(open) => !open && setEditorPanel(null)}>
-        <DialogContent className="flex h-[92vh] max-h-[92vh] w-[min(1160px,94vw)] max-w-none flex-col overflow-hidden rounded-[26px] border-white/10 bg-[#111316] p-0 text-slate-100 shadow-2xl">
-          <DialogTitle className="sr-only">
-            {editorPanel === 'playground' ? 'Playground do agente' : 'Painel do agente'}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            Teste e inspecione o agente sem publicar alterações no atendimento real.
-          </DialogDescription>
-          {editorPanel === 'playground' && (
-            <div className="flex-1 overflow-y-auto p-5 sm:p-7">
-              <AutopilotPlayground
-                workspaceId={user?.activeWorkspaceId}
-                agentId={agentId}
-                disabled={isSaving || isPublishing}
-                stale={hasUnpublishedChanges}
-                draftSnapshot={previewDraftSnapshot}
-                onTrace={setLastPlaygroundTrace}
-              />
-            </div>
-          )}
-
-          {editorPanel === 'versions' && (
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8">
-              <div className="mb-6 flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-semibold text-foreground">Historico publicado</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Restaure configuracoes anteriores do atendente inteligente.
-                  </p>
-                </div>
-                <Badge variant="outline" className="rounded-full">
-                  {versions[0] ? `Atual: v${versions[0].version_number}` : 'Sem versao'}
-                </Badge>
-              </div>
-              <div className="grid gap-3">
-                {versions.map((version, index) => {
-                  const current = index === 0;
-                  const restoring = restoringVersionId === version.id;
-                  return (
-                    <Card key={version.id} className="border-border bg-card">
-                      <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-start">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold">Versao v{version.version_number}</h3>
-                            {current && <Badge className="bg-emerald-500/15 text-emerald-300">Atual</Badge>}
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {new Date(version.created_at).toLocaleString('pt-BR')}
-                          </p>
-                          <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
-                            {summarizeVersionChanges(version, versions[index + 1] || null, modelCatalog)
-                              .slice(0, 3)
-                              .map((change) => <li key={change}>{change}</li>)}
-                          </ul>
-                        </div>
-                        <Button
-                          variant={current ? 'outline' : 'default'}
-                          disabled={current || Boolean(restoringVersionId)}
-                          onClick={() => handleRestoreVersion(version.id, version.version_number)}
-                        >
-                          {restoring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                          {current ? 'Em uso' : 'Restaurar'}
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-                {versions.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-                    Publique o agente para criar o primeiro ponto de restauracao.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isRuleModalOpen} onOpenChange={setIsRuleModalOpen}>
-        <DialogContent className="flex h-[90vh] max-h-[90vh] max-w-3xl flex-col overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl">
-          <AutomationForm
-            configId={config.id}
-            instance={editingRule}
-            onClose={() => setIsRuleModalOpen(false)}
-            onSuccess={handleRuleSaved}
-          />
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-
-  // Historical settings markup retained only as unreachable source during the
-  // cleanup window; both executable returns above are native-only.
+  // Autonomous agents keep their operational configuration, knowledge,
+  // policies and analytics here. Their visual definition is edited in Nexus.
   return (
     <div className="flex h-full min-w-0 flex-col gap-6 bg-background px-4 py-4 sm:px-6 lg:px-8">
       <header className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-4 rounded-[28px] border border-border bg-card p-5 shadow-sm">
@@ -2187,6 +1521,16 @@ export default function AutopilotDetailPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.push(`/nexus/${agentId}`)}
+              className="rounded-full px-5"
+            >
+              <GitBranch className="mr-2 h-4 w-4" />
+              Abrir fluxo no Nexus
+            </Button>
+
             {isDirty ? (
               <Badge className="rounded-full border-0 bg-amber-500/15 text-amber-700 dark:text-amber-300">
                 Alteracoes nao salvas
@@ -2252,9 +1596,14 @@ export default function AutopilotDetailPage() {
         )}
       </header>
 
+      {loadWarningBanner}
+
       <main className="mx-auto grid w-full max-w-[1600px] min-w-0 flex-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
-        <Tabs defaultValue="overview" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+        <Tabs defaultValue={managementTab} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm">
+            <TabsTrigger value="domain" className="gap-2 rounded-xl px-4 py-2">
+              <GitBranch className="h-4 w-4" /> Contexto da IA
+            </TabsTrigger>
             <TabsTrigger value="overview" className="gap-2 rounded-xl px-4 py-2">
               <LayoutDashboard className="h-4 w-4" /> Visão geral
             </TabsTrigger>
@@ -2288,6 +1637,31 @@ export default function AutopilotDetailPage() {
           </TabsList>
 
           <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+            <TabsContent value="domain" className="mt-0 min-w-0 pb-10">
+              <div className="space-y-6">
+                <AgentDomainPackStudio
+                  workspaceId={user?.activeWorkspaceId}
+                  config={config}
+                  knowledgeDocuments={knowledgeDocuments}
+                  enabledToolNames={enabledToolNames}
+                />
+                <ProcedureStudio
+                  configId={agentId}
+                  tools={toolCatalog.map((tool) => ({
+                    name: tool.name,
+                    displayName: tool.displayName,
+                    description: tool.description,
+                    riskLevel: tool.riskLevel,
+                    sideEffect: tool.sideEffect || 'none',
+                    requiresHumanApproval: tool.requiresHumanApproval,
+                    enabled: tool.enabledByDefault || enabledToolNames.includes(tool.name),
+                    requiredSlots: tool.requiredSlots || [],
+                    inputSchema: tool.inputSchema || null,
+                  }))}
+                />
+              </div>
+            </TabsContent>
+
             <TabsContent value="overview" className="mt-0 min-w-0 space-y-6">
               <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
                 <Card className="min-w-0 overflow-hidden border border-border bg-card shadow-sm">

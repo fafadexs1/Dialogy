@@ -9,6 +9,11 @@ import type { User } from '@/lib/types';
 import { headers } from 'next/headers';
 import { getLoginErrorMessage } from '@/lib/auth/login-errors';
 
+function safeNextPath(value: unknown): string {
+  const path = String(value || '').trim();
+  return path.startsWith('/') && !path.startsWith('//') ? path : '/inbox';
+}
+
 export const login = withDebug(
   'login',
   async function login(prevState: any, formData: FormData) {
@@ -22,17 +27,14 @@ export const login = withDebug(
       password,
     });
 
-    const redirectTo = formData.get('redirectTo') as string;
+    const redirectTo = safeNextPath(formData.get('redirectTo'));
 
     if (error) {
       console.error('[LOGIN_ACTION] Erro:', error);
       return { success: false, message: getLoginErrorMessage(error.code, error.message) };
     }
 
-    // if (redirectTo && redirectTo.startsWith('/')) {
-    //   return redirect(redirectTo);
-    // }
-    return redirect('/inbox');
+    return redirect(redirectTo);
   },
   {
     contextResolver: (_prevState, formData) => ({
@@ -55,6 +57,7 @@ export const register = withDebug(
     const password = formData.get('password') as string;
     const phone = formData.get('phone') as string;
     const referralCode = formData.get('referralCode') as string | null;
+    const redirectTo = safeNextPath(formData.get('redirectTo'));
 
     if (!firstName || !lastName || !email || !password || !phone) {
       return { success: false, message: "Todos os campos sao obrigatorios.", user: null, requiresEmailConfirmation: false };
@@ -64,11 +67,15 @@ export const register = withDebug(
 
     try {
       // This will create the user in `auth.users` and our trigger `handle_new_user` will create them in `public.users`
+      const origin = (await headers()).get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const activationUrl = new URL('/auth/confirm', origin);
+      activationUrl.searchParams.set('next', redirectTo);
+
       const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${(await headers()).get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/confirm?next=/inbox`,
+          emailRedirectTo: activationUrl.toString(),
           data: {
             full_name: fullName,
             avatar_url: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(fullName)}`,

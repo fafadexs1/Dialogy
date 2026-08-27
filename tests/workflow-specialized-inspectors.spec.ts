@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import type { ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
   guidedDurationToMs,
@@ -101,5 +103,98 @@ describe('native specialized inspectors', () => {
   it('converts wait durations using friendly units', () => {
     expect(timeoutMsToGuidedDuration(7_200_000)).toEqual({ value: 2, unit: 'hours' });
     expect(guidedDurationToMs(3, 'days')).toBe(259_200_000);
+  });
+
+  it('renders native workspace choices instead of raw Dialogy UUID fields', () => {
+    const team = createWorkflowNode('dialogy.team_availability', {
+      id: 'availability',
+      position: { x: 0, y: 0 },
+      config: { teamId: 'team-commercial' },
+    });
+    const close = createWorkflowNode('output.close_conversation', {
+      id: 'close',
+      position: { x: 0, y: 0 },
+      config: { reasonTagId: 'tag-close' },
+    });
+    const trigger = createWorkflowNode('trigger.received_message', {
+      id: 'trigger',
+      position: { x: 0, y: 0 },
+      config: { platforms: ['whatsapp'], instanceNames: ['zap1'], startPolicy: 'unassigned_only' },
+    });
+    const common = {
+      onUpdate: () => undefined,
+      teamOptions: [{ id: 'team-commercial', label: 'Comercial' }],
+      tagOptions: [
+        { id: 'tag-commercial', label: 'Comercial', isCloseReason: false },
+        { id: 'tag-close', label: 'Sistema', isCloseReason: true },
+      ],
+      instanceOptions: [{ id: 'zap1', label: 'zap1' }],
+    };
+
+    const teamMarkup = renderToStaticMarkup(NativeSpecializedNodeInspector({ node: team, ...common }) as ReactElement);
+    const closeMarkup = renderToStaticMarkup(NativeSpecializedNodeInspector({ node: close, ...common }) as ReactElement);
+    const triggerMarkup = renderToStaticMarkup(NativeSpecializedNodeInspector({ node: trigger, ...common }) as ReactElement);
+
+    expect(teamMarkup).toContain('Comercial');
+    expect(teamMarkup).not.toContain('UUID');
+    expect(closeMarkup).toContain('Sistema');
+    expect(closeMarkup).not.toContain('tag-commercial');
+    expect(triggerMarkup).toContain('WhatsApp');
+    expect(triggerMarkup).toContain('zap1');
+    expect(triggerMarkup).toContain('Somente atendimento sem responsável');
+  });
+
+  it('selects published subflows and maps their input without raw workflow ids', () => {
+    const subflow = createWorkflowNode('logic.subflow', {
+      id: 'subflow-node',
+      position: { x: 0, y: 0 },
+      config: {
+        workflowId: 'workflow-cadastro',
+        inputMapping: { cpf: '{{variables.cpf}}' },
+        inputSchema: {},
+        outputSchema: {},
+      },
+    });
+
+    const markup = renderToStaticMarkup(NativeSpecializedNodeInspector({
+      node: subflow,
+      onUpdate: () => undefined,
+      workflowOptions: [{ id: 'workflow-cadastro', label: 'Consultar cadastro', description: 'Publicado · v3' }],
+    }) as ReactElement);
+
+    expect(markup).toContain('Consultar cadastro');
+    expect(markup).toContain('Publicado · v3');
+    expect(markup).toContain('Campo no subfluxo');
+    expect(markup).toContain('{{variables.cpf}}');
+    expect(markup).not.toContain('ID do workflow');
+  });
+
+  it('keeps message triggers and option fallbacks simple by default', () => {
+    const trigger = createWorkflowNode('trigger.received_message', {
+      id: 'trigger-friendly',
+      position: { x: 0, y: 0 },
+      config: { matchMode: 'any_keyword', keywords: ['boleto', 'quero assinar internet'] },
+    });
+    const options = createWorkflowNode('interaction.options', {
+      id: 'options-friendly',
+      position: { x: 0, y: 0 },
+      config: {
+        prompt: 'Escolha:',
+        options: [{ id: 'one', value: 'Primeira', label: 'Primeira' }],
+        customFallbackRoutes: false,
+      },
+    });
+    const common = { onUpdate: () => undefined };
+    const triggerMarkup = renderToStaticMarkup(NativeSpecializedNodeInspector({ node: trigger, editorMode: 'essential', ...common }) as ReactElement);
+    const simpleOptionsMarkup = renderToStaticMarkup(NativeSpecializedNodeInspector({ node: options, editorMode: 'essential', ...common }) as ReactElement);
+    const advancedOptionsMarkup = renderToStaticMarkup(NativeSpecializedNodeInspector({ node: options, editorMode: 'advanced', ...common }) as ReactElement);
+
+    expect(triggerMarkup).toContain('Qualquer mensagem recebida');
+    expect(triggerMarkup).toContain('Palavras ou frases de gatilho');
+    expect(triggerMarkup).toContain('quero assinar internet');
+    expect(triggerMarkup).toContain('Gatilhos específicos são avaliados antes');
+    expect(simpleOptionsMarkup).toContain('apresenta este menu novamente automaticamente');
+    expect(simpleOptionsMarkup).not.toContain('Controlar resposta não reconhecida manualmente');
+    expect(advancedOptionsMarkup).toContain('Controlar resposta não reconhecida manualmente');
   });
 });

@@ -522,18 +522,6 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
         is_active: activeProviders.has('mercadolivre'),
       },
       {
-        id: 'nexusflow',
-        name: 'NexusFlow',
-        description: 'Automacao de fluxos e chatbots avancados.',
-        icon_url: '/icons/nexusflow.svg',
-        tag: 'Automacao',
-        tag_type: 'secondary',
-        href: '/integrations/nexusflow',
-        status: 'active',
-        provider: 'nexusflow',
-        is_active: activeProviders.has('nexusflow'),
-      },
-      {
         id: 'sgp',
         name: 'SGP',
         description: 'Plugin de integracao com o sistema SGP.',

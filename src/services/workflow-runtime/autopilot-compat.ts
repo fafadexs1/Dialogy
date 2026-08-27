@@ -3,7 +3,7 @@ import type {
   AutopilotFlowGraph,
   AutopilotFlowNode,
 } from '@/lib/types';
-import { createWorkflowNode, getWorkflowNodeManifest } from './catalog';
+import { createWorkflowNode } from './catalog';
 import type {
   ModelConfiguration,
   WorkflowConnection,
@@ -59,7 +59,7 @@ function targetType(node: AutopilotFlowNode): string {
     case 'tool':
       return node.toolName?.startsWith('mcp:') ? 'tool.mcp' : 'tool.internal';
     case 'handoff':
-      return 'output.handoff';
+      return node.config?.destination ? 'output.handoff' : 'output.respond';
     case 'close':
     case 'end':
       return 'output.end';
@@ -177,8 +177,8 @@ function mappedConfig(node: AutopilotFlowNode): Record<string, unknown> {
       return {
         teamId: config.destination || '',
         reason: config.message || node.subtitle || 'Transferência solicitada pelo fluxo.',
-        requireConfirmation: true,
-        permissionScope: 'automations:execute_handoff',
+        requireConfirmation: false,
+        permissionScope: 'conversation:handoff',
       };
     case 'output.end':
       return {
@@ -290,33 +290,6 @@ export function compileAutopilotFlowToWorkflow(
   nodes.push(modelNode);
   nodeMap.set(modelNode.id, modelNode);
 
-  const errorHandler = createWorkflowNode('error.handler', {
-    id: `error_${normalizeId(input.configId)}`,
-    name: 'Tratador de erro',
-    position: {
-      x: Math.max(...nodes.map((node) => node.position.x), 0) + 300,
-      y: Math.max(...nodes.map((node) => node.position.y), 0),
-    },
-    config: {
-      mode: 'fail',
-      publicMessage: 'Não foi possível concluir esta etapa.',
-    },
-  });
-  const errorEnd = createWorkflowNode('output.end', {
-    id: `error_end_${normalizeId(input.configId)}`,
-    name: 'Finalizar com erro',
-    position: {
-      x: errorHandler.position.x,
-      y: errorHandler.position.y + 180,
-    },
-    config: {
-      output: { status: 'failed' },
-    },
-  });
-  nodes.push(errorHandler, errorEnd);
-  nodeMap.set(errorHandler.id, errorHandler);
-  nodeMap.set(errorEnd.id, errorEnd);
-
   const connections: WorkflowConnection[] = [];
   const bypassTargets = new Map<string, string[]>();
   for (const edge of input.graph.edges) {
@@ -396,18 +369,6 @@ export function compileAutopilotFlowToWorkflow(
   for (const agent of nodes.filter((node) => node.type === 'ai.agent' || node.type === 'ai.prompt')) {
     connections.push(connection(modelNode, agent, 'model', 'model', 'model'));
   }
-
-  for (const node of nodes) {
-    const manifest = getWorkflowNodeManifest(node.type);
-    if (!manifest?.requiresErrorRoute || node.id === errorHandler.id) continue;
-    if (connections.some((candidate) => (
-      candidate.sourceNodeId === node.id && candidate.connectionType === 'error'
-    ))) continue;
-    const errorPort = node.outputPorts.find((port) => port.connectionType === 'error');
-    if (!errorPort) continue;
-    connections.push(connection(node, errorHandler, 'error', errorPort.id, 'error'));
-  }
-  connections.push(connection(errorHandler, errorEnd, 'main', 'failed', 'main'));
 
   return {
     id: `autopilot:${input.configId}`,

@@ -29,9 +29,12 @@ import {
   isRecord,
   mergeStatePatch,
   normalizeRuntimeError,
+  readPath,
+  statePatchAtPath,
   withTimeout,
 } from './utils';
 import { validateWorkflowDefinition } from './validator';
+import { matchWorkflowOptionByHeuristics } from './option-matching';
 
 export class InvalidWorkflowDefinitionError extends Error {
   readonly code = 'INVALID_WORKFLOW_DEFINITION';
@@ -53,6 +56,18 @@ export type WorkflowExecutorOptions = {
   defaultNodeTimeoutMs?: number;
   lockLeaseMs?: number;
   validateBeforeRun?: boolean;
+  classifyInteractionOption?: (input: {
+    workflow: WorkflowDefinition;
+    execution: WorkflowExecution;
+    node: WorkflowNode;
+    message: string;
+    options: Array<{ id: string; value: string; label: string }>;
+  }) => Promise<{
+    optionId: string | null;
+    confidence?: number;
+    model?: string;
+    modelCalls?: number;
+  }>;
 };
 
 const TERMINAL_EXECUTION_STATUSES = new Set([
@@ -98,15 +113,18 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-function findTrigger(workflow: WorkflowDefinition): WorkflowNode {
-  const trigger = workflow.nodes.find((node) => node.type.startsWith('trigger.'));
+function findTrigger(workflow: WorkflowDefinition, triggerNodeId?: string): WorkflowNode {
+  const trigger = triggerNodeId
+    ? workflow.nodes.find((node) => node.id === triggerNodeId && node.type.startsWith('trigger.'))
+    : workflow.nodes.find((node) => node.type.startsWith('trigger.'));
+  if (triggerNodeId && !trigger) throw new Error(`Workflow trigger ${triggerNodeId} not found.`);
   if (!trigger) throw new Error('Workflow trigger not found.');
   return trigger;
 }
 
 function createExecution(input: WorkflowStartInput): WorkflowExecution {
   const timestamp = now();
-  const trigger = findTrigger(input.workflow);
+  const trigger = findTrigger(input.workflow, input.triggerNodeId);
   return WorkflowExecutionSchema.parse({
     executionId: input.executionId || createId('exec'),
     workflowId: input.workflow.id,
@@ -231,7 +249,11 @@ function selectedConnections(
   node: WorkflowNode,
   result: NodeExecutionResult,
 ): string[] {
+  if (result.status === 'error' && node.config.customErrorRoute !== true) return [];
   if (result.nextNodeId) {
+    if (node.type === 'logic.goto' && workflow.nodes.some((candidate) => candidate.id === result.nextNodeId)) {
+      return [result.nextNodeId];
+    }
     const connected = workflow.connections.some((connection) => (
       connection.sourceNodeId === node.id
       && connection.targetNodeId === result.nextNodeId
@@ -276,6 +298,58 @@ function selectedConnections(
     : [];
 }
 
+function resumeValue(input: Record<string, unknown>): unknown {
+  return input.value
+    ?? input.text
+    ?? input.message
+    ?? input.answer
+    ?? input.rating
+    ?? input.file
+    ?? input;
+}
+
+function validateInteractionValue(node: WorkflowNode, value: unknown): string | null {
+  if (node.type === 'interaction.file') {
+    if (!isRecord(value) || typeof value.url !== 'string' || !value.url.trim()) return 'Nenhum arquivo válido foi recebido.';
+    const maximumBytes = Math.max(1, Number(node.config.maxFileSizeMb || 10)) * 1024 * 1024;
+    if (Number(value.size || 0) > maximumBytes) return 'O arquivo excede o tamanho permitido.';
+    const accept = String(node.config.accept || '*/*').trim();
+    const mimeType = String(value.mimeType || value.type || '').trim();
+    if (accept && accept !== '*/*' && mimeType) {
+      const accepted = accept.split(',').map((item) => item.trim()).filter(Boolean).some((pattern) => (
+        pattern.endsWith('/*') ? mimeType.startsWith(pattern.slice(0, -1)) : pattern === mimeType
+      ));
+      if (!accepted) return 'O tipo do arquivo não é permitido.';
+    }
+    return null;
+  }
+  const text = String(value ?? '').trim();
+  if (!text) return 'A resposta está vazia.';
+  if (node.type === 'interaction.rating') {
+    const rating = Number(text);
+    if (!Number.isFinite(rating) || rating < Number(node.config.minimum || 1) || rating > Number(node.config.maximum || 5)) {
+      return 'A avaliação está fora do intervalo permitido.';
+    }
+    return null;
+  }
+  const validation = node.type === 'interaction.date' ? 'date' : String(node.config.validation || 'none');
+  const digits = text.replace(/\D/g, '');
+  if (validation === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return 'O e-mail informado é inválido.';
+  if (validation === 'cpf' && digits.length !== 11) return 'O CPF informado é inválido.';
+  if (validation === 'cnpj' && digits.length !== 14) return 'O CNPJ informado é inválido.';
+  if (validation === 'phone' && (digits.length < 10 || digits.length > 15)) return 'O telefone informado é inválido.';
+  if (validation === 'number' && !Number.isFinite(Number(text.replace(',', '.')))) return 'O valor informado não é um número.';
+  if (validation === 'date' && !/^\d{4}-\d{2}-\d{2}$|^\d{2}\/\d{2}\/\d{4}$/.test(text)) return 'A data informada é inválida.';
+  if (validation === 'custom_regex') {
+    try {
+      if (!new RegExp(String(node.config.customRegex || '')).test(text)) return 'A resposta não corresponde ao formato esperado.';
+    } catch {
+      return 'A expressão regular configurada é inválida.';
+    }
+  }
+  return null;
+}
+
 function retryDelay(
   attempt: number,
   retryPolicy: NonNullable<WorkflowNode['retryPolicy']>,
@@ -288,11 +362,41 @@ function retryDelay(
   );
 }
 
+function continueAfterConfiguredError(node: WorkflowNode, result: NodeExecutionResult): NodeExecutionResult {
+  if (result.status !== 'error' || node.config.continueOnError !== true) return result;
+  const error = result.error || {
+    code: 'NODE_EXECUTION_FAILED',
+    message: 'A etapa falhou sem detalhes adicionais.',
+    retryable: false,
+  };
+  const errorValue = { error: error.message, code: error.code };
+  const outputKey = String(node.config.outputKey || '').trim();
+  const statePatch = outputKey
+    ? mergeStatePatch(result.statePatch || {}, statePatchAtPath(outputKey, errorValue))
+    : result.statePatch;
+  const selectedOutput = String(node.config.continueOutput || '').trim()
+    || node.outputPorts.find((port) => port.connectionType === 'main')?.id
+    || 'success';
+  return {
+    ...result,
+    status: 'route',
+    selectedOutput,
+    output: {
+      ...(result.output || {}),
+      continuedAfterError: true,
+      error: errorValue,
+    },
+    statePatch,
+    error,
+  };
+}
+
 export class WorkflowExecutor {
   readonly events: WorkflowEventBus;
   private readonly defaultNodeTimeoutMs: number;
   private readonly lockLeaseMs: number;
   private readonly validateBeforeRun: boolean;
+  private readonly classifyInteractionOption?: WorkflowExecutorOptions['classifyInteractionOption'];
   private readonly timeWaitTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -304,6 +408,7 @@ export class WorkflowExecutor {
     this.defaultNodeTimeoutMs = options.defaultNodeTimeoutMs || 30_000;
     this.lockLeaseMs = options.lockLeaseMs || 150_000;
     this.validateBeforeRun = options.validateBeforeRun ?? true;
+    this.classifyInteractionOption = options.classifyInteractionOption;
   }
 
   async start(input: WorkflowStartInput, options: WorkflowRunOptions = {}): Promise<WorkflowExecution> {
@@ -439,11 +544,183 @@ export class WorkflowExecutor {
     const waitingNode = locked.currentNodeId ? nodeById(workflow, locked.currentNodeId) : null;
     if (!waitingNode) throw new Error('Waiting node not found.');
     const waitingResult = locked.nodeResults[waitingNode.id];
+    let resolvedOutput: string = selectedOutput;
+    let routeStatus: NodeExecutionResult['status'] = 'route';
+    let interactionError: string | null = null;
+    let retryInteraction = false;
+    let interactionRetryReason: 'unrecognized' | 'invalid' | null = null;
+    const waitingMetadata = isRecord(waitingResult?.output) ? waitingResult.output : {};
+    if (
+      selectedOutput === 'expired'
+      && waitingNode.type === 'interaction.options'
+      && waitingNode.config.customFallbackRoutes !== true
+    ) {
+      locked.previousNodeId = waitingNode.id;
+      locked.currentNodeId = null;
+      locked.waitingReason = undefined;
+      locked.resumeToken = undefined;
+      locked.context = mergeStatePatch(locked.context, {
+        ...(input.contextPatch || {}),
+        __waitOutcome: 'expired',
+      });
+      locked.updatedAt = now();
+      return this.completeExecution(locked);
+    }
+    if (selectedOutput === 'expired' && typeof waitingMetadata.expirationOutput === 'string') {
+      resolvedOutput = waitingMetadata.expirationOutput;
+      const expirationPort = waitingNode.outputPorts.find((port) => port.id === resolvedOutput);
+      routeStatus = expirationPort?.connectionType === 'error' ? 'error' : 'route';
+    }
+    if (selectedOutput === 'resumed' && waitingMetadata.resumeMode === 'reexecute') {
+      locked.status = 'running';
+      locked.currentNodeId = waitingNode.id;
+      locked.waitingReason = undefined;
+      locked.resumeToken = undefined;
+      locked.context = mergeStatePatch(locked.context, {
+        ...(input.contextPatch || {}),
+        __resumeInput: input.input || {},
+        __waitOutcome: selectedOutput,
+      });
+      locked.updatedAt = now();
+      const saved = await this.persistence.saveExecution(locked, locked.version);
+      await this.emit(saved, {
+        type: 'execution.resumed',
+        nodeId: waitingNode.id,
+        safeSummary: 'Execução retomada no bloco aguardando resposta',
+        data: { selectedOutput, resumeMode: 'reexecute' },
+      });
+      return saved;
+    }
+    if (selectedOutput === 'resumed' && waitingNode.type.startsWith('interaction.')) {
+      const rawValue = resumeValue(input.input || {});
+      const responsePath = String(waitingNode.config.legacyApiResponsePathForValue || '').trim();
+      const extractedValue = responsePath ? readPath(rawValue, responsePath) : undefined;
+      const value = extractedValue === undefined ? rawValue : extractedValue;
+      interactionError = validateInteractionValue(waitingNode, value);
+      if (interactionError) {
+        if (waitingNode.config.customErrorRoute === true) {
+          routeStatus = 'error';
+          resolvedOutput = 'error';
+        } else {
+          retryInteraction = true;
+          interactionRetryReason = 'invalid';
+        }
+      } else {
+        const outputKey = String(waitingNode.config.outputKey || 'answer').trim();
+        if (waitingNode.type === 'interaction.options') {
+          const choices = Array.isArray(waitingNode.config.options)
+            ? waitingNode.config.options.filter(isRecord)
+            : [];
+          const selectedOptionId = typeof input.input?.selectedOptionId === 'string'
+            ? input.input.selectedOptionId.trim()
+            : '';
+          const selectedChoiceIndex = selectedOptionId
+            ? choices.findIndex((choice, index) => String(choice.id || choice.value || `option_${index + 1}`) === selectedOptionId)
+            : -1;
+          const selectedChoice = selectedChoiceIndex >= 0 ? choices[selectedChoiceIndex] : null;
+          let match = selectedChoice ? {
+            index: selectedChoiceIndex,
+            id: String(selectedChoice.id || selectedChoice.value || `option_${selectedChoiceIndex + 1}`),
+            value: String(selectedChoice.value || selectedChoice.label || selectedChoice.id || ''),
+            label: String(selectedChoice.label || selectedChoice.value || selectedChoice.id || ''),
+            strategy: 'exact' as const,
+          } : matchWorkflowOptionByHeuristics(choices, value);
+          if (
+            !match
+            && waitingNode.config.intelligentMatching === true
+            && input.input?.optionResolutionAttempted !== true
+            && this.classifyInteractionOption
+          ) {
+            try {
+              const classified = await this.classifyInteractionOption({
+                workflow,
+                execution: locked,
+                node: waitingNode,
+                message: String(value ?? ''),
+                options: choices.map((choice, index) => ({
+                  id: String(choice.id || choice.value || `option_${index + 1}`),
+                  value: String(choice.value || choice.label || choice.id || ''),
+                  label: String(choice.label || choice.value || choice.id || ''),
+                })),
+              });
+              const classifiedOption = choices.find((choice, index) => (
+                String(choice.id || choice.value || `option_${index + 1}`) === classified.optionId
+              ));
+              if (classifiedOption) {
+                const index = choices.indexOf(classifiedOption);
+                match = {
+                  index,
+                  id: String(classifiedOption.id || classifiedOption.value || `option_${index + 1}`),
+                  value: String(classifiedOption.value || classifiedOption.label || classifiedOption.id || ''),
+                  label: String(classifiedOption.label || classifiedOption.value || classifiedOption.id || ''),
+                  strategy: 'exact',
+                };
+                locked.totalModelCalls += Math.max(1, Number(classified.modelCalls || 1));
+                locked.context = mergeStatePatch(locked.context, {
+                  __interactionClassification: {
+                    nodeId: waitingNode.id,
+                    optionId: match.id,
+                    confidence: classified.confidence,
+                    model: classified.model,
+                  },
+                });
+              }
+            } catch (error) {
+              console.warn('[WORKFLOW_OPTION_CLASSIFIER] Intelligent option matching failed; using automatic retry.', error);
+            }
+          }
+          if (!match && waitingNode.config.customFallbackRoutes !== true) {
+            retryInteraction = true;
+            interactionRetryReason = 'unrecognized';
+          } else {
+            const candidate = String(match?.id || 'default');
+            resolvedOutput = waitingNode.outputPorts.some((port) => port.id === candidate) ? candidate : 'default';
+            if (outputKey) locked.variables = mergeStatePatch(locked.variables, statePatchAtPath(outputKey, match?.value ?? value));
+          }
+        } else if (outputKey) {
+          locked.variables = mergeStatePatch(locked.variables, statePatchAtPath(outputKey, value));
+        }
+      }
+    }
+    if (retryInteraction) {
+      const previousRetry = isRecord(locked.context.__interactionRetry)
+        ? locked.context.__interactionRetry
+        : {};
+      locked.status = 'running';
+      locked.currentNodeId = waitingNode.id;
+      locked.waitingReason = undefined;
+      locked.resumeToken = undefined;
+      locked.context = mergeStatePatch(locked.context, {
+        ...(input.contextPatch || {}),
+        __resumeInput: input.input || {},
+        __waitOutcome: interactionRetryReason,
+        __interactionRetry: {
+          nodeId: waitingNode.id,
+          attempt: Number(previousRetry.attempt || 0) + 1,
+          reason: interactionRetryReason,
+          message: interactionError || undefined,
+        },
+      });
+      locked.updatedAt = now();
+      const saved = await this.persistence.saveExecution(locked, locked.version);
+      await this.emit(saved, {
+        type: 'execution.resumed',
+        nodeId: waitingNode.id,
+        safeSummary: interactionRetryReason === 'unrecognized'
+          ? 'Opção não reconhecida; pergunta repetida automaticamente'
+          : 'Resposta inválida; pergunta repetida automaticamente',
+        data: { selectedOutput: 'automatic_retry', reason: interactionRetryReason },
+      });
+      return saved;
+    }
     const nextNodeIds = waitingResult
       ? selectedConnections(workflow, waitingNode, {
           ...waitingResult,
-          status: 'route',
-          selectedOutput,
+          status: routeStatus,
+          selectedOutput: resolvedOutput,
+          ...(interactionError ? {
+            error: { code: 'INVALID_INTERACTION_INPUT', message: interactionError, retryable: false },
+          } : {}),
         })
       : [];
     if (nextNodeIds.length === 0) {
@@ -459,6 +736,8 @@ export class WorkflowExecutor {
       ...(input.contextPatch || {}),
       __resumeInput: input.input || {},
       __waitOutcome: selectedOutput,
+      __interactionRetry: null,
+      ...(interactionError ? { __interactionError: interactionError } : {}),
     });
     locked.updatedAt = now();
     const saved = await this.persistence.saveExecution(locked, locked.version);
@@ -467,7 +746,7 @@ export class WorkflowExecutor {
       safeSummary: selectedOutput === 'expired'
         ? 'Execução retomada por expiração'
         : 'Execução retomada',
-      data: { selectedOutput },
+      data: { selectedOutput: resolvedOutput },
     });
     return saved;
   }
@@ -594,13 +873,14 @@ export class WorkflowExecutor {
       safeSummary: `${node.name} iniciado`,
     });
 
-    const result = await this.executeNodeSafely(
+    const rawResult = await this.executeNodeSafely(
       workflow,
       execution,
       node,
       input,
       signal,
     );
+    const result = continueAfterConfiguredError(node, rawResult);
     const stateAfter = result.statePatch
       ? mergeStatePatch(execution.variables, result.statePatch)
       : execution.variables;
@@ -726,16 +1006,20 @@ export class WorkflowExecutor {
       __resumeInput: undefined,
     };
     execution = await this.persistence.saveExecution(execution, execution.version);
+    const continuedAfterError = finalResult.output?.continuedAfterError === true;
     await this.emit(execution, {
-      type: finalResult.status === 'error' ? 'node.failed' : 'node.completed',
+      type: finalResult.status === 'error' || continuedAfterError ? 'node.failed' : 'node.completed',
       nodeId: node.id,
-      safeSummary: finalResult.status === 'error'
+      safeSummary: continuedAfterError
+        ? `${node.name} falhou e o fluxo continuou pela configuração da etapa`
+        : finalResult.status === 'error'
         ? `${node.name} encaminhado para tratamento de erro`
         : `${node.name} concluído`,
       data: {
         durationMs,
         selectedOutput: finalResult.selectedOutput,
         nextNodeIds: targets,
+        continuedAfterError,
       },
     });
     return execution;

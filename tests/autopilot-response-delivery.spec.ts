@@ -56,6 +56,7 @@ function fakeResponseDeliveryDatabase() {
         return {
           rows: [...deliveredBlockIndexes].map((index) => ({
             block_index: String(index),
+            message_status: 'SENT',
           })),
           rowCount: deliveredBlockIndexes.size,
         };

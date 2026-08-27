@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
       webhook_outbound: shouldEnqueueJob('webhook_outbound'),
       queue_auto_close: shouldEnqueueJob('queue_auto_close'),
       marketing_auto_close: shouldEnqueueJob('marketing_auto_close'),
+      nexus_internal_event: shouldEnqueueJob('nexus_internal_event'),
     },
     snapshot,
   });

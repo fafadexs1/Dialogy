@@ -1569,3 +1569,119 @@ describe('procedure runtime engine', () => {
     expect(responseResolver).not.toHaveBeenCalled();
   });
 });
+
+describe('procedure studio runtime safety', () => {
+  it('pauses a sensitive generic tool until the customer explicitly confirms', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-sensitive-confirmation',
+      documentId: 'procedure-studio:test',
+      documentName: 'Alterar senha do Wi-Fi',
+      version: 1,
+      compiledAt: new Date('2026-08-25T12:00:00Z').toISOString(),
+      triggerIntents: ['change_request'],
+      triggerKeywords: ['trocar senha wifi'],
+      metadata: { source: 'procedure_studio' },
+      steps: [
+        {
+          id: 'change',
+          order: 1,
+          type: 'tool_call',
+          label: 'Alterar credenciais do roteador',
+          toolName: 'mcp:router:change_wifi_credentials',
+          toolPayloadTemplate: { password: '{{wifi_password}}' },
+          requiresConfirmation: true,
+          confirmationPrompt: 'Os aparelhos serão desconectados. Confirma a alteração?',
+          successStepId: 'done',
+          errorStepId: 'fallback',
+          nextStepId: 'done',
+        },
+        { id: 'done', order: 2, type: 'respond', label: 'Concluir', responseTemplate: 'Alteração concluída.', nextStepId: null },
+        { id: 'fallback', order: 3, type: 'handoff', label: 'Encaminhar falha', handoffReason: 'Encaminhe para o Suporte.', nextStepId: null },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+    runtimeContext.collectedSlots.wifi_password = 'senha-segura';
+
+    const first = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Quero trocar a senha do Wi-Fi',
+    });
+
+    expect(first.status).toBe('waiting_input');
+    expect(first.actions).toEqual([]);
+    expect(first.response).toBe('Os aparelhos serão desconectados. Confirma a alteração?');
+    expect(runtimeContext.currentStepId).toBe('change');
+
+    const confirmed = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Confirmo',
+    });
+
+    expect(confirmed.status).toBe('waiting_tool');
+    expect(confirmed.actions).toEqual([
+      expect.objectContaining({
+        type: 'mcp_call_tool',
+        payload: expect.objectContaining({ toolName: 'mcp:router:change_wifi_credentials' }),
+      }),
+    ]);
+    expect(runtimeContext.decisions.confirmation_change).toBe('confirmed');
+  });
+
+  it('routes a failed tool result to the configured recovery path', async () => {
+    const graph: ProcedureGraph = {
+      id: 'proc-tool-error-route',
+      documentId: 'procedure-studio:error-route',
+      documentName: 'Consultar roteador',
+      version: 1,
+      compiledAt: new Date('2026-08-25T12:00:00Z').toISOString(),
+      triggerIntents: ['support_request'],
+      triggerKeywords: ['roteador'],
+      metadata: { source: 'procedure_studio' },
+      steps: [
+        {
+          id: 'tool',
+          order: 1,
+          type: 'tool_call',
+          label: 'Consultar roteador',
+          toolName: 'mcp:router:get_status',
+          toolPayloadTemplate: {},
+          successStepId: 'done',
+          errorStepId: 'fallback',
+          nextStepId: 'done',
+        },
+        { id: 'done', order: 2, type: 'respond', label: 'Responder', responseTemplate: 'Roteador consultado.', nextStepId: null },
+        { id: 'fallback', order: 3, type: 'handoff', label: 'Suporte', handoffReason: 'O Suporte continuará após a falha da consulta.', nextStepId: null },
+      ],
+    };
+    const runtimeContext = contextFor(graph);
+
+    const waiting = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Consulte o roteador',
+    });
+    expect(waiting.status).toBe('waiting_tool');
+
+    const failed = await advanceProcedure({
+      graph,
+      context: runtimeContext,
+      customerMessage: 'Consulte o roteador',
+      availableTeams: [{ id: 'team-support', name: 'Suporte' }],
+      toolResults: [{
+        toolName: 'mcp:router:get_status',
+        status: 'error',
+        input: { type: 'mcp:router:get_status', payload: {} },
+        error: 'router_offline',
+      } as unknown as AgentToolExecutionResult],
+    });
+
+    expect(failed.status).toBe('completed');
+    expect(failed.response).toContain('Suporte continuará');
+    expect(failed.actions).toEqual([
+      expect.objectContaining({ type: 'transfer_chat', payload: { teamId: 'team-support' } }),
+    ]);
+    expect(runtimeContext.currentStepId).toBe('fallback');
+  });
+});

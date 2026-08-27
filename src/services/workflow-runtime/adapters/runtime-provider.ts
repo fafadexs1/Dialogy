@@ -1,6 +1,6 @@
 import { genkit } from 'genkit';
 import { toJsonSchema } from 'genkit/schema';
-import { googleAI } from '@genkit-ai/googleai';
+import { googleAI } from '@genkit-ai/google-genai';
 
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';

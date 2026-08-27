@@ -99,6 +99,32 @@ describe('whatsapp contact identity', () => {
     expect(queryMock).toHaveBeenCalledTimes(2);
   });
 
+  it('does not redirect an explicitly closed chat to another active chat', async () => {
+    const queryMock = vi.fn(async (sql: string) => {
+      if (sql.includes('WHERE ch.id = $1')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: 'chat-closed',
+            workspace_id: 'ws-1',
+            status: 'encerrados',
+            phone_number_jid: '556198765432@s.whatsapp.net',
+          }],
+        };
+      }
+
+      return { rowCount: 1, rows: [{ id: 'chat-active', status: 'gerais' }] };
+    });
+
+    const result = await resolveCanonicalWhatsappChatId(
+      { query: queryMock },
+      'chat-closed'
+    );
+
+    expect(result).toBe('chat-closed');
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the current chat id when there is no active whatsapp chat to canonicalize to', async () => {
     const queryMock = vi.fn().mockResolvedValue({
       rowCount: 0,

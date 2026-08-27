@@ -95,6 +95,7 @@ import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 
 export type AgentEditorPanel =
   | 'settings'
+  | 'procedures'
   | 'knowledge'
   | 'capabilities'
   | 'playground'

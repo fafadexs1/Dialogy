@@ -94,7 +94,12 @@ export async function POST(request: Request) {
                     close_reason_tag_id = $1,
                     close_notes = $2,
                     tag = $3,
-                    color = $4
+                    color = $4,
+                    assigned_system_agent_id = NULL,
+                    is_autopilot_active = FALSE,
+                    copilot_mode = 'off',
+                    assigned_at = NULL,
+                    updated_at = timezone('utc', now())
                  WHERE id = $5`,
                 [
                     reasonTagId,

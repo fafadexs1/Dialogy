@@ -3,17 +3,27 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildConversionActionResourceName,
+  buildProductDestinationId,
+  buildTransactionId,
+  buildDataManagerEventPayload,
   buildClickConversion,
   buildConversionAdjustment,
   buildOrderId,
+  formatRfc3339DateTime,
+  isPermanentStatus,
   sanitizeClickId,
 } from '@/services/google-ads/conversion-upload';
 import {
+  buildUserData,
   buildUserIdentifiers,
   hashEmailForGoogleAds,
   hashPhoneForGoogleAds,
   normalizeEmailForHashing,
 } from '@/services/google-ads/identifiers';
+import {
+  buildDeterministicTransactionId,
+  extractNumericProductDestinationId,
+} from '@/services/google-ads/conversion-queue';
 import { encryptGoogleAdsSecret, readGoogleAdsSecret } from '@/services/google-ads/credentials';
 import { generateAttributionToken, extractAttributionToken } from '@/lib/marketing-attribution';
 
@@ -26,11 +36,15 @@ function baseRow(overrides: Record<string, unknown> = {}) {
     kind: 'conversion',
     event_name: 'sale_won',
     conversion_action_id: '987654321',
+    product_destination_id: '987654321',
     conversion_value: 4800,
     currency: 'BRL',
     created_at: '2026-07-20T13:45:09.000Z',
     attempt_count: 0,
     order_id: null,
+    transaction_id: null,
+    request_id: null,
+    processing_status: null,
     adjustment_type: null,
     custom_variables: null,
     google_ads_customer_id: CUSTOMER_ID,
@@ -48,7 +62,114 @@ function baseRow(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-describe('resource name da acao de conversao', () => {
+describe('Google Data Manager API: productDestinationId e transactionId', () => {
+  it('extrai apenas o ID numerico a partir de resource name ou string simples', () => {
+    expect(buildProductDestinationId(baseRow({ conversion_action_id: 'customers/123/conversionActions/987654321' }))).toBe(
+      '987654321'
+    );
+    expect(buildProductDestinationId(baseRow({ product_destination_id: '987654321' }))).toBe('987654321');
+    expect(extractNumericProductDestinationId('customers/123/conversionActions/555444333')).toBe('555444333');
+  });
+
+  it('rejeita acao de conversao ausente ou invalida', () => {
+    expect(() => buildProductDestinationId(baseRow({ conversion_action_id: '', product_destination_id: '' }))).toThrow(
+      /nao configurada/
+    );
+    expect(() => buildProductDestinationId(baseRow({ conversion_action_id: 'sem_digitos', product_destination_id: '' }))).toThrow(
+      /invalida/
+    );
+  });
+
+  it('gera transaction_id deterministico padronizado para idempotencia', () => {
+    const txId = buildDeterministicTransactionId('velpro', 'sale_won', 'deal-92832');
+    expect(txId).toBe('dialogy:velpro:sale_won:deal-92832');
+
+    const rowTxId = buildTransactionId(baseRow({ transaction_id: 'dialogy:ws-1:sale_won:deal-99' }));
+    expect(rowTxId).toBe('dialogy:ws-1:sale_won:deal-99');
+  });
+});
+
+describe('Google Data Manager API: montagem do payload events:ingest', () => {
+  it('monta payload no formato correto com destinations (operatingAccount) e events', () => {
+    const payload = buildDataManagerEventPayload(baseRow(), CUSTOMER_ID);
+
+    expect(payload.destinations).toEqual([
+      {
+        operatingAccount: {
+          accountId: CUSTOMER_ID,
+          accountType: 'GOOGLE_ADS',
+        },
+        productDestinationId: '987654321',
+      },
+    ]);
+
+    expect(payload.events).toHaveLength(1);
+    const event = payload.events[0];
+    expect(event.conversionValue).toBe(4800);
+    expect(event.currency).toBe('BRL');
+    expect(event.eventTimestamp).toBe('2026-07-20T13:45:09.000Z');
+    expect(event.transactionId).toBe('dialogy:ws-1:sale_won:chat-1');
+    expect((event as any).adIdentifiers).toEqual({ gclid: 'GCLID123' });
+    expect(payload.validateOnly).toBe(false);
+  });
+
+  it('inclui userData com hashes SHA-256 de e-mail e telefone quando disponiveis', () => {
+    const payload = buildDataManagerEventPayload(
+      baseRow({
+        contact_email: 'contato.cliente@gmail.com',
+        contact_phone: '+5563991234567',
+      }),
+      CUSTOMER_ID
+    );
+
+    const event = payload.events[0] as any;
+    expect(event.userData).toBeDefined();
+    expect(event.userData.hashedEmail).toBe(hashEmailForGoogleAds('contato.cliente@gmail.com'));
+    expect(event.userData.hashedPhoneNumber).toBe(hashPhoneForGoogleAds('+5563991234567'));
+  });
+
+  it('suporta identificadores de iOS (gbraid e wbraid)', () => {
+    const payloadGbraid = buildDataManagerEventPayload(
+      baseRow({ gclid: null, gbraid: 'GBRAID_XYZ' }),
+      CUSTOMER_ID
+    );
+    expect((payloadGbraid.events[0] as any).adIdentifiers).toEqual({ gbraid: 'GBRAID_XYZ' });
+
+    const payloadWbraid = buildDataManagerEventPayload(
+      baseRow({ gclid: null, wbraid: 'WBRAID_ABC' }),
+      CUSTOMER_ID
+    );
+    expect((payloadWbraid.events[0] as any).adIdentifiers).toEqual({ wbraid: 'WBRAID_ABC' });
+  });
+
+  it('formata data no padrao RFC 3339 / ISO 8601', () => {
+    const iso = formatRfc3339DateTime('2026-08-19T09:30:00.000Z');
+    expect(iso).toBe('2026-08-19T09:30:00.000Z');
+  });
+
+  it('recusa conversao sem gclid/gbraid/wbraid e sem userData', () => {
+    expect(() => buildDataManagerEventPayload(baseRow({ gclid: null }), CUSTOMER_ID)).toThrow(
+      /sem identificador de usuario/
+    );
+  });
+});
+
+describe('Classificacao de erros da API', () => {
+  it('identifica erros permanentes (4xx) vs transitorios (429, 5xx)', () => {
+    expect(isPermanentStatus(400)).toBe(true);
+    expect(isPermanentStatus(404)).toBe(true);
+    expect(isPermanentStatus(422)).toBe(true);
+
+    // Erros transitorios (que devem ter retry)
+    expect(isPermanentStatus(401)).toBe(false);
+    expect(isPermanentStatus(408)).toBe(false);
+    expect(isPermanentStatus(429)).toBe(false);
+    expect(isPermanentStatus(500)).toBe(false);
+    expect(isPermanentStatus(503)).toBe(false);
+  });
+});
+
+describe('resource name da acao de conversao (legado)', () => {
   it('aceita o ID numerico que o cliente copia da interface do Google Ads', () => {
     expect(buildConversionActionResourceName(CUSTOMER_ID, '987654321')).toBe(
       'customers/1234567890/conversionActions/987654321'
@@ -177,7 +298,7 @@ describe('ajustes de conversao', () => {
   });
 });
 
-describe('identificadores para Enhanced Conversions', () => {
+describe('identificadores para Enhanced Conversions e Data Manager API', () => {
   it('normaliza e-mail e ignora pontos do Gmail', () => {
     expect(normalizeEmailForHashing('  Fabricio.Soares@Gmail.com ')).toBe('fabriciosoares@gmail.com');
     expect(normalizeEmailForHashing('Contato.Vendas@Empresa.com')).toBe('contato.vendas@empresa.com');
@@ -188,10 +309,14 @@ describe('identificadores para Enhanced Conversions', () => {
     expect(hashPhoneForGoogleAds('123')).toBe('');
   });
 
-  it('devolve e-mail e telefone quando ambos existem', () => {
+  it('devolve e-mail e telefone quando ambos existem em buildUserIdentifiers e buildUserData', () => {
     const identifiers = buildUserIdentifiers({ email: 'a@b.com', phone: '63991234567' });
     expect(identifiers).toHaveLength(2);
     expect(identifiers.every((identifier) => identifier.userIdentifierSource === 'FIRST_PARTY')).toBe(true);
+
+    const userData = buildUserData({ email: 'a@b.com', phone: '63991234567' });
+    expect(userData?.hashedEmail).toBe(hashEmailForGoogleAds('a@b.com'));
+    expect(userData?.hashedPhoneNumber).toBe(hashPhoneForGoogleAds('63991234567'));
   });
 });
 

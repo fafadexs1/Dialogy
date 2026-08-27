@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 import { baseCookieOptions, buildSessionCookieOptions } from '@/lib/supabase/cookie-options';
 import { decodeSupabaseJwt, getSupabaseAccessTokenFromCookies } from '@/lib/auth/token';
+import { resolveSupabasePublicKey } from '@/lib/supabase/public-key';
 
 export async function updateSession(request: NextRequest, requestHeaders?: Headers) {
   const headersToUse = requestHeaders ?? new Headers(request.headers);
@@ -15,7 +16,10 @@ export async function updateSession(request: NextRequest, requestHeaders?: Heade
   try {
     supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+      resolveSupabasePublicKey({
+        anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        publishableKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY,
+      }) || '',
       {
         cookieOptions: baseCookieOptions,
         cookies: {

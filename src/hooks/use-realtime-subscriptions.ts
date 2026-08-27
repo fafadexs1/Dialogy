@@ -70,6 +70,10 @@ const statusHandlers = new Set<(status: string, type: 'chats' | 'messages') => v
 const healthHandlers = new Set<() => void>();
 let globalChannelHealth = INITIAL_REALTIME_CHANNEL_HEALTH;
 
+const RESUME_REPLAY_OVERLAP_MS = 5000;
+const RESUME_REPLAY_FALLBACK_WINDOW_MS = 15000;
+const RESUME_RECONNECT_COOLDOWN_MS = 1000;
+
 function updateGlobalChannelHealth(channel: RealtimeChannelKind, status: string) {
     const next = applyRealtimeChannelStatus(globalChannelHealth, channel, status);
     if (next === globalChannelHealth) return;
@@ -99,6 +103,10 @@ export function useRealtimeSubscriptions(options: {
     const onStatusChangeRef = useRef(onStatusChange);
     const selectedChatIdRef = useRef<string | null>(selectedChatId ?? null);
     const messagesListChatIdsRef = useRef<Set<string> | null>(csvToSet(messagesListChatIdsCsv));
+    const hiddenAtRef = useRef<number | null>(null);
+    const replaySinceRef = useRef<number | null>(null);
+    const lastResumeAtRef = useRef(0);
+    const [resumeRevision, setResumeRevision] = useState(0);
     const [, setHealthRevision] = useState(0);
 
     useEffect(() => {
@@ -125,6 +133,57 @@ export function useRealtimeSubscriptions(options: {
     useEffect(() => {
         messagesListChatIdsRef.current = csvToSet(messagesListChatIdsCsv);
     }, [messagesListChatIdsCsv]);
+
+    // A browser may keep the Realtime channel in SUBSCRIBED state while the tab
+    // is suspended. Reconnect on resume and ask Broadcast Replay for the window
+    // that could have been missed. The inbox delta sync remains the durable
+    // fallback for gaps larger than the replay limit.
+    useEffect(() => {
+        if (!workspaceId || typeof document === 'undefined') return;
+
+        if (document.visibilityState === 'hidden') {
+            hiddenAtRef.current = Date.now();
+        }
+
+        const markHidden = () => {
+            if (document.visibilityState === 'hidden' && hiddenAtRef.current === null) {
+                hiddenAtRef.current = Date.now();
+            }
+        };
+
+        const resumeRealtime = () => {
+            if (document.visibilityState !== 'visible') return;
+
+            const now = Date.now();
+            if (now - lastResumeAtRef.current < RESUME_RECONNECT_COOLDOWN_MS) return;
+
+            const hiddenAt = hiddenAtRef.current ?? now - RESUME_REPLAY_FALLBACK_WINDOW_MS;
+            hiddenAtRef.current = null;
+            lastResumeAtRef.current = now;
+            replaySinceRef.current = Math.max(0, hiddenAt - RESUME_REPLAY_OVERLAP_MS);
+            setResumeRevision((revision) => revision + 1);
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                markHidden();
+            } else {
+                resumeRealtime();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('focus', resumeRealtime);
+        window.addEventListener('pageshow', resumeRealtime);
+        window.addEventListener('online', resumeRealtime);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('focus', resumeRealtime);
+            window.removeEventListener('pageshow', resumeRealtime);
+            window.removeEventListener('online', resumeRealtime);
+        };
+    }, [workspaceId]);
 
     // Wrapper handlers
     const chatHandler = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
@@ -168,6 +227,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         // Register this component's handler
         if (onChatUpdateRef.current) {
@@ -196,6 +256,7 @@ export function useRealtimeSubscriptions(options: {
             globalChannels.chats = subscribeToWorkspaceChatUpdates({
                 client: supabase,
                 workspaceId,
+                replaySince,
                 onChatUpdate: (payload) => {
                     console.log('[REALTIME-GLOBAL] Chat update received:', payload);
                     chatHandlers.forEach((handler) => handler(payload));
@@ -225,7 +286,7 @@ export function useRealtimeSubscriptions(options: {
                 updateGlobalChannelHealth('chats', 'CLOSED');
             }
         };
-    }, [workspaceId, isLoading, accessToken, chatHandler, statusHandler]);
+    }, [workspaceId, isLoading, accessToken, chatHandler, statusHandler, resumeRevision]);
 
     // Subscribe to contacts channel
     useEffect(() => {
@@ -233,6 +294,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         if (onContactUpdateRef.current) {
             contactHandlers.add(contactHandler);
@@ -254,6 +316,7 @@ export function useRealtimeSubscriptions(options: {
             globalChannels.contacts = subscribeToWorkspaceContacts({
                 client: supabase,
                 workspaceId,
+                replaySince,
                 onContactUpdate: (payload) => {
                     contactHandlers.forEach((handler) => handler(payload));
                 },
@@ -279,7 +342,7 @@ export function useRealtimeSubscriptions(options: {
                 globalChannels.contactsSubscribers = 0;
             }
         };
-    }, [workspaceId, isLoading, accessToken, contactHandler]);
+    }, [workspaceId, isLoading, accessToken, contactHandler, resumeRevision]);
 
     // Subscribe to messages channel (Global for workspace)
     useEffect(() => {
@@ -287,6 +350,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         // Register this component's handler
         if (onMessageUpdateRef.current) {
@@ -322,6 +386,7 @@ export function useRealtimeSubscriptions(options: {
                 client: supabase,
                 workspaceId,
                 chatId: targetFilter,
+                replaySince,
                 onMessage: (payload) => {
                     // console.log('[REALTIME-GLOBAL] Message received:', payload);
                     messageThreadHandlers.forEach((handler) => handler(payload));
@@ -357,7 +422,7 @@ export function useRealtimeSubscriptions(options: {
                 updateGlobalChannelHealth('messages', 'CLOSED');
             }
         };
-    }, [workspaceId, isLoading, accessToken, selectedChatId, messageThreadHandler]);
+    }, [workspaceId, isLoading, accessToken, selectedChatId, messageThreadHandler, resumeRevision]);
 
     // Subscribe to messages channel for list updates (other chats)
     useEffect(() => {
@@ -365,6 +430,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         if (onMessageUpdateRef.current) {
             messageListHandlers.add(messageListHandler);
@@ -389,6 +455,7 @@ export function useRealtimeSubscriptions(options: {
             globalChannels.messagesList = subscribeToWorkspaceMessages({
                 client: supabase,
                 workspaceId,
+                replaySince,
                 onMessage: (payload) => {
                     messageListHandlers.forEach((handler) => handler(payload));
                 },
@@ -415,7 +482,7 @@ export function useRealtimeSubscriptions(options: {
                 updateGlobalChannelHealth('messagesList', 'CLOSED');
             }
         };
-    }, [workspaceId, isLoading, accessToken, messageListHandler]);
+    }, [workspaceId, isLoading, accessToken, messageListHandler, resumeRevision]);
 
     return {
         isChatsConnected: globalChannelHealth.chats,

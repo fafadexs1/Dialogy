@@ -18,15 +18,6 @@ export type Workspace = {
   isOwner?: boolean;
   plan?: string;
   vertical?: string | null;
-  nexus_settings?: {
-    mode?: 'workspace_managed' | 'existing_account';
-    email?: string;
-    username?: string;
-    autoProvisioned?: boolean;
-    nexusUserId?: string;
-    createdAt?: string;
-    updatedAt?: string;
-  }; // Shared NexusFlow credentials per workspace
 }
 
 export type Permission = {
@@ -223,6 +214,17 @@ export type MessageMetadata = {
   autopilotResponseDeliveryKey?: string;
   autopilotResponseBlockIndex?: number;
   autopilotResponseBlockCount?: number;
+  /** Stable key used by the native workflow runtime to prevent duplicate delivery. */
+  nexusDeliveryId?: string;
+  /** Forces the workflow to wait until the channel provider accepts this message. */
+  deliveryGuarantee?: 'best_effort' | 'ordered';
+  nexusExecutionId?: string;
+  nexusNodeId?: string;
+  /** Records the exceptional text fallback when the provider rejects an interactive list. */
+  nexusInteractiveFallback?: boolean;
+  nexusInteractiveError?: string;
+  /** Provider-level identifier for a selected interactive option. */
+  interactiveSelectionId?: string;
   customerMessage?: string;
   analysisKind?: 'transcription' | 'visual_summary' | 'video_summary' | 'media_summary' | 'routing_context';
   sourceMessageId?: string;
@@ -820,6 +822,7 @@ export interface AutopilotConfig {
   workflow_builder_mode?: 'legacy' | 'native_v2' | null;
   active_workflow_id?: string | null;
   active_workflow_version?: string | null;
+  agent_domain_pack_id?: string | null;
   workflow_definition?: WorkflowDefinition | null;
   tool_mode?: "deny" | "on_demand" | "required";
   created_at: string;

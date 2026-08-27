@@ -14,6 +14,7 @@ interface RegisterFormProps {
   onRegister: (data: FormData) => void;
   pending: boolean;
   referralCode?: string | null;
+  redirectTo?: string | null;
 }
 
 const FIELD_CLASS =
@@ -47,7 +48,7 @@ const PasswordStrengthIndicator = ({ strength }: { strength: number }) => {
   );
 };
 
-export function RegisterForm({ onRegister, pending, referralCode }: RegisterFormProps) {
+export function RegisterForm({ onRegister, pending, referralCode, redirectTo }: RegisterFormProps) {
   const { t } = useI18n();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
@@ -158,6 +159,7 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
         ) : null}
 
         <input type="hidden" name="referralCode" value={referralCode || ''} />
+        <input type="hidden" name="redirectTo" value={redirectTo || ''} />
 
         {step === 1 && (
           <div className="animate-in space-y-4 fade-in slide-in-from-right-4 duration-300">

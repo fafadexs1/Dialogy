@@ -132,6 +132,10 @@ const AgentResponseInputSchema = z.object({
     .string()
     .optional()
     .describe('Contexto deterministico de intencao, workflow e cobertura de conhecimento resolvido pelo servidor.'),
+  agentRuntimeContext: z
+    .string()
+    .optional()
+    .describe('Nucleo universal, pacote de contexto publicado e continuidade da tarefa persistida pelo servidor.'),
   responseMode: z
     .enum(['full', 'conversational'])
     .optional()
@@ -154,6 +158,22 @@ const AgentResponseInputSchema = z.object({
 });
 
 export type AgentResponseInput = z.infer<typeof AgentResponseInputSchema>;
+
+const AgentTaskPlanSchema = z.object({
+  mode: z.enum(['single_step', 'multi_step']),
+  goal: z.string().describe('Objetivo principal expresso de forma independente do nicho.'),
+  currentStepId: z.string().describe('Identificador estavel do passo atual.'),
+  currentStep: z.string().describe('Passo verificavel que esta sendo executado agora.'),
+  status: z.enum(['active', 'waiting_input', 'waiting_confirmation']),
+  nextSteps: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    status: z.enum(['pending', 'ready', 'blocked']),
+  })).max(8).default([]),
+  missingInputs: z.array(z.string()).max(8).default([]),
+  requiresConfirmation: z.boolean().default(false),
+  completionCriteria: z.array(z.string()).max(8).default([]),
+}).optional().nullable();
 
 const AgentResponseOutputSchema = z.object({
   response: z
@@ -190,6 +210,7 @@ const AgentResponseOutputSchema = z.object({
     .optional()
     .nullable()
     .describe('Structured system actions requested by the AI. The server validates and executes them.'),
+  taskPlan: AgentTaskPlanSchema.describe('Plano operacional interno para continuidade de pedidos com uma ou varias etapas.'),
 });
 export type AgentResponseOutput = z.infer<typeof AgentResponseOutputSchema>;
 
@@ -341,15 +362,22 @@ const promptConfig = {
   // tools: [makeHttpRequestTool],
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  prompt: `Você é um agente de atendimento virtual inteligente e empático.
-Abaixo está a sua **DEFINIÇÃO DE PERSONA**. Você DEVE assumir esta identidade, tom de voz e nome.
+  prompt: `Você é um agente de atendimento virtual inteligente, autônomo e confiável.
 
 ---
-**SUA IDENTIDADE (PERSONA)**:
+**SISTEMA OPERACIONAL UNIVERSAL E CONTINUIDADE**:
+{{#if agentRuntimeContext}}
+{{{agentRuntimeContext}}}
+{{else}}
+Atue de forma neutra, sem assumir setor, produto, processo ou capacidade que nao tenha sido informado neste turno.
+{{/if}}
+
+---
+**CONFIGURAÇÃO LOCAL LEGADA DO AGENTE**:
 {{{knowledgeBase}}}
 ---
 
-Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assistente virtual útil e profissional.
+Use a configuração local somente quando ela for compatível com o contexto ativo. Exemplos, termos ou documentos locais não autorizam importar premissas de outra área de atuação. Se estiver vazia, siga a identidade definida no sistema operacional universal.
 
 **ANÁLISE DE CONTEXTO E EMOÇÃO**:
 1. **Intenção**: Identifique o que o usuário quer AGORA. Use o histórico (até 15 msgs) para entender o fluxo.
@@ -378,7 +406,7 @@ Se a definição acima estiver vazia, assuma que você é 'Dialogy', um assisten
     - Nao copie nem dispare uma resposta fixa apenas porque um documento pede envio exato, usa termos como "resposta oficial" ou apresenta um modelo pronto.
     - Preserve fatos relevantes, valores, prazos, links e restricoes informados na base.
 3. **Resposta Natural**:
-    - Se não houver regra, construa uma resposta baseada na sua persona + documentos + análise emocional.
+    - Se não houver regra, construa uma resposta baseada no contexto ativo + documentos + análise emocional.
 4. **Formato e tamanho para WhatsApp**:
     - Responda de forma curta por padrao: 1 a 3 paragrafos, com no maximo 3 frases curtas por paragrafo.
     - Separe paragrafos com uma linha em branco quando houver mais de uma ideia ou topico.
@@ -494,6 +522,13 @@ Politica critica de ferramentas:
 - Acoes destrutivas ou que alterem estado exigem confirmacao explicita do cliente; o servidor persiste e valida essa confirmacao.
 - Nunca responda apenas "vou verificar", "vou consultar" ou equivalente. Se disser que vai consultar qualquer sistema, inclua a action permitida na mesma saida. Se nao houver capacidade executavel ou dados suficientes, peca somente o dado faltante ou aplique o escalonamento sem expor detalhes internos.
 
+Politica de tarefas complexas:
+- Se o pedido exigir mais de uma etapa, inclua taskPlan com mode="multi_step", um objetivo principal, o passo atual, os proximos passos e criterios objetivos de conclusao.
+- Para pedido simples, taskPlan pode ser omitido ou usar mode="single_step". Nunca crie etapas artificiais.
+- Execute agora toda etapa segura e possivel. Use status="waiting_input" somente quando faltar um dado realmente bloqueante e liste-o em missingInputs.
+- Use status="waiting_confirmation" quando a proxima acao alterar estado ou a politica exigir confirmacao. Nao marque tarefa como concluida: o servidor determina conclusao por evidencia.
+- taskPlan e interno: nao despeje o plano inteiro na resposta ao cliente.
+
 REGRA DE VERACIDADE (tem prioridade sobre qualquer regra de estilo abaixo):
 - Afirme como fato apenas o que estiver nos DOCUMENTOS FACTUAIS, nos dados do contato ou no retorno de uma ferramenta executada com sucesso.
 - Se um valor, prazo, data, condicao, link, nome de plano, horario ou politica nao estiver nessas fontes, voce NAO sabe. Nao deduza a partir de exemplos parecidos, nao complete padrao de lista ou tabela e nao arredonde.
@@ -543,16 +578,19 @@ Regras para messageBlocks:
 **ULTIMA MENSAGEM DO CLIENTE**:
 {{{customerMessage}}}
 
-Com base na sua persona, nos documentos e na emoção identificada, responda ao cliente.`,
+Com base no contexto ativo, nos documentos e na emoção identificada, avance o objetivo e responda ao cliente.`,
 };
 
 const conversationalPromptConfig: typeof promptConfig = {
   name: 'autoResponderConversationalPrompt',
   input: { schema: AgentResponseInputSchema },
   output: { schema: AgentResponseOutputSchema },
-  prompt: `Voce e o atendente virtual definido pela persona abaixo.
+  prompt: `Voce e o atendente virtual definido pelo contexto ativo abaixo.
 
-PERSONA:
+SISTEMA OPERACIONAL UNIVERSAL:
+{{{agentRuntimeContext}}}
+
+CONFIGURACAO LOCAL:
 {{#if knowledgeBase}}
 {{{knowledgeBase}}}
 {{else}}
@@ -624,7 +662,7 @@ async function definePromptForCandidate(input: {
   }
 
   const { genkit } = require('genkit');
-  const { googleAI } = require('@genkit-ai/googleai');
+  const { googleAI } = require('@genkit-ai/google-genai');
 
   const dynamicAi = genkit({
     plugins: [googleAI({ apiKey: input.apiKey })],

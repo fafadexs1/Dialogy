@@ -84,6 +84,8 @@ function Update-ComposeImages {
     $workerAiUpdated = $false
     $workerCampaignUpdated = $false
     $workerMetaRelayUpdated = $false
+    $workerGoogleAdsUpdated = $false
+    $dialogyNexusUpdated = $false
 
     foreach ($line in $Lines) {
         if ($line -match '^services:\s*$') {
@@ -135,6 +137,18 @@ function Update-ComposeImages {
             continue
         }
 
+        if ($inServices -and $currentService -eq 'worker-google-ads' -and $line -match '^    image:\s*') {
+            $updatedLines.Add("    image: $WorkerImage")
+            $workerGoogleAdsUpdated = $true
+            continue
+        }
+
+        if ($inServices -and $currentService -eq 'dialogy-nexus' -and $line -match '^    image:\s*') {
+            $updatedLines.Add("    image: $WorkerImage")
+            $dialogyNexusUpdated = $true
+            continue
+        }
+
         $updatedLines.Add($line)
     }
 
@@ -160,6 +174,14 @@ function Update-ComposeImages {
 
     if (!$workerMetaRelayUpdated) {
         throw "Nao foi possivel localizar a linha image do servico 'worker-meta-relay' em $composePath"
+    }
+
+    if (!$workerGoogleAdsUpdated) {
+        throw "Nao foi possivel localizar a linha image do servico 'worker-google-ads' em $composePath"
+    }
+
+    if (!$dialogyNexusUpdated) {
+        throw "Nao foi possivel localizar a linha image do servico 'dialogy-nexus' em $composePath"
     }
 
     return $updatedLines

@@ -24,13 +24,14 @@ export default function RegisterPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const redirectTo = searchParams.get('next');
+    const redirectPath = redirectTo?.startsWith('/') && !redirectTo.startsWith('//') ? redirectTo : '/inbox';
     const referralCode = normalizeReferralCode(searchParams.get('ref'));
 
     useEffect(() => {
         if (registerState.success && !registerState.requiresEmailConfirmation) {
-            router.push(redirectTo || '/inbox');
+            router.push(redirectPath);
         }
-    }, [registerState.success, registerState.requiresEmailConfirmation, router, redirectTo]);
+    }, [registerState.success, registerState.requiresEmailConfirmation, router, redirectPath]);
 
     useEffect(() => {
         if (!referralCode) {
@@ -83,13 +84,14 @@ export default function RegisterPage() {
                                 onRegister={registerAction}
                                 pending={isRegisterPending}
                                 referralCode={referralCode}
+                                redirectTo={redirectTo}
                             />
                         </div>
                         )}
 
                         <p className="mt-8 text-sm text-white/50">
                             {t('Já tem uma conta?')} {' '}
-                            <Link href="/login" className="font-semibold text-white transition-colors hover:text-[#20E401] hover:underline hover:underline-offset-4">
+                            <Link href={redirectTo ? `/login?next=${encodeURIComponent(redirectTo)}` : '/login'} className="font-semibold text-white transition-colors hover:text-[#20E401] hover:underline hover:underline-offset-4">
                                 {t('Entre agora')}
                             </Link>
                         </p>

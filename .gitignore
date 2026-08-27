@@ -31,6 +31,7 @@ yarn-error.log*
 # generated runtime/storage artifacts
 public/sw.js
 public/workbox-*.js
+src/generated/prisma
 *.sqlite
 *.sqlite3
 *.db

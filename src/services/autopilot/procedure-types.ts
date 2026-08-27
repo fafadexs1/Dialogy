@@ -78,6 +78,12 @@ export type ProcedureStep = {
   // tool_call
   toolName?: string;
   toolPayloadTemplate?: Record<string, string>;
+  /** Customer-facing confirmation asked before any sensitive side effect. */
+  confirmationPrompt?: string;
+  /** Explicit route selected after a successful tool result. */
+  successStepId?: string | null;
+  /** Explicit route selected after a rejected or failed tool result. */
+  errorStepId?: string | null;
 
   // validate
   condition?: string;

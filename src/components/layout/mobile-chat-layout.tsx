@@ -9,6 +9,7 @@ import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { getInitialChatsData, syncInboxData, getChatMessagesWindow, loadOlderChatsAction } from '@/actions/chats';
 import type { InitialChatsPayload } from '@/actions/chats';
+import { getInboxPaginationTab, isChatInInboxQueueScope, type InboxListFilters } from '@/lib/inbox-pagination';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -21,7 +22,7 @@ import { Switch } from '../ui/switch';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
-import { replaceChatPath } from '@/lib/chat-navigation';
+import { replaceChatPath, resolveHydratedChatSelection } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { usePresence } from '@/hooks/use-online-status';
@@ -31,11 +32,19 @@ import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
-import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
-import { reconcileRealtimeChatAssignment, reconcileRealtimeChatPresentation } from '@/lib/realtime/realtime-reconciler';
+import {
+  isChatVisibleForOwnership,
+  shouldClearSelectedChatOnOwnershipChange,
+} from '@/lib/inbox-ownership';
+import {
+  hasCompleteRealtimeChatPresentation,
+  reconcileRealtimeChatAssignment,
+  reconcileRealtimeChatPresentation,
+} from '@/lib/realtime/realtime-reconciler';
 import { shouldMarkChatAsRead } from '@/lib/inbox-read-state';
 import { persistChatRead } from '@/lib/inbox-mark-as-read';
 import { inboxDebug } from '@/lib/inbox-debug';
+import { WorkspaceInviteCenter } from '@/components/invites/workspace-invite-center';
 
 // Notification sounds served from public assets
 const SOUND_SOURCES = {
@@ -271,6 +280,7 @@ export default function MobileChatLayout({
   const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
   const appendChats = useInboxStore((state) => state.appendChats);
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
+  const setChatPagination = useInboxStore((state) => state.setChatPagination);
   const removeChat = useInboxStore((state) => state.removeChat);
   const { isOffline } = usePresence();
 
@@ -290,7 +300,7 @@ export default function MobileChatLayout({
   const messagesListChatIdsCsv = useMemo(() => {
     if (!initialUser?.id || ownershipFilter !== 'mine') return '';
     const ids = chats
-      .filter((chat) => chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id)
+      .filter((chat) => isChatVisibleForOwnership(chat, 'mine', initialUser.id))
       .map((chat) => chat.id)
       .sort();
     return ids.join(',');
@@ -300,7 +310,7 @@ export default function MobileChatLayout({
     if (!initialUser?.id || ownershipFilter !== 'mine') return '';
     const ids = new Set<string>();
     chats.forEach((chat) => {
-      if (chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id) {
+      if (isChatVisibleForOwnership(chat, 'mine', initialUser.id)) {
         ids.add(chat.id);
       }
     });
@@ -327,6 +337,7 @@ export default function MobileChatLayout({
   }, []);
 
   const selectedChatIdRef = useRef<string | null>(initialData?.selectedChatId ?? initialChatId);
+  const hasUserSelectedChatRef = useRef(false);
   const audioRefs = useRef<{ queue: HTMLAudioElement | null; attending: HTMLAudioElement | null }>({
     queue: null,
     attending: null,
@@ -340,6 +351,8 @@ export default function MobileChatLayout({
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
   const messageWindowLoadsInFlightRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
+  const pendingChatPresentationHydrationRef = useRef<Set<string>>(new Set());
+  const hydratedChatPresentationRef = useRef<Set<string>>(new Set());
   const deltaSyncInFlightRef = useRef<Promise<void> | null>(null);
   const deltaSyncQueuedRef = useRef(false);
   const lastDeltaSyncCompletedAtRef = useRef(0);
@@ -347,6 +360,24 @@ export default function MobileChatLayout({
 
   const isHydratedRef = useRef(false);
   const [retryCount, setRetryCount] = useState(0);
+
+  const requestRealtimeChatPresentationHydration = useCallback((chatId: string) => {
+    if (
+      hydratedChatPresentationRef.current.has(chatId) ||
+      pendingChatPresentationHydrationRef.current.has(chatId)
+    ) {
+      return;
+    }
+
+    const sync = runDeltaSyncRef.current;
+    if (!sync) return;
+
+    pendingChatPresentationHydrationRef.current.add(chatId);
+    void sync().finally(() => {
+      pendingChatPresentationHydrationRef.current.delete(chatId);
+      hydratedChatPresentationRef.current.add(chatId);
+    });
+  }, []);
 
 
 
@@ -421,6 +452,8 @@ export default function MobileChatLayout({
   }, []);
 
   const handleBackToList = useCallback(() => {
+    hasUserSelectedChatRef.current = true;
+    selectedChatIdRef.current = null;
     setSelectedChatId(null);
     updateSelectedChatPath(null);
     setShowFullHistory(false);
@@ -648,6 +681,7 @@ export default function MobileChatLayout({
     const isQueueMessage = messageChat?.status === 'gerais';
     const isAttendingMessage = messageChat?.status === 'atendimentos';
     const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
+    const shouldHydrateChatPresentation = isAttendingMessage && (!messageChat?.teamName || !messageChat?.teamColor);
     const currentSelectedChatId = snapshot.selectedChatId;
 
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
@@ -665,8 +699,8 @@ export default function MobileChatLayout({
       snapshot.markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
     }
 
-    if (!messageChat && runDeltaSyncRef.current) {
-      runDeltaSyncRef.current();
+    if (!messageChat || shouldHydrateChatPresentation) {
+      requestRealtimeChatPresentationHydration(message.chat_id);
     }
 
     if (!message.from_me) {
@@ -684,7 +718,7 @@ export default function MobileChatLayout({
         }
       }
     }
-  }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
+  }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat, requestRealtimeChatPresentationHydration]);
 
   const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
@@ -738,36 +772,54 @@ export default function MobileChatLayout({
   const handleLoadMoreChats = useCallback(async (options?: {
     statuses?: Chat['status'][];
     ownership?: 'mine' | 'everyone';
+    filters?: InboxListFilters;
   }) => {
-    if (isLoadingMoreChats || !hasMoreChats || !initialUser?.activeWorkspaceId) return;
+    if (isLoadingMoreChats || !initialUser?.activeWorkspaceId) return;
 
-    const { statuses = ['gerais', 'atendimentos'], ownership = 'mine' } = options || {};
-    const currentChats = useInboxStore.getState().chats;
+    const { statuses = ['gerais', 'atendimentos'], ownership = 'mine', filters } = options || {};
+    const state = useInboxStore.getState();
+    const currentChats = state.chats;
+    const status = statuses.length === 1 ? statuses[0] : null;
+    const paginationTab = status ? getInboxPaginationTab(status, filters?.queueScope) : null;
+    const storedPage = paginationTab ? state.chatPagination[paginationTab] : null;
+    if (storedPage && (!storedPage.hasMore || !storedPage.cursor)) return;
     const filteredChats = currentChats.filter((chat) => {
       if (!statuses.includes(chat.status)) return false;
-      const chatAgentId = chat.agent?.id || chat.agentId;
-      return ownership === 'everyone' || chatAgentId === initialUser.id || chat.status === 'gerais';
+      if (filters?.queueScope && !isChatInInboxQueueScope(chat, filters.queueScope)) return false;
+      return isChatVisibleForOwnership(chat, ownership, initialUser.id);
     });
     const lastChat = filteredChats.at(-1);
-    if (!lastChat?.updatedAt) return;
+    const cursor = storedPage?.cursor || (lastChat?.updatedAt
+      ? { lastActivityAt: lastChat.updatedAt, id: lastChat.id }
+      : null);
+    if (!cursor) return;
 
     setIsLoadingMoreChats(true);
     try {
       const result = await loadOlderChatsAction(
         initialUser.activeWorkspaceId,
-        lastChat.updatedAt,
-        lastChat.id,
+        cursor.lastActivityAt,
+        cursor.id,
         statuses,
         ownership,
+        filters,
       );
-      if (result.success && result.chats?.length) appendChats(result.chats);
+      if (result.success && result.chats) {
+        if (result.chats.length > 0) appendChats(result.chats);
+        if (paginationTab) {
+          setChatPagination(paginationTab, {
+            hasMore: result.hasMoreChats ?? false,
+            cursor: result.nextCursor ?? null,
+          });
+        }
+      }
       if (!result.success && result.error) console.error('[LOAD_MORE_CHATS_MOBILE] Error:', result.error);
     } catch (error) {
       console.error('[LOAD_MORE_CHATS_MOBILE] Exception:', error);
     } finally {
       setIsLoadingMoreChats(false);
     }
-  }, [appendChats, hasMoreChats, initialUser, isLoadingMoreChats]);
+  }, [appendChats, initialUser, isLoadingMoreChats, setChatPagination]);
 
   const ensureMessagesForChat = useCallback(async (chatId: string, options?: { force?: boolean }) => {
     const force = options?.force ?? false;
@@ -812,6 +864,8 @@ export default function MobileChatLayout({
   }, [selectedChatId, ensureMessagesForChat, hasLoadedSelectedMessageWindow]);
 
   const handleSetSelectedChat = useCallback((chat: Chat | null) => {
+    hasUserSelectedChatRef.current = true;
+
     if (!chat) {
       selectedChatIdRef.current = null;
       setSelectedChatId(null);
@@ -821,7 +875,8 @@ export default function MobileChatLayout({
     }
 
     const isFirstActivation = !activatedChatIdsRef.current.has(chat.id);
-    if (selectedChatIdRef.current === chat.id) {
+    if (selectedChatId === chat.id && selectedChatIdRef.current === chat.id) {
+      updateSelectedChatPath(chat.id);
       if (isFirstActivation) {
         activatedChatIdsRef.current.add(chat.id);
         void ensureMessagesForChat(chat.id, { force: true });
@@ -834,7 +889,20 @@ export default function MobileChatLayout({
     updateSelectedChatPath(chat.id);
     activatedChatIdsRef.current.add(chat.id);
     void ensureMessagesForChat(chat.id, { force: isFirstActivation });
-  }, [ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
+  }, [selectedChatId, ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
+
+  const handleOwnershipFilterChange = useCallback((nextOwnership: 'mine' | 'everyone') => {
+    setOwnershipFilter(nextOwnership);
+    if (nextOwnership !== 'mine') return;
+
+    const currentSelectedChatId = selectedChatIdRef.current ?? selectedChatId;
+    if (!currentSelectedChatId) return;
+
+    const currentSelectedChat = useInboxStore.getState().chats.find((chat) => chat.id === currentSelectedChatId);
+    if (shouldClearSelectedChatOnOwnershipChange(currentSelectedChat, nextOwnership, initialUser?.id)) {
+      handleSetSelectedChat(null);
+    }
+  }, [handleSetSelectedChat, initialUser?.id, selectedChatId]);
 
   const jumpChatByOffset = useCallback((delta: number) => {
     if (!chats.length) return;
@@ -892,6 +960,8 @@ export default function MobileChatLayout({
         oldestMessageId: result.oldestMessageId,
         hasMoreHistory: result.hasMoreHistory,
         hasMoreChats: result.hasMoreChats,
+        inboxCounts: result.inboxCounts,
+        chatPagination: result.statusPagination,
       });
       if (result.selectedChatId) {
         selectedChatIdRef.current = result.selectedChatId;
@@ -988,10 +1058,10 @@ export default function MobileChatLayout({
         // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
         React.startTransition(() => {
           const visibleDeltaChats = result.deltaChats.filter((chat) =>
-            isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId)
+          isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id)
           );
           const hiddenDeltaChatIds = result.deltaChats
-            .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId))
+            .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id))
             .map((chat) => chat.id)
             .filter((chatId) => chatId !== snapshot.selectedChatId);
 
@@ -1155,15 +1225,28 @@ export default function MobileChatLayout({
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
 
+    const handleResume = () => {
+      if (document.visibilityState !== 'visible') return;
+      void runDeltaSync({ force: true });
+      markSelectedChatAsRead();
+    };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        runDeltaSync({ force: true });
-        markSelectedChatAsRead();
+        handleResume();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleResume);
+    window.addEventListener('pageshow', handleResume);
+    window.addEventListener('online', handleResume);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleResume);
+      window.removeEventListener('pageshow', handleResume);
+      window.removeEventListener('online', handleResume);
+    };
   }, [initialUser?.activeWorkspaceId, runDeltaSync, markSelectedChatAsRead]);
 
   // Polling mechanism
@@ -1269,6 +1352,16 @@ export default function MobileChatLayout({
     const snapshot = useInboxStore.getState();
     const existingChat = snapshot.chats.find((chat) => chat.id === newChatData.id);
     const incomingStatus = newChatData.status || existingChat?.status || 'gerais';
+    const hasHydratedPresentation = hasCompleteRealtimeChatPresentation(newChatData);
+    const teamAssignmentChanged = hasRecordKey(newChatData, 'team_id')
+      && newChatData.team_id !== existingChat?.team_id;
+
+    if (hasHydratedPresentation) {
+      hydratedChatPresentationRef.current.add(newChatData.id);
+    } else if (teamAssignmentChanged) {
+      hydratedChatPresentationRef.current.delete(newChatData.id);
+    }
+
     const shouldKeepVisible = isChatVisibleForOwnership(
       {
         id: newChatData.id,
@@ -1277,7 +1370,6 @@ export default function MobileChatLayout({
       },
       ownershipFilter,
       initialUser?.id,
-      snapshot.selectedChatId
     );
 
     if (!shouldKeepVisible) {
@@ -1394,7 +1486,17 @@ export default function MobileChatLayout({
     }
 
     snapshot.upsertChats([optimisticUpdate as Chat]);
-  }, [fetchContactById, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, workspaceTimezone]);
+
+    const shouldHydratePresentation =
+      incomingStatus === 'atendimentos' &&
+      !hasHydratedPresentation &&
+      !hydratedChatPresentationRef.current.has(newChatData.id) &&
+      (!existingChat?.teamName || !existingChat?.teamColor);
+
+    if (shouldHydratePresentation) {
+      requestRealtimeChatPresentationHydration(newChatData.id);
+    }
+  }, [fetchContactById, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, requestRealtimeChatPresentationHydration, workspaceTimezone]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
@@ -1445,6 +1547,7 @@ export default function MobileChatLayout({
   useEffect(() => {
     if (preserveClientState) {
       selectedChatIdRef.current = useInboxStore.getState().selectedChatId;
+      hasUserSelectedChatRef.current = true;
       isHydratedRef.current = true;
       setIsLoading(false);
       return;
@@ -1453,9 +1556,14 @@ export default function MobileChatLayout({
       // FIX: Prevent overwriting client-side state with stale/empty server selection during revalidation.
       const clientHasSelection = !!selectedChatIdRef.current;
       const serverClearedSelection = initialData.selectedChatId === null;
-      const shouldPreserveSelection = isHydratedRef.current && clientHasSelection && serverClearedSelection;
+      const shouldPreserveSelection = hasUserSelectedChatRef.current
+        || (isHydratedRef.current && clientHasSelection && serverClearedSelection);
 
-      let effectiveSelectedChatId = initialData.selectedChatId;
+      let effectiveSelectedChatId = resolveHydratedChatSelection(
+        initialData.selectedChatId,
+        selectedChatIdRef.current,
+        shouldPreserveSelection,
+      );
       let effectiveChats = initialData.chats;
 
       if (shouldPreserveSelection) {
@@ -1491,6 +1599,8 @@ export default function MobileChatLayout({
         oldestMessageId: initialData.oldestMessageId,
         hasMoreHistory: initialData.hasMoreHistory,
         hasMoreChats: initialData.hasMoreChats,
+        inboxCounts: initialData.inboxCounts,
+        chatPagination: initialData.statusPagination,
       });
       setFetchError(initialData.error ?? null);
       setSelectedChatId(effectiveSelectedChatId);
@@ -1513,10 +1623,12 @@ export default function MobileChatLayout({
   }, [initialData, initialUser, initializeInbox, preserveClientState, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
-    if (selectedChatId) {
-      selectedChatIdRef.current = selectedChatId;
+    selectedChatIdRef.current = selectedChatId;
+
+    if (hasUserSelectedChatRef.current) {
+      updateSelectedChatPath(selectedChatId);
     }
-  }, [selectedChatId]);
+  }, [selectedChatId, updateSelectedChatPath]);
 
   if (!initialUser) {
     return <LoadingSkeleton />;
@@ -1565,6 +1677,7 @@ export default function MobileChatLayout({
     { id: 'crm' as const, label: 'Contatos', icon: Users },
     { id: 'settings' as const, label: 'Ajustes', icon: Settings },
   ];
+  const mobileWorkspace = initialUser?.workspaces?.find((workspace) => workspace.id === initialUser.activeWorkspaceId);
 
 
 
@@ -1640,7 +1753,8 @@ export default function MobileChatLayout({
                   setSelectedChat={handleSetSelectedChat}
                   currentUser={initialUser}
                   onUpdate={handleDataMutation}
-                  onOwnershipFilterChange={setOwnershipFilter}
+                  ownershipFilter={ownershipFilter}
+                  onOwnershipFilterChange={handleOwnershipFilterChange}
                   isForwarding={isForwarding}
                   selectedForwardingChatIds={selectedForwardingChatIds}
                   onToggleForwardSelection={handleToggleForwardSelection}
@@ -1748,6 +1862,16 @@ export default function MobileChatLayout({
                     {needsAudioUnlock ? 'Ativar' : 'Testar'}
                   </Button>
                 </div>
+                {mobileWorkspace ? (
+                  <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm">
+                    <WorkspaceInviteCenter
+                      workspaceId={mobileWorkspace.id}
+                      workspaceName={mobileWorkspace.name}
+                      userEmail={initialUser?.email}
+                      className="border-0 pt-0"
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
           )}

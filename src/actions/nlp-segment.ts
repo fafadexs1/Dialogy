@@ -1,12 +1,14 @@
 'use server';
 
 import { genkit } from 'genkit';
-import { googleAI, gemini15Flash } from '@genkit-ai/googleai';
+import { googleAI } from '@genkit-ai/google-genai';
 import type { CriteriaGroup } from '@/lib/crm-query-builder';
+
+const geminiFlashModel = googleAI.model('gemini-2.5-flash');
 
 const ai = genkit({
     plugins: [googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY })],
-    model: gemini15Flash,
+    model: geminiFlashModel,
 });
 
 const SYSTEM_PROMPT = `Você é um assistente que converte descrições em linguagem natural de segmentos de contatos CRM em filtros estruturados JSON.

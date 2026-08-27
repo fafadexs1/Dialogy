@@ -31,6 +31,11 @@ describe('worker runtime dependencies in Dockerfile', () => {
     const workerDepsNames = parseNames(matches[0][1]);
     const workerAiDepsNames = parseNames(matches[1][1]);
 
+    // Workflow/Nexus expressions can be reached from both queue runtimes.
+    // Keep this explicit even when dist/ has not been generated yet.
+    expect(workerDepsNames).toContain('jsonata');
+    expect(workerAiDepsNames).toContain('jsonata');
+
     // Check worker-ai dist
     const workerAiDistPath = path.join(process.cwd(), 'dist', 'worker-ai.js');
     if (existsSync(workerAiDistPath)) {
@@ -57,7 +62,7 @@ describe('worker runtime dependencies in Dockerfile', () => {
     }
 
     // Check worker, worker-campaign, worker-meta-relay dist files
-    const genericWorkerFiles = ['worker.js', 'worker-campaign.js', 'worker-meta-relay.js'];
+    const genericWorkerFiles = ['worker.js', 'worker-campaign.js', 'worker-meta-relay.js', 'worker-nexus.js'];
     for (const fileName of genericWorkerFiles) {
       const distPath = path.join(process.cwd(), 'dist', fileName);
       if (!existsSync(distPath)) continue;

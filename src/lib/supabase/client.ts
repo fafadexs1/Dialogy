@@ -2,6 +2,7 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveSupabasePublicKey } from '@/lib/supabase/public-key';
 
 // Declare a global variable to hold the client.
 let client: SupabaseClient | undefined;
@@ -32,7 +33,12 @@ async function syncRealtimeAuth(supabase: SupabaseClient): Promise<void> {
 export function createClient(): SupabaseClient {
   if (!client) {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    // Keep server-side/secret variables out of the browser bundle. The anon
+    // key is the legacy client-safe key and may also hold a safe publishable
+    // key value during a gradual key migration.
+    const key = resolveSupabasePublicKey({
+      anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    });
 
     // [DEBUG] Log environment variable status (safely)
     if (typeof window !== 'undefined') {

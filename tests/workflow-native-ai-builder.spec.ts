@@ -120,7 +120,8 @@ function expectNativeExecutableProposal(proposal: ReturnType<typeof materialize>
       .filter((connection) => connection.sourceNodeId === workflowAgent.id)
       .map((connection) => connection.sourcePortId);
     expect(incomingTypes).toContain('model');
-    expect(outgoingPorts).toEqual(expect.arrayContaining(['completed', 'needs_input', 'handoff', 'error']));
+    expect(outgoingPorts).toEqual(expect.arrayContaining(['completed', 'needs_input', 'handoff']));
+    expect(outgoingPorts).not.toContain('error');
   }
 }
 
@@ -286,7 +287,8 @@ describe('native workflow AI builder', () => {
     const routerOutputs = proposal.workflow.connections
       .filter((connection) => connection.sourceNodeId === router!.id)
       .map((connection) => connection.sourcePortId);
-    expect(routerOutputs).toEqual(expect.arrayContaining(['support', 'sales', 'default', 'low_confidence', 'error']));
+    expect(routerOutputs).toEqual(expect.arrayContaining(['support', 'sales', 'default', 'low_confidence']));
+    expect(routerOutputs).not.toContain('error');
 
     const sensitiveTool = proposal.workflow.nodes.find((node) => node.type === 'tool.mcp');
     expect(sensitiveTool?.config.requiresConfirmation).toBe(true);

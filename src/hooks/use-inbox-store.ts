@@ -5,6 +5,7 @@ import { appendNewChatsById, dedupeChats, mergeChatsById, sortChatsByActivity } 
 import { dedupeMessages, pruneMessageThreads, removeReplacedOptimisticMessages, touchMessageThread } from '@/hooks/inbox-store/message-thread-slice';
 import { normalizeDraftForStorage } from '@/hooks/inbox-store/draft-slice';
 import { baseInboxState, type InboxState } from '@/hooks/inbox-store/types';
+import { isChatInInboxQueueScope } from '@/lib/inbox-pagination';
 
 const messagesForChat = (chatId: string, messages: Message[]) =>
   messages.filter((message) => message.chat_id === chatId);
@@ -21,6 +22,8 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     oldestMessageId,
     hasMoreHistory,
     hasMoreChats,
+    inboxCounts,
+    chatPagination,
   }) => {
     const scopedMessages = selectedChatId ? messagesForChat(selectedChatId, messages) : [];
     set((state) => {
@@ -81,6 +84,8 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         ...prunedState,
         lastSyncChats,
         hasMoreChats,
+        inboxCounts: inboxCounts ?? state.inboxCounts,
+        chatPagination: chatPagination ?? state.chatPagination,
       };
     });
 
@@ -144,6 +149,54 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       return { chats: dedupeChats(nextChats, state.selectedChatId) };
     });
   },
+  replaceChatsForStatus: (status, incomingChats) => {
+    set((state) => {
+      const selectedStatusChat = state.chats.find((chat) => (
+        chat.id === state.selectedChatId && chat.status === status
+      ));
+      const otherStatuses = state.chats.filter((chat) => chat.status !== status);
+      const nextStatusChats = selectedStatusChat && !incomingChats.some((chat) => chat.id === selectedStatusChat.id)
+        ? [...incomingChats, selectedStatusChat]
+        : incomingChats;
+
+      return {
+        chats: dedupeChats(
+          sortChatsByActivity([...otherStatuses, ...nextStatusChats]),
+          state.selectedChatId
+        ),
+      };
+    });
+  },
+  replaceChatsForQueueScope: (scope, incomingChats) => {
+    set((state) => {
+      const belongsToScope = (chat: Chat) => isChatInInboxQueueScope(chat, scope);
+      const selectedScopeChat = state.chats.find((chat) => (
+        chat.id === state.selectedChatId && belongsToScope(chat)
+      ));
+      const otherScopes = state.chats.filter((chat) => !belongsToScope(chat));
+      const nextScopeChats = selectedScopeChat && !incomingChats.some((chat) => chat.id === selectedScopeChat.id)
+        ? [...incomingChats, selectedScopeChat]
+        : incomingChats;
+
+      return {
+        chats: dedupeChats(
+          sortChatsByActivity([...otherScopes, ...nextScopeChats]),
+          state.selectedChatId
+        ),
+      };
+    });
+  },
+  setInboxCounts: (inboxCounts) => set({ inboxCounts }),
+  setChatPagination: (tab, pagination) => set((state) => {
+    const chatPagination = {
+      ...state.chatPagination,
+      [tab]: pagination,
+    };
+    return {
+      chatPagination,
+      hasMoreChats: Object.values(chatPagination).some((page) => page.hasMore),
+    };
+  }),
   setHasMoreChats: (hasMore) => set({ hasMoreChats: hasMore }),
   updateChatContact: (contact) => {
     set((state) => ({
@@ -339,6 +392,22 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         messagesByChat: {
           ...state.messagesByChat,
           [chatId]: updatedMessages,
+        },
+      };
+    });
+  },
+  setAudioTranscription: (messageId, job) => {
+    set((state) => {
+      if (!job) {
+        const remaining = { ...state.audioTranscriptions };
+        delete remaining[messageId];
+        return { audioTranscriptions: remaining };
+      }
+
+      return {
+        audioTranscriptions: {
+          ...state.audioTranscriptions,
+          [messageId]: job,
         },
       };
     });

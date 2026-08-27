@@ -143,39 +143,43 @@ async function sendReceiptToWhatsApp(
     messagesToMark: { remoteJid: string; fromMe: boolean; id: string | undefined }[]
 ): Promise<void> {
     const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
-    if (!apiConfig) {
-        console.warn(`[MARK_AS_READ_API] API config not found for instance ${instanceName}. Cannot send read receipt.`);
+    if (!apiConfig || !apiConfig.api_url || !apiConfig.api_key) {
         return;
     }
 
-    if (!apiConfig.api_url || !apiConfig.api_key) {
-        console.warn(`[MARK_AS_READ_API] API config incomplete for instance ${instanceName}.`);
-        return;
-    }
+    const validMessages = messagesToMark.filter((m) => m.id && m.remoteJid);
+    if (validMessages.length === 0) return;
 
-    // Evolution API v2 format for markAsRead
+    // Evolution API v2 standard payload format for marking messages as read
     const payload = {
-        read: {
-            remoteJid: messagesToMark[0].remoteJid,
-            fromMe: messagesToMark[0].fromMe,
-            id: messagesToMark.map(m => m.id),
-        }
+        readMessages: validMessages.map((m) => ({
+            id: m.id,
+            fromMe: Boolean(m.fromMe),
+            remoteJid: m.remoteJid,
+        })),
     };
 
+    const encodedInstance = encodeURIComponent(instanceName);
+
     try {
-        // Correct endpoint for Evolution API v2
-        await fetchEvolutionAPI(`/chat/markAsRead/${instanceName}`, apiConfig, {
+        // Standard Evolution API v2 endpoint (POST /chat/markMessageAsRead/{instance})
+        await fetchEvolutionAPI(`/chat/markMessageAsRead/${encodedInstance}`, apiConfig, {
             method: 'POST',
             body: JSON.stringify(payload),
+            silent: true,
         });
-        console.log(`[MARK_AS_READ_API] Read receipt sent to WhatsApp API successfully for instance ${instanceName}.`);
         return;
-    } catch (error: any) {
-        // Suppress 404 errors as they likely mean the instance is stopped or the endpoint is different
-        if (error.message.includes('404') || error.message.includes('Not Found')) {
-            console.warn(`[MARK_AS_READ_API] Instance ${instanceName} not found or endpoint invalid. Ignoring.`);
-        } else {
-            console.error(`[MARK_AS_READ_API] Error sending read receipt: ${error.message}`);
+    } catch {
+        // Fallback for Evolution API installations expecting PUT
+        try {
+            await fetchEvolutionAPI(`/chat/markMessageAsRead/${encodedInstance}`, apiConfig, {
+                method: 'PUT',
+                body: JSON.stringify(payload),
+                silent: true,
+            });
+            return;
+        } catch {
+            // Ignored gracefully: instance offline, webhook-only, or unsupported by this Evolution version
         }
     }
 }

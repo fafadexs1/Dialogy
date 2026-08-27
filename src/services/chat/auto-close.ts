@@ -1,28 +1,8 @@
 import { db } from '@/lib/db';
-import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 const DEFAULT_QUEUE_AUTO_CLOSE_MS = 0;
 const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
-
-async function enqueueCaseMemoryRefreshAfterClose(params: {
-  workspaceId: string;
-  chatId: string;
-  closedAt: string | null;
-  logPrefix: string;
-}) {
-  const { workspaceId, chatId, closedAt, logPrefix } = params;
-
-  if (!shouldEnqueueJob('ai_case_memory_refresh')) {
-    console.warn(`${logPrefix} Refresh de memoria de caso ignorado: fila ai_case_memory_refresh desabilitada.`);
-    return;
-  }
-
-  await enqueueAiCaseMemoryRefresh({
-    workspaceId,
-    chatId,
-    closedAt,
-  });
-}
 
 export async function getQueueAutoCloseMs(workspaceId: string): Promise<number> {
   try {
@@ -92,17 +72,23 @@ export async function executeQueueAutoClose(params: {
       return;
     }
 
-    const closeRes = await client.query(
+    const queueRes = await client.query(
       `UPDATE chats
-       SET status = 'encerrados', closed_at = NOW()
+       SET status = 'gerais',
+           closed_at = NULL,
+           assigned_system_agent_id = NULL,
+           assigned_at = NULL,
+           is_autopilot_active = FALSE,
+           copilot_mode = 'off',
+           updated_at = clock_timestamp()
        WHERE id = $1
          AND status = 'gerais'
          AND agent_id IS NULL
-       RETURNING closed_at`,
+       RETURNING id`,
       [chatId]
     );
 
-    if ((closeRes.rowCount ?? 0) === 0) {
+    if ((queueRes.rowCount ?? 0) === 0) {
       await client.query('ROLLBACK');
       return;
     }
@@ -115,10 +101,10 @@ export async function executeQueueAutoClose(params: {
       [
         workspaceId,
         chatId,
-        `Atendimento encerrado automaticamente apos ${seconds} segundos na fila sem atendimento.`,
+        `Atendimento mantido na fila apos ${seconds} segundos sem atendimento.`,
         {
-          event: 'queue_auto_close',
-          autoClosedAfterMs: autoCloseMs,
+          event: 'queue_timeout_kept_in_queue',
+          queueTimeoutMs: autoCloseMs,
           lastIncomingAt: anchor.toISOString(),
         },
       ]
@@ -126,20 +112,7 @@ export async function executeQueueAutoClose(params: {
 
     await client.query('COMMIT');
 
-    const closedAt = closeRes.rows[0]?.closed_at
-      ? new Date(closeRes.rows[0].closed_at).toISOString()
-      : null;
-
-    try {
-      await enqueueCaseMemoryRefreshAfterClose({
-        workspaceId,
-        chatId,
-        closedAt,
-        logPrefix: '[QUEUE_AUTO_CLOSE]',
-      });
-    } catch (caseMemoryError) {
-      console.error('[QUEUE_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
-    }
+    await broadcastHydratedChatUpdate(workspaceId, chatId);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[QUEUE_AUTO_CLOSE] Falha ao encerrar chat da fila:', error);
@@ -215,13 +188,26 @@ export async function executeMarketingAutoClose(params: {
       return;
     }
 
-    const closeRes = await client.query(
+    const queueRes = await client.query(
       `UPDATE chats
-       SET status = 'encerrados', closed_at = NOW()
+       SET status = 'gerais',
+           closed_at = NULL,
+           assigned_system_agent_id = NULL,
+           assigned_at = NULL,
+           is_autopilot_active = FALSE,
+           copilot_mode = 'off',
+           updated_at = clock_timestamp()
        WHERE id = $1
-       RETURNING closed_at`,
+         AND status <> 'encerrados'
+         AND agent_id IS NULL
+       RETURNING id`,
       [chatId]
     );
+
+    if ((queueRes.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      return;
+    }
 
     const seconds = Math.max(1, Math.round(autoCloseMs / 1000));
     const humanDelay = seconds >= 60
@@ -235,10 +221,10 @@ export async function executeMarketingAutoClose(params: {
       [
         workspaceId,
         chatId,
-        `Atendimento encerrado automaticamente apos ${humanDelay} sem resposta a mensagem de marketing.`,
+        `Atendimento enviado automaticamente para a fila apos ${humanDelay} sem resposta a mensagem de marketing.`,
         {
-          event: 'marketing_auto_close',
-          autoClosedAfterMs: autoCloseMs,
+          event: 'marketing_auto_queue_handoff',
+          queueAfterMs: autoCloseMs,
           marketingSentAt: anchor.toISOString(),
         },
       ]
@@ -246,20 +232,7 @@ export async function executeMarketingAutoClose(params: {
 
     await client.query('COMMIT');
 
-    const closedAt = closeRes.rows[0]?.closed_at
-      ? new Date(closeRes.rows[0].closed_at).toISOString()
-      : null;
-
-    try {
-      await enqueueCaseMemoryRefreshAfterClose({
-        workspaceId,
-        chatId,
-        closedAt,
-        logPrefix: '[MARKETING_AUTO_CLOSE]',
-      });
-    } catch (caseMemoryError) {
-      console.error('[MARKETING_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
-    }
+    await broadcastHydratedChatUpdate(workspaceId, chatId);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[MARKETING_AUTO_CLOSE] Falha ao encerrar automaticamente:', error);

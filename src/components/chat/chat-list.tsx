@@ -10,7 +10,7 @@ import { badgeColorStyle } from '@/lib/color-contrast';
 import { resolveClientMediaUrl } from '@/lib/storage-url';
 import { Virtuoso } from 'react-virtuoso';
 import { useInboxStore } from '@/hooks/use-inbox-store';
-import { getInitialChatsData } from '@/actions/chats';
+import { getInboxChatsSnapshotAction } from '@/actions/chats';
 import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -61,7 +61,9 @@ import { Separator } from '@/components/ui/separator';
 import { getTeams } from '@/actions/teams';
 import { getWorkspaceUsers } from '@/actions/crm';
 import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
-import { isMarketingMessage, matchesChatTeamFilter, shouldKeepMarketingOnlyChatVisible } from './chat-list-visibility';
+import { isMarketingMessage, matchesChatTeamFilter } from './chat-list-visibility';
+import { isChatVisibleForOwnership, isOwnershipScopedChat } from '@/lib/inbox-ownership';
+import { formatInboxCount, getInboxPaginationScope, hasMoreChatsInScope, isChatInInboxQueueScope, isInboxAssignmentFilterTab, resolveInboxStatusFilterForTab, scopeInboxListFilters, type InboxListFilters } from '@/lib/inbox-pagination';
 
 import { SearchDetailsDialog } from './search-details-dialog';
 import { InboxSearchInput } from './inbox-search-input';
@@ -1229,6 +1231,7 @@ interface ChatListProps {
   setSelectedChat: (chat: Chat | null) => void;
   currentUser: User;
   onUpdate: () => void;
+  ownershipFilter?: 'mine' | 'everyone';
   onOwnershipFilterChange?: (filter: 'mine' | 'everyone') => void;
   isForwarding?: boolean;
   selectedForwardingChatIds?: Set<string>;
@@ -1238,7 +1241,7 @@ interface ChatListProps {
   onCancelForward?: () => void;
   onPrefetch?: (chatId: string) => void;
   className?: string;
-  loadMore?: (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => void;
+  loadMore?: (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone', filters?: InboxListFilters }) => void;
   hasMore?: boolean;
   isLoadingMore?: boolean;
   bottomPadding?: number;
@@ -1247,7 +1250,7 @@ interface ChatListProps {
 type ChatListTabId = 'robo' | 'gerais' | 'atendimentos' | 'encerrados';
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onSelectAllForwarding, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, ownershipFilter: controlledOwnershipFilter, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onSelectAllForwarding, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
   const visibleOnlineAgents = useMemo(
@@ -1264,12 +1267,26 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ChatListTabId>('gerais');
   const [priorityNow, setPriorityNow] = useState(() => Date.now());
-  const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
+  const [uncontrolledOwnershipFilter, setUncontrolledOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
+  const ownershipFilter = controlledOwnershipFilter ?? uncontrolledOwnershipFilter;
+  const updateOwnershipFilter = useCallback((next: 'mine' | 'everyone') => {
+    if (controlledOwnershipFilter === undefined) {
+      setUncontrolledOwnershipFilter(next);
+    }
+    onOwnershipFilterChange?.(next);
+  }, [controlledOwnershipFilter, onOwnershipFilterChange]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [showMarketing, setShowMarketing] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
+
+  const selectInboxTab = useCallback((tab: ChatListTabId) => {
+    setActiveTab(tab);
+    // A aba já define o status principal. Não deixe um filtro global
+    // contraditório tornar a aba recém-selecionada vazia.
+    setStatusFilter((current) => resolveInboxStatusFilterForTab(tab, current));
+  }, []);
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
@@ -1283,13 +1300,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [responsibleSearchTerm, setResponsibleSearchTerm] = useState('');
 
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
-  const appendChats = useInboxStore((state) => state.appendChats);
-  const setInitialData = useInboxStore((state) => state.setInitialData);
+  const inboxCounts = useInboxStore((state) => state.inboxCounts);
+  const chatPagination = useInboxStore((state) => state.chatPagination);
+  const replaceChatsForStatus = useInboxStore((state) => state.replaceChatsForStatus);
+  const replaceChatsForQueueScope = useInboxStore((state) => state.replaceChatsForQueueScope);
+  const setInboxCounts = useInboxStore((state) => state.setInboxCounts);
+  const setChatPagination = useInboxStore((state) => state.setChatPagination);
 
-  const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
-
-  const isFirstRun = React.useRef(true);
-  const ownershipRequestSeqRef = React.useRef(0);
+  const filterRequestSeqRef = React.useRef(0);
 
   const [isBulkMode, setIsBulkMode] = useState(false);
   const [bulkAction, setBulkAction] = useState<'close' | 'agent' | null>(null);
@@ -1369,24 +1387,24 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const toggleTeamSelection = useCallback((teamId: string) => {
     if (ownershipFilter !== 'everyone') {
-      setOwnershipFilter('everyone');
+      updateOwnershipFilter('everyone');
     }
     setTeamFilter((prev) => {
       return prev.includes(teamId)
         ? prev.filter((id) => id !== teamId)
         : [...prev, teamId];
     });
-  }, [ownershipFilter]);
+  }, [ownershipFilter, updateOwnershipFilter]);
 
   const selectResponsible = useCallback((userId: string | null) => {
     setResponsibleFilter(userId);
     if (userId) {
       setShowUnassignedOnly(false);
-      if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
+      if (ownershipFilter !== 'everyone') updateOwnershipFilter('everyone');
     }
     setIsResponsibleFilterOpen(false);
     setResponsibleSearchTerm('');
-  }, [ownershipFilter]);
+  }, [ownershipFilter, updateOwnershipFilter]);
 
   const clearAdvancedFilters = useCallback(() => {
     setTeamFilter([]);
@@ -1485,12 +1503,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     setChatToAssign(null);
   };
 
-  const selectedChatIdRef = React.useRef(selectedChat?.id);
-
-  useEffect(() => {
-    selectedChatIdRef.current = selectedChat?.id;
-  }, [selectedChat?.id]);
-
   useEffect(() => {
     if (currentUser.activeWorkspaceId) {
       setIsLoadingTeams(true);
@@ -1523,51 +1535,74 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
   }, [currentUser.activeWorkspaceId]);
 
-  useEffect(() => {
-    if (isFirstRun.current) {
-      isFirstRun.current = false;
-      return;
-    }
+  const activeStatus: Chat['status'] = activeTab === 'encerrados'
+    ? 'encerrados'
+    : activeTab === 'atendimentos'
+      ? 'atendimentos'
+      : 'gerais';
+  const serverFilters = useMemo<InboxListFilters>(() => scopeInboxListFilters(activeTab, {
+    teamIds: teamFilter,
+    responsibleId: responsibleFilter,
+    onlyUnread,
+    unassignedOnly: showUnassignedOnly,
+    // Esta opção controla apenas o preview. Uma troca de aba nunca deve remover
+    // o atendimento inteiro por a última mensagem ser de marketing.
+    includeMarketing: true,
+  }), [activeTab, onlyUnread, responsibleFilter, showUnassignedOnly, teamFilter]);
 
+  useEffect(() => {
     const fetchFilteredChats = async () => {
       if (!currentUser.activeWorkspaceId) return;
-      const requestSeq = ++ownershipRequestSeqRef.current;
+      const requestSeq = ++filterRequestSeqRef.current;
       setIsFiltering(true);
       try {
-        const data = await getInitialChatsData({
+        const data = await getInboxChatsSnapshotAction({
           workspaceId: currentUser.activeWorkspaceId,
-          selectedChatId: selectedChatIdRef.current || null,
-          ownership: ownershipFilter
+          status: activeStatus,
+          ownership: ownershipFilter,
+          filters: serverFilters,
         });
 
-        if (requestSeq !== ownershipRequestSeqRef.current) {
+        if (requestSeq !== filterRequestSeqRef.current) {
           return;
         }
 
-        if (data.error) {
+        if (!data.success) {
           toast({ title: 'Erro ao filtrar', description: data.error, variant: 'destructive' });
         } else {
-          setInitialData(data);
+          if (activeStatus === 'gerais' && serverFilters.queueScope) {
+            replaceChatsForQueueScope(serverFilters.queueScope, data.chats);
+          } else {
+            replaceChatsForStatus(activeStatus, data.chats);
+          }
+          if (data.counts) setInboxCounts(data.counts);
+          if (data.pagination) setChatPagination(activeTab, data.pagination);
         }
       } catch (err) {
-        if (requestSeq !== ownershipRequestSeqRef.current) {
+        if (requestSeq !== filterRequestSeqRef.current) {
           return;
         }
         console.error(err);
         toast({ title: 'Erro ao filtrar', description: 'Falha ao buscar conversas.', variant: 'destructive' });
       } finally {
-        if (requestSeq === ownershipRequestSeqRef.current) {
+        if (requestSeq === filterRequestSeqRef.current) {
           setIsFiltering(false);
         }
       }
     };
 
     fetchFilteredChats();
-  }, [ownershipFilter, currentUser.activeWorkspaceId, setInitialData]);
-
-  useEffect(() => {
-    onOwnershipFilterChange?.(ownershipFilter);
-  }, [ownershipFilter, onOwnershipFilterChange]);
+  }, [
+    activeStatus,
+    activeTab,
+    currentUser.activeWorkspaceId,
+    ownershipFilter,
+    replaceChatsForQueueScope,
+    replaceChatsForStatus,
+    serverFilters,
+    setChatPagination,
+    setInboxCounts,
+  ]);
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
@@ -1579,8 +1614,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     });
 
     const queueChats = sorted.filter((c) => c.status === 'gerais');
-    const robo = queueChats.filter((c) => !c.tag?.trim());
-    const fila = queueChats.filter((c) => Boolean(c.tag?.trim()));
+    const robo = queueChats.filter((c) => isChatInInboxQueueScope(c, 'robo'));
+    const fila = queueChats.filter((c) => isChatInInboxQueueScope(c, 'fila'));
     const atendimentos = sorted.filter((c) => c.status === 'atendimentos');
     const encerrados = sorted.filter((c) => c.status === 'encerrados');
 
@@ -1599,23 +1634,13 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
     const matchesControls = (chat: Chat) => {
       const messages = chat.messages || [];
-      let hasVisibleMessage = false;
       let matchesMessageContent = false;
 
       for (const message of messages) {
         if (!showMarketing && isMarketingMessage(message)) continue;
-        hasVisibleMessage = true;
         if (query && !matchesMessageContent && (message.content || '').toLocaleLowerCase('pt-BR').includes(query)) {
           matchesMessageContent = true;
         }
-      }
-
-      if (
-        !showMarketing &&
-        !hasVisibleMessage &&
-        !shouldKeepMarketingOnlyChatVisible(chat, selectedChat?.id)
-      ) {
-        return false;
       }
 
       const matchesStatus =
@@ -1626,15 +1651,14 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       const chatSystemAgentId = chat.assigned_system_agent_id || chat.assignedSystemAgent?.id;
       const matchesTeam = matchesChatTeamFilter(chat, teams, teamFilter);
 
-      const matchesOwner =
-        responsibleFilter
-          ? chatAgentId === responsibleFilter
-          : ownershipFilter === 'everyone' ||
-            chatAgentId === currentUser.id ||
-            chat.status === 'gerais';
+      const matchesOwner = responsibleFilter && isOwnershipScopedChat(chat)
+        ? chatAgentId === responsibleFilter
+        : isChatVisibleForOwnership(chat, ownershipFilter, currentUser.id);
 
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
-      const matchesUnassigned = !showUnassignedOnly || (!chat.agent && !chatSystemAgentId);
+      const matchesUnassigned = !showUnassignedOnly || (!chatAgentId && !chatSystemAgentId);
+      const matchesAssignmentFilters = !isOwnershipScopedChat(chat)
+        || (matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned);
       let matchesSearch = true;
 
       if (query) {
@@ -1647,7 +1671,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           matchesMessageContent;
       }
 
-      return matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned && matchesSearch;
+      return matchesAssignmentFilters && matchesSearch;
     };
 
     return {
@@ -1662,7 +1686,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     onlyUnread,
     ownershipFilter,
     responsibleFilter,
-    selectedChat?.id,
     showMarketing,
     showUnassignedOnly,
     sortedChats,
@@ -1672,12 +1695,39 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   ]);
 
   const filteredChats = filteredChatsByTab[activeTab];
-  const tabCounts = useMemo(() => ({
+  const isOwnershipFilterVisible = isInboxAssignmentFilterTab(activeTab);
+  const loadedTabCounts = useMemo(() => ({
     robo: filteredChatsByTab.robo.length,
     gerais: filteredChatsByTab.gerais.length,
     atendimentos: filteredChatsByTab.atendimentos.length,
     encerrados: filteredChatsByTab.encerrados.length,
   }), [filteredChatsByTab]);
+
+  const hasClientOnlyCountFilters = Boolean(debouncedSearchTerm.trim());
+  const tabCounts = useMemo(() => {
+    if (!inboxCounts || hasClientOnlyCountFilters) return loadedTabCounts;
+
+    const counts = {
+      robo: inboxCounts.robo,
+      gerais: inboxCounts.gerais,
+      atendimentos: inboxCounts.atendimentos,
+      encerrados: inboxCounts.encerrados,
+    };
+
+    if (statusFilter === 'open') counts.encerrados = 0;
+    if (statusFilter === 'closed') {
+      counts.robo = 0;
+      counts.gerais = 0;
+      counts.atendimentos = 0;
+    }
+
+    return counts;
+  }, [
+    hasClientOnlyCountFilters,
+    inboxCounts,
+    loadedTabCounts,
+    statusFilter,
+  ]);
 
   const { groupedChats, priorityGroupCounts } = useMemo(() => {
     const buckets: Record<ChatPriorityGroupId, Chat[]> = {
@@ -1742,23 +1792,34 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     [teamFilter, teams]
   );
 
-  const advancedFilterCount = teamFilter.length
-    + (responsibleFilter ? 1 : 0)
-    + (statusFilter !== 'all' ? 1 : 0)
-    + (showUnassignedOnly ? 1 : 0)
-    + (showMarketing ? 1 : 0);
+  const advancedFilterCount = isOwnershipFilterVisible
+    ? teamFilter.length
+      + (responsibleFilter ? 1 : 0)
+      + (statusFilter !== 'all' ? 1 : 0)
+      + (showUnassignedOnly ? 1 : 0)
+      + (showMarketing ? 1 : 0)
+    : 0;
 
-  const canLoadMore = Boolean(loadMore) && !isLoadingMore && (hasMore ?? hasMoreChats);
+  const paginationCounts = inboxCounts ?? loadedTabCounts;
+  const paginationScope = getInboxPaginationScope(activeTab, paginationCounts);
+  const loadedInPaginationScope = loadedTabCounts[activeTab];
+  const canLoadMore = Boolean(loadMore) && !isLoadingMore && !isFiltering && (
+    inboxCounts
+      ? hasMoreChatsInScope({
+        loaded: loadedInPaginationScope,
+        total: paginationScope.total,
+        paginationHasMore: chatPagination[paginationScope.tab].hasMore,
+      })
+      : (hasMore ?? hasMoreChats)
+  );
   const handleEndReached = useCallback(() => {
     if (!canLoadMore) return;
-    if (filteredChats.length === 0) return;
-    const statuses: Chat['status'][] = activeTab === 'encerrados'
-      ? ['encerrados']
-      : activeTab === 'atendimentos'
-        ? ['atendimentos']
-        : ['gerais'];
-    loadMore?.({ statuses, ownership: ownershipFilter });
-  }, [activeTab, canLoadMore, filteredChats.length, loadMore, ownershipFilter]);
+    loadMore?.({
+      statuses: [paginationScope.status],
+      ownership: ownershipFilter,
+      filters: serverFilters,
+    });
+  }, [canLoadMore, loadMore, ownershipFilter, paginationScope.status, serverFilters]);
 
   const virtuosoComponents = useMemo(() => ({
     Header: () => <div className="h-1" />,
@@ -1907,7 +1968,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/[0.05]" role="tablist" aria-label="Status das conversas">
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            const filteredCount = tabCounts[tab.id];
+            const loadedCount = loadedTabCounts[tab.id];
+            const totalCount = tabCounts[tab.id];
+            const countDescription = loadedCount === totalCount
+              ? `${loadedCount.toLocaleString('pt-BR')} conversas carregadas`
+              : `${loadedCount.toLocaleString('pt-BR')} de ${totalCount.toLocaleString('pt-BR')} conversas carregadas`;
 
             return (
               <button
@@ -1915,8 +1980,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 type="button"
                 role="tab"
                 aria-selected={activeTab === tab.id}
-                aria-label={`${tab.label}: ${filteredCount} conversas`}
-                onClick={() => setActiveTab(tab.id)}
+                aria-label={`${tab.label}: ${countDescription}`}
+                onClick={() => selectInboxTab(tab.id)}
                 className={cn(
                   "relative flex h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-semibold transition-[background-color,color,box-shadow,transform] duration-200 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none",
                   activeTab === tab.id
@@ -1927,14 +1992,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <Icon className="hidden h-3 w-3 flex-shrink-0 min-[1400px]:block" />
                 <span className="truncate min-[1400px]:hidden">{tab.shortLabel}</span>
                 <span className="hidden truncate min-[1400px]:inline">{tab.label}</span>
-                {filteredCount > 0 && (
-                  <span className={cn(
-                    "flex min-w-[16px] flex-shrink-0 items-center justify-center rounded-full px-1 text-[8px] leading-4",
-                    activeTab === tab.id ? "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" : "bg-slate-200 text-slate-600 dark:bg-white/[0.08] dark:text-zinc-400"
-                  )}>
-                    {filteredCount > 99 ? '99+' : filteredCount}
-                  </span>
-                )}
+                <span className={cn(
+                  "flex min-w-[16px] flex-shrink-0 items-center justify-center rounded-full px-1 text-[8px] leading-4",
+                  activeTab === tab.id ? "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" : "bg-slate-200 text-slate-600 dark:bg-white/[0.08] dark:text-zinc-400"
+                )} title={countDescription}>
+                  {formatInboxCount(loadedCount)}
+                </span>
               </button>
             );
           })}
@@ -1946,7 +2009,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onEnter={handleSubmitSearch}
-            renderFilterTrigger={(filterTriggerClassName) => (
+            renderFilterTrigger={(filterTriggerClassName) => isOwnershipFilterVisible ? (
               <Popover>
                 <PopoverTrigger asChild>
                   <button
@@ -1989,7 +2052,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       </div>
                       <div>
                         <p className="text-sm font-bold tracking-tight">Visão inteligente</p>
-                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-zinc-400">Combine filtros em qualquer fila da Inbox.</p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-zinc-400">Filtros exclusivos de Atendendo e Encerrados.</p>
                       </div>
                     </div>
                     {advancedFilterCount > 0 && (
@@ -2004,7 +2067,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <Label className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Equipes</Label>
-                        <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">Uma ou várias, em todas as filas.</p>
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">Uma ou várias, somente nos atendimentos.</p>
                       </div>
                       <div className="flex items-center gap-2">
                         {teamFilter.length > 0 && (
@@ -2232,16 +2295,16 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
-                        <p className="text-xs text-muted-foreground">Oculta mensagens de marketing no preview</p>
+                        <p className="text-xs text-muted-foreground">Altera apenas o preview; a conversa continua na lista</p>
                       </div>
                       <Switch checked={showMarketing} onCheckedChange={setShowMarketing} className="data-[state=checked]:bg-blue-600" />
                     </div>
                   </div>
                 </PopoverContent>
               </Popover>
-            )}
+            ) : null}
           />
-          {selectedResponsible && (
+          {isOwnershipFilterVisible && selectedResponsible && (
             <div className="pt-2">
               <button
                 type="button"
@@ -2259,48 +2322,53 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             </div>
           )}
           {/* Quick Filter Chips */}
+          {isOwnershipFilterVisible && (
           <div className="flex flex-nowrap items-center gap-1.5 pt-2">
-            <Badge
-              variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
-              className={cn(
-                "order-2 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
-                ownershipFilter === 'mine'
-                  ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
-                  : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
-              )}
-              onClick={() => {
-                setResponsibleFilter(null);
-                if (ownershipFilter !== 'mine') setOwnershipFilter('mine');
-              }}
-            >
-              <span className="flex w-full items-center justify-center px-2">
-                <span className="inline-flex max-w-full items-center justify-center gap-1">
-                  {isFiltering && ownershipFilter === 'mine' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
-                  <span className="block truncate text-center">Atribuídos a mim</span>
-                </span>
-              </span>
-            </Badge>
-            <Badge
-              variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
-              className={cn(
-                "order-1 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
-                ownershipFilter === 'everyone'
-                  ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
-                  : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
-              )}
-              onClick={() => {
-                setResponsibleFilter(null);
-                if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
-              }}
-            >
-              <span className="flex w-full items-center justify-center px-2">
-                <span className="inline-flex max-w-full items-center justify-center gap-1">
-                  {isFiltering && ownershipFilter === 'everyone' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
-                  <span className="block truncate text-center">Todos</span>
-                </span>
-              </span>
-            </Badge>
-            <div className="order-3 h-4 w-px bg-slate-200 dark:bg-white/10" />
+            {isOwnershipFilterVisible && (
+              <>
+                <Badge
+                  variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
+                  className={cn(
+                    "order-2 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
+                    ownershipFilter === 'mine'
+                      ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
+                  )}
+                  onClick={() => {
+                    setResponsibleFilter(null);
+                    if (ownershipFilter !== 'mine') updateOwnershipFilter('mine');
+                  }}
+                >
+                  <span className="flex w-full items-center justify-center px-2">
+                    <span className="inline-flex max-w-full items-center justify-center gap-1">
+                      {isFiltering && ownershipFilter === 'mine' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
+                      <span className="block truncate text-center">Atribuídos a mim</span>
+                    </span>
+                  </span>
+                </Badge>
+                <Badge
+                  variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
+                  className={cn(
+                    "order-1 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
+                    ownershipFilter === 'everyone'
+                      ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
+                  )}
+                  onClick={() => {
+                    setResponsibleFilter(null);
+                    if (ownershipFilter !== 'everyone') updateOwnershipFilter('everyone');
+                  }}
+                >
+                  <span className="flex w-full items-center justify-center px-2">
+                    <span className="inline-flex max-w-full items-center justify-center gap-1">
+                      {isFiltering && ownershipFilter === 'everyone' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
+                      <span className="block truncate text-center">Todos</span>
+                    </span>
+                  </span>
+                </Badge>
+                <div className="order-3 h-4 w-px bg-slate-200 dark:bg-white/10" />
+              </>
+            )}
             <Badge
               variant={onlyUnread ? 'default' : 'outline'}
               className={cn(
@@ -2328,6 +2396,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               Sem responsável
             </Badge>
           </div>
+          )}
         </div>
       </div>
 

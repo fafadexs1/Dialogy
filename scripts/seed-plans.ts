@@ -1,7 +1,16 @@
-import { PrismaClient } from '@prisma/client';
+import 'dotenv/config';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../src/generated/prisma/client';
 import { PLANS } from '../src/lib/plans-types';
 
-const prisma = new PrismaClient() as any;
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+    throw new Error('DATABASE_URL is required to seed plans.');
+}
+
+const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+}) as any;
 
 async function main() {
     console.log('Seeding plans...');

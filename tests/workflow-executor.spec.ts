@@ -198,6 +198,7 @@ describe('workflow executor', () => {
     const trigger = workflowNode('trigger.manual', 'trigger');
     const custom = workflowNode('data.set', 'failure');
     custom.type = 'custom.failure';
+    custom.config.customErrorRoute = true;
     custom.outputPorts.push({
       id: 'error',
       label: 'Error',

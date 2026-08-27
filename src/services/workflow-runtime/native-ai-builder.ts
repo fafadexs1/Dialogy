@@ -213,8 +213,7 @@ function addDeterministicCompletionControl(input: {
   const agent = input.workflow.nodes.find((node) => node.id === input.agentId);
   const prefix = input.agentId.replace(/_agent$/, '');
   const respond = input.workflow.nodes.find((node) => node.id === `${prefix}_respond`);
-  const errorHandler = input.workflow.nodes.find((node) => node.id === 'workflow_error');
-  if (!agent || !respond || !errorHandler) return false;
+  if (!agent || !respond) return false;
 
   const directCompletion = input.workflow.connections.find((candidate) => (
     candidate.sourceNodeId === agent.id
@@ -270,9 +269,6 @@ function addDeterministicCompletionControl(input: {
     connection(`${prefix}_completion_keep_open`, goal.id, 'incomplete', incompleteResponse.id, 'main', 'main'),
     connection(`${prefix}_completion_deliver`, close.id, 'completed', respond.id, 'main', 'main'),
     connection(`${prefix}_completion_open_end`, incompleteResponse.id, 'success', incompleteEnd.id, 'main', 'main'),
-    connection(`${prefix}_completion_goal_error`, goal.id, 'error', errorHandler.id, 'error', 'error'),
-    connection(`${prefix}_completion_close_error`, close.id, 'error', errorHandler.id, 'error', 'error'),
-    connection(`${prefix}_completion_open_error`, incompleteResponse.id, 'error', errorHandler.id, 'error', 'error'),
   );
   return true;
 }
@@ -391,7 +387,7 @@ export function materializeNativeWorkflowAiBlueprint(input: {
     blueprint.architecture === 'routed_team' ? 'AI Router com fallback de baixa confianca configurado.' : 'Rota principal de atendimento configurada.',
     `${materializedToolNames.length} ferramenta${materializedToolNames.length === 1 ? '' : 's'} anexada${materializedToolNames.length === 1 ? '' : 's'}.`,
     `${deterministicCompletionControls} controle${deterministicCompletionControls === 1 ? '' : 's'} nativo${deterministicCompletionControls === 1 ? '' : 's'} de conclusao configurado${deterministicCompletionControls === 1 ? '' : 's'}.`,
-    'Modelo, memoria, RAG, guardrail, resposta, handoff e tratamento de erro conectados.',
+    'Modelo, memória, RAG, guardrail e respostas conectados; caminhos de erro permanecem automáticos até serem habilitados manualmente.',
   ];
   return {
     summary: blueprint.summary,

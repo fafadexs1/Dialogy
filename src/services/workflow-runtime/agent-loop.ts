@@ -11,7 +11,7 @@ import type {
   WorkflowNode,
 } from './types';
 import type { ToolRegistry } from './tools';
-import { hashValue, isRecord, stableStringify } from './utils';
+import { hashValue, isRecord, renderTemplate, stableStringify } from './utils';
 import { responseRequestsMoreCustomerInput } from '@/services/autopilot/close-intent';
 import { toolInputSchemaForPrompt } from './tool-arguments';
 
@@ -47,21 +47,30 @@ function buildToolDescription(registry: ToolRegistry) {
 
 export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
   const config = context.config;
+  const templateSource = {
+    ...context.execution.variables,
+    input: context.execution.input,
+    variables: context.execution.variables,
+    context: context.execution.context,
+    sessionId: context.execution.sessionId,
+    conversationId: context.execution.conversationId,
+  };
+  const render = (value: string) => renderTemplate(value, templateSource);
   return [
-    `Você é ${config.name}, um agente especializado em ${config.role}.`,
+    `Você é ${render(config.name)}, um agente especializado em ${render(config.role)}.`,
     `Idioma de atendimento: ${config.language}.`,
     '',
     'PERSONA',
-    config.persona || 'Adote uma comunicação clara, respeitosa e coerente com o papel definido.',
+    config.persona ? render(config.persona) : 'Adote uma comunicação clara, respeitosa e coerente com o papel definido.',
     '',
     'OBJETIVO',
-    config.objective,
+    render(config.objective),
     '',
     'CRITÉRIOS DE CONCLUSÃO',
-    config.completionCriteria.map((item, index) => `${index + 1}. ${item}`).join('\n'),
+    config.completionCriteria.map((item, index) => `${index + 1}. ${render(item)}`).join('\n'),
     '',
     'INSTRUÇÕES',
-    config.instructions.map((item, index) => `${index + 1}. ${item}`).join('\n') || 'Siga o objetivo e os critérios de conclusão.',
+    config.instructions.map((item, index) => `${index + 1}. ${render(item)}`).join('\n') || 'Siga o objetivo e os critérios de conclusão.',
     '',
     'CONTEXTO ATUAL',
     stableStringify({
@@ -632,6 +641,29 @@ export async function executeAgentNode(
 
     if (decision.type === 'final') {
       lastPartialResponse = decision.response;
+      const presentedChoice = decision.completionStatus === 'partial'
+        ? presentedChoiceRequest(decision.response, context.memory)
+        : null;
+      if (presentedChoice) {
+        return {
+          status: 'route',
+          selectedOutput: 'needs_input',
+          output: {
+            type: 'needs_input',
+            question: decision.response,
+            missingFields: ['selected_option'],
+            statePatch: decision.statePatch,
+          },
+          statePatch: decision.statePatch,
+          toolCalls,
+          metrics: {
+            durationMs: 0,
+            model: fallbackResult.selected.config.model,
+            toolCalls: toolCalls.length,
+            attempts: turn,
+          },
+        };
+      }
       const repeatedKnownFields = requestedKnownFieldsFromResponse(
         decision.response,
         availableFieldState(context),

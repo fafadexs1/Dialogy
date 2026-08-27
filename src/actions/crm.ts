@@ -1,6 +1,8 @@
 
 'use server';
 
+import { randomUUID } from 'node:crypto';
+
 import { db } from '@/lib/db';
 import type { Contact, Tag, User, Activity, CustomFieldDefinition, SelectableOption } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
@@ -24,6 +26,7 @@ import {
     normalizeWhatsappJid as normalizeWhatsappContactJid,
 } from '@/lib/whatsapp/contact-identity';
 import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
+import { scheduleDialogyNexusInternalEvent } from '@/modules/nexus/services/dialogy-event-scheduler';
 
 
 import { buildCountQuery, buildSegmentQuery, combineSegmentCriteria, CriteriaGroup } from '@/lib/crm-query-builder';
@@ -278,6 +281,7 @@ export const saveContactAction = withDebug(
         }
 
         const id = formData.get('id') as string | null;
+        const contactEventId = randomUUID();
         let ownerId = formData.get('owner_id') as string;
         if (ownerId === 'unassigned') {
             ownerId = ''; // Set to empty string to be saved as NULL
@@ -474,6 +478,25 @@ export const saveContactAction = withDebug(
             }
 
             await client.query('COMMIT');
+
+            scheduleDialogyNexusInternalEvent({
+                workspaceId,
+                eventName: id ? 'contact.updated' : 'contact.created',
+                eventId: contactEventId,
+                payload: {
+                    contactId,
+                    actorUserId: user.id,
+                    contact: updatedContact ? {
+                        id: updatedContact.id,
+                        name: updatedContact.name,
+                        email: updatedContact.email,
+                        phoneNumberJid: updatedContact.phone_number_jid,
+                        ownerId: updatedContact.owner_id,
+                        tags: updatedContact.tags,
+                        customFields: updatedContact.custom_fields,
+                    } : { id: contactId },
+                },
+            });
 
             // Avanco no funil vira conversao de lead qualificado no Google Ads.
             // Nunca pode derrubar o salvamento do contato.

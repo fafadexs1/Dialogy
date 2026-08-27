@@ -163,16 +163,17 @@ export async function attributeInboundWhatsappMessageByToken(params: {
     inserted_attribution AS (
       INSERT INTO ad_attributions (
         workspace_id, ad_click_id, contact_id, chat_id, message_id,
-        source, medium, campaign, campaign_id, match_type, confidence
+        source, medium, campaign, campaign_id, match_type, confidence, export_eligible
       )
       SELECT
         workspace_id, id, $4, $5, $6,
-        source, medium, campaign, campaign_id, 'token', 'deterministic'
+        source, medium, campaign, campaign_id, 'token', 'deterministic', true
       FROM updated_click
       ON CONFLICT (ad_click_id) DO UPDATE SET
         contact_id = EXCLUDED.contact_id,
         chat_id = EXCLUDED.chat_id,
-        message_id = EXCLUDED.message_id
+        message_id = EXCLUDED.message_id,
+        export_eligible = true
       RETURNING *
     )
     SELECT
@@ -184,6 +185,7 @@ export async function attributeInboundWhatsappMessageByToken(params: {
       ia.campaign_id,
       ia.match_type,
       ia.confidence,
+      ia.export_eligible,
       uc.gclid,
       uc.gbraid,
       uc.wbraid,
@@ -215,6 +217,7 @@ async function finalizeAttribution(client: PoolClient, row: any, messageId: stri
     `
     INSERT INTO conversion_exports (
       workspace_id, ad_attribution_id, event_name, conversion_action_id,
+      product_destination_id, google_ads_customer_id, transaction_id,
       conversion_value, currency, status, kind, order_id, payload
     )
     SELECT
@@ -222,6 +225,9 @@ async function finalizeAttribution(client: PoolClient, row: any, messageId: stri
       aa.id,
       $2,
       NULLIF(w.google_ads_conversion_action_whatsapp_message, ''),
+      NULLIF(regexp_replace(regexp_replace(w.google_ads_conversion_action_whatsapp_message, '^.*/', ''), '\\D', '', 'g'), ''),
+      NULLIF(regexp_replace(w.google_ads_customer_id, '\\D', '', 'g'), ''),
+      'dialogy:' || aa.workspace_id || ':' || $2 || ':' || aa.chat_id || ':' || aa.message_id,
       1,
       'BRL',
       'pending',
@@ -232,13 +238,15 @@ async function finalizeAttribution(client: PoolClient, row: any, messageId: stri
         'message_id', aa.message_id,
         'chat_id', aa.chat_id,
         'contact_id', aa.contact_id,
-        'ad_click_id', aa.ad_click_id
+        'ad_click_id', aa.ad_click_id,
+        'transaction_id', 'dialogy:' || aa.workspace_id || ':' || $2 || ':' || aa.chat_id || ':' || aa.message_id
       )
     FROM ad_attributions aa
     JOIN workspaces w ON w.id = aa.workspace_id::uuid
     WHERE aa.id = $1
+      AND COALESCE(aa.export_eligible, true) = true
       AND NULLIF(w.google_ads_conversion_action_whatsapp_message, '') IS NOT NULL
-    ON CONFLICT (ad_attribution_id, event_name) WHERE kind = 'conversion' DO NOTHING
+    ON CONFLICT (workspace_id, event_name, transaction_id) WHERE kind = 'conversion' DO NOTHING
     `,
     [row.attribution_id, WHATSAPP_MESSAGE_EVENT]
   );
@@ -251,6 +259,8 @@ async function finalizeAttribution(client: PoolClient, row: any, messageId: stri
  * WhatsApp: casa a primeira mensagem do contato com o clique mais recente ainda
  * nao casado da mesma instancia. O clique e reivindicado de forma atomica, entao
  * duas conversas simultaneas nunca disputam o mesmo clique.
+ * Nota: export_eligible = false por padrao para correspondencias probabilisticas,
+ * garantindo que o aprendizado do Smart Bidding no Google Ads nao seja contaminado.
  */
 export async function attributeInboundWhatsappMessageByProximity(params: {
   client: PoolClient;
@@ -293,11 +303,11 @@ export async function attributeInboundWhatsappMessageByProximity(params: {
     inserted_attribution AS (
       INSERT INTO ad_attributions (
         workspace_id, ad_click_id, contact_id, chat_id, message_id,
-        source, medium, campaign, campaign_id, match_type, confidence
+        source, medium, campaign, campaign_id, match_type, confidence, export_eligible
       )
       SELECT
         workspace_id, id, $4, $5, $6,
-        source, medium, campaign, campaign_id, 'proximity', 'probabilistic'
+        source, medium, campaign, campaign_id, 'proximity', 'probabilistic', false
       FROM claimed_click
       ON CONFLICT (ad_click_id) DO NOTHING
       RETURNING *
@@ -311,6 +321,7 @@ export async function attributeInboundWhatsappMessageByProximity(params: {
       ia.campaign_id,
       ia.match_type,
       ia.confidence,
+      ia.export_eligible,
       cc.gclid,
       cc.gbraid,
       cc.wbraid,

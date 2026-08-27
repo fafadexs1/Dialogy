@@ -1,11 +1,20 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Loader2, Languages } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    AudioLines,
+    CircleAlert,
+    Languages,
+    Loader2,
+    Pause,
+    Play,
+    RotateCcw,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '../ui/button';
-import { useToast } from '@/hooks/use-toast';
 import { toAbsoluteAppUrl } from '@/lib/storage-url';
+import { useToast } from '@/hooks/use-toast';
+import { useInboxStore } from '@/hooks/use-inbox-store';
+import type { AudioTranscriptionJob } from '@/hooks/inbox-store/types';
 
 interface AudioPlayerProps {
     src: string;
@@ -18,87 +27,147 @@ interface AudioPlayerProps {
     chatId?: string;
 }
 
+type PlaybackRate = 1 | 1.5 | 2;
+
+const PLAYBACK_RATES: PlaybackRate[] = [1, 1.5, 2];
+const WAVEFORM_BAR_COUNT = 44;
+
 const formatTime = (timeInSeconds: number) => {
-    if (isNaN(timeInSeconds) || timeInSeconds < 0) return '0:00';
+    if (!Number.isFinite(timeInSeconds) || timeInSeconds < 0) return '0:00';
     const minutes = Math.floor(timeInSeconds / 60);
     const seconds = Math.floor(timeInSeconds % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-import { useInboxStore } from '@/hooks/use-inbox-store';
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-export function AudioPlayer({ src, messageId, initialTranscription, duration: initialDuration, isFromMe, workspaceId, chatId }: AudioPlayerProps) {
+function cleanTranscription(value?: string | null) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text || null;
+}
+
+function createFallbackWaveform(source: string, count: number) {
+    let seed = 2166136261;
+
+    for (let index = 0; index < source.length; index += 1) {
+        seed ^= source.charCodeAt(index);
+        seed = Math.imul(seed, 16777619);
+    }
+
+    return Array.from({ length: count }, (_, index) => {
+        seed = Math.imul(seed ^ (index + 1), 16777619);
+        const normalized = ((seed >>> 0) % 1000) / 1000;
+        return 0.26 + normalized * 0.68;
+    });
+}
+
+function normalizeWaveform(values: number[] | undefined, source: string) {
+    const safeValues = (values || []).filter((value) => Number.isFinite(value));
+    if (safeValues.length === 0) return createFallbackWaveform(source, WAVEFORM_BAR_COUNT);
+
+    const minimum = Math.min(...safeValues);
+    const maximum = Math.max(...safeValues);
+    const range = maximum - minimum;
+
+    return Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => {
+        const start = Math.floor((index * safeValues.length) / WAVEFORM_BAR_COUNT);
+        const end = Math.max(start + 1, Math.ceil(((index + 1) * safeValues.length) / WAVEFORM_BAR_COUNT));
+        const sample = safeValues.slice(start, end);
+        const average = sample.reduce((sum, value) => sum + value, 0) / sample.length;
+        const normalized = range > 0 ? (average - minimum) / range : 0.62;
+        return 0.24 + clamp(normalized, 0, 1) * 0.72;
+    });
+}
+
+function getResultError(result: unknown) {
+    if (!result || typeof result !== 'object') return null;
+    const error = (result as { error?: unknown }).error;
+    return typeof error === 'string' && error.trim() ? error.trim() : null;
+}
+
+export function AudioPlayer({
+    src,
+    messageId,
+    initialTranscription,
+    duration: initialDuration,
+    waveform,
+    isFromMe,
+    workspaceId,
+    chatId,
+}: AudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
+    const durationProbeStateRef = useRef<'idle' | 'probing' | 'done'>('idle');
+    const transcriptionRequestRef = useRef(0);
     const { toast } = useToast();
+
     const updateMessage = useInboxStore((state) => state.updateMessage);
+    const setAudioTranscription = useInboxStore((state) => state.setAudioTranscription);
+    const storedTranscriptionJob = useInboxStore((state) => (
+        messageId ? state.audioTranscriptions[messageId] : undefined
+    ));
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(initialDuration || 0);
-    const [transcription, setTranscription] = useState<string | null>(initialTranscription || null);
-    const [isTranscribing, setIsTranscribing] = useState(false);
-    const [playbackRate, setPlaybackRate] = useState(1);
+    const [duration, setDuration] = useState(
+        initialDuration && Number.isFinite(initialDuration) ? initialDuration : 0
+    );
+    const [localTranscription, setLocalTranscription] = useState(() => cleanTranscription(initialTranscription));
+    const [localTranscriptionJob, setLocalTranscriptionJob] = useState<AudioTranscriptionJob | undefined>();
+    const [playbackRate, setPlaybackRate] = useState<PlaybackRate>(1);
 
-    // Sync state with prop if it updates (e.g. from other user)
-    useEffect(() => {
-        if (initialTranscription) {
-            setTranscription(initialTranscription);
+    const transcriptionJob = messageId ? storedTranscriptionJob : localTranscriptionJob;
+    const transcription = cleanTranscription(transcriptionJob?.transcription)
+        || localTranscription
+        || cleanTranscription(initialTranscription);
+    const isTranscribing = transcriptionJob?.status === 'transcribing' && !transcription;
+    const transcriptionError = transcriptionJob?.status === 'error' ? transcriptionJob.error : null;
+
+    const waveformBars = useMemo(
+        () => normalizeWaveform(waveform, src),
+        [src, waveform]
+    );
+
+    const setTranscriptionJob = useCallback((job: AudioTranscriptionJob | null) => {
+        if (messageId) {
+            setAudioTranscription(messageId, job);
+        } else {
+            setLocalTranscriptionJob(job || undefined);
         }
+    }, [messageId, setAudioTranscription]);
+
+    useEffect(() => {
+        const nextTranscription = cleanTranscription(initialTranscription);
+        if (nextTranscription) setLocalTranscription(nextTranscription);
     }, [initialTranscription]);
 
-    // ... (keep existing useEffects)
-
-    // Apply playback rate to audio element
     useEffect(() => {
-        if (audioRef.current) {
-            audioRef.current.playbackRate = playbackRate;
-        }
-    }, [playbackRate]);
-
-    const togglePlaybackRate = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        const rates = [1, 1.5, 2];
-        const nextRateIndex = (rates.indexOf(playbackRate) + 1) % rates.length;
-        const newRate = rates[nextRateIndex];
-        setPlaybackRate(newRate);
-        localStorage.setItem('audioPlaybackRate', newRate.toString());
-    };
-
-    const simulatedWaveform = React.useMemo(() =>
-        Array.from({ length: 40 }, () => Math.random() * 0.6 + 0.3) // Fewer bars, taller minimum
-        , []);
-
-    const handlePlayPause = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (isPlaying) {
-            audioRef.current?.pause();
-        } else {
-            audioRef.current?.play().catch(error => console.error("Error playing audio:", error));
-        }
-        setIsPlaying(!isPlaying);
-    };
-
-    const handleTimeUpdate = useCallback(() => {
-        if (audioRef.current) {
-            setCurrentTime(audioRef.current.currentTime);
-        }
+        const savedRate = window.localStorage.getItem('audioPlaybackRate');
+        const parsedRate = Number(savedRate) as PlaybackRate;
+        if (PLAYBACK_RATES.includes(parsedRate)) setPlaybackRate(parsedRate);
     }, []);
 
-    // Arquivos gerados pelo MediaRecorder (ogg/webm do gravador do navegador) e
-    // varios audios do WhatsApp nao trazem a duracao no cabecalho: o navegador
-    // devolve `Infinity` ate percorrer o arquivo. Forcar um seek para um tempo
-    // absurdo obriga esse calculo; o `durationchange` seguinte traz o valor real.
-    const durationProbeStateRef = useRef<'idle' | 'probing' | 'done'>('idle');
+    useEffect(() => {
+        if (audioRef.current) audioRef.current.playbackRate = playbackRate;
+    }, [playbackRate]);
+
+    useEffect(() => {
+        durationProbeStateRef.current = 'idle';
+        setCurrentTime(0);
+        setDuration(initialDuration && Number.isFinite(initialDuration) ? initialDuration : 0);
+    }, [src, initialDuration]);
+
+    const handleTimeUpdate = useCallback(() => {
+        if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
+    }, []);
 
     const handleLoadedMetadata = useCallback(() => {
         const audio = audioRef.current;
         if (!audio) return;
 
-        const newDuration = audio.duration;
-        if (isFinite(newDuration) && newDuration > 0) {
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
             durationProbeStateRef.current = 'done';
-            setDuration(newDuration);
+            setDuration(audio.duration);
             return;
         }
 
@@ -114,193 +183,345 @@ export function AudioPlayer({ src, messageId, initialTranscription, duration: in
 
     const handleDurationChange = useCallback(() => {
         const audio = audioRef.current;
-        if (!audio) return;
+        if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
 
-        const newDuration = audio.duration;
-        if (!isFinite(newDuration) || newDuration <= 0) return;
-
-        setDuration(newDuration);
-
+        setDuration(audio.duration);
         if (durationProbeStateRef.current === 'probing') {
             durationProbeStateRef.current = 'done';
-            // Desfaz o seek da sondagem para o player voltar ao inicio.
             try {
                 audio.currentTime = 0;
                 setCurrentTime(0);
             } catch {
-                /* navegador recusou o rewind; a duracao ja foi obtida */
+                // The browser can reject the rewind while the media is still loading.
             }
         }
     }, []);
-
-    const handleSeek = (event: React.MouseEvent<HTMLDivElement>) => {
-        if (!progressRef.current || !audioRef.current || !isFinite(duration) || duration === 0) return;
-        const rect = progressRef.current.getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        const percentage = Math.max(0, Math.min(1, x / rect.width));
-        audioRef.current.currentTime = percentage * duration;
-    };
-
-    const handleTranscribe = async () => {
-        const audioUrl = toAbsoluteAppUrl(src);
-
-        if (!audioUrl) {
-            toast({ title: "Erro", description: "URL do áudio não encontrada.", variant: "destructive" });
-            return;
-        }
-        setIsTranscribing(true);
-        try {
-            const response = await fetch('/api/audio/transcribe', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    audioUrl,
-                    workspaceId,
-                    messageId,
-                    chatId,
-                }),
-            });
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result.error || 'Nao foi possivel transcrever o audio.');
-            }
-
-            if (result.transcription) {
-                setTranscription(result.transcription);
-                if (chatId && messageId) {
-                    updateMessage(chatId, messageId, { transcription: result.transcription });
-                }
-            }
-        } catch (error: any) {
-            toast({ title: "Erro ao transcrever", description: error.message || "Não foi possível transcrever o áudio.", variant: "destructive" });
-        } finally {
-            setIsTranscribing(false);
-        }
-    };
 
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
 
-        // `ended` precisa de referencia estavel: com a arrow inline o
-        // removeEventListener nao removia nada e o listener vazava a cada render.
-        const handleEnded = () => setIsPlaying(false);
+        const handlePlay = () => setIsPlaying(true);
+        const handlePause = () => setIsPlaying(false);
+        const handleEnded = () => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+        };
 
         audio.addEventListener('timeupdate', handleTimeUpdate);
         audio.addEventListener('loadedmetadata', handleLoadedMetadata);
         audio.addEventListener('durationchange', handleDurationChange);
+        audio.addEventListener('play', handlePlay);
+        audio.addEventListener('pause', handlePause);
         audio.addEventListener('ended', handleEnded);
 
-        if (initialDuration && isFinite(initialDuration)) {
-            setDuration(initialDuration);
-        }
-
-        // A duracao do metadado ainda e consultada mesmo com `initialDuration`:
-        // o valor vindo do provedor costuma ser arredondado e as vezes vem zerado.
-        if (audio.readyState > 0) {
-            handleLoadedMetadata();
-        }
+        if (audio.readyState > 0) handleLoadedMetadata();
 
         return () => {
             audio.removeEventListener('timeupdate', handleTimeUpdate);
             audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
             audio.removeEventListener('durationchange', handleDurationChange);
+            audio.removeEventListener('play', handlePlay);
+            audio.removeEventListener('pause', handlePause);
             audio.removeEventListener('ended', handleEnded);
         };
-    }, [handleTimeUpdate, handleLoadedMetadata, handleDurationChange, initialDuration]);
+    }, [handleDurationChange, handleLoadedMetadata, handleTimeUpdate]);
 
-    const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
+    const handlePlayPause = async (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        const audio = audioRef.current;
+        if (!audio) return;
 
-    // Premium styling
-    const containerClasses = isFromMe
-        ? "bg-transparent"
-        : "bg-transparent";
+        if (audio.paused) {
+            try {
+                await audio.play();
+            } catch {
+                setIsPlaying(false);
+                toast({
+                    title: 'Não foi possível reproduzir o áudio',
+                    description: 'Verifique se o arquivo ainda está disponível.',
+                    variant: 'destructive',
+                });
+            }
+        } else {
+            audio.pause();
+        }
+    };
 
-    const playButtonClasses = isFromMe
-        ? "bg-white/20 hover:bg-white/30 text-white"
-        : "bg-blue-500 hover:bg-blue-600 text-white shadow-md shadow-blue-500/20";
+    const seekTo = useCallback((nextTime: number) => {
+        if (!audioRef.current || !Number.isFinite(duration) || duration <= 0) return;
+        const clampedTime = clamp(nextTime, 0, duration);
+        audioRef.current.currentTime = clampedTime;
+        setCurrentTime(clampedTime);
+    }, [duration]);
 
-    const waveformBaseColor = isFromMe ? "bg-white/30" : "bg-zinc-300/50";
-    const waveformProgressColor = isFromMe ? "bg-white" : "bg-blue-500";
+    const handleSeek = (event: React.MouseEvent<HTMLDivElement>) => {
+        event.stopPropagation();
+        if (!progressRef.current || duration <= 0) return;
+        const rect = progressRef.current.getBoundingClientRect();
+        const percentage = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+        seekTo(percentage * duration);
+    };
 
-    const timeColor = isFromMe ? "text-white/70" : "text-zinc-500";
-    const speedButtonColor = isFromMe
-        ? "bg-white/20 text-white hover:bg-white/30"
-        : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300";
+    const handleSeekKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (!duration) return;
+        const step = Math.max(1, duration / 20);
+
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            seekTo(currentTime - step);
+        } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            seekTo(currentTime + step);
+        } else if (event.key === 'Home') {
+            event.preventDefault();
+            seekTo(0);
+        } else if (event.key === 'End') {
+            event.preventDefault();
+            seekTo(duration);
+        }
+    };
+
+    const togglePlaybackRate = (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        const currentIndex = PLAYBACK_RATES.indexOf(playbackRate);
+        const nextRate = PLAYBACK_RATES[(currentIndex + 1) % PLAYBACK_RATES.length];
+        setPlaybackRate(nextRate);
+        window.localStorage.setItem('audioPlaybackRate', nextRate.toString());
+    };
+
+    const handleTranscribe = async () => {
+        if (isTranscribing || transcription) return;
+
+        const audioUrl = toAbsoluteAppUrl(src);
+        if (!audioUrl) {
+            toast({
+                title: 'Não foi possível transcrever',
+                description: 'URL do áudio não encontrada.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        const requestId = transcriptionRequestRef.current + 1;
+        transcriptionRequestRef.current = requestId;
+        setTranscriptionJob({ status: 'transcribing', transcription: null, error: null });
+
+        try {
+            const response = await fetch('/api/audio/transcribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ audioUrl, workspaceId, messageId, chatId }),
+            });
+            const result = await response.json().catch(() => null) as {
+                transcription?: unknown;
+                error?: unknown;
+            } | null;
+
+            if (!response.ok) {
+                throw new Error(getResultError(result) || 'Não foi possível transcrever o áudio.');
+            }
+
+            const nextTranscription = cleanTranscription(
+                typeof result?.transcription === 'string' ? result.transcription : null
+            );
+            if (!nextTranscription) {
+                throw new Error('A transcrição retornou vazia. Tente novamente.');
+            }
+
+            if (requestId !== transcriptionRequestRef.current) return;
+
+            setTranscriptionJob({ status: 'completed', transcription: nextTranscription, error: null });
+            setLocalTranscription(nextTranscription);
+            if (chatId && messageId) {
+                updateMessage(chatId, messageId, { transcription: nextTranscription });
+            }
+        } catch (error) {
+            if (requestId !== transcriptionRequestRef.current) return;
+            const message = error instanceof Error ? error.message : 'Não foi possível transcrever o áudio.';
+            setTranscriptionJob({ status: 'error', transcription: null, error: message });
+            toast({ title: 'Erro ao transcrever', description: message, variant: 'destructive' });
+        }
+    };
+
+    const progressPercentage = duration > 0
+        ? clamp((currentTime / duration) * 100, 0, 100)
+        : 0;
+
+    const shellClasses = isFromMe
+        ? 'border-blue-500/25 bg-blue-600 text-white shadow-blue-950/15'
+        : 'border-slate-200/90 bg-slate-50/90 text-slate-900 shadow-slate-900/5 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-100';
+    const secondaryTextClasses = isFromMe
+        ? 'text-white/60'
+        : 'text-slate-500 dark:text-zinc-500';
+    const baseBarClasses = isFromMe
+        ? 'bg-white/25'
+        : 'bg-slate-300 dark:bg-white/15';
+    const playedBarClasses = isFromMe ? 'bg-white' : 'bg-blue-600 dark:bg-blue-400';
+    const dividerClasses = isFromMe ? 'border-white/10' : 'border-slate-200/80 dark:border-white/10';
 
     return (
-        <div className={cn('flex w-[280px] max-w-full min-w-0 flex-col gap-2', containerClasses)}>
-            <div className="flex items-center gap-3">
-                <audio ref={audioRef} src={src} preload="metadata" />
+        <div className={cn(
+            'w-[min(100%,360px)] max-w-full min-w-0 overflow-hidden rounded-2xl border shadow-sm',
+            shellClasses,
+        )}>
+            <audio ref={audioRef} src={src} preload="metadata" aria-label="Mensagem de voz" />
 
+            <div className="flex items-center gap-3 p-3">
                 <button
+                    type="button"
                     onClick={handlePlayPause}
-                    className={cn("flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-all duration-200", playButtonClasses)}
+                    className={cn(
+                        'flex h-11 w-11 shrink-0 items-center justify-center rounded-full shadow-sm transition-transform hover:scale-[1.03] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2',
+                        isFromMe
+                            ? 'bg-white text-blue-700 focus-visible:ring-offset-blue-600'
+                            : 'bg-blue-600 text-white focus-visible:ring-offset-slate-50 dark:focus-visible:ring-offset-[#111318]',
+                    )}
+                    aria-label={isPlaying ? 'Pausar áudio' : 'Reproduzir áudio'}
                 >
-                    {isPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current pl-0.5" />}
+                    {isPlaying
+                        ? <Pause className="h-4 w-4 fill-current" />
+                        : <Play className="ml-0.5 h-4 w-4 fill-current" />}
                 </button>
 
-                <div className="flex min-w-0 flex-grow flex-col justify-center gap-1">
-                    <div
-                        ref={progressRef}
-                        onClick={handleSeek}
-                        className="relative h-8 w-full cursor-pointer group"
-                    >
-                        <div className="absolute inset-0 flex items-center justify-between gap-[2px] px-1">
-                            {simulatedWaveform.map((barHeight, index) => {
-                                const barPercent = (index / simulatedWaveform.length) * 100;
-                                const isPlayed = barPercent <= progressPercentage;
-                                return (
-                                    <div
-                                        key={index}
-                                        className={cn(
-                                            "w-1.5 rounded-full transition-colors duration-150",
-                                            isPlayed ? waveformProgressColor : waveformBaseColor
-                                        )}
-                                        style={{
-                                            height: `${Math.max(20, barHeight * 100)}%`,
-                                            opacity: isPlayed ? 1 : 0.6
-                                        }}
-                                    />
-                                );
-                            })}
-                        </div>
+                <div className="min-w-0 flex-1">
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-[11px] font-semibold tracking-[0.01em]">
+                            <AudioLines className="h-3.5 w-3.5 shrink-0 opacity-75" />
+                            Mensagem de voz
+                        </span>
+                        <span className={cn('shrink-0 text-[10px] font-medium tabular-nums', secondaryTextClasses)}>
+                            {duration > 0 ? formatTime(duration) : '—:—'}
+                        </span>
                     </div>
 
-                    <div className={cn("flex justify-between text-[10px] font-medium px-1", timeColor)}>
+                    <div
+                        ref={progressRef}
+                        role="slider"
+                        tabIndex={0}
+                        aria-label="Posição do áudio"
+                        aria-valuemin={0}
+                        aria-valuemax={duration}
+                        aria-valuenow={Math.min(currentTime, duration)}
+                        aria-valuetext={`${formatTime(currentTime)} de ${formatTime(duration)}`}
+                        onClick={handleSeek}
+                        onKeyDown={handleSeekKeyDown}
+                        className="group relative flex h-8 cursor-pointer items-center gap-[3px] rounded-md px-0.5 outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                        {waveformBars.map((barHeight, index) => {
+                            const barPosition = (index / waveformBars.length) * 100;
+                            const isPlayed = barPosition <= progressPercentage;
+                            return (
+                                <span
+                                    key={`${src}-bar-${index}`}
+                                    className={cn(
+                                        'w-1 flex-1 rounded-full transition-[height,background-color,opacity] duration-150',
+                                        isPlayed ? playedBarClasses : baseBarClasses,
+                                    )}
+                                    style={{
+                                        height: `${Math.max(22, barHeight * 100)}%`,
+                                        opacity: isPlayed ? 1 : 0.78,
+                                    }}
+                                />
+                            );
+                        })}
+                        <span
+                            className={cn(
+                                'pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-sm transition-[left] duration-100',
+                                isFromMe ? 'border-blue-600 bg-white' : 'border-white bg-blue-600 dark:border-[#111318] dark:bg-blue-400',
+                            )}
+                            style={{ left: `${progressPercentage}%` }}
+                        />
+                    </div>
+
+                    <div className={cn('mt-0.5 flex justify-between text-[10px] font-medium tabular-nums', secondaryTextClasses)}>
                         <span>{formatTime(currentTime)}</span>
-                        <span>{formatTime(duration)}</span>
+                        <span>{duration > 0 ? formatTime(duration) : 'Carregando'}</span>
                     </div>
                 </div>
 
                 <button
+                    type="button"
                     onClick={togglePlaybackRate}
-                    className={cn("h-7 px-2 rounded-full text-[10px] font-bold transition-colors flex-shrink-0", speedButtonColor)}
+                    className={cn(
+                        'h-7 min-w-[38px] shrink-0 rounded-full border px-2 text-[10px] font-bold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                        isFromMe
+                            ? 'border-white/15 bg-white/10 text-white hover:bg-white/20'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200 dark:hover:bg-white/15',
+                    )}
+                    aria-label={`Velocidade ${playbackRate}x. Alterar velocidade`}
                 >
                     {playbackRate}x
                 </button>
             </div>
 
-            <div className="mt-1">
-                {transcription ? (
-                    <p className="text-xs italic text-foreground p-2 rounded-md bg-secondary/50 border border-white/10">{transcription}</p>
-                ) : isTranscribing ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground p-2 rounded-md bg-secondary/50">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Transcrevendo áudio...
-                    </div>
-                ) : (
-                    !isFromMe && (
-                        <Button variant="outline" size="sm" onClick={handleTranscribe} className="h-6 text-[10px] px-2 text-black bg-white hover:bg-white/90 border-none shadow-sm">
-                            <Languages className="mr-1.5 h-3 w-3" />
-                            Transcrever
-                        </Button>
-                    )
-                )}
-            </div>
+            {!isFromMe && (
+                <div className={cn('border-t px-3 py-2.5', dividerClasses)}>
+                    {transcription ? (
+                        <div className="space-y-1.5">
+                            <div className={cn('flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em]', secondaryTextClasses)}>
+                                <Languages className="h-3 w-3" />
+                                Transcrição
+                            </div>
+                            <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-current opacity-90 [overflow-wrap:anywhere]">
+                                {transcription}
+                            </p>
+                        </div>
+                    ) : isTranscribing ? (
+                        <div className="flex items-center gap-2.5" role="status" aria-live="polite">
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-300">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-xs font-semibold">Transcrevendo áudio</p>
+                                <p className={cn('text-[10px]', secondaryTextClasses)}>Você pode iniciar outras transcrições.</p>
+                            </div>
+                        </div>
+                    ) : transcriptionError ? (
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-2 text-red-600 dark:text-red-300">
+                                <CircleAlert className="h-4 w-4 shrink-0" />
+                                <p className="truncate text-[11px]" title={transcriptionError}>{transcriptionError}</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleTranscribe();
+                                }}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 dark:border-white/10 dark:bg-white/10 dark:text-zinc-100 dark:hover:bg-white/15"
+                            >
+                                <RotateCcw className="h-3 w-3" />
+                                Tentar novamente
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200/70 text-slate-500 dark:bg-white/10 dark:text-zinc-400">
+                                    <Languages className="h-3.5 w-3.5" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-xs font-semibold">Transcrição disponível</p>
+                                    <p className={cn('text-[10px]', secondaryTextClasses)}>Converta o áudio em texto.</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleTranscribe();
+                                }}
+                                disabled={isTranscribing}
+                                className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1.5 text-[10px] font-bold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-wait disabled:opacity-60"
+                            >
+                                <Languages className="h-3 w-3" />
+                                Transcrever
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

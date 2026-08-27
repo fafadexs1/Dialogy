@@ -8,10 +8,10 @@ if (!connectionString) {
   throw new Error('A variável de ambiente DATABASE_URL não está definida.');
 }
 
-// Este módulo é carregado por 5 processos distintos (app + 4 workers), cada um
-// com o seu próprio pool. O default do `pg` é 10 por processo, o que dá 50
-// conexões potenciais contra as ~41 livres do Postgres — daí o valor vir do
-// ambiente, orçado por serviço no docker-compose.
+// Este módulo é carregado por processos distintos (app e workers), cada um com
+// o seu próprio pool. O default do `pg` é 10 por processo e não cabe no orçamento
+// compartilhado do Postgres — daí o valor vir do ambiente, orçado por serviço
+// no docker-compose.
 function resolvePoolMax(): number {
   const parsed = Number.parseInt(process.env.DB_POOL_MAX ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;

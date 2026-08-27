@@ -5,6 +5,7 @@ import type { Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { enqueueAiAutopilotProcess, enqueueWebhookOutbound, shouldEnqueueJob } from '@/lib/queue';
 import { buildChatProtocol } from '@/lib/utils';
+import { dispatchNexusChatMessage } from '@/modules/nexus/services/chat-adapters';
 
 export type MetaChannelType = 'instagram' | 'messenger';
 
@@ -413,57 +414,31 @@ async function ensureConversation(
   if (existing.rows[0]) {
     const row = existing.rows[0];
 
-    // Se a conversa anterior foi encerrada, criamos um novo chat e
-    // reusamos o mesmo meta_conversation para que um novo atendimento seja aberto.
+    // Encerramento e terminal: novas mensagens continuam no chat encerrado.
+    // Um agente precisa reabrir explicitamente a conversa para que ela volte
+    // a aparecer na fila ou no Robô.
     if (row.chat_status === 'encerrados' || row.conversation_status === 'closed') {
-      const newChatId = randomUUID();
-      const protocol = buildChatProtocol(newChatId);
-      const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
-      const chatLimitStatus = await getMonthlyChatLimitStatus(row.workspace_id);
-      if (!chatLimitStatus.allowed) {
-        throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
-      }
-      const newChatInsert = await db.query(
-        `
-          INSERT INTO chats (id, workspace_id, contact_id, status, protocol)
-          VALUES ($1, $2, $3, 'gerais', $4)
-          RETURNING *
-        `,
-        [newChatId, channel.workspace_id, metaContact.contact_id, protocol]
-      );
-
-      const newChatRow = newChatInsert.rows[0];
-
-      await db.query(
-        `
-          UPDATE meta_conversations
-          SET chat_id = $1, status = 'open', updated_at = timezone('utc', now())
-          WHERE id = $2
-        `,
-        [newChatRow.id, row.conversation_id]
-      );
-
       const conversation: MetaConversationRecord = {
         id: row.conversation_id,
         channel_id: row.channel_id,
         meta_contact_id: row.meta_contact_id,
-        chat_id: newChatRow.id,
+        chat_id: row.chat_id,
         external_thread_id: row.external_thread_id,
         platform: row.conversation_platform,
       };
 
       const chat: ChatRow = {
-        id: newChatRow.id,
-        workspace_id: newChatRow.workspace_id,
-        status: newChatRow.status,
-        contact_id: newChatRow.contact_id,
-        agent_id: newChatRow.agent_id,
-        assigned_system_agent_id: newChatRow.assigned_system_agent_id,
-        is_autopilot_active: newChatRow.is_autopilot_active,
-        autopilot_config_id: newChatRow.autopilot_config_id,
-        copilot_mode: newChatRow.copilot_mode,
+        id: row.chat_id,
+        workspace_id: row.workspace_id,
+        status: row.chat_status,
+        contact_id: row.contact_id,
+        agent_id: row.agent_id,
+        assigned_system_agent_id: row.assigned_system_agent_id,
+        is_autopilot_active: row.is_autopilot_active,
+        autopilot_config_id: row.autopilot_config_id,
+        copilot_mode: row.copilot_mode,
         agent: undefined,
-        protocol: newChatRow.protocol,
+        protocol: row.chat_protocol || buildChatProtocol(row.chat_id),
       };
 
       return { chat, conversation };
@@ -584,6 +559,33 @@ export async function persistNormalizedMessage(params: {
     id: providedId,
   } = params;
 
+  if (direction === 'incoming' && chat.status === 'encerrados') {
+    const reopened = await db.query(
+      `UPDATE chats
+       SET status = 'gerais',
+           closed_at = NULL,
+           agent_id = NULL,
+           assigned_system_agent_id = NULL,
+           assigned_at = NULL,
+           is_autopilot_active = FALSE,
+           copilot_mode = 'off',
+           updated_at = clock_timestamp()
+       WHERE id = $1
+         AND status = 'encerrados'
+       RETURNING *`,
+      [chat.id]
+    );
+    if (reopened.rows[0]) {
+      Object.assign(chat, reopened.rows[0]);
+      await db.query(
+        `UPDATE meta_conversations
+         SET status = 'open', updated_at = timezone('utc', now())
+         WHERE chat_id = $1`,
+        [chat.id]
+      );
+    }
+  }
+
   const id = providedId || randomUUID();
 
   const result = await db.query(
@@ -688,7 +690,7 @@ export async function persistNormalizedMessage(params: {
     copilot_mode: chat.copilot_mode || undefined,
   };
 
-  if (direction === 'incoming') {
+  if (direction === 'incoming' && chat.status !== 'encerrados') {
     const instanceName = channel.name || platform;
     const webhookDispatch = shouldEnqueueJob('webhook_outbound')
       ? enqueueWebhookOutbound({
@@ -702,12 +704,26 @@ export async function persistNormalizedMessage(params: {
       console.error('[META_WEBHOOK_DISPATCH] Failed to dispatch incoming message', error);
     });
 
+    const nexus = await dispatchNexusChatMessage({
+      workspaceId: channel.workspace_id,
+      chatId: chat.id,
+      message: message.content?.trim() || '',
+      sourceMessageId: persistedMessage.id,
+      instanceName,
+      platform,
+      messageType: persistedMessage.type,
+    }).catch((error) => {
+      console.error('[META_NEXUS] Failed to process incoming message', error);
+      return { handled: false };
+    });
+
     // Covers both runtimes: an Intelligent Attendant answering on its own and the
     // copilot drafting a reply for the human who owns the conversation. The
     // orchestrator decides which one applies.
     const shouldProcessAi =
       Boolean(chat.is_autopilot_active) &&
-      Boolean(message.content?.trim());
+      Boolean(message.content?.trim()) &&
+      !nexus.handled;
 
     if (shouldProcessAi) {
       const autopilotProcess = shouldEnqueueJob('ai_autopilot_process')

@@ -8,11 +8,11 @@ import { putPrivateObject } from '@/lib/storage/private-s3';
  *
  * O bucket `temp-media` do Supabase existe so como ponte: o arquivo precisa
  * ficar publicamente acessivel para a Evolution conseguir busca-lo e entregar ao
- * WhatsApp. Um job apaga esse objeto 24h depois (RETRY_MEDIA_RETENTION_DAYS).
+ * WhatsApp. Um job apaga esse objeto 5 minutos depois.
  *
  * O problema era que a URL dessa ponte tambem virava o `metadata.mediaUrl` da
  * mensagem — ou seja, o registro permanente da conversa apontava para um arquivo
- * descartavel. Passadas 24h a midia sumia e o atendimento mostrava
+ * descartavel. Passado o prazo de retencao a midia sumia e o atendimento mostrava
  * "midia expirada".
  *
  * Aqui copiamos o arquivo para o mesmo storage permanente que a midia recebida

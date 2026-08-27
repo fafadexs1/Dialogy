@@ -11,6 +11,13 @@ import { sendAutomatedMessageAction } from './messages';
 import { logAction, withDebug } from '@/lib/observability/logger';
 import { buildChatProtocol, formatMessageDate } from '@/lib/utils';
 import { buildChatTeamLateralSql } from '@/lib/chat-team-resolution';
+import {
+    INBOX_CHAT_PAGE_SIZE,
+    type InboxListFilters,
+    type InboxPaginationPage,
+    type InboxStatusPagination,
+    type InboxTabCounts,
+} from '@/lib/inbox-pagination';
 import { randomUUID } from 'crypto';
 import { consumeRateLimit } from '@/lib/ratelimit';
 import { assignChatSchema, closeChatSchema, transferChatSchema } from '@/lib/validation/chat-schemas';
@@ -39,8 +46,15 @@ import {
     type TrustedActorContext,
     type TrustedUserContext,
 } from '@/lib/security/trusted-server-context';
+import { scheduleDialogyNexusInternalEvent } from '@/modules/nexus/services/dialogy-event-scheduler';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
+
+type NexusEventCausation = {
+    eventChain?: string[];
+    causedByExecutionId?: string;
+    causedByNodeId?: string;
+};
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -113,16 +127,34 @@ export const assignChatToSelfAction = withDebug(
 
             // Insert system message indicating attendance started
             const agentName = user.user_metadata?.full_name || user.email || 'Agente';
-            await db.query(
+            const assignmentMessage = await db.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, type, content, from_me, 
                     sender_user_id, created_at, is_read
-                ) VALUES ($1, $2, 'system', $3, true, $4, clock_timestamp(), true)`,
+                ) VALUES ($1, $2, 'system', $3, true, $4, clock_timestamp(), true)
+                RETURNING id, created_at`,
                 [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, currentAgentId]
             );
 
             await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'assign_chat');
             await broadcastHydratedChatUpdate(workspaceId, chatId);
+            if (assignmentMessage.rows[0]?.id) {
+                scheduleDialogyNexusInternalEvent({
+                    workspaceId,
+                    eventName: 'chat.assigned',
+                    eventId: String(assignmentMessage.rows[0].id),
+                    chatId,
+                    sessionId: chatId,
+                    conversationId: chatId,
+                    payload: {
+                        chatId,
+                        assignedAgentId: currentAgentId,
+                        assignedAgentName: agentName,
+                        assignedAt: assignmentMessage.rows[0].created_at,
+                        assignmentType: 'self',
+                    },
+                });
+            }
             console.log(`[ASSIGN_CHAT_SELF] Chat ${chatId} atribuído ao agente ${currentAgentId}.`);
 
             // Fetch updated chat with full details (tags, colors) to return to frontend
@@ -159,7 +191,7 @@ export const assignChatToSelfAction = withDebug(
 export const transferChatAction = withDebug(
     'transfer_chat',
     async function transferChatAction(
-        input: { chatId: string; teamId?: string; agentId?: string },
+        input: { chatId: string; teamId?: string; agentId?: string; nexusEventContext?: NexusEventCausation },
         trustedContext?: TrustedActorContext
     ): Promise<{
         success: boolean;
@@ -195,7 +227,7 @@ export const transferChatAction = withDebug(
         const currentAgentName = sessionToUse.user.name;
         const isSystemAgent = sessionToUse.isSystemAgent || false;
 
-        const { chatId, teamId, agentId } = input;
+        const { chatId, teamId, agentId, nexusEventContext } = input;
 
         if (!chatId || (!teamId && !agentId)) {
             return { success: false, error: "Parâmetros inválidos para transferência." };
@@ -420,9 +452,10 @@ export const transferChatAction = withDebug(
                 ? `Atendimento transferido por ${transferActorName} para ${transferTargetName}.`
                 : `Atendimento atribuído a ${transferTargetName} por ${transferActorName}.`;
 
-            await client.query(`
+            const transferMessage = await client.query(`
             INSERT INTO messages (workspace_id, chat_id, type, content, metadata, created_at)
             VALUES ($1, $2, 'system', $3, $4, clock_timestamp())
+            RETURNING id, created_at
         `, [
                 workspaceId,
                 chatId,
@@ -436,12 +469,43 @@ export const transferChatAction = withDebug(
                     from_agent_avatar_url: transferActorAvatarUrl,
                     to_agent_id: finalAgentId,
                     to_team_id: teamId,
-                    to_name: transferTargetName
+                    to_name: transferTargetName,
+                    nexus_event_chain: nexusEventContext?.eventChain,
+                    nexus_caused_by_execution_id: nexusEventContext?.causedByExecutionId,
+                    nexus_caused_by_node_id: nexusEventContext?.causedByNodeId,
                 }
             ]);
 
             await client.query('COMMIT');
             await broadcastHydratedChatUpdate(workspaceId, chatId);
+            if (transferMessage.rows[0]?.id) {
+                scheduleDialogyNexusInternalEvent({
+                    workspaceId,
+                    eventName: isFirstAssignment ? 'chat.assigned' : 'chat.transferred',
+                    eventId: String(transferMessage.rows[0].id),
+                    chatId,
+                    sessionId: chatId,
+                    conversationId: chatId,
+                    instanceName: lastInstanceName || undefined,
+                    eventChain: nexusEventContext?.eventChain,
+                    context: {
+                        causedByExecutionId: nexusEventContext?.causedByExecutionId,
+                        causedByNodeId: nexusEventContext?.causedByNodeId,
+                    },
+                    payload: {
+                        chatId,
+                        previousAgentId: current_chat_agent_id || null,
+                        previousSystemAgentId: current_system_agent_id || null,
+                        assignedAgentId: finalAgentId,
+                        assignedTeamId: teamId || null,
+                        assignedName: transferTargetName,
+                        actorId: currentAgentId,
+                        actorName: transferActorName,
+                        transferredAt: transferMessage.rows[0].created_at,
+                        firstAssignment: isFirstAssignment,
+                    },
+                });
+            }
             const updatedChat = await fetchHydratedChatForImmediateReturn(
                 workspaceId,
                 currentAgentId,
@@ -498,7 +562,7 @@ export const transferChatAction = withDebug(
 export const transferChatToIntelligentAgentAction = withDebug(
     'transfer_chat_to_intelligent_agent',
     async function transferChatToIntelligentAgentAction(
-        input: { chatId: string; systemAgentId: string },
+        input: { chatId: string; systemAgentId: string; nexusEventContext?: NexusEventCausation },
         trustedContext?: TrustedActorContext
     ): Promise<{ success: boolean; error?: string; chat?: Chat }> {
         const supabase = await createClient();
@@ -519,7 +583,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
             return { success: false, error: "Usuário não autenticado." };
         }
 
-        const { chatId, systemAgentId } = input;
+        const { chatId, systemAgentId, nexusEventContext } = input;
         if (!chatId || !systemAgentId) {
             return { success: false, error: "Chat e Atendente Inteligente são obrigatórios." };
         }
@@ -612,10 +676,11 @@ export const transferChatToIntelligentAgentAction = withDebug(
                 [systemAgentId, intelligentAgent.autopilot_config_id, chatId]
             );
 
-            await client.query(
+            const transferMessage = await client.query(
                 `INSERT INTO messages (
                     workspace_id, chat_id, type, content, from_me, is_read, sender_system_agent_id, metadata, created_at
-                 ) VALUES ($1, $2, 'system', $3, true, true, $4, $5, clock_timestamp())`,
+                 ) VALUES ($1, $2, 'system', $3, true, true, $4, $5, clock_timestamp())
+                 RETURNING id, created_at`,
                 [
                     workspaceId,
                     chatId,
@@ -627,12 +692,39 @@ export const transferChatToIntelligentAgentAction = withDebug(
                         from_actor_type: trustedCall && trustedContext.isSystemAgent ? 'system_agent' : 'user',
                         to_system_agent_id: systemAgentId,
                         autopilot_config_id: intelligentAgent.autopilot_config_id,
+                        nexus_event_chain: nexusEventContext?.eventChain,
+                        nexus_caused_by_execution_id: nexusEventContext?.causedByExecutionId,
+                        nexus_caused_by_node_id: nexusEventContext?.causedByNodeId,
                     },
                 ]
             );
 
             await client.query('COMMIT');
             await broadcastHydratedChatUpdate(workspaceId, chatId);
+            if (transferMessage.rows[0]?.id) {
+                scheduleDialogyNexusInternalEvent({
+                    workspaceId,
+                    eventName: 'chat.transferred',
+                    eventId: String(transferMessage.rows[0].id),
+                    chatId,
+                    sessionId: chatId,
+                    conversationId: chatId,
+                    eventChain: nexusEventContext?.eventChain,
+                    context: {
+                        causedByExecutionId: nexusEventContext?.causedByExecutionId,
+                        causedByNodeId: nexusEventContext?.causedByNodeId,
+                    },
+                    payload: {
+                        chatId,
+                        assignedSystemAgentId: systemAgentId,
+                        assignedSystemAgentName: intelligentAgent.name,
+                        autopilotConfigId: intelligentAgent.autopilot_config_id,
+                        actorId: sessionToUse.user.id,
+                        actorType: trustedCall && trustedContext.isSystemAgent ? 'system_agent' : 'user',
+                        transferredAt: transferMessage.rows[0].created_at,
+                    },
+                });
+            }
             const updatedChat = await fetchHydratedChatForImmediateReturn(
                 workspaceId,
                 sessionToUse.user.id,
@@ -707,25 +799,41 @@ export const closeChatAction = withDebug(
         reasonTagId: string | null,
         notes: string | null,
         sendCloseMessage: boolean = true,
-        additionalMetadata: Record<string, any> = {}
+        additionalMetadata: Record<string, any> = {},
+        trustedContext?: TrustedActorContext,
     ): Promise<{ success: boolean; error?: string }> {
-        const supabase = await createClient();
-        const { data: { user } } = await supabase.auth.getUser();
-
-        if (!user || !user.user_metadata.full_name) {
-            return { success: false, error: "Usuario nao autenticado." };
+        const trustedCall = isTrustedActorContext(trustedContext);
+        let currentAgentId = trustedCall ? trustedContext.user.id : '';
+        let currentAgentName = trustedCall ? trustedContext.user.name : '';
+        const isSystemAgent = trustedCall && trustedContext.isSystemAgent;
+        const nexusEventChain = Array.isArray(additionalMetadata.nexusEventChain)
+            ? additionalMetadata.nexusEventChain.map(String)
+            : undefined;
+        const nexusCausedByExecutionId = typeof additionalMetadata.nexusCausedByExecutionId === 'string'
+            ? additionalMetadata.nexusCausedByExecutionId
+            : undefined;
+        const nexusCausedByNodeId = typeof additionalMetadata.nexusCausedByNodeId === 'string'
+            ? additionalMetadata.nexusCausedByNodeId
+            : undefined;
+        if (!trustedCall) {
+            const supabase = await createClient();
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user || !user.user_metadata.full_name) {
+                return { success: false, error: "Usuario nao autenticado." };
+            }
+            currentAgentId = user.id;
+            currentAgentName = user.user_metadata.full_name;
         }
-
-        const currentAgentId = user.id;
-        const currentAgentName = user.user_metadata.full_name;
 
         if (!chatId) {
             return { success: false, error: "ID do chat e obrigatorio." };
         }
 
-        const chatAccess = await requireChatAccess(currentAgentId, chatId);
-        if (!chatAccess.ok) {
-            return { success: false, error: chatAccess.error };
+        if (!trustedCall) {
+            const chatAccess = await requireChatAccess(currentAgentId, chatId);
+            if (!chatAccess.ok) {
+                return { success: false, error: chatAccess.error };
+            }
         }
 
         const client = await db.connect();
@@ -754,6 +862,19 @@ export const closeChatAction = withDebug(
             }
             const { workspace_id, current_tag, current_color, last_instance_name } = chatRes.rows[0];
 
+            if (isSystemAgent) {
+                const actorAccess = await client.query(
+                    `SELECT 1 FROM system_agents
+                     WHERE id = $1 AND workspace_id = $2 AND is_active = TRUE
+                     LIMIT 1`,
+                    [currentAgentId, workspace_id],
+                );
+                if ((actorAccess.rowCount ?? 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: 'Agente do sistema não autorizado para este workspace.' };
+                }
+            }
+
             const { closeMessageTemplate } = await getWorkspaceTemplates(workspace_id);
             closeTemplate = closeMessageTemplate || undefined;
 
@@ -770,7 +891,7 @@ export const closeChatAction = withDebug(
                 tagInfo = tagRes.rows[0];
             }
 
-            await client.query(
+            const closeUpdate = await client.query(
                 `UPDATE chats
              SET 
                 status = 'encerrados',
@@ -779,8 +900,13 @@ export const closeChatAction = withDebug(
                 close_notes = $2,
                 tag = $3,
                 color = $4,
+                assigned_system_agent_id = NULL,
+                is_autopilot_active = FALSE,
+                copilot_mode = 'off',
+                assigned_at = NULL,
                 updated_at = clock_timestamp()
-             WHERE id = $5`,
+             WHERE id = $5
+             RETURNING closed_at`,
                 [
                     reasonTagId,
                     notes,
@@ -790,7 +916,8 @@ export const closeChatAction = withDebug(
                 ]
             );
 
-            // Marca a conversa Meta associada (se existir) como encerrada para que novas mensagens abram um novo chat.
+            // Mantém a conversa Meta associada em estado encerrado para que
+            // uma mensagem posterior não reabra o atendimento implicitamente.
             await client.query(
                 `UPDATE meta_conversations 
              SET status = 'closed', updated_at = timezone('utc', now()) 
@@ -798,11 +925,22 @@ export const closeChatAction = withDebug(
                 [chatId]
             );
 
+            // Cancela quaisquer execuções de fluxo Nexus/Autopilot que estejam aguardando nesta conversa
+            await client.query(
+                `UPDATE public.workflow_executions
+                 SET status = 'cancelled', updated_at = clock_timestamp()
+                 WHERE workspace_id = $1
+                   AND (conversation_id = $2 OR session_id = $2)
+                   AND status IN ('waiting', 'queued')`,
+                [workspace_id, chatId],
+            );
+
             const systemMessageContent = `Atendimento encerrado por ${currentAgentName}.`;
 
-            await client.query(`
+            const closeMessage = await client.query(`
             INSERT INTO messages (workspace_id, chat_id, type, content, metadata, created_at)
             VALUES ($1, $2, 'system', $3, $4, clock_timestamp())
+            RETURNING id, created_at
         `, [
                 workspace_id,
                 chatId,
@@ -818,6 +956,30 @@ export const closeChatAction = withDebug(
 
             await client.query('COMMIT');
             await broadcastHydratedChatUpdate(workspace_id, chatId);
+            if (closeMessage.rows[0]?.id) {
+                scheduleDialogyNexusInternalEvent({
+                    workspaceId: workspace_id,
+                    eventName: 'chat.closed',
+                    eventId: String(closeMessage.rows[0].id),
+                    chatId,
+                    sessionId: chatId,
+                    conversationId: chatId,
+                    instanceName: last_instance_name || undefined,
+                    eventChain: nexusEventChain,
+                    context: {
+                        causedByExecutionId: nexusCausedByExecutionId,
+                        causedByNodeId: nexusCausedByNodeId,
+                    },
+                    payload: {
+                        chatId,
+                        closedBy: currentAgentId,
+                        closedByName: currentAgentName,
+                        reasonTagId,
+                        notes,
+                        closedAt: closeUpdate.rows[0]?.closed_at || closeMessage.rows[0].created_at,
+                    },
+                });
+            }
 
             try {
                 const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [chatId]);
@@ -856,7 +1018,7 @@ export const closeChatAction = withDebug(
 
             if (closeTemplate && sendCloseMessage) {
                 try {
-                    await sendAutomatedMessageAction(chatId, closeTemplate, currentAgentId, false, last_instance_name || undefined, {
+                    await sendAutomatedMessageAction(chatId, closeTemplate, currentAgentId, isSystemAgent, last_instance_name || undefined, {
                         event: 'close_notice',
                         authored_by: currentAgentId,
                         template_applied: true,
@@ -1036,6 +1198,7 @@ export const toggleMultipleChatsAutopilotAction = withDebug(
                         autopilot_config_id = $2,
                         copilot_mode = $4
                     WHERE id = $3
+                      AND ($1 = FALSE OR status <> 'encerrados')
                 `, [isActive, agentId, chatId, copilotMode]);
             }));
 
@@ -1062,6 +1225,8 @@ export type InitialChatsPayload = {
     hasMoreHistory: boolean;
     hasMoreChats: boolean;
     timezone: string;
+    inboxCounts?: InboxTabCounts;
+    statusPagination?: InboxStatusPagination;
     nextCursor?: { lastActivityAt: string; id: string } | null;
     chatPagination?: {
         active: { hasMore: boolean; cursor: { lastActivityAt: string; id: string } | null };
@@ -1172,6 +1337,179 @@ type MessageRow = {
     team_color?: string | null;
 };
 
+function buildInboxListFilterClause({
+    filters,
+    params,
+    queryIndex,
+    chatAlias = 'c',
+}: {
+    filters?: InboxListFilters;
+    params: any[];
+    queryIndex: number;
+    chatAlias?: string;
+}): { clause: string; nextQueryIndex: number } {
+    if (!filters) return { clause: '', nextQueryIndex: queryIndex };
+
+    const clauses: string[] = [];
+    let nextQueryIndex = queryIndex;
+    const assignmentFilterClause = (clause: string) => `(
+        ${chatAlias}.status NOT IN ('atendimentos', 'encerrados')
+        OR (${clause})
+    )`;
+
+    if (filters.queueScope === 'robo') {
+        clauses.push(`NULLIF(BTRIM(${chatAlias}.tag), '') IS NULL`);
+    } else if (filters.queueScope === 'fila') {
+        clauses.push(`NULLIF(BTRIM(${chatAlias}.tag), '') IS NOT NULL`);
+    }
+
+    if (filters.responsibleId) {
+        params.push(filters.responsibleId);
+        // Responsável humano só restringe Atendendo/Encerrados. Robô e Fila
+        // são escopos compartilhados; aplicar agent_id neles zera a lista.
+        clauses.push(assignmentFilterClause(
+            `${chatAlias}.agent_id = $${nextQueryIndex}::uuid`
+        ));
+        nextQueryIndex++;
+    }
+
+    if (filters.teamIds?.length) {
+        params.push(filters.teamIds);
+        const teamIdsParameter = `$${nextQueryIndex}::uuid[]`;
+        clauses.push(assignmentFilterClause(`(
+            ${chatAlias}.team_id = ANY(${teamIdsParameter})
+            OR (
+                ${chatAlias}.team_id IS NULL
+                AND ${chatAlias}.agent_id IN (
+                    SELECT ranked_legacy_team.user_id
+                    FROM (
+                        SELECT
+                            tm.user_id,
+                            tm.team_id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY tm.user_id
+                                ORDER BY legacy_team.name ASC, legacy_team.id ASC
+                            ) AS team_rank
+                        FROM team_members tm
+                        JOIN teams legacy_team
+                          ON legacy_team.id = tm.team_id
+                         AND legacy_team.workspace_id = $1
+                    ) ranked_legacy_team
+                    WHERE ranked_legacy_team.team_rank = 1
+                      AND ranked_legacy_team.team_id = ANY(${teamIdsParameter})
+                )
+            )
+            OR (
+                ${chatAlias}.team_id IS NULL
+                AND (
+                    ${chatAlias}.agent_id IS NULL
+                    OR ${chatAlias}.agent_id NOT IN (
+                        SELECT tm.user_id
+                        FROM team_members tm
+                        JOIN teams legacy_team
+                          ON legacy_team.id = tm.team_id
+                         AND legacy_team.workspace_id = $1
+                    )
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM teams filter_team
+                    JOIN tags filter_tag
+                      ON filter_tag.id = filter_team.tag_id
+                     AND filter_tag.workspace_id = filter_team.workspace_id
+                    WHERE filter_team.workspace_id = ${chatAlias}.workspace_id
+                      AND filter_team.id = ANY(${teamIdsParameter})
+                      AND filter_tag.label = ${chatAlias}.tag
+                )
+            )
+        )`));
+        nextQueryIndex++;
+    }
+
+    if (filters.onlyUnread) {
+        clauses.push(assignmentFilterClause(`EXISTS (
+            SELECT 1
+            FROM messages unread_message
+            WHERE unread_message.chat_id = ${chatAlias}.id
+              AND unread_message.from_me = false
+              AND COALESCE(unread_message.is_read, false) = false
+        )`));
+    }
+
+    if (filters.unassignedOnly) {
+        clauses.push(assignmentFilterClause(
+            `${chatAlias}.agent_id IS NULL AND ${chatAlias}.assigned_system_agent_id IS NULL`
+        ));
+    }
+
+    if (!filters.includeMarketing) {
+        clauses.push(`(
+            ${chatAlias}.status <> 'gerais'
+            OR ${chatAlias}.agent_id IS NOT NULL
+            OR COALESCE((
+                SELECT NOT (
+                    COALESCE(latest_message.metadata->>'isMarketing', 'false') = 'true'
+                    OR latest_message.metadata->>'event' = 'marketing_auto_close'
+                )
+                FROM messages latest_message
+                WHERE latest_message.chat_id = ${chatAlias}.id
+                ORDER BY latest_message.created_at DESC, latest_message.id DESC
+                LIMIT 1
+            ), false)
+        )`);
+    }
+
+    return {
+        clause: clauses.length > 0 ? `AND ${clauses.map((clause) => `(${clause})`).join('\nAND ')}` : '',
+        nextQueryIndex,
+    };
+}
+
+async function fetchInboxTabCounts({
+    workspaceId,
+    userId,
+    ownership,
+    filters,
+}: {
+    workspaceId: string;
+    userId: string;
+    ownership: 'mine' | 'everyone';
+    filters?: InboxListFilters;
+}): Promise<InboxTabCounts> {
+    const params: any[] = [workspaceId, userId, ownership === 'everyone'];
+    const filterClause = buildInboxListFilterClause({
+        filters,
+        params,
+        queryIndex: 4,
+    });
+    const { rows } = await db.query<InboxTabCounts>(
+        `SELECT
+            COUNT(*) FILTER (
+                WHERE c.status = 'gerais'
+                  AND NULLIF(BTRIM(c.tag), '') IS NULL
+            )::int AS robo,
+            COUNT(*) FILTER (
+                WHERE c.status = 'gerais'
+                  AND NULLIF(BTRIM(c.tag), '') IS NOT NULL
+            )::int AS gerais,
+            COUNT(*) FILTER (
+                WHERE c.status = 'atendimentos'
+                  AND ($3::boolean OR c.agent_id = $2)
+            )::int AS atendimentos,
+            COUNT(*) FILTER (
+                WHERE c.status = 'encerrados'
+                  AND ($3::boolean OR c.agent_id = $2)
+            )::int AS encerrados
+         FROM chats c
+         WHERE c.workspace_id = $1
+           AND c.status IN ('gerais', 'atendimentos', 'encerrados')
+           ${filterClause.clause}`,
+        params
+    );
+
+    return rows[0] || { robo: 0, gerais: 0, atendimentos: 0, encerrados: 0 };
+}
+
 export const loadOlderChatsAction = withDebug(
     'load_older_chats',
     async function loadOlderChatsAction(
@@ -1179,8 +1517,15 @@ export const loadOlderChatsAction = withDebug(
         before: string,
         beforeId: string | null,
         statuses: Chat['status'][] = ['gerais', 'atendimentos'],
-        ownership: 'mine' | 'everyone' = 'mine'
-    ): Promise<{ success: boolean; chats?: Chat[]; error?: string }> {
+        ownership: 'mine' | 'everyone' = 'mine',
+        filters?: InboxListFilters,
+    ): Promise<{
+        success: boolean;
+        chats?: Chat[];
+        hasMoreChats?: boolean;
+        nextCursor?: { lastActivityAt: string; id: string } | null;
+        error?: string;
+    }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
 
@@ -1192,27 +1537,37 @@ export const loadOlderChatsAction = withDebug(
             const userId = user.id;
             const access = await requireWorkspaceAccess(userId, workspaceId);
             if (!access.ok) return { success: false, error: access.error };
-            const limit = 25;
+            const limit = INBOX_CHAT_PAGE_SIZE;
 
             const rows = await fetchChats({
                 workspaceId,
                 userId,
-                limit,
+                limit: limit + 1,
                 includeChatId: null,
                 before,
                 beforeId,
                 ownership,
-                statuses
+                statuses,
+                filters,
             });
 
             if (rows.length === 0) {
-                return { success: true, chats: [] };
+                return { success: true, chats: [], hasMoreChats: false, nextCursor: null };
             }
 
+            const pageRows = rows.slice(0, limit);
             const timezone = await getWorkspaceTimezone(workspaceId);
-            const { chats } = await hydrateChats(rows, timezone);
+            const { chats } = await hydrateChats(pageRows, timezone);
+            const cursorRow = pageRows.at(-1);
 
-            return { success: true, chats };
+            return {
+                success: true,
+                chats,
+                hasMoreChats: rows.length > limit,
+                nextCursor: cursorRow?.chat_activity_at
+                    ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                    : null,
+            };
 
         } catch (error) {
             console.error("Erro ao carregar chats antigos:", error);
@@ -1225,6 +1580,82 @@ export const loadOlderChatsAction = withDebug(
     }
 );
 
+export const getInboxChatsSnapshotAction = withDebug(
+    'get_inbox_chats_snapshot',
+    async function getInboxChatsSnapshotAction({
+        workspaceId,
+        status,
+        ownership = 'mine',
+        filters,
+    }: {
+        workspaceId: string;
+        status: Chat['status'];
+        ownership?: 'mine' | 'everyone';
+        filters?: InboxListFilters;
+    }): Promise<{
+        success: boolean;
+        chats: Chat[];
+        counts?: InboxTabCounts;
+        pagination?: InboxPaginationPage;
+        error?: string;
+    }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { success: false, chats: [], error: 'Usuário não autenticado.' };
+        }
+
+        try {
+            const access = await requireWorkspaceAccess(user.id, workspaceId);
+            if (!access.ok) return { success: false, chats: [], error: access.error };
+
+            const limit = INBOX_CHAT_PAGE_SIZE;
+            const countFilters = filters
+                ? { ...filters, queueScope: undefined }
+                : undefined;
+            const [rows, timezone, counts] = await Promise.all([
+                fetchChats({
+                    workspaceId,
+                    userId: user.id,
+                    limit: limit + 1,
+                    includeChatId: null,
+                    ownership,
+                    statuses: [status],
+                    filters,
+                }),
+                getWorkspaceTimezone(workspaceId),
+                fetchInboxTabCounts({ workspaceId, userId: user.id, ownership, filters: countFilters }),
+            ]);
+            const pageRows = rows.slice(0, limit);
+            const { chats } = await hydrateChats(pageRows, timezone);
+            const cursorRow = pageRows.at(-1);
+
+            return {
+                success: true,
+                chats,
+                counts,
+                pagination: {
+                    hasMore: rows.length > limit,
+                    cursor: cursorRow?.chat_activity_at
+                        ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                        : null,
+                },
+            };
+        } catch (error) {
+            console.error('[GET_INBOX_CHATS_SNAPSHOT] Error:', error);
+            return {
+                success: false,
+                chats: [],
+                error: 'Falha ao aplicar os filtros da Inbox.',
+            };
+        }
+    },
+    {
+        contextResolver: (input) => ({ payload: input }),
+    }
+);
+
 async function fetchChats({
     workspaceId,
     userId,
@@ -1234,6 +1665,7 @@ async function fetchChats({
     beforeId,
     ownership = 'mine',
     statuses,
+    filters,
 }: {
     workspaceId: string;
     userId: string;
@@ -1243,6 +1675,7 @@ async function fetchChats({
     beforeId?: string | null;
     ownership?: 'mine' | 'everyone';
     statuses?: Chat['status'][];
+    filters?: InboxListFilters;
 }): Promise<ChatRow[]> {
     const startTime = performance.now();
     const params: any[] = [workspaceId, limit];
@@ -1262,7 +1695,9 @@ async function fetchChats({
     let ownershipClause = '';
     if (ownership === 'mine') {
         params.push(userId);
-        ownershipClause = `AND (c.status = 'gerais' OR c.agent_id = $${queryIndex})`;
+        // "Atribuídos a mim" requires explicit assignment only in
+        // Atendendo/Encerrados. Robô/Fila remain shared.
+        ownershipClause = `AND (c.status NOT IN ('atendimentos', 'encerrados') OR c.agent_id = $${queryIndex})`;
         queryIndex++;
     }
 
@@ -1273,6 +1708,13 @@ async function fetchChats({
         params.push(...statuses);
         queryIndex += statuses.length;
     }
+
+    const inboxFilterClause = buildInboxListFilterClause({
+        filters,
+        params,
+        queryIndex,
+    });
+    queryIndex = inboxFilterClause.nextQueryIndex;
 
     let includeChatClause = '';
     if (includeChatId) {
@@ -1294,6 +1736,7 @@ async function fetchChats({
             WHERE c.workspace_id = $1
               ${statusClause}
               ${ownershipClause}
+              ${inboxFilterClause.clause}
               ${beforeClause}
             ORDER BY c.last_activity_at DESC, c.id DESC
             LIMIT $2
@@ -1605,7 +2048,7 @@ export const getInitialChatsData = withDebug(
                 [workspaceId]
             ).catch(err => console.error('[REPAIR_CHATS] Failed:', err));
 
-            const activeChatsLimit = 50;
+            const activeChatsLimit = INBOX_CHAT_PAGE_SIZE;
             const timezonePromise = workspaceTimezone
                 ? Promise.resolve(workspaceTimezone)
                 : getWorkspaceTimezone(workspaceId);
@@ -1621,14 +2064,24 @@ export const getInitialChatsData = withDebug(
                 10000,
                 'Timeout ao buscar chats ativos'
             );
+            const inboxCountsPromise = withTimeout(
+                fetchInboxTabCounts({
+                    workspaceId,
+                    userId,
+                    ownership,
+                    filters: { includeMarketing: true },
+                }),
+                10000,
+                'Timeout ao contar chats da Inbox'
+            );
 
-            const closedChatsLimit = 10;
+            const closedChatsLimit = INBOX_CHAT_PAGE_SIZE;
             let closedChatsDegraded = false;
-            const closedChatRowsPromise = withTimeout(
+            const closedChatRowsWithLookaheadPromise = withTimeout(
                 fetchChats({
                     workspaceId,
                     userId,
-                    limit: closedChatsLimit,
+                    limit: closedChatsLimit + 1,
                     includeChatId: null,
                     ownership,
                     statuses: ['encerrados']
@@ -1641,11 +2094,15 @@ export const getInitialChatsData = withDebug(
                 return [] as ChatRow[];
             });
 
-            const [timezone, activeChatRows, closedChatRows] = await Promise.all([
+            const [timezone, activeChatRows, closedChatRowsWithLookahead, inboxCounts] = await Promise.all([
                 timezonePromise,
                 activeChatRowsPromise,
-                closedChatRowsPromise,
+                closedChatRowsWithLookaheadPromise,
+                inboxCountsPromise,
             ]);
+            const closedChatRows = closedChatRowsWithLookahead.slice(0, closedChatsLimit);
+            const hasMoreClosedChats = closedChatsDegraded
+                || closedChatRowsWithLookahead.length > closedChatsLimit;
 
             const allChatRows = [...activeChatRows, ...closedChatRows];
 
@@ -1659,7 +2116,7 @@ export const getInitialChatsData = withDebug(
 
             const { chats, lastSyncChats } = await hydrateChats(uniqueChatRows, timezone);
 
-            const hasMoreChats = closedChatsDegraded || activeChatRows.length === activeChatsLimit || closedChatRows.length === closedChatsLimit;
+            const hasMoreChats = hasMoreClosedChats || activeChatRows.length === activeChatsLimit;
             const cursorRow = activeChatRows.at(-1);
             const closedCursorRow = closedChatRows.at(-1);
 
@@ -1680,6 +2137,7 @@ export const getInitialChatsData = withDebug(
                 hasMoreHistory,
                 hasMoreChats,
                 timezone,
+                inboxCounts,
                 nextCursor: cursorRow?.chat_activity_at
                     ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
                     : null,
@@ -1691,7 +2149,33 @@ export const getInitialChatsData = withDebug(
                             : null,
                     },
                     closed: {
-                        hasMore: closedChatsDegraded || closedChatRows.length === closedChatsLimit,
+                        hasMore: hasMoreClosedChats,
+                        cursor: closedCursorRow?.chat_activity_at
+                            ? { lastActivityAt: closedCursorRow.chat_activity_at, id: closedCursorRow.id }
+                            : null,
+                    },
+                },
+                statusPagination: {
+                    robo: {
+                        hasMore: activeChatRows.length === activeChatsLimit,
+                        cursor: cursorRow?.chat_activity_at
+                            ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                            : null,
+                    },
+                    gerais: {
+                        hasMore: activeChatRows.length === activeChatsLimit,
+                        cursor: cursorRow?.chat_activity_at
+                            ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                            : null,
+                    },
+                    atendimentos: {
+                        hasMore: activeChatRows.length === activeChatsLimit,
+                        cursor: cursorRow?.chat_activity_at
+                            ? { lastActivityAt: cursorRow.chat_activity_at, id: cursorRow.id }
+                            : null,
+                    },
+                    encerrados: {
+                        hasMore: hasMoreClosedChats,
                         cursor: closedCursorRow?.chat_activity_at
                             ? { lastActivityAt: closedCursorRow.chat_activity_at, id: closedCursorRow.id }
                             : null,
@@ -2733,7 +3217,9 @@ async function fetchChatsDelta({
     let ownershipCondition = '';
     if (ownership === 'mine') {
         params.push(userId);
-        ownershipCondition = `(c.status = 'gerais' OR c.agent_id = $${queryIndex})`;
+        // Robô/Fila remain shared; ownership filters only human attendance
+        // and closed-conversation updates.
+        ownershipCondition = `(c.status NOT IN ('atendimentos', 'encerrados') OR c.agent_id = $${queryIndex})`;
         queryIndex++;
     }
 
@@ -2845,6 +3331,7 @@ async function fetchChatsDelta({
             COALESCE(uc.unread_count, 0) AS unread_count,
             t.name AS team_name,
             t.id AS team_id,
+            t.color AS team_color,
             channel_instance.type AS instance_type,
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
@@ -3578,13 +4065,18 @@ export const toggleChatAutopilot = withDebug(
             if (!chatAccess.ok) return { success: false, error: chatAccess.error };
 
             const copilotMode = isActive ? 'suggest' : 'off';
-            await db.query(`
+            const updateResult = await db.query(`
                 UPDATE chats 
                 SET is_autopilot_active = $1, 
                     autopilot_config_id = $2,
                     copilot_mode = $4
                 WHERE id = $3
+                  AND ($1 = FALSE OR status <> 'encerrados')
             `, [isActive, agentId, chatId, copilotMode]);
+
+            if (isActive && updateResult.rowCount === 0) {
+                return { success: false, error: 'Nao e possivel ativar o Robo em uma conversa encerrada.' };
+            }
 
             revalidatePath('/', 'layout');
             return { success: true };
@@ -3613,11 +4105,16 @@ export const updateChatCopilotModeAction = withDebug(
             const chatAccess = await requireChatAccess(user.id, chatId);
             if (!chatAccess.ok) return { success: false, error: chatAccess.error };
 
-            await db.query(`
+            const updateResult = await db.query(`
                 UPDATE chats 
                 SET copilot_mode = $1
                 WHERE id = $2
+                  AND ($1 = 'off' OR status <> 'encerrados')
             `, [mode, chatId]);
+
+            if (mode !== 'off' && updateResult.rowCount === 0) {
+                return { success: false, error: 'Nao e possivel ativar o Copiloto em uma conversa encerrada.' };
+            }
 
             logToDebugFile(`[updateChatCopilotModeAction] Success update for chatId=${chatId}`);
 

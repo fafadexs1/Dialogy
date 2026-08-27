@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { randomUUID } from 'crypto';
 import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
+import { buildUniversalAgentRuntimeContext } from '@/services/agent-runtime/prompt-context';
 import { generateProcedureRuntimeOutput } from '@/ai/flows/procedure-runtime';
 import { logToDebugFile } from '@/lib/debug-file';
 import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact-identity';
@@ -220,13 +221,14 @@ import {
     shouldBypassKnowledgeForOperationalTurn,
     shouldPrioritizeAutopilotTurnPlan,
 } from '@/services/autopilot/turn-plan';
+import { listPublishedProcedureGraphs } from '@/services/procedures/repository';
 
-function compileRuntimeProcedures(input: {
+async function compileRuntimeProcedures(input: {
     config: AutopilotConfig;
     documents: KnowledgeBaseDocument[];
     tools: AgentToolCatalogItem[];
     enabledToolNames: string[];
-}): ProcedureGraph[] {
+}): Promise<ProcedureGraph[]> {
     const documentProcedures = compileAllProcedures({
         documents: input.documents,
         tools: input.tools,
@@ -238,9 +240,17 @@ function compileRuntimeProcedures(input: {
         name: `Fluxo visual: ${input.config.name}`,
     });
 
-    return flowProcedure.success && flowProcedure.graph
-        ? [...documentProcedures, flowProcedure.graph]
-        : documentProcedures;
+    const studioProcedures = await listPublishedProcedureGraphs({
+        workspaceId: input.config.workspace_id,
+        configId: input.config.id,
+    }).catch((error) => {
+        console.error('[PROCEDURE_STUDIO] Failed to load published procedures:', error);
+        return [];
+    });
+    const combined = flowProcedure.success && flowProcedure.graph
+        ? [...studioProcedures, ...documentProcedures, flowProcedure.graph]
+        : [...studioProcedures, ...documentProcedures];
+    return Array.from(new Map(combined.map((procedure) => [procedure.id, procedure])).values());
 }
 
 async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames: string[]): Promise<AgentToolCatalogItem[]> {
@@ -290,6 +300,23 @@ async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames
         });
 
     return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
+}
+
+async function recordGeneratedAgentTaskPlan(input: {
+    run: OrchestratorRunHandle;
+    taskPlan: Record<string, unknown> | null | undefined;
+    source: 'initial_response' | 'tool_continuation' | 'tool_final_response';
+}) {
+    if (!input.taskPlan) return;
+    await recordOrchestratorEvent({
+        run: input.run,
+        kind: 'agent_task_plan',
+        status: 'success',
+        payload: {
+            ...input.taskPlan,
+            source: input.source,
+        },
+    });
 }
 
 function resolveEnabledToolNames(config: AutopilotConfig) {
@@ -804,6 +831,7 @@ async function runRequestedAgentTools(input: {
             systemAgentName: input.systemAgentName,
             autopilotConfig: input.autopilotConfig,
             turnPolicy: input.turnPolicy,
+            slotExtraction: input.slotExtraction ?? null,
             customerMessage: input.customerMessage,
             confirmedActionFingerprint: input.confirmedActionFingerprint ?? null,
             orchestratorRunId: input.orchestratorRunId ?? null,
@@ -969,8 +997,9 @@ export async function processAutopilotForChat(
     instanceName: string,
     sourceMessageId?: string | null
 ) {
-    const resolvedChatId =
-        (await resolveCanonicalWhatsappChatIdByIdentity(db, {
+    const resolvedChatId = chat.status === 'encerrados'
+        ? chat.id
+        : (await resolveCanonicalWhatsappChatIdByIdentity(db, {
             workspaceId,
             phoneOrJid: chat.contact?.phone_number_jid,
             currentChatId: chat.id,
@@ -1014,12 +1043,12 @@ export async function processAutopilotForChat(
     }
 
     console.log(`[AUTOPILOT_SERVICE] Verificando autopilot para chat ${chat.id}`);
-    await broadcastAiProcessing(chat.id, 'ai_processing_start');
 
     try {
     const chatConfigRes = await db.query(
         `SELECT
             c.workspace_id,
+            c.status,
             c.copilot_mode,
             c.is_autopilot_active,
             c.assigned_system_agent_id,
@@ -1046,6 +1075,11 @@ export async function processAutopilotForChat(
         console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} nao encontrado no workspace ${workspaceId}. Ignorando.`);
         return;
     }
+    if (chatConfig.status === 'encerrados') {
+        console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} esta encerrado. Ignorando processamento pendente.`);
+        return;
+    }
+    await broadcastAiProcessing(chat.id, 'ai_processing_start');
     const rawIsActive = chatConfig?.is_autopilot_active ?? chat.is_autopilot_active;
     const currentIsActive = rawIsActive === true;
     let assignedSystemAgentId = chatConfig?.assigned_system_agent_id || null;
@@ -1165,6 +1199,7 @@ export async function processAutopilotForChat(
             source: 'autopilot-service',
             instanceName,
             copilotMode: currentCopilotMode,
+            domainPackId: autopilotConfig.agent_domain_pack_id || null,
         },
     });
     const orchestratorTimings: Record<string, number> = {};
@@ -1777,6 +1812,12 @@ export async function processAutopilotForChat(
         }
         : compiledTurnPolicy;
     enabledToolNames = turnPolicy.allowedToolNames;
+    const agentRuntimeContext = buildUniversalAgentRuntimeContext({
+        domainPack: orchestratorRun.domainPack,
+        task: orchestratorRun.taskExecution,
+        fallbackAgentName: assignedSystemAgentName,
+        enabledToolNames,
+    });
     const flowCompletionPlan = resolveFlowCompletionPlan(autopilotConfig, turnPolicy.activeNodeId);
     const allowedDocumentIds = resolveAllowedKnowledgeDocumentIds({
         config: autopilotConfig,
@@ -2991,6 +3032,7 @@ export async function processAutopilotForChat(
                     error: retrieval.error ?? null,
                     retrieved: retrieval.retrieved,
                     selected: retrieval.selected,
+                    provenance: retrieval.provenance,
                     internalKnowledgeSources: retrieval.diagnostics?.internalKnowledgeSources || [],
                     correctiveRetrieval: retrieval.diagnostics?.correctiveRetrieval || null,
                     discarded: retrieval.discarded.slice(0, 8),
@@ -3569,8 +3611,8 @@ export async function processAutopilotForChat(
         `flowSubAgent=${activeFlowIntentScope?.title || 'main_agent'}`,
         intentResolution.intent === 'troubleshooting' && turnPlan.customerNeed === 'none'
             ? [
-                'troubleshootingOpeningPolicy=acolha o relato e faca primeiro uma pergunta tecnica discriminante sobre alcance do problema, dispositivos, luzes do equipamento ou tipo de conexao.',
-                'Nao solicite CPF/CNPJ no primeiro relato generico e nao prometa consultar cadastro, status ou sistema sem uma action executavel no mesmo turno.',
+                'troubleshootingOpeningPolicy=acolha o relato e faca primeiro uma pergunta discriminante baseada no contexto ativo: alcance, sintoma observado, ultimo estado conhecido, momento de inicio ou tentativa ja realizada.',
+                'Nao solicite identificadores sensiveis no primeiro relato generico e nao prometa consultar cadastro, status ou sistema sem uma action executavel no mesmo turno.',
             ].join('\n')
             : '',
         flowReferencesForPrompt,
@@ -3692,7 +3734,7 @@ export async function processAutopilotForChat(
     }
 
     // Pre-load active procedure and compiled procedures early to be used by tool memory and lookup bypasses.
-    const compiledProcedures = compileRuntimeProcedures({
+    const compiledProcedures = await compileRuntimeProcedures({
         config: autopilotConfig,
         documents: scopedStaticKnowledgeDocuments,
         tools: runtimeToolCatalog,
@@ -5173,6 +5215,7 @@ export async function processAutopilotForChat(
                     strategy: retrieval.strategy,
                     knowledgeCoverage: retrieval.knowledgeCoverage,
                     selected: retrieval.selected,
+                    provenance: retrieval.provenance,
                     chunkCount: chunks.length,
                 },
             });
@@ -5190,12 +5233,6 @@ export async function processAutopilotForChat(
 
         if (activePEC) {
             // Resume the active procedure
-            const compiledProcedures = compileRuntimeProcedures({
-                config: autopilotConfig,
-                documents: scopedStaticKnowledgeDocuments,
-                tools: runtimeToolCatalog,
-                enabledToolNames,
-            });
             const graph = compiledProcedures.find((g) => g.id === activePEC.procedureId);
             if (graph) {
                 procedureRuntimeSource = 'active';
@@ -5216,13 +5253,6 @@ export async function processAutopilotForChat(
 
         if (!procedureResult) {
             // 2. Try to match a new procedure
-            const compiledProcedures = compileRuntimeProcedures({
-                config: autopilotConfig,
-                documents: scopedStaticKnowledgeDocuments,
-                tools: runtimeToolCatalog,
-                enabledToolNames,
-            });
-
             if (compiledProcedures.length > 0) {
                 const match = matchProcedure({
                     intent: intentResolution.intent,
@@ -5692,6 +5722,7 @@ export async function processAutopilotForChat(
                 : buildEnabledAgentToolsDescription(enabledToolNames, runtimeToolCatalog, turnPolicy.toolInstructionsByName),
             enabledAgentToolNames: isConversationalLlmTurn ? [] : enabledToolNames,
             knowledgeToolProcedures: isConversationalLlmTurn ? '' : knowledgeToolProcedures,
+            agentRuntimeContext,
             intentContext: isConversationalLlmTurn
                 ? `intent=${intentResolution.intent}; responda somente ao turno atual`
                 : intentContextForAI,
@@ -5710,6 +5741,11 @@ export async function processAutopilotForChat(
         );
         orchestratorTimings.llm_ms = llmStage.durationMs;
         const result = llmStage.value;
+        await recordGeneratedAgentTaskPlan({
+            run: orchestratorRun,
+            taskPlan: result?.taskPlan || null,
+            source: 'initial_response',
+        });
 
         if (result?.response) {
             let finalResponse = result.response;
@@ -6129,6 +6165,7 @@ export async function processAutopilotForChat(
                                     enabledAgentToolNames: enabledToolNames,
                                     allowNativeLmStudioToolCalls: false,
                                     knowledgeToolProcedures,
+                                    agentRuntimeContext,
                                     intentContext: intentContextForAI,
                                 }), orchestratorRun.budget.maxLlmMs, 'llm tool continuation'),
                                 {
@@ -6140,6 +6177,11 @@ export async function processAutopilotForChat(
                             orchestratorTimings.llm_tool_continuation_ms = continuationStage.durationMs;
 
                             const continuation = continuationStage.value;
+                            await recordGeneratedAgentTaskPlan({
+                                run: orchestratorRun,
+                                taskPlan: continuation?.taskPlan || null,
+                                source: 'tool_continuation',
+                            });
                             const continuationActions = filterAlreadyExecutedActions(
                                 normalizeAgentActions(continuation?.actions),
                                 toolResults
@@ -6250,6 +6292,7 @@ export async function processAutopilotForChat(
                                     enabledAgentToolNames: enabledToolNames,
                                     allowNativeLmStudioToolCalls: false,
                                     knowledgeToolProcedures,
+                                    agentRuntimeContext,
                                     intentContext: intentContextForAI,
                                 }), orchestratorRun.budget.maxLlmMs, 'llm tool final response'),
                                 {
@@ -6262,6 +6305,11 @@ export async function processAutopilotForChat(
                                 }
                             );
                             orchestratorTimings.llm_tool_final_response_ms = finalResponseStage.durationMs;
+                            await recordGeneratedAgentTaskPlan({
+                                run: orchestratorRun,
+                                taskPlan: finalResponseStage.value?.taskPlan || null,
+                                source: 'tool_final_response',
+                            });
                             if (finalResponseStage.value?.response) {
                                 postToolAiResponse = finalResponseStage.value.response;
                             }

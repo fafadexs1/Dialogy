@@ -109,6 +109,19 @@ export function getWorkspaceMessageDisposition(
 const hasOwn = (record: RealtimeRow, key: string) =>
   Object.prototype.hasOwnProperty.call(record, key);
 
+export function hasCompleteRealtimeChatPresentation(record: RealtimeRow): boolean {
+  if (!hasOwn(record, 'team_name') || !hasOwn(record, 'team_color')) {
+    return false;
+  }
+
+  const teamName = typeof record.team_name === 'string' ? record.team_name.trim() : '';
+  const teamColor = typeof record.team_color === 'string' ? record.team_color.trim() : '';
+
+  // A named team without a color is not hydrated enough for the inbox chip.
+  // A chat with no team at all is complete even though both values are null.
+  return !teamName || Boolean(teamColor);
+}
+
 export function reconcileRealtimeChatAssignment(
   existingChat: Chat | undefined,
   record: RealtimeRow,

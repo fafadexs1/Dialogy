@@ -63,6 +63,7 @@ type StepResult = {
   output?: unknown;
   replaceResponse?: boolean;
   advanceToNextOnPause?: boolean;
+  nextStepId?: string | null;
 };
 
 function interpolate(
@@ -798,7 +799,64 @@ function executeToolCallStep(
 
   const existingResults = getToolResultsForStep(context, step.id);
   if (existingResults.length > 0) {
-    return { status: 'continue', output: existingResults };
+    const successful = existingResults.some((result) => result.status === 'success');
+    if (successful) {
+      return {
+        status: 'continue',
+        output: existingResults,
+        nextStepId: step.successStepId || step.nextStepId || null,
+      };
+    }
+    if (step.errorStepId) {
+      return {
+        status: 'continue',
+        output: {
+          toolFailed: true,
+          routedTo: step.errorStepId,
+          results: existingResults,
+        },
+        nextStepId: step.errorStepId,
+      };
+    }
+    return {
+      status: 'error',
+      error: existingResults.map((result) => result.error).filter(Boolean).join(' ')
+        || `A ferramenta ${step.toolName} falhou.`,
+      output: existingResults,
+    };
+  }
+
+  if (step.requiresConfirmation && step.toolName !== 'transfer_chat') {
+    const confirmationKey = `confirmation_${step.id}`;
+    const alreadyConfirmed = context.decisions[confirmationKey] === 'confirmed';
+    const confirmationWasRequested = context.stepHistory.some((record) => (
+      record.stepId === step.id
+      && record.status === 'waiting'
+      && Boolean((record.output as Record<string, unknown> | null)?.confirmationRequired)
+    ));
+    if (!alreadyConfirmed && confirmationWasRequested && isExplicitAffirmativeMessage(customerMessage)) {
+      context.decisions[confirmationKey] = 'confirmed';
+    } else if (!alreadyConfirmed && confirmationWasRequested && isExplicitTransferCancellation(customerMessage)) {
+      return {
+        status: 'complete',
+        response: 'Certo, a acao foi cancelada e nenhuma alteracao foi executada.',
+        output: {
+          confirmationRequired: true,
+          confirmationDeclined: true,
+          toolName: step.toolName,
+        },
+      };
+    } else if (!alreadyConfirmed) {
+      return {
+        status: 'pause',
+        response: step.confirmationPrompt?.trim()
+          || `Antes de executar ${step.label.toLowerCase()}, preciso da sua confirmacao explicita. Posso prosseguir?`,
+        output: {
+          confirmationRequired: true,
+          toolName: step.toolName,
+        },
+      };
+    }
   }
 
   if (
@@ -1410,7 +1468,9 @@ export async function advanceProcedure(input: {
         stepRecord.completedAt = new Date().toISOString();
         context.stepHistory.push(stepRecord);
 
-        const nextStep = findNextStep(graph, currentStep, context);
+        const nextStep = result.nextStepId
+          ? findStep(graph, result.nextStepId)
+          : findNextStep(graph, currentStep, context);
         if (nextStep) {
           context.currentStepId = nextStep.id;
           break;

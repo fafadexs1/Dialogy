@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   queries: [] as string[],
-  recentMessages: [] as Array<Record<string, unknown>>,
   released: false,
   broadcastHydratedChatUpdate: vi.fn(async () => undefined),
   enqueueAiCaseMemoryRefresh: vi.fn(async () => undefined),
@@ -38,9 +37,6 @@ vi.mock('@/lib/db', () => ({
         if (query.includes('created_at >')) {
           return { rowCount: 0, rows: [] };
         }
-        if (query.includes('SELECT from_me, sender_system_agent_id, content')) {
-          return { rowCount: mocks.recentMessages.length, rows: mocks.recentMessages };
-        }
         if (query.includes("SET status = 'gerais'")) {
           return { rowCount: 1, rows: [{ id: 'chat-1' }] };
         }
@@ -61,19 +57,12 @@ import { executeAutopilotInactivityClose } from '@/services/autopilot/runtime/in
 describe('autopilot inactivity timeout', () => {
   beforeEach(() => {
     mocks.queries = [];
-    mocks.recentMessages = [];
     mocks.released = false;
     mocks.broadcastHydratedChatUpdate.mockClear();
     mocks.enqueueAiCaseMemoryRefresh.mockClear();
   });
 
   it('returns the chat to the human queue when the AI is waiting for customer data', async () => {
-    mocks.recentMessages = [{
-      from_me: true,
-      sender_system_agent_id: 'system-agent-1',
-      content: 'Para continuar, me informe o endereco completo.',
-    }];
-
     await executeAutopilotInactivityClose({
       workspaceId: 'workspace-1',
       chatId: 'chat-1',
@@ -92,13 +81,7 @@ describe('autopilot inactivity timeout', () => {
     expect(mocks.released).toBe(true);
   });
 
-  it('closes only when the last AI message is clearly terminal', async () => {
-    mocks.recentMessages = [{
-      from_me: true,
-      sender_system_agent_id: 'system-agent-1',
-      content: 'Obrigado pelo contato. Vou encerrar o atendimento por aqui.',
-    }];
-
+  it('always returns the chat to the queue instead of closing it automatically', async () => {
     await executeAutopilotInactivityClose({
       workspaceId: 'workspace-1',
       chatId: 'chat-1',
@@ -110,9 +93,9 @@ describe('autopilot inactivity timeout', () => {
       orchestratorRunId: 'run-1',
     });
 
-    expect(mocks.queries.some((query) => query.includes("SET status = 'encerrados'"))).toBe(true);
-    expect(mocks.queries.some((query) => query.includes("SET status = 'gerais'"))).toBe(false);
-    expect(mocks.broadcastHydratedChatUpdate).not.toHaveBeenCalled();
+    expect(mocks.queries.some((query) => query.includes("SET status = 'encerrados'"))).toBe(false);
+    expect(mocks.queries.some((query) => query.includes("SET status = 'gerais'"))).toBe(true);
+    expect(mocks.broadcastHydratedChatUpdate).toHaveBeenCalledWith('workspace-1', 'chat-1');
     expect(mocks.released).toBe(true);
   });
 });

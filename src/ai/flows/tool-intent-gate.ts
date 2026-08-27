@@ -76,20 +76,20 @@ export async function classifyToolIntent(input: ToolIntentGateInput): Promise<To
     ? [
         'Regra para close_chat:',
         '- execute=false: cliente negou encerramento, por exemplo "nao encerra", "nao fecha o atendimento", "nao finaliza".',
-        '- execute=false: "fechar" significa fechar negocio, contratar, fechar plano, fechar pedido, decidir depois ou contexto comercial.',
+        '- execute=false: "fechar" se refere a concluir um negocio, pedido, recurso ou decisao, e nao a terminar a conversa atual.',
         '- execute=true, confidence=high: cliente pediu claramente para encerrar, finalizar, fechar, desligar ou parar a CONVERSA/CHAT/ATENDIMENTO atual.',
         '- execute=true, confidence=medium: mensagem curta e contextual indica que o cliente quer terminar o atendimento atual, mesmo com linguagem informal ou gíria.',
-        '- execute=false: cliente quer cancelar/encerrar contrato, plano, assinatura, serviço, internet, instalação ou produto. Isso é solicitação comercial/suporte, não fechamento do chat.',
+        '- execute=false: cliente quer cancelar ou encerrar algo administrado pelo negocio. Isso e uma solicitacao operacional, nao fechamento do chat.',
         '- execute=false: cliente só agradeceu, disse ok, ou respondeu algo ambíguo sem pedir para terminar o atendimento.',
         '- Na duvida entre medium e false, prefira false.',
       ]
     : [
         'Regra para transfer_chat:',
         '- execute=true, confidence=high: cliente pediu EXPLICITAMENTE falar com humano, atendente, consultor, setor ou equipe.',
-        '- execute=true, confidence=medium: cliente relata um PROBLEMA TECNICO claro (internet fora, lenta, sem sinal, roteador, etc.) que a equipe alvo pode resolver, E o agente virtual nao tem ferramentas para resolver sozinho.',
+        '- execute=true, confidence=medium: a politica de escalonamento cobre claramente o caso e o agente nao possui um proximo passo permitido capaz de avancar a solicitacao.',
         '- execute=true, confidence=medium: cliente esta frustrado/irritado e o contexto indica que precisa de atendimento humano.',
-        '- execute=false: cliente esta fazendo pergunta, comprando, consultando planos, pedindo informacao geral, ou mencionou um assunto sem precisar de atendimento humano.',
-        '- execute=false: cliente esta fazendo transferencia de endereco, mudanca de plano, ou outra operacao que o agente consegue conduzir.',
+        '- execute=false: cliente esta fazendo uma pergunta, avaliando opcoes, pedindo informacao ou mencionando um assunto que o agente ainda consegue conduzir.',
+        '- execute=false: existe uma proxima pergunta, consulta ou acao segura que o agente pode realizar para avancar o objetivo.',
         '- Na duvida entre medium e false, prefira false.',
       ];
 

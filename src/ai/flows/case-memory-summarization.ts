@@ -113,7 +113,7 @@ export async function summarizeCaseMemory(input: CaseMemoryInput): Promise<CaseM
     });
   } else if (defaultEnvKey !== apiKey) {
     const { genkit } = require('genkit');
-    const { googleAI } = require('@genkit-ai/googleai');
+    const { googleAI } = require('@genkit-ai/google-genai');
 
     const dynamicAi = genkit({
       plugins: [googleAI({ apiKey })],

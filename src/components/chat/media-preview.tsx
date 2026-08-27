@@ -16,7 +16,7 @@ export interface MediaFileType {
   name: string;
   type: string;
   base64: string;
-  mediatype: 'image' | 'video' | 'document';
+  mediatype: 'image' | 'video' | 'document' | 'audio';
   thumbnail?: string; // Optional Base64 thumbnail for videos
 }
 

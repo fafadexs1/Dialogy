@@ -4,6 +4,7 @@ import {
   startEvolutionWebhookRetention,
   stopEvolutionWebhookRetention,
 } from '@/services/whatsapp/webhook-inbox-retention';
+import { startNexusScheduleRunner, stopNexusScheduleRunner } from '@/modules/nexus/services/schedule-runner';
 
 async function loadEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -28,12 +29,16 @@ async function main() {
   // Poda a caixa de entrada durável de webhooks, que antes só crescia.
   startEvolutionWebhookRetention();
 
+  // Executa, com claim durável por minuto, os fluxos Nexus publicados que usam cron.
+  startNexusScheduleRunner();
+
   const shutdown = async (signal: string) => {
     console.log(`[QUEUE_WORKER] Received ${signal}. Shutting down gracefully...`);
 
     try {
       stopPresenceReconciler();
       stopEvolutionWebhookRetention();
+      stopNexusScheduleRunner();
       await worker.close();
       await connection.quit();
       process.exit(0);

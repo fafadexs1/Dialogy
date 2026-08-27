@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getWorkspaceMessageDisposition,
+  hasCompleteRealtimeChatPresentation,
   parseVisibleIdSet,
   reconcileRealtimeChatAssignment,
   reconcileRealtimeChatPresentation,
@@ -37,6 +38,24 @@ describe('realtime reconciler', () => {
     expect(payload.eventType).toBe('INSERT');
     expect((payload.new as { id?: string }).id).toBe('msg-1');
     expect(payload.commit_timestamp).toBe('2024-01-01T10:00:00Z');
+  });
+
+  it('detects chat payloads that include the complete team presentation', () => {
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: 'Financeiro',
+      team_color: '#dc143c',
+    })).toBe(true);
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: 'Financeiro',
+    })).toBe(false);
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: 'Financeiro',
+      team_color: null,
+    })).toBe(false);
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: null,
+      team_color: null,
+    })).toBe(true);
   });
 
   it('filters chat updates by visible chat id when a visible set exists', () => {

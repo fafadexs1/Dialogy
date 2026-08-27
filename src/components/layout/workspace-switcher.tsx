@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import type { User } from '@/lib/types';
 import { useInboxStore } from '@/hooks/use-inbox-store';
+import { WorkspaceInviteCenter } from '@/components/invites/workspace-invite-center';
 
 import { Crown } from 'lucide-react';
 import { getPlanLabel } from '@/lib/plans-types';
@@ -30,6 +31,10 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
 
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"], [data-radix-dialog-overlay]')) {
+        return;
+      }
       if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
@@ -71,7 +76,9 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
         variant="ghost"
         className="h-8 w-8 2xl:h-10 2xl:w-10 p-0 rounded-lg 2xl:rounded-xl bg-sidebar-accent border border-sidebar-border hover:border-sidebar-border/80 transition-all"
         onClick={() => setOpen((o) => !o)}
-        aria-label="Selecionar workspace"
+        aria-label="Trocar workspace e acessar convites"
+        aria-expanded={open}
+        title="Trocar workspace e acessar convites"
       >
         <div className="relative">
           <Avatar className="h-6 w-6 2xl:h-8 2xl:w-8 border border-sidebar-border rounded-md">
@@ -84,7 +91,8 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
       {open && (
         <div className="absolute left-14 top-0 z-50 w-72 rounded-xl border border-sidebar-border bg-sidebar shadow-2xl p-2 space-y-2 mt-4">
           <div className="px-2 py-1">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Workspaces</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Trocar workspace</p>
+            <p className="mt-1 truncate text-[11px] text-sidebar-foreground/70">Atual: {currentWorkspace.name}</p>
           </div>
           <div className="max-h-64 overflow-y-auto space-y-1">
             {user.workspaces?.map((ws) => {
@@ -127,6 +135,12 @@ export function WorkspaceSwitcher({ className, user }: WorkspaceSwitcherProps) {
               );
             })}
           </div>
+          <WorkspaceInviteCenter
+            workspaceId={currentWorkspace.id}
+            workspaceName={currentWorkspace.name}
+            userEmail={user.email}
+            onClose={() => setOpen(false)}
+          />
           <div className="flex gap-2 pt-2 border-t border-sidebar-border mt-1">
             <Button asChild variant="ghost" className="flex-1 h-9 text-xs uppercase tracking-wider font-medium text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent">
               <Link href="/settings/workspace/new">Criar</Link>

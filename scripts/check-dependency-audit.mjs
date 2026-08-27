@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 
 const npmCli = process.env.npm_execpath;
 const result = npmCli
-  ? spawnSync(process.execPath, [npmCli, 'audit', '--omit=dev', '--json'], { encoding: 'utf8' })
-  : spawnSync('npm', ['audit', '--omit=dev', '--json'], { encoding: 'utf8', shell: process.platform === 'win32' });
+  ? spawnSync(process.execPath, [npmCli, 'audit', '--omit=dev', '--omit=optional', '--json'], { encoding: 'utf8' })
+  : spawnSync('npm', ['audit', '--omit=dev', '--omit=optional', '--json'], { encoding: 'utf8', shell: process.platform === 'win32' });
 if (!result.stdout) {
   console.error(result.stderr || '[dependency-audit] npm audit did not return a report.');
   process.exit(1);

@@ -213,11 +213,6 @@ export async function updateWorkspaceAction(
     }
   }
 
-  // `nexus_settings` pertence a tela de integracao (src/actions/nexus.ts), que
-  // grava o objeto completo com mode/autoProvisioned. O campo `nexusEmail` que
-  // existia aqui sobrescrevia tudo por { email }, e essa forma incompleta era
-  // lida depois como "conta existente vinculada", quebrando o SSO.
-
   if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
     try {
       const arrayBuffer = await avatarFile.arrayBuffer();

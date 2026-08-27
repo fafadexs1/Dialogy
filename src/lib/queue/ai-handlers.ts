@@ -175,6 +175,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   webhook_outbound: undefined,
   queue_auto_close: undefined,
   marketing_auto_close: undefined,
+  nexus_internal_event: undefined,
   analytics_event: undefined,
   notification_send: undefined,
   ai_task: undefined,
@@ -299,8 +300,12 @@ export async function handleAiQueueJobFailure(
            assigned_at = NULL,
            updated_at = clock_timestamp()
        WHERE id = $1
-         AND workspace_id = $2`,
-      [payload.chatId, payload.workspaceId],
+         AND workspace_id = $2
+         AND status <> 'encerrados'
+         AND agent_id IS NULL
+         AND assigned_system_agent_id = $3
+         AND is_autopilot_active = true`,
+      [payload.chatId, payload.workspaceId, systemAgentId],
     );
 
     const errorMessage = error instanceof Error ? error.message : String(error);

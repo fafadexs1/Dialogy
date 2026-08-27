@@ -106,10 +106,10 @@ export const localProductUpdateDemo: ProductUpdateFeedItem = {
 
 export const localProductUpdateAnnouncement: ProductUpdateAnnouncement = {
   id: LOCAL_PRODUCT_UPDATE_DEMO_ID,
-  slug: localProductUpdateDemo.slug,
-  title: 'A Comunidade Dialogy chegou ✨',
-  excerpt: 'Conheça o novo feed, veja fotos e vídeo, vote na primeira enquete e experimente as conversas da comunidade.',
-  category: 'Grande lançamento',
-  accentColor: 'violet',
-  publishedAt: localProductUpdateDemo.publishedAt,
+  slug: 'segunda-via-sgp-fatura-pdf',
+  title: 'Segunda via do SGP agora também pode ser enviada em PDF',
+  excerpt: 'A segunda via do SGP foi aprimorada. Além de PIX e boleto, o cliente agora também pode escolher receber a fatura em PDF para baixar e consultar com mais facilidade.',
+  category: 'Atualização do SGP',
+  accentColor: 'blue',
+  publishedAt: new Date().toISOString(),
 };

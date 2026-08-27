@@ -766,6 +766,12 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
             messageMimeType.startsWith('image/') ||
             messageMimeType.startsWith('video/')
         );
+    const isAudioMessage =
+        !isDeleted &&
+        !isInternalNote &&
+        !isAiAnalysis &&
+        !isToolExecution &&
+        (message.type === 'audio' || messageMimeType.startsWith('audio/'));
     const failureDetails = normalizeFailureDetails(message);
     const replyPreview = resolveReplyPreview(message, quotedMessage);
     const statusTitle = isFailed
@@ -888,14 +894,24 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                             <AvatarImage fallbackOnBlank src={senderAvatar} alt={senderName} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-600 text-xs font-medium dark:bg-zinc-900 dark:text-zinc-300">{senderInitial}</AvatarFallback>
                         </Avatar>
-                        <div className={cn("flex min-w-0 flex-1 flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                            <div className={cn("flex w-full min-w-0 items-end gap-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                        <div className={cn(
+                            "flex min-w-0 flex-1 flex-col",
+                            isFromMe ? 'items-end' : 'items-start',
+                        )}>
+                            <div className={cn(
+                                "flex min-w-0 max-w-full items-end gap-1",
+                                isAudioMessage ? 'w-fit' : 'w-full',
+                                isAudioMessage && 'relative',
+                                isAudioMessage
+                                    ? (isFromMe ? 'flex-row-reverse justify-start' : 'flex-row justify-start')
+                                    : (isFromMe ? 'flex-row-reverse' : 'flex-row'),
+                            )}>
                                 <div
                                     data-message-bubble
                                     data-message-direction={isFromMe ? 'outgoing' : 'incoming'}
                                     className={cn(
                                         "relative w-fit min-w-0 max-w-[88%] break-words [overflow-wrap:anywhere] sm:max-w-[78%] md:max-w-[min(72%,560px)]",
-                                        !isVisualMediaMessage && "rounded-[18px] p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)] md:p-3.5",
+                                        !isVisualMediaMessage && !isAudioMessage && "rounded-[18px] p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)] md:p-3.5",
                                         isDeleted
                                             ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'
                                             : isPrearmedTool
@@ -906,7 +922,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                 ? 'border border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
                                             : isInternalNote
                                                     ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-700'
-                                                : isVisualMediaMessage
+                                                : isVisualMediaMessage || isAudioMessage
                                                     ? ''
                                                 : (isFromMe
                                                     ? 'rounded-tr-md border border-blue-500/20 bg-blue-600 text-white'
@@ -967,7 +983,13 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                     )}
                                 </div>
                                 {!isDeleted && (
-                                    <div className="flex-shrink-0 self-start">
+                                    <div className={cn(
+                                        'flex-shrink-0 self-start',
+                                        isAudioMessage && cn(
+                                            'absolute top-1/2 z-10 -translate-y-1/2',
+                                            isFromMe ? 'right-full mr-1' : 'left-full ml-1',
+                                        ),
+                                    )}>
                                         <AlertDialog>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>

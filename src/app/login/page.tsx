@@ -17,6 +17,10 @@ interface LoginPageProps {
   }>;
 }
 
+function safeNextPath(value: string | null | undefined): string {
+  return value?.startsWith('/') && !value.startsWith('//') ? value : '/inbox';
+}
+
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const supabase = await createClient();
   const { t } = await getServerI18n();
@@ -25,9 +29,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   } = await supabase.auth.getUser();
 
   const resolvedSearchParams = await searchParams;
+  const nextPath = safeNextPath(resolvedSearchParams?.next);
 
   if (user && !resolvedSearchParams?.error) {
-    redirect('/inbox');
+    redirect(nextPath);
   }
 
   const isRegistered = resolvedSearchParams?.registered === 'true';
@@ -77,7 +82,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
             <p className="mt-8 text-sm text-white/50">
               {t("N\u00e3o tem uma conta?")} {' '}
-              <Link href="/register" className="font-semibold text-white transition-colors hover:text-[#20E401] hover:underline hover:underline-offset-4">
+              <Link href={resolvedSearchParams?.next ? `/register?next=${encodeURIComponent(nextPath)}` : '/register'} className="font-semibold text-white transition-colors hover:text-[#20E401] hover:underline hover:underline-offset-4">
                 {t("Cadastre-se gratuitamente")}
               </Link>
             </p>

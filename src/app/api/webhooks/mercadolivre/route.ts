@@ -114,7 +114,6 @@ export async function POST(request: Request) {
                      WHERE contact_id = $1
                        AND source = 'mercadolivre'
                        AND workspace_id = $2
-                       AND status IN ('gerais', 'atendimentos')
                      ORDER BY updated_at DESC NULLS LAST, created_at DESC
                      LIMIT 1`,
                     [contactId, account.workspace_id]
@@ -135,6 +134,16 @@ export async function POST(request: Request) {
                     );
                     chatId = newChat.rows[0].id;
                 }
+
+                await db.query(
+                    `UPDATE chats
+                     SET status = 'gerais', closed_at = NULL, agent_id = NULL,
+                         assigned_system_agent_id = NULL, assigned_at = NULL,
+                         is_autopilot_active = FALSE, copilot_mode = 'off',
+                         updated_at = clock_timestamp()
+                     WHERE id = $1 AND status = 'encerrados'`,
+                    [chatId]
+                );
 
                 // 3. Insert Message
                 // Check duplication by external ID (questionId)
@@ -238,7 +247,6 @@ export async function POST(request: Request) {
                      WHERE contact_id = $1
                        AND source = 'mercadolivre'
                        AND workspace_id = $2
-                       AND status IN ('gerais', 'atendimentos')
                      ORDER BY updated_at DESC NULLS LAST, created_at DESC
                      LIMIT 1`,
                     [contactId, account.workspace_id]
@@ -258,6 +266,16 @@ export async function POST(request: Request) {
                     );
                     chatId = newChat.rows[0].id;
                 }
+
+                await db.query(
+                    `UPDATE chats
+                     SET status = 'gerais', closed_at = NULL, agent_id = NULL,
+                         assigned_system_agent_id = NULL, assigned_at = NULL,
+                         is_autopilot_active = FALSE, copilot_mode = 'off',
+                         updated_at = clock_timestamp()
+                     WHERE id = $1 AND status = 'encerrados'`,
+                    [chatId]
+                );
 
                 // 3. Insert Message
                 const msgCheck = await db.query('SELECT id FROM messages WHERE message_id_from_api = $1', [String(messageId)]);

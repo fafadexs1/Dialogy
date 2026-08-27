@@ -98,6 +98,25 @@ function graphSearchText(graph: ProcedureGraph): string {
   ].join(' '));
 }
 
+function isExcludedByProcedureTrigger(graph: ProcedureGraph, customerMessage: string): boolean {
+  const exclusions = Array.isArray(graph.metadata?.triggerExclusions)
+    ? graph.metadata.triggerExclusions.map(String)
+    : [];
+  const normalizedMessage = normalizeText(customerMessage);
+  return exclusions.some((exclusion) => {
+    const normalizedExclusion = normalizeText(exclusion);
+    if (!normalizedExclusion) return false;
+    if (normalizedMessage.includes(normalizedExclusion) || normalizedExclusion.includes(normalizedMessage)) return true;
+    const terms = normalizedExclusion.split(/\s+/).filter((term) => term.length >= 4);
+    return terms.length >= 2 && terms.filter((term) => normalizedMessage.includes(term)).length >= Math.ceil(terms.length * 0.7);
+  });
+}
+
+function graphPriority(graph: ProcedureGraph): number {
+  const priority = Number(graph.metadata?.priority || 0);
+  return Number.isFinite(priority) ? priority : 0;
+}
+
 function isCloseRequest(normalizedMessage: string): boolean {
   if (/\b(nao|não)\s+(recuperei|resolveu|funcionou|finalizou|terminou)\b/.test(normalizedMessage)) {
     return false;
@@ -175,6 +194,9 @@ export function matchProcedure(input: {
   const scored: ProcedureMatchResult[] = [];
 
   for (const graph of compiledProcedures) {
+    if (isExcludedByProcedureTrigger(graph, customerMessage)) {
+      continue;
+    }
     if (!hasRequiredDomainEvidence(graph.documentName, customerMessage)) {
       continue;
     }
@@ -277,6 +299,7 @@ export function matchProcedure(input: {
   // Sort by score descending, then by fewer steps (simpler procedure wins ties)
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    if (graphPriority(b.graph) !== graphPriority(a.graph)) return graphPriority(b.graph) - graphPriority(a.graph);
     return a.graph.steps.length - b.graph.steps.length;
   });
 

@@ -284,6 +284,7 @@ export async function resolveCanonicalWhatsappChatId(
         `SELECT
             ch.id,
             ch.workspace_id,
+            ch.status,
             c.phone_number_jid
          FROM chats ch
          JOIN contacts c
@@ -299,6 +300,10 @@ export async function resolveCanonicalWhatsappChatId(
     }
 
     const chatRow = chatRes.rows[0];
+    if (chatRow.status === 'encerrados') {
+        return chatRow.id;
+    }
+
     return resolveCanonicalWhatsappChatIdByIdentity(client, {
         workspaceId: chatRow.workspace_id,
         phoneOrJid: chatRow.phone_number_jid,

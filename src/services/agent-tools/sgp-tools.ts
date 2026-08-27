@@ -10,6 +10,27 @@ type SgpToolContext = {
   cpf: string;
 };
 
+export type SgpRuntimeTarget = {
+  workspaceId: string;
+  chatId: string;
+  contactId?: string | null;
+  /**
+   * Identificador informado durante uma jornada determinística (por exemplo,
+   * o CPF digitado no Nexus). Quando presente ele deve prevalecer sobre o
+   * campo CRM, que pode ainda não estar preenchido para contatos novos.
+   */
+  customerIdentifier?: string | null;
+};
+
+type SupportedSgpToolAction = Extract<AgentToolAction, {
+  type:
+    | 'sgp_fetch_contracts'
+    | 'sgp_fetch_contact_panel_data'
+    | 'sgp_generate_invoice_pix'
+    | 'sgp_create_payment_promise'
+    | 'sgp_open_support_ticket'
+}>;
+
 function createRequestInit(token: string, body: unknown): RequestInit {
   return {
     method: 'POST',
@@ -72,16 +93,16 @@ function parseMaybeJson(raw: string): unknown {
   }
 }
 
-async function resolveContactId(context: AgentToolRuntimeContext): Promise<string | null> {
-  if (context.contact?.id) return context.contact.id;
+async function resolveContactId(target: SgpRuntimeTarget): Promise<string | null> {
+  if (target.contactId) return target.contactId;
   const { rows } = await db.query(
     'SELECT contact_id FROM public.chats WHERE id = $1 AND workspace_id = $2 LIMIT 1',
-    [context.chat.id, context.workspaceId]
+    [target.chatId, target.workspaceId]
   );
   return rows[0]?.contact_id || null;
 }
 
-async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
+async function loadSgpContext(target: SgpRuntimeTarget): Promise<
   | { success: true; data: SgpToolContext }
   | { success: false; error: string }
 > {
@@ -92,7 +113,7 @@ async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
        AND is_active = true
        AND (provider = 'sgp' OR provider LIKE 'sgp_user_%')
      ORDER BY CASE WHEN provider = 'sgp' THEN 0 ELSE 1 END, updated_at DESC`,
-    [context.workspaceId]
+    [target.workspaceId]
   );
 
   const global = integrationRows.find((row) => row.provider === 'sgp')?.config as SGPGlobalConfig | undefined;
@@ -106,7 +127,7 @@ async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
     return { success: false, error: 'Nenhuma credencial de usuario SGP ativa encontrada para o workspace.' };
   }
 
-  const contactId = await resolveContactId(context);
+  const contactId = await resolveContactId(target);
   if (!contactId) {
     return { success: false, error: 'Contato do chat nao encontrado.' };
   }
@@ -119,7 +140,13 @@ async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
     [contactId, global.cpfFieldId]
   );
 
-  const cpf = String(cpfRows[0]?.value || '').trim();
+  const explicitIdentifier = onlyDigits(target.customerIdentifier);
+  if (explicitIdentifier && ![11, 14].includes(explicitIdentifier.length)) {
+    return { success: false, error: 'O CPF/CNPJ informado precisa conter 11 ou 14 dígitos.' };
+  }
+
+  const crmIdentifier = onlyDigits(cpfRows[0]?.value);
+  const cpf = explicitIdentifier || crmIdentifier;
   if (!cpf) {
     return { success: false, error: `CPF/CNPJ nao encontrado no campo CRM mapeado (${global.cpfFieldId}).` };
   }
@@ -182,16 +209,9 @@ async function fetchSupportContracts(sgp: SgpToolContext, contractId?: string | 
         : [];
 }
 
-export async function runSgpTool(
-  context: AgentToolRuntimeContext,
-  action: Extract<AgentToolAction, {
-    type:
-      | 'sgp_fetch_contracts'
-      | 'sgp_fetch_contact_panel_data'
-      | 'sgp_generate_invoice_pix'
-      | 'sgp_create_payment_promise'
-      | 'sgp_open_support_ticket'
-  }>
+export async function runSgpWorkspaceTool(
+  target: SgpRuntimeTarget,
+  action: SupportedSgpToolAction,
 ): Promise<AgentToolExecutionResult> {
   if (action.type === 'sgp_open_support_ticket') {
     return {
@@ -202,7 +222,12 @@ export async function runSgpTool(
     };
   }
 
-  const sgpContext = await loadSgpContext(context);
+  const requestedCustomerIdentifier = action.type === 'sgp_fetch_contact_panel_data'
+    ? onlyDigits(action.payload?.customerIdentifier)
+    : '';
+  // Somente o chamador server-side pode definir a identidade alternativa no
+  // target. Um argumento produzido pela IA continua sujeito ao CPF do CRM.
+  const sgpContext = await loadSgpContext(target);
   if (!sgpContext.success) {
     return {
       toolName: action.type,
@@ -214,9 +239,6 @@ export async function runSgpTool(
 
   try {
     const sgp = sgpContext.data;
-    const requestedCustomerIdentifier = action.type === 'sgp_fetch_contact_panel_data'
-      ? onlyDigits(action.payload?.customerIdentifier)
-      : '';
     if (
       requestedCustomerIdentifier
       && requestedCustomerIdentifier !== onlyDigits(sgp.cpf)
@@ -225,7 +247,7 @@ export async function runSgpTool(
         toolName: action.type,
         status: 'rejected',
         input: action,
-        error: 'O CPF/CNPJ informado nao corresponde ao identificador cadastrado neste contato.',
+        error: 'O CPF/CNPJ informado nao corresponde ao identificador autorizado para este atendimento.',
       };
     }
 
@@ -334,4 +356,15 @@ export async function runSgpTool(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export async function runSgpTool(
+  context: AgentToolRuntimeContext,
+  action: SupportedSgpToolAction,
+): Promise<AgentToolExecutionResult> {
+  return runSgpWorkspaceTool({
+    workspaceId: context.workspaceId,
+    chatId: context.chat.id,
+    contactId: context.contact?.id || null,
+  }, action);
 }

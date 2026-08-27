@@ -17,6 +17,7 @@ export type ChatMessageSubscriptionParams = {
   client: SupabaseLike;
   workspaceId: string;
   chatId: string;
+  replaySince?: number | null;
   onMessage: (payload: RealtimePostgresChangesPayload<any>) => void;
   onStatusChange?: (status: string) => void;
 };
@@ -25,6 +26,7 @@ export type WorkspaceChatSubscriptionParams = {
   client: SupabaseLike;
   workspaceId: string;
   chatIdsCsv?: string;
+  replaySince?: number | null;
   onChatUpdate: (payload: RealtimePostgresChangesPayload<any>) => void;
   onStatusChange?: (status: string) => void;
 };
@@ -33,6 +35,7 @@ export type WorkspaceMessageSubscriptionParams = {
   client: SupabaseLike;
   workspaceId: string;
   chatIdsCsv?: string;
+  replaySince?: number | null;
   onMessage: (payload: RealtimePostgresChangesPayload<any>) => void;
   onStatusChange?: (status: string) => void;
 };
@@ -40,9 +43,35 @@ export type WorkspaceMessageSubscriptionParams = {
 export type WorkspaceContactSubscriptionParams = {
   client: SupabaseLike;
   workspaceId: string;
+  replaySince?: number | null;
   onContactUpdate: (payload: RealtimePostgresChangesPayload<any>) => void;
   onStatusChange?: (status: string) => void;
 };
+
+const BROADCAST_REPLAY_LIMIT = 25;
+
+function privateChannelConfig(replaySince?: number | null) {
+  const replaySinceMs =
+    typeof replaySince === 'number' && Number.isFinite(replaySince) && replaySince >= 0
+      ? Math.floor(replaySince)
+      : null;
+
+  return {
+    config: {
+      private: true,
+      ...(replaySinceMs !== null
+        ? {
+            broadcast: {
+              replay: {
+                since: replaySinceMs,
+                limit: BROADCAST_REPLAY_LIMIT,
+              },
+            },
+          }
+        : {}),
+    },
+  };
+}
 
 export const buildChatMessageChannelName = (_workspaceId: string, chatId: string) =>
   `room:${chatId}:messages`;
@@ -60,6 +89,7 @@ export function subscribeToChatMessages({
   client,
   workspaceId,
   chatId,
+  replaySince,
   onMessage,
   onStatusChange,
 }: ChatMessageSubscriptionParams): RealtimeChannel {
@@ -69,11 +99,7 @@ export function subscribeToChatMessages({
       : buildChatMessageChannelName(workspaceId, chatId);
 
   return client
-    .channel(topic, {
-      config: {
-        private: true,
-      },
-    })
+    .channel(topic, privateChannelConfig(replaySince))
     .on(
       'broadcast',
       { event: '*' },
@@ -94,6 +120,7 @@ export function subscribeToWorkspaceChatUpdates({
   client,
   workspaceId,
   chatIdsCsv,
+  replaySince,
   onChatUpdate,
   onStatusChange,
 }: WorkspaceChatSubscriptionParams): RealtimeChannel {
@@ -101,11 +128,7 @@ export function subscribeToWorkspaceChatUpdates({
   const visibleChatIds = parseVisibleIdSet(chatIdsCsv);
 
   return client
-    .channel(buildWorkspaceChatChannelName(workspaceId), {
-      config: {
-        private: true,
-      },
-    })
+    .channel(buildWorkspaceChatChannelName(workspaceId), privateChannelConfig(replaySince))
     .on(
       'broadcast',
       { event: '*' },
@@ -130,17 +153,14 @@ export function subscribeToWorkspaceMessages({
   client,
   workspaceId,
   chatIdsCsv,
+  replaySince,
   onMessage,
   onStatusChange,
 }: WorkspaceMessageSubscriptionParams): RealtimeChannel {
   const visibleChatIds = parseVisibleIdSet(chatIdsCsv);
 
   return client
-    .channel(buildWorkspaceMessageChannelName(workspaceId), {
-      config: {
-        private: true,
-      },
-    })
+    .channel(buildWorkspaceMessageChannelName(workspaceId), privateChannelConfig(replaySince))
     .on(
       'broadcast',
       { event: '*' },
@@ -164,15 +184,12 @@ export function subscribeToWorkspaceMessages({
 export function subscribeToWorkspaceContacts({
   client,
   workspaceId,
+  replaySince,
   onContactUpdate,
   onStatusChange,
 }: WorkspaceContactSubscriptionParams): RealtimeChannel {
   return client
-    .channel(buildWorkspaceContactChannelName(workspaceId), {
-      config: {
-        private: true,
-      },
-    })
+    .channel(buildWorkspaceContactChannelName(workspaceId), privateChannelConfig(replaySince))
     .on(
       'broadcast',
       { event: '*' },

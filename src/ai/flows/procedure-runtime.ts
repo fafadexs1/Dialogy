@@ -306,7 +306,7 @@ function definePromptForCandidate(input: {
   }
 
   const { genkit } = require('genkit');
-  const { googleAI } = require('@genkit-ai/googleai');
+  const { googleAI } = require('@genkit-ai/google-genai');
 
   const dynamicAi = genkit({
     plugins: [googleAI({ apiKey: input.apiKey })],

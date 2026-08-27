@@ -121,6 +121,9 @@ export async function requestCopilotSuggestion(chatId: string): Promise<{
     if (!access.ok) return { success: false, error: access.error };
 
     const chat = await loadCopilotChat(chatId);
+    if (chat?.status === 'encerrados') {
+        return { success: false, error: 'Nao e possivel usar o copiloto em uma conversa encerrada.' };
+    }
     if (!chat) return { success: false, error: 'Conversa não encontrada.' };
     if (!chat.is_autopilot_active || !chat.autopilot_config_id) {
         return { success: false, error: 'Ative o copiloto nesta conversa antes de pedir uma sugestão.' };
@@ -209,6 +212,10 @@ export async function activateChatCopilot(chatId: string, agentId: string): Prom
     const chat = await loadCopilotChat(chatId);
     if (!chat) return { success: false, error: 'Conversa não encontrada.' };
 
+    if (chat?.status === 'encerrados') {
+        return { success: false, error: 'Nao e possivel ativar o copiloto em uma conversa encerrada.' };
+    }
+
     const agent = await db.query(
         `SELECT id FROM autopilot_configs
           WHERE id = $1 AND workspace_id = $2 AND is_active = TRUE
@@ -220,15 +227,19 @@ export async function activateChatCopilot(chatId: string, agentId: string): Prom
     }
 
     try {
-        await db.query(
+        const updateResult = await db.query(
             `UPDATE chats
                 SET is_autopilot_active = TRUE,
                     autopilot_config_id = $1,
                     copilot_mode = 'suggest',
                     updated_at = clock_timestamp()
-              WHERE id = $2`,
+              WHERE id = $2
+                AND status <> 'encerrados'`,
             [agentId, chatId],
         );
+        if (updateResult.rowCount === 0) {
+            return { success: false, error: 'Nao e possivel ativar o copiloto em uma conversa encerrada.' };
+        }
         revalidatePath('/', 'layout');
     } catch (error) {
         console.error('[COPILOT] Failed to activate copilot:', error);

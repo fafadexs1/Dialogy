@@ -9,11 +9,12 @@ node_modules
 !.yarn/versions
 
 # build artifacts
-.next
+# Ignore the Next.js output directory and all local validation/build copies
+# (for example .next-turbopack-*, .next-perf, and .next-codex-dev).
+.next*
 out
 build
 dist
-public/sw.js
 public/workbox-*.js
 
 # testing
@@ -63,6 +64,7 @@ scratch
 tests
 docs
 delivery-app
+mobile
 
 # local artifacts
 *.bak

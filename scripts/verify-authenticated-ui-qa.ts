@@ -411,7 +411,7 @@ function isCriticalRequestFailure(entry: string) {
     '/api/build-id',
     '/api/users/online-status',
     '/api/users/online/',
-    '/_next/webpack-hmr',
+    '/_next/hmr',
   ].some((fragment) => entry.includes(fragment));
 }
 
@@ -450,7 +450,7 @@ async function runUiQa(client: PoolClient) {
     });
     page.on('requestfailed', (request) => {
       const url = request.url();
-      if (!url.includes('/_next/webpack-hmr') && !url.startsWith('wss://')) {
+      if (!url.includes('/_next/hmr') && !url.startsWith('wss://')) {
         failedRequests.push(`${request.method()} ${url} :: ${request.failure()?.errorText || 'unknown'}`);
       }
     });

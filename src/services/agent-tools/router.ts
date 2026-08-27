@@ -28,7 +28,7 @@ export type ToolRoutingCandidate = {
   toolName: 'transfer_chat';
   team: Pick<ToolRouterTeam, 'id' | 'name'>;
   reason: string;
-  source: 'configured_keyword' | 'team_mention' | 'domain_hint';
+  source: 'configured_keyword' | 'team_mention';
   matchedText?: string | null;
   responseHint: string;
 };
@@ -58,29 +58,6 @@ const HUMAN_TARGETS = new Set([
   'operador',
   'suporte',
 ]);
-
-const DOMAIN_KEYWORDS: Array<{ domain: string; terms: RegExp[]; teamHints: RegExp[] }> = [
-  {
-    domain: 'financeiro',
-    terms: [/\b(boleto|fatura|pix|pagamento|cobranca|cobrança|segunda via|mensalidade|negociar|debito|débito)\b/i],
-    teamHints: [/\b(financeiro|cobranca|cobrança|billing)\b/i],
-  },
-  {
-    domain: 'suporte',
-    terms: [/\b(sem internet|internet caiu|internet|conexao|conexão|sinal|los|lento|lentidao|lentidão|roteador|modem|tecnico|técnico|suporte|merda|ruim|caindo)\b/i],
-    teamHints: [/\b(suporte|tecnico|técnico|noc|atendimento)\b/i],
-  },
-  {
-    domain: 'comercial',
-    terms: [/\b(plano|contratar|upgrade|vendas|comercial|proposta|orcamento|orçamento)\b/i],
-    teamHints: [/\b(comercial|vendas|sales)\b/i],
-  },
-  {
-    domain: 'cancelamento',
-    terms: [/\b(cancelar|cancelamento|encerrar contrato|rescindir|desistir)\b/i],
-    teamHints: [/\b(cancelamento|retencao|retenção|sucesso|atendimento|suporte)\b/i],
-  },
-];
 
 function normalizeSearchText(value: string): string {
   return value
@@ -150,22 +127,8 @@ function findConfiguredTeam(message: string, teams: ToolRouterTeam[]) {
   return null;
 }
 
-function findDomainTeam(message: string, teams: ToolRouterTeam[]) {
-  for (const domain of DOMAIN_KEYWORDS) {
-    if (!domain.terms.some((pattern) => pattern.test(message))) continue;
-
-    const team = teams.find((candidate) => domain.teamHints.some((pattern) => pattern.test(candidate.name)));
-    if (team) {
-      return { team, domain: domain.domain };
-    }
-  }
-
-  return null;
-}
-
 function findHumanHandoffTeam(teams: ToolRouterTeam[]) {
-  return teams.find((candidate) => /\b(atendimento|suporte|sac|help|humano)\b/i.test(candidate.name))
-    ?? teams.find((candidate) => candidate.routingConfig?.enabled && candidate.routingConfig.autoTransfer !== false)
+  return teams.find((candidate) => candidate.routingConfig?.enabled && candidate.routingConfig.autoTransfer !== false)
     ?? teams[0]
     ?? null;
 }
@@ -294,44 +257,6 @@ export function routeDeterministicAgentTools(
       source: 'team_mention',
       matchedText: mentionedTeam.name,
       responseHint: `Vou encaminhar seu atendimento para a equipe ${mentionedTeam.name}.`,
-    });
-  }
-
-  const domainMatch = findDomainTeam(message, input.availableTeams);
-  if (domainMatch && shouldHandoffToHuman(message)) {
-    const reason = `Pedido de atendimento humano com indícios de assunto ${domainMatch.domain}.`;
-    return {
-      matchedReason: reason,
-      responseHint: `Vou encaminhar seu atendimento para a equipe ${domainMatch.team.name}.`,
-      candidates,
-      actions: [
-        {
-          type: 'add_internal_note',
-          reason,
-          payload: {
-            content: buildNoteContent({
-              reason,
-              customerMessage: message,
-              contactName: input.contactName,
-            }),
-          },
-        },
-        {
-          type: 'transfer_chat',
-          reason,
-          payload: { teamId: domainMatch.team.id },
-        },
-      ],
-    };
-  }
-  if (domainMatch) {
-    candidates.push({
-      toolName: 'transfer_chat',
-      team: { id: domainMatch.team.id, name: domainMatch.team.name },
-      reason: `Mensagem tem indicios de assunto ${domainMatch.domain}, mas nao houve pedido explicito de transferencia.`,
-      source: 'domain_hint',
-      matchedText: domainMatch.domain,
-      responseHint: `Vou encaminhar seu atendimento para a equipe ${domainMatch.team.name}.`,
     });
   }
 

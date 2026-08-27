@@ -71,32 +71,26 @@ function addMissingAgentOutcomeBranches(workflow: WorkflowDefinition) {
     addResponseBranch('limit_reached', 'Informar limite', '{{current.response}}', 300 + (index * 40));
 
     if (!workflow.connections.some((item) => item.sourceNodeId === agent.id && item.sourcePortId === 'handoff')) {
-      const handoff = createWorkflowNode('output.handoff', {
+      const handoff = createWorkflowNode('output.respond', {
         id: `${prefix}_handoff`,
-        name: 'Transferir para humano',
+        name: 'Transferência ainda não configurada',
         position: { x: agent.position.x + 300, y: agent.position.y + 440 + (index * 40) },
         config: {
-          teamId: '',
-          reason: '{{current.reason}}',
-          requireConfirmation: true,
-          permissionScope: 'automations:execute_handoff',
+          message: 'Não consegui encaminhar automaticamente agora porque a equipe de destino ainda não foi configurada.',
+          channel: 'source',
+          idempotent: true,
         },
       });
       const end = createWorkflowNode('output.end', {
         id: `${prefix}_handoff_end`,
-        name: 'Finalizar transferência',
+        name: 'Finalizar sem transferência',
         position: { x: agent.position.x + 580, y: agent.position.y + 440 + (index * 40) },
       });
       workflow.nodes.push(handoff, end);
       workflow.connections.push(
         connection(`${prefix}_handoff_route`, agent.id, 'handoff', handoff.id, 'main'),
-        connection(`${prefix}_handoff_done`, handoff.id, 'completed', end.id, 'main'),
+        connection(`${prefix}_handoff_done`, handoff.id, 'success', end.id, 'main'),
       );
-      if (errorHandler) {
-        workflow.connections.push(connection(
-          `${prefix}_handoff_error`, handoff.id, 'error', errorHandler.id, 'error', 'error',
-        ));
-      }
     }
   }
 }
@@ -153,7 +147,7 @@ export function previewAutopilotNativeMigration(input: AutopilotNativeMigrationI
       `${workflow.nodes.filter((node) => !node.type.startsWith('tool.')).length} blocos convertidos para o runtime nativo.`,
       `${workflow.nodes.filter((node) => node.type.startsWith('tool.')).length} ferramentas convertidas em capacidades anexadas.`,
       'Persona atual copiada integralmente para o agente principal.',
-      'Rotas de pergunta, limite, transferência e erro tornadas explícitas.',
+      'Rotas de pergunta e limite tornadas explícitas; transferência fica segura até uma equipe ser configurada.',
     ],
     warnings: validation.warnings.map((issue) => issue.message),
   };

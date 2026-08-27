@@ -8,6 +8,7 @@ export type QueueJobType =
   | 'ai_autopilot_process'
   | 'ai_autopilot_learning_cycle'
   | 'ai_case_memory_refresh'
+  | 'nexus_internal_event'
   | 'analytics_event'
   | 'notification_send'
   | 'ai_task';
@@ -109,6 +110,20 @@ export type AiTaskPayload = {
   payload?: Record<string, unknown>;
 };
 
+export type NexusInternalEventPayload = {
+  workspaceId: string;
+  eventName: string;
+  eventId: string;
+  payload?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+  variables?: Record<string, unknown>;
+  sessionId?: string;
+  conversationId?: string;
+  chatId?: string;
+  instanceName?: string;
+  eventChain?: string[];
+};
+
 export type QueueJobPayload =
   | EvolutionWebhookProcessPayload
   | WhatsappSendPayload
@@ -119,6 +134,7 @@ export type QueueJobPayload =
   | AiAutopilotProcessPayload
   | AiAutopilotLearningCyclePayload
   | AiCaseMemoryRefreshPayload
+  | NexusInternalEventPayload
   | AnalyticsEventPayload
   | NotificationPayload
   | AiTaskPayload;

@@ -67,10 +67,11 @@ export interface AgentSendButtonsPayload {
 }
 
 export interface AgentSendPayload {
-    type?: 'text' | 'template' | 'list' | 'buttons';
+    type?: 'text' | 'media' | 'template' | 'list' | 'buttons';
     chatId?: string;
     phoneNumber?: string; // JID format
     content?: string; // For text messages
+    skipUserSignature?: boolean;
     media?: any[]; // For media messages
     instance?: string;
     template?: {

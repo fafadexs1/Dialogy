@@ -6,7 +6,6 @@ import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import {
     enqueueAiAutopilotProcess,
-    enqueueAiCaseMemoryRefresh,
     enqueueEvolutionWebhookProcess,
     enqueueQueueAutoClose,
     enqueueWebhookOutbound,
@@ -23,8 +22,10 @@ import {
     resolveEvolutionInstance,
 } from '@/lib/whatsapp/evolution-config';
 import {
+    extractEvolutionInteractiveResponseId,
     extractEvolutionInteractiveResponseText,
     mapEvolutionInboundMessageTypeToDbType,
+    resolveEvolutionInteractiveSelectionFromQuotedMessage,
     resolveEvolutionInboundMessageType,
     shouldAppendInboundToClosedWhatsappChat,
 } from '@/lib/whatsapp/evolution-inbound-message';
@@ -46,6 +47,9 @@ import {
     persistEvolutionWebhookEvent,
 } from '@/services/whatsapp/evolution-webhook-inbox';
 import { verifyDialogyRequest } from '@/services/meta/dialogy-hmac';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
+import { createNexusChatAdapters } from '@/modules/nexus/services/chat-adapters';
+import { dispatchPublishedNexusMessage } from '@/modules/nexus/services/message-dispatcher';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
@@ -582,17 +586,22 @@ async function scheduleQueueAutoClose(
                 return;
             }
 
-            const closeRes = await client.query(
+            const queueRes = await client.query(
                 `UPDATE chats
-                 SET status = 'encerrados', closed_at = NOW()
+                 SET status = 'gerais',
+                     closed_at = NULL,
+                     assigned_system_agent_id = NULL,
+                     assigned_at = NULL,
+                     is_autopilot_active = FALSE,
+                     copilot_mode = 'off'
                  WHERE id = $1
                    AND status = 'gerais'
                    AND agent_id IS NULL
-                 RETURNING closed_at`,
+                 RETURNING id`,
                 [chatId]
             );
 
-            if ((closeRes.rowCount ?? 0) === 0) {
+            if ((queueRes.rowCount ?? 0) === 0) {
                 await client.query('ROLLBACK');
                 return;
             }
@@ -605,10 +614,10 @@ async function scheduleQueueAutoClose(
                 [
                     workspaceId,
                     chatId,
-                    `Atendimento encerrado automaticamente apos ${seconds} segundos na fila sem atendimento.`,
+                    `Atendimento mantido na fila apos ${seconds} segundos sem atendimento.`,
                     {
-                        event: 'queue_auto_close',
-                        autoClosedAfterMs: autoCloseMs,
+                        event: 'queue_timeout_kept_in_queue',
+                        queueTimeoutMs: autoCloseMs,
                         lastIncomingAt: anchor.toISOString(),
                     },
                 ]
@@ -616,28 +625,7 @@ async function scheduleQueueAutoClose(
 
             await client.query('COMMIT');
 
-            const closedAt = closeRes.rows[0]?.closed_at
-                ? new Date(closeRes.rows[0].closed_at).toISOString()
-                : null;
-
-            try {
-                if (shouldEnqueueJob('ai_case_memory_refresh')) {
-                    await enqueueAiCaseMemoryRefresh({
-                        workspaceId,
-                        chatId,
-                        closedAt,
-                    });
-                } else {
-                    const { refreshCaseMemoryForChat } = await import('@/services/rag/case-memory');
-                    await refreshCaseMemoryForChat({
-                        workspaceId,
-                        chatId,
-                        closedAt,
-                    });
-                }
-            } catch (caseMemoryError) {
-                console.error('[QUEUE_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
-            }
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('[QUEUE_AUTO_CLOSE] Falha ao encerrar chat da fila:', error);
@@ -1211,13 +1199,14 @@ async function handleMessagesUpdate(payload: any) {
             // 2. If it's a read receipt for a message sent by us, mark all older messages in the same chat as READ
             if (from_me) {
                 const olderMessagesRes = await client.query(
-                    `UPDATE messages 
-                     SET api_message_status = 'READ',
-                         metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
-                     WHERE chat_id = $1 
-                       AND from_me = TRUE 
-                       AND created_at <= $2 
-                       AND (api_message_status IS NULL OR api_message_status NOT IN ('READ', 'PLAYED'))`,
+                    `UPDATE messages
+                      SET api_message_status = 'READ',
+                          metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
+                      WHERE chat_id = $1
+                        AND from_me = TRUE
+                        AND created_at <= $2
+                        AND message_id_from_api IS NOT NULL
+                        AND UPPER(COALESCE(api_message_status, '')) IN ('SENT', 'DELIVERED')`,
                     [chat_id, created_at]
                 );
                 if ((olderMessagesRes.rowCount ?? 0) > 0) {
@@ -1250,6 +1239,12 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
 }): Promise<void> {
     const tasks: Promise<any>[] = [];
     const { chat, message, workspaceId, content, instanceName } = input;
+    const queueStatus = (chat as any).status;
+    const queueAgent = (chat as any).agent_id || (chat as any).agentId || null;
+
+    if (queueStatus === 'encerrados') {
+        return;
+    }
 
     const webhookTask = shouldEnqueueJob('webhook_outbound')
         ? enqueueWebhookOutbound({
@@ -1260,8 +1255,6 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
         : dispatchMessageToWebhooks(chat, message, instanceName);
     tasks.push(webhookTask);
 
-    const queueStatus = (chat as any).status;
-    const queueAgent = (chat as any).agent_id || (chat as any).agentId || null;
     if (queueStatus === 'gerais' && !queueAgent) {
         tasks.push((async () => {
             const autoCloseMs = await getQueueAutoCloseMs(workspaceId);
@@ -1272,7 +1265,28 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
         })());
     }
 
-    if (chat.is_autopilot_active) {
+    let nexusHandled = false;
+    try {
+        const nexus = await dispatchPublishedNexusMessage({
+            workspaceId,
+            chatId: chat.id,
+            message: content,
+            sourceMessageId: message.id,
+            instanceName,
+            metadata: {
+                platform: 'whatsapp',
+                messageType: message.type,
+                selectedOptionId: message.metadata?.interactiveSelectionId,
+            },
+            adapters: () => createNexusChatAdapters({ workspaceId, chatId: chat.id, instanceName }),
+        });
+        nexusHandled = nexus.handled;
+        if (nexusHandled) console.log(`[NEXUS_MESSAGE] Message ${message.id} handled by a native Nexus flow.`);
+    } catch (error) {
+        console.error('[NEXUS_MESSAGE] Failed to dispatch inbound message:', error);
+    }
+
+    if (chat.is_autopilot_active && !nexusHandled) {
         console.log(`[WEBHOOK_MSG_UPSERT] Scheduling Autopilot for chat ${chat.id}`);
         const autopilotTask = shouldEnqueueJob('ai_autopilot_process')
             ? enqueueAiAutopilotProcess({
@@ -1293,7 +1307,7 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
                 );
             })();
         tasks.push(autopilotTask);
-    } else {
+    } else if (!nexusHandled) {
         console.log(`[WEBHOOK_MSG_UPSERT] Autopilot SKIPPED (Inactive) for chat ${chat.id}`);
     }
 
@@ -1468,7 +1482,6 @@ async function handleMessagesUpsert(payload: any) {
     ) ?? new Date();
 
     const messageCreatedAt = new Date(Math.min(rawMessageCreatedAt.getTime(), Date.now()));
-    const isLiveInbound = isRecentInboundEvent(messageCreatedAt);
 
     // Log payload for incoming messages as requested
     console.log('[WEBHOOK_MSG_UPSERT] Incoming message received.', {
@@ -1512,6 +1525,7 @@ async function handleMessagesUpsert(payload: any) {
             : 'Contato compartilhado')
         : '';
     const interactiveText = extractEvolutionInteractiveResponseText(message);
+    const interactiveSelectionId = extractEvolutionInteractiveResponseId(message);
 
     content = pickFirstNonEmptyString(
         message.conversation,
@@ -1606,6 +1620,7 @@ async function handleMessagesUpsert(payload: any) {
         fileName,
         duration: mediaDetails?.seconds,
         thumbnail: normalizeInboundThumbnail((mediaDetails as any)?.thumbnail || (mediaDetails as any)?.jpegThumbnail),
+        interactiveSelectionId,
     };
 
     if (locationDetails) {
@@ -1698,19 +1713,21 @@ async function handleMessagesUpsert(payload: any) {
             } else if (recentChat.status === 'encerrados') {
                 const closedAt = recentChat.closed_at ? new Date(recentChat.closed_at).getTime() : 0;
                 const msgTime = messageCreatedAt.getTime();
+                const isDelayedMessage = shouldAppendInboundToClosedWhatsappChat({
+                    closedAt,
+                    messageCreatedAt: msgTime,
+                });
 
-                // Messages timestamped before the close are delayed/replayed events and belong to
-                // the closed chat. New inbound messages after closing must open a fresh queue chat.
-                if (shouldAppendInboundToClosedWhatsappChat({ closedAt, messageCreatedAt: msgTime })) {
-                    chat = recentChat;
-                    console.log(`[WEBHOOK_MSG_UPSERT] Mensagem atrasada apos encerramento. Reutilizando chat encerrado ${chat.id}.`);
-                } else if (!isLiveInbound) {
-                    // Historical/replayed events must not reopen queue chats.
+                if (isDelayedMessage) {
+                    // Eventos atrasados, com timestamp anterior ao encerramento,
+                    // pertencem apenas ao historico e nao reabrem a conversa.
                     chat = recentChat;
                     shouldRunRealtimeSideEffects = false;
-                    sideEffectSkipReason = `stale_inbound_after_close_${recentChat.id}`;
-                    console.log(`[WEBHOOK_MSG_UPSERT] Evento stale apos encerramento. Mantendo no chat encerrado ${chat.id}.`);
+                    sideEffectSkipReason = `delayed_inbound_after_close_${recentChat.id}`;
                 } else {
+                    // Uma mensagem realmente nova inicia outro atendimento.
+                    // Reutilizar o chat encerrado herdava tag, setor e contexto
+                    // da conversa anterior antes de o cliente escolher uma opção.
                     requiresNewChat = true;
                 }
             } else {
@@ -1784,11 +1801,12 @@ async function handleMessagesUpsert(payload: any) {
             type: Message['type'];
             from_me: boolean;
             created_at: string | Date;
+            metadata: MessageMetadata | string | null;
         } | null = null;
 
         if (replyContext.messageIdFromApi) {
             const replyReferenceRes = await client.query(
-                `SELECT m.id, m.chat_id, m.content, m.type, m.from_me, m.created_at
+                `SELECT m.id, m.chat_id, m.content, m.type, m.from_me, m.created_at, m.metadata
                  FROM messages m
                  JOIN chats c ON c.id = m.chat_id
                  WHERE m.workspace_id = $1
@@ -1811,6 +1829,8 @@ async function handleMessagesUpsert(payload: any) {
 
             metadata = {
                 ...metadata,
+                interactiveSelectionId: metadata.interactiveSelectionId
+                    || resolveEvolutionInteractiveSelectionFromQuotedMessage(content, replyReferenceRow?.metadata),
                 replyToMessageIdFromApi: replyContext.messageIdFromApi,
                 ...(replyContext.participantJid ? { replyToParticipantJid: replyContext.participantJid } : {}),
                 ...(replyReferenceRow?.id ? { replyToMessageId: replyReferenceRow.id } : {}),

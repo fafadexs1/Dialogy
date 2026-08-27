@@ -196,7 +196,7 @@ export async function readPresenceSnapshots(): Promise<WorkspacePresenceSnapshot
     for (const workspaceId of workspaceIds) {
       const key = workspaceKey(workspaceId);
       await client.zremrangebyscore(key, '-inf', cutoff);
-      const flat = await client.zrange(key, 0, -1, 'WITHSCORES');
+      const flat = await client.zrange(key, 0, '-1', 'WITHSCORES');
 
       const online: Array<{ userId: string; lastSeen: Date }> = [];
       for (let i = 0; i < flat.length; i += 2) {

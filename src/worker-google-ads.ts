@@ -7,11 +7,15 @@ try {
 import { randomUUID } from 'crypto';
 
 import { db } from '@/lib/db';
-import { processPendingGoogleAdsConversionExports } from '@/services/google-ads/conversion-upload';
+import {
+  checkSubmittedGoogleAdsConversionRequests,
+  processPendingGoogleAdsConversionExports,
+} from '@/services/google-ads/conversion-upload';
 
 const workerId = `google-ads-${randomUUID()}`;
 const batchSize = Math.max(1, Number(process.env.GOOGLE_ADS_EXPORT_BATCH_SIZE || 25));
 const batchIntervalMs = Math.max(5_000, Number(process.env.GOOGLE_ADS_EXPORT_INTERVAL_MS || 60_000));
+const statusCheckIntervalMs = Math.max(10_000, Number(process.env.GOOGLE_ADS_STATUS_CHECK_INTERVAL_MS || 30_000));
 const leaseMs = Math.max(30_000, Number(process.env.GOOGLE_ADS_EXPORT_LEASE_MS || 120_000));
 const retentionIntervalMs = 6 * 60 * 60 * 1000;
 
@@ -30,8 +34,7 @@ async function runScheduledTask(label: string, task: () => Promise<void>) {
 }
 
 /**
- * Drena a fila ate nao sobrar nada elegivel, para que um acumulo nao leve
- * varios ciclos para escoar.
+ * Drena a fila ate nao sobrar nada pendente elegivel, enviando para a Data Manager API (events:ingest).
  */
 async function drainConversionQueue() {
   for (let round = 0; round < 20; round += 1) {
@@ -39,11 +42,28 @@ async function drainConversionQueue() {
     if (result.processed === 0) return;
 
     console.log(
-      `[GOOGLE_ADS_WORKER] lote processado=${result.processed} enviado=${result.sent} ` +
+      `[GOOGLE_ADS_WORKER] lote processado=${result.processed} submetido=${result.submitted} ` +
         `falhou=${result.failed} descartado=${result.dead}`
     );
 
     if (result.processed < batchSize) return;
+  }
+}
+
+/**
+ * Consulta o status assincrono dos jobs em `submitted` via requestStatus:retrieve da Data Manager API.
+ */
+async function drainSubmittedCheckQueue() {
+  for (let round = 0; round < 20; round += 1) {
+    const result = await checkSubmittedGoogleAdsConversionRequests(batchSize, { workerId, leaseMs });
+    if (result.checked === 0) return;
+
+    console.log(
+      `[GOOGLE_ADS_WORKER] diagnostico verificado=${result.checked} confirmados=${result.confirmed} ` +
+        `processando=${result.processing} falhou=${result.failed} descartado=${result.dead}`
+    );
+
+    if (result.checked < batchSize) return;
   }
 }
 
@@ -64,11 +84,17 @@ async function purgeExpiredAdClicks() {
 }
 
 async function daemon() {
-  console.log(`[GOOGLE_ADS_WORKER] worker ${workerId} iniciado (intervalo=${batchIntervalMs}ms)`);
+  console.log(
+    `[GOOGLE_ADS_WORKER] worker ${workerId} iniciado (ingestao=${batchIntervalMs}ms, diagnostico=${statusCheckIntervalMs}ms)`
+  );
 
   const queueTimer = setInterval(
-    () => void runScheduledTask('fila de conversoes', drainConversionQueue),
+    () => void runScheduledTask('fila de ingestao (events:ingest)', drainConversionQueue),
     batchIntervalMs
+  );
+  const statusTimer = setInterval(
+    () => void runScheduledTask('diagnostico assincrono (requestStatus:retrieve)', drainSubmittedCheckQueue),
+    statusCheckIntervalMs
   );
   const retentionTimer = setInterval(
     () => void runScheduledTask('expurgo de cliques', purgeExpiredAdClicks),
@@ -77,6 +103,7 @@ async function daemon() {
 
   const shutdown = async () => {
     clearInterval(queueTimer);
+    clearInterval(statusTimer);
     clearInterval(retentionTimer);
     const deadline = Date.now() + 30_000;
     while (running && Date.now() < deadline) {
@@ -89,7 +116,8 @@ async function daemon() {
   process.once('SIGINT', () => void shutdown());
   process.once('SIGTERM', () => void shutdown());
 
-  await runScheduledTask('fila de conversoes', drainConversionQueue);
+  await runScheduledTask('fila de ingestao (events:ingest)', drainConversionQueue);
+  await runScheduledTask('diagnostico assincrono (requestStatus:retrieve)', drainSubmittedCheckQueue);
   await runScheduledTask('expurgo de cliques', purgeExpiredAdClicks);
 }
 

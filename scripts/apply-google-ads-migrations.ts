@@ -8,6 +8,8 @@ import { Pool } from 'pg';
 const MIGRATIONS = [
   '20260726130000_google_ads_tracking_hardening',
   '20260726140000_google_ads_customer_match_lists',
+  '20260819120000_google_data_manager_api',
+  '20260819130000_google_ads_data_manager_views',
 ];
 
 const APPLY = process.argv.includes('--apply');

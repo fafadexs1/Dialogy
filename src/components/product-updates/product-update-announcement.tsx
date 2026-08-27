@@ -61,7 +61,6 @@ export function ProductUpdateAnnouncementModal() {
       }
       return;
     }
-    if (process.env.NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED !== 'true') return;
     const next = await getUnreadProductUpdateAnnouncementAction();
     if (!next) return;
     const receiptKey = productUpdateReadReceiptKey(userId, next.id);
@@ -81,7 +80,6 @@ export function ProductUpdateAnnouncementModal() {
 
   useEffect(() => {
     if (isProductUpdatesLocalPreviewHostname(window.location.hostname)) return;
-    if (process.env.NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED !== 'true') return;
     const accessToken = session?.access_token;
     const userId = user?.id;
     if (!accessToken || !userId) return;

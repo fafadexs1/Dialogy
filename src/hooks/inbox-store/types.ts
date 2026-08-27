@@ -1,9 +1,24 @@
 import type { Chat, Contact, Message } from '@/lib/types';
+import {
+  EMPTY_INBOX_STATUS_PAGINATION,
+  type InboxTabId,
+  type InboxStatusPagination,
+  type InboxTabCounts,
+  type InboxQueueScope,
+} from '@/lib/inbox-pagination';
 
 export type MessagesRecord = Record<string, Message[]>;
 export type TimestampRecord = Record<string, string | null>;
 export type IdRecord = Record<string, string | null>;
 export type BooleanRecord = Record<string, boolean>;
+
+export type AudioTranscriptionJob = {
+  status: 'transcribing' | 'completed' | 'error';
+  transcription?: string | null;
+  error?: string | null;
+};
+
+export type AudioTranscriptionRecord = Record<string, AudioTranscriptionJob>;
 
 export type InboxState = {
   chats: Chat[];
@@ -16,6 +31,9 @@ export type InboxState = {
   oldestMessageIdByChat: IdRecord;
   hasMoreHistoryByChat: BooleanRecord;
   hasMoreChats: boolean;
+  inboxCounts: InboxTabCounts | null;
+  chatPagination: InboxStatusPagination;
+  audioTranscriptions: AudioTranscriptionRecord;
   setInitialData: (payload: {
     chats: Chat[];
     selectedChatId: string | null;
@@ -26,10 +44,16 @@ export type InboxState = {
     oldestMessageId: string | null;
     hasMoreHistory: boolean;
     hasMoreChats: boolean;
+    inboxCounts?: InboxTabCounts;
+    chatPagination?: InboxStatusPagination;
   }) => void;
   setSelectedChatId: (chatId: string | null) => void;
   upsertChats: (chats: Chat[], lastSyncChats?: string | null) => void;
   appendChats: (chats: Chat[]) => void;
+  replaceChatsForStatus: (status: Chat['status'], chats: Chat[]) => void;
+  replaceChatsForQueueScope: (scope: InboxQueueScope, chats: Chat[]) => void;
+  setInboxCounts: (counts: InboxTabCounts) => void;
+  setChatPagination: (tab: InboxTabId, pagination: InboxStatusPagination[InboxTabId]) => void;
   setHasMoreChats: (hasMore: boolean) => void;
   updateChatContact: (contact: Contact) => void;
   setMessagesForChat: (chatId: string, messages: Message[], lastSync?: string | null, oldestDate?: string | null, oldestId?: string | null, hasMoreHistory?: boolean, replace?: boolean) => void;
@@ -40,6 +64,7 @@ export type InboxState = {
   removeMessagesForChat: (chatId: string, predicate: (message: Message) => boolean) => void;
   markMessagesAsReadByRecipient: (chatId: string, upToDate: string) => void;
   updateMessage: (chatId: string, messageId: string, updates: Partial<Message>) => void;
+  setAudioTranscription: (messageId: string, job: AudioTranscriptionJob | null) => void;
   replaceOptimisticMessage: (chatId: string, optimisticId: string, realMessage: Message) => void;
   updateChat: (chatId: string, updates: Partial<Chat>) => void;
   removeChat: (chatId: string) => void;
@@ -59,5 +84,13 @@ export const baseInboxState = {
   oldestMessageIdByChat: {} as IdRecord,
   hasMoreHistoryByChat: {} as BooleanRecord,
   hasMoreChats: false,
+  inboxCounts: null as InboxTabCounts | null,
+  chatPagination: {
+    robo: { ...EMPTY_INBOX_STATUS_PAGINATION.robo },
+    gerais: { ...EMPTY_INBOX_STATUS_PAGINATION.gerais },
+    atendimentos: { ...EMPTY_INBOX_STATUS_PAGINATION.atendimentos },
+    encerrados: { ...EMPTY_INBOX_STATUS_PAGINATION.encerrados },
+  },
+  audioTranscriptions: {} as AudioTranscriptionRecord,
   drafts: {} as Record<string, string>,
 };

@@ -3,13 +3,17 @@ import { cookies } from 'next/headers';
 
 import { baseCookieOptions, buildSessionCookieOptions } from '@/lib/supabase/cookie-options';
 import { decodeSupabaseJwt, getSupabaseAccessTokenFromCookies, mapPayloadToSupabaseUser } from '@/lib/auth/token';
+import { resolveSupabasePublicKey } from '@/lib/supabase/public-key';
 
 export const createClient = async () => {
   const cookieStore = await cookies();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    resolveSupabasePublicKey({
+      anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      publishableKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY,
+    })!,
     {
       cookieOptions: baseCookieOptions,
       cookies: {
@@ -22,7 +26,7 @@ export const createClient = async () => {
               const mergedOptions = buildSessionCookieOptions(options);
               cookieStore.set({ name, value, ...mergedOptions });
             });
-          } catch (error) {
+          } catch {
             // The `set` method was called from a Server Component without
             // a mutable cookie store. Middleware will refresh the session.
           }

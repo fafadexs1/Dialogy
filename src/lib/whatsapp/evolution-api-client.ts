@@ -60,7 +60,7 @@ function buildBrazilianNumberFallback(
 export async function fetchEvolutionAPI(
   endpoint: string,
   apiConfig: EvolutionApiClientConfig,
-  options: RequestInit = {}
+  options: RequestInit & { silent?: boolean } = {}
 ): Promise<any> {
   if (!apiConfig.api_url || !apiConfig.api_key) {
     throw new Error('A configuracao da API (URL e Chave) e necessaria.');
@@ -151,7 +151,9 @@ export async function fetchEvolutionAPI(
     const text = await response.text();
     return text ? JSON.parse(text) : null;
   } catch (error) {
-    console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
+    if (!options.silent) {
+      console.error(`[EVO_API_FETCH] Erro de rede ou sistema ao chamar a API Evolution. URL: ${url}. Erro:`, error);
+    }
     throw error;
   }
 }

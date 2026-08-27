@@ -27,6 +27,29 @@ export function buildDeterministicOrderId(eventName: string, anchorId: string): 
   return `${eventName}:${anchorId}`;
 }
 
+export function buildDeterministicTransactionId(
+  workspaceId: string,
+  eventName: string,
+  anchorId: string
+): string {
+  return `dialogy:${workspaceId}:${eventName}:${anchorId}`;
+}
+
+export function extractNumericProductDestinationId(
+  rawConversionAction: string | null | undefined
+): string | null {
+  if (!rawConversionAction) return null;
+  const raw = String(rawConversionAction).trim();
+  let target = raw;
+  if (target.includes('conversionActions/')) {
+    target = target.split('conversionActions/')[1] || target;
+  } else if (target.includes('/')) {
+    target = target.split('/').pop() || target;
+  }
+  const digits = target.replace(/\D/g, '');
+  return digits || null;
+}
+
 export type EnqueueResult = { enqueued: boolean; reason?: string };
 
 type EnqueueParams = {
@@ -37,13 +60,13 @@ type EnqueueParams = {
   currency?: string | null;
   dealId?: string | null;
   orderId?: string | null;
+  transactionId?: string | null;
   executor?: Queryable;
 };
 
 /**
  * Enfileira uma conversao para o contato, desde que ele tenha vindo de um
- * anuncio. Silencioso quando nao ha atribuicao ou quando a acao de conversao
- * ainda nao foi configurada: enfileirar nesses casos so geraria dead-letter.
+ * anuncio e seja elegivel para export (protegendo o Smart Bidding).
  */
 export async function enqueueContactConversionExport(params: EnqueueParams): Promise<EnqueueResult> {
   const column = conversionActionColumnForEvent(params.eventName);
@@ -51,13 +74,16 @@ export async function enqueueContactConversionExport(params: EnqueueParams): Pro
   if (!params.workspaceId || !params.contactId) return { enqueued: false, reason: 'parametros_incompletos' };
 
   const executor = params.executor ?? db;
-  const orderId =
-    params.orderId || buildDeterministicOrderId(params.eventName, params.dealId || params.contactId);
+  const anchorId = params.dealId || params.contactId;
+  const orderId = params.orderId || buildDeterministicOrderId(params.eventName, anchorId);
+  const transactionId =
+    params.transactionId || buildDeterministicTransactionId(params.workspaceId, params.eventName, anchorId);
 
   const result = await executor.query(
     `
     INSERT INTO conversion_exports (
       workspace_id, ad_attribution_id, event_name, conversion_action_id,
+      product_destination_id, google_ads_customer_id, transaction_id,
       conversion_value, currency, status, kind, deal_id, order_id, payload
     )
     SELECT
@@ -65,6 +91,9 @@ export async function enqueueContactConversionExport(params: EnqueueParams): Pro
       aa.id,
       $3,
       NULLIF(w.${column}, ''),
+      NULLIF(regexp_replace(regexp_replace(w.${column}, '^.*/', ''), '\\D', '', 'g'), ''),
+      NULLIF(regexp_replace(w.google_ads_customer_id, '\\D', '', 'g'), ''),
+      $8,
       $4,
       $5,
       'pending',
@@ -77,16 +106,18 @@ export async function enqueueContactConversionExport(params: EnqueueParams): Pro
         'chat_id', aa.chat_id,
         'message_id', aa.message_id,
         'ad_click_id', aa.ad_click_id,
-        'deal_id', $6
+        'deal_id', $6,
+        'transaction_id', $8
       )
     FROM ad_attributions aa
     JOIN workspaces w ON w.id = aa.workspace_id::uuid
     WHERE aa.workspace_id = $1
       AND aa.contact_id = $2
+      AND COALESCE(aa.export_eligible, true) = true
       AND NULLIF(w.${column}, '') IS NOT NULL
     ORDER BY aa.attributed_at DESC
     LIMIT 1
-    ON CONFLICT (ad_attribution_id, event_name) WHERE kind = 'conversion' DO NOTHING
+    ON CONFLICT (workspace_id, event_name, transaction_id) WHERE kind = 'conversion' DO NOTHING
     `,
     [
       params.workspaceId,
@@ -96,6 +127,7 @@ export async function enqueueContactConversionExport(params: EnqueueParams): Pro
       params.currency || 'BRL',
       params.dealId ?? null,
       orderId,
+      transactionId,
     ]
   );
 
@@ -112,6 +144,7 @@ type AdjustmentParams = {
   value?: number | null;
   currency?: string | null;
   dealId?: string | null;
+  transactionId?: string | null;
 };
 
 /**
@@ -122,12 +155,16 @@ export async function enqueueConversionAdjustment(params: AdjustmentParams): Pro
   const column = conversionActionColumnForEvent(params.eventName);
   if (!column) return { enqueued: false, reason: 'evento_desconhecido' };
 
-  const orderId = buildDeterministicOrderId(params.eventName, params.dealId || params.contactId);
+  const anchorId = params.dealId || params.contactId;
+  const orderId = buildDeterministicOrderId(params.eventName, anchorId);
+  const transactionId =
+    params.transactionId || buildDeterministicTransactionId(params.workspaceId, params.eventName, anchorId);
 
   const result = await db.query(
     `
     INSERT INTO conversion_exports (
       workspace_id, ad_attribution_id, event_name, conversion_action_id,
+      product_destination_id, google_ads_customer_id, transaction_id,
       conversion_value, currency, status, kind, adjustment_type, deal_id, order_id, payload
     )
     SELECT
@@ -135,6 +172,9 @@ export async function enqueueConversionAdjustment(params: AdjustmentParams): Pro
       original.ad_attribution_id,
       original.event_name,
       original.conversion_action_id,
+      original.product_destination_id,
+      original.google_ads_customer_id,
+      $6,
       $4,
       $5,
       'pending',
@@ -145,17 +185,18 @@ export async function enqueueConversionAdjustment(params: AdjustmentParams): Pro
       jsonb_build_object(
         'event_name', original.event_name,
         'adjustment_type', $3,
-        'adjusts_export_id', original.id
+        'adjusts_export_id', original.id,
+        'transaction_id', $6
       )
     FROM conversion_exports original
     WHERE original.workspace_id = $1
-      AND original.order_id = $2
+      AND (original.transaction_id = $6 OR original.order_id = $2)
       AND original.kind = 'conversion'
-      AND original.status = 'sent'
+      AND original.status IN ('sent', 'submitted', 'confirmed')
     ORDER BY original.created_at DESC
     LIMIT 1
     `,
-    [params.workspaceId, orderId, params.adjustmentType, params.value ?? 0, params.currency || 'BRL']
+    [params.workspaceId, orderId, params.adjustmentType, params.value ?? 0, params.currency || 'BRL', transactionId]
   );
 
   return (result.rowCount ?? 0) > 0

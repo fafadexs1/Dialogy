@@ -5,6 +5,19 @@ import {
   recordAutopilotRunMetrics,
   recordAutopilotStageMetrics,
 } from '@/lib/observability/metrics';
+import {
+  createOrReuseAgentTask,
+  finishAgentTask,
+  getAgentTaskExecution,
+  recordAgentTaskEvent,
+  resolveAgentTaskInterruption,
+} from '@/services/agent-runtime/task-store';
+import { getAgentDomainPack } from '@/services/agent-runtime/domain-packs';
+import type {
+  AgentDomainPack,
+  AgentTaskExecution,
+  AgentTaskStatus,
+} from '@/services/agent-runtime/types';
 
 export type OrchestratorBudget = {
   maxTotalMs: number;
@@ -18,6 +31,9 @@ export type OrchestratorRunHandle = {
   id: string;
   workspaceId: string;
   chatId?: string | null;
+  taskExecutionId?: string | null;
+  domainPack?: AgentDomainPack | null;
+  taskExecution?: AgentTaskExecution | null;
   startedAt: number;
   budget: OrchestratorBudget;
 };
@@ -245,7 +261,61 @@ export async function startOrchestratorRun(input: StartRunInput): Promise<Orches
     ]
   );
 
+  const requestedDomainPackId = typeof input.metadata?.domainPackId === 'string'
+    ? input.metadata.domainPackId
+    : null;
+  const publishedDomainPack = requestedDomainPackId
+    ? await getAgentDomainPack({
+        workspaceId: input.workspaceId,
+        id: requestedDomainPackId,
+        publishedOnly: true,
+      })
+    : null;
+  const task = await createOrReuseAgentTask({
+    workspaceId: input.workspaceId,
+    chatId: input.chatId ?? null,
+    orchestratorRunId: id,
+    systemAgentId: input.systemAgentId ?? null,
+    autopilotConfigId: input.autopilotConfigId ?? null,
+    domainPackId: publishedDomainPack?.id || null,
+    goal: typeof input.metadata?.goal === 'string' ? input.metadata.goal : null,
+    metadata: {
+      ...(input.metadata || {}),
+      domainPackId: publishedDomainPack?.id || null,
+      domainPackVersion: publishedDomainPack?.version || null,
+    },
+  });
+  run.taskExecutionId = task?.id ?? null;
+  run.domainPack = publishedDomainPack;
+  run.taskExecution = task;
+  if (task?.activeInterruptionId) {
+    await resolveAgentTaskInterruption({
+      taskExecutionId: task.id,
+      workspaceId: task.workspaceId,
+      interruptionId: task.activeInterruptionId,
+    });
+    run.taskExecution = await getAgentTaskExecution({
+      workspaceId: task.workspaceId,
+      taskId: task.id,
+    });
+  }
+
   return run;
+}
+
+function shouldCheckpointAgentTask(kind: string): boolean {
+  return new Set([
+    'intent_resolution',
+    'agent_task_plan',
+    'workflow_plan',
+    'procedure_runtime',
+    'tool_planner',
+    'response_validator',
+    'workflow_runtime',
+    'handoff',
+    'transfer_chat',
+    'close_chat',
+  ]).has(kind);
 }
 
 export async function recordOrchestratorEvent(input: RecordEventInput) {
@@ -276,6 +346,21 @@ export async function recordOrchestratorEvent(input: RecordEventInput) {
     recordDecisionMetric(input);
   } catch (error) {
     console.error('[ORCHESTRATOR_RUNTIME] Failed to record decision metric:', error);
+  }
+
+  if (shouldCheckpointAgentTask(input.kind)) {
+    await recordAgentTaskEvent(
+      input.run.taskExecutionId,
+      {
+        eventType: input.kind,
+        status: input.status,
+        payload: input.payload || {},
+      },
+      {
+        workspaceId: input.run.workspaceId,
+        orchestratorRunId: input.run.id,
+      },
+    );
   }
 }
 
@@ -313,6 +398,19 @@ export async function finishOrchestratorRun(input: FinishRunInput) {
       input.error ?? null,
     ]
   );
+
+  if (input.status === 'error' && input.run.taskExecutionId) {
+    await finishAgentTask({
+      taskExecutionId: input.run.taskExecutionId,
+      workspaceId: input.run.workspaceId,
+      orchestratorRunId: input.run.id,
+      status: 'failed',
+      metadata: {
+        source: 'orchestrator_run_finish',
+        error: input.error || null,
+      },
+    });
+  }
 
   recordAutopilotRunMetrics({
     status: input.status,
@@ -440,4 +538,42 @@ export async function recordOrchestratorToolCall(input: {
       Boolean(input.requiresHumanApproval),
     ]
   );
+
+  const taskExecutionId = input.run?.taskExecutionId || (
+    input.chatId
+      ? (await getAgentTaskExecution({
+          workspaceId: input.workspaceId,
+          chatId: input.chatId,
+        }))?.id || null
+      : null
+  );
+  if (taskExecutionId) {
+    const terminalTaskStatus: AgentTaskStatus | undefined = input.toolName === 'transfer_chat' && input.status === 'success'
+      ? 'handoff'
+      : input.toolName === 'close_chat' && input.status === 'success'
+        ? 'completed'
+        : undefined;
+    // Every tool result becomes a task checkpoint. Terminal tools additionally
+    // close the objective through the same deterministic state transition.
+    await recordAgentTaskEvent(
+      taskExecutionId,
+      {
+        eventType: 'tool_execution',
+        status: input.status,
+        taskStatus: terminalTaskStatus,
+        payload: {
+          toolName: input.toolName,
+          toolVersion: input.toolVersion || null,
+          riskLevel: input.riskLevel || null,
+          output: input.output || null,
+          error: input.error || null,
+          durationMs: input.durationMs ?? null,
+        },
+      },
+      {
+        workspaceId: input.workspaceId,
+        orchestratorRunId: input.run?.id || null,
+      },
+    );
+  }
 }

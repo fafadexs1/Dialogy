@@ -15,11 +15,11 @@ describe('workflow catalog/runtime parity', () => {
     expect(unsupported).toEqual([]);
   });
 
-  it('keeps advanced nodes hidden until their runtime is complete', () => {
+  it('shows completed advanced nodes and keeps unfinished runtimes hidden', () => {
     const visible = new Set(listStableWorkflowNodeManifests().map((manifest) => manifest.type));
-    expect(visible.has('data.code')).toBe(false);
+    expect(visible.has('data.code')).toBe(true);
     expect(visible.has('ai.supervisor')).toBe(false);
     expect(visible.has('ai.planner')).toBe(false);
-    expect(visible.has('tool.http')).toBe(false);
+    expect(visible.has('tool.http')).toBe(true);
   });
 });

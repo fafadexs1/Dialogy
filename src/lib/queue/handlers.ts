@@ -3,6 +3,7 @@ import { logAction } from '@/lib/observability/logger';
 import { executeMarketingAutoClose, executeQueueAutoClose } from '@/services/chat/auto-close';
 import { dispatchMessageToWebhooksById } from '@/services/webhook-dispatcher';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
+import { requireProviderMessageId } from '@/services/whatsapp/template-send-contract';
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
 import { reconcileOutboundMessage } from '@/services/whatsapp/reconcile-outbound';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
@@ -16,6 +17,7 @@ import type {
   WebhookOutboundPayload,
   AnalyticsEventPayload,
   NotificationPayload,
+  NexusInternalEventPayload,
   AiTaskPayload,
   EvolutionWebhookProcessPayload,
 } from './types';
@@ -210,8 +212,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       );
     }
 
-    const messageIdFromApi =
-      apiResponse?.key?.id ?? apiResponse?.message_id ?? apiResponse?.id ?? null;
+    const messageIdFromApi = requireProviderMessageId(apiResponse);
 
     await db.query(
       `UPDATE messages
@@ -254,6 +255,16 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       marketingSentAt: new Date(payload.marketingSentAt),
       autoCloseMs: payload.autoCloseMs,
     });
+  },
+  nexus_internal_event: async (job) => {
+    const payload = job.payload as NexusInternalEventPayload;
+    if (!payload?.workspaceId || !payload.eventName || !payload.eventId) {
+      throw new Error('Invalid nexus_internal_event payload.');
+    }
+    const { executeQueuedDialogyNexusInternalEvent } = await import(
+      '@/modules/nexus/services/dialogy-event-dispatcher'
+    );
+    await executeQueuedDialogyNexusInternalEvent(payload);
   },
   analytics_event: async (job) => {
     const payload = job.payload as AnalyticsEventPayload;

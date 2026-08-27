@@ -63,6 +63,7 @@ import {
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { createClient } from '@/lib/supabase/client';
+import { createUniqueMediaFileName, createUniqueMediaStoragePath } from '@/lib/media-file-name';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
@@ -1238,17 +1239,15 @@ export default function ChatPanel({
                 mediatype = 'video';
                 thumbnail = await generateVideoThumbnail(file);
             } else if (file.type.startsWith('audio/') || isAudioExt) {
-                mediatype = 'audio' as any;
+                mediatype = 'audio';
             }
 
             const finalMimeType = file.type || (isAudioExt ? 'audio/mpeg' : file.type) || 'application/octet-stream';
 
-            // Generate unique filename for clipboard-pasted images (which have generic names like 'image.png')
-            // Also ensures uniqueness for any file sent in sequence
-            const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-            const fileExtension = ext ? `.${ext}` : '';
-            const baseName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
-            const uniqueFileName = `${baseName}_${uniqueSuffix}${fileExtension}`;
+            // Keep the visible/provider filename unique as well as the Storage path.
+            // This matters when several files have the same browser name (or are
+            // pasted as the generic `image.png`) in the same send operation.
+            const uniqueFileName = createUniqueMediaFileName(file.name);
 
             return {
                 id: `${uniqueFileName}-${file.lastModified}`,
@@ -1625,92 +1624,121 @@ export default function ChatPanel({
 
         scrollToLatestMessage();
 
-        // Process in background (Fire-and-forget from UI perspective)
+        // Process in background (Fire-and-forget from UI perspective).
+        // Upload every object with its own path, then submit one server action
+        // for the batch. This avoids racing several send actions against the
+        // same chat while preserving an individual optimistic status per file.
         (async () => {
-            for (let i = 0; i < filesToSend.length; i++) {
-                const mf = filesToSend[i];
-                const optMsg = optimisticMessages[i];
-
-                try {
-                    const extension = mf.name.split('.').pop() || 'dat';
-                    const fileName = Date.now() + '_' + uuidv4() + '.' + extension;
-
-                    // 1. Upload
-                    const { publicUrl, error: uploadError } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
-
-                    if (uploadError || !publicUrl) {
-                        throw new Error(`Falha no upload de ${mf.name}: ${uploadError}`);
+            const markFailed = (index: number, errorMessage: string, notify = true) => {
+                const mf = filesToSend[index];
+                const optMsg = optimisticMessages[index];
+                console.error(`Error sending file ${mf.name}:`, errorMessage);
+                updateMessage(chatId, optMsg.id, {
+                    api_message_status: 'FAILED',
+                    metadata: {
+                        ...optMsg.metadata,
+                        send_error: errorMessage,
+                        send_error_details: {
+                            source: 'client_media_send',
+                            status: 'FAILED',
+                            reason: errorMessage,
+                            captured_at: new Date().toISOString(),
+                        },
                     }
+                });
 
-                    // 2. Send Action (Single File)
-                    const filePayload = [{
-                        base64: publicUrl,
-                        mimetype: mf.type,
-                        filename: mf.name,
-                        mediatype: mf.mediatype,
-                        thumbnail: mf.thumbnail,
-                        deleteAfterSend: true,
-                        storageBucket: 'temp-media',
-                        storagePath: fileName,
-                    }];
+                if (notify) {
+                    toast({
+                        title: 'Erro ao enviar ' + mf.name,
+                        description: errorMessage,
+                        variant: 'destructive'
+                    });
+                }
+            };
 
-                    const currentCaption = i === 0 ? captionForFirst : '';
+            const uploadedMedia: Array<{
+                index: number;
+                file: MediaFileType;
+                storagePath: string;
+                publicUrl: string;
+            }> = [];
 
-                    // Call backend action
-                    const result = await sendMediaAction(chatId, currentCaption, filePayload, tabId);
+            try {
+                for (let i = 0; i < filesToSend.length; i++) {
+                    const mf = filesToSend[i];
+                    const storagePath = createUniqueMediaStoragePath(mf.name);
 
-                    if (result.error) {
-                        throw new Error(result.error);
+                    try {
+                        const { publicUrl, error: uploadError } = await uploadFileToStorage(
+                            mf.file,
+                            'temp-media',
+                            storagePath,
+                        );
+
+                        if (uploadError || !publicUrl) {
+                            throw new Error(uploadError || 'Upload sem URL pública.');
+                        }
+
+                        uploadedMedia.push({ index: i, file: mf, storagePath, publicUrl });
+                    } catch (fileErr) {
+                        const errorMessage = fileErr instanceof Error
+                            ? `Falha no upload de ${mf.name}: ${fileErr.message}`
+                            : `Falha no upload de ${mf.name}.`;
+                        markFailed(i, errorMessage);
                     }
+                }
 
-                    // 3. Success (Replace optimistic message with real one or just update status)
-                    // If backend returns the created message, we replace it.
-                    if ((result as any).messages && (result as any).messages.length > 0) {
-                        const realMsg = (result as any).messages[0];
-                        // Ensure formattedDate is present for UI
-                        const formattedRealMsg = {
+                if (uploadedMedia.length === 0) return;
+
+                const firstUploadedIndex = uploadedMedia[0].index;
+                const mediaPayload = uploadedMedia.map(({ index, file, storagePath, publicUrl }) => ({
+                    base64: publicUrl,
+                    mimetype: file.type,
+                    filename: file.name,
+                    mediatype: file.mediatype,
+                    thumbnail: file.thumbnail,
+                    caption: index === firstUploadedIndex ? captionForFirst : '',
+                    deleteAfterSend: true,
+                    storageBucket: 'temp-media',
+                    storagePath,
+                }));
+
+                const result = await sendMediaAction(chatId, captionForFirst, mediaPayload, tabId);
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                const serverMessages = result.messages || [];
+                uploadedMedia.forEach(({ index }, position) => {
+                    const optMsg = optimisticMessages[index];
+                    const realMsg = serverMessages[position];
+
+                    if (realMsg) {
+                        replaceOptimisticMessage(chatId, optMsg.id, {
                             ...realMsg,
                             sender: optMsg.sender,
-                            formattedDate: formatMessageDate(new Date(realMsg.createdAt), workspaceTimezone)
-                        };
-                        replaceOptimisticMessage(chatId, optMsg.id, formattedRealMsg);
+                            formattedDate: formatMessageDate(new Date(realMsg.createdAt), workspaceTimezone),
+                        });
                     } else {
-                        // Just mark as sent if no object returned (shouldn't happen with current action)
                         updateMessage(chatId, optMsg.id, {
                             api_message_status: 'SENT',
                         });
                     }
-
-                } catch (fileErr: any) {
-                    console.error(`Error sending file ${mf.name}:`, fileErr);
-                    // Mark specific message as FAILED
-                    updateMessage(chatId, optMsg.id, {
-                        api_message_status: 'FAILED',
-                        metadata: {
-                            ...optMsg.metadata,
-                            send_error: fileErr.message || 'Falha no envio.',
-                            send_error_details: {
-                                source: 'client_media_send',
-                                status: 'FAILED',
-                                reason: fileErr.message || 'Falha no envio.',
-                                captured_at: new Date().toISOString(),
-                            },
-                        }
-                    });
-
-                    toast({
-                        title: 'Erro ao enviar ' + mf.name,
-                        description: fileErr.message || 'Falha no envio.',
-                        variant: 'destructive'
-                    });
-                }
+                });
+            } catch (batchErr) {
+                const errorMessage = batchErr instanceof Error ? batchErr.message : 'Falha no envio dos arquivos.';
+                uploadedMedia.forEach(({ index }) => markFailed(index, errorMessage, false));
+                toast({
+                    title: 'Erro ao enviar arquivos',
+                    description: errorMessage,
+                    variant: 'destructive',
+                });
+            } finally {
+                lastSendDraftRef.current = null;
+                onActionSuccess();
+                reportClientMetric('send_message', performance.now() - sendStart, { chatId, media: true });
             }
-
-            // Cleanup logic if needed
-            lastSendDraftRef.current = null;
-            onActionSuccess();
-            reportClientMetric('send_message', performance.now() - sendStart, { chatId, media: true });
-
         })();
     };
 
@@ -1725,7 +1753,7 @@ export default function ChatPanel({
         console.log(`[AUDIO_SEND] Received mimetype: ${mimetype}, using extension: ${audioExtension}`);
 
         // 1. Upload to Supabase Storage (Public Bucket)
-        const fileName = `audio_${Date.now()}.${audioExtension}`;
+        const fileName = createUniqueMediaStoragePath(`audio.${audioExtension}`, 'audio-media');
         const { publicUrl, error: uploadError } = await uploadFileToStorage(audioBlob, 'temp-media', fileName);
 
         if (uploadError || !publicUrl) {
@@ -1737,7 +1765,7 @@ export default function ChatPanel({
         // User requested: "leave file in public, send url, then delete file"
         // We pass publicUrl in the 'base64' field because the action expects a string there, 
         // and internal logic handles URLs if they start with http.
-        const audioFilename = `audio_gravado.${audioExtension}`;
+        const audioFilename = createUniqueMediaFileName(`audio_gravado.${audioExtension}`);
 
         const mediaPayload = [{
             base64: publicUrl,

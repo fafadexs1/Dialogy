@@ -44,8 +44,8 @@ const INTERNAL_GROUPS: Record<string, Pick<NativeAgentToolGroup, 'label' | 'desc
     description: 'Leitura e atualização dos dados do contato.',
   },
   sgp: {
-    label: 'SGP',
-    description: 'Contratos, faturas e operações do provedor.',
+    label: 'Sistema de gestão (SGP)',
+    description: 'Cadastros, contratos, cobranças e operações configuradas do negócio.',
   },
   other: {
     label: 'Outras ferramentas',

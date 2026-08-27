@@ -1,4 +1,3 @@
-import type { Genkit } from 'genkit';
 import { z } from 'zod';
 import { getAiModelRuntimeProvider, type AiModelRuntimeProvider } from '@/lib/ai-models';
 import { listModelCallableAgentToolDefinitions } from '@/services/agent-tools/catalog';
@@ -187,11 +186,10 @@ export function defineOpenAiCompatiblePrompt(
     openAICompatible,
   } = require('@genkit-ai/compat-oai') as typeof import('@genkit-ai/compat-oai');
 
-  const defineModel = (ai: Genkit, client: InstanceType<typeof import('openai').OpenAI>) => {
+  const defineModel = (client: InstanceType<typeof import('openai').OpenAI>) => {
     patchChatCompletionClient(client, provider, modelId, outputKind);
     const modelRef = compatOaiModelRef({ name: model });
-    defineCompatOpenAIModel({
-      ai,
+    return defineCompatOpenAIModel({
       name: modelRef.name,
       client,
       modelRef,
@@ -206,7 +204,7 @@ export function defineOpenAiCompatiblePrompt(
     name: provider === 'deepseek' ? 'deepseek' : 'openai',
     apiKey,
     ...(providerBaseUrl(provider) ? { baseURL: providerBaseUrl(provider) } : {}),
-    initializer: async (ai: Genkit, client: InstanceType<typeof import('openai').OpenAI>) => defineModel(ai, client),
+    initializer: async (client: InstanceType<typeof import('openai').OpenAI>) => [defineModel(client)],
   };
 
   const dynamicAi = genkit({

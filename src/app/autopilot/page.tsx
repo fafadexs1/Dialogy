@@ -31,7 +31,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -116,7 +116,10 @@ export default function AutopilotPage() {
       );
 
       if (result.success && result.id) {
-        toast({ title: 'Automação criada', description: 'Escolha um template para começar.' });
+        toast({
+          title: 'Agente criado',
+          description: 'Configure a identidade e as políticas do agente.',
+        });
         setIsCreateDialogOpen(false);
         router.push(`/autopilot/${result.id}`);
       } else {
@@ -147,17 +150,17 @@ export default function AutopilotPage() {
 
             <div className="space-y-2">
               <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                Suas automações de IA
+                Seus agentes autônomos
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                Monte fluxos com um agente ou uma equipe especializada, conectando modelos, memória, conhecimento, ferramentas e guardrails.
+                Gerencie identidade, conhecimento, ferramentas, políticas e desempenho. A construção visual dos fluxos fica no Nexus.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <Button onClick={openCreateDialog} size="lg" className="rounded-full px-6">
                 <Plus className="mr-2 h-4 w-4" />
-                Nova automação
+                Novo agente
               </Button>
               <Badge variant="outline" className="rounded-full px-4 py-2 text-xs">
                 Workspace: {workspace?.name || 'Sem nome'}
@@ -248,7 +251,7 @@ export default function AutopilotPage() {
                       <span>{agent.is_active ? 'Pronto para operar' : 'Aguardando ativação'}</span>
                     </div>
                     <span className="inline-flex items-center gap-1 font-medium text-primary transition-transform group-hover:translate-x-1">
-                      Configurar <ArrowRight className="h-4 w-4" />
+                      Configurar agente <ArrowRight className="h-4 w-4" />
                     </span>
                   </div>
                 </CardContent>
@@ -262,14 +265,16 @@ export default function AutopilotPage() {
                 <Bot className="h-10 w-10" />
               </div>
               <div className="space-y-2">
-                <h2 className="text-2xl font-semibold text-foreground">Nenhuma automação criada</h2>
+                <h2 className="text-2xl font-semibold text-foreground">
+                  Nenhum agente criado
+                </h2>
                 <p className="text-sm leading-6 text-muted-foreground">
-                  Crie a primeira automação e escolha entre agente único, equipe roteada ou canvas em branco.
+                  Crie o primeiro agente e configure sua identidade, conhecimento e regras operacionais.
                 </p>
               </div>
               <Button onClick={openCreateDialog} size="lg" className="rounded-full px-8">
                 <Plus className="mr-2 h-4 w-4" />
-                Criar primeira automação
+                Criar primeiro agente
               </Button>
             </CardContent>
           </Card>
@@ -279,9 +284,11 @@ export default function AutopilotPage() {
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl sm:max-w-[520px]">
           <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
-            <DialogTitle className="text-xl text-foreground">Nova automação de IA</DialogTitle>
+            <DialogTitle className="text-xl text-foreground">
+              Novo agente autônomo
+            </DialogTitle>
             <DialogDescription>
-              Defina o nome e a visibilidade. O template será escolhido no Flowbuilder.
+              Defina o nome e a visibilidade. O fluxo visual poderá ser criado depois no Nexus.
             </DialogDescription>
           </DialogHeader>
 

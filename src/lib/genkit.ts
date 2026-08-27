@@ -1,11 +1,13 @@
 import { genkit } from 'genkit';
-import { googleAI, gemini15Flash } from '@genkit-ai/googleai';
+import { googleAI } from '@genkit-ai/google-genai';
 import { normalizeGoogleAiModelId } from '@/lib/ai-models';
+
+const geminiFlashModel = googleAI.model('gemini-2.5-flash');
 
 // Initialize Genkit - This file should ONLY be used on the server
 const ai = genkit({
     plugins: [googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY })],
-    model: gemini15Flash,
+    model: geminiFlashModel,
 });
 
 export async function generateSummary(conversationText: string, apiKey?: string, modelName?: string): Promise<string> {
@@ -16,7 +18,7 @@ export async function generateSummary(conversationText: string, apiKey?: string,
     if (apiKey || normalizedModel) {
         localAi = genkit({
             plugins: [googleAI({ apiKey: apiKey || process.env.GOOGLE_GENAI_API_KEY })],
-            model: normalizedModel || gemini15Flash,
+            model: normalizedModel || geminiFlashModel,
         });
     }
 

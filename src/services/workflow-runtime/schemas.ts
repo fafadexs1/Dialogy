@@ -227,6 +227,7 @@ export const WorkflowExecutionSchema = z.object({
 export const AgentNodeConfigSchema = z.object({
   name: z.string().min(1),
   role: z.string().min(1),
+  useSelectedSystemAgent: z.boolean().default(true),
   persona: z.string().default(''),
   language: z.string().min(2).default('pt-BR'),
   objective: z.string().min(1),

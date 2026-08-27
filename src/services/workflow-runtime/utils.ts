@@ -74,6 +74,30 @@ export function mergeStatePatch(
   return next;
 }
 
+export function statePatchAtPath(path: string, value: unknown): Record<string, unknown> {
+  const blocked = new Set(['__proto__', 'prototype', 'constructor']);
+  const segments = path
+    .replace(/^\{\{\s*|\s*\}\}$/g, '')
+    .replace(/^\$\./, '')
+    .trim()
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0 || segments.some((segment) => blocked.has(segment))) return {};
+  const patch: Record<string, unknown> = {};
+  let cursor = patch;
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) {
+      cursor[segment] = structuredClone(value);
+      return;
+    }
+    const child: Record<string, unknown> = {};
+    cursor[segment] = child;
+    cursor = child;
+  });
+  return patch;
+}
+
 export function readPath(source: unknown, path: string): unknown {
   const normalized = path
     .replace(/^\{\{\s*|\s*\}\}$/g, '')

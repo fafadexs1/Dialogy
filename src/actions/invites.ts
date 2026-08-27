@@ -9,21 +9,41 @@ import { redirect } from 'next/navigation';
 import type { WorkspaceInvite } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
+import { normalizeInviteCode } from '@/lib/invite-code';
 
+export type CreateWorkspaceInviteState = {
+    success: boolean;
+    error: string | null;
+    code: string | null;
+    expiresAt: string | null;
+};
 
-export async function createWorkspaceInvite(prevState: any, formData: FormData): Promise<string | null> {
+type CreatedInvite = {
+    code: string;
+    expiresAt: Date;
+};
+
+async function createInviteRecord(formData: FormData): Promise<CreatedInvite | { error: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return "Usuário não autenticado.";
+    if (!user) return { error: "Usuário não autenticado." };
 
-    const workspaceId = formData.get('workspaceId') as string;
+    const workspaceId = String(formData.get('workspaceId') || '').trim();
     const expiresInSeconds = Number(formData.get('expiresIn'));
-    const maxUses = formData.get('maxUses') ? Number(formData.get('maxUses')) : null;
+    const maxUsesValue = String(formData.get('maxUses') || '').trim();
+    const maxUses = maxUsesValue ? Number(maxUsesValue) : null;
 
-    if (!workspaceId || !expiresInSeconds) return "Parâmetros inválidos.";
+    if (
+        !workspaceId
+        || !Number.isFinite(expiresInSeconds)
+        || expiresInSeconds <= 0
+        || (maxUses !== null && (!Number.isInteger(maxUses) || maxUses <= 0))
+    ) {
+        return { error: "Informe uma validade e um limite de usos válidos." };
+    }
 
     if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:invites:manage')) {
-        return "Você não tem permissão para criar convites.";
+        return { error: "Você não tem permissão para criar convites." };
     }
 
     try {
@@ -36,11 +56,34 @@ export async function createWorkspaceInvite(prevState: any, formData: FormData):
         );
 
         revalidatePath('/settings/workspace');
-        return null; // Success
+        return { code, expiresAt };
     } catch (error) {
         console.error("[CREATE_INVITE] Error:", error);
-        return "Falha no servidor ao criar o convite.";
+        return { error: "Falha no servidor ao criar o convite." };
     }
+}
+
+export async function createWorkspaceInvite(prevState: any, formData: FormData): Promise<string | null> {
+    const result = await createInviteRecord(formData);
+    return 'error' in result ? result.error : null;
+}
+
+export async function createWorkspaceInviteWithDetails(
+    prevState: CreateWorkspaceInviteState,
+    formData: FormData
+): Promise<CreateWorkspaceInviteState> {
+    const result = await createInviteRecord(formData);
+
+    if ('error' in result) {
+        return { success: false, error: result.error, code: null, expiresAt: null };
+    }
+
+    return {
+        success: true,
+        error: null,
+        code: result.code,
+        expiresAt: result.expiresAt.toISOString(),
+    };
 }
 
 export async function getWorkspaceInvites(workspaceId: string): Promise<{ invites: WorkspaceInvite[] | null, error?: string }> {
@@ -109,13 +152,18 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
         return { success: false, error: "Usuário não autenticado. Por favor, faça login novamente." };
     }
     const userId = user.id;
-    const inviteCode = (formData.get('inviteCode') as string)?.trim().toUpperCase();
+    const inviteCode = normalizeInviteCode(formData.get('inviteCode') as string);
+    const redirectToValue = String(formData.get('redirectTo') || '').trim();
+    const redirectTo = redirectToValue.startsWith('/') && !redirectToValue.startsWith('//')
+        ? redirectToValue
+        : '/inbox';
 
     if (!inviteCode) {
         return { success: false, error: "O código de convite é obrigatório." };
     }
 
     const client = await db.connect();
+    let joinedWorkspace = false;
     try {
         await client.query('BEGIN');
         const rejectInvite = async (error: string) => {
@@ -147,67 +195,72 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
         const { workspace_id: workspaceId, id: inviteId } = invite;
         await client.query('SELECT id FROM workspaces WHERE id = $1 FOR UPDATE', [workspaceId]);
 
-        const inviteUseRes = await client.query(
-            'SELECT COUNT(*)::int AS use_count FROM user_invites WHERE invite_id = $1',
-            [inviteId]
-        );
-        const inviteUseCount = Number(inviteUseRes.rows[0]?.use_count || 0);
-        if (invite.max_uses && inviteUseCount >= Number(invite.max_uses)) {
-            return rejectInvite("O limite de usos para este convite foi atingido.");
-        }
-
-        // --- BILLING: Check User Limits ---
-        const { checkLimit } = await import('@/lib/billing-logic');
-        // Count current users
-        const userCountRes = await client.query(
-            'SELECT COUNT(*) as count FROM user_workspace_roles WHERE workspace_id = $1',
-            [workspaceId]
-        );
-        const currentUserCount = parseInt(userCountRes.rows[0].count, 10);
-
-        const limitCheck = await checkLimit(workspaceId, 'users', currentUserCount);
-        if (!limitCheck.allowed) {
-            return rejectInvite(
-                `O limite de usuários do plano ${limitCheck.plan.toUpperCase()} (${limitCheck.limit}) foi atingido. Faça upgrade para aceitar mais membros.`
-            );
-        }
-        // ----------------------------------
-
-        // 2. Check if user is already a member
+        // 2. Check if user is already a member before billing. Reopening an
+        // invite must be idempotent and should never fail because the plan is full.
         const memberCheck = await client.query(
             'SELECT 1 FROM user_workspace_roles WHERE user_id = $1 AND workspace_id = $2', [userId, workspaceId]
         );
         if ((memberCheck.rowCount || 0) > 0) {
-            return rejectInvite("Você já é membro deste workspace.");
+            await client.query(
+                'UPDATE users SET last_active_workspace_id = $1 WHERE id = $2',
+                [workspaceId, userId]
+            );
+            await client.query('COMMIT');
+            joinedWorkspace = true;
+        } else {
+            const inviteUseRes = await client.query(
+                'SELECT COUNT(*)::int AS use_count FROM user_invites WHERE invite_id = $1',
+                [inviteId]
+            );
+            const inviteUseCount = Number(inviteUseRes.rows[0]?.use_count || 0);
+            if (invite.max_uses && inviteUseCount >= Number(invite.max_uses)) {
+                return rejectInvite("O limite de usos para este convite foi atingido.");
+            }
+
+            // --- BILLING: Check User Limits ---
+            const { checkLimit } = await import('@/lib/billing-logic');
+            const userCountRes = await client.query(
+                'SELECT COUNT(*) as count FROM user_workspace_roles WHERE workspace_id = $1',
+                [workspaceId]
+            );
+            const currentUserCount = parseInt(userCountRes.rows[0].count, 10);
+
+            const limitCheck = await checkLimit(workspaceId, 'users', currentUserCount);
+            if (!limitCheck.allowed) {
+                return rejectInvite(
+                    `O limite de usuários do plano ${limitCheck.plan.toUpperCase()} (${limitCheck.limit}) foi atingido. Faça upgrade para aceitar mais membros.`
+                );
+            }
+
+            // 3. Add user to the workspace with the default 'Member' role
+            const memberRoleRes = await client.query(
+                "SELECT id FROM roles WHERE workspace_id = $1 AND is_default = TRUE", [workspaceId]
+            );
+            if ((memberRoleRes.rowCount || 0) === 0) {
+                throw new Error("Default 'Member' role not found for this workspace.");
+            }
+            const memberRoleId = memberRoleRes.rows[0].id;
+
+            await client.query(
+                'INSERT INTO user_workspace_roles (user_id, workspace_id, role_id) VALUES ($1, $2, $3)',
+                [userId, workspaceId, memberRoleId]
+            );
+
+            // 4. Record the invite usage
+            await client.query(
+                'INSERT INTO user_invites (invite_id, user_id) VALUES ($1, $2)',
+                [inviteId, userId]
+            );
+
+            // 5. Set the joined workspace as the user's active workspace
+            await client.query(
+                'UPDATE users SET last_active_workspace_id = $1 WHERE id = $2',
+                [workspaceId, userId]
+            );
+
+            await client.query('COMMIT');
+            joinedWorkspace = true;
         }
-
-        // 3. Add user to the workspace with the default 'Member' role
-        const memberRoleRes = await client.query(
-            "SELECT id FROM roles WHERE workspace_id = $1 AND is_default = TRUE", [workspaceId]
-        );
-        if ((memberRoleRes.rowCount || 0) === 0) {
-            throw new Error("Default 'Member' role not found for this workspace.");
-        }
-        const memberRoleId = memberRoleRes.rows[0].id;
-
-        await client.query(
-            'INSERT INTO user_workspace_roles (user_id, workspace_id, role_id) VALUES ($1, $2, $3)',
-            [userId, workspaceId, memberRoleId]
-        );
-
-        // 4. Record the invite usage
-        await client.query(
-            'INSERT INTO user_invites (invite_id, user_id) VALUES ($1, $2)',
-            [inviteId, userId]
-        );
-
-        // 5. Set the joined workspace as the user's active workspace
-        await client.query(
-            'UPDATE users SET last_active_workspace_id = $1 WHERE id = $2',
-            [workspaceId, userId]
-        );
-
-        await client.query('COMMIT');
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -217,11 +270,24 @@ export async function joinWorkspaceAction(prevState: any, formData: FormData): P
         client.release();
     }
 
+    if (!joinedWorkspace) {
+        return { success: false, error: "Não foi possível entrar neste workspace." };
+    }
+
     revalidatePath('/', 'layout');
-    redirect('/inbox');
+    redirect(redirectTo);
 }
 
-export async function getInviteDetails(code: string): Promise<{ workspaceName: string; inviterName: string; workspaceId: string } | { error: string }> {
+export async function getInviteDetails(code: string): Promise<{
+    workspaceName: string;
+    inviterName: string;
+    workspaceId: string;
+    expiresAt: string;
+    remainingUses: number | null;
+} | { error: string }> {
+    const normalizedCode = normalizeInviteCode(code);
+    if (!normalizedCode) return { error: "Cole um link ou informe o código do convite." };
+
     const client = await db.connect();
     try {
         const res = await client.query(`
@@ -237,7 +303,7 @@ export async function getInviteDetails(code: string): Promise<{ workspaceName: s
             JOIN workspaces w ON wi.workspace_id = w.id
             JOIN users u ON wi.created_by = u.id
             WHERE wi.code = $1
-        `, [code]);
+        `, [normalizedCode]);
 
         if ((res.rowCount || 0) === 0) {
             return { error: "Convite não encontrado." };
@@ -257,8 +323,12 @@ export async function getInviteDetails(code: string): Promise<{ workspaceName: s
 
         return {
             workspaceName: invite.workspace_name,
-            inviterName: invite.inviter_name,
-            workspaceId: invite.workspace_id
+            inviterName: invite.inviter_name || 'Sua equipe',
+            workspaceId: invite.workspace_id,
+            expiresAt: new Date(invite.expires_at).toISOString(),
+            remainingUses: invite.max_uses === null
+                ? null
+                : Math.max(Number(invite.max_uses) - Number(invite.use_count), 0),
         };
 
     } catch (error) {

@@ -1,4 +1,3 @@
-import type { Genkit } from 'genkit';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { listModelCallableAgentToolDefinitions } from '@/services/agent-tools/catalog';
@@ -235,7 +234,7 @@ export function defineLmStudioPrompt(
     openAICompatible,
   } = require('@genkit-ai/compat-oai') as typeof import('@genkit-ai/compat-oai');
 
-  const defineModel = (ai: Genkit, client: InstanceType<typeof import('openai').OpenAI>) => {
+  const defineModel = (client: InstanceType<typeof import('openai').OpenAI>) => {
     const originalCreate = client.chat.completions.create.bind(client.chat.completions);
     client.chat.completions.create = async function (body: any, options?: any) {
       const response = await originalCreate(body, options);
@@ -254,8 +253,7 @@ export function defineLmStudioPrompt(
     } as any;
 
     const modelRef = compatOaiModelRef({ name: model });
-    defineCompatOpenAIModel({
-      ai,
+    return defineCompatOpenAIModel({
       name: modelRef.name,
       client,
       modelRef,
@@ -279,7 +277,7 @@ export function defineLmStudioPrompt(
         name: 'lmstudio',
         apiKey: apiToken || 'lm-studio',
         baseURL,
-        initializer: async (ai, client) => defineModel(ai, client),
+        initializer: async (client) => [defineModel(client)],
       }),
     ],
     model,

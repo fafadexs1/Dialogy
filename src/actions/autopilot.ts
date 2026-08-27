@@ -102,7 +102,10 @@ import {
     prepareWorkflowBlockTest,
     createWorkflowBlockTestSideEffectAdapters,
     type WorkflowBlockTestFixtures,
+    type WorkflowTestChatMessage,
+    type WorkflowTestExecutionResult,
 } from '@/services/workflow-runtime';
+export type { WorkflowTestChatMessage, WorkflowTestExecutionResult };
 import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
 import {
     getPrimaryWorkflowModelId,
@@ -1177,6 +1180,8 @@ async function persistNativeWorkflowDraft(input: {
         [input.configId, input.workspaceId, input.userId, JSON.stringify(synchronizedSnapshot)],
     );
     revalidatePath(`/autopilot/${input.configId}`);
+    revalidatePath('/nexus');
+    revalidatePath(`/nexus/${input.configId}`);
     return saved.rows[0]?.updated_at as string | undefined;
 }
 
@@ -1408,28 +1413,28 @@ export async function runAutopilotNativeWorkflowTest(input: {
     workflowDefinition?: WorkflowDefinition;
     startNodeId?: string;
     fixtures?: WorkflowBlockTestFixtures;
-}) {
+}): Promise<WorkflowTestExecutionResult> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+    if (!user) return { success: false, error: 'Usuário não autenticado.', messages: [], variables: {} };
     try {
         const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
         const requestedWorkflowInput = input.workflowDefinition
             ? WorkflowDefinitionSchema.parse(input.workflowDefinition)
             : snapshot.workflow_definition;
-        if (!requestedWorkflowInput) return { success: false, error: 'O rascunho nativo não possui workflow.' };
+        if (!requestedWorkflowInput) return { success: false, error: 'O rascunho nativo não possui workflow.', messages: [], variables: {} };
         const [configuredModels, toolCatalog] = await Promise.all([
             listWorkspaceConfiguredAiModels(workspaceId),
             listWorkspaceAgentToolCatalog(workspaceId),
         ]);
         const toolReconciliation = reconcileNativeWorkflowTools(requestedWorkflowInput, toolCatalog);
         if (toolReconciliation.errors.length > 0) {
-            return { success: false, error: toolReconciliation.errors.join(' ') };
+            return { success: false, error: toolReconciliation.errors.join(' '), messages: [], variables: {} };
         }
         const requestedWorkflow = toolReconciliation.workflow;
         const availableModelIds = configuredModels.map((model) => model.id);
         const sourceValidation = validateWorkflowDefinition(requestedWorkflow, { availableModelIds });
-        if (!input.startNodeId && !sourceValidation.valid) return { success: false, error: sourceValidation.errors.map((issue) => issue.message).join(' ') };
+        if (!input.startNodeId && !sourceValidation.valid) return { success: false, error: sourceValidation.errors.map((issue) => issue.message).join(' '), messages: [], variables: {} };
         const timestamp = new Date().toISOString();
         const standardInput = { customerMessage: input.customerMessage, message: input.customerMessage, text: input.customerMessage };
         const prepared = input.startNodeId
@@ -1451,7 +1456,7 @@ export async function runAutopilotNativeWorkflowTest(input: {
             updatedAt: timestamp,
         });
         const validation = validateWorkflowDefinition(workflow, { availableModelIds });
-        if (!validation.valid) return { success: false, error: validation.errors.map((issue) => issue.message).join(' ') };
+        if (!validation.valid) return { success: false, error: validation.errors.map((issue) => issue.message).join(' '), messages: [], variables: {} };
         const runtimeConfig: AutopilotConfig = {
             ...config,
             id: String(config.id),
@@ -1473,6 +1478,7 @@ export async function runAutopilotNativeWorkflowTest(input: {
             created_at: new Date(config.created_at || Date.now()).toISOString(),
             updated_at: new Date(config.updated_at || Date.now()).toISOString(),
         };
+        const chatMessages: WorkflowTestChatMessage[] = [];
         const sandboxSideEffects = createWorkflowBlockTestSideEffectAdapters();
         const handlers = createDefaultNodeHandlerRegistry({
             resolveModelChain: async (context) => modelChainForNode({
@@ -1498,8 +1504,58 @@ export async function runAutopilotNativeWorkflowTest(input: {
             },
             applyGuardrails: async (_phase, value) => value,
             ...sandboxSideEffects.dependencies,
+            sendResponse: async (message, runtimeInput) => {
+                const isOptions = runtimeInput.node.type === 'interaction.options';
+                const isInput = runtimeInput.node.type.startsWith('interaction.');
+                const rawOptions = runtimeInput.node.config.options;
+                const options = isOptions && Array.isArray(rawOptions)
+                    ? rawOptions.filter((opt) => opt && typeof opt === 'object').map((opt: any, idx: number) => ({
+                        id: String(opt.id || `opt_${idx}`),
+                        label: String(opt.label || opt.value || `Opção ${idx + 1}`),
+                        value: String(opt.value || opt.label || `Opção ${idx + 1}`),
+                    }))
+                    : undefined;
+
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: message,
+                    type: isOptions ? 'options' : isInput ? 'input' : 'text',
+                    options,
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, characterCount: message.length };
+            },
+            sendMedia: async (media, runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: media.caption || `[Mídia: ${media.type}]`,
+                    type: 'media',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, mediaType: media.type };
+            },
+            handoff: async (runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'system',
+                    text: 'Atendimento transferido para equipe humana.',
+                    type: 'handoff',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, transferred: true };
+            },
         });
-        const execution = await new WorkflowExecutor(new PostgresWorkflowPersistence(db), handlers).start({
+        const persistence = new PostgresWorkflowPersistence(db);
+        await persistence.saveWorkflowDefinition(workflow);
+        const execution = await new WorkflowExecutor(persistence, handlers).start({
             workflow,
             input: prepared?.startInput.input || standardInput,
             variables: prepared?.startInput.variables,
@@ -1508,9 +1564,233 @@ export async function runAutopilotNativeWorkflowTest(input: {
             conversationId: `sandbox:${input.configId}`,
             executionId: `sandbox_${uuidv4()}`,
         }, { workerId: `sandbox_${user.id}` });
-        return { success: true, executionId: execution.executionId, status: execution.status };
+
+        // Collect any AI agent responses if not delivered through sendResponse
+        for (const step of execution.executionPath || []) {
+            const nodeResult = execution.nodeResults[step.nodeId];
+            if (step.nodeType === 'ai.agent' || step.nodeType === 'agent.intelligent') {
+                const out = nodeResult?.output as Record<string, unknown> | undefined;
+                const responseText = out?.response || out?.question || out?.summary;
+                if (typeof responseText === 'string' && responseText.trim()) {
+                    const alreadyRecorded = chatMessages.some((msg) => msg.nodeId === step.nodeId && msg.text === responseText);
+                    if (!alreadyRecorded) {
+                        chatMessages.push({
+                            id: `msg_${uuidv4()}`,
+                            nodeId: step.nodeId,
+                            nodeType: step.nodeType,
+                            role: 'bot',
+                            text: responseText,
+                            type: out?.type === 'needs_input' ? 'input' : 'text',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if (chatMessages.length === 0 && execution.status === 'failed') {
+            const failure = execution.failure as Record<string, unknown> | undefined;
+            chatMessages.push({
+                id: `msg_${uuidv4()}`,
+                role: 'system',
+                text: `O fluxo falhou: ${String(failure?.message || 'Erro desconhecido durante a execução.')}`,
+                type: 'error',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        return {
+            success: true,
+            executionId: execution.executionId,
+            status: execution.status,
+            resumeToken: execution.resumeToken,
+            waitingNodeId: execution.currentNodeId || undefined,
+            messages: chatMessages,
+            variables: execution.variables || {},
+            nodeResults: execution.nodeResults,
+        };
     } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : 'Falha ao executar teste.' };
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Falha ao executar teste.',
+            messages: [],
+            variables: {},
+        };
+    }
+}
+
+export async function resumeAutopilotNativeWorkflowTest(input: {
+    configId: string;
+    resumeToken: string;
+    customerMessage: string;
+    workflowDefinition?: WorkflowDefinition;
+}): Promise<WorkflowTestExecutionResult> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.', messages: [], variables: {} };
+    try {
+        const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
+        const runtimeConfig: AutopilotConfig = {
+            ...config,
+            id: String(config.id),
+            workspace_id: workspaceId,
+            user_id: String(config.user_id),
+            name: String(config.name || snapshot.name),
+            gemini_api_key: config.gemini_api_key || null,
+            ai_model: config.ai_model || snapshot.ai_model || null,
+            transcription_model: config.transcription_model || null,
+            knowledge_base: config.knowledge_base || null,
+            knowledge_base_documents: snapshot.knowledge_base_documents
+                .filter((document) => document.content?.trim() && !isUnsafeAsCustomerFacingKnowledge(document)),
+            is_primary: Boolean(config.is_primary),
+            is_active: Boolean(config.is_active),
+            is_private: Boolean(config.is_private),
+            default_fallback_reply: config.default_fallback_reply || null,
+            escalation_policy: config.escalation_policy || null,
+            closing_policy: config.closing_policy || null,
+            created_at: new Date(config.created_at || Date.now()).toISOString(),
+            updated_at: new Date(config.updated_at || Date.now()).toISOString(),
+        };
+
+        const chatMessages: WorkflowTestChatMessage[] = [];
+        const sandboxSideEffects = createWorkflowBlockTestSideEffectAdapters();
+        const handlers = createDefaultNodeHandlerRegistry({
+            resolveModelChain: async (context) => modelChainForNode({
+                workspaceId,
+                config: runtimeConfig,
+                modelNode: context.modelNode,
+            }),
+            loadMemory: async () => ({ sandbox: true }),
+            retrieveKnowledge: async (context) => {
+                const documents = selectNativeKnowledgeDocuments(
+                    context.knowledgeNodes,
+                    runtimeConfig.knowledge_base_documents || [],
+                );
+                if (documents.length === 0) return [];
+                const retrieval = await retrieveHybridSupportContext({
+                    workspaceId,
+                    autopilotConfigId: input.configId,
+                    query: input.customerMessage,
+                    staticDocuments: documents,
+                    allowedDocumentIds: documents.map((document) => document.id),
+                });
+                return retrieval.knowledgeBaseDocuments.map((document) => ({ ...document }));
+            },
+            applyGuardrails: async (_phase, value) => value,
+            ...sandboxSideEffects.dependencies,
+            sendResponse: async (message, runtimeInput) => {
+                const isOptions = runtimeInput.node.type === 'interaction.options';
+                const isInput = runtimeInput.node.type.startsWith('interaction.');
+                const rawOptions = runtimeInput.node.config.options;
+                const options = isOptions && Array.isArray(rawOptions)
+                    ? rawOptions.filter((opt) => opt && typeof opt === 'object').map((opt: any, idx: number) => ({
+                        id: String(opt.id || `opt_${idx}`),
+                        label: String(opt.label || opt.value || `Opção ${idx + 1}`),
+                        value: String(opt.value || opt.label || `Opção ${idx + 1}`),
+                    }))
+                    : undefined;
+
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: message,
+                    type: isOptions ? 'options' : isInput ? 'input' : 'text',
+                    options,
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, characterCount: message.length };
+            },
+            sendMedia: async (media, runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: media.caption || `[Mídia: ${media.type}]`,
+                    type: 'media',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, mediaType: media.type };
+            },
+            handoff: async (runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'system',
+                    text: 'Atendimento transferido para equipe humana.',
+                    type: 'handoff',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, transferred: true };
+            },
+        });
+
+        const persistence = new PostgresWorkflowPersistence(db);
+        const executor = new WorkflowExecutor(persistence, handlers);
+        const execution = await executor.resume({
+            resumeToken: input.resumeToken,
+            input: {
+                message: input.customerMessage,
+                customerMessage: input.customerMessage,
+                text: input.customerMessage,
+                value: input.customerMessage,
+            },
+        });
+
+        // Collect any AI agent responses if not delivered through sendResponse
+        for (const step of execution.executionPath || []) {
+            const nodeResult = execution.nodeResults[step.nodeId];
+            if (step.nodeType === 'ai.agent' || step.nodeType === 'agent.intelligent') {
+                const out = nodeResult?.output as Record<string, unknown> | undefined;
+                const responseText = out?.response || out?.question || out?.summary;
+                if (typeof responseText === 'string' && responseText.trim()) {
+                    const alreadyRecorded = chatMessages.some((msg) => msg.nodeId === step.nodeId && msg.text === responseText);
+                    if (!alreadyRecorded) {
+                        chatMessages.push({
+                            id: `msg_${uuidv4()}`,
+                            nodeId: step.nodeId,
+                            nodeType: step.nodeType,
+                            role: 'bot',
+                            text: responseText,
+                            type: out?.type === 'needs_input' ? 'input' : 'text',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if (chatMessages.length === 0 && execution.status === 'failed') {
+            const failure = execution.failure as Record<string, unknown> | undefined;
+            chatMessages.push({
+                id: `msg_${uuidv4()}`,
+                role: 'system',
+                text: `O fluxo falhou: ${String(failure?.message || 'Erro desconhecido durante a execução.')}`,
+                type: 'error',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        return {
+            success: true,
+            executionId: execution.executionId,
+            status: execution.status,
+            resumeToken: execution.resumeToken,
+            waitingNodeId: execution.currentNodeId || undefined,
+            messages: chatMessages,
+            variables: execution.variables || {},
+            nodeResults: execution.nodeResults,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Falha ao retomar teste.',
+            messages: [],
+            variables: {},
+        };
     }
 }
 
@@ -1981,6 +2261,8 @@ export async function saveAutopilotDraft(
 
         revalidatePath('/autopilot');
         revalidatePath(`/autopilot/${configId}`);
+        revalidatePath('/nexus');
+        revalidatePath(`/nexus/${configId}`);
         return { success: true, updatedAt: saveRes.rows[0]?.updated_at };
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Falha ao salvar rascunho.';
@@ -2288,6 +2570,8 @@ export async function publishAutopilotDraft(configId: string): Promise<{
 
         revalidatePath('/autopilot');
         revalidatePath(`/autopilot/${configId}`);
+        revalidatePath('/nexus');
+        revalidatePath(`/nexus/${configId}`);
         return {
             success: true,
             versionNumber,
@@ -2505,6 +2789,7 @@ export async function createAutopilotAgent(workspaceId: string, name: string, is
 
         const newId = insertRes.rows[0]?.id;
         revalidatePath('/autopilot');
+        revalidatePath('/nexus');
         return { success: true, id: newId };
     } catch (error) {
         console.error('[CREATE_AUTOPILOT_AGENT] Erro ao criar agente:', error);

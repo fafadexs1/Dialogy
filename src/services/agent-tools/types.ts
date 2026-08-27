@@ -1,5 +1,7 @@
 import type { AutopilotConfig, Chat, Contact } from '@/lib/types';
 import type { AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
+import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
+import type { SlotExtractionResult } from '@/services/autopilot/slots';
 
 export type AgentToolName =
   | 'transfer_chat'
@@ -99,6 +101,8 @@ export type AgentToolRuntimeContext = {
   systemAgentName: string;
   autopilotConfig: AutopilotConfig;
   turnPolicy: AutopilotTurnPolicy;
+  intent?: UniversalAutopilotIntent | null;
+  slotExtraction?: SlotExtractionResult | null;
   customerMessage: string;
   recentCustomerVisibleMessages?: Array<{
     fromMe: boolean;

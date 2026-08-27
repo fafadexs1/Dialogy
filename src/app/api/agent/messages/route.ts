@@ -26,6 +26,7 @@ interface AgentMessagePayload {
   chatId?: string;
   phoneNumber?: string; // JID format, e.g., 5511999998888@s.whatsapp.net
   content?: string; // Caption for media, or content for text
+  skipUserSignature?: boolean;
   media?: MediaFilePayload[];
   instance?: string; // Specific instance name (e.g., "zap1")
   list?: {
@@ -168,6 +169,9 @@ export async function POST(request: Request) {
           marketingTargetSystemAgentId: agent.handoff_system_agent_id || null,
         }
       : {};
+    const automatedMetadata = body.skipUserSignature === true
+      ? { ...marketingMetadata, skipUserSignature: true }
+      : marketingMetadata;
 
     if (!chatId && !phoneNumber) {
       return NextResponse.json({ error: 'Either chatId or phoneNumber is required.' }, { status: 400 });
@@ -254,11 +258,11 @@ export async function POST(request: Request) {
 
     // If media is present, send it. Content will be used as caption.
     if (media && media.length > 0) {
-      result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, marketingMetadata as any);
+      result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, automatedMetadata as any);
     }
     // Otherwise, send a text message.
     else {
-      result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, marketingMetadata as any);
+      result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, automatedMetadata as any);
     }
 
 

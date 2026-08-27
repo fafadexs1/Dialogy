@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { createSeoEntry, updateSeoEntry, deleteSeoEntry } from '@/actions/seo';
@@ -26,7 +27,7 @@ export default function SeoEditor({ initialData, isNew }: Props) {
     const { toast } = useToast();
     const [activeTab, setActiveTab] = useState('edit');
 
-    const defaultValues = initialData || {
+    const defaultValues: z.input<typeof SeoEntrySchema> = initialData || {
         id: 'new', // will be ignored/generated on server for new
         pathname: '',
         title: '',
@@ -39,9 +40,9 @@ export default function SeoEditor({ initialData, isNew }: Props) {
         updatedAt: new Date().toISOString(),
     };
 
-    const form = useForm<SeoEntry>({
+    const form = useForm<z.input<typeof SeoEntrySchema>, any, SeoEntry>({
         resolver: zodResolver(SeoEntrySchema),
-        defaultValues: defaultValues as SeoEntry,
+        defaultValues,
     });
 
     const { register, watch, setValue, handleSubmit, formState: { errors, isSubmitting } } = form;

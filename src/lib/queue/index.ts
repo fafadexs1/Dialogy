@@ -18,6 +18,7 @@ import type {
   AnalyticsEventPayload,
   EvolutionWebhookProcessPayload,
   MarketingAutoClosePayload,
+  NexusInternalEventPayload,
   NotificationPayload,
   QueueAutoClosePayload,
   QueueJobPayload,
@@ -127,6 +128,14 @@ function getJobId(type: QueueJobType, payload: QueueJobPayload) {
       return `ai_case_memory_refresh__${toSafeJobIdPart(typedPayload.chatId)}__${toSafeJobIdPart(
         typedPayload.closedAt || 'pending'
       )}`;
+    }
+    case 'nexus_internal_event': {
+      const typedPayload = payload as NexusInternalEventPayload;
+      const eventKey = createHash('sha256')
+        .update(`${typedPayload.workspaceId}:${typedPayload.eventName}:${typedPayload.eventId}`)
+        .digest('hex')
+        .slice(0, 32);
+      return `nexus_internal_event__${eventKey}`;
     }
     case 'analytics_event': {
       const typedPayload = payload as AnalyticsEventPayload;
@@ -251,6 +260,13 @@ export async function enqueueAiCaseMemoryRefresh(
   return enqueueJob('ai_case_memory_refresh', payload, options);
 }
 
+export async function enqueueNexusInternalEvent(
+  payload: NexusInternalEventPayload,
+  options?: EnqueueOptions,
+) {
+  return enqueueJob('nexus_internal_event', payload, options);
+}
+
 export async function enqueueAnalyticsEvent(payload: AnalyticsEventPayload, options?: EnqueueOptions) {
   return enqueueJob('analytics_event', payload, options);
 }
@@ -269,7 +285,8 @@ export async function processQueueOnce() {
     !shouldEnqueueJob('evolution_webhook_process') &&
     !shouldEnqueueJob('webhook_outbound') &&
     !shouldEnqueueJob('queue_auto_close') &&
-    !shouldEnqueueJob('marketing_auto_close')
+    !shouldEnqueueJob('marketing_auto_close') &&
+    !shouldEnqueueJob('nexus_internal_event')
   ) {
     return {
       processed: 0,

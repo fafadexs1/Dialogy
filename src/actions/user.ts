@@ -220,7 +220,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
         const themePreference = normalizeInterfaceTheme(authUser.user_metadata?.theme_preference);
 
         const workspacesRes = await db.query(`
-            SELECT w.id, w.name, w.avatar_url, w.owner_id, w.nexus_settings, 
+            SELECT w.id, w.name, w.avatar_url, w.owner_id,
                    w.close_message_template, w.transfer_team_message_template,
                    w.timezone, w.marketing_auto_close_seconds, w.queue_auto_close_seconds,
                    r.name as role_name,
@@ -242,7 +242,6 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Use
                 avatar: normalizedWorkspaceAvatar || '',
                 isOwner: r.owner_id === authUser.id,
                 roleName: r.role_name,
-                nexus_settings: r.nexus_settings || {},
                 closeMessageTemplate: r.close_message_template || '',
                 transferTeamMessageTemplate: r.transfer_team_message_template || '',
                 timezone: r.timezone || undefined,

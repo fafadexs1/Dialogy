@@ -17,12 +17,11 @@ import {
   Fingerprint,
   Gift,
   Inbox,
-  Instagram,
+  Camera,
   LayoutGrid,
   LogOut,
   LucideIcon,
   MessageCircleMore,
-  Network,
   RadioTower,
   ScrollText,
   Send,
@@ -113,12 +112,6 @@ const clientsNavItems: NavItem[] = [
 
 const automationNavItems: NavItem[] = [
   {
-    href: "/autopilot",
-    icon: BrainCircuit,
-    labelKey: "nav.autopilot",
-    descriptionKey: "nav.autopilotDescription",
-  },
-  {
     href: "/automations/robots",
     icon: Bot,
     labelKey: "nav.systemAgents",
@@ -181,7 +174,7 @@ const integrationNavSections: FlyoutSectionConfig[] = [
       },
       {
         href: "/integrations/meta-instagram",
-        icon: Instagram,
+        icon: Camera,
         labelKey: "nav.instagram",
         descriptionKey: "nav.instagramDescription",
       },
@@ -214,12 +207,6 @@ const integrationNavSections: FlyoutSectionConfig[] = [
         icon: Webhook,
         labelKey: "nav.mcp",
         descriptionKey: "nav.mcpDescription",
-      },
-      {
-        href: "/integrations/nexusflow",
-        icon: Network,
-        labelKey: "nav.nexusIntegration",
-        descriptionKey: "nav.nexusIntegrationDescription",
       },
     ],
   },

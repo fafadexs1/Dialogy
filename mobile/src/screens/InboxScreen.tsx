@@ -37,7 +37,11 @@ export function InboxScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const myChats = useMemo(
-    () => chats.filter((chat) => chat.assignedToId === user?.id),
+    () => chats.filter((chat) => (
+      chat.status === "robo" ||
+      chat.status === "gerais" ||
+      chat.assignedToId === user?.id
+    )),
     [chats, user?.id]
   );
 

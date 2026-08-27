@@ -10,9 +10,8 @@ loadEnvConfig(rootDir);
 const defaultPort = "9002";
 const secretWaitMs = Number.parseInt(process.env.STRIPE_WEBHOOK_SECRET_WAIT_MS || "8000", 10);
 const rawDevArgs = process.argv.slice(2);
-const { nextArgs: devArgs, disableStripe } = normalizeDevArgs(rawDevArgs);
+const { nextArgs: devArgs, disableStripe, enablePwa } = normalizeDevArgs(rawDevArgs);
 const resolvedPort = resolvePortArg(devArgs) || defaultPort;
-const useTurbo = resolveTurboMode();
 applyLocalAppUrlOverrides(resolvedPort);
 const forwardTo =
   process.env.STRIPE_WEBHOOK_FORWARD_TO ||
@@ -124,8 +123,13 @@ function startNext(injectedSecret) {
     return;
   }
 
-  const nextArgs = buildNextArgs(devArgs, defaultPort, useTurbo);
+  const nextArgs = buildNextArgs(devArgs, defaultPort);
   const childEnv = { ...process.env };
+
+  if (enablePwa) {
+    childEnv.NEXT_PUBLIC_PWA_DEV = "1";
+    logDev("Enabling PWA registration for local Turbopack development.");
+  }
 
   if (injectedSecret) {
     childEnv.STRIPE_WEBHOOK_SECRET = injectedSecret;
@@ -230,14 +234,8 @@ function resolveStripeCommand() {
   return { command: process.platform === "win32" ? "stripe.exe" : "stripe", label: "global stripe" };
 }
 
-function buildNextArgs(args, fallbackPort, turboEnabled) {
-  const nextArgs = ["dev"];
-
-  if (turboEnabled) {
-    nextArgs.push("--turbo");
-  } else {
-    nextArgs.push("--webpack");
-  }
+function buildNextArgs(args, fallbackPort) {
+  const nextArgs = ["dev", "--turbo"];
 
   if (!hasPortArg(args)) {
     nextArgs.push("-p", fallbackPort);
@@ -248,6 +246,7 @@ function buildNextArgs(args, fallbackPort, turboEnabled) {
 
 function normalizeDevArgs(args) {
   let disableStripe = false;
+  let enablePwa = false;
   const nextArgs = [];
 
   for (const arg of args) {
@@ -256,33 +255,20 @@ function normalizeDevArgs(args) {
       continue;
     }
 
+    if (arg === "--pwa" || arg === "--pwa-dev") {
+      enablePwa = true;
+      continue;
+    }
+
+    if (arg === "--webpack") {
+      logDev("Ignoring deprecated --webpack flag; Turbopack is mandatory.");
+      continue;
+    }
+
     nextArgs.push(arg);
   }
 
-  return { nextArgs, disableStripe };
-}
-
-function resolveTurboMode() {
-  if (Object.prototype.hasOwnProperty.call(process.env, "DIALOGY_USE_TURBO")) {
-    const enabled = !isFalsey(process.env.DIALOGY_USE_TURBO);
-    if (enabled) {
-      logDev("Forcing Turbopack because DIALOGY_USE_TURBO is enabled.");
-    }
-    return enabled;
-  }
-
-  const isWindows = process.platform === "win32";
-  const hasNonAsciiPath = /[^\x00-\x7F]/.test(rootDir);
-  const isOneDrivePath = /OneDrive/i.test(rootDir);
-
-  if (isWindows && (hasNonAsciiPath || isOneDrivePath)) {
-    logDev(
-      "Disabling Turbopack for local dev because this Windows workspace path uses OneDrive and/or non-ASCII characters."
-    );
-    return false;
-  }
-
-  return true;
+  return { nextArgs, disableStripe, enablePwa };
 }
 
 function applyLocalAppUrlOverrides(port) {

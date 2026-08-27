@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import { sendAutomatedMessageAction } from '@/actions/messages';
 import { auditAgentToolExecution } from './audit';
-import { getAgentToolDefinition } from './catalog';
+import { getAgentToolDefinition, listAgentToolCatalogItems } from './catalog';
 import type { AgentToolAction, AgentToolExecutionResult, AgentToolRuntimeContext } from './types';
 import { recordAgentToolMetrics } from '@/lib/observability/metrics';
 import { runCrmUpdateContactCustomFieldsTool } from './crm-tools';
@@ -34,6 +34,7 @@ import { recordDecisionOutcomesForChat, type AutopilotOutcomeTrigger } from '@/s
 import type { PoolClient } from 'pg';
 import { validateSchema } from 'genkit/schema';
 import { normalizeToolArgumentsFromJsonSchema } from '@/services/workflow-runtime/tool-arguments';
+import { authorizeAgentToolCapability } from '@/services/agent-runtime/capability-gateway';
 
 const MAX_ACTIONS_PER_MESSAGE = 2;
 const MAX_INTERNAL_NOTE_CHARS = 500;
@@ -488,6 +489,7 @@ async function runTransferChatTool(
                AND agent_id IS NULL
                AND assigned_system_agent_id = $5
                AND is_autopilot_active = TRUE
+               AND status <> 'encerrados'
              RETURNING id`,
             [chatTag, chatColor, context.chat.id, context.workspaceId, context.systemAgentId]
           );
@@ -609,6 +611,8 @@ async function runClosePostCommitEffects(input: {
         close_notes: input.notes,
         tag: input.tag || '',
         color: input.color || '',
+        assigned_system_agent_id: null,
+        assigned_at: null,
         is_autopilot_active: false,
         copilot_mode: 'off',
       }),
@@ -783,6 +787,8 @@ async function runCloseChatTool(
           close_notes = $2,
           tag = $3,
           color = $4,
+          assigned_system_agent_id = NULL,
+          assigned_at = NULL,
           is_autopilot_active = FALSE,
           copilot_mode = 'off',
           updated_at = clock_timestamp()
@@ -791,6 +797,7 @@ async function runCloseChatTool(
          AND agent_id IS NULL
          AND assigned_system_agent_id = $7
          AND is_autopilot_active = TRUE
+         AND status <> 'encerrados'
        RETURNING closed_at, close_reason_tag_id, close_notes, tag, color`,
       [
         reasonTagId,
@@ -1212,6 +1219,28 @@ export async function runAgentTools(
     const definition = getAgentToolDefinition(action.type);
     if (!definition) {
       const result = reject(action, 'Ferramenta sem contrato registrado no catalogo.');
+      await auditToolResult(runtimeContext, result, Date.now() - startedAt);
+      results.push(result);
+      continue;
+    }
+
+    const capabilityAuthorization = authorizeAgentToolCapability({
+      action,
+      intentResolution: runtimeContext.intent ? { intent: runtimeContext.intent } : undefined,
+      slotExtraction: runtimeContext.slotExtraction,
+      enabledToolNames: runtimeContext.turnPolicy.allowedToolNames,
+      toolCatalog: listAgentToolCatalogItems(),
+      confirmedActionFingerprint: runtimeContext.confirmedActionFingerprint,
+      // The existing policy gate remains responsible for conversational
+      // confirmation context. This preflight enforces the immutable contract
+      // (scope, required fields, risk class and human-approval flag) first.
+      enforceConfirmation: false,
+    });
+    if (!capabilityAuthorization.allowed) {
+      const result = reject(
+        action,
+        `[capability_gateway:${capabilityAuthorization.code}] ${capabilityAuthorization.reason}`,
+      );
       await auditToolResult(runtimeContext, result, Date.now() - startedAt);
       results.push(result);
       continue;

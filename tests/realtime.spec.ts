@@ -83,6 +83,32 @@ describe('Realtime subscriptions', () => {
     expect(client.removeChannel).toHaveBeenCalledWith(subscription);
   });
 
+  it('requests replay for the interval missed while a tab was suspended', () => {
+    const { client, channel } = createSupabaseMock();
+    const replaySince = 1704110400000;
+
+    subscribeToChatMessages({
+      client: client as any,
+      workspaceId: WORKSPACE_ID,
+      chatId: 'chat-123',
+      replaySince,
+      onMessage: vi.fn(),
+    });
+
+    expect(client.channel).toHaveBeenCalledWith(
+      buildChatMessageChannelName(WORKSPACE_ID, 'chat-123'),
+      {
+        config: {
+          private: true,
+          broadcast: {
+            replay: { since: replaySince, limit: 25 },
+          },
+        },
+      },
+    );
+    expect(channel.subscribe).toHaveBeenCalled();
+  });
+
   it('subscribes to workspace chat updates and supports cleanup', () => {
     const { client, channel, onCalls } = createSupabaseMock();
     const handler = vi.fn();

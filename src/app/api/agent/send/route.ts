@@ -150,6 +150,9 @@ export async function POST(request: Request) {
                 marketingTargetSystemAgentId: agent.handoff_system_agent_id || null,
             }
             : {};
+        const automatedMetadata = payload.skipUserSignature === true
+            ? { ...metadata, skipUserSignature: true }
+            : metadata;
 
         // --- TEMPLATE FLOW ---
         if (type === 'template') {
@@ -241,9 +244,9 @@ export async function POST(request: Request) {
             let result: { success: boolean; error?: string };
 
             if (media && media.length > 0) {
-                result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, metadata as any);
+                result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, automatedMetadata as any);
             } else {
-                result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, metadata as any);
+                result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, automatedMetadata as any);
             }
 
             if (result.success) {

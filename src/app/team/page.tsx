@@ -106,7 +106,7 @@ function AddExceptionDialog({ teamId, onAdd }: { teamId: string, onAdd: () => vo
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
-                  <CalendarComponent mode="single" selected={date} onSelect={setDate} initialFocus />
+                  <CalendarComponent mode="single" selected={date} onSelect={setDate} autoFocus />
                 </PopoverContent>
               </Popover>
             </div>

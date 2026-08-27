@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Facebook, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { FaFacebook as Facebook } from 'react-icons/fa6';
 import { useToast } from '@/hooks/use-toast';
 
 interface FacebookLoginButtonProps {

@@ -55,3 +55,22 @@ export function buildUserIdentifiers(input: {
 
   return identifiers;
 }
+
+export type DataManagerUserData = {
+  hashedEmail?: string;
+  hashedPhoneNumber?: string;
+};
+
+export function buildUserData(input: {
+  email?: string | null;
+  phone?: string | null;
+}): DataManagerUserData | undefined {
+  const hashedEmail = hashEmailForGoogleAds(input.email);
+  const hashedPhoneNumber = hashPhoneForGoogleAds(input.phone);
+  if (!hashedEmail && !hashedPhoneNumber) return undefined;
+
+  return {
+    ...(hashedEmail ? { hashedEmail } : {}),
+    ...(hashedPhoneNumber ? { hashedPhoneNumber } : {}),
+  };
+}
