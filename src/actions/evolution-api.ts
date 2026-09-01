@@ -8,6 +8,8 @@ import { randomUUID } from 'crypto';
 import { buildEvolutionWebhookUrl, getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 import { requireWorkspaceAccess, requireWorkspacePermission } from '@/lib/security/access';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
+import { buildEvolutionWebhookConfig, configureEvolutionInstanceWebhook } from '@/services/whatsapp/evolution-webhook-config';
 import {
     buildTelegramWebhookUrl,
     deleteTelegramWebhook,
@@ -99,16 +101,19 @@ async function requireInstanceAccess(
 /**
  * Retorna todas as instâncias da Evolution API para um workspace.
  */
-export async function getEvolutionApiInstances(workspaceId: string): Promise<{ instances: Omit<EvolutionInstance, 'status' | 'qrCode'>[] | null; error?: string; limitStatus?: { reached: boolean, current: number, max: number, plan: string } }> {
+export async function getEvolutionApiInstances(workspaceId: string): Promise<{ instances: Omit<EvolutionInstance, 'status' | 'qrCode'>[] | null; canManageWebhooks?: boolean; error?: string; limitStatus?: { reached: boolean, current: number, max: number, plan: string } }> {
     if (!workspaceId) {
         return { instances: null, error: 'Workspace n\u00e3o informado.' };
     }
 
     try {
-        await requireWorkspaceAccess(workspaceId);
+        const user = await requireWorkspaceAccess(workspaceId);
+        const canManageWebhooks = await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:edit');
         const res = await db.query(
             `SELECT 
                 id, instance_name, display_name, type, cluster_id,
+                CASE WHEN $2 THEN webhook_url ELSE NULL END AS webhook_url,
+                CASE WHEN $2 THEN to_jsonb(evolution_api_instances)->>'webhook_key' ELSE NULL END AS webhook_key,
                 to_jsonb(evolution_api_instances)->>'business_name' as business_name,
                 to_jsonb(evolution_api_instances)->>'waba_name' as waba_name,
                 to_jsonb(evolution_api_instances)->>'display_phone_number' as display_phone_number,
@@ -122,8 +127,18 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
              FROM evolution_api_instances
              WHERE workspace_id = $1
                AND type <> 'telegram'`,
-            [workspaceId]
+            [workspaceId, canManageWebhooks]
         );
+
+        const instances = res.rows.map(({ webhook_key, webhook_url, ...instance }) => {
+            if (!canManageWebhooks) return instance;
+            try {
+                const expectedUrl = buildEvolutionWebhookUrl(webhook_key || instance.instance_name);
+                return { ...instance, webhook_url: expectedUrl, webhook_needs_sync: webhook_url !== expectedUrl };
+            } catch {
+                return { ...instance, webhook_url: webhook_url || null, webhook_configuration_error: 'Link salvo, se disponível. Configure EVOLUTION_WEBHOOK_BASE_URL ou NEXTAUTH_URL com a URL pública da Dialogy antes de reconfigurar.' };
+            }
+        });
 
         // --- BILLING Check ---
         const { checkLimit } = await import('@/lib/billing-logic');
@@ -138,10 +153,23 @@ export async function getEvolutionApiInstances(workspaceId: string): Promise<{ i
         };
         // ---------------------
 
-        return { instances: res.rows, limitStatus };
+        return { instances, canManageWebhooks, limitStatus };
     } catch (error) {
         console.error('[EVO_ACTION_GET_INSTANCES] Error fetching instances:', error);
         return { instances: null, error: 'Falha ao buscar instancias da Evolution API.' };
+    }
+}
+
+/** Reapply delivery without logging out or recreating the WhatsApp instance. */
+export async function reconfigureEvolutionWebhook(instanceId: string, workspaceId: string): Promise<{ success: boolean; webhookUrl?: string; error?: string }> {
+    try {
+        await requireWorkspacePermission(workspaceId, 'workspace:settings:edit');
+        const webhookUrl = await configureEvolutionInstanceWebhook(instanceId, workspaceId);
+        revalidatePath('/integrations/evolution-api');
+        return { success: true, webhookUrl };
+    } catch {
+        // Provider errors can contain authentication headers or the secret webhook URL.
+        return { success: false, error: 'Não foi possível reconfigurar o webhook. Verifique sua permissão, o cluster Evolution API e a URL pública em EVOLUTION_WEBHOOK_BASE_URL ou NEXTAUTH_URL.' };
     }
 }
 
@@ -319,48 +347,8 @@ export async function createEvolutionApiInstance(
         }
 
         // 3. Preparar o payload para a API da Evolution
-        // 3. Preparar o payload para a API da Evolution
         const webhookUrlForInstance = buildEvolutionWebhookUrl(webhookKey);
-
-        // Ensure webhook object exists and set the URL
-        if (!payload.webhook) {
-            payload.webhook = {};
-        }
-        payload.webhook.url = webhookUrlForInstance;
-        payload.webhook.events = [
-            "APPLICATION_STARTUP",
-            "QRCODE_UPDATED",
-            "MESSAGES_SET",
-            "MESSAGES_UPSERT",
-            "MESSAGES_EDITED",
-            "MESSAGES_UPDATE",
-            "MESSAGES_DELETE",
-            "SEND_MESSAGE",
-            "SEND_MESSAGE_UPDATE",
-            "CONTACTS_SET",
-            "CONTACTS_UPSERT",
-            "CONTACTS_UPDATE",
-            "PRESENCE_UPDATE",
-            "CHATS_SET",
-            "CHATS_UPSERT",
-            "CHATS_UPDATE",
-            "CHATS_DELETE",
-            "GROUPS_UPSERT",
-            "GROUP_UPDATE",
-            "GROUP_PARTICIPANTS_UPDATE",
-            "CONNECTION_UPDATE",
-            "LABELS_EDIT",
-            "LABELS_ASSOCIATION",
-            "CALL",
-            "TYPEBOT_START",
-            "TYPEBOT_CHANGE_STATUS",
-            "REMOVE_INSTANCE",
-            "LOGOUT_INSTANCE",
-            "INSTANCE_CREATE",
-            "INSTANCE_DELETE",
-            "STATUS_INSTANCE"
-        ];
-        payload.webhook.byEvents = false;
+        payload.webhook = { ...payload.webhook, ...buildEvolutionWebhookConfig(webhookUrlForInstance) };
 
         // Clean up payload
         Object.keys(payload).forEach((key) => {

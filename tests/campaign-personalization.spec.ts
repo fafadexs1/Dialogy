@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCampaignTemplateSendComponents,
+  getCampaignTemplateBodyParameterKeys,
   getCampaignFirstName,
   getCampaignGreeting,
   renderCampaignMessage,
@@ -60,6 +61,49 @@ describe('campaign personalization', () => {
       parameters: [
         { type: 'text', text: 'Bom dia' },
         { type: 'text', text: 'Maria' },
+      ],
+    }]);
+  });
+
+  it('uses the editable values configured for each template field', () => {
+    const template: CampaignTemplate = {
+      name: 'visita_tecnica',
+      language: 'pt_BR',
+      components: [{ type: 'BODY', text: '{{1}}, {{2}}! Protocolo: {{3}}.' }],
+      bodyParameterValues: ['{{Saudação}}', '{{primeiro_nome}}', 'ATD-2026'],
+    };
+
+    expect(buildCampaignTemplateSendComponents(template, {
+      contactName: 'Maria Clara Silva',
+      now: new Date('2026-07-06T13:00:00.000Z'),
+      timeZone: 'America/Sao_Paulo',
+    })).toEqual([{
+      type: 'body',
+      parameters: [
+        { type: 'text', text: 'Bom dia' },
+        { type: 'text', text: 'Maria' },
+        { type: 'text', text: 'ATD-2026' },
+      ],
+    }]);
+  });
+
+  it('detects and sends named Meta template parameters', () => {
+    const template: CampaignTemplate = {
+      name: 'cobranca',
+      language: 'pt_BR',
+      components: [{ type: 'BODY', text: 'Olá, {{cliente}}. Fatura {{referencia}}.' }],
+      bodyParameterNames: ['cliente', 'referencia'],
+      bodyParameterValues: ['{{primeiro_nome}}', 'AGO-2026'],
+    };
+
+    expect(getCampaignTemplateBodyParameterKeys(template)).toEqual(['cliente', 'referencia']);
+    expect(buildCampaignTemplateSendComponents(template, {
+      contactName: 'Maria Silva',
+    })).toEqual([{
+      type: 'body',
+      parameters: [
+        { type: 'text', text: 'Maria', parameter_name: 'cliente' },
+        { type: 'text', text: 'AGO-2026', parameter_name: 'referencia' },
       ],
     }]);
   });

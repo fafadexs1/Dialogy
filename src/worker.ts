@@ -5,6 +5,7 @@ import {
   stopEvolutionWebhookRetention,
 } from '@/services/whatsapp/webhook-inbox-retention';
 import { startNexusScheduleRunner, stopNexusScheduleRunner } from '@/modules/nexus/services/schedule-runner';
+import { startAgentStudioRetention, stopAgentStudioRetention } from '@/services/agent-studio/retention-runner';
 
 async function loadEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -29,6 +30,9 @@ async function main() {
   // Poda a caixa de entrada durável de webhooks, que antes só crescia.
   startEvolutionWebhookRetention();
 
+  // Opt-in until the Agent Studio database migration is deployed and verified.
+  startAgentStudioRetention();
+
   // Executa, com claim durável por minuto, os fluxos Nexus publicados que usam cron.
   startNexusScheduleRunner();
 
@@ -38,6 +42,7 @@ async function main() {
     try {
       stopPresenceReconciler();
       stopEvolutionWebhookRetention();
+      stopAgentStudioRetention();
       stopNexusScheduleRunner();
       await worker.close();
       await connection.quit();

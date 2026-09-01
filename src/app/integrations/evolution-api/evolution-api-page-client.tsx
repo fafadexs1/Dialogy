@@ -24,6 +24,7 @@ import { useFormStatus } from 'react-dom';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TemplateManager } from './template-manager';
+import { EvolutionWebhookPanel } from './evolution-webhook-panel';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
@@ -946,10 +947,14 @@ function InstanceRow({
     initialInstance,
     onMutate,
     onStatusChange,
+    canManageWebhooks,
+    workspaceId,
 }: {
     initialInstance: Omit<EvolutionInstance, 'status' | 'qrCode'>,
     onMutate: () => void,
     onStatusChange: (instanceId: string, status: EvolutionInstance['status']) => void,
+    canManageWebhooks: boolean,
+    workspaceId: string,
 }) {
     const { toast } = useToast();
     const [instance, setInstance] = useState<EvolutionInstance>({ ...initialInstance, status: 'disconnected' });
@@ -1029,7 +1034,7 @@ function InstanceRow({
         : null;
     const statusLabel = instance.status === 'connected' ? 'Conectada' : instance.status === 'pending' ? 'Pendente' : 'Desconectada';
     const statusDescription = instance.status === 'connected'
-        ? isTelegram ? 'Webhook ativo' : 'Operando normalmente'
+        ? isTelegram ? 'Webhook ativo' : 'Sessão WhatsApp conectada'
         : instance.status === 'pending'
             ? 'Aguardando leitura do QR Code'
             : isTelegram ? 'Webhook pausado' : 'Conexão indisponível';
@@ -1132,6 +1137,10 @@ function InstanceRow({
                 </div>
             </div>
 
+            {!isTelegram && canManageWebhooks && (
+                <EvolutionWebhookPanel instance={initialInstance} workspaceId={workspaceId} />
+            )}
+
             {instance.status === 'pending' && instance.qrCode && !isTelegram && (
                 <div className="flex items-center gap-5 border-t bg-muted/30 px-6 py-4">
                     <Image src={instance.qrCode} alt="QR Code para conectar o WhatsApp" width={112} height={112} />
@@ -1155,6 +1164,7 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
     const [limitStatus, setLimitStatus] = useState<{ reached: boolean, current: number, max: number, plan: string } | null>(null);
     const [instanceSearch, setInstanceSearch] = useState('');
     const [instanceStatuses, setInstanceStatuses] = useState<Record<string, EvolutionInstance['status']>>({});
+    const [canManageWebhooks, setCanManageWebhooks] = useState(false);
     const isTelegramView = channelMode === 'telegram';
 
     const handleStatusChange = useCallback((instanceId: string, status: EvolutionInstance['status']) => {
@@ -1166,6 +1176,7 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
         setLoading(true);
         try {
             const result = await getEvolutionApiInstances(user.activeWorkspaceId);
+            setCanManageWebhooks(result.canManageWebhooks === true);
             if (result.error) {
                 toast({ title: 'Erro ao carregar inst\u00e2ncias', description: result.error, variant: 'destructive' });
                 setInstances([]);
@@ -1325,7 +1336,7 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
                         <div className="px-6 py-10 text-center text-sm text-muted-foreground">Nenhuma instância corresponde à sua busca.</div>
                     ) : (
                         filteredInstances.map((instance) => (
-                            <InstanceRow key={instance.id} initialInstance={instance} onMutate={fetchData} onStatusChange={handleStatusChange} />
+                            <InstanceRow key={instance.id} initialInstance={instance} onMutate={fetchData} onStatusChange={handleStatusChange} canManageWebhooks={canManageWebhooks} workspaceId={user.activeWorkspaceId!} />
                         ))
                     )}
                 </section>

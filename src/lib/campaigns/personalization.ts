@@ -85,22 +85,47 @@ function extractTemplateParameterValues(message: string, context: CampaignPerson
     .filter((value): value is string => value !== null);
 }
 
+export function getCampaignTemplateBodyParameterKeys(template: CampaignTemplate | null): string[] {
+  const body = template?.components?.find(component => String(component.type).toUpperCase() === 'BODY');
+  const keys = Array.from(
+    String(body?.text || '').matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g),
+    match => match[1].trim(),
+  );
+  const uniqueKeys = [...new Set(keys)];
+
+  if (uniqueKeys.length > 0 && uniqueKeys.every(key => /^\d+$/.test(key))) {
+    const highestPosition = Math.max(...uniqueKeys.map(Number));
+    return Array.from({ length: highestPosition }, (_, index) => String(index + 1));
+  }
+
+  return uniqueKeys;
+}
+
 export function buildCampaignTemplateSendComponents(
   template: CampaignTemplate,
   context: CampaignPersonalizationContext,
 ): any[] {
-  const body = template.components?.find(component => String(component.type).toUpperCase() === 'BODY');
-  const placeholderCount = (String(body?.text || '').match(/\{\{\d+\}\}/g) || []).length;
+  const parameterKeys = getCampaignTemplateBodyParameterKeys(template);
+  const placeholderCount = parameterKeys.length;
   if (placeholderCount === 0) {
     return [];
   }
 
-  const values = extractTemplateParameterValues(String(context.campaignMessage || ''), context);
+  const configuredValues = template.bodyParameterValues?.map(value =>
+    renderCampaignMessage(String(value || ''), context)
+  );
+  const values = configuredValues?.length
+    ? configuredValues
+    : extractTemplateParameterValues(String(context.campaignMessage || ''), context);
   const fallback = String(context.contactName || '').trim();
-  const parameters = Array.from({ length: placeholderCount }, (_, index) => ({
-    type: 'text',
-    text: values[index] ?? fallback,
-  }));
+  const parameters = Array.from({ length: placeholderCount }, (_, index) => {
+    const parameterName = template.bodyParameterNames?.[index];
+    return {
+      type: 'text',
+      text: values[index] ?? fallback,
+      ...(parameterName && !/^\d+$/.test(parameterName) ? { parameter_name: parameterName } : {}),
+    };
+  });
 
   return [{
     type: 'body',

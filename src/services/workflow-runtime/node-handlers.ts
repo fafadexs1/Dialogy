@@ -39,6 +39,8 @@ type AgentDependencyContext = {
 };
 
 export type WorkflowHandlerDependencies = {
+  executePublishedAgent?: (input: NodeRuntimeInput) => Promise<NodeExecutionResult>;
+  stopPublishedAgent?: NonNullable<NodeHandler['stop']>;
   executeLinkedAgent?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   resolveModelChain?: (context: AgentDependencyContext) => Promise<ModelFallbackChain>;
   resolveToolRegistry?: (context: AgentDependencyContext) => Promise<ToolRegistry>;
@@ -1176,6 +1178,14 @@ export function createDefaultNodeHandlerRegistry(
       })),
     })
     .register(agentHandler(dependencies))
+    .register({
+      type: 'ai.published_agent',
+      stop: dependencies.stopPublishedAgent,
+      configSchema: z.object({ agentId: z.string().uuid(), releaseId: z.string().uuid(), outputKeys: z.array(z.string()).default([]) }).passthrough(),
+      execute: async (input) => dependencies.executePublishedAgent ? dependencies.executePublishedAgent(input) : {
+        status: 'error', selectedOutput: 'error', error: { code: 'STUDIO_ADAPTER_REQUIRED', message: 'Este bloco requer um atendimento conectado ao Estúdio de IA.', retryable: false },
+      },
+    })
     .register({
       type: 'ai.prompt',
       execute: dependencies.executePrompt || (async () => ({

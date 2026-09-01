@@ -23,6 +23,7 @@ import { nexusPortableFilename, serializeNexusPortableFlow } from '../services/f
 
 import {
   getNexusWorkflow,
+  generateNexusWorkflowWithAi,
   publishNexusWorkflow,
   resumeNexusWorkflowTest,
   runNexusWorkflowTest,
@@ -37,6 +38,7 @@ import { NexusCredentialsDialog } from './nexus-credentials-dialog';
 import { NexusDeploymentDialog } from './nexus-deployment-dialog';
 import { NexusWorkflowExecutionsDialog } from './nexus-workflow-executions-dialog';
 import { NexusWorkflowHistoryDialog } from './nexus-workflow-history-dialog';
+import { NexusAiFlowComposer } from './nexus-ai-flow-composer';
 
 function modelConfiguration(model: string): ModelConfiguration {
   return {
@@ -307,8 +309,30 @@ export function StandaloneNexusFlowEditor() {
           if (!result.success) toast({ title: 'Falha no teste isolado', description: result.error, variant: 'destructive' });
           return result;
         }}
+        onDiscard={() => {
+          if (!loadedDefinition) return;
+          setDefinition(loadedDefinition);
+          setPendingSaveSource('save');
+          toast({ title: 'Alterações descartadas', description: 'O canvas voltou ao último rascunho salvo.' });
+        }}
         onSave={() => void save()}
         onPublish={() => void publish()}
+        assistantComposer={(
+          <NexusAiFlowComposer
+            disabled={saving || publishing}
+            onGenerate={(conversation) => generateNexusWorkflowWithAi({
+              workspaceId: user.activeWorkspaceId!,
+              workflowId,
+              conversation,
+              currentWorkflow: definition,
+            })}
+            onApply={(proposal) => {
+              setDefinition(proposal.workflow);
+              setPendingSaveSource('save');
+              toast({ title: 'A IA alterou o rascunho', description: proposal.summary });
+            }}
+          />
+        )}
       />
       <LegacyNexusImportDialog
         disabled={saving || publishing}

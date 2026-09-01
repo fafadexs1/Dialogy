@@ -14,12 +14,8 @@ import {
   runAutopilotNativeWorkflowTest,
   saveAutopilotDraft,
 } from '@/actions/autopilot';
-import { NativeAiBuilderDialog } from '@/components/workflow/native-ai-builder-dialog';
-import { NativeWorkflowBuilder } from '@/components/workflow/native-workflow-builder';
-import { LegacyNexusImportDialog } from './legacy-nexus-import-dialog';
-import { Badge } from '@/components/ui/badge';
+import { AiAgentJourneyStudio } from '@/components/autopilot/ai-agent-journey-studio';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useCurrentUser } from '@/hooks/use-online-status';
 import {
@@ -369,133 +365,24 @@ export function NexusFlowEditor() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {definition ? (
-        <>
-          <NativeWorkflowBuilder
-            definition={definition}
-            defaultModel={defaultModel}
-            modelOptions={modelOptions}
-            knowledgeDocuments={snapshot.knowledge_base_documents}
-            knowledgeCollections={normalizeCollections(snapshot.knowledge_collections)}
-            tools={tools}
-            toolsLoading={toolsLoading}
-            isSaving={saving}
-            isPublishing={publishing}
-            isDirty={isDirty}
-            hasDraft={canPublishDraft}
-            onChange={applyDefinition}
-            onBack={() => router.push('/nexus')}
-            onOpenSettings={() => router.push(`/autopilot/${flowId}?tab=settings`)}
-            onOpenModelSettings={() => router.push('/integrations/ai')}
-            onOpenPanel={(panel) => router.push(`/autopilot/${flowId}?tab=${MANAGEMENT_TAB[panel]}`)}
-            onTest={async (payload) => {
-              const result = await runAutopilotNativeWorkflowTest({
-                configId: config.id,
-                customerMessage: payload.message.trim(),
-                workflowDefinition: definition,
-                fixtures: payload.fixtures,
-              });
-              if (!result.success) {
-                toast({ title: 'Falha no teste', description: result.error, variant: 'destructive' });
-              }
-              return result;
-            }}
-            onResumeTest={async (payload) => {
-              const result = await resumeAutopilotNativeWorkflowTest({
-                configId: config.id,
-                resumeToken: payload.resumeToken,
-                customerMessage: payload.message.trim(),
-                workflowDefinition: definition,
-              });
-              if (!result.success) {
-                toast({ title: 'Falha ao continuar o teste', description: result.error, variant: 'destructive' });
-              }
-              return result;
-            }}
-            onTestNode={async (startNodeId, payload) => {
-              const result = await runAutopilotNativeWorkflowTest({
-                configId: config.id,
-                customerMessage: payload.message.trim() || 'Teste isolado iniciado pelo Nexus.',
-                workflowDefinition: definition,
-                startNodeId,
-                fixtures: payload.fixtures,
-              });
-              if (!result.success) {
-                toast({ title: 'Falha no teste isolado', description: result.error, variant: 'destructive' });
-              }
-              return result;
-            }}
-            onSave={() => void save()}
-            onPublish={() => void publish()}
-          />
-          <NativeAiBuilderDialog
-            definition={definition}
-            disabled={saving || publishing}
-            configuredModelLabel={modelOptions.find((model) => model.id === selectedModel)?.label || selectedModel}
-            knowledgeDocumentCount={snapshot.knowledge_base_documents.length}
-            availableToolCount={tools.length}
-            onGenerate={(conversation) => generateAutopilotNativeWorkflowWithAi({
-              configId: config.id,
-              conversation,
-              currentWorkflow: definition,
-              enabledToolNames: snapshot.enabled_tool_names,
-            })}
-            onApply={(proposal) => {
-              if (!proposal.validation.valid) {
-                toast({ title: 'Proposta bloqueada', description: 'A proposta não passou no validador da Dialogy.', variant: 'destructive' });
-                return;
-              }
-              applyDefinition(proposal.workflow);
-              toast({ title: 'Proposta aplicada', description: 'Revise e teste o rascunho antes de publicar.' });
-            }}
-          />
-          <LegacyNexusImportDialog
-            disabled={saving || publishing}
-            workspaceId={user?.activeWorkspaceId || config.workspace_id}
-            configId={config.id}
-            name={snapshot.name}
-            model={defaultModel}
-            mcpTools={tools.filter((tool) => tool.source === 'mcp')}
-            onApply={(workflow, report) => {
-              applyDefinition(workflow);
-              toast({
-                title: 'Fluxo antigo convertido',
-                description: `${report.importedNodes} blocos foram trazidos para o runtime da Dialogy. Revise e salve o rascunho.`,
-              });
-            }}
-          />
-        </>
-      ) : (
-        <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-[#080d14] p-6">
-          <div className="w-full max-w-3xl rounded-3xl border border-cyan-500/20 bg-[#101821] p-8 text-center shadow-2xl">
-            <GitBranch className="mx-auto h-10 w-10 text-cyan-400" />
-            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-400">Nexus nativo</p>
-            <h1 className="mt-3 text-2xl font-semibold text-white">Crie a definição desta automação</h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-400">O fluxo será salvo como Workflow V2 e executado pela IA da Dialogy.</p>
-            <Button onClick={() => setTemplateOpen(true)} className="mt-6 bg-cyan-500 text-slate-950 hover:bg-cyan-400"><Sparkles className="mr-2 h-4 w-4" />Escolher template</Button>
-          </div>
-        </div>
-      )}
-
-      <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
-        <DialogContent className="max-w-3xl border-white/10 bg-[#111419] text-slate-100">
-          <DialogTitle>Começar um fluxo nativo</DialogTitle>
-          <DialogDescription className="text-slate-400">Todos os templates usam modelos, memória, ferramentas e políticas da Dialogy.</DialogDescription>
-          <div className="grid gap-4 py-3 sm:grid-cols-3">
-            {([
-              ['single_agent', 'Agente único', 'Modelo, memória, conhecimento e guardrail conectados.'],
-              ['routed_team', 'Equipe roteada', 'Roteador de IA distribuindo trabalho entre especialistas.'],
-              ['blank', 'Em branco', 'Canvas livre para construir bloco a bloco.'],
-            ] as const).map(([template, title, description]) => (
-              <button key={template} type="button" onClick={() => void createTemplate(template)} disabled={templateBusy} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-cyan-400/40 hover:bg-cyan-500/[0.06] disabled:opacity-50">
-                <span className="block font-semibold text-slate-100">{title}</span><span className="mt-2 block text-sm leading-6 text-slate-400">{description}</span>
-              </button>
-            ))}
-          </div>
-          {templateBusy && <div className="flex items-center justify-center text-sm text-slate-400"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Criando o workflow na Dialogy…</div>}
-          <div className="flex justify-between"><Badge variant="outline" className="border-cyan-500/20 text-cyan-300">Workflow Runtime V2</Badge><Button variant="ghost" onClick={() => router.push('/nexus')}>Cancelar</Button></div>
-        </DialogContent>
-      </Dialog>
+      <AiAgentJourneyStudio
+        config={config}
+        models={modelOptions}
+        knowledgeDocuments={snapshot.knowledge_base_documents}
+        knowledgeCollections={normalizeCollections(snapshot.knowledge_collections)}
+        tools={tools}
+        isSaving={saving}
+        isPublishing={publishing}
+        onSave={async (patch) => {
+          if (patch) {
+            setSnapshot((curr) => (curr ? ({ ...curr, ...patch } as AutopilotConfigDraftSnapshot) : curr));
+          }
+          return await save();
+        }}
+        onPublish={publish}
+        workspaceId={user?.activeWorkspaceId || ''}
+        onBackToOverview={() => router.push('/nexus')}
+      />
     </div>
   );
 }

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Studio — comparação visual</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #111827; }
+      main { display: grid; grid-template-columns: 1fr 1fr; width: 100vw; height: 100vh; gap: 2px; }
+      figure { position: relative; margin: 0; min-width: 0; overflow: hidden; background: white; }
+      img { width: 100%; height: 100%; object-fit: fill; display: block; }
+      figcaption { position: absolute; left: 12px; top: 12px; padding: 6px 10px; border-radius: 8px; background: rgba(7, 11, 18, .86); color: white; font: 600 12px/1.2 system-ui, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <figure><img src="agent-studio-reference.png" alt="Referência" /><figcaption>Referência escolhida</figcaption></figure>
+      <figure><img src="agent-studio-implementation.png" alt="Implementação" /><figcaption>Implementação</figcaption></figure>
+    </main>
+  </body>
+</html>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
 import { badgeColorStyle } from '@/lib/color-contrast';
@@ -22,7 +22,6 @@ import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
-import { TagSelectionDialog } from './tag-selection-dialog';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -64,6 +63,7 @@ import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
 import { isMarketingMessage, matchesChatTeamFilter } from './chat-list-visibility';
 import { isChatVisibleForOwnership, isOwnershipScopedChat } from '@/lib/inbox-ownership';
 import { formatInboxCount, getInboxPaginationScope, hasMoreChatsInScope, isChatInInboxQueueScope, isInboxAssignmentFilterTab, resolveInboxStatusFilterForTab, scopeInboxListFilters, type InboxListFilters } from '@/lib/inbox-pagination';
+import { sanitizeNationalPhoneInput } from '@/lib/phone-input';
 
 import { SearchDetailsDialog } from './search-details-dialog';
 import { InboxSearchInput } from './inbox-search-input';
@@ -358,7 +358,10 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                     isRecipientValid ? "border-emerald-400 focus-within:ring-emerald-500/15 dark:border-emerald-500/60" : "border-slate-200 focus-within:border-blue-500 focus-within:ring-blue-500/15 dark:border-white/10"
                   )}>
                     {!isTelegram && (
-                      <Select value={countryCode} onValueChange={setCountryCode}>
+                      <Select value={countryCode} onValueChange={(value) => {
+                        setCountryCode(value);
+                        setPhoneNumber(current => sanitizeNationalPhoneInput(current, value));
+                      }}>
                         <SelectTrigger aria-label="Código do país" className="h-12 w-[92px] shrink-0 rounded-none border-0 border-r border-slate-200 bg-slate-50 px-2 shadow-none focus:ring-0 dark:border-white/10 dark:bg-white/[0.04]"><SelectValue /></SelectTrigger>
                         <SelectContent className="rounded-xl">
                           <SelectItem value="55">BR +55</SelectItem>
@@ -378,8 +381,8 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                       placeholder={isTelegram ? '123456789' : '11 99999 8888'}
                       required
                       value={phoneNumber}
-                      onChange={(event) => setPhoneNumber(isTelegram ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 13))}
-                      className="h-12 flex-1 rounded-none border-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0"
+                      onChange={(event) => setPhoneNumber(isTelegram ? event.target.value : sanitizeNationalPhoneInput(event.target.value, countryCode))}
+                      className="h-12 min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 text-[14px] font-medium tracking-tight tabular-nums shadow-none focus-visible:ring-0"
                     />
                     <AnimatePresence initial={false}>
                       {isRecipientValid && (
@@ -423,7 +426,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <Input value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Buscar por nome" aria-label="Buscar template aprovado" className="h-10 rounded-xl border-slate-200 bg-white pl-9 shadow-none dark:border-white/10 dark:bg-white/[0.03]" />
                       </div>
-                      <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
+                      <div className="max-h-[min(58dvh,560px)] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
                         {loadingTemplates ? (
                           <div className="flex min-h-36 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Carregando templates...</div>
                         ) : filteredTemplates.length === 0 ? (
@@ -744,11 +747,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const draftPreview = useMemo(() => getDraftPreviewText(draft || ''), [draft]);
   const hasDraft = draftPreview.length > 0;
   const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages?.[chat.messages.length - 1];
-  const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
   const canAssign = chat.status === 'gerais';
-  const canTag = false;
   const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
   const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
   const statusTone = chat.status === 'encerrados'
@@ -766,6 +767,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
     () => (hasTag ? badgeColorStyle(chat.color) : null),
     [hasTag, chat.color]
   );
+  const classificationTags = (chat.tags || []).filter(
+    (classificationTag) => !chat.team_id || !classificationTag.team_ids?.includes(chat.team_id)
+  );
+  const classificationTitle = classificationTags.map((tag) => tag.label).join(', ');
   const unreadCount = chat.unreadCount ?? 0;
   const hasUnread = unreadCount > 0;
 
@@ -873,7 +878,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       onClick={handleSelect}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onDoubleClick={() => setIsTagDialogOpen(true)}
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="option"
@@ -904,14 +908,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           {isSelectedForForwarding && <Check className="h-3 w-3 text-primary-foreground" />}
         </div>
       )}
-
-      <TagSelectionDialog
-        isOpen={isTagDialogOpen}
-        setIsOpen={setIsTagDialogOpen}
-        chat={chat}
-        onUpdate={onUpdate}
-        user={currentUser}
-      />
 
       <div className="relative mt-0.5 flex-shrink-0">
         <Avatar className={cn(
@@ -1028,7 +1024,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </div>
           </div>
           <div className="flex flex-shrink-0 flex-nowrap items-center justify-end gap-1.5">
-            {(canAssign || canTag || canQuickClose) && !isForwarding && !isBulkMode && (
+            {(canAssign || canQuickClose) && !isForwarding && !isBulkMode && (
             <div className="absolute right-2 top-2 z-20 flex flex-nowrap items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-white/10 dark:bg-zinc-950">
               {canAssign && (
                 <TooltipProvider>
@@ -1045,24 +1041,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Assumir</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-              {canTag && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        aria-label="Etiquetar conversa"
-                        onClick={(e) => { e.stopPropagation(); setIsTagDialogOpen(true); }}
-                      >
-                        <TagIcon className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Aplicar tag</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               )}
@@ -1148,6 +1126,35 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               <Megaphone className="h-3 w-3" />
               Marketing
             </Badge>
+          )}
+          {classificationTags.length > 0 && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="flex min-w-0 items-center gap-1"
+                    aria-label={`${classificationTags.length} etiquetas: ${classificationTitle}`}
+                  >
+                    {classificationTags.slice(0, 2).map((tag) => (
+                      <span
+                        key={tag.id}
+                        className="flex h-[18px] max-w-[78px] shrink items-center gap-1 truncate rounded-full border px-1.5 text-[9px] font-medium text-slate-600 dark:text-zinc-300"
+                        style={{ borderColor: `${tag.color}30`, backgroundColor: `${tag.color}0d` }}
+                      >
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
+                        <span className="truncate">{tag.label}</span>
+                      </span>
+                    ))}
+                    {classificationTags.length > 2 && (
+                      <span className="flex h-[18px] shrink-0 items-center rounded-md bg-slate-100 px-1.5 text-[9px] font-semibold text-slate-500 dark:bg-white/[0.06] dark:text-zinc-400">
+                        +{classificationTags.length - 2}
+                      </span>
+                    )}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{classificationTitle}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
 

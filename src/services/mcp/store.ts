@@ -3,6 +3,7 @@ import 'server-only';
 import { db } from '@/lib/db';
 import { ensureWorkspaceIntegrationsTable } from '@/lib/workspace-integrations';
 import type { McpServerConfig, McpWorkspaceConfig } from './types';
+import { openMcpServerSecrets, sealMcpServerSecrets } from './secret-storage';
 
 const MCP_PROVIDER = 'mcp';
 
@@ -23,10 +24,9 @@ export async function getMcpWorkspaceConfig(workspaceId: string): Promise<McpWor
         name: String(server.name || ''),
         url: server.url ? String(server.url) : undefined,
         transport: server.transport === 'sse' ? 'sse' : server.transport === 'stdio' ? 'stdio' : 'streamable_http',
-        headers: server.headers && typeof server.headers === 'object' ? server.headers : {},
         command: server.command ? String(server.command) : undefined,
         args: Array.isArray(server.args) ? server.args.map(String) : [],
-        env: server.env && typeof server.env === 'object' ? server.env : {},
+        ...openMcpServerSecrets(workspaceId, server),
         cwd: server.cwd ? String(server.cwd) : null,
         isActive: Boolean(server.isActive),
         syncedAt: server.syncedAt || null,
@@ -55,7 +55,7 @@ export async function saveMcpWorkspaceConfig(workspaceId: string, config: McpWor
      VALUES ($1, $2, $3, $4, NOW())
      ON CONFLICT (workspace_id, provider)
      DO UPDATE SET config = $3, is_active = $4, updated_at = NOW()`,
-    [workspaceId, MCP_PROVIDER, JSON.stringify(config), config.servers.some((server) => server.isActive)]
+    [workspaceId, MCP_PROVIDER, JSON.stringify({ ...config, servers: config.servers.map((server) => sealMcpServerSecrets(workspaceId, server)) }), config.servers.some((server) => server.isActive)]
   );
 }
 

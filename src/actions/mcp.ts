@@ -139,7 +139,7 @@ export async function deleteMcpServerAction(workspaceId: string, serverId: strin
   return { success: true };
 }
 
-export async function syncMcpServerToolsAction(workspaceId: string, serverId: string) {
+export async function syncMcpServerToolsAction(workspaceId: string, serverId: string, strictPublicNetwork = false) {
   const auth = await requireWorkspace(workspaceId);
   if (auth.error) return { success: false, error: auth.error };
 
@@ -155,7 +155,7 @@ export async function syncMcpServerToolsAction(workspaceId: string, serverId: st
   const startedAt = Date.now();
   const checkedAt = new Date().toISOString();
   try {
-    const tools = await listMcpServerTools(server);
+    const tools = await listMcpServerTools(server, strictPublicNetwork);
     await saveMcpWorkspaceConfig(workspaceId, {
       servers: config.servers.map((item) => (
         item.id === serverId

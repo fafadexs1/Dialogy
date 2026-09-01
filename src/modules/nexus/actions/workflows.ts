@@ -2,8 +2,12 @@
 
 import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 
 import { db } from '@/lib/db';
+import { getAiModelRuntimeProvider } from '@/lib/ai-models';
+import { loadStudioRelease } from '@/services/agent-studio/repository';
+import { validateStudioFlowBindings } from '@/services/agent-studio/flow-inputs';
 import type { PoolClient } from 'pg';
 import { createClient } from '@/lib/supabase/server';
 import type { AutopilotConfig } from '@/lib/types';
@@ -14,6 +18,7 @@ import { listWorkspaceConfiguredAiModels } from '@/services/ai/workspace-ai-cred
 import {
   WorkflowDefinitionSchema,
   WorkflowExecutor,
+  createWorkflowNode,
   createDefaultNodeHandlerRegistry,
   createWorkflowBlockTestSideEffectAdapters,
   hashValue,
@@ -27,12 +32,15 @@ import {
   type WorkflowTestChatMessage,
   type WorkflowTestExecutionResult,
 } from '@/services/workflow-runtime';
+import { listStableWorkflowNodeManifests } from '@/services/workflow-runtime/catalog';
+import type { NativeWorkflowAiProposal } from '@/services/workflow-runtime/native-ai-builder';
 import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
 
 import {
   bindStandaloneNexusWorkflow,
   createStandaloneNexusWorkflow,
   duplicateStandaloneNexusWorkflow,
+  normalizeStandaloneStudioAgents,
   type NexusWorkflowExecutionSummary,
   type NexusWorkflowRecord,
   type NexusWorkflowSummary,
@@ -75,6 +83,288 @@ function parseJson(value: unknown) {
 
 function iso(value: unknown) {
   return new Date(String(value)).toISOString();
+}
+
+const NexusAiEditProposalSchema = z.object({
+  summary: z.string().min(1).max(2_000),
+  changes: z.array(z.string().min(1).max(500)).min(1).max(30),
+  workflow: WorkflowDefinitionSchema,
+});
+
+const NexusAiPatchProposalSchema = z.object({
+  applicability: z.enum(['patch', 'full_edit_required']),
+  summary: z.string().min(1).max(1_000),
+  changes: z.array(z.string().min(1).max(300)).max(12),
+  operations: z.array(z.object({
+    nodeId: z.string().min(1),
+    name: z.string().min(1).max(300).optional(),
+    configPatch: z.record(z.string(), z.unknown()).optional(),
+  })).max(12),
+});
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeNexusConfigPatch(current: Record<string, unknown>, patch: Record<string, unknown>) {
+  const merged: Record<string, unknown> = { ...current };
+  Object.entries(patch).forEach(([key, value]) => {
+    merged[key] = isRecordValue(value) && isRecordValue(merged[key])
+      ? mergeNexusConfigPatch(merged[key], value)
+      : value;
+  });
+  return merged;
+}
+
+function requiresStructuralNexusEdit(request: string) {
+  return /\b(adicion(?:e|ar)|cri(?:e|ar)|remov(?:a|er)|exclu(?:a|ir)|conect(?:e|ar)|desconect(?:e|ar)|dupli(?:que|car)|nova?\s+(?:etapa|rota|ramifica[cç][aã]o)|novo\s+bloco|reestrutur|reconstru|credencia(?:l|is)|integra[cç][aã]o|\brag\b|agente\s+do\s+studio)\b/i.test(request);
+}
+
+function nexusAiChangeComplexity(request: string, workflow: WorkflowDefinition) {
+  const normalized = request.trim().toLocaleLowerCase('pt-BR');
+  const requestedActions = normalized.match(/\b(altere|ajuste|troque|renomeie|corrija|adicione|crie|remova|exclua|conecte|desconecte|mova|reorganize|configure)\b/g)?.length || 1;
+  const clauses = normalized.split(/(?:\n+|;|\b(?:tamb[eé]m|al[eé]m disso|depois|e ent[aã]o)\b)/i).filter((part) => part.trim().length > 3).length;
+  const mentionedNodes = workflow.nodes.filter((node) => (
+    normalized.includes(node.id.toLocaleLowerCase('pt-BR'))
+    || normalized.includes(node.name.toLocaleLowerCase('pt-BR'))
+  )).length;
+  const broadScope = /\b(todo|todos|todas|inteiro|completo|v[aá]rios|fluxo todo|em massa)\b/i.test(normalized);
+  return {
+    requestedChanges: Math.max(requestedActions, clauses, mentionedNodes, broadScope ? Math.max(4, Math.ceil(workflow.nodes.length * 0.6)) : 1),
+    requestTokens: Math.max(1, Math.ceil(request.length / 3.5)),
+  };
+}
+
+function calculateNexusAiOutputTokens(input: {
+  mode: 'patch' | 'full';
+  request: string;
+  workflow: WorkflowDefinition;
+}) {
+  const complexity = nexusAiChangeComplexity(input.request, input.workflow);
+  if (input.mode === 'patch') {
+    const estimated = 768 + (complexity.requestedChanges * 420) + (complexity.requestTokens * 2);
+    return Math.min(12_288, Math.max(1_536, Math.ceil(estimated / 256) * 256));
+  }
+  const structuralSize = (input.workflow.nodes.length * 420) + (input.workflow.connections.length * 160);
+  const requestedGrowth = complexity.requestedChanges * 640;
+  const estimated = 4_096 + structuralSize + requestedGrowth + (complexity.requestTokens * 2);
+  return Math.min(32_768, Math.max(8_192, Math.ceil(estimated / 512) * 512));
+}
+
+function applyNexusAiPatch(input: {
+  current: WorkflowDefinition;
+  patch: z.infer<typeof NexusAiPatchProposalSchema>;
+  workflowId: string;
+  workspaceId: string;
+  configuredModelIds: string[];
+}) {
+  const validationOptions = { availableModelIds: input.configuredModelIds };
+  const baselineValidation = validateWorkflowDefinition(input.current, validationOptions);
+  const draft = structuredClone(input.current);
+  const nodesById = new Map(draft.nodes.map((node) => [node.id, node]));
+  for (const operation of input.patch.operations) {
+    const node = nodesById.get(operation.nodeId);
+    if (!node) throw new Error(`O bloco ${operation.nodeId} não existe mais no fluxo.`);
+    if (operation.name) node.name = operation.name;
+    if (operation.configPatch) node.config = mergeNexusConfigPatch(node.config, operation.configPatch);
+  }
+  draft.updatedAt = new Date().toISOString();
+  const workflow = bindStandaloneNexusWorkflow({
+    definition: WorkflowDefinitionSchema.parse(draft),
+    id: input.workflowId,
+    workspaceId: input.workspaceId,
+    name: input.current.name,
+  });
+  const validation = validateWorkflowDefinition(workflow, validationOptions);
+  const baselineErrors = new Set(baselineValidation.errors.map((issue) => `${issue.code}:${issue.nodeId || ''}:${issue.connectionId || ''}`));
+  const introducedErrors = validation.errors.filter((issue) => !baselineErrors.has(`${issue.code}:${issue.nodeId || ''}:${issue.connectionId || ''}`));
+  if (introducedErrors.length > 0) throw new Error(introducedErrors.map((issue) => issue.message).join(' '));
+  return { workflow, validation };
+}
+
+export async function generateNexusWorkflowWithAi(input: {
+  workspaceId: string;
+  workflowId: string;
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+  currentWorkflow: WorkflowDefinition;
+}): Promise<{ proposal: NativeWorkflowAiProposal | null; error?: string }> {
+  try {
+    const user = await requireWorkspaceManager(input.workspaceId);
+    const conversation = input.conversation
+      .filter((message) => ['user', 'assistant'].includes(message.role) && message.content?.trim())
+      .slice(-12)
+      .map((message) => ({ role: message.role, content: message.content.trim().slice(0, 12_000) }));
+    if (!conversation.some((message) => message.role === 'user')) {
+      return { proposal: null, error: 'Descreva a alteração que deseja fazer no fluxo.' };
+    }
+    const current = bindStandaloneNexusWorkflow({
+      definition: WorkflowDefinitionSchema.parse(input.currentWorkflow),
+      id: input.workflowId,
+      workspaceId: input.workspaceId,
+    });
+    const [runtime, configuredModels] = await Promise.all([
+      resolveWorkspaceAiExecutionContext(input.workspaceId),
+      listWorkspaceConfiguredAiModels(input.workspaceId),
+    ]);
+    const modelNode = current.nodes.find((node) => node.type === 'ai.model') || createWorkflowNode('ai.model', {
+      id: 'nexus_ai_editor_model',
+      name: 'Modelo do editor Nexus',
+      position: { x: 0, y: 0 },
+      config: {
+        provider: getAiModelRuntimeProvider(configuredModels[0]?.id || runtime.model),
+        model: configuredModels[0]?.id || runtime.model,
+        temperature: 0.1,
+        maxOutputTokens: 16_384,
+        supportsTools: true,
+        supportsStructuredOutput: true,
+        supportsStreaming: false,
+        timeoutMs: 120_000,
+        maxRetries: 2,
+      },
+    });
+    const runtimeConfig = (runtime.autopilotConfig || {
+      workspace_id: input.workspaceId,
+      gemini_api_key: runtime.workspaceGeminiApiKey || null,
+    }) as AutopilotConfig;
+    const latestRequest = [...conversation].reverse().find((message) => message.role === 'user')?.content || '';
+    if (!requiresStructuralNexusEdit(latestRequest)) {
+      try {
+        const patchOutputTokens = calculateNexusAiOutputTokens({ mode: 'patch', request: latestRequest, workflow: current });
+        const patchModelNode = {
+          ...modelNode,
+          config: {
+            ...modelNode.config,
+            temperature: 0,
+            maxOutputTokens: patchOutputTokens,
+            timeoutMs: 20_000,
+            maxRetries: 0,
+          },
+        };
+        const patchChain = await modelChainForNode({ workspaceId: input.workspaceId, config: runtimeConfig, modelNode: patchModelNode });
+        const generatedPatch = await patchChain.generateStructured({
+          schema: NexusAiPatchProposalSchema,
+          schemaName: 'dialogy_nexus_flow_patch',
+          timeoutMs: 20_000,
+          messages: [{ role: 'system', content: [
+            'Você é o editor rápido de fluxos Nexus da Dialogy.',
+            'Altere somente nome ou configuração de blocos existentes. Preserve integralmente nós, portas, conexões, posições e tudo que não foi solicitado.',
+            'Use applicability=patch apenas quando o pedido puder ser resolvido com até 12 patches nos blocos existentes.',
+            'Se for necessário criar, remover, conectar, desconectar ou consultar recursos externos, use applicability=full_edit_required e operations vazias.',
+            'configPatch deve conter somente as chaves alteradas; nunca repita a configuração completa.',
+            'Use exclusivamente os IDs de bloco fornecidos.',
+            `O orçamento calculado para esta resposta é ${patchOutputTokens} tokens; use apenas o necessário para as mudanças solicitadas.`,
+          ].join('\n') }, { role: 'user', content: JSON.stringify({
+            request: latestRequest,
+            recentConversation: conversation.slice(-4),
+            nodes: current.nodes.map((node) => ({ id: node.id, type: node.type, name: node.name, config: node.config })),
+          }) }],
+        });
+        const parsedPatch = NexusAiPatchProposalSchema.parse(generatedPatch.output);
+        if (parsedPatch.applicability === 'patch' && parsedPatch.operations.length > 0) {
+          const patched = applyNexusAiPatch({
+            current,
+            patch: parsedPatch,
+            workflowId: input.workflowId,
+            workspaceId: input.workspaceId,
+            configuredModelIds: configuredModels.map((model) => model.id),
+          });
+          return { proposal: {
+            summary: parsedPatch.summary,
+            workflow: patched.workflow,
+            changes: parsedPatch.changes.length > 0 ? parsedPatch.changes : ['Configuração atualizada.'],
+            warnings: [],
+            validation: patched.validation,
+            selectedToolNames: [],
+          } };
+        }
+      } catch (patchError) {
+        console.warn('[NEXUS_AI_FAST_PATCH] Falling back to full workflow edit:', patchError);
+      }
+    }
+
+    const [knowledge, tools, resources, studioAgents] = await Promise.all([
+      loadWorkspaceDialogyKnowledge(input.workspaceId),
+      listNexusDialogyTools(input.workspaceId),
+      loadNexusDialogyResources(input.workspaceId),
+      db.query(`SELECT a.id, a.name, v.version_number,
+          v.snapshot->'agent_release_manifest'->>'releaseId' AS release_id
+        FROM autopilot_configs a
+        JOIN LATERAL (
+          SELECT version_number, snapshot FROM autopilot_config_versions
+          WHERE config_id = a.id AND workspace_id = a.workspace_id
+            AND snapshot->'agent_release_manifest'->>'runtimeVersion' = 'studio-v1'
+          ORDER BY version_number DESC LIMIT 1
+        ) v ON true
+        WHERE a.workspace_id = $1 AND a.is_active = true AND (NOT a.is_private OR a.user_id = $2)
+        ORDER BY a.name`, [input.workspaceId, user.id]),
+    ]);
+    const fullEditOutputTokens = calculateNexusAiOutputTokens({ mode: 'full', request: latestRequest, workflow: current });
+    const fullEditModelNode = {
+      ...modelNode,
+      config: {
+        ...modelNode.config,
+        temperature: 0.1,
+        maxOutputTokens: fullEditOutputTokens,
+        timeoutMs: 60_000,
+        maxRetries: 0,
+      },
+    };
+    const chain = await modelChainForNode({ workspaceId: input.workspaceId, config: runtimeConfig, modelNode: fullEditModelNode });
+    const catalog = listStableWorkflowNodeManifests()
+      .filter((manifest) => manifest.type !== 'ai.agent')
+      .map((manifest) => ({
+        type: manifest.type,
+        label: manifest.label,
+        inputPorts: manifest.inputPorts,
+        outputPorts: manifest.outputPorts,
+        defaultConfig: manifest.defaultConfig,
+        terminal: manifest.terminal === true,
+      }));
+    const context = {
+      conversation,
+      currentWorkflow: current,
+      catalog,
+      studioAgents: studioAgents.rows.map((row) => ({ agentId: String(row.id), agentName: String(row.name), releaseId: String(row.release_id), version: Number(row.version_number) })),
+      resources: {
+        teams: resources.teams,
+        tags: resources.tags,
+        members: resources.members,
+        intelligentAgents: resources.intelligentAgents,
+        instances: resources.instances,
+        workflows: resources.workflows,
+        knowledgeDocuments: knowledge.documents.map((document) => ({ id: document.id, name: document.name })),
+        knowledgeCollections: knowledge.collections.map((collection) => ({ id: collection.id, name: collection.name })),
+        tools: tools.map((tool) => ({ name: tool.name, label: tool.displayName, source: tool.source, riskLevel: tool.riskLevel })),
+      },
+    };
+    let lastError = '';
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const generated = await chain.generateStructured({
+        schema: NexusAiEditProposalSchema,
+        schemaName: 'dialogy_nexus_flow_edit_proposal',
+        timeoutMs: 60_000,
+        messages: [{ role: 'system', content: [
+          'Você é o editor profissional de fluxos Nexus da Dialogy.',
+          'Aplique exatamente o pedido do usuário ao workflow atual e preserve tudo que não foi solicitado.',
+          'Use somente tipos, portas, IDs de recursos e configurações presentes no contexto.',
+          'Nunca use ai.agent. Para atendimento autônomo, use ai.published_agent com uma versão publicada do Studio.',
+          'ai.published_agent é terminal: recebe somente uma entrada main, não possui saídas e decide finalizar ou transferir conforme o Studio.',
+          'Nunca invente credenciais, IDs, resultados de ferramentas ou segredos. Mantenha posições legíveis e conexões válidas.',
+          'Retorne o workflow completo, um resumo objetivo e a lista concreta de alterações.',
+          `O orçamento calculado para esta resposta é ${fullEditOutputTokens} tokens; use apenas o necessário para representar o fluxo resultante.`,
+          lastError ? `A tentativa anterior foi inválida: ${lastError}. Corrija integralmente.` : '',
+        ].filter(Boolean).join('\n') }, { role: 'user', content: JSON.stringify(context) }],
+      });
+      const parsed = NexusAiEditProposalSchema.parse(generated.output);
+      const workflow = bindStandaloneNexusWorkflow({ definition: parsed.workflow, id: input.workflowId, workspaceId: input.workspaceId, name: current.name });
+      const validation = validateWorkflowDefinition(workflow, { availableModelIds: configuredModels.map((model) => model.id) });
+      if (validation.valid) return { proposal: { summary: parsed.summary, workflow, changes: parsed.changes, warnings: [], validation, selectedToolNames: [] } };
+      lastError = validation.errors.map((issue) => issue.message).join(' ');
+    }
+    return { proposal: null, error: `A IA não conseguiu produzir uma alteração válida. ${lastError}` };
+  } catch (error) {
+    return { proposal: null, error: error instanceof Error ? error.message : 'Não foi possível alterar o fluxo com IA.' };
+  }
 }
 
 function jsonRecord(value: unknown): Record<string, unknown> {
@@ -172,7 +462,7 @@ function rowRecord(row: NexusWorkflowRow, hasUnpublishedChanges = true): NexusWo
   return {
     ...rowSummary(row),
     createdBy: String(row.created_by),
-    draftDefinition: WorkflowDefinitionSchema.parse(parseJson(row.draft_definition)),
+    draftDefinition: normalizeStandaloneStudioAgents(WorkflowDefinitionSchema.parse(parseJson(row.draft_definition))),
     publishedWorkflowId: row.published_workflow_id ? String(row.published_workflow_id) : null,
     publishedWorkflowVersion: row.published_workflow_version ? String(row.published_workflow_version) : null,
     hasUnpublishedChanges,
@@ -618,6 +908,13 @@ export async function publishNexusWorkflow(input: {
     if (!validation.valid) {
       return { success: false, error: validation.errors.map((issue) => issue.message).join(' ') };
     }
+    for (const node of draft.nodes.filter((item) => item.type === 'ai.published_agent')) {
+      const release = await loadStudioRelease(input.workspaceId, String(node.config.agentId || ''), String(node.config.releaseId || ''));
+      if (!release) throw new Error(`O bloco “${node.name}” não possui uma versão disponível neste workspace.`);
+      validateStudioFlowBindings(release.agentSnapshot, node.config.inputMappings, node.config.outputKeys);
+      const active = await db.query('SELECT is_active FROM autopilot_configs WHERE workspace_id = $1 AND id = $2 AND (NOT is_private OR user_id = $3)', [input.workspaceId, release.agentId, user.id]);
+      if (!active.rows[0]?.is_active) throw new Error(`O agente do bloco “${node.name}” está pausado.`);
+    }
     const [credentialBindings, dialogyBindings] = await Promise.all([
       validateNexusWorkflowCredentialBindings({
         workspaceId: input.workspaceId,
@@ -642,6 +939,11 @@ export async function publishNexusWorkflow(input: {
     }
 
     await client.query('BEGIN');
+    // Recheck mutable visibility/activation under a shared lock. Published manifests are immutable.
+    for (const agentId of [...new Set(draft.nodes.filter((node) => node.type === 'ai.published_agent').map((node) => String(node.config.agentId)))].sort()) {
+      const available = await client.query('SELECT id FROM autopilot_configs WHERE workspace_id = $1 AND id = $2 AND is_active AND (NOT is_private OR user_id = $3) FOR SHARE', [input.workspaceId, agentId, user.id]);
+      if (!available.rows[0]) throw new Error('Um agente foi pausado ou teve o acesso alterado. Revise os blocos antes de publicar.');
+    }
     const locked = await client.query(
       `SELECT published_revision, status FROM public.nexus_workflows
        WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,

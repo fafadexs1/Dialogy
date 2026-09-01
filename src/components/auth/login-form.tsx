@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import Link from 'next/link';
-import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from 'lucide-react';
+import { AlertCircle, ArrowRight, Eye, EyeOff, Loader2, Lock, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -17,11 +17,12 @@ function LoginButton() {
   return (
     <button
       type="submit"
-      className="h-12 w-full rounded-2xl bg-slate-950 text-sm font-semibold text-white shadow-[0_20px_40px_-24px_rgba(15,23,42,0.48)] transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+      className="h-12 w-full rounded-xl bg-[#087f5b] text-sm font-semibold text-white shadow-[0_3px_6px_-3px_rgba(6,95,70,0.3)] transition-colors hover:bg-[#066648] disabled:cursor-not-allowed disabled:opacity-70"
       disabled={pending}
     >
       {pending && <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />}
-      {pending ? t("Entrando...") : t("Entrar")}
+      {pending ? t("Entrando...") : t("Entrar na minha conta")}
+      {!pending && <ArrowRight className="ml-2 inline h-4 w-4" />}
     </button>
   );
 }
@@ -61,31 +62,31 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
 
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="email" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <Label htmlFor="email" className="text-[12px] font-medium text-slate-700">
             {t("Email")}
           </Label>
           <div className="group relative">
-            <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#20E401]" />
+            <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-emerald-600" />
             <Input
               id="email"
               name="email"
               type="email"
-              placeholder={t("ex: seu-email@exemplo.com")}
+              placeholder={t("voce@empresa.com")}
               required
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="h-12 rounded-2xl border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-950 placeholder:text-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] focus:border-[#20E401]/35 focus:ring-[#20E401]/10"
+              className="h-12 rounded-xl border-slate-200 bg-white pl-12 pr-4 text-base sm:text-sm text-slate-950 placeholder:text-slate-400 transition-colors hover:border-slate-300 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/15 focus-visible:ring-offset-0"
             />
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <Label htmlFor="password" className="text-[12px] font-medium text-slate-700">
             {t("Senha")}
           </Label>
           <div className="group relative">
-            <Lock className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#20E401]" />
+            <Lock className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-emerald-600" />
             <Input
               id="password"
               name="password"
@@ -95,7 +96,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="h-12 rounded-2xl border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-950 placeholder:text-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] focus:border-[#20E401]/35 focus:ring-[#20E401]/10"
+              className="h-12 rounded-xl border-slate-200 bg-white pl-12 pr-12 text-base sm:text-sm text-slate-950 placeholder:text-slate-400 transition-colors hover:border-slate-300 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/15 focus-visible:ring-offset-0"
             />
             <button
               type="button"
@@ -116,7 +117,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
             id="remember-me"
             name="remember-me"
             type="checkbox"
-            className="h-4 w-4 cursor-pointer rounded border-black/10 bg-white text-[#20E401] focus:ring-2 focus:ring-[#20E401]/20"
+            className="h-4 w-4 cursor-pointer rounded border-black/10 bg-white accent-emerald-600 focus:ring-2 focus:ring-emerald-500/20"
             checked={rememberMe}
             onChange={(e) => setRememberMe(e.target.checked)}
           />
@@ -128,7 +129,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
       </div>
 
       {state?.message && (
-        <Alert className="rounded-2xl border-red-200 bg-red-50 py-3 text-red-700">
+        <Alert className="rounded-xl border-red-200 bg-red-50 py-3 text-red-700">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription className="text-sm font-medium">{state.message}</AlertDescription>
         </Alert>

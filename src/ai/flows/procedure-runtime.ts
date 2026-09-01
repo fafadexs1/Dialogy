@@ -45,6 +45,7 @@ const ProcedureRuntimeInputSchema = z.object({
   chatId: z.string(),
   mode: z.enum(['decision', 'response']),
   model: z.string().optional(),
+  fixedModel: z.boolean().optional(),
   customerMessage: z.string(),
   chatHistory: z.string().optional(),
   persona: z.string().optional(),
@@ -340,7 +341,7 @@ const procedureRuntimeFlow = ai.defineFlow(
     try {
       const promptRun = await runAiModelWithFallback({
         label: 'procedureRuntimeSlimFlow',
-        modelCandidates: getModelCandidates(input.model),
+        modelCandidates: input.fixedModel ? [model] : getModelCandidates(input.model),
         apiKeyCandidates,
         maxAttemptsPerCandidate: Number.parseInt(process.env.AI_MODEL_MAX_ATTEMPTS || '', 10) || 2,
         retryBaseDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_BASE_DELAY_MS || '', 10) || 250,

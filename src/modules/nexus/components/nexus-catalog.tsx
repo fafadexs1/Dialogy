@@ -133,7 +133,7 @@ export function NexusCatalog() {
         return;
       }
       setCreateOpen(false);
-      router.push(`/nexus/${result.id}`);
+      router.push(`/autopilot/${result.id}`);
     } finally {
       setCreating(false);
     }
@@ -201,7 +201,7 @@ export function NexusCatalog() {
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-col gap-6 bg-background px-4 py-4 sm:px-6 lg:px-8">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-6 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-background px-4 py-4 [scrollbar-gutter:stable] sm:px-6 lg:px-8">
       <section className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 rounded-[28px] border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-4xl space-y-4">
@@ -228,7 +228,7 @@ export function NexusCatalog() {
           {showArchived && archivedWorkflows.length > 0 ? <div className="space-y-3 rounded-[26px] border border-dashed border-border bg-muted/15 p-4 sm:p-5"><div><h3 className="font-semibold">Fluxos arquivados</h3><p className="text-xs text-muted-foreground">Versões e execuções continuam preservadas. Restaure para editar ou voltar a executar.</p></div><div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">{archivedWorkflows.map((flow) => <Card key={flow.id} className="rounded-2xl opacity-85"><CardContent className="flex items-center gap-3 p-4"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground"><Archive className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="truncate font-medium">{flow.name}</p><p className="text-xs text-muted-foreground">{flow.nodeCount} blocos · arquivado</p></div><Button type="button" variant="outline" size="sm" disabled={busyWorkflowId === flow.id} onClick={() => void restoreFlow(flow)}>{busyWorkflowId === flow.id ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-2 h-3.5 w-3.5" />}Restaurar</Button></CardContent></Card>)}</div></div> : null}
         </section>
 
-        {agents.length > 0 && <section className="space-y-4"><div><h2 className="text-xl font-semibold">Agentes inteligentes</h2><p className="text-sm text-muted-foreground">Automações orientadas a agentes, com conhecimento, ferramentas e guardrails.</p></div><div className="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">{agents.map((agent) => <Card key={agent.id} role="button" tabIndex={0} onClick={() => router.push(`/nexus/${agent.id}`)} className="group cursor-pointer rounded-[26px] transition hover:border-primary/40 hover:shadow-lg"><CardContent className="flex items-center gap-4 p-6"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-600"><Bot className="h-5 w-5" /></div><div className="min-w-0 flex-1"><h3 className="truncate font-semibold">{agent.name}</h3><p className="text-sm text-muted-foreground">{agent.is_active ? 'Publicado' : 'Em preparação'} · Agente Dialogy</p></div><ArrowRight className="h-4 w-4 text-primary" /></CardContent></Card>)}</div></section>}
+        {agents.length > 0 && <section className="space-y-4"><div><h2 className="text-xl font-semibold">Agentes inteligentes</h2><p className="text-sm text-muted-foreground">Automações orientadas a agentes, com conhecimento, ferramentas e guardrails.</p></div><div className="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">{agents.map((agent) => <Card key={agent.id} role="button" tabIndex={0} onClick={() => router.push(`/autopilot/${agent.id}`)} className="group cursor-pointer rounded-[26px] transition hover:border-primary/40 hover:shadow-lg"><CardContent className="flex items-center gap-4 p-6"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-600"><Bot className="h-5 w-5" /></div><div className="min-w-0 flex-1"><h3 className="truncate font-semibold">{agent.name}</h3><p className="text-sm text-muted-foreground">{agent.is_active ? 'Publicado' : 'Em preparação'} · Agente Dialogy</p></div><ArrowRight className="h-4 w-4 text-primary" /></CardContent></Card>)}</div></section>}
       </main>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent className="rounded-[28px] sm:max-w-[620px]"><DialogHeader><DialogTitle>Novo no Nexus</DialogTitle><DialogDescription>Escolha se você quer montar um processo comum ou uma automação orientada a agente.</DialogDescription></DialogHeader><div className="space-y-5 py-2">

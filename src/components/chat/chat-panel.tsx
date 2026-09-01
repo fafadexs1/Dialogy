@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Paperclip,
-    Send,
+    ArrowUp,
     Smile,
     MoreVertical,
     Bot,
@@ -58,7 +58,6 @@ import {
     SpellCheck2,
     Activity,
     Signature,
-    SlidersHorizontal,
     PanelRightOpen,
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
@@ -99,7 +98,10 @@ import {
     DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuTrigger,
-    DropdownMenuSeparator
+    DropdownMenuSeparator,
+    DropdownMenuSub,
+    DropdownMenuSubTrigger,
+    DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu';
 import {
     AlertDialog,
@@ -120,6 +122,8 @@ import type { EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioRecorder } from './audio-recorder';
+import { ComposerAiMenu } from './composer-ai-menu';
+import composerStyles from './composer.module.css';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
 import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
@@ -137,6 +141,7 @@ import { getChatIdentityDisplayValue, resolveChatPlatform } from '@/lib/chat-pla
 import { buildToolExecutionItems, isToolExecutionMessage, ToolExecutionsSheet } from './tool-executions-sheet';
 import { ConversationLearningDialog } from './conversation-learning-dialog';
 import { usePremiumWheelScroller } from '@/hooks/use-premium-wheel-scroller';
+import { ChatTagsBar } from './chat-tags-bar';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
     ssr: false,
@@ -358,65 +363,18 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
 
 function SendMessageButton({
     disabled,
-    isPrimed,
     feedbackKey,
-    showFeedback,
 }: {
     disabled?: boolean;
-    isPrimed?: boolean;
     feedbackKey?: number;
-    showFeedback?: boolean;
 }) {
     const { pending } = useFormStatus();
     const isEnabled = !disabled && !pending;
-    const shouldShowFeedback = Boolean(showFeedback && feedbackKey);
 
     return (
-        <div className="relative">
-            {isEnabled && isPrimed && (
-                <span className="pointer-events-none absolute -inset-1 rounded-full border border-cyan-400/30" />
-            )}
-
-            {shouldShowFeedback && (
-                <span
-                    key={`send-ring-${feedbackKey}`}
-                    className="pointer-events-none absolute inset-0 rounded-full border border-cyan-300/70"
-                />
-            )}
-
-            <Button
-                type="submit"
-                size="icon"
-                className={cn(
-                    "h-9 w-9 rounded-full transition-all duration-200 shrink-0 relative overflow-hidden",
-                    isEnabled
-                        ? "bg-blue-600 text-white hover:bg-blue-500"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                )}
-                disabled={pending || disabled}
-                aria-label="Enviar mensagem"
-            >
-                {pending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                    <span
-                        key={`send-icon-${feedbackKey || 0}`}
-                        className="flex items-center justify-center"
-                    >
-                        <Send className="h-4 w-4" />
-                    </span>
-                )}
-            </Button>
-
-            {shouldShowFeedback && (
-                <span
-                    key={`send-chip-${feedbackKey}`}
-                    className="pointer-events-none absolute -top-5 right-0 text-[10px] font-semibold uppercase tracking-wide text-cyan-300"
-                >
-                    Enviado
-                </span>
-            )}
-        </div>
+        <button type="submit" className={composerStyles.send} disabled={!isEnabled} aria-label="Enviar mensagem" title="Enviar mensagem (Enter)">
+            {pending ? <Loader2 className="animate-spin" /> : <span key={feedbackKey} className={composerStyles.sendIcon}><ArrowUp /></span>}
+        </button>
     )
 }
 
@@ -449,6 +407,7 @@ export default function ChatPanel({
     const emojiPickerTheme = resolvedTheme === 'light' ? 'light' : 'dark';
     const debouncedMessageInput = useDebouncedValue(newMessage, 220);
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
+    const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const chatRef = useRef(chat?.id);
     const newMessageRef = useRef(newMessage);
     newMessageRef.current = newMessage;
@@ -501,6 +460,7 @@ export default function ChatPanel({
     const retryingMessagesRef = useRef(new Set<string>());
     const [sendFeedbackKey, setSendFeedbackKey] = useState(0);
     const [isSendBurstActive, setIsSendBurstActive] = useState(false);
+    const [isVoiceActive, setIsVoiceActive] = useState(false);
     const sendBurstTimeoutRef = useRef<number | null>(null);
 
     // AI Copilot Suggestion State
@@ -534,6 +494,7 @@ export default function ChatPanel({
     const finishInitialPositionTimerRef = useRef<number | null>(null);
     const initiallyPositionedChatRef = useRef<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileDragDepthRef = useRef(0);
     const contentEditableRef = useRef<any>(null);
     const savedRange = useRef<Range | null>(null);
     const userScrolledUpRef = useRef(false);
@@ -576,7 +537,7 @@ export default function ChatPanel({
         }
         sendBurstTimeoutRef.current = window.setTimeout(() => {
             setIsSendBurstActive(false);
-        }, 460);
+        }, 900);
     }, []);
 
     useEffect(() => {
@@ -1270,6 +1231,39 @@ export default function ChatPanel({
         event.target.value = '';
     };
 
+    const isFileDrag = (event: React.DragEvent<HTMLElement>) =>
+        Array.from(event.dataTransfer.types).includes('Files');
+
+    const handleComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        fileDragDepthRef.current += 1;
+        setIsDraggingFiles(true);
+    };
+
+    const handleComposerDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setIsDraggingFiles(true);
+    };
+
+    const handleComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isDraggingFiles) return;
+        event.preventDefault();
+        fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+        if (fileDragDepthRef.current === 0) setIsDraggingFiles(false);
+    };
+
+    const handleComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        fileDragDepthRef.current = 0;
+        setIsDraggingFiles(false);
+        const files = Array.from(event.dataTransfer.files);
+        if (files.length > 0) void processFiles(files);
+    };
+
     const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
         if (e.clipboardData.files.length > 0) {
             e.preventDefault();
@@ -1745,20 +1739,18 @@ export default function ChatPanel({
 
 
     const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
-        if (!chat) return;
+        if (!chat) throw new Error('Conversa indisponível.');
 
         // Determine file extension based on mimetype (WhatsApp prefers ogg)
-        const audioExtension = mimetype.includes('ogg') || mimetype.includes('opus') ? 'ogg' : mimetype.includes('webm') ? 'webm' : 'mp3';
+        const audioExtension = mimetype.includes('ogg') ? 'ogg' : mimetype.includes('webm') ? 'webm' : mimetype.includes('mp4') ? 'm4a' : 'mp3';
 
-        console.log(`[AUDIO_SEND] Received mimetype: ${mimetype}, using extension: ${audioExtension}`);
 
         // 1. Upload to Supabase Storage (Public Bucket)
         const fileName = createUniqueMediaStoragePath(`audio.${audioExtension}`, 'audio-media');
         const { publicUrl, error: uploadError } = await uploadFileToStorage(audioBlob, 'temp-media', fileName);
 
         if (uploadError || !publicUrl) {
-            toast({ title: 'Erro ao fazer upload do áudio', description: uploadError || 'Erro desconhecido', variant: 'destructive' });
-            return;
+            throw new Error(uploadError || 'Não foi possível carregar o áudio.');
         }
 
         // 2. Send Media using the Public URL (instead of Base64)
@@ -1778,17 +1770,14 @@ export default function ChatPanel({
             storagePath: fileName
         }];
 
-        console.log('[AUDIO_SEND] Sending media payload:', JSON.stringify(mediaPayload, null, 2));
 
-        const result = await sendMediaAction(chat.id, '', mediaPayload, tabId, { mediaUrl: publicUrl });
+        const result = await sendMediaAction(chat.id, '', mediaPayload, tabId, { mediaUrl: publicUrl, duration });
 
-        console.log('[AUDIO_SEND] Server result:', result);
 
-        if (result.error) {
+        if (!result.success || result.error) {
             console.error('[AUDIO_SEND] Error from server:', result.error);
-            toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
+            throw new Error(result.error || 'O envio não foi confirmado.');
         } else if ((result as any).messages && (result as any).messages.length > 0) {
-            console.log('[AUDIO_SEND] Success, appending messages');
             appendMessagesToChat(chat.id, (result as any).messages);
             triggerSendFeedback();
             scrollToLatestMessage();
@@ -1824,6 +1813,7 @@ export default function ChatPanel({
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+        if (!(e.target instanceof HTMLElement) || !e.target.isContentEditable || e.nativeEvent.isComposing || isVoiceActive) return;
         if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
             e.preventDefault();
             handleFormSubmit();
@@ -2068,7 +2058,7 @@ export default function ChatPanel({
     const isChatOpen = chat.status !== 'encerrados';
     const isChatAssignedToMe = (chat.agent?.id || chat.agentId) === currentUser.id;
 
-    const showTextInput = !mediaFiles.length;
+    const showTextInput = !isVoiceActive;
     const showAiTypingOverlay = showTextInput && isAiTyping && isComposerTextEmpty;
     const availableAutopilotAgents = autopilotAgents.length > 0 ? autopilotAgents : autopilotConfig ? [autopilotConfig] : [];
     const selectedAutopilotAgentId =
@@ -2420,6 +2410,8 @@ export default function ChatPanel({
                 </div>
             </header>
 
+            <ChatTagsBar chat={chat} onUpdate={onActionSuccess} />
+
             {/* Messages Area */}
 
             <div
@@ -2551,9 +2543,6 @@ export default function ChatPanel({
                                 ))}
                             </div>
                         )}
-                        {mediaFiles.length > 0 && (
-                            <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
-                        )}
                         {/* {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
                         <SmartReplies
                             customerMessage={lastCustomerMessage?.content || ''}
@@ -2594,29 +2583,28 @@ export default function ChatPanel({
                             <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown}>
                                 <input type="hidden" name="chatId" value={chat.id} />
 
-                                <div data-input-container className={cn(
-                                    "relative mx-auto flex w-full max-w-[1600px] flex-col overflow-hidden rounded-[22px] border shadow-[0_10px_35px_-28px_rgba(15,23,42,0.55)] transition-all duration-200",
-                                    isInternalNote
-                                        ? "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-300 dark:border-yellow-700/40"
-                                        : "border-slate-200 bg-white dark:border-white/10 dark:bg-black",
-                                    canSendFromComposer && !isInternalNote && "border-cyan-500/50",
-                                    isSendBurstActive && !isInternalNote && "ring-1 ring-cyan-300/40",
-                                    isAiTyping && !isInternalNote && "ring-1 ring-cyan-400/25"
-                                )}>
-                                    {!isInternalNote && canSendFromComposer && (
-                                        <span className="pointer-events-none absolute left-6 right-6 top-0 h-px bg-cyan-300/60" />
+                                <div
+                                    data-input-container
+                                    data-ready={canSendFromComposer}
+                                    data-note={isInternalNote}
+                                    data-voice={isVoiceActive}
+                                    data-dragging={isDraggingFiles}
+                                    className={composerStyles.composer}
+                                    onDragEnter={handleComposerDragEnter}
+                                    onDragOver={handleComposerDragOver}
+                                    onDragLeave={handleComposerDragLeave}
+                                    onDrop={handleComposerDrop}
+                                >
+                                    {isSendBurstActive && <span key={sendFeedbackKey} className={composerStyles.burst} />}
+                                    {isDraggingFiles && (
+                                        <div className={composerStyles.dropOverlay} aria-hidden="true">
+                                            <span className={composerStyles.dropIcon}><Paperclip size={18} /></span>
+                                            <span><strong>Solte para anexar</strong><small>Fotos, vídeos, documentos ou áudios</small></span>
+                                        </div>
                                     )}
-
-                                    {isAiTyping && !isInternalNote && (
-                                        <span className="pointer-events-none absolute inset-x-10 top-0 h-px bg-cyan-400" />
-                                    )}
-
-                                    {Boolean(sendFeedbackKey) && (
-                                        <span
-                                            key={`composer-burst-${sendFeedbackKey}`}
-                                            className="pointer-events-none absolute inset-0 rounded-2xl border border-cyan-300/60"
-                                        />
-                                    )}
+                                    {isInternalNote && <div className={composerStyles.mode}><StickyNote size={13} /><span>Nota interna · somente sua equipe pode ver</span><button type="button" onClick={() => setIsInternalNote(false)} aria-label="Sair da nota interna"><X size={13} /></button></div>}
+                                    {skipUserSignature && <div className={composerStyles.mode}><Signature size={13} /><span>Esta mensagem será enviada sem assinatura</span><button type="button" onClick={() => setSkipUserSignature(false)} aria-label="Restaurar assinatura"><X size={13} /></button></div>}
+                                    {mediaFiles.length > 0 && <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />}
 
                                     {isSpellChecking && (
                                         <div className="px-4 pt-1">
@@ -2628,13 +2616,13 @@ export default function ChatPanel({
                                     )}
 
                                     {/* Text Input Area */}
-                                    <div className="relative min-w-0 px-5 pb-1 pt-4">
+                                    <div className={cn("relative min-w-0 px-5 pb-1 pt-4", isVoiceActive && "hidden")}>
                                         {showTextInput && isComposerTextEmpty && !showAiTypingOverlay && (
                                             <div className="pointer-events-none absolute inset-0 px-5 pb-1 pt-4 select-none">
                                                 <span className={cn(
                                                     "text-[15px] leading-relaxed",
-                                                    isInternalNote ? "text-muted-foreground/50" : "text-slate-400 dark:text-zinc-500"
-                                                )}>Digite aqui a sua mensagem...</span>
+                                                    isInternalNote ? "text-amber-700/60" : "text-muted-foreground/70"
+                                                )}>{isInternalNote ? 'Escreva uma nota para sua equipe…' : mediaFiles.length ? 'Adicione uma legenda…' : 'Escreva uma mensagem…'}</span>
                                             </div>
                                         )}
                                         {showAiTypingOverlay && (
@@ -2670,10 +2658,13 @@ export default function ChatPanel({
                                                 onChange={handleMessageChange}
                                                 onPaste={handlePaste}
                                                 className={cn(
-                                                    "max-h-[140px] min-h-[44px] w-full resize-none overflow-y-auto whitespace-pre-wrap border-0 bg-transparent p-0 text-[15px] leading-relaxed focus:outline-none focus:ring-0 scrollbar-hide",
-                                                    isInternalNote ? "text-foreground" : "text-slate-900 caret-slate-900 dark:text-white dark:caret-white",
+                                                    composerStyles.editor, "w-full resize-none overflow-y-auto whitespace-pre-wrap border-0 bg-transparent focus:outline-none focus:ring-0 scrollbar-hide",
+                                                    isInternalNote ? "text-amber-950" : "text-foreground",
                                                     showAiTypingOverlay && "opacity-0"
                                                 )}
+                                                role="textbox"
+                                                aria-label={isInternalNote ? "Nota interna" : "Mensagem"}
+                                                aria-multiline="true"
                                                 tagName="div"
                                                 onKeyUp={saveCursorPosition}
                                                 onClick={saveCursorPosition}
@@ -2682,18 +2673,9 @@ export default function ChatPanel({
                                     </div>
 
                                     {/* Bottom Toolbar */}
-                                    <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
+                                    <div className={composerStyles.toolbar}>
                                         {/* Left Action Buttons */}
-                                        <div className="flex min-w-0 items-center gap-1 overflow-x-auto scrollbar-hide">
-                                            <button
-                                                type="button"
-                                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                onClick={() => fileInputRef.current?.click()}
-                                                disabled={isAiTyping}
-                                                aria-label="Anexar arquivo"
-                                            >
-                                                <Paperclip className="h-4 w-4" />
-                                            </button>
+                                        <div className={cn("flex min-w-0 items-center gap-1.5", isVoiceActive && "hidden")}>
                                             <input
                                                 type="file"
                                                 ref={fileInputRef}
@@ -2705,27 +2687,48 @@ export default function ChatPanel({
 
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className={cn(
-                                                            "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
-                                                            isInternalNote || skipUserSignature
-                                                                ? "bg-blue-500/10 text-blue-700 hover:bg-blue-500/15 dark:text-blue-300"
-                                                                : "text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                        )}
-                                                        disabled={isAiTyping}
-                                                        aria-label="Selecionar opções para a próxima mensagem"
-                                                    >
-                                                        <SlidersHorizontal className="h-4 w-4" />
-                                                        <span className="hidden sm:inline">Opções</span>
-                                                        {(isInternalNote || skipUserSignature) && (
-                                                            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold text-white">
-                                                                {Number(isInternalNote) + Number(skipUserSignature)}
-                                                            </span>
-                                                        )}
+                                                    <button type="button" className={cn(composerStyles.tool, composerStyles.add)} disabled={isAiTyping} aria-label="Anexos e ferramentas" title="Anexos e ferramentas">
+                                                        <Plus size={19} />
                                                     </button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" className="w-72">
+                                                <DropdownMenuContent align="start" side="top" sideOffset={12} className="w-72 rounded-2xl p-2 shadow-xl">
+                                                    <DropdownMenuItem className="gap-3 rounded-xl py-3" onSelect={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" /><div><p className="text-sm font-medium">Anexar mídia</p><p className="text-[11px] text-muted-foreground">Fotos, vídeos, documentos e áudios</p></div></DropdownMenuItem>
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuSub>
+                                                        <DropdownMenuSubTrigger className="gap-3 rounded-xl py-3"><MessageSquareQuote className="h-4 w-4" /><span>Respostas rápidas</span><kbd className="ml-auto text-xs text-muted-foreground">/</kbd></DropdownMenuSubTrigger>
+                                                        <DropdownMenuSubContent className="max-h-80 w-[min(300px,calc(100vw-40px))] overflow-y-auto rounded-xl p-2">
+                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                                                        Atalhos disponíveis
+                                                    </div>
+                                                    <DropdownMenuSeparator />
+                                                    {shortcuts.length === 0 ? (
+                                                        <DropdownMenuItem disabled>
+                                                            Nenhum atalho encontrado.
+                                                        </DropdownMenuItem>
+                                                    ) : (
+                                                        shortcuts.map(shortcut => (
+                                                            <DropdownMenuItem
+                                                                key={shortcut.id}
+                                                                className="items-start gap-0 px-0 py-0 focus:bg-transparent"
+                                                                onSelect={() => handleShortcutSelect(shortcut)}
+                                                            >
+                                                                <div className="flex w-full flex-col gap-1 rounded-sm px-2 py-2 hover:bg-accent">
+                                                                    <div className="flex items-center justify-between w-full gap-2">
+                                                                        <span className="font-bold text-primary flex items-center gap-2">
+                                                                            /{shortcut.name}
+                                                                            {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
+                                                                            {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
+                                                                            {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span className="w-full truncate text-xs text-muted-foreground">{shortcut.message}</span>
+                                                                </div>
+                                                            </DropdownMenuItem>
+                                                        ))
+                                                    )}
+                                                        </DropdownMenuSubContent>
+                                                    </DropdownMenuSub>
+                                                    <DropdownMenuSeparator />
                                                     <DropdownMenuLabel>
                                                         <span className="block text-sm">Próxima mensagem</span>
                                                         <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">As opções são desativadas após o envio.</span>
@@ -2765,173 +2768,32 @@ export default function ChatPanel({
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
 
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                        disabled={isAiTyping}
-                                                    >
-                                                        <MessageSquareQuote className="h-4 w-4" />
-                                                        <span className="hidden sm:inline">Respostas rápidas</span>
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" className="w-80 max-h-96 overflow-y-auto">
-                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Atalhos disponíveis
-                                                    </div>
-                                                    <DropdownMenuSeparator />
-                                                    {shortcuts.length === 0 ? (
-                                                        <DropdownMenuItem disabled>
-                                                            Nenhum atalho encontrado.
-                                                        </DropdownMenuItem>
-                                                    ) : (
-                                                        shortcuts.map(shortcut => (
-                                                            <DropdownMenuItem
-                                                                key={shortcut.id}
-                                                                className="items-start gap-0 px-0 py-0 focus:bg-transparent"
-                                                                onSelect={() => handleShortcutSelect(shortcut)}
-                                                            >
-                                                                <div className="flex w-full flex-col gap-1 rounded-sm px-2 py-2 hover:bg-accent">
-                                                                    <div className="flex items-center justify-between w-full gap-2">
-                                                                        <span className="font-bold text-primary flex items-center gap-2">
-                                                                            /{shortcut.name}
-                                                                            {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
-                                                                        </span>
-                                                                    </div>
-                                                                    <span className="w-full truncate text-xs text-muted-foreground">{shortcut.message}</span>
-                                                                </div>
-                                                            </DropdownMenuItem>
-                                                        ))
-                                                    )}
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
 
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className={cn(
-                                                            "flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition-colors hover:bg-muted dark:hover:bg-white/10",
-                                                            isAiAgentActive
-                                                                ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300"
-                                                                : "text-muted-foreground hover:text-foreground"
-                                                        )}
-                                                        aria-label="Configurar IA"
-                                                    >
-                                                        <Sparkles className={cn("h-4 w-4", isAiAgentActive && "text-cyan-500")} />
-                                                        <span>IA</span>
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" side="top" className="w-80 max-h-[70vh] overflow-y-auto">
-                                                    <div className="px-2 py-2">
-                                                        <div className="flex items-center justify-between gap-3">
-                                                            <div className="flex min-w-0 items-center gap-2">
-                                                                <Sparkles className="h-4 w-4 text-cyan-500" />
-                                                                <div className="min-w-0">
-                                                                    <p className="truncate text-sm font-medium">Copiloto IA</p>
-                                                                    <p className="truncate text-xs text-muted-foreground">
-                                                                        {chat.assigned_system_agent_id
-                                                                            ? 'A IA já está conduzindo esta conversa'
-                                                                            : selectedAutopilotAgent?.name || 'Nenhum agente selecionado'}
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                            <Switch
-                                                                checked={isCopilotActive}
-                                                                onCheckedChange={handleAiSwitchChange}
-                                                                disabled={isAiTyping || isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <DropdownMenuSeparator />
-                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Agente responsável
-                                                    </div>
-                                                    {!hasAutopilotAvailable ? (
-                                                        <DropdownMenuItem disabled>
-                                                            Nenhum agente IA configurado.
-                                                        </DropdownMenuItem>
-                                                    ) : (
-                                                        availableAutopilotAgents.map(agent => (
-                                                            <DropdownMenuItem
-                                                                key={agent.id}
-                                                                onSelect={() => handleAgentChange(agent.id)}
-                                                                disabled={isAiTyping}
-                                                                className="gap-2"
-                                                            >
-                                                                <Bot className="h-4 w-4 text-muted-foreground" />
-                                                                <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-                                                                {agent.id === selectedAutopilotAgent?.id && <Check className="h-4 w-4 text-cyan-500" />}
-                                                            </DropdownMenuItem>
-                                                        ))
-                                                    )}
 
-                                                    <DropdownMenuSeparator />
-                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Nesta mensagem
-                                                    </div>
-                                                    <DropdownMenuItem onSelect={handleSpellCheck} disabled={isSpellChecking || isComposerTextEmpty}>
-                                                        {isSpellChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SpellCheck2 className="mr-2 h-4 w-4" />}
-                                                        Corretor ortográfico
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem
-                                                        disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
-                                                        onSelect={() => { void handleRequestSuggestion(); }}
-                                                    >
-                                                        {isRequestingSuggestion ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquareQuote className="mr-2 h-4 w-4" />}
-                                                        Sugerir resposta agora
-                                                    </DropdownMenuItem>
-
-                                                    <DropdownMenuSeparator />
-                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Esta conversa
-                                                    </div>
-                                                    <DropdownMenuItem onSelect={handleLearnFromConversation}>
-                                                        <Brain className="mr-2 h-4 w-4" />
-                                                        Aprender com esta conversa
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem onSelect={() => setIsToolExecutionsOpen(true)}>
-                                                        <Activity className="mr-2 h-4 w-4" />
-                                                        Execuções da IA
-                                                        {toolExecutionEntries.length > 0 && (
-                                                            <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
-                                                                {toolExecutionEntries.length}
-                                                            </Badge>
-                                                        )}
-                                                    </DropdownMenuItem>
-
-                                                    {/* Passa o atendimento para a IA: fica isolado no fim, com
-                                                        confirmação, porque tira a conversa das mãos do atendente. */}
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuItem
-                                                        disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation || isTakingOverWithAi}
-                                                        onSelect={() => setIsAiTakeOverDialogOpen(true)}
-                                                        className="items-start py-2"
-                                                    >
-                                                        <Bot className="mr-2 mt-0.5 h-4 w-4 text-cyan-500" />
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-medium">Deixar a IA assumir</p>
-                                                            <p className="text-[10px] text-muted-foreground">
-                                                                {chat.assigned_system_agent_id
-                                                                    ? 'A IA já assumiu esta conversa'
-                                                                    : canAiTakeOverConversation
-                                                                        ? 'Você sai do atendimento e a IA responde'
-                                                                        : 'Agente não publicado como Atendente Inteligente'}
-                                                            </p>
-                                                        </div>
-                                                        {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
+                                            <ComposerAiMenu
+                                                key={chat.id}
+                                                agents={availableAutopilotAgents}
+                                                selectedId={selectedAutopilotAgent?.id}
+                                                active={isCopilotActive}
+                                                busy={isAiTyping || isRequestingSuggestion || isTakingOverWithAi}
+                                                autonomous={Boolean(chat.assigned_system_agent_id)}
+                                                canTakeOver={canAiTakeOverConversation}
+                                                canSpellCheck={!isComposerTextEmpty}
+                                                spellChecking={isSpellChecking}
+                                                onActivate={handleAgentChange}
+                                                onDeactivate={disableCopilot}
+                                                onSuggest={() => { void handleRequestSuggestion(); }}
+                                                onSpellCheck={() => { void handleSpellCheck(); }}
+                                                onLearn={handleLearnFromConversation}
+                                                onExecutions={() => setIsToolExecutionsOpen(true)}
+                                                onTakeOver={() => setIsAiTakeOverDialogOpen(true)}
+                                            />
 
                                             <Popover>
                                                 <PopoverTrigger asChild>
                                                     <button
                                                         type="button"
-                                                        className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/10 transition-colors"
+                                                        className={composerStyles.tool}
                                                         disabled={isAiTyping}
                                                         aria-label="Abrir emojis"
                                                     >
@@ -2945,18 +2807,16 @@ export default function ChatPanel({
                                         </div>
 
                                         {/* Right: Audio / Send */}
-                                        <div className="flex items-center gap-1.5">
+                                        <div className={cn("flex items-center gap-1.5", isVoiceActive && "w-full min-w-0")}>
                                             {!canSendFromComposer ? (
-                                                <div className="animate-in zoom-in duration-150">
-                                                    <AudioRecorder onSend={handleSendAudio} />
+                                                <div className={cn("min-w-0", isVoiceActive && "w-full")} >
+                                                    <AudioRecorder key={chat.id} onSend={handleSendAudio} onActiveChange={setIsVoiceActive} disabled={isAiTyping || isInternalNote} />
                                                 </div>
                                             ) : (
                                                 <div className="animate-in zoom-in duration-150">
                                                     <SendMessageButton
                                                         disabled={isAiTyping}
-                                                        isPrimed={!isAiTyping && canSendFromComposer}
                                                         feedbackKey={sendFeedbackKey}
-                                                        showFeedback={isSendBurstActive}
                                                     />
                                                 </div>
                                             )}
@@ -2964,6 +2824,10 @@ export default function ChatPanel({
                                     </div>
                                 </div>
                             </form>
+                            <div className={composerStyles.hint}>
+                                <span aria-live="polite">{isDraggingFiles ? 'Solte os arquivos para anexar' : isSendBurstActive ? <span className={composerStyles.feedback}><Check size={12} />Mensagem adicionada à conversa</span> : isVoiceActive ? 'Você pode ouvir e revisar antes de enviar.' : mediaFiles.length ? `${mediaFiles.length} arquivo(s) pronto(s) para enviar` : 'Use / para encontrar uma resposta rápida'}</span>
+                                {!isVoiceActive && <span><kbd>Enter</kbd> envia · <kbd>Shift + Enter</kbd> quebra a linha</span>}
+                            </div>
                             {/* Agent UI removed from here, moving to header */}
                         </div>
                     </footer>

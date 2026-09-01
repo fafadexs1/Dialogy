@@ -2843,8 +2843,12 @@ export async function deleteAutopilotAgent(agentId: string) {
 
         const isMember = await isWorkspaceMember(user.id, workspaceId);
         if (!isMember) return { success: false, error: 'Sem permissão no workspace' };
+        if (!await hasWorkspacePermission(user.id, workspaceId, 'automations:manage')) return { success: false, error: 'Sem permissão para excluir agentes.' };
 
-        await db.query('DELETE FROM autopilot_configs WHERE id = $1', [agentId]);
+        const dependencies = await db.query(`SELECT name FROM workflow_definitions WHERE workspace_id = $1 AND status = 'published'
+          AND definition->'nodes' @> $2::jsonb LIMIT 10`, [workspaceId, JSON.stringify([{ type: 'ai.published_agent', config: { agentId } }])]);
+        if (dependencies.rows.length) return { success: false, error: `Este agente é usado por fluxos publicados: ${dependencies.rows.map((row) => row.name).join(', ')}. Resolva essas referências antes de excluí-lo.` };
+        await db.query('DELETE FROM autopilot_configs WHERE id = $1 AND workspace_id = $2', [agentId, workspaceId]);
 
         revalidatePath('/autopilot');
         return { success: true };

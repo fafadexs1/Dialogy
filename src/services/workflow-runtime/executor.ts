@@ -550,6 +550,7 @@ export class WorkflowExecutor {
     let retryInteraction = false;
     let interactionRetryReason: 'unrecognized' | 'invalid' | null = null;
     const waitingMetadata = isRecord(waitingResult?.output) ? waitingResult.output : {};
+    if (selectedOutput === 'expired') await this.stopNodeSession(locked, 'expired', workflow);
     if (
       selectedOutput === 'expired'
       && waitingNode.type === 'interaction.options'
@@ -569,7 +570,7 @@ export class WorkflowExecutor {
     if (selectedOutput === 'expired' && typeof waitingMetadata.expirationOutput === 'string') {
       resolvedOutput = waitingMetadata.expirationOutput;
       const expirationPort = waitingNode.outputPorts.find((port) => port.id === resolvedOutput);
-      routeStatus = expirationPort?.connectionType === 'error' ? 'error' : 'route';
+      routeStatus = resolvedOutput === 'error' || expirationPort?.connectionType === 'error' ? 'error' : 'route';
     }
     if (selectedOutput === 'resumed' && waitingMetadata.resumeMode === 'reexecute') {
       locked.status = 'running';
@@ -713,17 +714,21 @@ export class WorkflowExecutor {
       });
       return saved;
     }
-    const nextNodeIds = waitingResult
-      ? selectedConnections(workflow, waitingNode, {
+    const resumedResult: NodeExecutionResult | undefined = waitingResult ? {
           ...waitingResult,
           status: routeStatus,
           selectedOutput: resolvedOutput,
+          ...(selectedOutput === 'expired' && routeStatus === 'error' ? {
+            error: { code: 'WAIT_EXPIRED', message: 'O prazo de resposta desta etapa terminou.', retryable: false },
+          } : {}),
           ...(interactionError ? {
             error: { code: 'INVALID_INTERACTION_INPUT', message: interactionError, retryable: false },
           } : {}),
-        })
-      : [];
+        } : undefined;
+    const nextNodeIds = resumedResult ? selectedConnections(workflow, waitingNode, resumedResult) : [];
+    if (resumedResult) locked.nodeResults[waitingNode.id] = resumedResult;
     if (nextNodeIds.length === 0) {
+      if (selectedOutput === 'expired' && routeStatus === 'error') return this.failExecution(locked, 'WAIT_EXPIRED', 'O prazo de resposta desta etapa terminou.');
       throw new Error(`Waiting node ${waitingNode.id} has no ${selectedOutput} route.`);
     }
     locked.status = 'running';
@@ -881,6 +886,7 @@ export class WorkflowExecutor {
       signal,
     );
     const result = continueAfterConfiguredError(node, rawResult);
+    if (rawResult.status === 'error') await this.stopNodeSession(execution, 'failed', workflow);
     const stateAfter = result.statePatch
       ? mergeStatePatch(execution.variables, result.statePatch)
       : execution.variables;
@@ -945,7 +951,7 @@ export class WorkflowExecutor {
     }
 
     const manifest = getWorkflowNodeManifest(node.type);
-    if (finalResult.status === 'completed' || manifest?.terminal) {
+    if (finalResult.status === 'completed' || (manifest?.terminal && finalResult.status !== 'error')) {
       execution.currentNodeId = null;
       execution.previousNodeId = node.id;
       execution = await this.persistence.saveExecution(execution, execution.version);
@@ -1169,6 +1175,7 @@ export class WorkflowExecutor {
     code: string,
     message: string,
   ): Promise<WorkflowExecution> {
+    await this.stopNodeSession(execution, 'failed');
     execution.status = 'failed';
     execution.failure = { code, message, nodeId: execution.currentNodeId || undefined };
     execution.finishedAt = now();
@@ -1187,7 +1194,10 @@ export class WorkflowExecutor {
     execution: WorkflowExecution,
     reason: string,
   ): Promise<WorkflowExecution> {
+    await this.stopNodeSession(execution, 'cancelled');
     execution.status = 'cancelled';
+    execution.resumeToken = undefined;
+    execution.waitingReason = undefined;
     execution.failure = { code: 'EXECUTION_CANCELLED', message: reason };
     execution.finishedAt = now();
     execution.updatedAt = execution.finishedAt;
@@ -1199,6 +1209,19 @@ export class WorkflowExecutor {
       data: { reason },
     });
     return saved;
+  }
+
+  private async stopNodeSession(execution: WorkflowExecution, reason: 'cancelled' | 'expired' | 'failed', definition?: WorkflowDefinition) {
+    if (!execution.currentNodeId) return;
+    const workflow = definition || await this.persistence.getWorkflowDefinition(execution.workflowId, execution.workflowVersion);
+    if (!workflow) throw new Error('Workflow definition not found while ending the active session.');
+    const node = nodeById(workflow, execution.currentNodeId);
+    await this.handlers.get(node.type)?.stop?.({ execution, workflow, node, reason });
+    if (execution.resumeToken) {
+      const timer = this.timeWaitTimers.get(execution.resumeToken);
+      if (timer) clearTimeout(timer);
+      this.timeWaitTimers.delete(execution.resumeToken);
+    }
   }
 
   private emit(

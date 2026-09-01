@@ -7,6 +7,7 @@ import {
 } from '@/actions/messages';
 import { closeChatAction, transferChatAction, transferChatToIntelligentAgentAction } from '@/actions/chats';
 import { db } from '@/lib/db';
+import { executePublishedStudioNode } from '@/services/agent-studio/workflow-adapter';
 import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
@@ -248,6 +249,36 @@ export async function createNexusChatAdapters(input: {
         durationMs: Date.now() - startedAt,
       };
     },
+    executePublishedAgent: async (runtimeInput) => executePublishedStudioNode(runtimeInput, {
+      send: async (response) => {
+        const sender = await senderFor(runtimeInput);
+        return sendAutomatedMessageAction(input.chatId, response, sender.id, true, input.instanceName, nexusDeliveryMetadata(runtimeInput));
+      },
+      native: async (action, confirmed) => {
+        const actor = await trustedActorFor(runtimeInput);
+        if (action.type === 'transfer_chat') {
+          const team = action.payload?.teamId
+            ? await db.query('SELECT id FROM teams WHERE workspace_id = $1 AND id = $2', [input.workspaceId, action.payload.teamId])
+            : await db.query('SELECT id FROM teams WHERE workspace_id = $1 AND name = $2', [input.workspaceId, action.payload?.teamName]);
+          if (!team.rows[0]) throw new Error('Equipe de transferência indisponível.');
+          const result = await transferChatAction({ chatId: input.chatId, teamId: team.rows[0].id, nexusEventContext: nexusEventCausation(runtimeInput) }, actor);
+          if (!result.success) throw new Error(result.error || 'A transferência falhou.');
+          return;
+        }
+        if (action.type === 'close_chat' && confirmed) {
+          if (action.payload?.notes) {
+            const sender = await senderFor(runtimeInput);
+            const delivered = await sendAutomatedMessageAction(input.chatId, action.payload.notes, sender.id, true, input.instanceName, nexusDeliveryMetadata(runtimeInput));
+            if (!delivered.success) throw new Error('A despedida não pôde ser entregue; a conversa permanece aberta.');
+          }
+          const result = await closeChatAction(input.chatId, null, action.reason || 'Procedimento do agente concluído.', false,
+            { event: 'studio_close', nexusExecutionId: runtimeInput.execution.executionId, nexusNodeId: runtimeInput.node.id }, actor);
+          if (!result.success) throw new Error(result.error || 'O encerramento falhou.');
+          return;
+        }
+        throw new Error('Ação não autorizada pelo bloco publicado.');
+      },
+    }),
     sendResponse: async (message, runtimeInput) => {
       const sender = await senderFor(runtimeInput);
       const metadata = nexusDeliveryMetadata(runtimeInput);

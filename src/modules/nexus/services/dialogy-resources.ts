@@ -50,6 +50,7 @@ const MESSAGE_DELIVERY_NODE_TYPES = new Set([
 export function nexusWorkflowRequiresSenderSystemAgent(definition: WorkflowDefinition) {
   return definition.nodes.some((node) => (
     node.type === 'trigger.received_message'
+    || node.type === 'ai.published_agent'
     || MESSAGE_DELIVERY_NODE_TYPES.has(node.type)
     || (node.type === 'ai.agent' && node.config.autoSendResponse === true)
   ));

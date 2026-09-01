@@ -1,4 +1,5 @@
 'use client';
+import { PublishedAgentInspector } from './published-agent-inspector';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
@@ -627,7 +628,11 @@ const WorkflowNodeCard = memo(function WorkflowNodeCard({ data, selected, draggi
           </div>
         ) : (
           <span className="w-full text-center text-[8px] font-medium text-slate-500">
-            {visibleOutputs.length === 0 ? (node.outputPorts.length === 0 ? 'Fim deste caminho' : 'Recurso do agente') : 'Próximo passo conectado'}
+            {node.type === 'ai.published_agent'
+              ? 'O agente assume o atendimento'
+              : visibleOutputs.length === 0
+                ? (node.outputPorts.length === 0 ? 'Fim deste caminho' : 'Recurso do agente')
+                : 'Próximo passo conectado'}
           </span>
         )}
       </div> : null}
@@ -872,6 +877,7 @@ const ESSENTIAL_WORKFLOW_NODE_TYPES = new Set([
   'tool.http',
   'tool.database',
   'ai.agent',
+  'ai.published_agent',
   'output.respond',
   'output.media',
   'output.redirect',
@@ -901,6 +907,7 @@ const FRIENDLY_NODE_COPY: Record<string, { label: string; description: string }>
   'dialogy.chat_tag': { label: 'Aplicar etiqueta', description: 'Atualiza a etiqueta do atendimento atual no próprio Dialogy.' },
   'whatsapp.group_create': { label: 'Criar grupo no WhatsApp', description: 'Cria um grupo na instância autorizada e adiciona participantes.' },
   'ai.agent': { label: 'Atender com IA', description: 'Entende o pedido, conversa e usa as habilidades permitidas.' },
+  'ai.published_agent': { label: 'Agente do Studio', description: 'Assume o atendimento e decide quando finalizar ou transferir conforme sua configuração publicada.' },
   'output.respond': { label: 'Enviar mensagem', description: 'Responde ao cliente pelo canal atual.' },
   'output.handoff': { label: 'Transferir para uma pessoa', description: 'Entrega o atendimento para a equipe com contexto.' },
   'output.close_conversation': { label: 'Encerrar atendimento', description: 'Fecha o atendimento com motivo e registro.' },
@@ -1214,8 +1221,10 @@ export function NativeWorkflowBuilder({
   onTest,
   onResumeTest,
   onTestNode,
+  onDiscard,
   onSave,
   onPublish,
+  assistantComposer,
   activePanelContent,
   surface = 'agent',
   credentialOptions = [],
@@ -1251,8 +1260,10 @@ export function NativeWorkflowBuilder({
     nodeId: string,
     payload: { message: string; fixtures?: WorkflowBlockTestFixtures },
   ) => Promise<WorkflowTestExecutionResult | string | null | undefined> | WorkflowTestExecutionResult | string | null | undefined;
+  onDiscard?: () => void;
   onSave: () => void;
   onPublish: () => void;
+  assistantComposer?: React.ReactNode;
 }) {
   const validation = useMemo(() => validateWorkflowDefinition(definition, {
     availableModelIds: modelOptions.map((model) => model.id),
@@ -2142,10 +2153,11 @@ export function NativeWorkflowBuilder({
 
   const manifests = useMemo(() => listStableWorkflowNodeManifests().filter((manifest) => (
     manifestMatches(manifest, query)
+    && !(surface === 'standalone' && manifest.type === 'ai.agent')
     && (editorMode === 'advanced' || ESSENTIAL_WORKFLOW_NODE_TYPES.has(manifest.type))
     && (!(pendingConnection || selectedWorkflowNode) || manifest.category !== 'triggers')
     && (!catalogSourcePort || manifest.inputPorts.some((port) => port.connectionType === catalogSourcePort.connectionType))
-  )), [catalogSourcePort, editorMode, pendingConnection, query, selectedWorkflowNode]);
+  )), [catalogSourcePort, editorMode, pendingConnection, query, selectedWorkflowNode, surface]);
   const recommendedManifests = useMemo(() => {
     const byType = new Map(manifests.map((manifest) => [manifest.type, manifest]));
     return recommendedNodeTypes(selectedWorkflowNode, catalogSourcePort?.connectionType, surface)
@@ -2303,6 +2315,10 @@ export function NativeWorkflowBuilder({
                       <Wrench className="h-4 w-4 text-slate-400" />
                       <span className="text-sm font-medium">Ferramentas e MCP</span>
                     </DropdownMenuItem>
+                    {onManageCredentials ? <DropdownMenuItem onClick={onManageCredentials} className="flex cursor-pointer items-center gap-2.5 py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
+                      <KeyRound className="h-4 w-4 text-slate-400" />
+                      <span className="text-sm font-medium">Credenciais</span>
+                    </DropdownMenuItem> : null}
                     <DropdownMenuItem onClick={() => onOpenPanel('settings')} className="flex cursor-pointer items-center gap-2.5 py-2 hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white">
                       <Settings2 className="h-4 w-4 text-slate-300" />
                       <span className="text-sm font-medium">Implantação e gatilhos</span>
@@ -2350,7 +2366,7 @@ export function NativeWorkflowBuilder({
                 <Settings2 className="mr-2 h-4 w-4" /> Ajustes
               </Button>
             ) : null}
-            {onManageCredentials ? (
+            {onManageCredentials && surface !== 'standalone' ? (
               <Button variant="ghost" size="sm" onClick={onManageCredentials} className="shrink-0 text-slate-300">
                 <KeyRound className="mr-2 h-4 w-4" /> Credenciais
               </Button>
@@ -2360,12 +2376,13 @@ export function NativeWorkflowBuilder({
               <button type="button" aria-pressed={editorMode === 'advanced'} onClick={() => setEditorMode('advanced')} className={cn('h-7 rounded-lg px-2.5 text-[10px] font-semibold transition', editorMode === 'advanced' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200')}>Avançado</button>
             </div>
             {onTest && <Button variant="ghost" size="sm" onClick={() => setTestTarget({ kind: 'workflow' })} disabled={!validation.valid || testRunning || isSaving || isPublishing} className="h-9 shrink-0 rounded-xl text-slate-200 hover:bg-white/[0.06]"><Play className="mr-2 h-4 w-4 text-slate-400" />{testRunning ? 'Iniciando…' : 'Testar'}</Button>}
-            <Button variant="outline" size="sm" onClick={onSave} disabled={isSaving || isPublishing || !isDirty} aria-busy={isSaving} className="h-9 shrink-0 rounded-xl border-slate-700/70 bg-[#111d28] text-slate-200 hover:bg-[#172633]"><Save className="mr-2 h-4 w-4" />{isSaving ? 'Salvando…' : 'Salvar'}</Button>
+            {onDiscard ? <button type="button" onClick={onDiscard} disabled={isSaving || isPublishing || !isDirty} title="Descartar alterações" aria-label="Descartar alterações" className="group flex h-9 w-9 shrink-0 items-center justify-start overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025] px-2.5 text-slate-300 transition-[width,background-color] duration-200 hover:w-[106px] hover:bg-white/[0.07] focus-visible:w-[106px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-40 disabled:hover:w-9"><Undo2 className="h-4 w-4 shrink-0" /><span className="ml-2 whitespace-nowrap text-xs font-medium opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">Descartar</span></button> : null}
+            <button type="button" onClick={onSave} disabled={isSaving || isPublishing || !isDirty} aria-busy={isSaving} title="Salvar rascunho" aria-label={isSaving ? 'Salvando rascunho' : 'Salvar rascunho'} className="group flex h-9 w-9 shrink-0 items-center justify-start overflow-hidden rounded-xl border border-slate-700/70 bg-[#111d28] px-2.5 text-slate-200 transition-[width,background-color] duration-200 hover:w-[92px] hover:bg-[#172633] focus-visible:w-[92px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-40 disabled:hover:w-9"><Save className={cn('h-4 w-4 shrink-0', isSaving && 'animate-pulse')} /><span className="ml-2 whitespace-nowrap text-xs font-medium opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">{isSaving ? 'Salvando…' : 'Salvar'}</span></button>
             <Button size="sm" onClick={onPublish} disabled={isSaving || isPublishing || !validation.valid || !hasDraft} aria-busy={isPublishing} title={!validation.valid ? 'Resolva as pendências antes de publicar.' : !hasDraft ? (isDirty ? 'Apenas o layout visual foi alterado. Use "Salvar" para guardar as posições.' : 'Nenhuma alteração nova para publicar.') : 'Publicar rascunho'} className="h-9 shrink-0 rounded-xl bg-slate-100 px-4 font-semibold text-slate-950 shadow-sm hover:bg-white"><Sparkles className="mr-2 h-4 w-4" />{isPublishing ? 'Publicando…' : 'Publicar'}</Button>
             {!inspectorOpen && <Button variant="ghost" size="icon" onClick={openInspectorPanel} className="h-9 w-9 shrink-0 rounded-xl border border-white/[0.07] bg-white/[0.025] text-slate-300 hover:bg-white/[0.07]" title="Abrir inspetor"><PanelRightOpen className="h-4 w-4" /></Button>}
           </div>
         </header>
-        <div className={cn('relative min-h-0 flex-1 flex flex-col bg-[#f8fafc]', debugExecutionId && !activePanelContent ? 'basis-[56%]' : 'flex-1')} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={onDrop}>
+        <div className={cn('relative min-h-0 flex-1 flex flex-col bg-[#f8fafc] transition-[margin] duration-200', debugExecutionId && !activePanelContent ? 'basis-[56%]' : 'flex-1', inspectorOpen && !isNarrowViewport && 'mr-[400px]')} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={onDrop}>
           {activePanelContent ? (
             <div className="h-full w-full overflow-y-auto bg-[#070b10] px-4 py-5 text-slate-100 sm:px-6">
               {activePanelContent}
@@ -2432,6 +2449,7 @@ export function NativeWorkflowBuilder({
               {!isLargeWorkflow ? <MiniMap pannable zoomable className="!m-4 !h-24 !w-36 !rounded-[16px] !border !border-slate-200/90 !bg-white/95 !shadow-[0_4px_20px_rgba(0,0,0,0.08)]" nodeColor="#94a3b8" maskColor="rgba(241,245,249,0.75)" /> : null}
             </ReactFlow>
           )}
+          {assistantComposer && !activePanelContent ? assistantComposer : null}
         </div>
         {debugExecutionId && !activePanelContent && (
           <section className="relative min-h-[280px] flex-1 border-t border-slate-700/60 bg-[#101214] shadow-[0_-10px_28px_rgba(0,0,0,.3)]">
@@ -2458,7 +2476,7 @@ export function NativeWorkflowBuilder({
         )}
       </main>
 
-      {inspectorOpen && <aside ref={inspectorPanelRef} aria-label="Inspetor da automação" aria-modal={isNarrowViewport || undefined} role={isNarrowViewport ? 'dialog' : undefined} className="absolute bottom-3 right-3 top-3 z-50 w-[min(400px,calc(100vw-1.5rem))] shrink-0 overflow-y-auto rounded-[22px] border border-slate-700/60 bg-[#0e1720]/95 shadow-[0_18px_48px_rgba(0,0,0,.42)] backdrop-blur-xl">
+      {inspectorOpen && <aside ref={inspectorPanelRef} aria-label="Inspetor da automação" aria-modal={isNarrowViewport || undefined} role={isNarrowViewport ? 'dialog' : undefined} className={cn('absolute bottom-0 right-0 z-30 w-[min(400px,calc(100vw-1.5rem))] shrink-0 overflow-y-auto border border-slate-700/60 bg-[#0e1720]/95 shadow-[-12px_12px_40px_rgba(0,0,0,.28)] backdrop-blur-xl', isNarrowViewport ? 'top-3 rounded-l-[22px]' : 'top-[68px] rounded-none border-b-0 border-r-0')}>
         {selectedNode ? (
           <div className="p-4">
             <div className="sticky top-0 z-20 -mx-4 -mt-4 mb-4 border-b border-white/[0.065] bg-[#0e1720]/95 px-4 pb-4 pt-4 backdrop-blur-xl">
@@ -2524,6 +2542,8 @@ export function NativeWorkflowBuilder({
                    knowledgeDocumentCount={knowledgeDocuments.length}
                   onDelete={requestDeleteSelectedNode}
                 />
+              : selectedNode.data.workflowNode.type === 'ai.published_agent'
+                ? <PublishedAgentInspector workspaceId={definition.workspaceId} node={selectedNode.data.workflowNode} onUpdate={(patch) => updateSelectedNode({ ...selectedNode.data.workflowNode, ...patch })} />
               : hasSpecializedWorkflowInspector(selectedNode.data.workflowNode.type)
                 ? <NativeSpecializedNodeInspector
                     node={selectedNode.data.workflowNode}

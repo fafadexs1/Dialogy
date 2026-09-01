@@ -418,6 +418,8 @@ export type Chat = {
   teamColor?: string;
   tag?: string;
   color?: string;
+  /** Etiquetas de classificação. `tag`/`color` continuam temporariamente como marcador legado de fila. */
+  tags?: Tag[];
   is_autopilot_active?: boolean;
   autopilot_config_id?: string | null;
   copilot_mode?: 'off' | 'auto' | 'suggest';
@@ -924,7 +926,9 @@ export interface EvolutionInstance {
   type: 'baileys' | 'wa_cloud' | 'telegram' | 'mercadolivre';
   cluster_id: string;
   qrCode?: string;
-  webhook_url?: string;
+  webhook_url?: string | null;
+  webhook_needs_sync?: boolean;
+  webhook_configuration_error?: string;
   business_name?: string | null;
   waba_name?: string | null;
   display_phone_number?: string | null;
@@ -1019,6 +1023,7 @@ export interface EvolutionInstanceCreationPayload {
 
   // Webhook
   webhook?: {
+    enabled?: boolean;
     url?: string;
     byEvents?: boolean;
     base64?: boolean;
@@ -1130,6 +1135,8 @@ export interface CampaignTemplate {
   name: string;
   language: string;
   components: any[];
+  bodyParameterValues?: string[];
+  bodyParameterNames?: string[];
 }
 
 export type CampaignMediaType = 'image' | 'audio';

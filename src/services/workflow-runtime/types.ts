@@ -105,6 +105,8 @@ export type NodeHandler = {
   inputSchema?: z.ZodType<Record<string, unknown>>;
   configSchema?: z.ZodType<Record<string, unknown>>;
   execute: (input: NodeRuntimeInput) => Promise<NodeExecutionResult>;
+  /** End a suspended child session without executing or replaying business operations. Must be idempotent. */
+  stop?: (input: Pick<NodeRuntimeInput, 'execution' | 'workflow' | 'node'> & { reason: 'cancelled' | 'expired' | 'failed' }) => Promise<void>;
 };
 
 export type NodeHandlerRegistry = {
@@ -141,4 +143,3 @@ export type {
   WorkflowTestChatMessage,
   WorkflowTestExecutionResult,
 } from './block-test';
-

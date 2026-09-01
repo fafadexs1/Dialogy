@@ -3,7 +3,7 @@
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent, MessageMetadata } from '@/lib/types';
+import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent, MessageMetadata, Tag } from '@/lib/types';
 import { format as formatDate, isToday, isYesterday } from 'date-fns';
 import { toZonedTime, format as formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
@@ -1577,6 +1577,89 @@ export const loadOlderChatsAction = withDebug(
     },
     {
         contextResolver: (workspaceId, before, beforeId) => ({ payload: { workspaceId, before, beforeId } })
+    }
+);
+
+const MAX_CHAT_TAGS = 8;
+
+export const toggleChatTagAction = withDebug(
+    'toggle_chat_tag',
+    async function toggleChatTagAction(
+        chatId: string,
+        tagId: string,
+        selected: boolean
+    ): Promise<{ success: boolean; tags?: Tag[]; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { success: false, error: 'Usuário não autenticado.' };
+        if (!chatId || !tagId) return { success: false, error: 'Chat e etiqueta são obrigatórios.' };
+
+        const chatAccess = await requireChatAccess(user.id, chatId);
+        if (!chatAccess.ok) return { success: false, error: chatAccess.error };
+
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
+            const scope = await client.query(
+                `SELECT c.workspace_id
+                 FROM chats c
+                 JOIN tags t ON t.workspace_id = c.workspace_id
+                 WHERE c.id = $1 AND t.id = $2 AND t.is_close_reason = FALSE
+                 FOR UPDATE OF c`,
+                [chatId, tagId]
+            );
+            if ((scope.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                return { success: false, error: 'Etiqueta indisponível para este atendimento.' };
+            }
+
+            const workspaceId = scope.rows[0].workspace_id as string;
+            if (selected) {
+                const count = await client.query(
+                    'SELECT COUNT(*)::int AS total FROM chat_tags WHERE chat_id = $1',
+                    [chatId]
+                );
+                if (Number(count.rows[0]?.total || 0) >= MAX_CHAT_TAGS) {
+                    await client.query('ROLLBACK');
+                    return { success: false, error: `Use no máximo ${MAX_CHAT_TAGS} etiquetas por atendimento.` };
+                }
+                await client.query(
+                    `INSERT INTO chat_tags (chat_id, tag_id, workspace_id, added_by)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT (chat_id, tag_id) DO NOTHING`,
+                    [chatId, tagId, workspaceId, user.id]
+                );
+            } else {
+                await client.query(
+                    'DELETE FROM chat_tags WHERE chat_id = $1 AND tag_id = $2 AND workspace_id = $3',
+                    [chatId, tagId, workspaceId]
+                );
+            }
+
+            const tagsResult = await client.query(
+                `SELECT t.id, t.label, t.value, t.color, t.is_close_reason,
+                        t.team_ids, t.category, t.sort_order
+                 FROM chat_tags ct
+                 JOIN tags t ON t.id = ct.tag_id AND t.workspace_id = ct.workspace_id
+                 JOIN chats c ON c.id = ct.chat_id AND c.workspace_id = ct.workspace_id
+                 WHERE ct.chat_id = $1
+                   AND NOT (
+                     c.team_id IS NOT NULL
+                     AND c.team_id = ANY(COALESCE(t.team_ids, ARRAY[]::uuid[]))
+                   )
+                 ORDER BY ct.created_at, COALESCE(t.sort_order, 2147483647), t.label`,
+                [chatId]
+            );
+            await client.query('COMMIT');
+            revalidatePath('/', 'layout');
+            return { success: true, tags: tagsResult.rows as Tag[] };
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[TOGGLE_CHAT_TAG] Error:', error);
+            return { success: false, error: 'Falha ao atualizar as etiquetas do atendimento.' };
+        } finally {
+            client.release();
+        }
     }
 );
 
@@ -3459,6 +3542,41 @@ async function fetchSystemAgentsMap(ids: string[]): Promise<Map<string, Pick<Sys
     return new Map(rows.map((row: Pick<SystemAgent, 'id' | 'name' | 'avatar_url' | 'type'>) => [row.id, row]));
 }
 
+async function fetchChatTagsMap(chatIds: string[]): Promise<Map<string, Tag[]>> {
+    if (!chatIds.length) return new Map();
+    const { rows } = await db.query(
+        `SELECT ct.chat_id, t.id, t.label, t.value, t.color, t.is_close_reason,
+                t.team_ids, t.category, t.sort_order
+         FROM chat_tags ct
+         JOIN tags t ON t.id = ct.tag_id AND t.workspace_id = ct.workspace_id
+         JOIN chats c ON c.id = ct.chat_id AND c.workspace_id = ct.workspace_id
+         WHERE ct.chat_id::text = ANY($1::text[])
+           AND t.is_close_reason = FALSE
+           AND NOT (
+             c.team_id IS NOT NULL
+             AND c.team_id = ANY(COALESCE(t.team_ids, ARRAY[]::uuid[]))
+           )
+         ORDER BY ct.chat_id, ct.created_at, COALESCE(t.sort_order, 2147483647), t.label`,
+        [chatIds]
+    );
+    const result = new Map<string, Tag[]>();
+    for (const row of rows) {
+        const tags = result.get(row.chat_id) || [];
+        tags.push({
+            id: row.id,
+            label: row.label,
+            value: row.value,
+            color: row.color,
+            is_close_reason: row.is_close_reason,
+            team_ids: row.team_ids,
+            category: row.category,
+            sort_order: row.sort_order,
+        });
+        result.set(row.chat_id, tags);
+    }
+    return result;
+}
+
 async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats: Chat[]; chatMap: Map<string, Chat>; lastSyncChats: string | null }> {
     if (!rows.length) {
         return { chats: [], chatMap: new Map(), lastSyncChats: null };
@@ -3473,9 +3591,10 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
         if (row.last_message_sender_system_agent_id) systemAgentIds.add(row.last_message_sender_system_agent_id);
     });
 
-    const [agentsMap, systemAgentsMap] = await Promise.all([
+    const [agentsMap, systemAgentsMap, chatTagsMap] = await Promise.all([
         fetchAgentsMap([...agentIds].filter(Boolean)),
         fetchSystemAgentsMap([...systemAgentIds].filter(Boolean)),
+        fetchChatTagsMap(rows.map((row) => row.id)),
     ]);
 
     const chats: Chat[] = rows.map((row) => {
@@ -3561,6 +3680,7 @@ async function hydrateChats(rows: ChatRow[], timezone: string): Promise<{ chats:
             teamColor: row.team_color || undefined,
             tag: row.tag || undefined,
             color: row.color || undefined,
+            tags: chatTagsMap.get(row.id) || [],
             protocol: row.protocol || buildChatProtocol(row.id),
             is_autopilot_active: row.is_autopilot_active ?? false,
             autopilot_config_id: row.autopilot_config_id ?? null,

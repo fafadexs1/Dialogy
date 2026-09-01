@@ -1,4 +1,6 @@
 import { db } from '@/lib/db';
+import { selectStudioConversationRelease } from '@/services/agent-studio/release-selection';
+import { runStudioConversation } from '@/services/agent-studio/runtime';
 import { randomUUID } from 'crypto';
 import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
@@ -1365,6 +1367,74 @@ export async function processAutopilotForChat(
         },
     };
     const availableTeams = await loadToolRouterTeams(workspaceId);
+
+    // Studio publications own their entire journey. They never pass through the legacy canvas planner.
+    const studioSelection = await selectStudioConversationRelease({ workspaceId, agentId: autopilotConfig.id, chatId: chat.id, sourceMessageId });
+    if (studioSelection.release) {
+        const pinnedRelease = studioSelection.release;
+        try {
+            if (!sourceMessageId) throw new Error('O Estúdio exige uma mensagem identificada para executar com segurança.');
+            const store = studioSelection.store;
+            const allowedNative = ['transfer_chat', ...pinnedRelease.publishedProcedures.flatMap((procedure) => procedure.steps)
+                .filter((step) => step.type === 'native_action')
+                .map((step) => step.nativeActionType === 'update_crm_field' ? 'crm_update_contact_custom_fields' : step.nativeActionType || '')];
+            const studioPolicy: AutopilotTurnPolicy = { activeNodeId: null, toolMode: 'on_demand', globallyEnabledToolNames: allowedNative,
+                attachedToolNames: allowedNative, allowedToolNames: allowedNative, toolInstructionsByName: {},
+                allowedKnowledgeDocumentIds: (pinnedRelease.knowledgeSnapshot || []).map((document) => String(document.id)), reason: 'studio_release' };
+            const result = await runStudioConversation({
+                release: pinnedRelease, state: store.state?.releaseId === pinnedRelease.releaseId ? store.state : null,
+                config: autopilotConfig, chatId: chat.id, messageId: sourceMessageId, message: lastMessageContent,
+                contact: sanitizedContact, chatHistory: chatHistoryForAI, suggestionOnly: isSuggestionOnlyRuntime,
+                checkpoint: isSuggestionOnlyRuntime ? async () => {} : store.checkpoint,
+                assertCurrent: () => assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId }),
+                runNative: async (action, operation) => {
+                    if (isSuggestionOnlyRuntime) throw new Error('Ações reais não são permitidas no modo de sugestão.');
+                    if (action.type === 'transfer_chat') {
+                        const team = availableTeams.find((item) => item.id === action.payload?.teamId || item.name === action.payload?.teamName);
+                        if (!team) throw new Error('Equipe de destino indisponível neste workspace.');
+                        action.payload = { teamId: team.id, teamName: team.name };
+                    }
+                    const fingerprint = fingerprintToolAction(action);
+                    if (action.type === 'close_chat' && operation.confirmed) {
+                        const goodbye = pinnedRelease.agentSnapshot.concludeStage.successClosingMessage;
+                        if (goodbye) {
+                            const delivery = await sendMultiBlockResponse(chat.id, goodbye, assignedSystemAgentId, true, instanceName, null, { ...responseTrace, deliveryKey: `studio-close:${operation.id}` });
+                            if (!delivery.success) throw new Error('A despedida não pôde ser entregue; o atendimento não foi encerrado.');
+                        }
+                    }
+                    const results = await runRequestedAgentToolsWithStatus({
+                        workspaceId, chat, contact: sanitizedContact, systemAgentId: assignedSystemAgentId,
+                        systemAgentName: assignedSystemAgentName, autopilotConfig: { ...autopilotConfig, enabled_tool_names: allowedNative },
+                        turnPolicy: studioPolicy, customerMessage: lastMessageContent, sourceMessageId,
+                        orchestratorRunId: orchestratorRun.id, actions: [action],
+                        confirmedActionFingerprint: operation.confirmed ? fingerprint : null,
+                        closeAuthorization: action.type === 'close_chat' && operation.confirmed ? {
+                            source: 'procedure_goal_completed', chatId: chat.id, orchestratorRunId: orchestratorRun.id,
+                            procedureExecutionId: operation.id, actionFingerprint: fingerprint,
+                        } : null,
+                    });
+                    if (results.length !== 1 || results[0].status !== 'success') throw new Error(results[0]?.error || 'A ação não foi concluída.');
+                    if (action.type === 'transfer_chat' && action.payload?.teamName) return { message: `Vou encaminhar seu atendimento para a equipe ${action.payload.teamName} continuar com você.` };
+                },
+            });
+            if (result.response) {
+                await assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId });
+                const delivery = await sendMultiBlockResponse(chat.id, result.response, assignedSystemAgentId, true, instanceName, null,
+                    { ...responseTrace, deliveryKey: `studio:${result.state.id}:${sourceMessageId}` });
+                if (!delivery.success) throw new Error('A resposta do Estúdio não pôde ser entregue.');
+            }
+            await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,
+                intent: 'agent_studio', confidenceLevel: 'deterministic',
+                metadata: { studioReleaseId: pinnedRelease.releaseId, studioVersion: pinnedRelease.version,
+                    studioStatus: result.state.status, suggestionOnly: isSuggestionOnlyRuntime, replay: result.replay } });
+        } catch (error) {
+            await finishOrchestratorRun({ run: orchestratorRun, status: 'error', timings: orchestratorTimings,
+                intent: 'agent_studio', metadata: { studioReleaseId: pinnedRelease.releaseId, studioStatus: 'failed' } });
+            // Do not fall back to a second runtime or replay side effects after an uncertain result.
+            throw error;
+        }
+        return;
+    }
 
     const contactIdForMemory = sanitizedContact.id
         || (chat as { contact_id?: string | null }).contact_id

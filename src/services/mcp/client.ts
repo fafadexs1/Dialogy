@@ -15,6 +15,7 @@ import {
 } from './circuit-breaker';
 import { resolveMcpToolTimeoutMs } from './tool-safety';
 import { applyMcpRuntimeEndpointOverride } from './runtime-overrides';
+import { createStudioMcpFetch } from '@/services/agent-studio/mcp-transport';
 
 function buildRequestInit(server: McpServerConfig): RequestInit | undefined {
   const headers = Object.fromEntries(
@@ -27,11 +28,15 @@ function buildRequestInit(server: McpServerConfig): RequestInit | undefined {
   return { headers };
 }
 
-async function withMcpClient<T>(server: McpServerConfig, task: (client: Client) => Promise<T>): Promise<T> {
-  server = applyMcpRuntimeEndpointOverride(server);
+async function withMcpClient<T>(server: McpServerConfig, task: (client: Client) => Promise<T>, totalTimeoutMs?: number, strictPublicNetwork = false, signal?: AbortSignal): Promise<T> {
+  if (!strictPublicNetwork) server = applyMcpRuntimeEndpointOverride(server);
   const client = new Client({ name: 'dialogy', version: '1.0.0' }, { capabilities: {} });
   let circuitRequestStarted = false;
-  const requestInit = buildRequestInit(server);
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
+  const requestInit = { ...buildRequestInit(server), ...(totalTimeoutMs ? { signal: controller.signal } : {}) };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const transport = (() => {
     if (server.transport === 'stdio') {
       if (!server.command?.trim()) {
@@ -55,16 +60,19 @@ async function withMcpClient<T>(server: McpServerConfig, task: (client: Client) 
     }
 
     const url = new URL(server.url);
+    const fetch = strictPublicNetwork ? createStudioMcpFetch(server.url, controller.signal) : undefined;
     return server.transport === 'sse'
-      ? new SSEClientTransport(url, { requestInit })
-      : new StreamableHTTPClientTransport(url, { requestInit });
+      ? new SSEClientTransport(url, { requestInit, fetch })
+      : new StreamableHTTPClientTransport(url, { requestInit, fetch });
   })();
 
   try {
     beginMcpCircuitRequest(server);
     circuitRequestStarted = true;
-    await client.connect(transport);
-    const result = await task(client);
+    const operation = async () => { controller.signal.throwIfAborted(); await client.connect(transport); if (controller.signal.aborted) throw new Error('Conexão MCP cancelada.'); return task(client); };
+    const result = totalTimeoutMs ? await Promise.race([operation(), new Promise<never>((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); void client.close().catch(() => undefined); reject(new Error('O servidor MCP excedeu o tempo limite; confira o resultado antes de repetir.')); }, totalTimeoutMs);
+    })]) : await operation();
     recordMcpCircuitSuccess(server);
     return result;
   } catch (error) {
@@ -95,9 +103,17 @@ async function withMcpClient<T>(server: McpServerConfig, task: (client: Client) 
       code,
       address && port ? `${address}:${port}` : address || port,
     ].filter(Boolean).join(' | ');
-    throw new Error(`Falha na comunicacao com MCP "${server.name}" em ${target}: ${detail}`);
+    let safeDetail = detail;
+    for (const secret of [...Object.values(server.headers || {}), ...Object.values(server.env || {})].filter(Boolean)) safeDetail = safeDetail.split(secret).join('[protegido]');
+    throw new Error(`Falha na comunicacao com MCP "${server.name}" em ${target}: ${safeDetail}`);
   } finally {
-    await client.close().catch(() => undefined);
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    if (totalTimeoutMs) {
+      controller.abort();
+      // Do not let a broken remote close handshake hang the Studio worker.
+      void client.close().catch(() => undefined);
+    } else await client.close().catch(() => undefined);
   }
 }
 
@@ -111,7 +127,7 @@ export function parseQualifiedMcpToolName(qualifiedName: string) {
   return { serverId: match[1], toolName: match[2] };
 }
 
-export async function listMcpServerTools(server: McpServerConfig): Promise<McpToolConfig[]> {
+export async function listMcpServerTools(server: McpServerConfig, strictPublicNetwork = false): Promise<McpToolConfig[]> {
   return withMcpClient(server, async (client) => {
     const result = await client.listTools(undefined, {
       timeout: Math.min(resolveMcpToolTimeoutMs(), 15000),
@@ -127,13 +143,16 @@ export async function listMcpServerTools(server: McpServerConfig): Promise<McpTo
       outputSchema: (tool.outputSchema || null) as Record<string, unknown> | null,
       annotations: tool.annotations || null,
     }));
-  });
+  }, 20_000, strictPublicNetwork);
 }
 
 export async function callMcpServerTool(input: {
   server: McpServerConfig;
   toolName: string;
   arguments?: Record<string, unknown> | null;
+  totalTimeoutMs?: number;
+  strictPublicNetwork?: boolean;
+  signal?: AbortSignal;
 }) {
   return withMcpClient(input.server, async (client) => {
     return client.callTool(
@@ -144,5 +163,5 @@ export async function callMcpServerTool(input: {
       undefined,
       { timeout: resolveMcpToolTimeoutMs() }
     );
-  });
+  }, input.totalTimeoutMs, input.strictPublicNetwork, input.signal);
 }

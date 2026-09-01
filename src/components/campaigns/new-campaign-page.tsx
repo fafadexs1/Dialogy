@@ -10,7 +10,7 @@ import { listMetaChannels as fetchMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
 import { MAX_CAMPAIGN_LIST_ROWS, MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
 import { parseCampaignContactsCsv } from '@/lib/campaigns/csv-import';
-import { renderCampaignMessage } from '@/lib/campaigns/personalization';
+import { getCampaignTemplateBodyParameterKeys, renderCampaignMessage } from '@/lib/campaigns/personalization';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import type { CampaignChannel, CampaignInteractivePayload, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -73,9 +73,16 @@ async function loadCampaignChannels(workspaceId: string) {
   };
 }
 
-function templatePreview(template: WhatsappTemplateOption | null) {
+function templatePreview(template: CampaignTemplate | null) {
   const body = template?.components?.find((component: any) => component.type?.toUpperCase() === 'BODY');
-  return (body?.text || (template ? `[Template: ${template.name}]` : '')).replace(/\{\{\d+\}\}/g, PLACEHOLDER);
+  const parameterKeys = getCampaignTemplateBodyParameterKeys(template);
+  return (body?.text || (template ? `[Template: ${template.name}]` : '')).replace(
+    /\{\{\s*([^{}]+?)\s*\}\}/g,
+    (placeholder: string, key: string) => {
+      const parameterIndex = parameterKeys.indexOf(key.trim());
+      return parameterIndex >= 0 ? template?.bodyParameterValues?.[parameterIndex] || placeholder : placeholder;
+    },
+  );
 }
 
 function applyPlaceholder(msg: string) {
@@ -278,6 +285,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const [metaChannels, setMetaChannels] = useState<MetaChannel[]>([]);
   const [whatsappTemplates, setWhatsappTemplates] = useState<WhatsappTemplateOption[]>([]);
   const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
+  const [templateParameterValues, setTemplateParameterValues] = useState<string[]>([]);
 
   // Loading states
   const [loadingCrm, setLoadingCrm] = useState(true);
@@ -413,7 +421,18 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }, [deliveryChannel, instances, metaChannels, telegramInstances]);
 
   const selectedTemplate = whatsappTemplates.find(template => template.name === selectedTemplateName) || null;
-  const campaignMessage = deliveryChannel === 'whatsapp_cloud' ? templatePreview(selectedTemplate) : message;
+  const templateBodyParameterKeys = getCampaignTemplateBodyParameterKeys(selectedTemplate);
+  const templateBodyParameterCount = templateBodyParameterKeys.length;
+  const areTemplateParametersComplete = templateBodyParameterCount === 0 || Array.from(
+    { length: templateBodyParameterCount },
+    (_, index) => Boolean(templateParameterValues[index]?.trim()),
+  ).every(Boolean);
+  const campaignTemplate: CampaignTemplate | null = selectedTemplate ? {
+    ...selectedTemplate,
+    bodyParameterValues: templateParameterValues.slice(0, templateBodyParameterCount),
+    bodyParameterNames: templateBodyParameterKeys,
+  } : null;
+  const campaignMessage = deliveryChannel === 'whatsapp_cloud' ? templatePreview(campaignTemplate) : message;
   const preview = useMemo(() => {
     const channel = CHANNEL_OPTIONS.find(option => option.value === deliveryChannel) ?? CHANNEL_OPTIONS[0];
     const destinationLabel = channelDestinations.find(destination => destination.id === destinationId)?.label || channel.label;
@@ -428,6 +447,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   useEffect(() => {
     setDestinationId(null);
     setSelectedTemplateName(null);
+    setTemplateParameterValues([]);
     setWhatsappTemplates([]);
     if (deliveryChannel !== 'whatsapp_baileys') {
       setMediaAttachment(null);
@@ -443,6 +463,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     if (deliveryChannel !== 'whatsapp_cloud' || !destinationId) {
       setWhatsappTemplates([]);
       setSelectedTemplateName(null);
+      setTemplateParameterValues([]);
       return;
     }
 
@@ -478,7 +499,15 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     && customScheduleIsValid
     && !isUploadingMedia
     && (deliveryChannel !== 'whatsapp_cloud' || selectedTemplate)
+    && (deliveryChannel !== 'whatsapp_cloud' || areTemplateParametersComplete)
   );
+
+  function handleTemplateSelection(templateName: string) {
+    const template = whatsappTemplates.find(option => option.name === templateName) || null;
+    const parameterKeys = getCampaignTemplateBodyParameterKeys(template);
+    setSelectedTemplateName(templateName);
+    setTemplateParameterValues(Array.from({ length: parameterKeys.length }, () => PLACEHOLDER));
+  }
 
   function toggleSelect(id: string) {
     setSelectedCrmIds((prev) => {
@@ -700,6 +729,10 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       toast({ title: 'Consentimento necessario', description: 'Confirme que os destinatarios autorizaram o recebimento da campanha.', variant: 'destructive' });
       return;
     }
+    if (deliveryChannel === 'whatsapp_cloud' && !areTemplateParametersComplete) {
+      toast({ title: 'Campos do template incompletos', description: 'Preencha todos os campos editáveis do template antes de criar a campanha.', variant: 'destructive' });
+      return;
+    }
     if (!customScheduleIsValid) {
       toast({ title: 'Agendamento incompleto', description: 'Revise a data limite, os dias, a janela e os intervalos.', variant: 'destructive' });
       return;
@@ -737,7 +770,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       channel: deliveryChannel,
       instanceName: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? undefined : destinationId,
       metaChannelId: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? destinationId : undefined,
-      template: selectedTemplate,
+      template: campaignTemplate,
     }, campaignMessage, allContactsToSend, [...selectedSegmentIds], scheduleConfig, mediaAttachment, buildInteractivePayload());
 
     if (result.error) {
@@ -1015,7 +1048,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                 {deliveryChannel === 'whatsapp_cloud' && destinationId && (
                   <div className="space-y-2 mt-6">
                     <label htmlFor="template" className="text-sm font-medium leading-none">Template aprovado da Meta</label>
-                    <Select onValueChange={setSelectedTemplateName} value={selectedTemplateName || undefined}>
+                    <Select onValueChange={handleTemplateSelection} value={selectedTemplateName || undefined}>
                       <SelectTrigger id="template">
                         <SelectValue placeholder="Selecione o template para o disparo" />
                       </SelectTrigger>
@@ -1030,6 +1063,37 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">No WhatsApp Cloud, campanhas usam o template aprovado selecionado acima.</p>
+                    {selectedTemplate && templateBodyParameterCount > 0 && (
+                      <div className="mt-4 space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/[0.06]">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Campos editáveis do template</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Defina o conteúdo de cada variável. A pré-visualização é atualizada imediatamente.</p>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {Array.from({ length: templateBodyParameterCount }, (_, index) => (
+                            <div key={index} className="space-y-1.5">
+                              <label htmlFor={`template-parameter-${index}`} className="text-xs font-medium text-foreground">
+                                Campo {index + 1} <span className="font-normal text-muted-foreground">{`{{${templateBodyParameterKeys[index]}}}`}</span>
+                              </label>
+                              <Input
+                                id={`template-parameter-${index}`}
+                                value={templateParameterValues[index] || ''}
+                                onChange={(event) => setTemplateParameterValues(current => {
+                                  const next = [...current];
+                                  next[index] = event.target.value;
+                                  return next;
+                                })}
+                                placeholder="Digite o conteúdo deste campo"
+                                aria-invalid={!templateParameterValues[index]?.trim()}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Personalização disponível: <code>{'{{nome}}'}</code>, <code>{'{{primeiro_nome}}'}</code> e <code>{'{{Saudação}}'}</code>.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>

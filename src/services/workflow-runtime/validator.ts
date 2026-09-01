@@ -243,6 +243,10 @@ function validateNodeConfig(
     }
   }
 
+  if (node.type === 'ai.published_agent' && (!configuredText(node.config.agentId) || !configuredText(node.config.releaseId))) {
+    error(collector, 'published_agent_missing_release', `Selecione uma versão publicada no bloco “${node.name}”.`, { nodeId: node.id });
+  }
+
   if (node.type.startsWith('interaction.')) {
     if (!configuredText(node.config.prompt)) {
       error(collector, 'interaction_prompt_missing', `O bloco "${node.name}" precisa de uma pergunta.`, { nodeId: node.id });

@@ -11,10 +11,11 @@ describe('Nexus native module boundary', () => {
     const standaloneEditorRoute = read('src/app/nexus/flows/[id]/page.tsx');
 
     expect(catalogRoute).toContain("from '@/modules/nexus'");
-    expect(editorRoute).toContain("from '@/modules/nexus'");
+    expect(editorRoute).toContain("from 'next/navigation'");
+    expect(editorRoute).toContain('redirect(`/autopilot/${encodeURIComponent(id)}`)');
     expect(standaloneEditorRoute).toContain("from '@/modules/nexus'");
     expect(catalogRoute).not.toContain("@/app/autopilot");
-    expect(editorRoute).not.toContain("@/app/autopilot");
+    expect(editorRoute).not.toContain('NexusFlowEditor');
   });
 
   it('keeps standalone Nexus workflows separate from Autopilot agents', () => {
@@ -37,7 +38,8 @@ describe('Nexus native module boundary', () => {
     expect(agentPage).not.toContain('NativeWorkflowBuilder');
     expect(agentPage).not.toContain('NativeAiBuilderDialog');
     expect(agentPage).not.toContain('usePathname');
-    expect(agentPage).toContain('Abrir fluxo no Nexus');
+    expect(agentPage).toContain('AiAgentJourneyStudio');
+    expect(agentPage).toContain('getAgentStudioDataAction');
   });
 
   it('has no iframe or external Nexus SSO in the active Nexus routes', () => {

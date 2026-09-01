@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { db } from '@/lib/db';
+import { stopPublishedStudioNode } from '@/services/agent-studio/workflow-adapter';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import type { AutopilotConfig } from '@/lib/types';
 import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
@@ -45,7 +46,7 @@ export type NexusRuntimeDelivery = {
 
 export type NexusRuntimeAdapters = Pick<
   WorkflowHandlerDependencies,
-  'executeLinkedAgent' | 'sendResponse' | 'sendMedia' | 'sendTyping' | 'handoff' | 'closeConversation' | 'loadState' | 'saveState' | 'executeSubflow'
+  'executeLinkedAgent' | 'executePublishedAgent' | 'sendResponse' | 'sendMedia' | 'sendTyping' | 'handoff' | 'closeConversation' | 'loadState' | 'saveState' | 'executeSubflow'
 > & {
   sendOptions?: (
     options: { title: string; choices: NexusPlatformChoice[]; invalid?: boolean },
@@ -198,6 +199,8 @@ async function createNexusRuntimeEnvironment(input: {
   const sendResponse = input.adapters?.sendResponse || defaultSendResponse;
   const dependencies: WorkflowHandlerDependencies = {
     executeLinkedAgent: input.adapters?.executeLinkedAgent,
+    executePublishedAgent: input.adapters?.executePublishedAgent,
+    stopPublishedAgent: stopPublishedStudioNode,
     resolveModelChain: async (context) => {
       const requestedTemperature = Number(context.node.config.temperature);
       const modelNode = Number.isFinite(requestedTemperature)
@@ -556,7 +559,7 @@ export async function cancelPublishedNexusWorkflowExecution(input: {
   if (!execution || execution.workspaceId !== input.workspaceId || !execution.workflowId.startsWith('nexus:')) {
     throw new Error('Execução Nexus ativa não encontrada neste workspace.');
   }
-  return new WorkflowExecutor(persistence, createDefaultNodeHandlerRegistry()).cancel(input.executionId, input.reason);
+  return new WorkflowExecutor(persistence, createDefaultNodeHandlerRegistry({ stopPublishedAgent: stopPublishedStudioNode })).cancel(input.executionId, input.reason);
 }
 
 export function terminalNexusOutput(execution: WorkflowExecution): Record<string, unknown> {

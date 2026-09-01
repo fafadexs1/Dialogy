@@ -60,6 +60,21 @@ export type NexusWorkflowExecutionSummary = {
   finishedAt: string | null;
 };
 
+/** Studio agents own the rest of the conversation, so they can never expose a downstream route in Nexus. */
+export function normalizeStandaloneStudioAgents(definition: WorkflowDefinition): WorkflowDefinition {
+  const terminalAgentIds = new Set(
+    definition.nodes.filter((node) => node.type === 'ai.published_agent').map((node) => node.id),
+  );
+  if (terminalAgentIds.size === 0) return definition;
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => terminalAgentIds.has(node.id)
+      ? { ...node, outputPorts: [], config: { ...node.config, outputKeys: [] } }
+      : node),
+    connections: definition.connections.filter((connection) => !terminalAgentIds.has(connection.sourceNodeId)),
+  };
+}
+
 const DEFAULT_SETTINGS: WorkflowDefinition['settings'] = {
   executionTimeoutMs: 120_000,
   maxSteps: 100,
@@ -205,7 +220,7 @@ export function bindStandaloneNexusWorkflow(input: {
   name?: string;
   now?: string;
 }): WorkflowDefinition {
-  const parsed = WorkflowDefinitionSchema.parse(input.definition);
+  const parsed = normalizeStandaloneStudioAgents(WorkflowDefinitionSchema.parse(input.definition));
   return WorkflowDefinitionSchema.parse({
     ...parsed,
     id: `nexus:${input.id}`,

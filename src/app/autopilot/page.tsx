@@ -1,5 +1,7 @@
 'use client';
 
+import { createClientUuid } from '@/lib/client-uuid';
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -18,9 +20,12 @@ import {
 import type { AutopilotConfig, Workspace } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useCurrentUser } from '@/hooks/use-online-status';
-import { getAutopilotConfig, createAutopilotAgent } from '@/actions/autopilot';
-import { getAiModelCatalogAction } from '@/actions/ai-models';
+import { getAutopilotConfig } from '@/actions/autopilot';
+import { createNewAiAgentAction } from '@/actions/agent-studio';
+import { AGENT_SERVICE_TYPE_LABELS, type AgentServiceType } from '@/services/agent-studio/types';
+import { getWorkspaceConfiguredAiModelsAction } from '@/actions/integrations';
 import { getAiModelLabel, type AiModelCatalogEntry } from '@/lib/ai-models';
+import { StudioModelSelect } from '@/components/autopilot/studio-model-select';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -34,6 +39,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
@@ -52,7 +58,14 @@ export default function AutopilotPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
   const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentModel, setNewAgentModel] = useState('');
+  const selectableModels = useMemo(() => modelCatalog.filter((model) => model.enabled), [modelCatalog]);
   const [newAgentVisibility, setNewAgentVisibility] = useState<AgentVisibilityMode>('public');
+  const [newAgentObjective, setNewAgentObjective] = useState('');
+  const [newAgentArea, setNewAgentArea] = useState<AgentServiceType>('support');
+  const [newAgentLanguage, setNewAgentLanguage] = useState('pt-BR');
+  const [newAgentTemplate, setNewAgentTemplate] = useState<'blank' | 'invoice'>('blank');
+  const [creationId, setCreationId] = useState('');
 
   const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
@@ -61,7 +74,7 @@ export default function AutopilotPage() {
     try {
       const [autopilotData, catalogData] = await Promise.all([
         getAutopilotConfig(user.activeWorkspaceId),
-        getAiModelCatalogAction(),
+        getWorkspaceConfiguredAiModelsAction(user.activeWorkspaceId),
       ]);
 
       if (autopilotData.error) {
@@ -70,7 +83,7 @@ export default function AutopilotPage() {
       }
 
       if (catalogData.error) {
-        toast({ title: 'Catálogo indisponível', description: catalogData.error, variant: 'destructive' });
+        toast({ title: 'Modelos cadastrados indisponíveis', description: catalogData.error, variant: 'destructive' });
       }
 
       setAgents(autopilotData.agents || []);
@@ -99,32 +112,33 @@ export default function AutopilotPage() {
   }, [agents]);
 
   const openCreateDialog = useCallback(() => {
-    setNewAgentName(`Automação ${agents.length + 1}`);
+    setNewAgentName(`Agente ${agents.length + 1}`);
+    setNewAgentModel('');
     setNewAgentVisibility('public');
+    setNewAgentObjective(''); setNewAgentArea('support'); setNewAgentLanguage('pt-BR'); setNewAgentTemplate('blank'); setCreationId(createClientUuid());
     setIsCreateDialogOpen(true);
   }, [agents.length]);
 
   const handleCreateAgent = async () => {
-    if (!user?.activeWorkspaceId) return;
+    if (!user?.activeWorkspaceId || !selectableModels.some((model) => model.id === newAgentModel)) return;
 
     setIsCreatingAgent(true);
     try {
-      const result = await createAutopilotAgent(
-        user.activeWorkspaceId,
-        newAgentName.trim() || `Automação ${agents.length + 1}`,
-        newAgentVisibility === 'private'
-      );
+      const result = await createNewAiAgentAction({ name: newAgentName, objective: newAgentObjective, serviceType: newAgentArea,
+        language: newAgentLanguage, aiModel: newAgentModel, isPrivate: newAgentVisibility === 'private', template: newAgentTemplate, creationId });
 
-      if (result.success && result.id) {
+      if (result.success && result.agentId) {
         toast({
           title: 'Agente criado',
-          description: 'Configure a identidade e as políticas do agente.',
+          description: 'Seu rascunho está pronto no Estúdio de IA. Nenhum atendimento foi ativado.',
         });
         setIsCreateDialogOpen(false);
-        router.push(`/autopilot/${result.id}`);
+        router.push(`/autopilot/${result.agentId}`);
       } else {
         toast({ title: 'Erro ao criar', description: result.error, variant: 'destructive' });
       }
+    } catch {
+      toast({ title: 'Não foi possível confirmar a criação', description: 'Tente novamente. A mesma tentativa será recuperada sem duplicar o agente.', variant: 'destructive' });
     } finally {
       setIsCreatingAgent(false);
     }
@@ -153,7 +167,7 @@ export default function AutopilotPage() {
                 Seus agentes autônomos
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                Gerencie identidade, conhecimento, ferramentas, políticas e desempenho. A construção visual dos fluxos fica no Nexus.
+                Ensine como sua empresa atende: organize a jornada, configure procedimentos e teste a conversa no Estúdio de IA.
               </p>
             </div>
 
@@ -285,16 +299,16 @@ export default function AutopilotPage() {
         <DialogContent className="overflow-hidden rounded-[28px] border border-border bg-background p-0 shadow-2xl sm:max-w-[520px]">
           <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
             <DialogTitle className="text-xl text-foreground">
-              Novo agente autônomo
+              Novo agente de IA
             </DialogTitle>
             <DialogDescription>
-              Defina o nome e a visibilidade. O fluxo visual poderá ser criado depois no Nexus.
+              Defina o que o agente deve resolver. Depois você configura e testa seus procedimentos no Estúdio de IA.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 px-6 py-6">
+          <div className="max-h-[60dvh] space-y-5 overflow-y-auto px-6 py-6">
             <div className="space-y-2">
-              <Label htmlFor="new-agent-name">Nome da automação</Label>
+              <Label htmlFor="new-agent-name">Nome do agente</Label>
               <Input
                 id="new-agent-name"
                 value={newAgentName}
@@ -302,6 +316,14 @@ export default function AutopilotPage() {
                 placeholder="Ex: Atendimento Comercial"
               />
             </div>
+
+            <label className="block space-y-2 text-sm font-medium">O que ele deve resolver?<Textarea value={newAgentObjective} onChange={(event) => setNewAgentObjective(event.target.value)} placeholder="Ex.: ajudar clientes a consultar pedidos e encaminhar solicitações fora do escopo." /></label>
+            <StudioModelSelect models={modelCatalog} value={newAgentModel} onChange={setNewAgentModel} disabled={isCreatingAgent} />
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-2 text-sm font-medium">Área de atendimento<select className="w-full rounded-md border bg-background p-2 text-sm" value={newAgentArea} onChange={(event) => setNewAgentArea(event.target.value as AgentServiceType)}>{Object.entries(AGENT_SERVICE_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label className="block space-y-2 text-sm font-medium">Idioma<select className="w-full rounded-md border bg-background p-2 text-sm" value={newAgentLanguage} onChange={(event) => setNewAgentLanguage(event.target.value)}><option value="pt-BR">Português (Brasil)</option><option value="en">Inglês</option><option value="es">Espanhol</option></select></label>
+            </div>
+            <label className="block space-y-2 text-sm font-medium">Como começar<select className="w-full rounded-md border bg-background p-2 text-sm" value={newAgentTemplate} onChange={(event) => setNewAgentTemplate(event.target.value as 'blank' | 'invoice')}><option value="blank">Em branco · criar meus procedimentos</option><option value="invoice">Exemplo · segunda via de fatura</option></select><span className="block text-xs font-normal text-muted-foreground">O exemplo é um rascunho. APIs, MCP e equipes precisam ser configurados antes de publicar.</span></label>
 
             <div className="space-y-3">
               <Label>Visibilidade</Label>
@@ -333,7 +355,7 @@ export default function AutopilotPage() {
             <Button variant="ghost" onClick={() => setIsCreateDialogOpen(false)} className="rounded-full">
               Cancelar
             </Button>
-            <Button onClick={handleCreateAgent} disabled={isCreatingAgent} className="rounded-full px-6">
+            <Button onClick={handleCreateAgent} disabled={isCreatingAgent || !newAgentName.trim() || !newAgentObjective.trim() || !selectableModels.some((model) => model.id === newAgentModel)} className="rounded-full px-6">
               {isCreatingAgent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               Criar agente
             </Button>

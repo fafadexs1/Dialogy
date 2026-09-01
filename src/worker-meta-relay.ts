@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import { currentDialogySigningKey } from '@/services/meta/dialogy-hmac';
 import { buildEvolutionRelayRequest } from '@/services/meta/evolution-relay-contract';
+import { resolveEvolutionRelayInstanceId } from '@/services/meta/evolution-relay-instance';
 import { decryptPayload } from '@/services/meta/meta-payload-crypto';
 import { RelayCapacity } from '@/services/meta/relay-capacity';
 import { processPersistedEvolutionWebhookEvent } from '@/services/whatsapp/evolution-webhook-handler';
@@ -88,7 +89,7 @@ async function processDelivery(delivery: Record<string, unknown>) {
       return;
     }
     const clusterResult = await db.query(
-      'SELECT api_url FROM public.whatsapp_clusters WHERE id = $1',
+      'SELECT api_url, api_key FROM public.whatsapp_clusters WHERE id = $1',
       [delivery.cluster_id],
     );
     if (clusterResult.rowCount !== 1) {
@@ -96,22 +97,32 @@ async function processDelivery(delivery: Record<string, unknown>) {
       return;
     }
     let instanceName: string | null = null;
+    let providerInstanceId: string | null = null;
     if (delivery.instance_id) {
       const instanceResult = await db.query(
-        'SELECT instance_name FROM public.evolution_api_instances WHERE id = $1',
-        [delivery.instance_id],
+        `SELECT instance_name FROM public.evolution_api_instances
+         WHERE id = $1 AND workspace_id = $2 AND cluster_id = $3
+           AND phone_number_id = $4 AND waba_id = $5`,
+        [delivery.instance_id, delivery.workspace_id, delivery.cluster_id, delivery.phone_number_id, delivery.waba_id],
       );
       if (instanceResult.rowCount !== 1) {
         await quarantine(deliveryId, { reason: 'instance_not_found' });
         return;
       }
       instanceName = instanceResult.rows[0].instance_name;
+      providerInstanceId = await resolveEvolutionRelayInstanceId({
+        apiUrl: String(clusterResult.rows[0].api_url),
+        apiKey: String(clusterResult.rows[0].api_key || ''),
+        instanceName: String(instanceName),
+        phoneNumberId: String(delivery.phone_number_id || ''),
+        wabaId: String(delivery.waba_id || ''),
+      });
     }
 
     const payload = JSON.parse(decryptPayload(String(delivery.encrypted_payload))) as Record<string, unknown>;
     const timestamp = new Date().toISOString();
     const { keyId, secret } = currentDialogySigningKey();
-    const relayRequest = buildEvolutionRelayRequest({ delivery, instanceName, payload, timestamp, keyId, secret });
+    const relayRequest = buildEvolutionRelayRequest({ delivery, instanceName, providerInstanceId, payload, timestamp, keyId, secret });
     const response = await fetch(
       `${String(clusterResult.rows[0].api_url).replace(/\/$/, '')}/internal/webhooks/dialogy/meta`,
       {
