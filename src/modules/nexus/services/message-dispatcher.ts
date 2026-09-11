@@ -32,6 +32,8 @@ function configuredList(value: unknown) {
 export type NexusMessageTriggerContext = {
   platform?: string;
   instanceName?: string;
+  // Loaded from this workspace's instance registry, never from message metadata.
+  instancePlatforms?: Record<string, string>;
   messageType?: string;
   chatStatus?: string;
   agentId?: string | null;
@@ -75,8 +77,18 @@ export function nexusMessageTriggerMatch(
   const platforms = configuredList(config.platforms);
   const instances = configuredList(config.instanceNames);
   const messageTypes = configuredList(config.messageTypes);
-  if (platforms.length > 0 && !platforms.includes(normalizedText(context.platform || ''))) return null;
-  if (instances.length > 0 && !instances.includes(normalizedText(context.instanceName || ''))) return null;
+  const platform = normalizedText(context.platform || '');
+  if (platforms.length > 0 && !platforms.includes(platform)) return null;
+  // Meta and webchat do not use the instance selector. WhatsApp and Telegram
+  // restrictions apply independently; an unknown/deleted instance stays restrictive.
+  const instancePlatforms = Object.fromEntries(Object.entries(context.instancePlatforms || {})
+    .map(([name, channel]) => [normalizedText(name), normalizedText(channel)]));
+  const channelInstances = ['instagram', 'messenger', 'webchat'].includes(platform)
+    ? []
+    : ['whatsapp', 'telegram'].includes(platform)
+      ? instances.filter(name => !instancePlatforms[name] || instancePlatforms[name] === platform)
+      : instances;
+  if (channelInstances.length > 0 && !channelInstances.includes(normalizedText(context.instanceName || ''))) return null;
   if (messageTypes.length > 0 && !messageTypes.includes(normalizedText(context.messageType || 'text'))) return null;
   if (
     String(config.startPolicy || 'all') === 'unassigned_only'
@@ -137,6 +149,15 @@ export function nexusMessageTriggerMatches(
 
 export function nexusMessageTriggerIsCatchAll(config: Record<string, unknown>) {
   return String(config.matchMode || 'all') === 'all' || config.fallbackToAnyMessage === true;
+}
+
+export function nexusWaitingExecutionIsSuperseded(input: {
+  workflowVersion: unknown;
+  publishedWorkflowVersion: unknown;
+}) {
+  const workflowVersion = String(input.workflowVersion || '').trim();
+  const publishedWorkflowVersion = String(input.publishedWorkflowVersion || '').trim();
+  return Boolean(workflowVersion && publishedWorkflowVersion && workflowVersion !== publishedWorkflowVersion);
 }
 
 export function rankNexusMessageTriggerCandidates<T extends {
@@ -218,11 +239,16 @@ export async function dispatchPublishedNexusMessage(input: {
     `SELECT execution.id AS execution_id,
             execution.current_node_id,
             execution.resume_token,
+            execution.workflow_version,
+            nexus.published_workflow_version,
             definition.definition
      FROM public.workflow_executions AS execution
      JOIN public.workflow_definitions AS definition
        ON definition.workflow_id = execution.workflow_id
       AND definition.workflow_version = execution.workflow_version
+     LEFT JOIN public.nexus_workflows AS nexus
+       ON nexus.workspace_id = execution.workspace_id
+      AND nexus.published_workflow_id = execution.workflow_id
      WHERE execution.workspace_id = $1
        AND execution.conversation_id = $2
        AND execution.status = 'waiting'
@@ -232,7 +258,18 @@ export async function dispatchPublishedNexusMessage(input: {
      LIMIT 1`,
     [input.workspaceId, input.chatId],
   );
-  const waitingRow = waitingResult.rows[0] as Record<string, unknown> | undefined;
+  let waitingRow = waitingResult.rows[0] as Record<string, unknown> | undefined;
+  if (waitingRow && nexusWaitingExecutionIsSuperseded({
+    workflowVersion: waitingRow.workflow_version,
+    publishedWorkflowVersion: waitingRow.published_workflow_version,
+  })) {
+    await cancelPublishedNexusWorkflowExecution({
+      workspaceId: input.workspaceId,
+      executionId: String(waitingRow.execution_id),
+      reason: `Execução da versão ${String(waitingRow.workflow_version)} substituída pela versão publicada ${String(waitingRow.published_workflow_version)}.`,
+    });
+    waitingRow = undefined;
+  }
   const resumeToken = waitingRow?.resume_token ? String(waitingRow.resume_token) : '';
   const waitingDefinition = waitingRow?.definition
     ? WorkflowDefinitionSchema.safeParse(parseJson(waitingRow.definition)).data
@@ -267,7 +304,10 @@ export async function dispatchPublishedNexusMessage(input: {
   }
 
   const candidates = await db.query(
-    `SELECT nw.id, nw.workspace_id, wd.definition
+    `SELECT nw.id, nw.workspace_id, wd.definition,
+            (SELECT COALESCE(jsonb_object_agg(instance_name,
+               CASE WHEN lower(type) = 'telegram' THEN 'telegram' ELSE 'whatsapp' END), '{}'::jsonb)
+             FROM public.evolution_api_instances WHERE workspace_id = $1) AS instance_platforms
      FROM public.nexus_workflows nw
      JOIN public.workflow_definitions wd
        ON wd.workflow_id = nw.published_workflow_id
@@ -293,7 +333,10 @@ export async function dispatchPublishedNexusMessage(input: {
     .map((row) => {
       const definition = WorkflowDefinitionSchema.parse(parseJson(row.definition));
       const trigger = messageTrigger(definition);
-      const match = trigger ? nexusMessageTriggerMatch(trigger.config, input.message, triggerContext) : null;
+      const match = trigger ? nexusMessageTriggerMatch(trigger.config, input.message, {
+        ...triggerContext,
+        instancePlatforms: configuredRecord(row.instance_platforms) as Record<string, string>,
+      }) : null;
       return { row, definition, trigger, match, priority: Number(definition.metadata?.priority || 0) };
     })
     .filter((candidate) => candidate.trigger && candidate.match);

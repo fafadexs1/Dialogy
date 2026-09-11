@@ -70,8 +70,17 @@ export default function AutopilotAgentStudioPage() {
       setStudioDocument(studioRes.document);
       setRequiresMigrationReview(studioRes.requiresMigrationReview);
       setMigrationReport(studioRes.migrationReport);
-      setKnowledgeDocuments((configRes.config.knowledge_base_documents as KnowledgeBaseDocument[]) || []);
-      setKnowledgeCollections((configRes.config.knowledge_collections as KnowledgeCollection[]) || []);
+      const collections = (configRes.config.knowledge_collections as KnowledgeCollection[]) || [];
+      const defaultCollectionId = collections.find((c) => c.isDefault)?.id || collections[0]?.id || 'general';
+      const rawDocs = (configRes.config.knowledge_base_documents as KnowledgeBaseDocument[]) || [];
+      const normalizedDocs = rawDocs.map((doc) => ({
+        ...doc,
+        collectionIds: (Array.isArray(doc.collectionIds) && doc.collectionIds.length > 0)
+          ? doc.collectionIds
+          : [defaultCollectionId],
+      }));
+      setKnowledgeDocuments(normalizedDocs);
+      setKnowledgeCollections(collections);
 
       if (modelsRes && modelsRes.models) {
         setModelCatalog(modelsRes.models);

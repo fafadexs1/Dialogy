@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { isValidBrazilianDocument, normalizeBrazilianDocument } from '@/lib/brazilian-document';
 import { buildSGPContactPanelData, getContractId, getPrimaryService, normalizeText } from '@/plugins/sgp/contact-panel-data';
 import type { SGPGlobalConfig, SGPUserConfig } from '@/plugins/sgp/types';
 import { enrichSupportContractsWithLiveRadius } from '@/plugins/sgp/radius-session';
@@ -102,9 +103,9 @@ async function resolveContactId(target: SgpRuntimeTarget): Promise<string | null
   return rows[0]?.contact_id || null;
 }
 
-async function loadSgpContext(target: SgpRuntimeTarget): Promise<
+async function loadSgpContext(target: SgpRuntimeTarget, validateDocument = false): Promise<
   | { success: true; data: SgpToolContext }
-  | { success: false; error: string }
+  | { success: false; error: string; code?: string }
 > {
   const { rows: integrationRows } = await db.query(
     `SELECT provider, config
@@ -140,30 +141,34 @@ async function loadSgpContext(target: SgpRuntimeTarget): Promise<
     [contactId, global.cpfFieldId]
   );
 
-  const explicitIdentifier = onlyDigits(target.customerIdentifier);
+  const normalize = validateDocument ? (value: unknown) => normalizeBrazilianDocument(String(value ?? '')) : onlyDigits;
+  const explicitIdentifier = normalize(target.customerIdentifier);
   if (explicitIdentifier && ![11, 14].includes(explicitIdentifier.length)) {
     return { success: false, error: 'O CPF/CNPJ informado precisa conter 11 ou 14 dígitos.' };
   }
 
-  const crmIdentifier = onlyDigits(cpfRows[0]?.value);
+  const crmIdentifier = normalize(cpfRows[0]?.value);
   const cpf = explicitIdentifier || crmIdentifier;
   if (!cpf) {
-    return { success: false, error: `CPF/CNPJ nao encontrado no campo CRM mapeado (${global.cpfFieldId}).` };
+    return { success: false, code: 'SGP_IDENTIFIER_MISSING', error: `CPF/CNPJ nao encontrado no campo CRM mapeado (${global.cpfFieldId}).` };
+  }
+  if (validateDocument && !isValidBrazilianDocument(cpf)) {
+    return { success: false, code: 'SGP_IDENTIFIER_INVALID', error: 'CPF/CNPJ inválido.' };
   }
 
   return { success: true, data: { global, user: sgpUser, cpf } };
 }
 
-async function fetchSgpClients(sgp: SgpToolContext) {
+async function fetchSgpClients(sgp: SgpToolContext, allowEmpty = false) {
   const response = await fetch(
     `${sgp.global.baseUrl}/api/ura/clientes/`,
-    createRequestInit(
+    { ...createRequestInit(
       sgp.user.token!,
       withApplicationCredentials(sgp.global, {
         cpfcnpj: sgp.cpf,
         exibir_conexao: 1,
       })
-    )
+    ), signal: AbortSignal.timeout(25_000) }
   );
 
   const raw = await response.text();
@@ -172,11 +177,55 @@ async function fetchSgpClients(sgp: SgpToolContext) {
   }
 
   const data = raw ? JSON.parse(raw) : {};
+  if (allowEmpty && Array.isArray(data?.clientes) && data.clientes.length === 0) return [];
   if (!Array.isArray(data?.clientes) || data.clientes.length === 0) {
     throw new Error('Nenhum cliente encontrado no SGP para este CPF/CNPJ.');
   }
 
   return data.clientes;
+}
+
+export type SgpIdentificationContract = {
+  id: string;
+  statusTone?: 'active' | 'suspended' | 'cancelled' | 'unknown';
+  statusLabel: string;
+  addressLabel: string;
+  planDescription: string;
+};
+
+export type SgpIdentificationResult =
+  | { status: 'found'; cpfCnpj: string; contracts: SgpIdentificationContract[] }
+  | { status: 'missing-identifier' }
+  | { status: 'invalid-identifier' }
+  | { status: 'not-found' }
+  | { status: 'unavailable' };
+
+/** Read-only identification for a deterministic flow; never changes the CRM CPF. */
+export async function lookupSgpCustomerContracts(target: SgpRuntimeTarget): Promise<SgpIdentificationResult> {
+  try {
+    // Resolve identity from this conversation, never from a supplied contact ID.
+    const context = await loadSgpContext({
+      workspaceId: target.workspaceId,
+      chatId: target.chatId,
+      customerIdentifier: target.customerIdentifier,
+    }, true);
+    if (!context.success) return { status: context.code === 'SGP_IDENTIFIER_MISSING' ? 'missing-identifier' : context.code === 'SGP_IDENTIFIER_INVALID' ? 'invalid-identifier' : 'unavailable' };
+    const clients = await fetchSgpClients(context.data, true);
+    if (clients.length === 0) return { status: 'not-found' };
+    const panel = buildSGPContactPanelData(clients, []);
+    if (!panel) return { status: 'unavailable' };
+    // Only the selection fields leave this boundary, excluding invoices and credentials.
+    const contracts = panel.contracts.map(contract => ({
+      id: contract.id,
+      statusTone: contract.statusTone,
+      statusLabel: contract.statusLabel || 'Sem status',
+      addressLabel: contract.addressLabel || '',
+      planDescription: contract.planDescription || '',
+    }));
+    return { status: 'found', cpfCnpj: context.data.cpf, contracts };
+  } catch {
+    return { status: 'unavailable' };
+  }
 }
 
 async function fetchSupportContracts(sgp: SgpToolContext, contractId?: string | null) {

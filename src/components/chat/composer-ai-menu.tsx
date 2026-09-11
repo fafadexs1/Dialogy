@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import { Activity, ArrowLeft, ArrowRight, Bot, Brain, Check, ChevronDown, Loader2, MessageSquareQuote, Search, Sparkles, SpellCheck2 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import composerStyles from './composer.module.css';
 import styles from './composer-ai-menu.module.css';
 
 interface ComposerAiMenuProps {
-  agents: { id: string; name: string }[];
+  agents: { id: string; name: string; avatarUrl?: string | null }[];
   selectedId?: string;
   active: boolean;
   busy: boolean;
@@ -69,7 +70,11 @@ export function ComposerAiMenu(props: ComposerAiMenuProps) {
             <div className={styles.search}><Search size={14} /><input autoFocus value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar pelo nome…" aria-label="Buscar assistente" /></div>
             <div className={styles.agents} aria-label="Assistentes disponíveis">
               {matches.map(agent => <button type="button" key={agent.id} className={styles.agent} onClick={() => { setDraftId(agent.id); setChoosing(false); setSearch(''); }}>
-                <span className={styles.avatar}>{agent.name.trim().charAt(0)}</span><span>{agent.name}</span>{draftId === agent.id && <Check size={14} />}
+                <Avatar className={styles.avatar}>
+                  <AvatarImage fallbackOnBlank src={agent.avatarUrl || undefined} alt={agent.name} />
+                  <AvatarFallback>{agent.name.trim().charAt(0)}</AvatarFallback>
+                </Avatar>
+                <span>{agent.name}</span>{draftId === agent.id && <Check size={14} />}
               </button>)}
               {!matches.length && <p className={styles.empty}>Nenhum assistente encontrado.</p>}
             </div>
@@ -79,7 +84,11 @@ export function ComposerAiMenu(props: ComposerAiMenuProps) {
             <div className={styles.heading}><Sparkles size={15} /><strong>Seu assistente</strong><span>{props.autonomous ? 'Autônomo' : props.active ? 'Ativo' : 'Desativado'}</span></div>
             <p className={styles.description}>{props.autonomous ? 'A IA está atendendo este cliente.' : 'A IA sugere. Você decide o que enviar.'}</p>
             <button type="button" disabled={disabled || !props.agents.length} className={styles.selected} onClick={() => setChoosing(true)} aria-label="Trocar assistente">
-              <span className={styles.avatar}>{selected?.name.trim().charAt(0) || <Bot size={17} />}</span><strong>{selected?.name || 'Nenhum assistente disponível'}</strong><span>Trocar<ChevronDown size={12} /></span>
+              <Avatar className={styles.avatar}>
+                <AvatarImage fallbackOnBlank src={selected?.avatarUrl || undefined} alt={selected?.name || 'Assistente'} />
+                <AvatarFallback>{selected?.name.trim().charAt(0) || <Bot size={17} />}</AvatarFallback>
+              </Avatar>
+              <strong>{selected?.name || 'Nenhum assistente disponível'}</strong><span>Trocar<ChevronDown size={12} /></span>
             </button>
             {!props.agents.length && <p className={styles.empty}>Configure um agente em Autopilot para começar.</p>}
             <button type="button" disabled={disabled || !selected} className={styles.activate} data-active={isCurrentActive} onClick={() => void apply()}>

@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { crmOptionMatches } from './crm-option-trigger';
 import {
   WorkflowDefinitionSchema,
   hashValue,
@@ -21,7 +22,11 @@ export function normalizedNexusInternalEventName(value: unknown) {
   return String(value || '').trim().toLocaleLowerCase('en-US');
 }
 
-export function nexusInternalEventTriggerMatches(config: Record<string, unknown>, eventName: string) {
+export function nexusInternalEventTriggerMatches(config: Record<string, unknown>, eventName: string, payload: Record<string, unknown> = {}) {
+  if (config.crmOption !== undefined) {
+    return ['contact.created', 'contact.updated'].includes(normalizedNexusInternalEventName(eventName))
+      && crmOptionMatches(config.crmOption, payload);
+  }
   const configured = normalizedNexusInternalEventName(config.eventName);
   return Boolean(configured) && configured === normalizedNexusInternalEventName(eventName);
 }
@@ -76,7 +81,7 @@ export async function dispatchPublishedNexusInternalEvent(input: {
   for (const row of candidates.rows as Array<Record<string, unknown>>) {
     const definition = WorkflowDefinitionSchema.parse(parseJson(row.definition));
     const trigger = internalEventTrigger(definition);
-    if (!trigger || !nexusInternalEventTriggerMatches(trigger.config, eventName)) continue;
+    if (!trigger || definition.workspaceId !== input.workspaceId || !nexusInternalEventTriggerMatches(trigger.config, eventName, input.payload)) continue;
     const published = await loadPublishedNexusWorkflow({
       nexusWorkflowId: String(row.id),
       workspaceId: input.workspaceId,

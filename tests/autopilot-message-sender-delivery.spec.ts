@@ -88,6 +88,15 @@ describe('autopilot multi-block response delivery', () => {
 
     expect(mocks.sendAutomatedMessageAction).not.toHaveBeenCalled();
   });
+  it('preserves Studio plan labels, line breaks and prices without AI reformatting', async () => {
+    const text = 'Qual plano?\n1. 500 MEGA — R$ 99,90 com pontualidade / R$ 109,90 normal\n2. 1000 MEGA + 100 canais + Wi-Fi 6 — R$ 149,90';
+    mocks.prepareDelivery.mockImplementation(async ({blocks}) => ({id:'delivery',blocks,deliveredBlockIndexes:new Set(),status:'pending'}));
+    const sending = sendMultiBlockResponse('chat-1',text,'agent-1',true,'instance-1',null,trace,{preserveFormatting:true});
+    await vi.runAllTimersAsync(); await sending;
+    expect(mocks.prepareDelivery).toHaveBeenCalledWith(expect.objectContaining({blocks:[text]}));
+    expect(mocks.sendAutomatedMessageAction).toHaveBeenCalledWith('chat-1',text,'agent-1',true,'instance-1',expect.any(Object));
+    expect(mocks.markDelivered).toHaveBeenCalledOnce();
+  });
 
   it('resumes at the missing block and preserves the original response plan', async () => {
     mocks.prepareDelivery.mockResolvedValue({

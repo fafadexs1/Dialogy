@@ -1,6 +1,7 @@
 'use server';
 
 import { createHash } from 'node:crypto';
+import { studioCrmProfileField } from '@/services/agent-studio/crm-fields';
 import { z } from 'zod';
 import { validateSchema } from 'genkit/schema';
 import { revalidatePath } from 'next/cache';
@@ -8,6 +9,7 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/actions/user';
 import { db } from '@/lib/db';
 import { listWorkspaceConfiguredAiModels } from '@/services/ai/workspace-ai-credentials';
+import { resolveConfiguredAiModel } from '@/lib/ai-models';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import { resolveSafeAutopilotWebhookTarget } from '@/services/autopilot/automation-rules';
 import { executeStudioHttp, executeStudioMcp, resolveStudioMcpTool } from '@/services/agent-studio/integrations';
@@ -20,6 +22,7 @@ import {
 import { validateAgentForPublication } from '@/services/agent-studio/assistant-validator';
 import {
   AgentStudioDocumentSchema,
+  AgentReleaseManifestSchema,
   McpToolStepConfigSchema,
   createDefaultAgentStudioDocument,
   createInvoiceAgentStudioTemplate,
@@ -43,6 +46,7 @@ import { reviewStudioUncertainOutcome, type StudioOutcomeResolution } from '@/se
 import { rollbackStudioAgentToLegacy } from '@/services/agent-studio/legacy-rollback';
 import { revokeStudioRelease } from '@/services/agent-studio/revocation';
 import { extractStudioKnowledgeFile } from '@/services/agent-studio/knowledge-file';
+import { stableStringify } from '@/services/workflow-runtime/utils';
 
 export type AgentApiConnectionSummary = {
   id: string;
@@ -55,8 +59,15 @@ type JsonObject = Record<string, unknown>;
 
 async function resolveStudioModel(workspaceId: string, selected?: string, previous?: unknown) {
   const models = await listWorkspaceConfiguredAiModels(workspaceId);
-  const requested = selected || (typeof previous === 'string' ? previous : '') || models[0]?.id;
-  if (requested && models.some((model) => model.id === requested)) return requested;
+  if (!models || models.length === 0) {
+    throw new Error('Cadastre e ative pelo menos um modelo de IA na aba Modelos de IA deste workspace antes de continuar.');
+  }
+  const resolved = resolveConfiguredAiModel(
+    selected,
+    models,
+    typeof previous === 'string' ? previous : undefined,
+  );
+  if (resolved) return resolved;
   throw new Error('Selecione um modelo de IA cadastrado e ativo na aba Modelos de IA deste workspace.');
 }
 
@@ -100,6 +111,30 @@ function baseSnapshot(row: JsonObject): JsonObject {
   };
 }
 
+function stablePublicationValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stablePublicationValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !['updatedAt', 'draftRevision', 'publishedVersion', 'restoredKnowledgeReleaseId', 'revisionPublishedAt'].includes(key))
+    .map(([key, nested]) => [key, key === 'status' && (nested === 'draft' || nested === 'published')
+      ? 'active'
+      : stablePublicationValue(nested)]));
+}
+
+function studioPublicationFingerprint(input: {
+  document: AgentStudioDocument;
+  knowledgeSnapshot: Record<string, unknown>[];
+  runtimeConfig: { aiModel: string };
+  referencedConnectionIds: string[];
+  connectionFingerprints: Record<string, string>;
+  mcpServerToolFingerprints: Record<string, string>;
+}) {
+  return createHash('sha256').update(stableStringify(stablePublicationValue({
+    ...input,
+    referencedConnectionIds: [...input.referencedConnectionIds].sort(),
+  }))).digest('hex');
+}
+
 async function loadDraftSnapshot(agentId: string, workspaceId: string): Promise<JsonObject | null> {
   const result = await db.query('SELECT snapshot FROM autopilot_config_drafts WHERE config_id = $1 AND workspace_id = $2 LIMIT 1', [agentId, workspaceId]);
   return result.rows[0] ? asObject(result.rows[0].snapshot) : null;
@@ -120,7 +155,35 @@ export async function getAgentStudioDataAction(agentId: string) {
     const migration = planStudioMigration(row, inventory);
     const requiresMigrationReview = !publishedDocument && migration.report.requiresReview;
     document ??= migration.document;
-    document = { ...document, aiModel: document.aiModel || String(draft?.ai_model || row.ai_model || '') || undefined };
+    const configuredModels = await listWorkspaceConfiguredAiModels(workspaceId);
+    const resolvedAiModel = resolveConfiguredAiModel(
+      document.aiModel || String(draft?.ai_model || row.ai_model || ''),
+      configuredModels,
+    );
+    document = {
+      ...document,
+      aiModel: resolvedAiModel || document.aiModel || String(draft?.ai_model || row.ai_model || '') || undefined,
+    };
+    if (document.resolveStage.reasoning?.enabled && document.resolveStage.reasoning.supportModel) {
+      const resolvedSupport = resolveConfiguredAiModel(
+        document.resolveStage.reasoning.supportModel,
+        configuredModels,
+        document.aiModel,
+      );
+      if (resolvedSupport) {
+        document.resolveStage.reasoning.supportModel = resolvedSupport;
+      }
+    }
+    const rawDocs = Array.isArray(row.knowledge_base_documents) ? row.knowledge_base_documents as Record<string, unknown>[] : [];
+    const knownIds = new Set<string>();
+    if (Array.isArray(row.knowledge_collections)) {
+      for (const c of row.knowledge_collections as Array<{ id: string }>) if (c.id) knownIds.add(String(c.id));
+    }
+    const defaultCollectionId = (Array.isArray(row.knowledge_collections) ? row.knowledge_collections : []).find((c: { isDefault?: boolean }) => c.isDefault)?.id || 'general';
+    knownIds.add(defaultCollectionId);
+    for (const d of rawDocs) if (d.id) knownIds.add(String(d.id));
+    for (const ik of document.inlineKnowledge || []) if (ik.id) knownIds.add(String(ik.id));
+    document.resolveStage.knowledgeCollectionIds = (document.resolveStage.knowledgeCollectionIds || []).filter((id) => knownIds.has(id));
     return { success: true as const, document, isPublished: Boolean(row.is_active), requiresMigrationReview, migrationReport: requiresMigrationReview ? migration.report : null };
   } catch (error) {
     return { success: false as const, error: error instanceof Error ? error.message : 'Erro ao carregar o agente.' };
@@ -129,15 +192,27 @@ export async function getAgentStudioDataAction(agentId: string) {
 
 export async function saveAgentStudioDraftAction(agentId: string, input: AgentStudioDocument) {
   try {
-    const { user, workspaceId } = await requireAgent(agentId);
+    const { user, workspaceId, row } = await requireAgent(agentId);
     const parsed = AgentStudioDocumentSchema.safeParse(input);
     if (!parsed.success) return { success: false as const, error: 'O agente possui configurações incompletas ou inválidas.' };
-    if (parsed.data.aiModel) await resolveStudioModel(workspaceId, parsed.data.aiModel);
+    const rawDocs = Array.isArray(row.knowledge_base_documents) ? row.knowledge_base_documents as Record<string, unknown>[] : [];
+    const knownIds = new Set<string>();
+    if (Array.isArray(row.knowledge_collections)) {
+      for (const c of row.knowledge_collections as Array<{ id: string }>) if (c.id) knownIds.add(String(c.id));
+    }
+    const defaultCollectionId = (Array.isArray(row.knowledge_collections) ? row.knowledge_collections : []).find((c: { isDefault?: boolean }) => c.isDefault)?.id || 'general';
+    knownIds.add(defaultCollectionId);
+    for (const d of rawDocs) if (d.id) knownIds.add(String(d.id));
+    for (const ik of parsed.data.inlineKnowledge || []) if (ik.id) knownIds.add(String(ik.id));
+    parsed.data.resolveStage.knowledgeCollectionIds = (parsed.data.resolveStage.knowledgeCollectionIds || []).filter((id) => knownIds.has(id));
+    const resolvedAiModel = parsed.data.aiModel
+      ? await resolveStudioModel(workspaceId, parsed.data.aiModel, row.ai_model)
+      : undefined;
     const document: AgentStudioDocument = await withStudioTransaction(async (client) => {
       const current = await lockStudioDraft(client, workspaceId, agentId, parsed.data.draftRevision || 0);
       const document: AgentStudioDocument = {
       ...parsed.data,
-      aiModel: parsed.data.aiModel || String(current.draft.ai_model || current.row.ai_model || '') || undefined,
+      aiModel: resolvedAiModel || parsed.data.aiModel || String(current.draft.ai_model || current.row.ai_model || '') || undefined,
       id: agentId,
       workspaceId,
       status: 'draft',
@@ -300,6 +375,55 @@ export async function importStudioKnowledgeFileAction(agentId: string, formData:
   } catch (error) { return { success: false as const, error: error instanceof Error ? error.message : 'Não foi possível importar o arquivo.' }; }
 }
 
+export async function optimizeStudioKnowledgeAction(
+  agentId: string,
+  input: { name: string; content: string; category?: string }
+) {
+  try {
+    const { workspaceId, row } = await requireAgent(agentId);
+    if (!input.content?.trim()) throw new Error('Adicione conteúdo antes de solicitar a otimização.');
+    const { resolveWorkspaceAiExecutionContext } = await import('@/services/ai/runtime');
+    const { resolveAiProviderKeyCandidates } = await import('@/services/ai/provider-keys');
+    const { improveKnowledgeDocumentForRag } = await import('@/ai/flows/knowledge-document-rewrite');
+
+    const runtime = await resolveWorkspaceAiExecutionContext(workspaceId, agentId);
+    const modelApiKeyCandidates = await resolveAiProviderKeyCandidates({
+      config: row,
+      workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
+    });
+    const improved = await improveKnowledgeDocumentForRag({
+      document: {
+        id: 'studio-knowledge-opt',
+        name: input.name || 'Documento',
+        content: input.content,
+        category: input.category || '',
+      } as any,
+      model: runtime.model,
+      apiKeyCandidates: modelApiKeyCandidates,
+    });
+
+    return {
+      success: true as const,
+      improved: {
+        name: improved.name,
+        content: improved.content,
+        summary: improved.summary,
+        category: improved.category,
+        tags: improved.tags,
+        contextRole: improved.contextRole,
+        canonicalAnswer: improved.canonicalAnswer || undefined,
+        workflowHints: improved.workflowHints,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : 'Não foi possível otimizar o documento com IA.',
+    };
+  }
+}
+
+
 /** Read-only: restoring is an explicit draft edit; this never republishes a release. */
 export async function getStudioVersionForDraftAction(agentId: string, releaseId: string) {
   try {
@@ -317,13 +441,24 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
     const parsed = AgentStudioDocumentSchema.safeParse(input);
     if (!parsed.success) return { success: false as const, error: 'O agente possui configurações inválidas.' };
     const aiModel = await resolveStudioModel(workspaceId, parsed.data.aiModel, row.ai_model);
-    const validation = validateAgentForPublication(parsed.data);
+    const validation = validateAgentForPublication({ ...parsed.data, aiModel });
     if (!validation.valid) return { success: false as const, error: 'Corrija as pendências antes de publicar.', issues: validation.issues };
     // Fail before publishing if the deployment cannot persist encrypted customer state.
     try { sealStudioSession({ workspaceId, agentId, chatId: 'publication-readiness-check' }, createStudioSession(agentId, 'readiness-check', 'readiness-check')); }
     catch { throw new Error('Configure a chave de criptografia do ambiente antes de publicar agentes.'); }
     const historyReady = await db.query("SELECT to_regclass('public.agent_studio_sessions') AS ready");
     if (!historyReady.rows[0]?.ready) throw new Error('A atualização do banco do Estúdio ainda não foi aplicada. Solicite ao administrador a migração agent_studio_session_history antes de publicar.');
+    if (parsed.data.resolveStage.reasoning?.enabled) {
+      const memoryReady = await db.query("SELECT to_regclass('public.agent_studio_memory_events') AS ready");
+      if (!memoryReady.rows[0]?.ready) throw new Error('Aplique a migração agent_studio_durable_memory antes de publicar o novo núcleo adaptativo.');
+      if (parsed.data.resolveStage.reasoning.supportModel) {
+        parsed.data.resolveStage.reasoning.supportModel = await resolveStudioModel(
+          workspaceId,
+          parsed.data.resolveStage.reasoning.supportModel,
+          aiModel,
+        );
+      }
+    }
 
     // Read-only dependency validation happens before holding any database lock.
     const tools = await Promise.all(parsed.data.resolveStage.procedures.filter((procedure) => procedure.status !== 'archived').flatMap((procedure) => procedure.steps)
@@ -351,7 +486,7 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
         if (!teamNames.has(team!)) throw new Error(`Revise a equipe da etapa “${step.title}”.`);
       }
       if (['add_tag', 'remove_tag'].includes(step.nativeActionType || '') && !resources.tags.some((tag) => tag.id === step.nativeActionPayload?.tagId)) throw new Error(`Selecione uma etiqueta válida em “${step.title}”.`);
-      for (const mapping of step.nativeDataMappings || []) if (!resources.fields.some((field) => field.id === mapping.apiField)) throw new Error(`Selecione um campo de CRM válido em “${step.title}”.`);
+      for (const mapping of step.nativeDataMappings || []) if (!studioCrmProfileField(mapping.apiField) && !resources.fields.some((field) => field.id === mapping.apiField)) throw new Error(`Selecione um campo de CRM válido em “${step.title}”.`);
     }
     const published = await withStudioTransaction(async (client) => {
     const current = await lockStudioDraft(client, workspaceId, agentId, parsed.data.draftRevision || 0);
@@ -393,7 +528,7 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
       const currentTags = await client.query('SELECT id FROM tags WHERE workspace_id = $1 AND id = ANY($2::uuid[]) ORDER BY id FOR SHARE', [workspaceId, tagIds]);
       if (currentTags.rows.length !== tagIds.length) throw new Error('Uma etiqueta deixou de estar disponível durante a publicação.');
     }
-    const fieldIds = [...new Set(activeSteps.flatMap((step) => (step.nativeDataMappings || []).map((mapping) => mapping.apiField)))];
+    const fieldIds = [...new Set(activeSteps.flatMap((step) => (step.nativeDataMappings || []).map((mapping) => mapping.apiField).filter((id) => !studioCrmProfileField(id))))];
     if (fieldIds.length) {
       const currentFields = await client.query('SELECT id, type FROM custom_field_definitions WHERE workspace_id = $1 AND id = ANY($2::uuid[]) ORDER BY id FOR SHARE', [workspaceId, fieldIds]);
       if (currentFields.rows.length !== fieldIds.length || currentFields.rows.some((field) => resources.fields.find((prepared) => prepared.id === field.id)?.type !== field.type)) throw new Error('Um campo de CRM mudou durante a publicação. Revise os mapeamentos.');
@@ -414,19 +549,29 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
       const revokedSources = new Set((restored.rows[0].revoked_sources || []).map(String));
       restoredKnowledge = (restored.rows[0].release.knowledgeSnapshot || []).filter((source: Record<string, unknown>) => !revokedSources.has(String(source.id || '')));
     }
-    const currentKnowledgeDocuments = Array.isArray(current.row.knowledge_base_documents) ? current.row.knowledge_base_documents as Record<string, unknown>[] : [];
+    const rawDocs = Array.isArray(current.row.knowledge_base_documents) ? current.row.knowledge_base_documents as Record<string, unknown>[] : [];
+    const defaultCollectionId = (Array.isArray(current.row.knowledge_collections) ? current.row.knowledge_collections : []).find((c: { isDefault?: boolean }) => c.isDefault)?.id
+      || (Array.isArray(current.row.knowledge_collections) ? current.row.knowledge_collections : [])[0]?.id
+      || 'general';
+    const currentKnowledgeDocuments: Record<string, unknown>[] = rawDocs.map((doc) => ({
+      ...doc,
+      collectionIds: (Array.isArray(doc.collectionIds) && doc.collectionIds.length > 0)
+        ? doc.collectionIds
+        : [defaultCollectionId],
+    }));
     const knownCollections = new Set((Array.isArray(current.row.knowledge_collections) ? current.row.knowledge_collections : []).map((collection: { id: string }) => collection.id));
+    if (defaultCollectionId) knownCollections.add(defaultCollectionId);
     for (const source of currentKnowledgeDocuments) if (source.id) knownCollections.add(String(source.id));
     for (const source of restoredKnowledge || []) if (Array.isArray(source.collectionIds)) for (const id of source.collectionIds) knownCollections.add(String(id));
     for (const source of parsed.data.inlineKnowledge || []) knownCollections.add(source.id);
-    for (const id of selectedCollections) if (!knownCollections.has(id)) throw new Error('Uma base selecionada não está mais disponível. Revise o conhecimento autorizado.');
+    const activeSelectedCollections = new Set([...selectedCollections].filter((id) => knownCollections.has(id)));
     const inlineIds = new Set((parsed.data.inlineKnowledge || []).map((source) => source.id));
-    const knowledgeSnapshot = (restoredKnowledge || currentKnowledgeDocuments).filter((item: Record<string, unknown>) =>
+    const knowledgeSnapshot: Record<string, unknown>[] = (restoredKnowledge || currentKnowledgeDocuments).filter((item: Record<string, unknown>) =>
       !inlineIds.has(String(item.id)) &&
       !['draft', 'archived', 'expired'].includes(String(item.status || 'active')) &&
-      (selectedCollections.has(String(item.id)) || (Array.isArray(item.collectionIds) && item.collectionIds.some((id: string) => selectedCollections.has(id)))) &&
+      (activeSelectedCollections.has(String(item.id)) || (Array.isArray(item.collectionIds) && item.collectionIds.some((id: string) => activeSelectedCollections.has(id)))) &&
       String(item.content || '').trim() && (!item.validUntil || Date.parse(String(item.validUntil)) > Date.now()) && (!item.validFrom || Date.parse(String(item.validFrom)) <= Date.now()));
-    for (const source of parsed.data.inlineKnowledge || []) if (selectedCollections.has(source.id)) {
+    for (const source of parsed.data.inlineKnowledge || []) if (activeSelectedCollections.has(source.id)) {
       if (!source.name.trim() || !source.content.trim()) throw new Error('Preencha o título e o conteúdo das fontes de conhecimento selecionadas.');
       knowledgeSnapshot.push({ ...source, collectionIds: [source.id], status: 'active' });
     }
@@ -435,7 +580,12 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
       source.contentHash = createHash('sha256').update(String(source.content || '')).digest('hex');
       source.revisionPublishedAt = revisionTimestamp;
     }
-    for (const id of selectedCollections) if (!knowledgeSnapshot.some((item: { id?: string; collectionIds?: string[] }) => item.id === id || item.collectionIds?.includes(id))) throw new Error('Uma base ou documento selecionado não possui conteúdo ativo para publicar.');
+    if (activeSelectedCollections.size > 0 && knowledgeSnapshot.length === 0) {
+      throw new Error('Uma base ou documento selecionado não possui conteúdo ativo para publicar.');
+    }
+    normalized.resolveStage.knowledgeCollectionIds = normalized.resolveStage.knowledgeCollectionIds.filter((id) =>
+      knowledgeSnapshot.some((item: { id?: string; collectionIds?: string[] }) => item.id === id || item.collectionIds?.includes(id))
+    );
     const document: AgentStudioDocument = {
       ...normalized,
       aiModel,
@@ -449,6 +599,46 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
     };
     const referencedConnectionIds = [...new Set(document.resolveStage.procedures.filter((procedure) => procedure.status !== 'archived').flatMap((procedure) => procedure.steps)
       .map((step) => step.httpRequest?.connectionId).filter((id): id is string => Boolean(id)))];
+    const connectionFingerprints = Object.fromEntries(usedConnections.map((connection) => [connection.id, studioConnectionFingerprint(connection)]));
+    const mcpServerToolFingerprints = Object.fromEntries(tools.map((tool) => [tool.tool.qualifiedName, tool.fingerprint]));
+    const previousManifest = AgentReleaseManifestSchema.safeParse(current.published.agent_release_manifest);
+    if (previousManifest.success) {
+      const revoked = await client.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM agent_studio_release_revocations
+            WHERE workspace_id = $1 AND agent_id = $2 AND release_id = $3
+         ) OR EXISTS (
+           SELECT 1 FROM agent_studio_knowledge_revocations
+            WHERE workspace_id = $1 AND agent_id = $2 AND release_id = $3
+         ) AS revoked`,
+        [workspaceId, agentId, previousManifest.data.releaseId],
+      );
+      const nextFingerprint = studioPublicationFingerprint({
+        document,
+        knowledgeSnapshot,
+        runtimeConfig: { aiModel: document.aiModel! },
+        referencedConnectionIds,
+        connectionFingerprints,
+        mcpServerToolFingerprints,
+      });
+      const previousFingerprint = studioPublicationFingerprint({
+        document: previousManifest.data.agentSnapshot,
+        knowledgeSnapshot: (previousManifest.data.knowledgeSnapshot || []) as Record<string, unknown>[],
+        runtimeConfig: { aiModel: previousManifest.data.runtimeConfig?.aiModel || document.aiModel! },
+        referencedConnectionIds: previousManifest.data.referencedConnectionIds,
+        connectionFingerprints: previousManifest.data.connectionFingerprints || {},
+        mcpServerToolFingerprints: previousManifest.data.mcpServerToolFingerprints,
+      });
+      if (revoked.rows[0]?.revoked !== true && nextFingerprint === previousFingerprint) {
+        await client.query('DELETE FROM autopilot_config_drafts WHERE config_id = $1 AND workspace_id = $2', [agentId, workspaceId]);
+        return {
+          document: previousManifest.data.agentSnapshot,
+          manifest: previousManifest.data,
+          publishedVersion: previousManifest.data.version,
+          reusedExistingVersion: true,
+        };
+      }
+    }
     const manifest: AgentReleaseManifest = {
       releaseId: crypto.randomUUID(),
       agentId,
@@ -460,8 +650,8 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
       knowledgeSnapshot,
       runtimeConfig: { aiModel: document.aiModel! },
       referencedConnectionIds,
-      connectionFingerprints: Object.fromEntries(usedConnections.map((connection) => [connection.id, studioConnectionFingerprint(connection)])),
-      mcpServerToolFingerprints: Object.fromEntries(tools.map((tool) => [tool.tool.qualifiedName, tool.fingerprint])),
+      connectionFingerprints,
+      mcpServerToolFingerprints,
       createdAt: new Date().toISOString(),
       publishedByUserId: user.id,
     };
@@ -758,13 +948,14 @@ export async function revokeAgentStudioReleaseAction(agentId: string, input: { r
   } catch (error) { return { success: false as const, error: error instanceof Error ? error.message : 'Não foi possível revogar esta publicação.' }; }
 }
 
-export async function reviewStudioOutcomeAction(agentId: string, sessionId: string, resolution: StudioOutcomeResolution) {
+export async function reviewStudioOutcomeAction(agentId: string, sessionId: string, resolution: StudioOutcomeResolution, operationId?: string) {
   try {
     z.string().uuid().parse(sessionId);
     const { user, workspaceId } = await requireAgent(agentId);
     if (!await hasWorkspacePermission(user.id, workspaceId, 'workspace:settings:edit')) throw new Error('Você não tem permissão para confirmar resultados de operações externas.');
     const reviewed = await reviewStudioUncertainOutcome({ workspaceId, agentId, sessionId, userId: user.id,
-      resolution: z.enum(['confirmed_succeeded', 'confirmed_failed']).parse(resolution) });
+      resolution: z.enum(['confirmed_succeeded', 'confirmed_failed']).parse(resolution),
+      operationId: z.string().min(1).max(500).optional().parse(operationId) });
     revalidatePath(`/autopilot/${agentId}`);
     return { success: true as const, ...reviewed };
   } catch (error) { return { success: false as const, error: error instanceof Error ? error.message : 'Não foi possível registrar a revisão.' }; }

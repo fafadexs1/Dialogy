@@ -7,7 +7,6 @@ import {
 } from '@/actions/messages';
 import { closeChatAction, transferChatAction, transferChatToIntelligentAgentAction } from '@/actions/chats';
 import { db } from '@/lib/db';
-import { executePublishedStudioNode } from '@/services/agent-studio/workflow-adapter';
 import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
@@ -15,7 +14,7 @@ import { dispatchPublishedNexusMessage } from './message-dispatcher';
 import type { NexusRuntimeAdapters } from './runtime';
 import { isValidWorkflowGoalCompletionEvidence } from '@/services/workflow-runtime/goal-completion';
 import type { NodeRuntimeInput, WorkflowDefinition } from '@/services/workflow-runtime';
-import { isRecord } from '@/services/workflow-runtime/utils';
+import { isRecord, renderTemplate } from '@/services/workflow-runtime/utils';
 import { resolveSafeAutopilotWebhookTarget } from '@/services/autopilot/automation-rules';
 
 type NexusSenderSystemAgent = {
@@ -25,6 +24,8 @@ type NexusSenderSystemAgent = {
   autopilotConfigId: string | null;
   autopilotIsActive: boolean | null;
 };
+
+type PublishedStudioSystemAgent = NexusSenderSystemAgent;
 
 function configuredSenderSystemAgentId(workflow: WorkflowDefinition) {
   return String(workflow.metadata?.senderSystemAgentId || '').trim();
@@ -158,6 +159,7 @@ export async function createNexusChatAdapters(input: {
   instanceName?: string;
 }): Promise<NexusRuntimeAdapters> {
   const senderCache = new Map<string, Promise<NexusSenderSystemAgent>>();
+  const publishedAgentCache = new Map<string, Promise<PublishedStudioSystemAgent>>();
   const senderFor = (runtimeInput: NodeRuntimeInput) => {
     const senderSystemAgentId = configuredSenderSystemAgentId(runtimeInput.workflow);
     const cacheKey = senderSystemAgentId || `missing:${runtimeInput.workflow.id}@${runtimeInput.workflow.version}`;
@@ -174,6 +176,89 @@ export async function createNexusChatAdapters(input: {
       user: { id: sender.id, name: sender.name },
       isSystemAgent: true,
     });
+  };
+  const publishedAgentFor = (runtimeInput: NodeRuntimeInput) => {
+    const autopilotConfigId = String(runtimeInput.node.config.agentId || '').trim();
+    if (!autopilotConfigId) {
+      return Promise.reject(new Error('O bloco Agente do Studio não possui um agente publicado configurado.'));
+    }
+    let agent = publishedAgentCache.get(autopilotConfigId);
+    if (!agent) {
+      const preferredSenderId = configuredSenderSystemAgentId(runtimeInput.workflow) || null;
+      agent = db.query(
+        `SELECT agent.id::text AS id,
+                agent.name,
+                agent.type,
+                agent.autopilot_config_id::text AS autopilot_config_id,
+                autopilot.is_active AS autopilot_is_active
+         FROM public.system_agents agent
+         JOIN public.autopilot_configs autopilot
+           ON autopilot.id = agent.autopilot_config_id
+          AND autopilot.workspace_id = agent.workspace_id
+         WHERE agent.workspace_id = $1
+           AND agent.autopilot_config_id = $2
+           AND agent.type = 'intelligent_attendant'
+           AND agent.is_active IS NOT FALSE
+           AND autopilot.is_active = TRUE
+         ORDER BY (agent.id = $3::uuid) DESC, agent.created_at ASC, agent.id ASC
+         LIMIT 1`,
+        [input.workspaceId, autopilotConfigId, preferredSenderId],
+      ).then((result) => {
+        if (!result.rows[0]) {
+          throw new Error('O agente publicado não possui um Atendente Inteligente ativo vinculado.');
+        }
+        return {
+          id: String(result.rows[0].id),
+          name: String(result.rows[0].name || 'Atendente Inteligente'),
+          type: String(result.rows[0].type),
+          autopilotConfigId: String(result.rows[0].autopilot_config_id),
+          autopilotIsActive: result.rows[0].autopilot_is_active === true,
+        };
+      });
+      publishedAgentCache.set(autopilotConfigId, agent);
+    }
+    return agent;
+  };
+  const transferChatToPublishedAgent = async (
+    runtimeInput: NodeRuntimeInput,
+    agent: PublishedStudioSystemAgent,
+  ) => {
+    const state = await db.query(
+      `SELECT assigned_system_agent_id::text AS assigned_system_agent_id,
+              agent_id::text AS agent_id,
+              status,
+              is_autopilot_active,
+              autopilot_config_id::text AS autopilot_config_id
+       FROM public.chats
+       WHERE workspace_id = $1 AND id = $2
+       LIMIT 1`,
+      [input.workspaceId, input.chatId],
+    );
+    const chat = state.rows[0];
+    if (!chat) throw new Error('Conversa indisponível para o Agente do Studio.');
+    const alreadyAssigned = chat.assigned_system_agent_id === agent.id
+      && !chat.agent_id
+      && chat.status === 'atendimentos'
+      && chat.is_autopilot_active === true
+      && chat.autopilot_config_id === agent.autopilotConfigId;
+    if (alreadyAssigned) return false;
+
+    const actor = createTrustedActorContext({
+      user: { id: agent.id, name: agent.name },
+      isSystemAgent: true,
+    });
+    const result = await transferChatToIntelligentAgentAction(
+      {
+        chatId: input.chatId,
+        systemAgentId: agent.id,
+        nexusEventContext: nexusEventCausation(runtimeInput),
+      },
+      actor,
+    );
+    if (!result.success) {
+      throw new Error(result.error || 'O Agente do Studio não conseguiu assumir o atendimento.');
+    }
+    return true;
   };
   const sendNativeList = async (
     runtimeInput: NodeRuntimeInput,
@@ -249,36 +334,20 @@ export async function createNexusChatAdapters(input: {
         durationMs: Date.now() - startedAt,
       };
     },
-    executePublishedAgent: async (runtimeInput) => executePublishedStudioNode(runtimeInput, {
-      send: async (response) => {
-        const sender = await senderFor(runtimeInput);
-        return sendAutomatedMessageAction(input.chatId, response, sender.id, true, input.instanceName, nexusDeliveryMetadata(runtimeInput));
-      },
-      native: async (action, confirmed) => {
-        const actor = await trustedActorFor(runtimeInput);
-        if (action.type === 'transfer_chat') {
-          const team = action.payload?.teamId
-            ? await db.query('SELECT id FROM teams WHERE workspace_id = $1 AND id = $2', [input.workspaceId, action.payload.teamId])
-            : await db.query('SELECT id FROM teams WHERE workspace_id = $1 AND name = $2', [input.workspaceId, action.payload?.teamName]);
-          if (!team.rows[0]) throw new Error('Equipe de transferência indisponível.');
-          const result = await transferChatAction({ chatId: input.chatId, teamId: team.rows[0].id, nexusEventContext: nexusEventCausation(runtimeInput) }, actor);
-          if (!result.success) throw new Error(result.error || 'A transferência falhou.');
-          return;
-        }
-        if (action.type === 'close_chat' && confirmed) {
-          if (action.payload?.notes) {
-            const sender = await senderFor(runtimeInput);
-            const delivered = await sendAutomatedMessageAction(input.chatId, action.payload.notes, sender.id, true, input.instanceName, nexusDeliveryMetadata(runtimeInput));
-            if (!delivered.success) throw new Error('A despedida não pôde ser entregue; a conversa permanece aberta.');
-          }
-          const result = await closeChatAction(input.chatId, null, action.reason || 'Procedimento do agente concluído.', false,
-            { event: 'studio_close', nexusExecutionId: runtimeInput.execution.executionId, nexusNodeId: runtimeInput.node.id }, actor);
-          if (!result.success) throw new Error(result.error || 'O encerramento falhou.');
-          return;
-        }
-        throw new Error('Ação não autorizada pelo bloco publicado.');
-      },
-    }),
+    executePublishedAgent: async (runtimeInput) => {
+      const publishedAgent = await publishedAgentFor(runtimeInput);
+      const transferred = await transferChatToPublishedAgent(runtimeInput, publishedAgent);
+      return {
+        status: 'completed',
+        output: {
+          delegated: true,
+          transferred,
+          systemAgentId: publishedAgent.id,
+          systemAgentName: publishedAgent.name,
+          autopilotConfigId: publishedAgent.autopilotConfigId,
+        },
+      };
+    },
     sendResponse: async (message, runtimeInput) => {
       const sender = await senderFor(runtimeInput);
       const metadata = nexusDeliveryMetadata(runtimeInput);
@@ -288,7 +357,9 @@ export async function createNexusChatAdapters(input: {
         const title = String(runtimeInput.node.config.prompt || 'Escolha uma opcao:').trim();
         const description = interactionDescription(runtimeInput);
         const footer = String(runtimeInput.node.config.footer || '').trim();
-        if (mode === 'list' && options.length > 0 && input.instanceName) {
+        // WhatsApp lists support at most 10 rows. Falling back to the complete
+        // numbered message avoids silently hiding valid choices.
+        if (mode === 'list' && options.length > 0 && options.length <= 10 && input.instanceName) {
           const delivered = await sendNativeList(runtimeInput, {
             title,
             description,
@@ -356,7 +427,7 @@ export async function createNexusChatAdapters(input: {
           `${index + 1}. ${choice.label}${choice.description ? ` — ${choice.description}` : ''}`
         )).join('\n'),
       ].filter(Boolean).join('\n\n');
-      if (input.instanceName && choices.length > 0) {
+      if (input.instanceName && choices.length > 0 && choices.length <= 10) {
         const delivered = await sendNativeList(runtimeInput, {
           title,
           description: invalid
@@ -447,11 +518,20 @@ export async function createNexusChatAdapters(input: {
       const teamId = String(runtimeInput.node.config.teamId || '').trim();
       const agentId = String(runtimeInput.node.config.agentId || '').trim();
       if (!teamId && !agentId) return { success: false, error: 'Equipe ou atendente humano não configurado.' };
+      const handoffSummary = runtimeInput.node.config.persistReason === true
+        ? renderTemplate(String(runtimeInput.node.config.reason || ''), {
+          ...runtimeInput.execution.variables,
+          variables: runtimeInput.execution.variables,
+          input: runtimeInput.execution.input,
+          context: runtimeInput.execution.context,
+        }).slice(0, 2000)
+        : undefined;
       const result = await transferChatAction(
         {
           chatId: input.chatId,
           ...(teamId ? { teamId } : {}),
           ...(agentId ? { agentId } : {}),
+          ...(handoffSummary ? { handoffSummary } : {}),
           nexusEventContext: nexusEventCausation(runtimeInput),
         },
         trustedActor,

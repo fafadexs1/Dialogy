@@ -1,13 +1,14 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import type { StudioSession } from './engine';
+import type { StudioReasoningState } from './reasoning-contract';
 
 export type StudioResults = {
   periodDays: number;
   sessions: Array<{ status: string; count: number }>;
   averageResolutionSeconds: number | null;
   procedures: Array<{ id: string; name: string; selected: number; completed: number; failed: number; collectionFailures: number; integrationFailures: number }>;
-  recent: Array<{ id: string; status: string; startedAt: string; updatedAt: string; releaseId: string; summary: { events: StudioSession['events']; outcomeUnknown?: boolean; outcomeReview?: { resolution: string; reviewedAt: string } } }>;
+  recent: Array<{ id: string; status: string; startedAt: string; updatedAt: string; releaseId: string; summary: { uncertainOperations?: Array<{ id: string; capabilityId: string; title?: string; at: string }>; events: StudioSession['events']; lastTurnMetrics?: StudioReasoningState['lastTurnMetrics']; usageTotals?: StudioReasoningState['usageTotals']; outcomeUnknown?: boolean; outcomeReview?: { resolution: string; reviewedAt: string } } }>;
 };
 
 /** One snapshot supplies all metrics; the denominator is sessions started in this period. */
@@ -26,7 +27,7 @@ export async function readStudioResults(workspaceId: string, agentId: string, pe
     FROM sessions CROSS JOIN LATERAL jsonb_array_elements(COALESCE(summary->'procedureStats', '[]'::jsonb)) p
     GROUP BY p->>'id', p->>'name'
   ), recent AS (
-    SELECT id, status, started_at AS "startedAt", updated_at AS "updatedAt", release_id AS "releaseId", summary
+    SELECT id, status, started_at AS "startedAt", updated_at AS "updatedAt", release_id AS "releaseId", summary - 'recoveryCheckpoint' AS summary
     FROM sessions ORDER BY updated_at DESC LIMIT 20
   ) SELECT
     COALESCE((SELECT jsonb_agg(s) FROM status_counts s), '[]'::jsonb) AS sessions,

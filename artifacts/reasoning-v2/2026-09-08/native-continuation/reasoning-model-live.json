@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-08T18:34:48.980Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [],
+  "decisions": [
+    {
+      "observations": [],
+      "error": "O modelo precisa enviar uma única decisão pela ferramenta publicada.",
+      "ms": 5180
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2295,
+      "outputTokens": 778,
+      "totalTokens": 3073,
+      "ruleName": "decision"
+    }
+  ]
+}

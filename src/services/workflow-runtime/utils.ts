@@ -16,8 +16,14 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function normalizeRuntimeError(error: unknown, fallbackCode = 'UNEXPECTED_ERROR') {
   const candidate = error as RuntimeError | null;
+  const rawCode = candidate?.code ?? (error as any)?.status ?? (error as any)?.statusCode;
+  const code = typeof rawCode === 'string' && rawCode.trim().length > 0
+    ? rawCode.trim()
+    : typeof rawCode === 'number'
+    ? `ERROR_${rawCode}`
+    : fallbackCode;
   return {
-    code: candidate?.code || fallbackCode,
+    code,
     message: error instanceof Error ? error.message : String(error || 'Unknown error'),
     retryable: candidate?.retryable === true,
     details: isRecord(candidate?.details) ? candidate.details : undefined,

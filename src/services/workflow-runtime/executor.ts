@@ -500,7 +500,13 @@ export class WorkflowExecutor {
           execution = await this.persistence.saveExecution(execution, execution.version);
           continue;
         }
-        execution = await this.executeStep(workflow, execution, node, options.signal);
+        try {
+          execution = await this.executeStep(workflow, execution, node, options.signal);
+        } catch (stepError) {
+          const normalized = normalizeRuntimeError(stepError, 'STEP_EXECUTION_UNHANDLED');
+          execution = await this.failExecution(execution, normalized.code, normalized.message);
+          break;
+        }
       }
       return execution;
     } finally {
@@ -577,7 +583,8 @@ export class WorkflowExecutor {
       locked.currentNodeId = waitingNode.id;
       locked.waitingReason = undefined;
       locked.resumeToken = undefined;
-      locked.context = mergeStatePatch(locked.context, {
+      // Each response replaces the previous payload, including omitted button IDs.
+      locked.context = mergeStatePatch({ ...locked.context, __resumeInput: null }, {
         ...(input.contextPatch || {}),
         __resumeInput: input.input || {},
         __waitOutcome: selectedOutput,
@@ -691,7 +698,7 @@ export class WorkflowExecutor {
       locked.currentNodeId = waitingNode.id;
       locked.waitingReason = undefined;
       locked.resumeToken = undefined;
-      locked.context = mergeStatePatch(locked.context, {
+      locked.context = mergeStatePatch({ ...locked.context, __resumeInput: null }, {
         ...(input.contextPatch || {}),
         __resumeInput: input.input || {},
         __waitOutcome: interactionRetryReason,
@@ -737,7 +744,7 @@ export class WorkflowExecutor {
     locked.pendingNodeIds.push(...nextNodeIds.slice(1));
     locked.waitingReason = undefined;
     locked.resumeToken = undefined;
-    locked.context = mergeStatePatch(locked.context, {
+    locked.context = mergeStatePatch({ ...locked.context, __resumeInput: null }, {
       ...(input.contextPatch || {}),
       __resumeInput: input.input || {},
       __waitOutcome: selectedOutput,

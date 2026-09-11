@@ -26,7 +26,8 @@ import {
     XCircle,
     Loader2,
     ChevronDown,
-    ListTree
+    ListTree,
+    ScanEye
 } from 'lucide-react';
 import { type Message } from '@/lib/types';
 import {
@@ -536,38 +537,65 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
 
     const renderMedia = () => {
         if (effectiveMimeType.startsWith('image/')) {
+            const isFromMe = Boolean(message.from_me);
+            const shellClasses = isFromMe
+                ? 'border-blue-500/25 bg-blue-600 text-white shadow-blue-950/15'
+                : 'border-slate-200/90 bg-slate-50/90 text-slate-900 shadow-slate-900/5 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-100';
+            const secondaryTextClasses = isFromMe
+                ? 'text-white/60'
+                : 'text-slate-500 dark:text-zinc-500';
+            const dividerClasses = isFromMe ? 'border-white/10' : 'border-slate-200/80 dark:border-white/10';
+
             return (
-                <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName} chatId={message.chat_id}>
-                    <div
-                        className="group relative w-[min(78vw,320px)] max-w-full cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/10 shadow-sm dark:border-white/10"
-                        onMouseDown={startPress}
-                        onMouseUp={cancelPress}
-                        onMouseLeave={cancelPress}
-                        onTouchStart={startPress}
-                        onTouchEnd={cancelPress}
-                        onClick={(e) => {
-                            if (isLongPressRef.current) {
-                                e.preventDefault();
-                                e.stopPropagation();
-                            }
-                        }}
-                    >
-                        <SafeMediaImage
-                            src={urlToUse}
-                            alt={message.content || fileName || 'Imagem enviada'}
-                            width={320}
-                            height={320}
-                            className="block max-h-[420px] w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
-                        />
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/65 via-black/15 to-transparent px-3 pb-2 pt-10 text-white">
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-white/90">
-                                <ImageIcon className="h-3.5 w-3.5" />
-                                Imagem
-                            </span>
-                            <span className="text-[10px] text-white/70">Toque para ampliar</span>
+                <div className={cn(
+                    'w-[min(78vw,320px)] max-w-full overflow-hidden rounded-2xl border shadow-sm',
+                    shellClasses
+                )}>
+                    <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName} chatId={message.chat_id}>
+                        <div
+                            className="group relative cursor-pointer overflow-hidden"
+                            onMouseDown={startPress}
+                            onMouseUp={cancelPress}
+                            onMouseLeave={cancelPress}
+                            onTouchStart={startPress}
+                            onTouchEnd={cancelPress}
+                            onClick={(e) => {
+                                if (isLongPressRef.current) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                }
+                            }}
+                        >
+                            <SafeMediaImage
+                                src={urlToUse}
+                                alt={message.content || fileName || 'Imagem enviada'}
+                                width={320}
+                                height={320}
+                                className="block max-h-[420px] w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
+                            />
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/65 via-black/15 to-transparent px-3 pb-2 pt-10 text-white">
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-white/90">
+                                    <ImageIcon className="h-3.5 w-3.5" />
+                                    Imagem
+                                </span>
+                                <span className="text-[10px] text-white/70">Toque para ampliar</span>
+                            </div>
                         </div>
-                    </div>
-                </MediaViewer>
+                    </MediaViewer>
+                    {message.transcription && (
+                        <div className={cn('border-t px-3 py-2.5', dividerClasses)}>
+                            <div className="space-y-1.5">
+                                <div className={cn('flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em]', secondaryTextClasses)}>
+                                    <ScanEye className="h-3 w-3" />
+                                    Descrição da Imagem
+                                </div>
+                                <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-current opacity-90 [overflow-wrap:anywhere]">
+                                    {message.transcription}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
             );
         }
 
@@ -612,20 +640,47 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
             />;
         }
 
+        const isFromMe = Boolean(message.from_me);
+        const shellClasses = isFromMe
+            ? 'border-blue-500/25 bg-blue-600 text-white shadow-blue-950/15'
+            : 'border-slate-200/90 bg-slate-50/90 text-slate-900 shadow-slate-900/5 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-100';
+        const secondaryTextClasses = isFromMe
+            ? 'text-white/60'
+            : 'text-slate-500 dark:text-zinc-500';
+        const dividerClasses = isFromMe ? 'border-white/10' : 'border-slate-200/80 dark:border-white/10';
+
         return (
-            <a
-                href={mediaAssetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex w-[300px] max-w-full min-w-0 items-center gap-3 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted/80 dark:bg-white/10 dark:hover:bg-white/20"
-            >
-                <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />
-                <div className='min-w-0 flex-1'>
-                    <p className="font-medium truncate opacity-90">{fileName || 'Documento'}</p>
-                    <p className="text-xs opacity-70">Clique para abrir ou baixar</p>
-                </div>
-                <Download className="h-5 w-5 opacity-70 ml-auto flex-shrink-0" />
-            </a>
+            <div className={cn(
+                'w-[320px] max-w-full min-w-0 overflow-hidden rounded-2xl border shadow-sm',
+                shellClasses
+            )}>
+                <a
+                    href={mediaAssetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-3 transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                    <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />
+                    <div className='min-w-0 flex-1'>
+                        <p className="font-medium truncate opacity-90">{fileName || 'Documento'}</p>
+                        <p className="text-xs opacity-70">Clique para abrir ou baixar</p>
+                    </div>
+                    <Download className="h-5 w-5 opacity-70 ml-auto flex-shrink-0" />
+                </a>
+                {message.transcription && (
+                    <div className={cn('border-t px-3 py-2.5', dividerClasses)}>
+                        <div className="space-y-1.5">
+                            <div className={cn('flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em]', secondaryTextClasses)}>
+                                <ScanEye className="h-3 w-3" />
+                                Resumo do Documento
+                            </div>
+                            <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-current opacity-90 [overflow-wrap:anywhere]">
+                                {message.transcription}
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
         );
     };
 

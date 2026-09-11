@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-08T18:45:43.379Z",
+  "apply": true,
+  "previousVersion": "v20",
+  "version": "v21",
+  "change": "Segunda via identifica CPF/CNPJ salvo no contato antes de solicitar documento.",
+  "validation": true,
+  "providerDeliveryTested": false
+}

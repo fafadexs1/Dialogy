@@ -1,19 +1,32 @@
 import type { CollectedFieldDefinition } from './types';
 import { isValidCustomerIdentifier } from '@/services/autopilot/slots';
+import { isStudioInformationQuestion, resolveStudioOption } from './option-resolution';
+import { readStudioValue } from './data-mapping';
+import { parseBrazilianDate } from './natural-values';
 
 const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-
-const normalizePhrase = (value: string) => normalize(value).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-
-const containsPhrase = (message: string, phrase: string) => {
-  const normalizedMessage = normalizePhrase(message);
-  const normalizedPhrase = normalizePhrase(phrase);
-  return normalizedPhrase.length >= 3 && ` ${normalizedMessage} `.includes(` ${normalizedPhrase} `);
-};
 
 export function matchesStudioFieldLabel(field: CollectedFieldDefinition, label: string) {
   const normalized = normalize(label);
   return [field.name, ...(field.aliases || [])].some((candidate) => normalize(candidate) === normalized);
+}
+
+/** Keep display labels and typed integration IDs together for every consumer. */
+export function resolveStudioCollectionOptions(field: CollectedFieldDefinition, values: Record<string, unknown>): {
+  field: CollectedFieldDefinition;
+  options?: Array<{ label: string; value: unknown }>;
+} {
+  if (!field.optionsSourceKey || !['single_select', 'multi_select'].includes(field.type)) return { field };
+  const source = readStudioValue(values, field.optionsSourceKey);
+  if (!Array.isArray(source) || !source.length || source.length > 100) throw new Error('A lista de opções está indisponível ou excede 100 itens.');
+  const options = source.map((item) => ({
+    label: String(field.optionLabelPath ? readStudioValue(item, field.optionLabelPath) ?? '' : item),
+    value: field.optionValuePath ? readStudioValue(item, field.optionValuePath) : item,
+  }));
+  if (options.some((option) => !option.label.trim() || option.value === undefined) || new Set(options.map((option) => option.label)).size !== options.length) {
+    throw new Error('A lista possui opções incompletas ou nomes repetidos.');
+  }
+  return { field: { ...field, options: options.map((option) => option.label) }, options };
 }
 
 /** Fixed-width patterns only: even bounded optional repetitions can cause exponential backtracking. */
@@ -85,8 +98,9 @@ export function validateStudioField(field: CollectedFieldDefinition, input: unkn
     if (field.minValue !== undefined && Number(value) < field.minValue) return invalid(`O valor mínimo é ${field.minValue}.`);
     if (field.maxValue !== undefined && Number(value) > field.maxValue) return invalid(`O valor máximo é ${field.maxValue}.`);
   } else if (field.type === 'date') {
+    const parsed = parseBrazilianDate(raw);
     const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(raw);
-    const iso = match ? `${match[3]}-${match[2]}-${match[1]}` : raw;
+    const iso = parsed || (match ? `${match[3]}-${match[2]}-${match[1]}` : raw);
     const date = new Date(`${iso}T12:00:00Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return invalid('Informe uma data válida no formato dia/mês/ano.');
     value = iso;
@@ -96,13 +110,17 @@ export function validateStudioField(field: CollectedFieldDefinition, input: unkn
     try { const url = new URL(raw); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error(); value = url.toString(); }
     catch { return invalid('Informe um link HTTP ou HTTPS válido.'); }
   } else if (field.type === 'boolean') {
+    if (typeof input === 'boolean') return { valid: true, value: input };
     if (['sim', 'true', 'yes'].includes(normalize(raw))) value = true;
     else if (['nao', 'false', 'no'].includes(normalize(raw))) value = false;
     else return invalid('Responda sim ou não.');
   } else if (field.type === 'single_select' || field.type === 'multi_select') {
     const options = field.options || [];
     const requested = field.type === 'multi_select' ? (Array.isArray(input) ? input.map(String) : raw.split(',')) : [raw];
-    const selected = requested.map((item) => options.find((option, index) => normalize(option) === normalize(item) || String(index + 1) === item.trim()));
+    const selected = requested.map((item) => {
+      const resolved = resolveStudioOption(options, item);
+      return resolved.kind === 'selected' ? resolved.value : undefined;
+    });
     if (!selected.length || selected.some((item) => !item)) return invalid(`Escolha entre: ${options.join(', ')}.`);
     value = field.type === 'single_select' ? selected[0] : [...new Set(selected)];
   }
@@ -119,19 +137,15 @@ export function extractStudioFieldCandidate(field: CollectedFieldDefinition, mes
   const labelled = message.split(/[;\n]/).map((part) => part.trim()).filter((part) => part.includes(':') && matchesStudioFieldLabel(field, part.slice(0, part.indexOf(':'))));
   if (labelled.length === 1) return labelled[0].slice(labelled[0].indexOf(':') + 1).trim();
   if (field.type === 'single_select') {
-    const matches = (field.options || []).filter((option) => {
-      if (containsPhrase(message, option)) return true;
-      const distinctiveLabel = option.split(/\s*(?:\+|—|–|\|)\s*|\s+-\s+/)[0];
-      return distinctiveLabel !== option && containsPhrase(message, distinctiveLabel);
-    });
-    if (matches.length === 1) return matches[0];
+    const resolved = resolveStudioOption(field.options || [], message, directAnswer);
+    if (resolved.kind === 'selected') return resolved.value;
   }
   const patterns: Partial<Record<CollectedFieldDefinition['type'], RegExp>> = {
     cpf: /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/,
     cnpj: /\b[A-Z\d]{2}\.?[A-Z\d]{3}\.?[A-Z\d]{3}\/?[A-Z\d]{4}-?\d{2}\b/i,
     cpf_cnpj: /\b(?:[A-Z\d]{2}\.?[A-Z\d]{3}\.?[A-Z\d]{3}\/?[A-Z\d]{4}-?\d{2}|\d{3}\.?\d{3}\.?\d{3}-?\d{2})\b/i,
     email: /[^\s@]+@[^\s@]+\.[^\s@]+/,
-    date: /\b\d{2}\/\d{2}\/\d{4}\b/,
+    date: /\b(?:\d{1,2}\s*(?:de\s+)?(?:jan(?:eiro)?|fev(?:ereiro)?|mar(?:co)?|abr(?:il)?|mai(?:o)?|jun(?:ho)?|jul(?:ho)?|ago(?:sto)?|set(?:embro)?|out(?:ubro)?|nov(?:embro)?|dez(?:embro)?)\b(?:\s+(?:de\s+)?\d{2,4})?|\d{1,2}[\/\.-]\d{1,2}(?:[\/\.-]\d{2,4})?)\b/i,
     time: /\b\d{2}:\d{2}\b/,
     cep: /\b\d{5}-?\d{3}\b/,
   };
@@ -141,4 +155,10 @@ export function extractStudioFieldCandidate(field: CollectedFieldDefinition, mes
     return matches.length === 1 ? matches[0] : directAnswer ? message : undefined;
   }
   return directAnswer ? message : undefined;
+}
+
+/** Valid structured values (e.g. URLs with query strings) are still answers. */
+export function isStudioFieldQuestion(field: CollectedFieldDefinition, message: string): boolean {
+  if (!isStudioInformationQuestion(message)) return false;
+  return field.type === 'text' || !validateStudioField(field, extractStudioFieldCandidate(field, message, true)).valid;
 }

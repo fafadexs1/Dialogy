@@ -1,0 +1,1150 @@
+{
+  "at": "2026-09-08T18:38:05.738Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [
+    {
+      "message": "Quero o de 700 e sem mesh. Dá pra continuar a instalação assim?",
+      "response": "Perfeito! Anotei o plano 700 MEGA sem mesh. E sim, dá pra seguir sem mesh normalmente: ele é só uma opção de cobertura Wi-Fi extra, não é obrigatório. Para continuarmos a preparar a instalação, me confirma o endereço completo (rua, número, bairro, cidade e CEP)?",
+      "ms": 13003,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active",
+            "values": {
+              "plan": 42,
+              "mesh": "Sem mesh"
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "2ed03be6-5be9-48fa-aac7-f567589e2312:80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "requestId": "contract",
+            "capabilityId": "contract:catalog",
+            "signature": "80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:36:47.008Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "status": "waiting_input"
+    },
+    {
+      "message": "Vamos continuar aquela instalação que eu escolhi.",
+      "response": "Perfeito! Seguimos com o plano 700 MEGA sem mesh. Para finalizar a preparação da instalação, só falta o endereço completo: rua, número, complemento (se houver), bairro, cidade e CEP. Pode me passar?",
+      "ms": 24164,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active",
+            "values": {
+              "plan": 42,
+              "mesh": "Sem mesh"
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "2ed03be6-5be9-48fa-aac7-f567589e2312:80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "requestId": "contract",
+            "capabilityId": "contract:catalog",
+            "signature": "80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:36:47.008Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "status": "waiting_input"
+    },
+    {
+      "scenario": "older-session-memory",
+      "runIndex": 1,
+      "response": "Perfeito! Retomei daqui:\n\n- Plano: 700 MEGA\n- Mesh: sem mesh\n\nSó falta o endereço de instalação para deixarmos tudo registrado. Qual é o endereço?",
+      "ms": 15743,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active",
+            "values": {
+              "plan": 42,
+              "mesh": "Sem mesh"
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-new-session:80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "requestId": "contract",
+            "capabilityId": "contract:catalog",
+            "signature": "80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:37:26.199Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "journal": [
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:contract",
+          "kind": "request",
+          "key": "request",
+          "label": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+          "value": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-08T18:37:19.263Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:contract",
+          "kind": "choice",
+          "key": "plan",
+          "label": "Plano escolhido",
+          "value": "700 MEGA",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:contract",
+          "kind": "choice",
+          "key": "mesh",
+          "label": "Preferência de mesh",
+          "value": "Sem mesh",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "sem mesh",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "older-session-memory",
+      "runIndex": 2,
+      "response": "Perfeito, encontrei o que você escolheu antes: plano 700 MEGA e instalação sem mesh. 🙂 Para retomarmos a instalação, me confirma o endereço onde ela será feita?",
+      "ms": 18600,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "req-contract",
+            "procedureId": "contract",
+            "objective": "Registrar plano, mesh e endereço da instalação",
+            "status": "active",
+            "values": {
+              "plan": 42,
+              "mesh": "Sem mesh"
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-new-session:607f1c209bd0683608ef63bd8802a5c6930e7e7bc16c323d6732d4a04ef91dc3",
+            "requestId": "req-contract",
+            "capabilityId": "contract:catalog",
+            "signature": "607f1c209bd0683608ef63bd8802a5c6930e7e7bc16c323d6732d4a04ef91dc3",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:37:45.224Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "journal": [
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:req-contract",
+          "kind": "request",
+          "key": "request",
+          "label": "Registrar plano, mesh e endereço da instalação",
+          "value": "Registrar plano, mesh e endereço da instalação",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-08T18:37:38.490Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:req-contract",
+          "kind": "choice",
+          "key": "plan",
+          "label": "Plano escolhido",
+          "value": "700 MEGA",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:req-contract",
+          "kind": "choice",
+          "key": "mesh",
+          "label": "Preferência de mesh",
+          "value": "Sem mesh",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "sem mesh",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "older-session-memory",
+      "runIndex": 3,
+      "response": "Perfeito! Retomei aqui: **plano 700 MEGA** e **sem mesh** — está tudo certo? Se precisar, também temos o plano 1000 MEGA disponível no catálogo atual.\n\nPara seguirmos com a instalação, me confirma o **endereço de instalação**?",
+      "ms": 14485,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active",
+            "values": {
+              "plan": 42,
+              "mesh": "Sem mesh"
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-new-session:80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "requestId": "contract",
+            "capabilityId": "contract:catalog",
+            "signature": "80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:38:00.756Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "journal": [
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:contract",
+          "kind": "request",
+          "key": "request",
+          "label": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+          "value": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-08T18:37:53.703Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:contract",
+          "kind": "choice",
+          "key": "plan",
+          "label": "Plano escolhido",
+          "value": "700 MEGA",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:contract",
+          "kind": "choice",
+          "key": "mesh",
+          "label": "Preferência de mesh",
+          "value": "Sem mesh",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "sem mesh",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "contract",
+          "capabilityId": "contract:catalog",
+          "query": "Consultar catálogo de planos para identificar o plano de 700",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente escolheu o plano 'de 700', cujo identificador depende do catálogo. Preciso consultar o catálogo antes de registrar a escolha."
+        }
+      },
+      "ms": 7227
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "2ed03be6-5be9-48fa-aac7-f567589e2312:80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "requestId": "contract",
+            "capabilityId": "contract:catalog",
+            "signature": "80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:36:47.008Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "contract",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "Quero o de 700"
+          },
+          {
+            "requestId": "contract",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "contract",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito! Anotei o plano 700 MEGA sem mesh. E sim, dá pra seguir sem mesh normalmente: ele é só uma opção de cobertura Wi-Fi extra, não é obrigatório. Para continuarmos a preparar a instalação, me confirma o endereço completo (rua, número, bairro, cidade e CEP)?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Catálogo consultado: o plano 'de 700' corresponde a 700 MEGA. Registro plano e mesh e respondo que sem mesh não há impedimento (mesh é opcional), solicitando o endereço para prosseguir."
+        }
+      },
+      "ms": 5725
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "contract",
+            "key": "plan",
+            "label": "700 MEGA",
+            "value": "42",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "Quero o de 700 e sem mesh. Dá pra continuar a instalação assim?"
+          },
+          {
+            "requestId": "contract",
+            "key": "mesh",
+            "label": "Sem mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "Quero o de 700 e sem mesh. Dá pra continuar a instalação assim?"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "contract",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito! Seguimos com o plano 700 MEGA sem mesh — confirmado aqui. 😊 Para finalizar a preparação da instalação, só falta o endereço completo: rua, número, complemento (se houver), bairro, cidade e CEP. Pode me passar?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente retomou a instalação já escolhida (700 MEGA sem mesh), mas ainda não informou o endereço. Registrei as escolhas com base na mensagem synthetic-1 e mantenho o pedido aberto, aguardando o endereço para concluir o objetivo."
+        }
+      },
+      "ms": 9967
+    },
+    {
+      "observations": [
+        {
+          "error": "proposal_rejected",
+          "detail": "A escolha não é válida para o campo publicado."
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "contract",
+            "key": "plan",
+            "label": "700 MEGA",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "Quero o de 700 e sem mesh. Dá pra continuar a instalação assim?"
+          },
+          {
+            "requestId": "contract",
+            "key": "mesh",
+            "label": "Sem mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "Quero o de 700 e sem mesh. Dá pra continuar a instalação assim?"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "contract",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito! Seguimos com o plano 700 MEGA sem mesh. Para finalizar a preparação da instalação, só falta o endereço completo: rua, número, complemento (se houver), bairro, cidade e CEP. Pode me passar?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "A proposta anterior foi rejeitada por valor de escolha inválido. Ajustei o valor do plano para o rótulo publicado no catálogo (700 MEGA) e mantenho mesh Sem mesh, que corresponde às opções publicadas do campo. Sigo aguardando o endereço."
+        }
+      },
+      "ms": 14170
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": "contract",
+          "capabilityId": null,
+          "query": "plano e mesh escolhidos na instalação anterior",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente diz que já escolheu plano e mesh anteriormente; preciso recuperar essas escolhas da memória antes de pedir que repita."
+        }
+      },
+      "ms": 2334
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "contract",
+          "capabilityId": "contract:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O plano depende do catálogo. Antes de registrar a escolha recuperada da memória (700 MEGA), preciso consultar o catálogo atual para validar as opções e seus identificadores."
+        }
+      },
+      "ms": 6934
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-new-session:80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "requestId": "contract",
+            "capabilityId": "contract:catalog",
+            "signature": "80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:37:26.199Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "contract",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA"
+          },
+          {
+            "requestId": "contract",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "contract",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito! Retomei daqui:\n\n- Plano: 700 MEGA\n- Mesh: sem mesh\n\nSó falta o endereço de instalação para deixarmos tudo registrado. Qual é o endereço?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Memória recuperada traz plano 700 MEGA e sem mesh, e o catálogo atual confirma o plano 700 MEGA. Registrei as escolhas do cliente e sigo aguardando o endereço, que ainda está pendente."
+        }
+      },
+      "ms": 6450
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "req-contract",
+            "procedureId": "contract",
+            "objective": "Registrar plano, mesh e endereço da instalação",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": "req-contract",
+          "capabilityId": null,
+          "query": "Escolhas anteriores do cliente para a instalação: plano e preferência de mesh.",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Cliente retomou dizendo que já escolheu plano e mesh antes; há memória mais antiga registrada (hasOlderMemory) e não há histórico recente. Recupero a memória para reutilizar as escolhas válidas antes de pedir que repita."
+        }
+      },
+      "ms": 5817
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "result": {
+        "requests": [],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "req-contract",
+          "capabilityId": "contract:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O plano guardado na memória precisa ser validado contra o catálogo atual antes de ser reutilizado nesta sessão, pois o campo plan depende do catálogo e preços/disponibilidade exigem verificação atual."
+        }
+      },
+      "ms": 6733
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-new-session:607f1c209bd0683608ef63bd8802a5c6930e7e7bc16c323d6732d4a04ef91dc3",
+            "requestId": "req-contract",
+            "capabilityId": "contract:catalog",
+            "signature": "607f1c209bd0683608ef63bd8802a5c6930e7e7bc16c323d6732d4a04ef91dc3",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:37:45.224Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [],
+        "choices": [
+          {
+            "requestId": "req-contract",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA"
+          },
+          {
+            "requestId": "req-contract",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "req-contract",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito, encontrei o que você escolheu antes: plano 700 MEGA e instalação sem mesh. 🙂 Para retomarmos a instalação, me confirma o endereço onde ela será feita?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Recuperei da memória as escolhas válidas do cliente (plano 700 MEGA e Sem mesh) e validei o plano no catálogo atual. Registro ambas na sessão e sigo perguntando o endereço de instalação, único campo obrigatório ainda pendente."
+        }
+      },
+      "ms": 6026
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": "contract",
+          "capabilityId": null,
+          "query": "Recuperar escolhas anteriores do cliente: plano escolhido e preferência de mesh para instalação.",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente afirma que já escolheu o plano e o mesh em atendimento anterior. Há memória registrada (hasOlderMemory), então devo recuperar as escolhas antes de pedir que repita."
+        }
+      },
+      "ms": 2428
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "contract",
+          "capabilityId": "contract:catalog",
+          "query": "Consultar catálogo de planos para validar o identificador do plano 700 MEGA.",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O campo plano depende do catálogo (optionsSourceKey). Preciso do catálogo atual para registrar a escolha válida de plano retomada da memória."
+        }
+      },
+      "ms": 7052
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-new-session:80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "requestId": "contract",
+            "capabilityId": "contract:catalog",
+            "signature": "80627caca091fffea690749d489c4b3bb0f00cc403f88b5a72c171a24999183b",
+            "status": "succeeded",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-08T18:38:00.756Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "contract",
+            "procedureId": "contract",
+            "objective": "Consultar o catálogo; guardar plano, preferência de mesh e endereço. Enquanto faltar o endereço, manter o pedido aberto. Mesh é uma opção de cobertura, não é obrigatório.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "contract",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA"
+          },
+          {
+            "requestId": "contract",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "contract",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito! Retomei aqui: **plano 700 MEGA** e **sem mesh** — está tudo certo? Se precisar, também temos o plano 1000 MEGA disponível no catálogo atual.\n\nPara seguirmos com a instalação, me confirma o **endereço de instalação**?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Plano e mesh foram recuperados da memória e o plano 700 MEGA foi confirmado no catálogo atual. Falta apenas o endereço, então registro as escolhas retomadas e peço o endereço."
+        }
+      },
+      "ms": 4979
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2291,
+      "outputTokens": 884,
+      "totalTokens": 3175,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4156,
+      "outputTokens": 798,
+      "totalTokens": 4954,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2812,
+      "outputTokens": 1413,
+      "totalTokens": 4225,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 5187,
+      "outputTokens": 1847,
+      "totalTokens": 7034,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2295,
+      "outputTokens": 303,
+      "totalTokens": 2598,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3384,
+      "outputTokens": 940,
+      "totalTokens": 4324,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 5458,
+      "outputTokens": 922,
+      "totalTokens": 6380,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2295,
+      "outputTokens": 720,
+      "totalTokens": 3015,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3768,
+      "outputTokens": 854,
+      "totalTokens": 4622,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 5739,
+      "outputTokens": 785,
+      "totalTokens": 6524,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2295,
+      "outputTokens": 344,
+      "totalTokens": 2639,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3425,
+      "outputTokens": 859,
+      "totalTokens": 4284,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 5418,
+      "outputTokens": 701,
+      "totalTokens": 6119,
+      "ruleName": "decision"
+    }
+  ]
+}

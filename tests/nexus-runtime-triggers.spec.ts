@@ -15,6 +15,7 @@ import {
   nexusMessageTriggerIsCatchAll,
   nexusMessageTriggerMatches,
   nexusChatCanReceiveAutomation,
+  nexusWaitingExecutionIsSuperseded,
   rankNexusMessageTriggerCandidates,
 } from '@/modules/nexus/services/message-dispatcher';
 import {
@@ -79,6 +80,21 @@ describe('Nexus published triggers', () => {
       { id: 'plano-site', priority: 0, match: { catchAll: false, score: 100, matchedWeight: 3, outputPortId: 'message' } },
     ]);
     expect(ranked.map((candidate) => candidate.id)).toEqual(['plano-site']);
+  });
+
+  it('does not resume a waiting execution from a superseded published version', () => {
+    expect(nexusWaitingExecutionIsSuperseded({
+      workflowVersion: 'v11',
+      publishedWorkflowVersion: 'v12',
+    })).toBe(true);
+    expect(nexusWaitingExecutionIsSuperseded({
+      workflowVersion: 'v12',
+      publishedWorkflowVersion: 'v12',
+    })).toBe(false);
+    expect(nexusWaitingExecutionIsSuperseded({
+      workflowVersion: 'v11',
+      publishedWorkflowVersion: null,
+    })).toBe(false);
   });
 
   it('scopes received-message triggers by channel, instance and assignment policy', () => {

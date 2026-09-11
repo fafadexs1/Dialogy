@@ -1,6 +1,7 @@
 'use server';
 
 import { db } from '@/lib/db';
+import { syncLegacyChatQueueTag } from '@/services/chat/chat-tag-routing-compat';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import type { User, Workspace, Chat, Message, MessageSender, Contact, SystemAgent, MessageMetadata, Tag } from '@/lib/types';
@@ -191,7 +192,7 @@ export const assignChatToSelfAction = withDebug(
 export const transferChatAction = withDebug(
     'transfer_chat',
     async function transferChatAction(
-        input: { chatId: string; teamId?: string; agentId?: string; nexusEventContext?: NexusEventCausation },
+        input: { chatId: string; teamId?: string; agentId?: string; nexusEventContext?: NexusEventCausation; handoffSummary?: string },
         trustedContext?: TrustedActorContext
     ): Promise<{
         success: boolean;
@@ -452,6 +453,9 @@ export const transferChatAction = withDebug(
                 ? `Atendimento transferido por ${transferActorName} para ${transferTargetName}.`
                 : `Atendimento atribuído a ${transferTargetName} por ${transferActorName}.`;
 
+            // A deterministic server-side flow may attach its confirmed contract/context.
+            // This is an internal system entry, never an outbound customer message.
+            const handoffSummary = trustedCall ? String(input.handoffSummary || '').trim().slice(0, 2000) : '';
             const transferMessage = await client.query(`
             INSERT INTO messages (workspace_id, chat_id, type, content, metadata, created_at)
             VALUES ($1, $2, 'system', $3, $4, clock_timestamp())
@@ -459,9 +463,10 @@ export const transferChatAction = withDebug(
         `, [
                 workspaceId,
                 chatId,
-                systemMessageContent,
+                handoffSummary ? `${systemMessageContent}\n${handoffSummary}` : systemMessageContent,
                 {
                     event: 'transfer',
+                    ...(handoffSummary ? { handoff_summary: handoffSummary } : {}),
                     previous_system_agent_id: current_system_agent_id || null,
                     autopilot_disabled: true,
                     from_agent_id: currentAgentId,
@@ -562,10 +567,13 @@ export const transferChatAction = withDebug(
 export const transferChatToIntelligentAgentAction = withDebug(
     'transfer_chat_to_intelligent_agent',
     async function transferChatToIntelligentAgentAction(
-        input: { chatId: string; systemAgentId: string; nexusEventContext?: NexusEventCausation },
+        input: {
+            chatId: string;
+            systemAgentId: string;
+            nexusEventContext?: NexusEventCausation;
+        },
         trustedContext?: TrustedActorContext
     ): Promise<{ success: boolean; error?: string; chat?: Chat }> {
-        const supabase = await createClient();
         const trustedCall = isTrustedActorContext(trustedContext);
         let sessionToUse: {
             user: { id: string; name?: string | null; email?: string | null };
@@ -573,6 +581,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
         } | undefined = trustedCall ? trustedContext : undefined;
 
         if (!sessionToUse) {
+            const supabase = await createClient();
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
                 sessionToUse = { user: { id: user.id, name: user.user_metadata.full_name || user.email || 'Agente', email: user.email } };
@@ -1635,6 +1644,13 @@ export const toggleChatTagAction = withDebug(
                     [chatId, tagId, workspaceId]
                 );
             }
+
+            // Inbox queue routing still reads the legacy chats.tag/color pair.
+            // Keep it synchronized with the multi-tag relation until every
+            // queue consumer has moved to chats.team_id/chat_tags. Without
+            // this bridge, adding a classification succeeds visually but the
+            // conversation remains in the Robot bucket.
+            await syncLegacyChatQueueTag(client, { chatId, tagId, workspaceId });
 
             const tagsResult = await client.query(
                 `SELECT t.id, t.label, t.value, t.color, t.is_close_reason,

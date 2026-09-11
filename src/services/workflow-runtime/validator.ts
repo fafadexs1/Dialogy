@@ -360,6 +360,12 @@ function validateNodeConfig(
   }
 
   if (node.type === 'trigger.internal_event') {
+    if (node.config.crmOption !== undefined) {
+      const option = node.config.crmOption as { fieldId?: unknown; value?: unknown } | null;
+      if (!option || typeof option.fieldId !== 'string' || !option.fieldId || typeof option.value !== 'string' || !option.value) {
+        error(collector, 'crm_option_invalid', 'Selecione o campo do CRM e a opção que inicia o fluxo.', { nodeId: node.id });
+      }
+    }
     const eventName = configuredText(node.config.eventName);
     if (!eventName || !/^[a-z0-9][a-z0-9._:-]*$/.test(eventName)) {
       error(collector, 'internal_event_name_invalid', `O gatilho "${node.name}" precisa de um nome de acontecimento interno válido.`, { nodeId: node.id });
@@ -471,6 +477,12 @@ function validateNodeConfig(
   if (node.type === 'integration.google_sheets_append') {
     if (!configuredText(node.config.credentialId) || !configuredText(node.config.spreadsheetId) || !configuredText(node.config.range) || !Array.isArray(node.config.values) || node.config.values.length === 0) {
       error(collector, 'sheets_config_invalid', `O bloco "${node.name}" precisa de OAuth, planilha, intervalo e valores.`, { nodeId: node.id });
+    }
+  }
+  if (node.type === 'integration.google_ads_lead') {
+    if (!/^\d+$/.test(String(node.config.customerId || '')) || !configuredText(node.config.conversionActionId)
+      || !['lead_qualified', 'sale_won', 'whatsapp_message_received'].includes(String(node.config.eventName))) {
+      error(collector, 'google_ads_destination_required', 'Selecione a conta e a conversão do Google Ads.', { nodeId: node.id });
     }
   }
 

@@ -1,12 +1,10 @@
 import { generateDocumentQueryEmbedding } from '@/lib/embeddings';
 import type { KnowledgeBaseDocument } from '@/lib/types';
-import { VectorStore, type CaseMemoryMatch } from '@/lib/vector-store';
+import { VectorStore } from '@/lib/vector-store';
 import type { AutopilotIntentResolution, UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
 
 const DOCUMENT_LIMIT = 4;
-const CASE_LIMIT = 3;
 const DOCUMENT_MIN_SIMILARITY = 0.54;
-const CASE_MIN_SIMILARITY = 0.74;
 const RRF_RANK_CONSTANT = 60;
 
 export function isLocalRagQueryEmbeddingEnabled() {
@@ -55,18 +53,6 @@ function dedupeMatchesByDocumentId<T extends { document_id: string }>(matches: T
         seen.add(match.document_id);
         return true;
     });
-}
-
-function formatCaseMatch(match: CaseMemoryMatch): ResolvedCasePromptItem {
-    return {
-        summary: match.summary,
-        problem: match.problem || '',
-        resolution: match.resolution || '',
-        outcome: match.outcome || '',
-        closeReasonLabel: match.close_reason_label,
-        keywords: match.keywords || [],
-        similarity: Number(match.similarity || 0),
-    };
 }
 
 function getDocumentMinSimilarity(intent?: AutopilotIntentResolution | null) {
@@ -184,24 +170,9 @@ export async function retrieveSupportContext(input: {
         limit: DOCUMENT_LIMIT * 2,
     });
 
-    let caseRetrievalError: string | null = null;
-    let caseMatches: CaseMemoryMatch[] = [];
-    if (queryVector.length > 0) {
-        try {
-            caseMatches = await VectorStore.searchSimilarCaseMemories({
-                vector: queryVector,
-                workspaceId: input.workspaceId,
-                autopilotConfigId: input.autopilotConfigId ?? null,
-                excludeChatId: input.excludeChatId ?? null,
-                limit: CASE_LIMIT,
-                minSimilarity: CASE_MIN_SIMILARITY,
-            });
-        } catch (error) {
-            caseRetrievalError = error instanceof Error ? error.message : String(error);
-            console.warn('[RAG] Case-memory retrieval failed; continuing without case memory:', caseRetrievalError);
-        }
-    }
-    const finalCaseMatches = caseMatches;
+    // Private case summaries are not a curated knowledge base. Never retrieve
+    // other customers' cases for a customer-facing answer, even within a tenant.
+    // Keep stored cases intact; reuse requires a separate reviewed publication.
 
     const knowledgeBaseDocuments = dedupeDocumentsByContent(
         finalDocMatches.map((match) => ({
@@ -232,17 +203,18 @@ export async function retrieveSupportContext(input: {
 
     return {
         knowledgeBaseDocuments,
-        resolvedCases: finalCaseMatches.map(formatCaseMatch),
+        resolvedCases: [] as ResolvedCasePromptItem[],
         diagnostics: {
             queryVectorLength: queryVector.length,
             localQueryEmbeddingEnabled,
             queryEmbeddingError,
             vectorRetrievalError,
-            caseRetrievalError,
+            caseRetrievalError: null,
+            caseMemoryPolicy: 'disabled_cross_conversation',
             documentMinSimilarity: minSimilarity,
             vectorMatches: docMatches.length,
             keywordMatches: keywordMatches.length,
-            caseMatches: finalCaseMatches.length,
+            caseMatches: 0,
             rawDocumentMatches: finalDocMatches.map((match) => ({
                 id: match.id,
                 documentId: match.document_id,

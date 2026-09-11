@@ -1,0 +1,2378 @@
+{
+  "at": "2026-09-10T01:16:02.565Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [
+    {
+      "message": "Quero o de 700 e sem mesh. Dá pra continuar a instalação assim?",
+      "response": "Perfeito! Registrei o plano 700 MEGA e a preferência sem mesh. Sim, dá para seguir com a instalação assim — o mesh é uma opção de cobertura, não é obrigatório. Para concluir, só falta o endereço onde será feita a instalação. Pode me informar?",
+      "ms": 6623,
+      "reasoning": {
+        "version": 2,
+        "usageTotals": {
+          "lastMessageId": "synthetic-1",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 9176,
+          "outputTokens": 1186,
+          "totalTokens": 10362
+        },
+        "lastTurnMetrics": {
+          "messageId": "synthetic-1",
+          "durationMs": 6591,
+          "modelDecisions": 2,
+          "toolCalls": 1,
+          "activeRequests": 1,
+          "pausedRequests": 0,
+          "resolvedRequests": 0,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 2,
+              "inputTokens": 9176,
+              "outputTokens": 1186,
+              "totalTokens": 10362
+            }
+          ]
+        },
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": null,
+            "objective": "Registrar plano (700 MEGA), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "values": {
+              "mesh": "Sem mesh",
+              "plan": 42
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "04e83874-8597-4c5e-af3c-3e6547024c1c:146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c:read-0",
+            "requestId": "request-1",
+            "capabilityId": "contract:catalog",
+            "signature": "146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "status": "succeeded",
+            "readOnly": true,
+            "title": "Consultar catálogo de planos",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:32.209Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "status": "waiting_input"
+    },
+    {
+      "message": "Vamos continuar aquela instalação que eu escolhi.",
+      "response": "Claro! Sua instalação já está registrada com o plano 700 MEGA e a preferência sem mesh. Para concluir, só falta o endereço onde será feita a instalação. Pode me informar?",
+      "ms": 5293,
+      "reasoning": {
+        "version": 2,
+        "usageTotals": {
+          "lastMessageId": "synthetic-2",
+          "recordedTurns": 2,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 13188,
+          "outputTokens": 2366,
+          "totalTokens": 15554
+        },
+        "lastTurnMetrics": {
+          "messageId": "synthetic-2",
+          "durationMs": 5271,
+          "modelDecisions": 1,
+          "toolCalls": 0,
+          "activeRequests": 1,
+          "pausedRequests": 0,
+          "resolvedRequests": 0,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 1,
+              "inputTokens": 4012,
+              "outputTokens": 1180,
+              "totalTokens": 5192
+            }
+          ]
+        },
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "objective": "Registrar plano (700 MEGA), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "values": {
+              "mesh": "Sem mesh",
+              "plan": 42
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "04e83874-8597-4c5e-af3c-3e6547024c1c:146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c:read-0",
+            "requestId": "request-1",
+            "capabilityId": "contract:catalog",
+            "signature": "146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "status": "succeeded",
+            "readOnly": true,
+            "title": "Consultar catálogo de planos",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:32.209Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "status": "waiting_input"
+    },
+    {
+      "message": "Consulte o catálogo novamente agora e confira se meu plano continua disponível. Mantenha minhas escolhas.",
+      "response": "Pronto! Consultei o catálogo agora e seu plano 700 MEGA continua disponível. Suas escolhas foram mantidas: plano 700 MEGA e preferência sem mesh. Para concluir, só falta o endereço onde será feita a instalação. Pode me informar?",
+      "ms": 4422,
+      "reasoning": {
+        "version": 2,
+        "usageTotals": {
+          "lastMessageId": "synthetic-3",
+          "recordedTurns": 3,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 23484,
+          "outputTokens": 3206,
+          "totalTokens": 26690
+        },
+        "lastTurnMetrics": {
+          "messageId": "synthetic-3",
+          "durationMs": 4400,
+          "modelDecisions": 2,
+          "toolCalls": 1,
+          "activeRequests": 1,
+          "pausedRequests": 0,
+          "resolvedRequests": 0,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 2,
+              "inputTokens": 10296,
+              "outputTokens": 840,
+              "totalTokens": 11136
+            }
+          ]
+        },
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "objective": "Registrar plano (700 MEGA), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "values": {
+              "mesh": "Sem mesh",
+              "plan": 42
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "04e83874-8597-4c5e-af3c-3e6547024c1c:146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c:read-0",
+            "requestId": "request-1",
+            "capabilityId": "contract:catalog",
+            "signature": "146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "status": "succeeded",
+            "readOnly": true,
+            "title": "Consultar catálogo de planos",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:32.209Z"
+          },
+          {
+            "id": "04e83874-8597-4c5e-af3c-3e6547024c1c:146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c:read-1",
+            "requestId": "request-1",
+            "capabilityId": "contract:catalog",
+            "signature": "146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "status": "succeeded",
+            "readOnly": true,
+            "title": "Consultar catálogo de planos",
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:41.686Z"
+          }
+        ],
+        "pendingAction": null
+      },
+      "status": "waiting_input"
+    },
+    {
+      "scenario": "dress-photo",
+      "response": "Localizei o seu vestido no catálogo: Vestido azul (código blue), mas não consegui exibir a foto agora.\n\nNa tentativa de mostrar a imagem, o sistema retornou que não foi possível verificar as ações anteriores deste pedido, e a exibição não foi executada. Reconsultei o catálogo e tentei novamente, com o mesmo resultado, então não vou repetir a ação para não gerar duplicidade.\n\nSua escolha (Vestido azul) ficou registrada neste atendimento. Se quiser, me responda em alguns instantes e eu tento mostrar a foto de novo; o catálogo também tem o Vestido vermelho, caso queira ver essa opção.\n\nNenhuma compra ou cobrança foi feita — só a consulta e a tentativa de exibir a foto.",
+      "ms": 25682,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "values": {
+              "product": "blue"
+            },
+            "integrationValues": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "product": "Vestido azul"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-0",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:46.418Z"
+          },
+          {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-1",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:03.550Z"
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-dress",
+          "durationMs": 25660,
+          "modelDecisions": 7,
+          "toolCalls": 2,
+          "activeRequests": 1,
+          "pausedRequests": 0,
+          "resolvedRequests": 0,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 7,
+              "inputTokens": 68020,
+              "outputTokens": 4574,
+              "totalTokens": 72594
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-dress",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 68020,
+          "outputTokens": 4574,
+          "totalTokens": 72594
+        }
+      },
+      "photos": []
+    },
+    {
+      "scenario": "commercial-eligibility",
+      "response": "Consultei a elegibilidade da oferta para o seu contrato e este é o resultado: \"Esta oferta não está disponível para este contrato.\" Por isso, neste momento não é possível seguir com a contratação. Se quiser, posso verificar outra oferta ou condição para você.",
+      "ms": 5708,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "offer-eligibility-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar se o cliente pode contratar a oferta e responder com o resultado.",
+            "status": "resolved",
+            "memoryRequestId": "synthetic-eligibility-session:offer-eligibility-1",
+            "values": {},
+            "integrationValues": {
+              "eligible": false
+            },
+            "choiceLabels": {},
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-eligibility-session:9a8d719b0f51a925516be2b3ab4f67e04c8426c91c303557670349cef3997d61:read-0",
+            "requestId": "offer-eligibility-1",
+            "memoryRequestId": "synthetic-eligibility-session:offer-eligibility-1",
+            "capabilityId": "offer:eligibility",
+            "title": "Consultar elegibilidade",
+            "signature": "9a8d719b0f51a925516be2b3ab4f67e04c8426c91c303557670349cef3997d61",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-10T01:15:12.496Z"
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-eligibility",
+          "durationMs": 5685,
+          "modelDecisions": 2,
+          "toolCalls": 1,
+          "activeRequests": 0,
+          "pausedRequests": 0,
+          "resolvedRequests": 1,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 2,
+              "inputTokens": 8327,
+              "outputTokens": 940,
+              "totalTokens": 9267
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-eligibility",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 8327,
+          "outputTokens": 940,
+          "totalTokens": 9267
+        }
+      }
+    },
+    {
+      "scenario": "older-session-memory",
+      "runIndex": 1,
+      "response": "Que bom continuar! Recuperei do seu pedido anterior: plano 700 MEGA e preferência sem mesh. Para seguir com a instalação, falta apenas o endereço. Pode me informar o endereço completo (rua, número, bairro e cidade)? Se quiser ajustar o plano ou o mesh, é só avisar.",
+      "ms": 23524,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "installation",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Registrar o plano, a preferência de mesh e o endereço de instalação do cliente; consultar o catálogo e esclarecer dúvidas.",
+            "status": "active",
+            "memoryRequestId": "older-session:installation",
+            "values": {
+              "plan": 42,
+              "mesh": "Sem mesh"
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-new-session:f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699:read-0",
+            "requestId": "installation",
+            "memoryRequestId": "older-session:installation",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:29.557Z"
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-resume",
+          "durationMs": 23500,
+          "modelDecisions": 4,
+          "toolCalls": 1,
+          "activeRequests": 1,
+          "pausedRequests": 0,
+          "resolvedRequests": 0,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 4,
+              "inputTokens": 24594,
+              "outputTokens": 5020,
+              "totalTokens": 29614
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-resume",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 24594,
+          "outputTokens": 5020,
+          "totalTokens": 29614
+        }
+      },
+      "journal": [
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "request",
+          "key": "request",
+          "label": "Registrar o plano, a preferência de mesh e o endereço de instalação do cliente; consultar o catálogo e esclarecer dúvidas.",
+          "value": "Registrar o plano, a preferência de mesh e o endereço de instalação do cliente; consultar o catálogo e esclarecer dúvidas.",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-10T01:15:29.557Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "choice",
+          "key": "plan",
+          "label": "Plano escolhido",
+          "value": "700 MEGA",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "choice",
+          "key": "mesh",
+          "label": "Preferência de mesh",
+          "value": "Sem mesh",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "sem mesh",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "older-session-memory",
+      "runIndex": 2,
+      "response": "Perfeito! Retomei seu pedido de instalação com o plano 700 MEGA e a preferência sem mesh já registrados. Para concluir, qual é o endereço onde a instalação será feita?",
+      "ms": 11676,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "installation",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Registrar plano, preferência de mesh e endereço de instalação (sem contratar nem cobrar).",
+            "status": "active",
+            "memoryRequestId": "older-session:installation",
+            "values": {
+              "mesh": "Sem mesh",
+              "plan": 42
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-new-session:f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699:read-0",
+            "requestId": "installation",
+            "memoryRequestId": "older-session:installation",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:47.557Z"
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-resume",
+          "durationMs": 11652,
+          "modelDecisions": 3,
+          "toolCalls": 1,
+          "activeRequests": 1,
+          "pausedRequests": 0,
+          "resolvedRequests": 0,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 3,
+              "inputTokens": 15007,
+              "outputTokens": 2239,
+              "totalTokens": 17246
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-resume",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 15007,
+          "outputTokens": 2239,
+          "totalTokens": 17246
+        }
+      },
+      "journal": [
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "request",
+          "key": "request",
+          "label": "Registrar plano, preferência de mesh e endereço de instalação (sem contratar nem cobrar).",
+          "value": "Registrar plano, preferência de mesh e endereço de instalação (sem contratar nem cobrar).",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-10T01:15:47.557Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "choice",
+          "key": "mesh",
+          "label": "Preferência de mesh",
+          "value": "Sem mesh",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "sem mesh",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "choice",
+          "key": "plan",
+          "label": "Plano escolhido",
+          "value": "700 MEGA",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "older-session-memory",
+      "runIndex": 3,
+      "response": "Prontinho! Retomei sua instalação anterior e confirmei no catálogo: plano 700 MEGA e preferência Sem mesh. Só falta o endereço de instalação para eu deixar tudo registrado. Qual é o endereço onde a instalação será feita?",
+      "ms": 11861,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "req-install",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Retomar a instalação anterior: registrar o plano 700 MEGA e a preferência Sem mesh já escolhidos, validar no catálogo e obter o endereço de instalação.",
+            "status": "active",
+            "memoryRequestId": "older-session:installation",
+            "values": {
+              "plan": 42,
+              "mesh": "Sem mesh"
+            },
+            "integrationValues": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "plan": "700 MEGA"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-new-session:f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699:read-0",
+            "requestId": "req-install",
+            "memoryRequestId": "older-session:installation",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:57.367Z"
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-resume",
+          "durationMs": 11833,
+          "modelDecisions": 3,
+          "toolCalls": 1,
+          "activeRequests": 1,
+          "pausedRequests": 0,
+          "resolvedRequests": 0,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 3,
+              "inputTokens": 16214,
+              "outputTokens": 2458,
+              "totalTokens": 18672
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-resume",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 16214,
+          "outputTokens": 2458,
+          "totalTokens": 18672
+        }
+      },
+      "journal": [
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:req-install",
+          "kind": "request",
+          "key": "request",
+          "label": "Retomar a instalação anterior: recuperar plano e preferência de mesh já escolhidos e registrar o endereço de instalação.",
+          "value": "Retomar a instalação anterior: recuperar plano e preferência de mesh já escolhidos e registrar o endereço de instalação.",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-10T01:15:54.377Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "synthetic-new-session:req-install",
+          "kind": "request",
+          "key": "request",
+          "label": "Retomar a instalação anterior: recuperar plano e preferência de mesh já escolhidos e registrar o endereço de instalação.",
+          "value": {
+            "objective": "Retomar a instalação anterior: recuperar plano e preferência de mesh já escolhidos e registrar o endereço de instalação.",
+            "supersededBy": "older-session:installation"
+          },
+          "status": "cancelled",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-10T01:15:57.367Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "request",
+          "key": "request",
+          "label": "Retomar a instalação anterior: registrar o plano 700 MEGA e a preferência Sem mesh já escolhidos, validar no catálogo e obter o endereço de instalação.",
+          "value": "Retomar a instalação anterior: registrar o plano 700 MEGA e a preferência Sem mesh já escolhidos, validar no catálogo e obter o endereço de instalação.",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "synthetic-resume",
+            "quote": "Quero continuar aquela instalação. Já escolhi o plano e o mesh lá atrás.",
+            "at": "2026-09-10T01:15:57.367Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "choice",
+          "key": "plan",
+          "label": "Plano escolhido",
+          "value": "700 MEGA",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "version": 1,
+          "requestId": "older-session:installation",
+          "kind": "choice",
+          "key": "mesh",
+          "label": "Preferência de mesh",
+          "value": "Sem mesh",
+          "status": "active",
+          "sensitive": false,
+          "source": {
+            "sessionId": "synthetic-new-session",
+            "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+            "procedureId": "contract",
+            "messageId": "old-customer-message",
+            "quote": "sem mesh",
+            "at": "2026-01-01T00:00:00.000Z"
+          }
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": null,
+            "objective": "Registrar plano (700), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "request-1",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "tool",
+          "requestId": "request-1",
+          "capabilityId": "contract:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Consultar o catálogo de planos para validar a opção de 700 informada pelo cliente antes de registrá-la como escolha."
+        }
+      },
+      "ms": 4405
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "04e83874-8597-4c5e-af3c-3e6547024c1c:146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c:read-0",
+            "requestId": "request-1",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:32.209Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": null,
+            "objective": "Registrar plano (700 MEGA), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "request-1",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "synthetic-1",
+            "quote": "o de 700"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "request-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito! Registrei o plano 700 MEGA e a preferência sem mesh. Sim, dá para seguir com a instalação assim — o mesh é uma opção de cobertura, não é obrigatório. Para concluir, só falta o endereço onde será feita a instalação. Pode me informar?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Plano validado no catálogo e preferência sem mesh registrada; responder que o mesh é opcional e pedir o endereço para completar o pedido."
+        }
+      },
+      "ms": 2168
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "objective": "Registrar plano (700 MEGA), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "request-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Claro! Sua instalação já está registrada com o plano 700 MEGA e a preferência sem mesh. Para concluir, só falta o endereço onde será feita a instalação. Pode me informar?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Retomada do pedido: plano e mesh já registrados; o único campo obrigatório pendente é o endereço de instalação, então a resposta avança pedindo esse dado sem repetir a consulta ao catálogo já concluída."
+        }
+      },
+      "ms": 5271
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "objective": "Registrar plano (700 MEGA), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "request-1",
+          "capabilityId": "contract:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente pediu para reconsultar o catálogo agora e confirmar se o plano 700 MEGA continua disponível, mantendo as escolhas já registradas (plano 700 MEGA, sem mesh). Consulta ao catálogo é leitura e não exige confirmação."
+        }
+      },
+      "ms": 1989
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "04e83874-8597-4c5e-af3c-3e6547024c1c:146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c:read-1",
+            "requestId": "request-1",
+            "memoryRequestId": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "146557a0394291173b40ddf98862e02b7a6a15ce59565bdba27a332a9426613c",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:41.686Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "request-1",
+            "procedureId": "contract",
+            "resumeFrom": "04e83874-8597-4c5e-af3c-3e6547024c1c:request-1",
+            "objective": "Registrar plano (700 MEGA), preferência sem mesh e endereço de instalação; consultar catálogo e esclarecer dúvidas.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "request-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Pronto! Consultei o catálogo agora e seu plano 700 MEGA continua disponível. Suas escolhas foram mantidas: plano 700 MEGA e preferência sem mesh. Para concluir, só falta o endereço onde será feita a instalação. Pode me informar?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O catálogo foi reconsultado agora e o plano 700 MEGA (id 42) continua disponível. As escolhas já registradas (700 MEGA e sem mesh) foram mantidas. Falta apenas o endereço de instalação, então respondo informando a disponibilidade e pedindo o endereço."
+        }
+      },
+      "ms": 2409
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "dress-photo-1",
+          "capabilityId": "shop:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Cliente quer ver a foto do vestido azul; é preciso consultar o catálogo do procedimento para identificar o produto antes de mostrar a foto."
+        }
+      },
+      "ms": 2296
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-0",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:46.418Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "synthetic-dress-session:dress-photo-1",
+            "key": "product",
+            "label": "Vestido azul",
+            "value": "Vestido azul",
+            "status": "active",
+            "sourceMessageId": "synthetic-dress",
+            "quote": "Quero ver a foto do vestido azul."
+          }
+        ],
+        "action": {
+          "kind": "tool",
+          "requestId": "dress-photo-1",
+          "capabilityId": "shop:photo",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Catálogo já consultado e o vestido azul identificado; registro a escolha do cliente e mostro a foto real do produto solicitado."
+        }
+      },
+      "ms": 5831
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-0",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:46.418Z"
+          }
+        },
+        {
+          "error": "proposal_rejected",
+          "detail": "Escolha sem pedido identificado."
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "dress-photo-1",
+            "key": "product",
+            "label": "Vestido azul",
+            "value": "Vestido azul",
+            "status": "active",
+            "sourceMessageId": "synthetic-dress",
+            "quote": "Quero ver a foto do vestido azul."
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "dress-photo-1",
+          "capabilityId": null,
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Rejeição anterior indicou que o requestId da escolha estava incorreto; registro a escolha do vestido azul vinculada ao pedido dress-photo-1 antes de mostrar a foto."
+        }
+      },
+      "ms": 3240
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-0",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:46.418Z"
+          }
+        },
+        {
+          "error": "proposal_rejected",
+          "detail": "Escolha sem pedido identificado."
+        },
+        {
+          "error": "empty_response"
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "dress-photo-1",
+          "capabilityId": "shop:photo",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Escolha 'Vestido azul' registrada no pedido e a etapa de foto está pronta; mostro a foto real do vestido solicitado."
+        }
+      },
+      "ms": 1646
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-0",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:46.418Z"
+          }
+        },
+        {
+          "error": "proposal_rejected",
+          "detail": "Escolha sem pedido identificado."
+        },
+        {
+          "error": "empty_response"
+        },
+        {
+          "error": "prior_operations_unavailable",
+          "detail": "Não foi possível verificar as ações anteriores deste pedido. A alteração não foi executada; consulte informações sem alteração ou explique a pendência."
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "dress-photo-1",
+          "capabilityId": "shop:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "A etapa de foto não pôde ser executada porque as ações anteriores do pedido não puderam ser verificadas. Refaço a consulta somente-leitura ao catálogo para restabelecer a base de verificação antes de tentar mostrar a foto novamente."
+        }
+      },
+      "ms": 6410
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-0",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:46.418Z"
+          }
+        },
+        {
+          "error": "proposal_rejected",
+          "detail": "Escolha sem pedido identificado."
+        },
+        {
+          "error": "empty_response"
+        },
+        {
+          "error": "prior_operations_unavailable",
+          "detail": "Não foi possível verificar as ações anteriores deste pedido. A alteração não foi executada; consulte informações sem alteração ou explique a pendência."
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-1",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:03.550Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "dress-photo-1",
+          "capabilityId": "shop:photo",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Catálogo reconferido (leitura bem-sucedida) e a etapa de foto está pronta com o campo 'product' = Vestido azul; tento mostrar a foto real do vestido solicitado."
+        }
+      },
+      "ms": 1792
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-0",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:14:46.418Z"
+          }
+        },
+        {
+          "error": "proposal_rejected",
+          "detail": "Escolha sem pedido identificado."
+        },
+        {
+          "error": "empty_response"
+        },
+        {
+          "error": "prior_operations_unavailable",
+          "detail": "Não foi possível verificar as ações anteriores deste pedido. A alteração não foi executada; consulte informações sem alteração ou explique a pendência."
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4:read-1",
+            "requestId": "dress-photo-1",
+            "memoryRequestId": "synthetic-dress-session:dress-photo-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "5755260433ac41c74f6ba27318ebfb20d914129ed99918ea4bb57cdbebba4ff4",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:03.550Z"
+          }
+        },
+        {
+          "error": "prior_operations_unavailable",
+          "detail": "Não foi possível verificar as ações anteriores deste pedido. A alteração não foi executada; consulte informações sem alteração ou explique a pendência."
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "dress-photo-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Mostrar a foto do vestido azul escolhido pelo cliente",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "dress-photo-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Localizei o seu vestido no catálogo: Vestido azul (código blue), mas não consegui exibir a foto agora.\n\nNa tentativa de mostrar a imagem, o sistema retornou que não foi possível verificar as ações anteriores deste pedido, e a exibição não foi executada. Reconsultei o catálogo e tentei novamente, com o mesmo resultado, então não vou repetir a ação para não gerar duplicidade.\n\nSua escolha (Vestido azul) ficou registrada neste atendimento. Se quiser, me responda em alguns instantes e eu tento mostrar a foto de novo; o catálogo também tem o Vestido vermelho, caso queira ver essa opção.\n\nNenhuma compra ou cobrança foi feita — só a consulta e a tentativa de exibir a foto.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "A exibição da foto falhou duas vezes por indisponibilidade de verificação das ações anteriores do pedido; sem apoio configurado e sem destino de transferência publicado, informo o que foi resolvido (vestido identificado e escolha registrada) e a pendência, mantendo o pedido ativo para nova tentativa."
+        }
+      },
+      "ms": 4436
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "offer-eligibility-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar se o cliente pode contratar a oferta e responder com o resultado.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "offer-eligibility-1",
+          "capabilityId": "offer:eligibility",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente pediu para conferir se a oferta está disponível para ele. A etapa 'offer:eligibility' está pronta, é somente leitura e não exige confirmação, então é o próximo trabalho que aproxima da solução."
+        }
+      },
+      "ms": 2681
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-eligibility-session:9a8d719b0f51a925516be2b3ab4f67e04c8426c91c303557670349cef3997d61:read-0",
+            "requestId": "offer-eligibility-1",
+            "memoryRequestId": "synthetic-eligibility-session:offer-eligibility-1",
+            "capabilityId": "offer:eligibility",
+            "title": "Consultar elegibilidade",
+            "signature": "9a8d719b0f51a925516be2b3ab4f67e04c8426c91c303557670349cef3997d61",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-10T01:15:12.496Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "offer-eligibility-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar se o cliente pode contratar a oferta e responder com o resultado.",
+            "status": "resolved"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "offer-eligibility-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Consultei a elegibilidade da oferta para o seu contrato e este é o resultado: \"Esta oferta não está disponível para este contrato.\" Por isso, neste momento não é possível seguir com a contratação. Se quiser, posso verificar outra oferta ou condição para você.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "A consulta offer:eligibility foi executada com sucesso e retornou eligible=false. A resposta publicada para esse resultado informa que a oferta não está disponível para este contrato, atendendo ao pedido de conferir e informar o resultado."
+        }
+      },
+      "ms": 3002
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": null,
+          "capabilityId": null,
+          "query": "pedido anterior de instalação: plano escolhido e preferência de mesh registrados",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente afirma ter escolhido plano e mesh em um pedido anterior. Há memória antiga (hasOlderMemory=true). Preciso recuperar o requestId e as escolhas registradas antes de retomar o pedido de instalação, sem pedir que o cliente repita."
+        }
+      },
+      "ms": 3821
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "error": "deepseek returned JSON that does not match dialogy_reasoning_decision: requests.0.id: Invalid",
+      "ms": 6831
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        },
+        {
+          "error": "invalid_decision",
+          "detail": "A proposta não validou o contrato. Corrija o formato, envie apenas uma decisão com os campos definidos. Nenhuma ação dessa proposta foi executada."
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "installation",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Registrar o plano, a preferência de mesh e o endereço de instalação do cliente; consultar o catálogo e esclarecer dúvidas.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "installation",
+          "capabilityId": "contract:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Retomo o pedido anterior (resumeFrom older-session:installation) com plano e mesh já escolhidos na memória. Consulto o catálogo atual antes de re-registrar o plano '700 MEGA', pois o campo plan depende de optionsSourceKey catalog e preços/disponibilidade exigem verificação atual."
+        }
+      },
+      "ms": 3380
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        },
+        {
+          "error": "invalid_decision",
+          "detail": "A proposta não validou o contrato. Corrija o formato, envie apenas uma decisão com os campos definidos. Nenhuma ação dessa proposta foi executada."
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-new-session:f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699:read-0",
+            "requestId": "installation",
+            "memoryRequestId": "older-session:installation",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:29.557Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "installation",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Registrar o plano, a preferência de mesh e o endereço de instalação do cliente; consultar o catálogo e esclarecer dúvidas.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "installation",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA"
+          },
+          {
+            "requestId": "installation",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "installation",
+          "capabilityId": null,
+          "query": null,
+          "response": "Que bom continuar! Recuperei do seu pedido anterior: plano 700 MEGA e preferência sem mesh. Para seguir com a instalação, falta apenas o endereço. Pode me informar o endereço completo (rua, número, bairro e cidade)? Se quiser ajustar o plano ou o mesh, é só avisar.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Catálogo consultado com sucesso e '700 MEGA' confirmado como opção válida. Restauro as escolhas do pedido anterior (plan 700 MEGA e mesh Sem mesh) sob o pedido retomado via resumeFrom, usando a origem exata da memória. O endereço de instalação é obrigatório e ainda falta, então mantenho o pedido aberto e peço o dado."
+        }
+      },
+      "ms": 9466
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": null,
+          "capabilityId": null,
+          "query": "pedido de instalação anterior: plano escolhido e preferência de mesh (memória antiga)",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente diz que já escolheu plano e mesh em uma conversa anterior. Preciso recuperar a memória do pedido para reutilizar as escolhas válidas antes de pedir que repita."
+        }
+      },
+      "ms": 2166
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "installation",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Registrar plano, preferência de mesh e endereço de instalação (sem contratar nem cobrar).",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "installation",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "tool",
+          "requestId": "installation",
+          "capabilityId": "contract:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Recuperei a memória do pedido anterior (older-session:installation) com plano 700 MEGA e mesh Sem mesh. Retomo o pedido e registro a preferência de mesh (opções fixas). Consulto o catálogo para validar o plano 700 MEGA e seus identificadores antes de registrá-lo."
+        }
+      },
+      "ms": 6341
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-new-session:f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699:read-0",
+            "requestId": "installation",
+            "memoryRequestId": "older-session:installation",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:47.557Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "installation",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Registrar plano, preferência de mesh e endereço de instalação (sem contratar nem cobrar).",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "installation",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "installation",
+          "capabilityId": null,
+          "query": null,
+          "response": "Perfeito! Retomei seu pedido de instalação com o plano 700 MEGA e a preferência sem mesh já registrados. Para concluir, qual é o endereço onde a instalação será feita?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O catálogo confirma o plano 700 MEGA (id 42) como opção válida, então registro a escolha recuperada da memória. Ainda falta o endereço de instalação; pergunto apenas esse dado necessário, mantendo o pedido aberto."
+        }
+      },
+      "ms": 3142
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "req-install",
+            "procedureId": "contract",
+            "resumeFrom": null,
+            "objective": "Retomar a instalação anterior: recuperar plano e preferência de mesh já escolhidos e registrar o endereço de instalação.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": "req-install",
+          "capabilityId": null,
+          "query": "memória anterior do pedido de instalação: plano escolhido e preferência de mesh",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente afirma ter escolhido plano e mesh em atendimento anterior, mas o contexto não traz essas escolhas. Preciso recuperar a memória antiga antes de registrar ou pedir que o cliente repita."
+        }
+      },
+      "ms": 3647
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "req-install",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Retomar a instalação anterior: registrar o plano 700 MEGA e a preferência Sem mesh já escolhidos, validar no catálogo e obter o endereço de instalação.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "req-install",
+          "capabilityId": "contract:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O plano 700 MEGA é um campo com optionsSourceKey=catalog; preciso consultar o catálogo para validar/registrar a escolha pelo rótulo disponível antes de prosseguir."
+        }
+      },
+      "ms": 2989
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-new-session:f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699:read-0",
+            "requestId": "req-install",
+            "memoryRequestId": "older-session:installation",
+            "capabilityId": "contract:catalog",
+            "title": "Consultar catálogo de planos",
+            "signature": "f5ba5b0df0265a9a0660c701a635f1b41bf87b9197b0c7880b925a4785fdd699",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "catalog": [
+                {
+                  "id": 42,
+                  "name": "700 MEGA"
+                },
+                {
+                  "id": 77,
+                  "name": "1000 MEGA"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:15:57.367Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "req-install",
+            "procedureId": "contract",
+            "resumeFrom": "older-session:installation",
+            "objective": "Retomar a instalação anterior: registrar o plano 700 MEGA e a preferência Sem mesh já escolhidos, validar no catálogo e obter o endereço de instalação.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "req-install",
+            "key": "plan",
+            "label": "Plano escolhido",
+            "value": "700 MEGA",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "Quero o plano 700 MEGA"
+          },
+          {
+            "requestId": "req-install",
+            "key": "mesh",
+            "label": "Preferência de mesh",
+            "value": "Sem mesh",
+            "status": "active",
+            "sourceMessageId": "old-customer-message",
+            "quote": "sem mesh"
+          }
+        ],
+        "action": {
+          "kind": "respond",
+          "requestId": "req-install",
+          "capabilityId": null,
+          "query": null,
+          "response": "Prontinho! Retomei sua instalação anterior e confirmei no catálogo: plano 700 MEGA e preferência Sem mesh. Só falta o endereço de instalação para eu deixar tudo registrado. Qual é o endereço onde a instalação será feita?",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Escolhas antigas recuperadas da memória e plano validado no catálogo (700 MEGA disponível). Falta apenas o endereço, que o cliente nunca informou, então peço esse dado para completar o pedido."
+        }
+      },
+      "ms": 5196
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3451,
+      "outputTokens": 752,
+      "totalTokens": 4203,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 5725,
+      "outputTokens": 434,
+      "totalTokens": 6159,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4012,
+      "outputTokens": 1180,
+      "totalTokens": 5192,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4166,
+      "outputTokens": 390,
+      "totalTokens": 4556,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 6130,
+      "outputTokens": 450,
+      "totalTokens": 6580,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3402,
+      "outputTokens": 401,
+      "totalTokens": 3803,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 5114,
+      "outputTokens": 1104,
+      "totalTokens": 6218,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 7548,
+      "outputTokens": 645,
+      "totalTokens": 8193,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 9643,
+      "outputTokens": 263,
+      "totalTokens": 9906,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 11399,
+      "outputTokens": 1152,
+      "totalTokens": 12551,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 14385,
+      "outputTokens": 267,
+      "totalTokens": 14652,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 16529,
+      "outputTokens": 742,
+      "totalTokens": 17271,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3362,
+      "outputTokens": 416,
+      "totalTokens": 3778,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4965,
+      "outputTokens": 524,
+      "totalTokens": 5489,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3455,
+      "outputTokens": 758,
+      "totalTokens": 4213,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4878,
+      "outputTokens": 1483,
+      "totalTokens": 6361,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 7072,
+      "outputTokens": 637,
+      "totalTokens": 7709,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 9189,
+      "outputTokens": 2142,
+      "totalTokens": 11331,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3455,
+      "outputTokens": 305,
+      "totalTokens": 3760,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4425,
+      "outputTokens": 1278,
+      "totalTokens": 5703,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 7127,
+      "outputTokens": 656,
+      "totalTokens": 7783,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3455,
+      "outputTokens": 713,
+      "totalTokens": 4168,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 5233,
+      "outputTokens": 622,
+      "totalTokens": 5855,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 7526,
+      "outputTokens": 1123,
+      "totalTokens": 8649,
+      "ruleName": "decision"
+    }
+  ]
+}

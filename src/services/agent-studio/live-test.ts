@@ -4,9 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { db } from '@/lib/db';
 import type { AutopilotConfig, Contact } from '@/lib/types';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
-import { claimLiveTest, decodeLiveTest, liveTestReplyId, readLiveTestView, type LiveTestScope } from './live-test-store';
+import { claimLiveTest, decodeLiveTest, readLiveTestSessionHistory, liveTestReplyId, readLiveTestView, type LiveTestScope } from './live-test-store';
 import { runStudioConversation } from './runtime';
 import type { AgentToolAction } from '@/services/agent-tools/types';
+import { validateRemoteUrl } from '@/lib/security/safe-remote-url';
+import { buildMediaAnalysisContext } from '@/services/autopilot/runtime/media-analysis-context';
 
 export type LiveTestAttachment = { file: File };
 
@@ -46,8 +48,10 @@ export async function sendLiveTestMessage(scope: LiveTestScope, config: Autopilo
       WHERE c.id=$1 AND c.workspace_id=$2`, [row.chat_id, scope.workspaceId]);
     if (!chat.rows[0]) throw new Error('Atendimento do teste indisponível.');
     const replay = state.lastTurn?.messageId === messageId || state.processedMessageIds?.includes(messageId);
-    if (!replay && state.inFlight) throw new Error('Uma operação anterior ficou sem confirmação. Confira o resultado no sistema antes de iniciar outro teste; ela não será repetida.');
-    if (!replay && (chat.rows[0].status === 'encerrados' || ['resolved', 'failed', 'cancelled'].includes(state.status))) throw new Error('Este teste terminou. Inicie um novo teste para conversar novamente com o agente.');
+    const reasoningEnabled = release.agentSnapshot.resolveStage.conversationMode === 'adaptive' && release.agentSnapshot.resolveStage.reasoning?.enabled;
+    if (!replay && state.inFlight && !reasoningEnabled) throw new Error('Uma operação anterior ficou sem confirmação. Confira o resultado no sistema antes de iniciar outro teste; ela não será repetida.');
+    if (!replay && (chat.rows[0].status === 'encerrados' || ['failed', 'cancelled'].includes(state.status)
+      || (state.status === 'resolved' && !reasoningEnabled))) throw new Error('Este teste terminou. Inicie um novo teste para conversar novamente com o agente.');
     if (!replay && state.status !== 'transferred' && chat.rows[0].agent_id !== scope.userId) {
       state.phase = 'done'; state.status = 'transferred'; state.pendingField = null; state.confirmation = null;
       state.events.push({ stepId: 'handoff', label: 'Atendimento assumido pela equipe no Inbox', kind: 'transferred', at: new Date().toISOString() });
@@ -93,8 +97,39 @@ export async function sendLiveTestMessage(scope: LiveTestScope, config: Autopilo
       ? { state, response: state.lastTurn?.messageId === messageId ? state.lastTurn.response : '' }
       : await runStudioConversation({ release, state, config, chatId: row.chat_id, messageId, message: text,
         contact: runtimeContact, flowInput: row.flow_input, testMode: true,
+        mediaAnalysisContext: await buildMediaAnalysisContext({ workspaceId: scope.workspaceId, chatId: row.chat_id,
+          messageId, systemAgentId: scope.agentId, model: release.runtimeConfig?.aiModel,
+          recordAnalysis: false, assertCurrent }),
+        operationHistory: {
+          recallSessionOperations: async (sessionId) => {
+            await assertCurrent();
+            const history = await readLiveTestSessionHistory(scope, sessionId);
+            const archived = history.sessions.find((entry) => entry.id === sessionId);
+            return archived ? { releaseId: archived.releaseId, operations: archived.reasoning?.operations || [] } : null;
+          },
+          priorRequestOperations: async (requestId) => {
+            await assertCurrent();
+            const history = await readLiveTestSessionHistory(scope);
+            if (!history.sessions.some((entry) => entry.id === requestId.split(':', 1)[0])) {
+              throw new Error('A sessão de origem do pedido não está disponível neste teste.');
+            }
+            return history.sessions.filter((entry) => entry.id !== history.currentSessionId).map((entry) => ({
+              releaseId: entry.releaseId, operations: (entry.reasoning?.operations || []).filter((operation) =>
+                (operation.memoryRequestId || `${entry.id}:${operation.requestId}`) === requestId),
+            }));
+          },
+        },
         chatHistory: history.rows.map((m) => `${m.from_me ? 'Agente' : 'Cliente'}: ${m.content || ''}`).join('\n'),
         checkpoint: lease.checkpoint, assertCurrent,
+        sendCatalogImage: async (image, operationId) => {
+          await validateRemoteUrl(image.url);
+          await assertCurrent();
+          await db.query(`INSERT INTO messages (id,workspace_id,chat_id,type,content,from_me,is_read,api_message_status,instance_name,source_from_api,metadata,created_at)
+            VALUES ($1,$2,$3,'image',$4,TRUE,TRUE,'SENT','Estúdio IA','webchat',$5::jsonb,clock_timestamp()) ON CONFLICT (id) DO NOTHING`,
+          [liveTestReplyId(`${scope.sessionId}:image:${operationId}`), scope.workspaceId, row.chat_id, image.caption,
+            JSON.stringify({ studioLiveTestId: scope.sessionId, sourceMessageId: messageId, agentId: scope.agentId,
+              studioOperationId: operationId, studioPresentedProduct: { productId: image.productId, caption: image.caption }, mediaUrl: image.url, mimetype: image.mimeType })]);
+        },
         runNative: async (action, operation) => {
           await assertCurrent();
           return runLiveNative(scope, row.chat_id, action, operation.confirmed, release.agentSnapshot.rules.outOfHoursMessage);

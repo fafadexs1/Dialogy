@@ -175,7 +175,7 @@ async function testOpenAiCompatibleConnection(input: {
     systemPrompt: 'Voce verifica uma conexao de IA. Responda somente o JSON solicitado.',
     userPrompt: `Responda exatamente este JSON: {"ok":true,"provider":"${input.provider}","message":"ok"}`,
     timeoutMs: input.timeoutMs,
-    maxTokens: 80,
+    maxTokens: 300,
   });
 
   if (!response.ok || response.provider !== input.provider) {

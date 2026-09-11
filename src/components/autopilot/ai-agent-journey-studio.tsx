@@ -163,9 +163,16 @@ export function AiAgentJourneyStudio({
   const mutationInFlight = useRef(false);
   const currentDocument = useRef(doc); currentDocument.current = doc;
   const [saveError, setSaveError] = useState('');
+  const defaultCollectionId = existingKnowledgeCollections.find((c) => c.isDefault)?.id || existingKnowledgeCollections[0]?.id || 'general';
+  const normalizedKnowledgeDocs = knowledgeDocuments.map((source) => ({
+    ...source,
+    collectionIds: (Array.isArray(source.collectionIds) && source.collectionIds.length > 0)
+      ? source.collectionIds
+      : [defaultCollectionId],
+  }));
   const knowledgeCollections = [...existingKnowledgeCollections, ...(doc.inlineKnowledge || []).map((source) => ({ id: source.id, name: source.name }))];
   const selectedKnowledgeIds = new Set(doc.resolveStage.knowledgeCollectionIds);
-  const activeKnowledgeCount = knowledgeDocuments.filter((source) => !['draft', 'archived', 'expired'].includes(source.status || 'active') && (selectedKnowledgeIds.has(source.id) || (source.collectionIds || []).some((id) => selectedKnowledgeIds.has(id)))).length
+  const activeKnowledgeCount = normalizedKnowledgeDocs.filter((source) => !['draft', 'archived', 'expired'].includes(source.status || 'active') && (selectedKnowledgeIds.has(source.id) || (source.collectionIds || []).some((id) => selectedKnowledgeIds.has(id)))).length
     + (doc.inlineKnowledge || []).filter((source) => selectedKnowledgeIds.has(source.id)).length;
   const currentFingerprint = draftFingerprint(doc);
   const [stageSettings, setStageSettings] = useState<'understand' | 'conclude' | null>(null);
@@ -1268,7 +1275,7 @@ export function AiAgentJourneyStudio({
               </div>
 
               {/* Collect Data Field Config */}
-              {editingStepData.type === 'collect_data' && editingStepData.collectField && <StudioFieldEditor field={editingStepData.collectField} onChange={(field) => setEditingStepData((previous) => previous ? { ...previous, collectField: field } : null)} />}
+              {editingStepData.type === 'collect_data' && editingStepData.collectField && <StudioFieldEditor crmFields={resources.fields} field={editingStepData.collectField} onChange={(field) => setEditingStepData((previous) => previous ? { ...previous, collectField: field } : null)} />}
 
               {editingStepData.type === 'http_request' && editingStepData.httpRequest && (
                 <div className="space-y-3 rounded-xl border border-orange-500/20 bg-orange-500/5 p-4">
@@ -1699,7 +1706,7 @@ export function AiAgentJourneyStudio({
                 <h3 className="text-sm font-bold text-slate-900">Horário e Políticas de Atendimento</h3>
                 <p className="text-xs text-slate-500">Defina o tom de voz e regras de operação fora do expediente.</p>
 
-                <StudioPolicySettings document={doc} onChange={setDoc} />
+          <StudioPolicySettings document={doc} onChange={setDoc} models={models} />
 
                 <div className="mt-5 space-y-4">
                   <label className="block text-xs font-semibold text-slate-700">Objetivo do agente<Textarea value={doc.objective || ''} onChange={(event) => setDoc((previous) => ({ ...previous, objective: event.target.value }))} className="mt-1 text-xs" placeholder="O que este agente deve resolver e quais são seus limites?" /></label>

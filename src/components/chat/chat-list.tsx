@@ -1972,7 +1972,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             )}
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/[0.05]" role="tablist" aria-label="Status das conversas">
+        {/* Unified 1-Row Pipeline Navigation with Icons — Intuitive, High-contrast, Spring Animated */}
+        <div
+          className="relative flex h-10 w-full items-center rounded-xl bg-slate-100/90 p-1 dark:bg-white/[0.05] border border-slate-200/60 dark:border-white/[0.06]"
+          role="tablist"
+          aria-label="Status das conversas"
+        >
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const loadedCount = loadedTabCounts[tab.id];
@@ -1980,32 +1985,77 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             const countDescription = loadedCount === totalCount
               ? `${loadedCount.toLocaleString('pt-BR')} conversas carregadas`
               : `${loadedCount.toLocaleString('pt-BR')} de ${totalCount.toLocaleString('pt-BR')} conversas carregadas`;
+            const isActive = activeTab === tab.id;
 
             return (
-              <button
+              <motion.button
                 key={tab.id}
                 type="button"
                 role="tab"
-                aria-selected={activeTab === tab.id}
+                aria-selected={isActive}
                 aria-label={`${tab.label}: ${countDescription}`}
                 onClick={() => selectInboxTab(tab.id)}
+                layout
+                whileTap={{ scale: 0.97 }}
+                transition={{
+                  layout: { type: "spring", stiffness: 450, damping: 35 },
+                }}
+                title={countDescription}
                 className={cn(
-                  "relative flex h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-semibold transition-[background-color,color,box-shadow,transform] duration-200 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none",
-                  activeTab === tab.id
-                    ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-white/10 dark:text-blue-300 dark:ring-white/10"
-                    : "text-slate-500 hover:bg-white/70 hover:text-slate-800 dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-zinc-100"
+                  "relative z-10 flex h-full items-center justify-center gap-1.5 rounded-lg text-xs outline-none select-none transition-colors duration-150",
+                  isActive
+                    ? "flex-initial shrink-0 px-3 text-white font-bold"
+                    : "flex-1 min-w-0 px-2 text-slate-500 hover:bg-slate-200/50 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-white/[0.04] dark:hover:text-white font-medium"
                 )}
               >
-                <Icon className="hidden h-3 w-3 flex-shrink-0 min-[1400px]:block" />
-                <span className="truncate min-[1400px]:hidden">{tab.shortLabel}</span>
-                <span className="hidden truncate min-[1400px]:inline">{tab.label}</span>
-                <span className={cn(
-                  "flex min-w-[16px] flex-shrink-0 items-center justify-center rounded-full px-1 text-[8px] leading-4",
-                  activeTab === tab.id ? "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" : "bg-slate-200 text-slate-600 dark:bg-white/[0.08] dark:text-zinc-400"
-                )} title={countDescription}>
+                {/* High-contrast sliding active pill with spring physics */}
+                {isActive && (
+                  <motion.div
+                    layoutId="inbox-unified-tab-pill"
+                    className="absolute inset-0 rounded-lg bg-slate-950 shadow-md shadow-slate-950/20 dark:bg-blue-600 dark:shadow-lg dark:shadow-blue-500/30"
+                    transition={{ type: "spring", stiffness: 450, damping: 35 }}
+                  />
+                )}
+
+                {/* Icon */}
+                <Icon
+                  className={cn(
+                    "relative z-10 h-3.5 w-3.5 shrink-0 stroke-[1.9] transition-colors",
+                    isActive
+                      ? "text-white"
+                      : "text-slate-500 dark:text-zinc-400"
+                  )}
+                  aria-hidden="true"
+                />
+
+                {/* Label: Only shown when active, expands smoothly */}
+                <AnimatePresence initial={false}>
+                  {isActive ? (
+                    <motion.span
+                      initial={{ opacity: 0, width: 0 }}
+                      animate={{ opacity: 1, width: "auto" }}
+                      exit={{ opacity: 0, width: 0 }}
+                      transition={{ duration: 0.18, ease: "easeInOut" }}
+                      className="relative z-10 overflow-hidden whitespace-nowrap tracking-tight text-[11px] font-bold min-[1400px]:text-xs"
+                    >
+                      {tab.label}
+                    </motion.span>
+                  ) : null}
+                </AnimatePresence>
+
+                {/* Metric Badge */}
+                <span
+                  className={cn(
+                    "relative z-10 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums leading-none transition-colors",
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-200/80 text-slate-700 dark:bg-white/10 dark:text-zinc-300"
+                  )}
+                  title={countDescription}
+                >
                   {formatInboxCount(loadedCount)}
                 </span>
-              </button>
+              </motion.button>
             );
           })}
         </div>

@@ -6,7 +6,7 @@ import type {
   WorkflowNode,
 } from '@/services/workflow-runtime/types';
 
-export type NexusWorkflowTemplate = 'blank' | 'message' | 'webhook' | 'schedule';
+export type NexusWorkflowTemplate = 'blank' | 'message' | 'webhook' | 'schedule' | 'crm_option';
 
 export type NexusWorkflowSummary = {
   id: string;
@@ -16,6 +16,7 @@ export type NexusWorkflowSummary = {
   status: 'draft' | 'published' | 'archived';
   nodeCount: number;
   triggerTypes: string[];
+  category?: 'workflow' | 'crm_trigger';
   publishedRevision: number;
   publishedAt: string | null;
   createdAt: string;
@@ -135,6 +136,7 @@ export function createStandaloneNexusWorkflow(input: {
   workspaceId: string;
   name: string;
   template: NexusWorkflowTemplate;
+  crmOption?: { fieldId: string; value: string };
   now?: string;
 }): WorkflowDefinition {
   const timestamp = input.now || new Date().toISOString();
@@ -157,7 +159,13 @@ export function createStandaloneNexusWorkflow(input: {
     updatedAt: timestamp,
   };
 
-  if (input.template === 'message') {
+  if (input.template === 'crm_option') {
+    const trigger = addNode(definition, 'trigger.internal_event', 'crm_option', 'Opção do CRM', { x: 100, y: 100 }, {
+      eventName: 'contact.updated', defaultOutput: 'event', crmOption: input.crmOption || { fieldId: '', value: '' },
+    });
+    const end = addNode(definition, 'output.end', 'crm_end', 'Finalizar fluxo', { x: 430, y: 100 });
+    definition.connections.push(connection('crm_to_end', trigger, 'event', end));
+  } else if (input.template === 'message') {
     const error = addErrorTermination(definition);
     const trigger = addNode(definition, 'trigger.received_message', 'message_received', 'Mensagem recebida', { x: 80, y: 80 });
     const response = addNode(definition, 'output.respond', 'send_message', 'Enviar mensagem', { x: 390, y: 80 }, {

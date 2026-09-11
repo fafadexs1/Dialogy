@@ -1,0 +1,53 @@
+{
+  "evaluation": "production-runtime-continuity",
+  "scenario": "legacy",
+  "model": "deepseek/deepseek-v4-flash",
+  "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "trace": [
+    {
+      "decision": "turn_continue"
+    },
+    {
+      "recovery": {
+        "collectionPlan": {
+          "intent": "contribute",
+          "observations": [
+            {
+              "fieldKey": "selected_plan",
+              "status": "provided",
+              "value": "1000 MEGA + 100 canais + Wi-Fi 6 — R$ 149,90 com pontualidade / R$ 159,90 normal",
+              "evidence": "Acho que fico com o de 1000 que eu trabalho home office."
+            },
+            {
+              "fieldKey": "lead_name",
+              "status": "provided",
+              "value": "Ana de Sousa",
+              "evidence": "Ana de Sousa"
+            },
+            {
+              "fieldKey": "preferred_contact_period",
+              "status": "provided",
+              "value": "Qualquer horário",
+              "evidence": "Então, não vamos fechar?"
+            }
+          ],
+          "deferFields": [],
+          "nextFieldKey": null
+        }
+      }
+    },
+    {
+      "decision": "field_1"
+    },
+    {
+      "customer": "Vamos continuar",
+      "response": "Qual é o CEP onde deseja instalar a internet?",
+      "phase": "resolve",
+      "pending": "installation_cep",
+      "values": {
+        "selected_plan": "1000 MEGA + 100 canais + Wi-Fi 6 — R$ 149,90 com pontualidade / R$ 159,90 normal",
+        "lead_name": "Ana de Sousa"
+      }
+    }
+  ]
+}

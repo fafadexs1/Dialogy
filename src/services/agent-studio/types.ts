@@ -53,6 +53,8 @@ export const CollectedFieldDefinitionSchema = z.object({
   required: z.boolean().default(true),
   promptMessage: z.string().max(4000),
   errorMessage: z.string().optional(), // Ex: "CPF inválido. Digite apenas os 11 números."
+  unavailableMessage: z.string().max(2000).optional(),
+  onUnavailable: z.enum(['help', 'handoff']).optional(),
   exampleValue: z.string().optional(), // Ex: "123.456.789-00"
   options: z.array(z.string()).optional(), // For single_select / multi_select
   optionsSourceKey: z.string().optional(),
@@ -308,12 +310,13 @@ export const ProcedureStepSchema = z.object({
   type: z.enum(PROCEDURE_STEP_TYPES),
   title: z.string().max(200),
   subtitle: z.string().optional(),
+  adaptiveAccess: z.object({ enabled: z.boolean(), requiresSteps: z.array(z.string()).max(40).default([]) }).optional(),
   // Detailed configurations per type
   messageText: z.string().optional(),
   collectField: CollectedFieldDefinitionSchema.optional(),
   knowledgeCollectionId: z.string().optional(),
   validationRule: z.string().optional(),
-  nativeActionType: z.enum(['add_tag', 'remove_tag', 'update_crm_field', 'close_chat']).optional(),
+  nativeActionType: z.enum(['add_tag', 'remove_tag', 'update_crm_field', 'close_chat', 'show_catalog_image']).optional(),
   nativeActionPayload: z.record(z.unknown()).optional(),
   nativeDataMappings: z.array(z.object({
     apiField: z.string(), sourceType: z.enum(['collected_field', 'step_output', 'contact_property', 'flow_input', 'static_value']),
@@ -385,6 +388,11 @@ export const AgentStudioDocumentSchema = z.object({
     sourceType: z.enum(['manual', 'file']).optional(), fileName: z.string().max(255).optional(),
     mimeType: z.string().max(100).optional(), importedAt: z.string().optional(), contentHash: z.string().length(64).optional(),
     pages: z.array(z.object({ number: z.number().int().positive(), content: z.string().max(100_000) })).max(100).optional(),
+    category: z.string().max(100).optional(),
+    summary: z.string().max(2000).optional(),
+    canonicalAnswer: z.string().max(4000).optional(),
+    contextRole: z.enum(['fact', 'procedure', 'policy', 'persona']).optional(),
+    tags: z.array(z.string().max(50)).max(20).optional(),
   })).max(20).optional(),
   status: z.enum(['draft', 'published', 'paused']).default('draft'),
   publishedVersion: z.number().nullable().default(null),
@@ -400,6 +408,14 @@ export const AgentStudioDocumentSchema = z.object({
   }),
   // 2. Resolver com IA
   resolveStage: z.object({
+    conversationMode: z.enum(['guided', 'adaptive']).optional(),
+    reasoning: z.object({
+      enabled: z.boolean(),
+      effort: z.enum(['low', 'medium', 'high']).default('medium'),
+      supportModel: z.string().min(1).nullable().default(null),
+      maxDecisions: z.number().int().min(2).max(16).default(8),
+      maxTurnMs: z.number().int().min(10_000).max(180_000).default(90_000),
+    }).optional(),
     knowledgeCollectionIds: z.array(z.string()).default([]),
     procedures: z.array(ProcedureDocumentSchema).default([]),
     allowGeneralAiChat: z.boolean().default(true),

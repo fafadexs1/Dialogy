@@ -37,7 +37,9 @@ import {
 } from '../actions/workflows';
 import type { NexusWorkflowSummary, NexusWorkflowTemplate } from '../services/standalone-workflows';
 
-type CreationKind = 'workflow' | 'agent';
+import { CrmOptionFields } from './crm-option-fields';
+
+type CreationKind = 'workflow' | 'agent' | 'crm_trigger';
 
 const TRIGGER_LABELS: Record<string, string> = {
   'trigger.received_message': 'Mensagem',
@@ -59,6 +61,7 @@ export function NexusCatalog() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  const [crmOption, setCrmOption] = useState({ fieldId: '', value: '' });
   const [kind, setKind] = useState<CreationKind>('workflow');
   const [template, setTemplate] = useState<NexusWorkflowTemplate>('blank');
   const [busyWorkflowId, setBusyWorkflowId] = useState<string | null>(null);
@@ -117,8 +120,8 @@ export function NexusCatalog() {
     if (!user?.activeWorkspaceId) return;
     setCreating(true);
     try {
-      if (kind === 'workflow') {
-        const result = await createNexusWorkflow({ workspaceId: user.activeWorkspaceId, name, template });
+      if (kind !== 'agent') {
+        const result = await createNexusWorkflow({ workspaceId: user.activeWorkspaceId, name, template: kind === 'crm_trigger' ? 'crm_option' : template, crmOption: kind === 'crm_trigger' ? crmOption : undefined });
         if (!result.success || !result.id) {
           toast({ title: 'Erro ao criar o fluxo', description: result.error, variant: 'destructive' });
           return;
@@ -220,7 +223,7 @@ export function NexusCatalog() {
             <Card key={flow.id} role="button" tabIndex={0} onClick={() => router.push(`/nexus/flows/${flow.id}`)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') router.push(`/nexus/flows/${flow.id}`); }} className="group cursor-pointer rounded-[26px] transition hover:border-primary/40 hover:shadow-lg">
               <CardContent className="flex h-full flex-col gap-5 p-6">
                 <div className="flex items-start justify-between gap-3"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500/15 text-cyan-600"><Workflow className="h-5 w-5" /></div><div className="flex items-center gap-2"><Badge variant={flow.status === 'published' ? 'default' : 'outline'} className="rounded-full">{flow.status === 'published' ? `Publicado · v${flow.publishedRevision}` : 'Rascunho'}</Badge><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" disabled={busyWorkflowId === flow.id} onClick={(event) => event.stopPropagation()} aria-label={`Ações de ${flow.name}`} className="h-8 w-8 rounded-full">{busyWorkflowId === flow.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}</Button></DropdownMenuTrigger><DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}><DropdownMenuItem onSelect={() => void duplicateFlow(flow)}><Copy className="mr-2 h-4 w-4" />Duplicar fluxo</DropdownMenuItem><DropdownMenuItem onSelect={() => setArchiveCandidate(flow)} className="text-amber-600 focus:text-amber-600"><Archive className="mr-2 h-4 w-4" />Arquivar</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></div>
-                <div><h3 className="truncate text-xl font-semibold">{flow.name}</h3><p className="mt-1 text-sm text-muted-foreground">{flow.nodeCount} blocos · {flow.triggerTypes.map((type) => TRIGGER_LABELS[type] || type).join(', ')}</p></div>
+                <div><h3 className="truncate text-xl font-semibold">{flow.name}</h3>{flow.category === 'crm_trigger' && <Badge variant="outline" className="mt-2">Gatilho do CRM</Badge>}<p className="mt-1 text-sm text-muted-foreground">{flow.nodeCount} blocos · {flow.triggerTypes.map((type) => TRIGGER_LABELS[type] || type).join(', ')}</p></div>
                 <div className="mt-auto flex items-center justify-between border-t border-border/60 pt-4 text-sm"><span className="flex items-center gap-2 text-muted-foreground"><CheckCircle2 className="h-4 w-4 text-emerald-500" />Workflow Runtime V2</span><span className="inline-flex items-center gap-1 font-medium text-primary transition group-hover:translate-x-1">Abrir canvas <ArrowRight className="h-4 w-4" /></span></div>
               </CardContent>
             </Card>
@@ -231,11 +234,12 @@ export function NexusCatalog() {
         {agents.length > 0 && <section className="space-y-4"><div><h2 className="text-xl font-semibold">Agentes inteligentes</h2><p className="text-sm text-muted-foreground">Automações orientadas a agentes, com conhecimento, ferramentas e guardrails.</p></div><div className="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">{agents.map((agent) => <Card key={agent.id} role="button" tabIndex={0} onClick={() => router.push(`/autopilot/${agent.id}`)} className="group cursor-pointer rounded-[26px] transition hover:border-primary/40 hover:shadow-lg"><CardContent className="flex items-center gap-4 p-6"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-600"><Bot className="h-5 w-5" /></div><div className="min-w-0 flex-1"><h3 className="truncate font-semibold">{agent.name}</h3><p className="text-sm text-muted-foreground">{agent.is_active ? 'Publicado' : 'Em preparação'} · Agente Dialogy</p></div><ArrowRight className="h-4 w-4 text-primary" /></CardContent></Card>)}</div></section>}
       </main>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent className="rounded-[28px] sm:max-w-[620px]"><DialogHeader><DialogTitle>Novo no Nexus</DialogTitle><DialogDescription>Escolha se você quer montar um processo comum ou uma automação orientada a agente.</DialogDescription></DialogHeader><div className="space-y-5 py-2">
-        <RadioGroup value={kind} onValueChange={(value) => setKind(value as CreationKind)} className="grid gap-3 sm:grid-cols-2"><Label className="flex cursor-pointer gap-3 rounded-2xl border p-4 [&:has(button[data-state=checked])]:border-primary [&:has(button[data-state=checked])]:bg-primary/5"><RadioGroupItem value="workflow" /><span><span className="block font-medium">Fluxo de automação</span><span className="mt-1 block text-xs text-muted-foreground">Regras e operações; IA opcional.</span></span></Label><Label className="flex cursor-pointer gap-3 rounded-2xl border p-4 [&:has(button[data-state=checked])]:border-primary [&:has(button[data-state=checked])]:bg-primary/5"><RadioGroupItem value="agent" /><span><span className="block font-medium">Agente inteligente</span><span className="mt-1 block text-xs text-muted-foreground">Atendimento orientado a IA.</span></span></Label></RadioGroup>
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent className="rounded-[28px] sm:max-w-[620px]"><DialogHeader><DialogTitle>Novo no Nexus</DialogTitle><DialogDescription>Escolha um fluxo, um agente de IA ou um gatilho por opção do CRM.</DialogDescription></DialogHeader><div className="space-y-5 py-2">
+        <RadioGroup value={kind} onValueChange={(value) => setKind(value as CreationKind)} className="grid gap-3 sm:grid-cols-2"><Label className="flex cursor-pointer gap-3 rounded-2xl border p-4 [&:has(button[data-state=checked])]:border-primary [&:has(button[data-state=checked])]:bg-primary/5"><RadioGroupItem value="workflow" /><span><span className="block font-medium">Fluxo de automação</span><span className="mt-1 block text-xs text-muted-foreground">Regras e operações; IA opcional.</span></span></Label><Label className="flex cursor-pointer gap-3 rounded-2xl border p-4 [&:has(button[data-state=checked])]:border-primary [&:has(button[data-state=checked])]:bg-primary/5"><RadioGroupItem value="agent" /><span><span className="block font-medium">Agente inteligente</span><span className="mt-1 block text-xs text-muted-foreground">Atendimento orientado a IA.</span></span></Label><Label className="flex cursor-pointer gap-3 rounded-2xl border p-4 [&:has(button[data-state=checked])]:border-primary [&:has(button[data-state=checked])]:bg-primary/5"><RadioGroupItem value="crm_trigger" /><span><span className="block font-medium">Gatilhos do CRM</span><span className="mt-1 block text-xs text-muted-foreground">Uma opção selecionada inicia as ações.</span></span></Label></RadioGroup>
         <div className="space-y-2"><Label htmlFor="new-nexus-name">Nome</Label><Input id="new-nexus-name" value={name} onChange={(event) => setName(event.target.value)} /></div>
+        {kind === 'crm_trigger' && <CrmOptionFields value={crmOption} onChange={setCrmOption} />}
         {kind === 'workflow' && <div className="space-y-2"><Label htmlFor="new-nexus-template">Ponto de partida</Label><select id="new-nexus-template" value={template} onChange={(event) => setTemplate(event.target.value as NexusWorkflowTemplate)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="blank">Em branco · execução manual</option><option value="webhook">Webhook</option><option value="schedule">Agendamento</option><option value="message">Mensagem recebida</option></select></div>}
-      </div><DialogFooter><Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={createItem} disabled={creating}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}{kind === 'workflow' ? 'Criar fluxo' : 'Criar agente'}</Button></DialogFooter></DialogContent></Dialog>
+      </div><DialogFooter><Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={createItem} disabled={creating || (kind === 'crm_trigger' && (!crmOption.fieldId || !crmOption.value))}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}{kind === 'agent' ? 'Criar agente' : kind === 'crm_trigger' ? 'Criar gatilho' : 'Criar fluxo'}</Button></DialogFooter></DialogContent></Dialog>
 
       <AlertDialog open={Boolean(archiveCandidate)} onOpenChange={(open) => { if (!open) setArchiveCandidate(null); }}>
         <AlertDialogContent>

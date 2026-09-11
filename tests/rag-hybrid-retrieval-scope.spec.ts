@@ -16,6 +16,17 @@ vi.mock('@/lib/db', () => ({
 }));
 
 describe('hybrid RAG document scope', () => {
+  it('discards private cases returned by a legacy provider', async () => {
+    mocks.retrieveSupportContext.mockResolvedValue({
+      knowledgeBaseDocuments: [],
+      resolvedCases: [{ summary: 'PRIVATE_OTHER_CUSTOMER', problem: 'secret', resolution: 'secret' }],
+    });
+    const result = await retrieveHybridSupportContext({ workspaceId: 'workspace', query: 'Ajuda com acesso' });
+    expect(result.resolvedCases).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_OTHER_CUSTOMER');
+    expect(result.retrieved.resolvedCases).toBe(0);
+  });
+
   beforeEach(() => {
     mocks.retrieveSupportContext.mockReset();
     mocks.retrieveSupportContext.mockResolvedValue({

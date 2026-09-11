@@ -10,8 +10,11 @@ function extension(name: string) {
   return name.toLowerCase().split('.').pop() || '';
 }
 
+import { cleanDocumentText } from './knowledge-text';
+export { cleanDocumentText };
+
 function cleanExtractedText(value: string) {
-  const content = value.replace(/\0/g, '').replace(/\r\n?/g, '\n').trim();
+  const content = cleanDocumentText(value);
   if (!content) throw new Error('O arquivo não contém texto utilizável.');
   if (content.length > MAX_CONTENT_CHARACTERS) throw new Error('O texto extraído excede 100 mil caracteres. Divida o conteúdo em fontes menores.');
   return content;
@@ -36,11 +39,26 @@ export async function extractStudioKnowledgeFile(file: File) {
       const pages: string[] = [];
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
         const text = await (await pdf.getPage(pageNumber)).getTextContent();
-        pages.push(text.items.flatMap((item) => 'str' in item ? [item.str] : []).join(' '));
+        const pageLines: string[] = [];
+        let currentLine = '';
+        for (const item of text.items) {
+          if ('str' in item && typeof item.str === 'string') {
+            currentLine += item.str;
+            if ('hasEOL' in item && item.hasEOL) {
+              pageLines.push(currentLine);
+              currentLine = '';
+            }
+          }
+        }
+        if (currentLine.trim()) pageLines.push(currentLine);
+        const pageContent = pageLines.length > 0
+          ? pageLines.join('\n')
+          : text.items.flatMap((item) => 'str' in item ? [item.str] : []).join(' ');
+        pages.push(pageContent);
         if (pages.join('\n').length > MAX_CONTENT_CHARACTERS) throw new Error('O texto extraído excede 100 mil caracteres. Divida o conteúdo em fontes menores.');
       }
       content = pages.join('\n\n');
-      extractedPages = pages.map((page, index) => ({ number: index + 1, content: page.replace(/\0/g, '').replace(/\r\n?/g, '\n').trim() }));
+      extractedPages = pages.map((page, index) => ({ number: index + 1, content: cleanDocumentText(page) }));
     } finally { await task.destroy(); }
   } else {
     throw new Error('Use PDF, TXT, Markdown, CSV ou JSON.');

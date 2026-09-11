@@ -1,0 +1,25 @@
+{
+  "observedAt": "2026-09-08T15:28:13.033Z",
+  "source": "real-sgp-api",
+  "mappedField": "CPF",
+  "cpfMasked": "***.***.731-**",
+  "contractsReachable": 20,
+  "pages": 4,
+  "menuSizes": [
+    9,
+    10,
+    10,
+    5
+  ],
+  "selectionConfirmed": true,
+  "alternateCpfLookupConfirmed": true,
+  "crmCpfUnchanged": true,
+  "contractStatuses": {
+    "active": 19,
+    "cancelled": 1
+  },
+  "cancelledSelectionConfirmed": true,
+  "messagesSent": 0,
+  "delivery": "captured-locally",
+  "productionWorkflowPublished": false
+}

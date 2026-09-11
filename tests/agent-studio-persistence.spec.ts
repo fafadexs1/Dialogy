@@ -37,7 +37,10 @@ describe('Studio encrypted session and scoped persistence', () => {
     expect(mocks.query.mock.calls[0][1]).toEqual(['chat', 'workspace']);
   });
   it.each([{ agentId: 'other', contextId: scope.contextId }, { agentId: scope.agentId, contextId: 'other' }])('does not take over another active context', async (owner) => {
-    mocks.query.mockResolvedValue({ rows: [{ studio: { ...owner, status: 'waiting_input' } }] });
+    const prior = createStudioSession(owner.agentId, 'release', 'session');
+    prior.status = 'waiting_input';
+    mocks.query.mockResolvedValue({ rows: [{ studio: { ...owner, status: prior.status,
+      encrypted: sealStudioSession({ ...scope, ...owner }, prior) } }] });
     await expect(studioSessionStore(scope)).rejects.toThrow('Outra execução');
   });
   it('reserves once using CAS and stores only an encrypted payload and safe summary', async () => {

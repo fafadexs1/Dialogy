@@ -27,6 +27,7 @@ import {
 } from '@/lib/whatsapp/contact-identity';
 import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
 import { scheduleDialogyNexusInternalEvent } from '@/modules/nexus/services/dialogy-event-scheduler';
+import { changedCrmFields } from '@/modules/nexus/services/crm-option-trigger';
 
 
 import { buildCountQuery, buildSegmentQuery, combineSegmentCriteria, CriteriaGroup } from '@/lib/crm-query-builder';
@@ -321,7 +322,7 @@ export const saveContactAction = withDebug(
                      FROM contacts
                      WHERE id = $1
                        AND workspace_id = $2
-                     LIMIT 1`,
+                     LIMIT 1 FOR UPDATE`,
                     [id, workspaceId]
                 );
                 if ((currentContactRes.rowCount || 0) === 0) {
@@ -486,6 +487,7 @@ export const saveContactAction = withDebug(
                 payload: {
                     contactId,
                     actorUserId: user.id,
+                    changedFields: changedCrmFields(currentFields, updatedContact?.custom_fields || {}),
                     contact: updatedContact ? {
                         id: updatedContact.id,
                         name: updatedContact.name,
@@ -498,14 +500,7 @@ export const saveContactAction = withDebug(
                 },
             });
 
-            // Avanco no funil vira conversao de lead qualificado no Google Ads.
-            // Nunca pode derrubar o salvamento do contato.
-            try {
-                const { maybeEnqueueLeadQualified } = await import('@/services/google-ads/lead-qualification');
-                await maybeEnqueueLeadQualified({ workspaceId, contactId });
-            } catch (error) {
-                console.error('[CRM_GADS_SYNC] Falha ao enfileirar lead qualificado:', error);
-            }
+            // Google Ads lead export is an explicit Nexus action, never a side effect of saving CRM.
 
             // Dispatch Automations for custom field changes
             try {

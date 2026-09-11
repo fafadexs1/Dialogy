@@ -162,6 +162,8 @@ export type MessageSender = Partial<User> & { type?: 'user' | 'contact' | 'syste
 
 
 export type MessageMetadata = {
+  studioOperationId?: string;
+  studioPresentedProduct?: { productId: string | number; caption: string };
   sharedContactName?: string;
   sharedContactPhones?: string[];
   sharedContactVcard?: string;
@@ -174,6 +176,8 @@ export type MessageMetadata = {
   }>;
   mediaUrl?: string;
   originalMediaUrl?: string;
+  signedMediaUrl?: string;
+  base64?: string;
   originalThumbnailUrl?: string;
   mimetype?: string;
   fileName?: string;

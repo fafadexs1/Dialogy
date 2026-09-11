@@ -37,13 +37,170 @@ beforeEach(() => {
 });
 
 describe('production Studio orchestration with controlled model and integration adapters', () => {
-  it.each([undefined, ''])('preserves the existing WhatsApp JID fallback when phone is %j', async (phone) => {
+  it.each([false, true])('plans a ready lookup before another question with the same published model in preview=%s', async (preview) => {
+    const f = fixture(); f.release.agentSnapshot.resolveStage.conversationMode = 'adaptive';
+    f.release.agentSnapshot.resolveStage.procedures[0].steps = [
+      ...['postal', 'address'].map((key, i) => ({ id: key, order: i + 1, title: key, type: 'collect_data' as const,
+        collectField: CollectedFieldDefinitionSchema.parse({ id: key, variableKey: key, name: key, type: 'text', promptMessage: `Informe ${key}` }) })),
+      { id: 'api', order: 3, title: 'Consultar código postal', type: 'http_request', httpRequest: HttpRequestStepConfigSchema.parse({ name: 'Localizar', connectionId: 'connection', method: 'GET', url: '/location',
+        sentDataMappings: [{ apiField: 'address', sourceType: 'collected_field', sourceValue: 'address' }], outputMappings: [{ chipKey: 'postal', chipLabel: 'Código', jsonPath: 'postal' }] }) },
+      { id: 'reply', order: 4, title: 'Resultado', type: 'respond', messageText: 'Resultado:', messageDataKeys: ['postal'] },
+    ];
+    mocks.model.mockImplementation(async (request) => {
+      if (request.mode === 'collection_plan') return { collectionPlan: { intent: 'contribute', observations: [
+        { fieldKey: 'postal', status: 'unavailable', value: null, evidence: 'Não sei o CEP' },
+        { fieldKey: 'address', status: 'provided', value: 'Rua Azul', evidence: 'Rua Azul' },
+      ], deferFields: [], nextFieldKey: null } };
+      if (request.procedure.prompt.startsWith('Escolha o próximo trabalho')) return { decision: 'step:api' };
+      if (request.procedure.prompt.startsWith('Interprete o sentido')) return { decision: 'turn_answer' };
+      return { decision: 'invoice' };
+    });
+    mocks.http.mockResolvedValue({ values: { postal: '72800000' } });
+    const result = await f.send('Não sei o CEP, moro na Rua Azul', undefined, 'lookup', preview ? { preview: { samples: { api: '{"postal":"72800000"}' } } } : {});
+    expect(result.response).toContain('Resultado:\n72800000'); expect(result.state.adaptiveCompletedSteps?.['invoice:api']).toBe(true);
+    expect(mocks.http).toHaveBeenCalledTimes(preview ? 0 : 1); expect(f.native).not.toHaveBeenCalled();
+    expect(mocks.model).toHaveBeenCalledWith(expect.objectContaining({ model: 'published-model', fixedModel: true,
+      procedure: expect.objectContaining({ prompt: expect.stringContaining('Escolha o próximo trabalho') }) }));
+  });
+  it.each([false, true])('applies the same multi-field goal plan in preview=%s', async (preview) => {
+    const f = fixture();
+    f.release.agentSnapshot.resolveStage.conversationMode = 'adaptive';
+    f.release.agentSnapshot.resolveStage.procedures[0].steps = ['name', 'postal', 'address'].map((key, index) => ({
+      id: key, order: index + 1, title: key, type: 'collect_data', collectField: CollectedFieldDefinitionSchema.parse({
+        id: key, name: key, variableKey: key, type: 'text', promptMessage: `Informe ${key}` }),
+    }));
+    const mode = preview ? { preview: { samples: {} } } : {};
+    mocks.model.mockImplementation(async (request) => {
+      if (request.mode === 'collection_plan') return { collectionPlan: {
+        intent: 'contribute', deferFields: [], nextFieldKey: request.customerMessage.includes('Sou Ana') ? null : 'address',
+        observations: request.customerMessage.includes('Sou Ana') ? [
+          { fieldKey: 'name', status: 'provided', value: 'Ana', evidence: 'Sou Ana' },
+          { fieldKey: 'postal', status: 'unavailable', value: null, evidence: 'não sei o CEP' },
+          { fieldKey: 'address', status: 'provided', value: 'Rua Azul', evidence: 'moro na Rua Azul' },
+        ] : [],
+      } };
+      if (request.procedure.prompt.startsWith('Interprete o sentido')) return { decision: 'turn_answer' };
+      return { decision: 'invoice' };
+    });
+    expect((await f.send('Preciso de atendimento', undefined, 'start', mode)).state.pendingField).toBe('address');
+    const result = await f.send('Sou Ana, não sei o CEP, moro na Rua Azul', undefined, 'facts', mode);
+    expect(result.state.values).toMatchObject({ name: 'Ana', address: 'Rua Azul' });
+    expect(result.state.values.postal).toBeUndefined();
+    expect(result.state.unavailableFields?.['invoice:postal']).toBeDefined();
+    expect(result.state.phase).toBe('conclude');
+    expect(mocks.model).toHaveBeenCalledWith(expect.objectContaining({ mode: 'collection_plan', model: 'published-model', fixedModel: true }));
+    expect(mocks.http).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('shares adaptive interpretation and verified handoff in preview=%s', async (preview) => {
+    const f = fixture();
+    f.release.agentSnapshot.resolveStage.conversationMode = 'adaptive';
+    f.release.agentSnapshot.resolveStage.procedures[0].steps = [
+      { id: 'phone', order: 1, title: 'Telefone', type: 'collect_data', collectField: CollectedFieldDefinitionSchema.parse({
+        id: 'phone', name: 'Telefone', variableKey: 'phone', type: 'phone', promptMessage: 'Qual telefone?', requiresConfirmation: true }) },
+      { id: 'postal', order: 2, title: 'Endereço', type: 'collect_data', collectField: CollectedFieldDefinitionSchema.parse({
+        id: 'postal', name: 'Código postal', variableKey: 'postal', type: 'cep', promptMessage: 'Qual código postal?' }) },
+    ];
+    const mode: Partial<StudioRuntimeInput> = { contact: { id: 'contact', name: 'Cliente', phone_number_jid: '5561999999999@s.whatsapp.net' } as Contact,
+      ...(preview ? { preview: { samples: {} } } : {}) };
+    mocks.model.mockImplementation(async (request) => {
+      if (request.procedure.prompt.startsWith('Escolha a próxima informação pendente')) return { decision: request.procedure.branchOptions[0].condition };
+      if (request.mode === 'collection_plan') {
+        const planning = JSON.parse(request.procedure.prompt.split('\n').at(-1));
+        return { collectionPlan: { intent: 'contribute', observations: [], deferFields: [],
+          nextFieldKey: planning.fields.find((field: { known: boolean; unavailable: boolean }) => !field.known && !field.unavailable)?.key || null } };
+      }
+      if (!request.procedure.prompt.startsWith('Interprete o sentido')) return { decision: 'invoice' };
+      const kind = ({ 'Este mesmo': 'contact_reference', positivo: 'confirm', 'Não sei informar': 'unable', encaminha: 'handoff' } as Record<string, string>)[request.customerMessage] || 'answer';
+      return { decision: request.procedure.branchOptions.find((branch: { condition: string }) =>
+        branch.condition === `turn_${kind}` || branch.condition.startsWith(`turn_${kind}_`))?.condition };
+    });
+    await f.send('Preciso de atendimento', undefined, 'start', mode);
+    expect((await f.send('Este mesmo', undefined, 'reference', mode)).state.confirmation).not.toBeNull();
+    expect((await f.send('positivo', undefined, 'confirm', mode)).state.pendingField).toBe('postal');
+    const missing = await f.send('Não sei informar', undefined, 'unknown', mode);
+    expect(missing.state.procedureId).toBe('invoice'); expect(missing.state.attempts).toEqual({});
+    const transferred = await f.send('encaminha', undefined, 'handoff', mode);
+    expect(transferred.state.status).toBe('transferred'); expect(transferred.state.pendingField).toBeNull();
+    expect(f.native).toHaveBeenCalledTimes(preview ? 0 : 1);
+    if (!preview) expect(f.native).toHaveBeenCalledWith(expect.objectContaining({ type: 'transfer_chat' }), expect.objectContaining({ confirmed: false }));
+    expect(mocks.model.mock.calls.every(([request]) => request.model === 'published-model' && request.fixedModel)).toBe(true);
+    expect(mocks.http).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('uses the published model for sector-neutral interpretation in preview=%s', async (preview) => {
+    const f = fixture();
+    const field = f.release.agentSnapshot.resolveStage.procedures[0].steps[0];
+    field.collectField = CollectedFieldDefinitionSchema.parse({ id: 'service', name: 'Serviço', variableKey: 'service',
+      type: 'single_select', promptMessage: 'Qual serviço?', options: ['Essencial', 'Completo + acompanhamento'] });
+    f.release.agentSnapshot.resolveStage.procedures[0].steps[1].httpRequest!.method = 'POST';
+    const mode = preview ? { preview: { samples: { api: '{"invoice":"Confirmado"}' } } } : {};
+    await f.send('Preciso do serviço', undefined, 'begin', mode);
+    mocks.model.mockResolvedValue({ decision: 'option_1' });
+    const calls = mocks.model.mock.calls.length;
+    const proposed = await f.send('aquele com acompanhamento', undefined, 'proposal', mode);
+    expect(proposed.state.values.service).toBeUndefined();
+    expect(proposed.response).toContain('Você quer dizer Completo + acompanhamento?');
+    expect(mocks.model).toHaveBeenCalledTimes(calls + 1);
+    expect(mocks.model).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'published-model', fixedModel: true,
+      procedure: expect.objectContaining({ prompt: expect.stringContaining('Qual serviço?'),
+        branchOptions: expect.arrayContaining([{ condition: 'option_1', nextStepId: 'option_1' }]) }) }));
+    expect(mocks.http).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled();
+    const confirmed = await f.send('sim', undefined, 'confirm-choice', mode);
+    expect(confirmed.state.values.service).toBe('Completo + acompanhamento');
+    // Confirming an interpretation is not permission to execute a business action.
+    expect(confirmed.response).toContain('Posso executar');
+    expect(mocks.http).not.toHaveBeenCalled(); expect(mocks.model).toHaveBeenCalledTimes(calls + 1);
+    await f.send('sim', undefined, 'confirm-action', mode);
+    expect(mocks.http).toHaveBeenCalledTimes(preview ? 0 : 1);
+  });
+  it.each([false, true])('recovers from invalid interpretation equally in preview=%s', async (preview) => {
+    const f = fixture();
+    f.release.agentSnapshot.resolveStage.procedures[0].steps[0].collectField = CollectedFieldDefinitionSchema.parse({
+      id: 'service', name: 'Serviço', variableKey: 'service', type: 'single_select', promptMessage: 'Qual serviço?', options: ['Essencial', 'Completo'],
+    });
+    const mode = preview ? { preview: { samples: {} } } : {};
+    await f.send('Preciso do serviço', undefined, 'begin', mode);
+    mocks.model.mockResolvedValue({ decision: 'Inventado' });
+    const result = await f.send('o que você falou', undefined, 'uncertain', mode);
+    expect(result.state.values.service).toBeUndefined(); expect(result.state.attempts).toEqual({});
+    expect(result.state.events.at(-1)?.kind).toBe('collection_interpreter_unavailable');
+    expect(result.response).toContain('com segurança'); expect(mocks.http).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('answers a pending-field doubt and accepts a short plan in preview=%s', async (preview) => {
+    const f = fixture();
+    const document = f.release.agentSnapshot;
+    document.resolveStage.allowGeneralAiChat = false;
+    document.resolveStage.procedures[0].steps = ProcedureDocumentSchema.parse({ id: 'invoice', name: 'Contratar', updatedAt: '2026-09-05', steps: [
+      { id: 'plan', title: 'Plano', type: 'collect_data', order: 1, collectField: CollectedFieldDefinitionSchema.parse({
+        id: 'plan', name: 'Plano desejado', variableKey: 'plan', type: 'single_select', promptMessage: 'Qual plano?',
+        options: ['500 MEGA — R$ 99,90', '600 MEGA + TV — R$ 109,90'],
+      }) },
+      { id: 'phone', title: 'Telefone', type: 'collect_data', order: 2, collectField: CollectedFieldDefinitionSchema.parse({
+        id: 'phone', name: 'Telefone', variableKey: 'phone', type: 'phone', promptMessage: 'Qual telefone com DDD?',
+      }) },
+    ] }).steps;
+    const mode = preview ? { preview: { samples: {} } } : {};
+    await f.send('Quero contratar', undefined, 'begin', mode);
+    mocks.model.mockResolvedValue({ response: 'O plano de 600 MEGA inclui TV.' });
+    const answer = await f.send('Qual inclui TV?', undefined, 'doubt', mode);
+    expect(answer.response).toBe('O plano de 600 MEGA inclui TV.');
+    expect(answer.state.pendingField).toBe('plan');
+    expect(answer.state.attempts).toEqual({});
+    expect(mocks.model).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'response', model: 'published-model', fixedModel: true,
+      procedure: expect.objectContaining({ prompt: expect.stringContaining('600 MEGA + TV — R$ 109,90') }) }));
+    const callsBeforeSelection = mocks.model.mock.calls.length;
+    const chosen = await f.send('500', undefined, 'selection', mode);
+    expect(chosen.state.values.plan).toBe('500 MEGA — R$ 99,90');
+    expect(chosen.response).toBe('Qual telefone com DDD?');
+    expect(mocks.model).toHaveBeenCalledTimes(callsBeforeSelection);
+    expect(mocks.http).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled();
+  });
+  it.each([undefined, ''])('normalizes the direct WhatsApp JID fallback when phone is %j', async (phone) => {
     const f = fixture();
     await f.send('Quero fatura 529.982.247-25', undefined, 'whatsapp-phone', {
       contact: { id: 'contact', name: 'Cliente', phone, phone_number_jid: '5511999999999@s.whatsapp.net' } as Contact,
     });
     expect(mocks.http).toHaveBeenCalledWith(expect.objectContaining({
-      context: expect.objectContaining({ contact: expect.objectContaining({ phone: '5511999999999@s.whatsapp.net' }) }),
+      context: expect.objectContaining({ contact: expect.objectContaining({ phone: '5511999999999' }) }),
     }));
   });
   it('answers in the preview using the real model adapter, selected sources and conversation history', async () => {
@@ -70,6 +227,17 @@ describe('production Studio orchestration with controlled model and integration 
     const f = fixture();
     const result = await f.send('quero falar com humano', undefined, 'preview-3', { preview: { samples: {} } });
     expect(result.state.status).toBe('transferred'); expect(f.native).not.toHaveBeenCalled(); expect(mocks.query).not.toHaveBeenCalled();
+  });
+  it('uses the same interruption governor in Studio preview without calling tools or transferring', async () => {
+    const f = fixture();
+    const sandbox = { preview: { samples: {} } };
+    expect((await f.send('Quero minha fatura', undefined, 'preview-governor-start', sandbox)).response).toContain('Qual seu CPF?');
+    const cancelled = await f.send('não precisa', undefined, 'preview-governor-cancel', sandbox);
+    expect(cancelled.response).toContain('parei este procedimento');
+    expect(cancelled.state.procedureId).toBeNull();
+    expect(cancelled.state.status).toBe('waiting_input');
+    expect(mocks.http).not.toHaveBeenCalled();
+    expect(f.native).not.toHaveBeenCalled();
   });
   it('does not mutate contact data or close real chats when testing native steps', async () => {
     const f = fixture();

@@ -4,6 +4,9 @@ import { runSgpWorkspaceTool } from '@/services/agent-tools/sgp-tools';
 import { evaluateTeamBusinessHours } from '@/services/chat-distribution/team-availability';
 import type { NodeExecutionResult, NodeRuntimeInput, WorkflowHandlerDependencies } from '@/services/workflow-runtime';
 import { createId, isRecord, renderTemplate, statePatchAtPath } from '@/services/workflow-runtime/utils';
+import { executeSgpIdentification } from './sgp-identification';
+import { isValidBrazilianDocument } from '@/lib/brazilian-document';
+import { saveSgpContactDocumentIfEmpty } from './sgp-contact-document';
 
 export type NexusTemplateDelivery = {
   instanceName?: string;
@@ -96,7 +99,7 @@ function resumeValue(input: NodeRuntimeInput): unknown {
 function resolveChoice(value: unknown, choices: NexusPlatformChoice[]): string | null {
   const normalized = normalizeChoice(value);
   if (!normalized) return null;
-  const numericIndex = Number.parseInt(normalized, 10) - 1;
+  const numericIndex = /^\d+$/.test(normalized) ? Number(normalized) - 1 : -1;
   return choices.find((choice, index) => (
     normalizeChoice(choice.id) === normalized
     || normalizeChoice(choice.label) === normalized
@@ -327,7 +330,8 @@ async function executeContractStatus(
   input: NodeRuntimeInput,
   delivery: NexusPlatformActionDelivery,
 ): Promise<NodeExecutionResult> {
-  let state = readState(input);
+  const resumedState = readState(input);
+  let state = resumedState;
   if (!state) {
     const panel = await loadPanel(input);
     const contracts = eligibleContracts(panel.contracts);
@@ -338,7 +342,9 @@ async function executeContractStatus(
   let selectedContractId = String(state.selectedContractId || '');
   if (!selectedContractId && contracts.length === 1) selectedContractId = contracts[0]!.id;
   if (!selectedContractId) {
-    const answer = resumeValue(input);
+    // An initial resume value can belong to the input node that supplied the
+    // CPF/CNPJ. Only consume it after this action has persisted a waiting state.
+    const answer = resumedState ? resumeValue(input) : undefined;
     if (answer !== undefined) selectedContractId = resolveChoice(answer, contractChoices(contracts)) || '';
     if (!selectedContractId) {
       return waitForChoice(input, delivery, 'Por favor, informe o contrato:', contractChoices(contracts), state, answer !== undefined);
@@ -417,18 +423,38 @@ async function executeSecondCopy(
   input: NodeRuntimeInput,
   delivery: NexusPlatformActionDelivery,
 ): Promise<NodeExecutionResult> {
-  let state = readState(input);
+  const resumedState = readState(input);
+  let state = resumedState;
   if (!state) {
     const panel = await loadPanel(input);
+    const document = renderTemplate(String(input.node.config.cpfCnpj || ''), source(input)).trim();
+    // Persist only an explicitly supplied, valid document confirmed by this SGP lookup.
+    // A customer without open invoices can still be identified successfully.
+    if (isValidBrazilianDocument(document) && asRecords(panel.contracts).some((contract) => Boolean(contract.id))) {
+      await saveSgpContactDocumentIfEmpty({
+        workspaceId: input.workflow.workspaceId!,
+        chatId: input.execution.conversationId!,
+        document,
+      });
+    }
     const contracts = eligibleContracts(panel.contracts);
     if (contracts.length === 0) return actionError('Nenhum contrato ativo ou suspenso foi encontrado para este cliente.', 'SGP_CONTRACT_NOT_FOUND');
     state = { stage: 'contract', contracts, invoices: asRecords(panel.invoices) };
   }
   const contracts = asRecords(state.contracts).map((contract) => contract as SgpContract);
   const allInvoices = asRecords(state.invoices).map((invoice) => invoice as SgpInvoice);
-  let answer = resumeValue(input);
+  // Do not treat the CPF/CNPJ collected by the preceding node as an answer to
+  // this action's contract or invoice prompts.
+  let answer = resumedState ? resumeValue(input) : undefined;
   let selectedContractId = String(state.selectedContractId || '');
-  if (!selectedContractId && contracts.length === 1) selectedContractId = contracts[0]!.id;
+  if (!selectedContractId && contracts.length === 1) {
+    selectedContractId = contracts[0]!.id;
+    // The resume value belongs to the previous input node (usually the CPF/CNPJ).
+    // Once the only contract is selected automatically, it must not be reused as
+    // a numeric invoice choice (for example, CPF 004... selecting option 4).
+    answer = undefined;
+    state = { ...state, stage: 'invoice', selectedContractId };
+  }
   if (!selectedContractId) {
     if (answer !== undefined) selectedContractId = resolveChoice(answer, contractChoices(contracts)) || '';
     if (!selectedContractId) return waitForChoice(input, delivery, 'Por favor, informe o contrato:', contractChoices(contracts), state, answer !== undefined);
@@ -516,7 +542,8 @@ async function executePaymentPromise(
   input: NodeRuntimeInput,
   delivery: NexusPlatformActionDelivery,
 ): Promise<NodeExecutionResult> {
-  let state = readState(input);
+  const resumedState = readState(input);
+  let state = resumedState;
   if (!state) {
     const panel = await loadPanel(input);
     const contracts = eligibleContracts(panel.contracts);
@@ -527,7 +554,7 @@ async function executePaymentPromise(
   let selectedContractId = String(state.selectedContractId || '');
   if (!selectedContractId && contracts.length === 1) selectedContractId = contracts[0]!.id;
   if (!selectedContractId) {
-    const answer = resumeValue(input);
+    const answer = resumedState ? resumeValue(input) : undefined;
     if (answer !== undefined) selectedContractId = resolveChoice(answer, contractChoices(contracts)) || '';
     if (!selectedContractId) return waitForChoice(input, delivery, 'Por favor, informe o contrato:', contractChoices(contracts), state, answer !== undefined);
   }
@@ -577,6 +604,7 @@ export async function executeNexusPlatformAction(
   delivery: NexusPlatformActionDelivery,
 ): Promise<NodeExecutionResult> {
   try {
+    if (input.node.type === 'dialogy.sgp_identify_customer') return await executeSgpIdentification(input, delivery);
     if (input.node.type === 'dialogy.team_availability') return await executeTeamAvailability(input);
     if (input.node.type === 'dialogy.chat_tag') return await executeChatTag(input);
     if (input.node.type === 'dialogy.sgp_contract_status') return await executeContractStatus(input, delivery);

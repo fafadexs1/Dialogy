@@ -185,7 +185,7 @@ services:
   # as uid 1001, so initialise the shared Hugging Face/ONNX cache before either
   # process can load a local embedding or reranking model.
   ai-cache-init:
-    image: fafadexs/dialogy-worker-ai:PDC-1.70
+    image: fafadexs/dialogy-worker-ai:PDC-1.94
     restart: "no"
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
@@ -198,7 +198,7 @@ services:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
 
   dialogy:
-    image: fafadexs/dialogy:PDC-1.70
+    image: fafadexs/dialogy:PDC-1.94
     restart: unless-stopped
     init: true
     depends_on:
@@ -230,7 +230,7 @@ services:
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PDC-1.70
+    image: fafadexs/dialogy-worker:PDC-1.94
     restart: unless-stopped
     init: true
     depends_on:
@@ -246,7 +246,7 @@ services:
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PDC-1.70
+    image: fafadexs/dialogy-worker-ai:PDC-1.94
     restart: unless-stopped
     init: true
     depends_on:
@@ -264,7 +264,7 @@ services:
     stop_grace_period: 30s
 
   worker-campaign:
-    image: fafadexs/dialogy-worker:PDC-1.70
+    image: fafadexs/dialogy-worker:PDC-1.94
     command: ["node", "dist/worker-campaign.js"]
     restart: unless-stopped
     init: true
@@ -279,7 +279,7 @@ services:
     stop_grace_period: 30s
 
   worker-meta-relay:
-    image: fafadexs/dialogy-worker:PDC-1.70
+    image: fafadexs/dialogy-worker:PDC-1.94
     command: ["node", "dist/worker-meta-relay.js"]
     restart: unless-stopped
     init: true
@@ -294,7 +294,7 @@ services:
     stop_grace_period: 30s
 
   worker-google-ads:
-    image: fafadexs/dialogy-worker:PDC-1.70
+    image: fafadexs/dialogy-worker:PDC-1.94
     command: ["node", "dist/worker-google-ads.js"]
     restart: unless-stopped
     init: true
@@ -312,7 +312,7 @@ services:
   # executa somente os gatilhos agendados e publica saude/metricas operacionais;
   # mensagens e webhooks seguem no runtime principal, sem consumo duplicado.
   dialogy-nexus:
-    image: fafadexs/dialogy-worker:PDC-1.70
+    image: fafadexs/dialogy-worker:PDC-1.94
     command: ["node", "dist/worker-nexus.js"]
     restart: unless-stopped
     init: true

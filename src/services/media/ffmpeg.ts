@@ -25,7 +25,7 @@ export async function runFfmpeg(input: {
 }): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
-      resolveFfmpegPath(),
+      /*turbopackIgnore: true*/ resolveFfmpegPath(),
       [
         '-hide_banner',
         '-loglevel',

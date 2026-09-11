@@ -67,6 +67,7 @@ delivery-app
 mobile
 
 # local artifacts
+artifacts/reasoning-v2
 *.bak
 *.log
 *.sqlite

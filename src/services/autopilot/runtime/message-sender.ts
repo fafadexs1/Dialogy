@@ -64,8 +64,10 @@ async function sendGuardedAutomatedMessage(input: {
   isSystemAgent: boolean;
   instanceName?: string;
   metadata?: MessageMetadata;
+  preserveFormatting?: boolean;
 }) {
-  const message = await guardAutomatedMessage(input.chatId, input.message);
+  // Studio owns its conversational guards. Transport must not rewrite its content.
+  const message = input.preserveFormatting ? input.message : await guardAutomatedMessage(input.chatId, input.message);
   if (!message) {
     throw new Error(
       `Resposta automatizada suprimida pelo guard de repeticao para o chat ${input.chatId}.`,
@@ -101,6 +103,7 @@ export async function sendMultiBlockResponse(
   instanceName?: string,
   aiMessageBlocks?: string[] | null,
   responseTrace?: AutopilotResponseTrace,
+  options?: { preserveFormatting?: boolean },
 ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
   await assertAutopilotSourceMessageCurrent({
     chatId,
@@ -109,13 +112,13 @@ export async function sendMultiBlockResponse(
 
   const sourceBlocks = (aiMessageBlocks && aiMessageBlocks.length >= 1)
     ? aiMessageBlocks
-    : splitIntoMessageBlocks(formattedResponse);
+    : options?.preserveFormatting ? [formattedResponse] : splitIntoMessageBlocks(formattedResponse);
   let blocks = sourceBlocks
-    .map((block) => formatCustomerFacingAiResponse(block))
+    .map((block) => options?.preserveFormatting ? block : formatCustomerFacingAiResponse(block))
     .filter((block) => block.trim() !== '');
 
   if (blocks.length === 0) {
-    blocks = [formatCustomerFacingAiResponse(formattedResponse)];
+    blocks = [options?.preserveFormatting ? formattedResponse : formatCustomerFacingAiResponse(formattedResponse)];
   }
 
   const delivery = responseTrace
@@ -181,6 +184,7 @@ export async function sendMultiBlockResponse(
           isSystemAgent,
           instanceName,
           metadata: deliveryMetadata,
+          preserveFormatting: options?.preserveFormatting,
         }),
         chatId,
       );

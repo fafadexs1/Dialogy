@@ -4,12 +4,13 @@ import { redirect } from 'next/navigation';
 import { getProductUpdatesFeed } from '@/actions/product-updates';
 import { CommunityFeed } from '@/components/community/community-feed';
 import { getCommunityPostsFeed } from '@/lib/community-feed-server';
+import { db } from '@/lib/db';
 import type { ProductUpdateFeedItem } from '@/lib/product-updates';
 import { createClient } from '@/lib/supabase/server';
 
 export const metadata: Metadata = {
-  title: 'Comunidade | Dialogy',
-  description: 'Converse, compartilhe ideias e acompanhe as atualizações oficiais da Dialogy.',
+  title: 'Comunidade & Novidades | Dialogy',
+  description: 'Conecte-se com a comunidade, descubra tendências e acompanhe atualizações oficiais da Dialogy.',
 };
 
 export default async function CommunityPage() {
@@ -19,11 +20,15 @@ export default async function CommunityPage() {
 
   let updates: ProductUpdateFeedItem[] = [];
   let unavailable = false;
+  let isSuperAdmin = false;
+
   try {
-    const [officialUpdates, communityPosts] = await Promise.all([
+    const [officialUpdates, communityPosts, userDb] = await Promise.all([
       getProductUpdatesFeed(user.id),
       getCommunityPostsFeed(user.id),
+      db.query('SELECT is_superadmin FROM public.users WHERE id = $1', [user.id]),
     ]);
+    isSuperAdmin = userDb.rows[0]?.is_superadmin === true;
     updates = [...officialUpdates, ...communityPosts]
       .sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
   } catch (error) {
@@ -31,5 +36,5 @@ export default async function CommunityPage() {
     unavailable = true;
   }
 
-  return <CommunityFeed initialItems={updates} unavailable={unavailable} />;
+  return <CommunityFeed initialItems={updates} unavailable={unavailable} isSuperAdmin={isSuperAdmin} />;
 }

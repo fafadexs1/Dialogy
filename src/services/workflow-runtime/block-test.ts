@@ -135,6 +135,8 @@ export function createWorkflowBlockTestSideEffectAdapters(): {
       executePlatformAction: async (runtimeInput) => {
         const selectedOutput = runtimeInput.node.type === 'dialogy.team_availability'
           ? 'open'
+          : runtimeInput.node.type === 'dialogy.sgp_identify_customer'
+          ? 'selected'
           : runtimeInput.node.type === 'dialogy.sgp_contract_status'
           ? 'active'
           : runtimeInput.node.type === 'dialogy.sgp_payment_promise'

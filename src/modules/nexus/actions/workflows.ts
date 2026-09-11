@@ -9,6 +9,7 @@ import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { loadStudioRelease } from '@/services/agent-studio/repository';
 import { validateStudioFlowBindings } from '@/services/agent-studio/flow-inputs';
 import type { PoolClient } from 'pg';
+import { assertNexusGoogleAdsBinding, loadNexusGoogleAdsOptions } from '../services/google-ads-lead';
 import { createClient } from '@/lib/supabase/server';
 import type { AutopilotConfig } from '@/lib/types';
 import type { KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
@@ -348,7 +349,7 @@ export async function generateNexusWorkflowWithAi(input: {
           'Aplique exatamente o pedido do usuário ao workflow atual e preserve tudo que não foi solicitado.',
           'Use somente tipos, portas, IDs de recursos e configurações presentes no contexto.',
           'Nunca use ai.agent. Para atendimento autônomo, use ai.published_agent com uma versão publicada do Studio.',
-          'ai.published_agent é terminal: recebe somente uma entrada main, não possui saídas e decide finalizar ou transferir conforme o Studio.',
+          'ai.published_agent é terminal: recebe somente uma entrada main, não possui saídas e transfere o atendimento ao Atendente Inteligente vinculado ao agente publicado.',
           'Nunca invente credenciais, IDs, resultados de ferramentas ou segredos. Mantenha posições legíveis e conexões válidas.',
           'Retorne o workflow completo, um resumo objetivo e a lista concreta de alterações.',
           `O orçamento calculado para esta resposta é ${fullEditOutputTokens} tokens; use apenas o necessário para representar o fluxo resultante.`,
@@ -451,6 +452,7 @@ function rowSummary(row: NexusWorkflowRow): NexusWorkflowSummary {
     status: row.status as NexusWorkflowSummary['status'],
     nodeCount: definition.nodes.length,
     triggerTypes: definition.nodes.filter((node) => node.type.startsWith('trigger.')).map((node) => node.type),
+    category: definition.nodes.some((node) => node.type === 'trigger.internal_event' && node.config.crmOption !== undefined) ? 'crm_trigger' : 'workflow',
     publishedRevision: Number(row.published_revision || 0),
     publishedAt: row.published_at ? iso(row.published_at) : null,
     createdAt: iso(row.created_at),
@@ -551,11 +553,35 @@ export async function getNexusWorkflow(workspaceId: string, workflowId: string):
   }
 }
 
+export async function getNexusCrmOptionFields(workspaceId: string) {
+  await requireWorkspaceManager(workspaceId);
+  const result = await db.query('SELECT id, label, options FROM custom_field_definitions WHERE workspace_id = $1 AND type = $2 ORDER BY label', [workspaceId, 'select']);
+  return result.rows.map((row) => ({ id: String(row.id), label: String(row.label), options: parseJson(row.options) as Array<{ value: string; label: string }> }));
+}
+
+export async function getNexusGoogleAdsOptions(workspaceId: string) {
+  await requireWorkspaceManager(workspaceId);
+  return loadNexusGoogleAdsOptions(workspaceId);
+}
+
+async function validateCrmOptionBindings(workspaceId: string, definition: WorkflowDefinition) {
+  for (const node of definition.nodes) {
+    if (node.type !== 'trigger.internal_event' || node.config.crmOption === undefined) continue;
+    const condition = z.object({ fieldId: z.string().uuid(), value: z.string().min(1) }).parse(node.config.crmOption);
+    const result = await db.query('SELECT options FROM custom_field_definitions WHERE workspace_id = $1 AND id = $2 AND type = $3', [workspaceId, condition.fieldId, 'select']);
+    const options = parseJson(result.rows[0]?.options);
+    if (!Array.isArray(options) || !options.some((option) => option.value === condition.value)) {
+      throw new Error('Selecione um campo e uma opção disponíveis nesta workspace.');
+    }
+  }
+}
+
 export async function createNexusWorkflow(input: {
   workspaceId: string;
   name: string;
   description?: string;
   template?: NexusWorkflowTemplate;
+  crmOption?: { fieldId: string; value: string };
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   const client = await db.connect();
   try {
@@ -567,7 +593,9 @@ export async function createNexusWorkflow(input: {
       workspaceId: input.workspaceId,
       name,
       template: input.template || 'blank',
+      crmOption: input.crmOption,
     });
+    await validateCrmOptionBindings(input.workspaceId, definition);
     await client.query('BEGIN');
     await client.query(
       `INSERT INTO public.nexus_workflows
@@ -908,6 +936,10 @@ export async function publishNexusWorkflow(input: {
     if (!validation.valid) {
       return { success: false, error: validation.errors.map((issue) => issue.message).join(' ') };
     }
+    await validateCrmOptionBindings(input.workspaceId, draft);
+    for (const node of draft.nodes.filter((item) => item.type === 'integration.google_ads_lead')) {
+      await assertNexusGoogleAdsBinding(input.workspaceId, node.config);
+    }
     for (const node of draft.nodes.filter((item) => item.type === 'ai.published_agent')) {
       const release = await loadStudioRelease(input.workspaceId, String(node.config.agentId || ''), String(node.config.releaseId || ''));
       if (!release) throw new Error(`O bloco “${node.name}” não possui uma versão disponível neste workspace.`);
@@ -1001,7 +1033,33 @@ export async function publishNexusWorkflow(input: {
       source: 'publish',
       publishedRevision: revision,
     });
+    const supersededExecutions = await client.query(
+      `SELECT id
+       FROM public.workflow_executions
+       WHERE workspace_id = $1
+         AND workflow_id = $2
+         AND workflow_version <> $3
+         AND status IN ('queued', 'running', 'waiting')`,
+      [input.workspaceId, published.id, published.version],
+    );
     await client.query('COMMIT');
+    const cancellationResults = await Promise.allSettled(
+      (supersededExecutions.rows as Array<{ id: string }>).map((execution) => (
+        cancelPublishedNexusWorkflowExecution({
+          workspaceId: input.workspaceId,
+          executionId: String(execution.id),
+          reason: `Execução substituída pela publicação ${published.version}.`,
+        })
+      )),
+    );
+    const cancellationFailures = cancellationResults.filter((result) => result.status === 'rejected');
+    if (cancellationFailures.length > 0) {
+      console.warn('[NEXUS_PUBLISH] Some superseded executions could not be cancelled.', {
+        workflowId: published.id,
+        publishedVersion: published.version,
+        failed: cancellationFailures.length,
+      });
+    }
     revalidatePath('/nexus');
     revalidatePath(`/nexus/flows/${input.workflowId}`);
     return { success: true, revision };

@@ -32,6 +32,16 @@ beforeEach(() => {
   mocks.run.mockResolvedValue({ state: { ...createStudioSession('agent', 'release', 'session'), status: 'waiting_input' }, response: 'Qual seu CPF?' });
 });
 describe('published Studio agent in an unchanged normal workflow', () => {
+  it('supplies customer-visible history in the same runtime call as Studio', async () => {
+    mocks.query.mockImplementation(async (sql: string) => ({ rows: sql.includes('FROM messages m')
+      ? [{ content: 'Prefiro atendimento à tarde.', from_me: false }, { content: 'Qual opção?', from_me: true }] : [{ id: 'contact' }] }));
+    await executePublishedStudioNode(input(), effects());
+    expect(mocks.run.mock.calls[0][0].chatHistory).toBe('Cliente: Prefiro atendimento à tarde.\nAgente: Qual opção?');
+    const query = mocks.query.mock.calls.find(([sql]) => sql.includes('FROM messages m'))!;
+    expect(query[1]).toEqual(['workspace', 'chat', 'message-1']);
+    expect(query[0]).toContain('isInternalNote'); expect(query[0]).toContain('(m.created_at,m.id)<(source.created_at,source.id)');
+    expect(query[0]).toContain('c.workspace_id=$1'); expect(query[0]).toContain('LIMIT 80');
+  });
   it('rejects undeclared outputs before running the agent or loading customer data', async () => {
     const request = input(); request.node.config.outputKeys = ['secret'];
     expect((await executePublishedStudioNode(request, effects())).status).toBe('error');

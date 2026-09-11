@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { listModelCallableAgentToolDefinitions } from '@/services/agent-tools/catalog';
+import { StudioCollectionPlanSchema, studioCollectionPlanJsonSchema } from '@/services/agent-studio/collection-planner';
 
 export const LM_STUDIO_MODEL_PREFIX = 'lmstudio/';
 export const LM_STUDIO_CONFIG_KEY = 'lm_studio_config';
@@ -10,7 +11,7 @@ export type LmStudioConfig = {
   apiToken: string;
 };
 
-export type LmStudioOutputKind = 'agent' | 'procedure';
+export type LmStudioOutputKind = 'agent' | 'procedure' | 'collection_plan';
 
 function getActionSchema() {
   return {
@@ -29,6 +30,7 @@ function getActionSchema() {
 }
 
 function getLmStudioResponseSchema(outputKind: LmStudioOutputKind) {
+  if (outputKind === 'collection_plan') return studioCollectionPlanJsonSchema;
   if (outputKind === 'procedure') {
     return {
       type: 'object',
@@ -67,6 +69,7 @@ const lmStudioActionZodSchema = z.object({
 });
 
 export function getLmStudioZodSchema(outputKind: LmStudioOutputKind) {
+  if (outputKind === 'collection_plan') return z.object({ collectionPlan: StudioCollectionPlanSchema });
   if (outputKind === 'procedure') {
     return z.object({
       decision: z.string().optional().nullable(),

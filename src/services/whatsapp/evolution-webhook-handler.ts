@@ -1542,8 +1542,8 @@ async function handleMessagesUpsert(payload: any) {
     // A Evolution entrega a midia do MinIO como URL assinada de 7 dias
     // (`presignedGetObject` sem prazo explicito). Guardar a assinatura junto faz
     // a midia "expirar" com o arquivo intacto no bucket, entao gravamos so o
-    // caminho do objeto — que e de leitura publica e nao vence.
-    const mediaUrl = normalizeStoredMediaUrl(sanitizeUrl(message.mediaUrl)) || null;
+    const rawMediaUrl = sanitizeUrl(message.mediaUrl) || null;
+    const mediaUrl = normalizeStoredMediaUrl(rawMediaUrl) || null;
     console.log('[WEBHOOK_MSG_UPSERT] Message Object Keys:', Object.keys(message));
     console.log('[WEBHOOK_MSG_UPSERT] Extracted mediaUrl:', mediaUrl);
     console.log('[WEBHOOK_MSG_UPSERT] Message Type:', messageType);
@@ -1614,8 +1614,12 @@ async function handleMessagesUpsert(payload: any) {
         ? `https://www.google.com/maps?q=${latitude},${longitude}`
         : undefined;
 
+    const base64Content = (mediaDetails as any)?.base64 || (message as any)?.base64 || undefined;
     let metadata: MessageMetadata = {
         mediaUrl: mediaUrl || undefined,
+        signedMediaUrl: rawMediaUrl || undefined,
+        originalMediaUrl: rawMediaUrl || undefined,
+        base64: base64Content,
         mimetype: normalizedMime || mimetype,
         fileName,
         duration: mediaDetails?.seconds,

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { ensureWorkspaceIntegrationsTable } from '@/lib/workspace-integrations';
-import type { AiModelCatalogEntry } from '@/lib/ai-models';
+import { resolveConfiguredAiModel, type AiModelCatalogEntry } from '@/lib/ai-models';
 import {
   AI_CREDENTIAL_PROVIDERS,
   formatAiCredentialModelLabel,
@@ -116,5 +116,5 @@ export async function isWorkspaceConfiguredAiModel(
   const normalized = clean(model);
   if (!workspaceId || !normalized) return false;
   const models = await listWorkspaceConfiguredAiModels(workspaceId);
-  return models.some((entry) => entry.id === normalized);
+  return Boolean(resolveConfiguredAiModel(normalized, models));
 }

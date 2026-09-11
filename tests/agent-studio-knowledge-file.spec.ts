@@ -17,4 +17,11 @@ describe('Studio knowledge file ingestion', () => {
     await expect(extractStudioKnowledgeFile(new File([new Uint8Array([0xff, 0xfe])], 'invalido.txt'))).rejects.toThrow('UTF-8');
     await expect(extractStudioKnowledgeFile(new File(['não é pdf'], 'falso.pdf'))).rejects.toThrow('assinatura PDF');
   });
+
+  it('cleans and normalizes noisy text with hyphenated linebreaks and extra spaces', async () => {
+    const { cleanDocumentText } = await import('@/services/agent-studio/knowledge-file');
+    const dirty = 'Este ser-\nviço possui   horário\n\n\n\ncomercial.';
+    const cleaned = cleanDocumentText(dirty);
+    expect(cleaned).toBe('Este serviço possui horário\n\ncomercial.');
+  });
 });

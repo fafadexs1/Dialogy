@@ -2080,6 +2080,11 @@ export default function ChatPanel({
     // over, the AI answers the customer directly and there is nothing to suggest.
     const isCopilotActive = isAiAgentActive && !chat.assigned_system_agent_id;
     const selectedInboxAiAgent = inboxAiAgents.find(agent => agent.id === selectedAutopilotAgentId) || null;
+    const composerAiAgents = availableAutopilotAgents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        avatarUrl: inboxAiAgents.find((inboxAgent) => inboxAgent.id === agent.id)?.systemAgentAvatarUrl || null,
+    }));
     const copilotAgentName = selectedInboxAiAgent?.name || selectedAutopilotAgent?.name || 'IA Dialogy';
     const copilotAgentAvatarUrl = selectedInboxAiAgent?.systemAgentAvatarUrl || null;
     const canAiTakeOverConversation = Boolean(selectedInboxAiAgent?.canTakeOverConversation);
@@ -2772,7 +2777,7 @@ export default function ChatPanel({
 
                                             <ComposerAiMenu
                                                 key={chat.id}
-                                                agents={availableAutopilotAgents}
+                                                agents={composerAiAgents}
                                                 selectedId={selectedAutopilotAgent?.id}
                                                 active={isCopilotActive}
                                                 busy={isAiTyping || isRequestingSuggestion || isTakingOverWithAi}

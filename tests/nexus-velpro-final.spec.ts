@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { createNexusToolRegistry } from '@/modules/nexus/services/tool-registry';
+import { upgradeVelproIdentification } from '@/modules/nexus/services/velpro-identification-upgrade';
+import { validateWorkflowDefinition } from '@/services/workflow-runtime/validator';
 import {
   buildVelproFinalWorkflow,
   VELPRO_DISCORD_CHANNEL_ID,
@@ -166,6 +168,22 @@ class VelproSequenceModelAdapter implements ModelAdapter {
 }
 
 describe('Fluxo Velpro Final nativo', () => {
+  it('upgrades the edited flow, preserves support and isolates address transfer', () => {
+    const { workflow } = buildVelproFinalWorkflow({ rawLegacyFlow: legacyVelproFixture(), bindings });
+    workflow.nodes.find(n => n.id === 'velpro_commercial_message')!.config.message = 'Texto editado pelo usuário';
+    const before = structuredClone(workflow);
+    const upgraded = upgradeVelproIdentification(workflow);
+    expect(validateWorkflowDefinition(upgraded)).toEqual({ valid: true, errors: [], warnings: [] });
+    expect(workflow).toEqual(before);
+    expect(upgradeVelproIdentification(upgraded)).toEqual(upgraded);
+    expect(upgraded.nodes.find(n => n.id === 'velpro_commercial_message')!.config.message).toBe('Texto editado pelo usuário');
+    expect(upgraded.connections.find(e => e.sourceNodeId === 'velpro_main_menu' && e.sourcePortId === 'address_transfer')!.targetNodeId).toBe('velpro_address_identify');
+    expect(upgraded.connections.filter(e => e.sourceNodeId.startsWith('velpro_support') && before.connections.some(old => old.id === e.id))).toEqual(before.connections.filter(e => e.sourceNodeId.startsWith('velpro_support')));
+    expect(upgraded.nodes.find(n => n.id === 'velpro_address_handoff')!.config.reason).toContain('{{novo_endereco}}');
+    expect(upgraded.nodes.find(n => n.id === 'velpro_finance_handoff')!.config.reason).toContain('{{sgpIdentification.summary}}');
+    expect(upgraded.nodes.find(n => n.id === 'velpro_finance_identify')!.config.allowNewCustomer).toBe(false);
+    expect(upgraded.nodes.find(n => n.id === 'velpro_commercial_identify')!.config.allowNewCustomer).toBe(true);
+  });
   it('reconstrói toda a jornada em blocos Dialogy validados e sem segredos legados', () => {
     const result = buildVelproFinalWorkflow({
       rawLegacyFlow: legacyVelproFixture(),

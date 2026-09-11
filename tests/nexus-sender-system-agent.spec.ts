@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   sendAgentListAction: vi.fn(),
   sendAgentButtonsAction: vi.fn(),
   transferChatToIntelligentAgentAction: vi.fn(),
+  transferChatAction: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({ db: { query: mocks.dbQuery } }));
@@ -18,7 +19,7 @@ vi.mock('@/actions/messages', () => ({
 }));
 vi.mock('@/actions/chats', () => ({
   closeChatAction: vi.fn(),
-  transferChatAction: vi.fn(),
+  transferChatAction: mocks.transferChatAction,
   transferChatToIntelligentAgentAction: mocks.transferChatToIntelligentAgentAction,
 }));
 vi.mock('@/lib/security/trusted-server-context', () => ({
@@ -27,10 +28,9 @@ vi.mock('@/lib/security/trusted-server-context', () => ({
 vi.mock('@/lib/whatsapp/evolution-api-client', () => ({ fetchEvolutionAPI: vi.fn() }));
 vi.mock('@/lib/whatsapp/evolution-config', () => ({ getEvolutionApiConfig: vi.fn() }));
 vi.mock('@/services/autopilot/automation-rules', () => ({ resolveSafeAutopilotWebhookTarget: vi.fn() }));
-
 import { createNexusChatAdapters, resolveNexusSenderSystemAgent } from '@/modules/nexus/services/chat-adapters';
 import type { NodeRuntimeInput } from '@/services/workflow-runtime';
-import { linearWorkflow } from './workflow-runtime-fixtures';
+import { linearWorkflow, workflowNode } from './workflow-runtime-fixtures';
 
 function runtimeInput(senderSystemAgentId?: string): NodeRuntimeInput {
   const workflow = linearWorkflow();
@@ -52,6 +52,23 @@ describe('Nexus system-agent sender attribution', () => {
     mocks.sendAgentListAction.mockReset().mockResolvedValue({ success: true, providerAccepted: true });
     mocks.sendAgentButtonsAction.mockReset().mockResolvedValue({ success: true, providerAccepted: true });
     mocks.transferChatToIntelligentAgentAction.mockReset().mockResolvedValue({ success: true });
+    mocks.transferChatAction.mockReset().mockResolvedValue({ success: true });
+  });
+
+  it('passes the selected contract and new address as an internal transfer summary', async () => {
+    mocks.dbQuery.mockResolvedValue({ rows: [{ id: 'sender-1', name: 'Velpro' }] });
+    const adapters = await createNexusChatAdapters({ workspaceId: 'workspace-1', chatId: 'chat-1' });
+    const input = runtimeInput('sender-1');
+    input.node = workflowNode('output.handoff', 'address-handoff', {
+      teamId: 'commercial', persistReason: true,
+      reason: 'Transferência de endereço. {{sgpIdentification.summary}}. Novo endereço: {{novo_endereco}}',
+    });
+    input.execution.variables = { sgpIdentification: { summary: 'Contrato 123 — endereço atual' }, novo_endereco: 'Rua Nova, 10' };
+    await adapters.handoff!(input);
+    expect(mocks.transferChatAction).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'chat-1', teamId: 'commercial', handoffSummary: 'Transferência de endereço. Contrato 123 — endereço atual. Novo endereço: Rua Nova, 10',
+    }), expect.anything());
+    expect(mocks.sendAutomatedMessageAction).not.toHaveBeenCalled();
   });
 
   it('sends every response as the system agent stored in the workflow version', async () => {
@@ -160,6 +177,33 @@ describe('Nexus system-agent sender attribution', () => {
     expect(mocks.sendAutomatedMessageAction).not.toHaveBeenCalled();
   });
 
+  it('uses a complete numbered fallback instead of truncating dynamic choices above the WhatsApp limit', async () => {
+    mocks.dbQuery.mockResolvedValue({ rows: [{ id: 'sender-1', name: 'Velpro' }] });
+    const adapters = await createNexusChatAdapters({
+      workspaceId: 'workspace-1',
+      chatId: 'chat-1',
+      instanceName: 'zap1',
+    });
+    const input = runtimeInput('sender-1');
+    input.node = { id: 'sgp-second-copy', type: 'dialogy.sgp_second_copy', config: {} } as NodeRuntimeInput['node'];
+    const choices = Array.from({ length: 11 }, (_, index) => ({
+      id: `invoice-${index + 1}`,
+      label: `${String(index + 1).padStart(2, '0')}/2026 - R$ 99,90`,
+    }));
+
+    await adapters.sendOptions!({ title: 'Qual fatura você deseja pagar?', choices }, input);
+
+    expect(mocks.sendAgentListAction).not.toHaveBeenCalled();
+    expect(mocks.sendAutomatedMessageAction).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('11. 11/2026 - R$ 99,90'),
+      'sender-1',
+      true,
+      'zap1',
+      expect.objectContaining({ nexusNodeId: 'sgp-second-copy' }),
+    );
+  });
+
   it('refuses to create a hidden fallback when the flow has no selected sender', async () => {
     const adapters = await createNexusChatAdapters({ workspaceId: 'workspace-1', chatId: 'chat-1' });
 
@@ -219,6 +263,89 @@ describe('Nexus system-agent sender attribution', () => {
     const adapters = await createNexusChatAdapters({ workspaceId: 'workspace-1', chatId: 'chat-1' });
 
     await expect(adapters.executeLinkedAgent!(runtimeInput('sender-1'))).resolves.toMatchObject({ handled: false });
+    expect(mocks.transferChatToIntelligentAgentAction).not.toHaveBeenCalled();
+  });
+
+  it('ends the Nexus execution by transferring ownership to the published Studio agent', async () => {
+    mocks.dbQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM public.system_agents agent')) {
+        return { rows: [{
+          id: 'ai-sender-1',
+          name: 'Raquel',
+          type: 'intelligent_attendant',
+          autopilot_config_id: '11111111-1111-4111-8111-111111111111',
+          autopilot_is_active: true,
+        }] };
+      }
+      if (sql.includes('FROM public.chats')) {
+        return { rows: [{
+          assigned_system_agent_id: null,
+          agent_id: null,
+          status: 'gerais',
+          is_autopilot_active: false,
+          autopilot_config_id: null,
+        }] };
+      }
+      return { rows: [] };
+    });
+    const adapters = await createNexusChatAdapters({
+      workspaceId: 'workspace-1',
+      chatId: 'chat-1',
+      instanceName: 'zap1',
+    });
+    const input = runtimeInput('ai-sender-1');
+    input.node = {
+      id: 'published-agent-1',
+      type: 'ai.published_agent',
+      config: { agentId: '11111111-1111-4111-8111-111111111111', releaseId: 'release-1' },
+    } as unknown as NodeRuntimeInput['node'];
+
+    await expect(adapters.executePublishedAgent!(input)).resolves.toMatchObject({
+      status: 'completed',
+      output: {
+        delegated: true,
+        transferred: true,
+        systemAgentId: 'ai-sender-1',
+        autopilotConfigId: '11111111-1111-4111-8111-111111111111',
+      },
+    });
+
+    expect(mocks.transferChatToIntelligentAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 'chat-1',
+        systemAgentId: 'ai-sender-1',
+        nexusEventContext: expect.objectContaining({ causedByNodeId: 'published-agent-1' }),
+      }),
+      expect.objectContaining({ isSystemAgent: true, user: { id: 'ai-sender-1', name: 'Raquel' } }),
+    );
+    expect(mocks.sendAutomatedMessageAction).not.toHaveBeenCalled();
+  });
+
+  it('does not create another transfer when the Studio agent already owns the chat', async () => {
+    mocks.dbQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM public.system_agents agent')) {
+        return { rows: [{
+          id: 'ai-sender-1', name: 'Raquel', type: 'intelligent_attendant',
+          autopilot_config_id: '11111111-1111-4111-8111-111111111111', autopilot_is_active: true,
+        }] };
+      }
+      return { rows: [{
+        assigned_system_agent_id: 'ai-sender-1', agent_id: null, status: 'atendimentos',
+        is_autopilot_active: true, autopilot_config_id: '11111111-1111-4111-8111-111111111111',
+      }] };
+    });
+    const adapters = await createNexusChatAdapters({ workspaceId: 'workspace-1', chatId: 'chat-1' });
+    const input = runtimeInput('ai-sender-1');
+    input.node = {
+      id: 'published-agent-1', type: 'ai.published_agent',
+      config: { agentId: '11111111-1111-4111-8111-111111111111', releaseId: 'release-1' },
+    } as unknown as NodeRuntimeInput['node'];
+
+    await expect(adapters.executePublishedAgent!(input)).resolves.toMatchObject({
+      status: 'completed',
+      output: { delegated: true, transferred: false, systemAgentId: 'ai-sender-1' },
+    });
+
     expect(mocks.transferChatToIntelligentAgentAction).not.toHaveBeenCalled();
   });
 });

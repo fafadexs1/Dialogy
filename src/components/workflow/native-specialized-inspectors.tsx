@@ -18,6 +18,9 @@ import {
 } from '@/components/workflow/native-model-selection';
 import type { KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { CrmOptionFields } from '@/modules/nexus/components/crm-option-fields';
+import { GoogleAdsLeadFields } from '@/modules/nexus/components/google-ads-lead-fields';
+import type { CrmOptionCondition } from '@/modules/nexus/services/crm-option-trigger';
 import type { NativeAgentToolCatalogItem } from '@/services/workflow-runtime/native-agent-tools';
 
 export const SPECIALIZED_WORKFLOW_INSPECTOR_TYPES = new Set([
@@ -52,10 +55,12 @@ export const SPECIALIZED_WORKFLOW_INSPECTOR_TYPES = new Set([
   'integration.mcp_call',
   'integration.email',
   'integration.google_sheets_append',
+  'integration.google_ads_lead',
   'integration.database',
   'dialogy.crm_update',
   'dialogy.team_availability',
   'dialogy.chat_tag',
+  'dialogy.sgp_identify_customer',
   'dialogy.sgp_contract_status',
   'dialogy.sgp_second_copy',
   'dialogy.sgp_payment_promise',
@@ -596,7 +601,7 @@ function TriggerInspector({ node, onUpdate, instanceOptions = [], editorMode = '
         value={node.config.instanceNames}
         onChange={(value) => config('instanceNames', value)}
         options={instanceOptions}
-        description="Sem seleção, aceita qualquer instância do workspace."
+        description="A seleção limita apenas o canal da instância (WhatsApp ou Telegram). Os outros canais selecionados continuam ativos. Sem instância selecionada para um canal, aceita todas as dele."
       />
       <MultiChoiceField
         label="Tipos de mensagem"
@@ -623,6 +628,7 @@ function TriggerInspector({ node, onUpdate, instanceOptions = [], editorMode = '
     return <div className="space-y-4"><div className="rounded-xl border border-sky-400/20 bg-sky-400/[0.06] p-4 text-xs leading-relaxed text-slate-300">Publique o fluxo e abra “Ajustes” para copiar a URL e gerar o token. O endpoint aceita Bearer ou X-Nexus-Key e nunca envia a credencial para os blocos.</div><Field label="Método HTTP"><NativeSelect value={String(node.config.method || 'POST')} onChange={(value) => config('method', value)}>{['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((method) => <option key={method} value={method}>{method}</option>)}</NativeSelect></Field><Field label="Autenticação"><NativeSelect value="token" onChange={() => undefined} disabled><option value="token">Token Nexus rotacionável</option></NativeSelect></Field></div>;
   }
   if (node.type === 'trigger.internal_event') {
+    if (node.config.crmOption !== undefined) return <CrmOptionFields value={node.config.crmOption as CrmOptionCondition} onChange={(value) => config('crmOption', value)} />;
     return <div className="space-y-4"><div className="rounded-xl border border-sky-400/20 bg-sky-400/[0.06] p-4 text-xs leading-relaxed text-slate-300">Inicia uma versão publicada quando a Dialogy despachar o acontecimento indicado para este workspace. O payload do evento fica disponível como entrada do fluxo.</div><Field label="Nome do acontecimento" description="Use um nome estável em minúsculas, como chat.closed ou contact.updated."><Input value={String(node.config.eventName || '')} onChange={(event) => config('eventName', event.target.value.trim().toLowerCase().replace(/[^a-z0-9._:-]/g, '_'))} placeholder="chat.closed" /></Field></div>;
   }
   if (node.type === 'trigger.schedule') {
@@ -1092,6 +1098,11 @@ function SgpCommonFields({ node, onUpdate }: InspectorProps) {
 
 function SgpContractStatusInspector(props: InspectorProps) {
   return <div className="space-y-4"><SgpCommonFields {...props} /><div className="rounded-xl border border-white/[0.07] p-3 text-xs text-slate-400">O bloco segue pelas saídas <strong className="text-emerald-300">Ativo</strong>, <strong className="text-amber-300">Suspenso</strong> ou <strong className="text-red-300">Erro</strong>.</div></div>;
+}
+
+function SgpIdentificationInspector({ node, onUpdate }: InspectorProps) {
+  const { config } = useNodeUpdater(node, onUpdate);
+  return <div className="space-y-4"><p className="text-xs text-slate-300">Valida CPF/CNPJ e consulta o SGP para o contato deste atendimento. Após confirmar o contrato, salva o documento se o campo estiver vazio. Informar outro documento não substitui um valor já cadastrado.</p><Field label="Permitir novo cliente"><NativeSelect value={node.config.allowNewCustomer === true ? 'yes' : 'no'} onChange={(value) => config('allowNewCustomer', value === 'yes')}><option value="no">Não</option><option value="yes">Sim, para atendimento comercial</option></NativeSelect></Field><Field label="Salvar identificação em"><Input value={String(node.config.outputKey || 'sgpIdentification')} onChange={(event) => config('outputKey', event.target.value.trim().replace(/\s+/g, '_'))} /></Field><p className="text-xs text-slate-400">Saídas: contrato selecionado, novo cliente, voltar / expirou e erro de consulta. A seleção possui páginas para manter todos os contratos acessíveis.</p></div>;
 }
 
 function TemplateConfigFields({ node, onUpdate, instanceOptions = [], prefix, label }: InspectorProps & { prefix: 'pixTemplate' | 'boletoTemplate'; label: string }) {
@@ -1994,10 +2005,12 @@ export function NativeSpecializedNodeInspector(props: InspectorProps) {
     case 'integration.mcp_call': return <McpCallInspector {...props} />;
     case 'integration.email': return <EmailInspector {...props} />;
     case 'integration.google_sheets_append': return <SheetsInspector {...props} />;
+    case 'integration.google_ads_lead': return <GoogleAdsLeadFields config={props.node.config} onChange={(patch) => props.onUpdate({ ...props.node, config: { ...props.node.config, ...patch } })} />;
     case 'integration.database': return <DatabaseInspector {...props} />;
     case 'dialogy.crm_update': return <CrmUpdateInspector {...props} />;
     case 'dialogy.team_availability': return <TeamAvailabilityInspector {...props} />;
     case 'dialogy.chat_tag': return <ChatTagInspector {...props} />;
+    case 'dialogy.sgp_identify_customer': return <SgpIdentificationInspector {...props} />;
     case 'dialogy.sgp_contract_status': return <SgpContractStatusInspector {...props} />;
     case 'dialogy.sgp_second_copy': return <SgpSecondCopyInspector {...props} />;
     case 'dialogy.sgp_payment_promise': return <SgpPaymentPromiseInspector {...props} />;

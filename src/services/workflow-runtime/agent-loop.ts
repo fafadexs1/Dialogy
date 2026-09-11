@@ -97,11 +97,11 @@ export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
     '3. Use somente as ferramentas listadas e forneça todos os argumentos exigidos.',
     '4. Não repita uma ferramenta com os mesmos argumentos quando o resultado terminal já estiver disponível. Se uma consulta retornar pending, queued, sent, running ou processing, consulte novamente até obter um estado terminal ou atingir o limite.',
     '5. Peça ao usuário apenas informações realmente ausentes.',
-    '6. Só retorne final quando os critérios de conclusão forem atendidos.',
+    '6. Só retorne final quando os critérios de conclusão forem atendidos ou para responder diretamente ao cliente.',
     '7. Nunca afirme que uma ação foi concluída antes da confirmação da ferramenta.',
     '8. Não exponha raciocínio interno, cadeia de pensamento ou análise detalhada.',
     '9. purposeSummary deve explicar brevemente por que a ferramenta é necessária.',
-    '10. Responda exclusivamente no contrato estruturado solicitado.',
+    '10. Responda exclusivamente no contrato estruturado solicitado (type "final" para falar com o cliente, "needs_input" para fazer perguntas/pedir dados ausentes, "tool_call" para ferramentas, "handoff" para transferir).',
     '11. Nunca pergunte qual opção, item, horário, produto, serviço ou alternativa o cliente prefere antes de apresentar as escolhas. Referências como "desses", "dessas", "deles", "delas", "esse" e "qual mais interessou" precisam ter um referente claro na conversa ou na própria resposta.',
     '12. Ao retornar handoff, use summary somente como contexto interno objetivo para a equipe e customerMessage como a mensagem visível ao cliente. Agradeça ou confirme o encaminhamento em customerMessage, nunca apenas em summary.',
   ].join('\n');
@@ -588,7 +588,12 @@ export async function executeAgentNode(
       });
     }
 
-    const decision = AgentDecisionSchema.parse(fallbackResult.output);
+    const rawDecision = AgentDecisionSchema.parse(fallbackResult.output);
+    const decision = rawDecision.type === 'response'
+      ? { ...rawDecision, type: 'final' as const }
+      : rawDecision.type === 'question'
+      ? { ...rawDecision, type: 'needs_input' as const }
+      : rawDecision;
     const signature = decisionSignature(decision, context, toolState);
     const stateSignature = hashValue(relevantState(context, toolState));
     decisionHistory.push({ signature, stateSignature });

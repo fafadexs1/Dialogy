@@ -3,6 +3,8 @@ import type { PublicationValidationIssue } from './assistant-validator';
 import { readStudioValue, resolveStudioEndpoint } from './data-mapping';
 import { isSafeStudioPattern } from './collection';
 import { studioDataAtSteps } from './data-availability';
+import { checkStudioReasoningPublication } from './reasoning-publication';
+import { StudioCatalogImageSchema } from './catalog-media';
 
 /** Publication is stricter than draft storage: reject incomplete paths before any real conversation. */
 export function checkStudioDependencies(doc: AgentStudioDocument): PublicationValidationIssue[] {
@@ -69,6 +71,21 @@ export function checkStudioDependencies(doc: AgentStudioDocument): PublicationVa
       if (step.type === 'handoff' && !step.handoffTeam?.trim() && !doc.concludeStage.handoffTeam.trim()) error('MISSING_STEP_TEAM', 'selecione a equipe de destino.');
       if (step.type === 'knowledge_lookup' && !step.knowledgeCollectionId && !doc.resolveStage.knowledgeCollectionIds.length) error('MISSING_KNOWLEDGE', 'selecione uma base de conhecimento.');
       if (step.type === 'native_action') {
+        if (step.nativeActionType === 'show_catalog_image') {
+          const image = StudioCatalogImageSchema.safeParse(step.nativeActionPayload);
+          if (!image.success) error('CATALOG_IMAGE_INVALID', 'configure catálogo, campos do produto e servidores autorizados para as fotos.');
+          else {
+            if (image.data.selectionMode === 'recommendation' && !(doc.resolveStage.conversationMode === 'adaptive' && doc.resolveStage.reasoning?.enabled)) {
+              error('CATALOG_RECOMMENDATION_REQUIRES_REASONING', 'ative o novo atendimento adaptativo para a IA recomendar produtos.');
+            }
+            if (image.data.selectionMode !== 'recommendation' && step.nativeDataMappings?.filter((mapping) => mapping.apiField === 'productId').length !== 1) {
+              error('CATALOG_PRODUCT_REQUIRED', 'selecione o dado que identifica o produto escolhido pelo cliente.');
+            }
+            const catalog = procedure.steps.flatMap((source) => source.httpRequest?.outputMappings || source.mcpTool?.outputMappings || [])
+              .find((output) => output.chipKey === image.data.catalogKey && !output.sensitive);
+            if (!catalog) error('CATALOG_SOURCE_REQUIRED', 'selecione um catálogo não sensível retornado por uma integração deste procedimento.');
+          }
+        }
         if (step.nativeActionType === 'close_chat' && index !== procedure.steps.length - 1) error('CLOSE_NOT_TERMINAL', 'o encerramento deve ser a última etapa do procedimento.');
         if (!step.nativeActionType) error('NATIVE_ACTION_MISSING', 'selecione uma ação.');
         if (['add_tag', 'remove_tag'].includes(step.nativeActionType || '') && !step.nativeActionPayload?.tagId) error('TAG_MISSING', 'selecione uma etiqueta.');
@@ -112,5 +129,5 @@ export function checkStudioDependencies(doc: AgentStudioDocument): PublicationVa
       } else if (!['finish', 'handoff'].includes(step.type) && step.nativeActionType !== 'close_chat') target(step.nextStepId);
     });
   }
-  return issues;
+  return [...issues, ...checkStudioReasoningPublication(doc)];
 }

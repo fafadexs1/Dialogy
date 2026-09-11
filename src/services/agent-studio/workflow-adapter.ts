@@ -11,6 +11,8 @@ import { loadStudioRelease } from './repository';
 import { studioSessionStore, stopStudioSession } from './session-store';
 import { runStudioConversation } from './runtime';
 import { mapStudioFlowInputs, validateStudioFlowBindings } from './flow-inputs';
+import { loadStudioConversationHistory } from './history';
+import { loadStudioContactCrm } from './contact-crm';
 
 export async function executePublishedStudioNode(input: NodeRuntimeInput, effects: {
   send: (response: string) => Promise<{ success?: boolean; error?: unknown }>;
@@ -38,8 +40,9 @@ export async function executePublishedStudioNode(input: NodeRuntimeInput, effect
     if (store.state && store.state.releaseId !== releaseId) throw new Error('O atendimento começou com outra versão. Reinicie-o de forma controlada.');
     if (store.state?.status === 'cancelled') throw new Error('Esta invocação do agente foi cancelada.');
     const result = await runStudioConversation({ release, config, chatId, messageId, message,
+      chatHistory: await loadStudioConversationHistory(workspaceId, chatId, messageId),
       signal: input.signal,
-      state: store.state, contact: contactResult.rows[0], flowInput: mapStudioFlowInputs(release.agentSnapshot, input.node.config.inputMappings,
+      state: store.state, contact: { ...contactResult.rows[0], custom_fields: await loadStudioContactCrm(workspaceId, chatId) }, flowInput: mapStudioFlowInputs(release.agentSnapshot, input.node.config.inputMappings,
         { variables: input.execution.variables, current: input.input, input: input.execution.input }),
       checkpoint: store.checkpoint, assertCurrent: () => assertAutopilotSourceMessageCurrent({ chatId, sourceMessageId: messageId }),
       runNative: (action, operation) => effects.native(action, operation.confirmed),

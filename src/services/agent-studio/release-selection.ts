@@ -2,6 +2,7 @@ import 'server-only';
 
 import { loadStudioRelease } from './repository';
 import { studioSessionStore } from './session-store';
+import { studioHasUncertainOperation } from './engine';
 import type { AgentReleaseManifest } from './types';
 
 type Store = Awaited<ReturnType<typeof studioSessionStore>>;
@@ -25,12 +26,17 @@ export async function selectStudioConversationRelease(input: {
   const store = await dependencies.loadStore({ workspaceId: input.workspaceId, agentId: input.agentId, chatId: input.chatId });
   const shouldResumePinned = Boolean(store.state && (
     store.state.phase !== 'done'
-    || store.state.inFlight
+    || studioHasUncertainOperation(store.state)
     || (input.sourceMessageId && store.state.lastTurn?.messageId === input.sourceMessageId)
   ));
 
   if (shouldResumePinned && store.state) {
-    return { store, release: await dependencies.loadRelease(input.workspaceId, input.agentId, store.state.releaseId) };
+    const release = await dependencies.loadRelease(input.workspaceId, input.agentId, store.state.releaseId);
+    if (!release) throw new Error('A versão vinculada a esta conversa está indisponível. O estado foi preservado; não é seguro continuar com outra configuração.');
+    if (release.releaseId !== store.state.releaseId || release.agentId !== input.agentId || release.workspaceId !== input.workspaceId) {
+      throw new Error('A versão carregada não corresponde à conversa em andamento.');
+    }
+    return { store, release };
   }
   return { store, release: await dependencies.loadRelease(input.workspaceId, input.agentId) };
 }

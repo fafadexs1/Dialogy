@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { advanceStudioSession, createStudioSession, evaluateStudioCondition, type StudioEngineDependencies, type StudioSession } from '@/services/agent-studio/engine';
 import { CollectedFieldDefinitionSchema, createDefaultAgentStudioDocument, HttpRequestStepConfigSchema, ProcedureDocumentSchema, type ProcedureStep } from '@/services/agent-studio/types';
 import { isValidStudioCnpj, validateStudioField } from '@/services/agent-studio/collection';
+import {
+  detectExplicitStudioConversationControl,
+  guardRepeatedStudioResponse,
+} from '@/services/agent-studio/conversation-governor';
 
 const field = (extra = {}) => CollectedFieldDefinitionSchema.parse({ id: 'cpf', name: 'CPF', variableKey: 'cpf', type: 'cpf', promptMessage: 'Qual seu CPF?', ...extra });
 const validCpf = '529.982.247-25';
@@ -38,6 +42,25 @@ describe('Studio collection validation', () => {
     expect(validateStudioField(field({ type: 'multi_select', options: ['A', 'B'] }), '1, 2')).toEqual({ valid: true, value: ['A', 'B'] });
     expect(validateStudioField(field({ type: 'number', minValue: 1 }), '0').valid).toBe(false);
     expect(validateStudioField(field({ type: 'text', validationRegex: '(a+)+' }), 'aaa').valid).toBe(false);
+  });
+});
+
+describe('Studio domain-neutral conversation governor', () => {
+  it.each([
+    ['não precisa', 'cancel_procedure'],
+    ['deixa pra lá', 'cancel_procedure'],
+    ['prefiro não responder', 'skip_field'],
+    ['na verdade quero outra coisa', 'change_intent'],
+    ['quero falar com uma pessoa', 'request_human'],
+    ['900', 'answer'],
+  ] as const)('classifies %j as %s', (message, expected) => {
+    expect(detectExplicitStudioConversationControl(message)).toBe(expected);
+  });
+
+  it('blocks an identical long response from being sent twice', () => {
+    const response = `Catálogo publicado: ${'Plano e informação. '.repeat(20)}`;
+    expect(guardRepeatedStudioResponse({ response, recentResponses: [response], procedureActive: true }))
+      .not.toBe(response);
   });
 });
 
@@ -80,6 +103,43 @@ describe('Studio real state machine with injected effects', () => {
     const result = await f.send('fatura');
     expect(result.response).toContain('Qual seu CPF?');
     expect(result.response).not.toContain(f.document.understandStage.welcomeMessage);
+  });
+  it('cancels an active procedure when the customer says “não precisa” without counting a bad answer or transferring', async () => {
+    const f = fixture();
+    await f.send('Quero minha fatura');
+    const result = await f.send('não precisa');
+    expect(result.response).toContain('parei este procedimento');
+    expect(result.state.procedureId).toBeNull();
+    expect(result.state.status).toBe('waiting_input');
+    expect(result.state.attempts['billing:collect'] || 0).toBe(0);
+    expect(result.state.intentHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ intent: 'Quero minha fatura', procedureId: 'billing', outcome: 'cancelled_by_customer' }),
+    ]));
+    expect(result.state.events.some((entry) => entry.kind === 'procedure_cancelled')).toBe(true);
+    expect(f.deps.handoff).not.toHaveBeenCalled();
+  });
+  it('changes intent during a pending field instead of validating the new request as field data', async () => {
+    const f = fixture(); addScheduling(f);
+    await f.send('Quero minha fatura');
+    const result = await f.send('Na verdade quero agendar');
+    expect(result.state.procedureId).toBe('schedule');
+    expect(result.response).toContain('Qual data?');
+    expect(result.response).not.toContain('CPF');
+    expect(result.state.intentHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ procedureId: 'billing', outcome: 'changed_by_customer' }),
+    ]));
+    expect(f.deps.handoff).not.toHaveBeenCalled();
+  });
+  it('explains how to stop after repeated invalid answers and still honors cancellation', async () => {
+    const f = fixture();
+    await f.send('fatura');
+    await f.send('valor inválido');
+    const repeated = await f.send('continua inválido');
+    expect(repeated.response).toContain('diga “não precisa”');
+    const cancelled = await f.send('não precisa');
+    expect(cancelled.state.status).toBe('waiting_input');
+    expect(cancelled.state.procedureId).toBeNull();
+    expect(f.deps.handoff).not.toHaveBeenCalled();
   });
   it('asks which procedure was intended instead of executing an ambiguous match', async () => {
     const f = fixture(); addScheduling(f); f.document.resolveStage.procedures[1].triggerKeywords = ['fatura'];
@@ -182,6 +242,25 @@ describe('Studio real state machine with injected effects', () => {
     expect(result.response).toContain('Confirma E-mail'); expect(result.state.valueOrigins?.email.source).toBe('contact_property'); expect(result.state.valueOrigins?.email.confirmed).toBe(false);
     f.setState(result.state); await f.send('sim'); expect(f.state.valueOrigins?.email.confirmed).toBe(true);
   });
+  it('continues to prompt next missing field when an earlier field is auto-collected from contact', async () => {
+    const f = fixture([
+      { id: 'name', order: 1, type: 'collect_data', title: 'Nome', collectField: field({ type: 'text', name: 'Nome', variableKey: 'name', promptMessage: 'Qual seu nome?', reuseFrom: { sourceType: 'contact_property', sourceValue: 'name' } }) },
+      { id: 'phone', order: 2, type: 'collect_data', title: 'Telefone', collectField: field({ type: 'phone', name: 'Telefone', variableKey: 'phone', promptMessage: 'Qual seu telefone?' }) },
+    ]);
+    const result = await advanceStudioSession({
+      document: f.document,
+      state: f.state,
+      message: 'fatura',
+      messageId: 'first',
+      context: { contact: { name: 'Fabricio' } },
+      dependencies: {
+        ...f.deps,
+        planCollection: vi.fn().mockResolvedValue({ intent: 'contribute', observations: [], deferFields: [], nextFieldKey: 'name' }),
+      },
+    });
+    expect(result.state.values.name).toBe('Fabricio');
+    expect(result.response).toContain('Qual seu telefone?');
+  });
   it('asks again when the configured contact value is invalid', async () => {
     const f = fixture([{ id: 'email', order: 1, type: 'collect_data', title: 'E-mail', collectField: field({ type: 'email', name: 'E-mail', variableKey: 'email', promptMessage: 'Qual e-mail?', reuseFrom: { sourceType: 'contact_property', sourceValue: 'email' } }) }]);
     const result = await advanceStudioSession({ document: f.document, state: f.state, message: 'fatura', messageId: 'first', context: { contact: { email: 'inválido' } }, dependencies: f.deps });
@@ -193,6 +272,25 @@ describe('Studio real state machine with injected effects', () => {
     const result = await f.send('Quero corrigir CPF: 111.444.777-35');
     expect(result.state.values.cpf).toBe('11144477735'); expect(f.deps.execute).toHaveBeenCalledTimes(2);
     expect(result.state.valueOrigins?.invoice.source).toBe('integration');
+  });
+  it('preserves independent downstream collected fields on correction', async () => {
+    const f = fixture([
+      { id: 'phone', order: 1, title: 'Telefone', type: 'collect_data', collectField: field({ id: 'phone', name: 'Telefone', variableKey: 'phone', type: 'phone', promptMessage: 'Qual telefone?' }) },
+      { id: 'cep', order: 2, title: 'CEP', type: 'collect_data', collectField: field({ id: 'cep', name: 'CEP', variableKey: 'cep', type: 'cep', promptMessage: 'Qual CEP?' }) },
+      { id: 'api', order: 3, title: 'Consultar', type: 'http_request', httpRequest: HttpRequestStepConfigSchema.parse({ name: 'Faturas', url: 'https://example.com/invoices', outputMappings: [{ chipKey: 'invoice', chipLabel: 'Fatura', jsonPath: 'invoice' }] }) },
+      { id: 'reply', order: 4, title: 'Responder', type: 'respond', messageText: 'Resultado:', messageDataKeys: ['invoice'] },
+    ]);
+    await f.send('fatura');
+    await f.send('61995215930');
+    await f.send('72883772');
+    expect(f.state.values.phone).toBe('61995215930');
+    expect(f.state.values.cep).toBe('72883772');
+    expect(f.state.values.invoice).toBe('Fatura encontrada');
+
+    await f.send('Quero corrigir o telefone');
+    const result = await f.send('61988887777');
+    expect(result.state.values.phone).toBe('61988887777');
+    expect(result.state.values.cep).toBe('72883772');
   });
   it('hands off corrections after a write instead of repeating an already executed operation', async () => {
     const f = fixture(); f.document.resolveStage.procedures[0].steps[1].httpRequest!.method = 'POST';
@@ -276,7 +374,8 @@ describe('Studio real state machine with injected effects', () => {
   it('does not execute on cancelled confirmation', async () => {
     const f = fixture(); f.document.resolveStage.procedures[0].steps[1].httpRequest!.method = 'DELETE';
     await f.send(`Fatura ${validCpf}`); await f.send('não');
-    expect(f.deps.execute).not.toHaveBeenCalled(); expect(f.state.status).toBe('transferred');
+    expect(f.deps.execute).not.toHaveBeenCalled(); expect(f.state.status).toBe('waiting_input');
+    expect(f.state.procedureId).toBeNull(); expect(f.deps.handoff).not.toHaveBeenCalled();
   });
   it('does not replay an operation whose outcome was lost in a crash', async () => {
     const f = fixture(); await f.send('fatura');
@@ -290,9 +389,11 @@ describe('Studio real state machine with injected effects', () => {
     expect(result.response).not.toContain('529'); expect(JSON.stringify(result.state.events)).not.toContain('529');
     expect(f.deps.execute).not.toHaveBeenCalled(); await f.send('sim'); expect(f.deps.execute).toHaveBeenCalledOnce();
   });
-  it('hands off after the configured number of bad answers', async () => {
+  it('interrupts the procedure without punitive transfer after the configured number of bad answers', async () => {
     const f = fixture(); await f.send('fatura'); await f.send('a'); await f.send('b'); await f.send('c');
-    expect(f.state.status).toBe('transferred'); expect(f.deps.execute).not.toHaveBeenCalled();
+    expect(f.state.status).toBe('waiting_input'); expect(f.state.procedureId).toBeNull();
+    expect(f.state.intentHistory).toEqual(expect.arrayContaining([expect.objectContaining({ outcome: 'validation_exhausted' })]));
+    expect(f.deps.handoff).not.toHaveBeenCalled(); expect(f.deps.execute).not.toHaveBeenCalled();
   });
   it('cannot report success for a failed integration', async () => {
     const f = fixture(); vi.mocked(f.deps.execute).mockRejectedValue(new Error('Timeout'));
@@ -341,5 +442,45 @@ describe('Studio real state machine with injected effects', () => {
     expect(evaluateStudioCondition({ fieldKey: 'amount', operator: 'exists' }, context)).toBe(true);
     expect(evaluateStudioCondition({ fieldKey: 'allowed', operator: 'equals', value: 'false' }, context)).toBe(true);
     expect(evaluateStudioCondition({ fieldKey: 'invoices', operator: 'count_equals', value: '0' }, context)).toBe(true);
+  });
+  it('resolves phone field from current conversation channel reference', async () => {
+    const phoneStep = {
+      id: 'phone', order: 1, type: 'collect_data' as const, title: 'Telefone',
+      collectField: CollectedFieldDefinitionSchema.parse({
+        id: 'phone', name: 'Telefone para contato', variableKey: 'phone', type: 'phone', promptMessage: 'Qual seu telefone?',
+        requiresConfirmation: true,
+      }),
+    };
+    const f = fixture([phoneStep]);
+    const document = f.document;
+    let state = createStudioSession(document.id, 'release-1', 'session');
+    state.phase = 'resolve';
+    state.procedureId = 'billing';
+    state.pendingField = 'phone';
+    const result = await advanceStudioSession({
+      document, state, message: 'É o mesmo que estou falando contigo', messageId: 'm1',
+      context: { contact: { phone: '5561995215930' } },
+      dependencies: {
+        ...f.deps,
+        interpretTurn: vi.fn().mockResolvedValue({ kind: 'contact_reference', fieldKey: 'phone', contactKey: 'phone' }),
+      },
+    });
+    expect(result.state.values.phone).toBe('5561995215930');
+    expect(result.response).toContain('5561995215930');
+  });
+  it('prompts customer for clarification when divergence occurs with fallbackAction message', async () => {
+    const f = fixture();
+    f.document.resolveStage.procedures[0].steps[1].httpRequest!.fallbackAction = 'message';
+    f.state.phase = 'resolve';
+    f.state.procedureId = 'billing';
+    f.state.stepIndex = 1;
+    f.state.values = { invoice: 'Fatura antiga' };
+    f.state.valueOrigins = { invoice: { source: 'customer', confirmed: true, stepId: 'billing:collect', at: '' } };
+    f.state.adaptiveOperation = { procedureId: 'billing', stepId: 'api', returnIndex: 0 };
+    f.deps.execute = vi.fn(async () => ({ values: { invoice: 'Fatura nova' } }));
+    const result = await f.send('consultar');
+    expect(result.response).toContain('divergência');
+    expect(f.state.status).toBe('waiting_input');
+    expect(f.deps.handoff).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { consumeRateLimit } from '@/lib/ratelimit';
 import { requireAuthenticatedUser } from '@/lib/security/access';
 import { fetchSafeRemote, readResponseBodyLimited } from '@/lib/security/safe-remote-url';
+import { normalizeStoredMediaUrl } from '@/lib/storage-url';
 
 const IMAGE_PLACEHOLDER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><rect width="320" height="320" rx="32" fill="#F4F4F5"/><text x="160" y="164" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#71717A">Midia indisponivel</text></svg>`;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -43,9 +44,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const sourceUrl = request.nextUrl.searchParams.get('url');
+  const rawSourceUrl = request.nextUrl.searchParams.get('url');
   const kind = request.nextUrl.searchParams.get('kind') === 'image' ? 'image' : 'media';
-  if (!sourceUrl) return NextResponse.json({ error: 'Missing url parameter.' }, { status: 400 });
+  if (!rawSourceUrl) return NextResponse.json({ error: 'Missing url parameter.' }, { status: 400 });
+  const sourceUrl = normalizeStoredMediaUrl(rawSourceUrl);
   const allowedHosts = configuredMediaHosts();
   if (!allowedHosts.length) {
     return NextResponse.json(

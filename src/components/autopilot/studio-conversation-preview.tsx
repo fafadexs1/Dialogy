@@ -11,6 +11,7 @@ import { testAgentStudioConversationAction } from '@/actions/agent-studio';
 import { createStudioSession, type StudioSession } from '@/services/agent-studio/engine';
 import type { AgentStudioDocument } from '@/services/agent-studio/types';
 import { StudioLiveConversation } from './studio-live-conversation';
+import { StudioTurnMetrics } from './studio-turn-metrics';
 
 type TeamOption = { id: string; name: string };
 
@@ -29,7 +30,7 @@ export function StudioConversationPreview({ document, resetKey, teams = [] }: { 
 function StudioSimulatedConversationPreview({ document, resetKey, teams }: { document: AgentStudioDocument; resetKey: number; teams: TeamOption[] }) {
   const [snapshot, setSnapshot] = useState(document);
   const [state, setState] = useState<StudioSession>(() => createStudioSession(document.id, 'simulation', createClientUuid()));
-  const [messages, setMessages] = useState<{ id: string; role: 'user' | 'bot'; text: string; time: string }[]>([]);
+  const [messages, setMessages] = useState<{ id: string; role: 'user' | 'bot'; text: string; time: string; imageUrl?: string }[]>([]);
   const [text, setText] = useState('');
   const [samples, setSamples] = useState<Record<string, string>>({});
   const [failureStep, setFailureStep] = useState('');
@@ -73,7 +74,12 @@ function StudioSimulatedConversationPreview({ document, resetKey, teams }: { doc
       if (!result.success) throw new Error(result.error);
       setModel(result.model);
       setState(result.state);
-      setMessages((previous) => [...previous, { id: `${id}:bot`, role: 'bot', text: result.response || 'Teste concluído. Recomece para testar outro atendimento.', time }]);
+      const earlierOperations = new Set(state.reasoning?.operations.map((operation) => operation.id) || []);
+      const photos = (result.state.reasoning?.operations || []).filter((operation) => !earlierOperations.has(operation.id)
+        && operation.status === 'succeeded' && operation.presentedProduct?.url.startsWith('https://'));
+      setMessages((previous) => [...previous, ...photos.map((operation) => ({ id: `${operation.id}:photo`, role: 'bot' as const,
+        text: operation.presentedProduct!.caption, imageUrl: operation.presentedProduct!.url, time })),
+        { id: `${id}:bot`, role: 'bot', text: result.response || 'Teste concluído. Recomece para testar outro atendimento.', time }]);
     } catch (error) {
       if (generation !== generationRef.current) return;
       setMessages((previous) => previous.filter((message) => message.id !== id));
@@ -94,6 +100,7 @@ function StudioSimulatedConversationPreview({ document, resetKey, teams }: { doc
         <label className="block">Simular falha<select value={failureStep} onChange={(event) => setFailureStep(event.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-900 p-2"><option value="">Nenhuma</option>{integrationSteps.map((step) => <option key={step.id} value={step.id}>{step.title}</option>)}</select></label>
       </div>
     </details>
+    <StudioTurnMetrics metrics={state.reasoning?.lastTurnMetrics} />
     {state.events.length > 0 && <details className="border-b border-purple-500/20 bg-purple-500/10 px-4 py-2 text-[11px] text-purple-200">
       <summary className="cursor-pointer"><Sparkles className="mr-1 inline h-3 w-3" />{state.events.at(-1)?.label} · {state.status === 'waiting_input' ? 'Aguardando resposta' : state.status === 'resolved' ? 'Resolvido' : state.status === 'transferred' ? 'Transferência simulada' : 'Execução'}</summary>
       <ol className="mt-2 max-h-40 overflow-auto space-y-1">{state.events.map((event, index) => <li key={index}>{index + 1}. {event.label} · {event.kind === 'completed' ? 'Concluído' : event.kind === 'waiting_confirmation' ? 'Confirmar' : event.kind === 'outcome_unknown' ? 'Resultado incerto' : event.kind === 'failed' ? 'Falhou' : event.kind === 'collected' ? 'Dado válido' : event.kind === 'memory_reused' ? 'Reutilizado da memória' : event.kind === 'procedure_selected' ? 'Procedimento escolhido' : event.kind === 'transferred' ? 'Transferido' : event.kind === 'branch_selected' ? 'Caminho escolhido' : 'Aguardando'}</li>)}</ol>
@@ -110,7 +117,7 @@ function StudioSimulatedConversationPreview({ document, resetKey, teams }: { doc
       {!messages.length && <div className="space-y-3 text-xs text-slate-400"><p>Escreva como um cliente: a IA responderá seguindo o rascunho, com memória desta conversa. Você também pode testar um procedimento:</p>{snapshot.resolveStage.procedures.filter((p) => p.status !== 'archived').map((p) => <button key={p.id} disabled={busy || changed} onClick={() => void send(p.name)} className="block w-full rounded-lg border border-slate-700 p-2 text-left text-slate-200 hover:bg-slate-800">{p.name}</button>)}</div>}
       {messages.map((message) => <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
         <span className="mb-0.5 px-1 text-[9px] text-slate-400">{message.role === 'user' ? 'Cliente' : snapshot.appearance.botTitle}</span>
-        <div className={`flex max-w-[95%] items-end gap-1.5 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>{message.role === 'bot' && snapshot.appearance.showAvatar && <span aria-label="Avatar do agente" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-800 bg-cover bg-center" style={safeAvatarUrl ? { backgroundImage: `url("${safeAvatarUrl}")` } : undefined}>{!safeAvatarUrl && <Bot className="h-3.5 w-3.5" />}</span>}<div className={`rounded-2xl p-3 text-xs leading-relaxed text-slate-900 ${message.role === 'user' ? `rounded-tr-none ${accent}` : 'rounded-tl-none bg-white'}`}><p className="whitespace-pre-wrap break-words">{message.text}</p><div className="mt-1 flex justify-end gap-1 text-[9px] text-slate-500">{message.time}{message.role === 'user' && <Check className="h-3 w-3 text-emerald-600" />}</div></div></div>
+        <div className={`flex max-w-[95%] items-end gap-1.5 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>{message.role === 'bot' && snapshot.appearance.showAvatar && <span aria-label="Avatar do agente" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-800 bg-cover bg-center" style={safeAvatarUrl ? { backgroundImage: `url("${safeAvatarUrl}")` } : undefined}>{!safeAvatarUrl && <Bot className="h-3.5 w-3.5" />}</span>}<div className={`rounded-2xl p-3 text-xs leading-relaxed text-slate-900 ${message.role === 'user' ? `rounded-tr-none ${accent}` : 'rounded-tl-none bg-white'}`}><p className="whitespace-pre-wrap break-words">{message.text}</p>{message.imageUrl && <img src={message.imageUrl} alt={message.text} referrerPolicy="no-referrer" loading="lazy" className="mt-2 max-h-72 max-w-full rounded-lg object-contain" />}<div className="mt-1 flex justify-end gap-1 text-[9px] text-slate-500">{message.time}{message.role === 'user' && <Check className="h-3 w-3 text-emerald-600" />}</div></div></div>
       </div>)}
       {field?.options?.map((option) => <button key={option} disabled={busy || changed} onClick={() => void send(option)} className="mr-1 rounded-lg border border-slate-600 px-2 py-1 text-xs">{option}</button>)}
       {busy && <div role="status" className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />A IA está respondendo...</div>}

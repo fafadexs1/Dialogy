@@ -1,0 +1,39 @@
+{
+  "observedAt": "2026-09-08T17:03:15.293Z",
+  "evidence": [
+    {
+      "phone": "5561998773030",
+      "validDocument": true,
+      "staleSelection": "other_cpf",
+      "realSgpLookup": true,
+      "visibleContracts": 1,
+      "selectionRoutes": "selected",
+      "statusTone": "active",
+      "crmWrite": false,
+      "messagesSent": 0
+    },
+    {
+      "phone": "5561996374943",
+      "validDocument": true,
+      "staleSelection": "other_cpf",
+      "realSgpLookup": true,
+      "visibleContracts": 1,
+      "selectionRoutes": "selected",
+      "statusTone": "active",
+      "crmWrite": false,
+      "messagesSent": 0
+    },
+    {
+      "phone": "5574981278864",
+      "validDocument": true,
+      "staleSelection": "other_cpf",
+      "realSgpLookup": true,
+      "visibleContracts": 1,
+      "selectionRoutes": "selected",
+      "statusTone": "active",
+      "crmWrite": false,
+      "messagesSent": 0
+    }
+  ],
+  "limitation": "Historical input replay with real SGP lookup and captured side effects; production deploy and live handoff not verified."
+}

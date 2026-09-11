@@ -1137,6 +1137,7 @@ export function createDefaultNodeHandlerRegistry(
     .register(dependencyResultHandler('integration.email', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('integration.mcp_call', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('integration.google_sheets_append', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
+    .register(dependencyResultHandler('integration.google_ads_lead', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('integration.database', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('dialogy.crm_update', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('whatsapp.send_text', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
@@ -1151,6 +1152,13 @@ export function createDefaultNodeHandlerRegistry(
     })
     .register({
       type: 'dialogy.chat_tag',
+      execute: dependencies.executePlatformAction || (async () => ({
+        status: 'error',
+        error: { code: 'PLATFORM_ACTION_RUNTIME_NOT_CONFIGURED', message: 'O runtime de ações da Dialogy não está configurado.', retryable: false },
+      })),
+    })
+    .register({
+      type: 'dialogy.sgp_identify_customer',
       execute: dependencies.executePlatformAction || (async () => ({
         status: 'error',
         error: { code: 'PLATFORM_ACTION_RUNTIME_NOT_CONFIGURED', message: 'O runtime de ações da Dialogy não está configurado.', retryable: false },

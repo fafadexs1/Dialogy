@@ -3,6 +3,7 @@ import { DOCUMENT_EMBEDDING_DIMENSIONS, DOCUMENT_EMBEDDING_MODEL, generateDocume
 import { VectorStore } from '@/lib/vector-store';
 import { summarizeCaseMemory } from '@/ai/flows/case-memory-summarization';
 import { resolveWorkspaceAiExecutionContext } from '@/services/ai/runtime';
+import { loadCaseMemoryTranscript } from './case-transcript';
 
 type RefreshCaseMemoryInput = {
     chatId: string;
@@ -15,11 +16,9 @@ type ChatResolutionContext = {
     id: string;
     workspace_id: string;
     contact_id: string | null;
-    contact_name: string | null;
     autopilot_config_id: string | null;
     close_reason_tag_id: string | null;
     close_reason_label: string | null;
-    close_notes: string | null;
     status: string;
     closed_at: string | null;
     source: string | null;
@@ -49,53 +48,30 @@ function buildSearchableContent(input: {
         .join('\n');
 }
 
-async function loadChatResolutionContext(chatId: string): Promise<ChatResolutionContext | null> {
+async function loadChatResolutionContext(workspaceId: string, chatId: string): Promise<ChatResolutionContext | null> {
     const { rows } = await db.query(
         `SELECT
             c.id,
             c.workspace_id,
             c.contact_id,
-            ct.name AS contact_name,
             c.autopilot_config_id,
             c.close_reason_tag_id,
             t.label AS close_reason_label,
-            c.close_notes,
             c.status,
             c.closed_at,
             c.source
          FROM chats c
-         LEFT JOIN contacts ct ON ct.id = c.contact_id
-         LEFT JOIN tags t ON t.id = c.close_reason_tag_id
-         WHERE c.id = $1
+         LEFT JOIN tags t ON t.id = c.close_reason_tag_id AND t.workspace_id = c.workspace_id
+         WHERE c.id = $1 AND c.workspace_id = $2
          LIMIT 1`,
-        [chatId]
+        [chatId, workspaceId]
     );
 
     return rows[0] ?? null;
 }
 
-async function loadTranscript(chatId: string) {
-    const { rows } = await db.query(
-        `SELECT content, from_me, type
-         FROM messages
-         WHERE chat_id = $1
-           AND content IS NOT NULL
-           AND btrim(content) <> ''
-         ORDER BY created_at ASC
-         LIMIT 120`,
-        [chatId]
-    );
-
-    return rows
-        .map((row) => {
-            const sender = row.type === 'system' ? 'Sistema' : row.from_me ? 'Agente' : 'Cliente';
-            return `${sender}: ${row.content}`;
-        })
-        .join('\n');
-}
-
 export async function refreshCaseMemoryForChat(input: RefreshCaseMemoryInput) {
-    const chat = await loadChatResolutionContext(input.chatId);
+    const chat = await loadChatResolutionContext(input.workspaceId, input.chatId);
     if (!chat) {
         return;
     }
@@ -119,7 +95,7 @@ export async function refreshCaseMemoryForChat(input: RefreshCaseMemoryInput) {
         return;
     }
 
-    const transcript = await loadTranscript(input.chatId);
+    const transcript = await loadCaseMemoryTranscript(input.workspaceId, input.chatId);
     const compactTranscript = normalizeText(transcript);
 
     if (!compactTranscript || compactTranscript.length < 80) {
@@ -132,8 +108,6 @@ export async function refreshCaseMemoryForChat(input: RefreshCaseMemoryInput) {
         workspaceId: chat.workspace_id,
         chatHistory: transcript,
         closeReasonLabel: chat.close_reason_label || undefined,
-        closeNotes: chat.close_notes || undefined,
-        contactName: chat.contact_name || undefined,
         channel: chat.source || undefined,
         model: aiContext.model,
         apiKey: aiContext.workspaceGeminiApiKey,

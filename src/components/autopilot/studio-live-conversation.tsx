@@ -11,6 +11,7 @@ import { startAgentStudioLiveTestAction, getAgentStudioLiveTestAction, sendAgent
 import type { AgentStudioDocument } from '@/services/agent-studio/types';
 import type { LiveTestView } from '@/services/agent-studio/live-test-store';
 import { studioFlowInputs } from '@/services/agent-studio/flow-inputs';
+import { StudioTurnMetrics } from './studio-turn-metrics';
 
 export function StudioLiveConversation({ document, resetKey, teams = [] }: { document: AgentStudioDocument; resetKey: number; teams?: { id: string; name: string }[] }) {
   const [view, setView] = useState<LiveTestView | null>(null);
@@ -33,7 +34,9 @@ export function StudioLiveConversation({ document, resetKey, teams = [] }: { doc
   const storageKey = `studio-live-test:${document.workspaceId}:${document.id}`;
   const sessionId = view?.sessionId;
   const changed = view && JSON.stringify({ ...view.document, draftRevision: 0, updatedAt: '' }) !== JSON.stringify({ ...document, draftRevision: 0, updatedAt: '' });
-  const done = Boolean(view?.expired || view?.chat.status === 'encerrados' || (view && ['resolved', 'failed', 'cancelled'].includes(view.state.status)));
+  const reasoningEnabled = view?.document.resolveStage.conversationMode === 'adaptive' && view.document.resolveStage.reasoning?.enabled;
+  const done = Boolean(view?.expired || view?.chat.status === 'encerrados' || (view && (['failed', 'cancelled'].includes(view.state.status)
+    || (view.state.status === 'resolved' && !reasoningEnabled))));
   const blocked = busy || loading || Boolean(view?.busy);
   const reset = useCallback(() => {
     if (busyRef.current) return;
@@ -134,7 +137,7 @@ export function StudioLiveConversation({ document, resetKey, teams = [] }: { doc
       </div>}
       {view?.messages.map((message) => <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
         <span className="mb-1 text-[10px] text-slate-400">{message.role === 'user' ? 'Você como cliente' : view.document.appearance.botTitle || 'Atendimento'}</span>
-        <div className={`max-w-[95%] rounded-xl p-3 text-xs text-slate-900 ${message.role === 'user' ? 'bg-emerald-100' : 'bg-white'}`}><p className="whitespace-pre-wrap break-words">{message.text}</p>{message.attachmentUrl && <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="mt-1 block text-sky-700 underline">Abrir anexo</a>}<p className="mt-1 text-right text-[9px] text-slate-500">{message.time}</p></div>
+        <div className={`max-w-[95%] rounded-xl p-3 text-xs text-slate-900 ${message.role === 'user' ? 'bg-emerald-100' : 'bg-white'}`}><p className="whitespace-pre-wrap break-words">{message.text}</p>{message.attachmentUrl && <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="mt-1 block text-sky-700 underline">{message.attachmentType === 'image' ? <img src={message.attachmentUrl} alt={message.text || 'Foto enviada no atendimento'} loading="lazy" referrerPolicy="no-referrer" className="max-h-72 max-w-full rounded-lg object-contain" /> : 'Abrir anexo'}</a>}<p className="mt-1 text-right text-[9px] text-slate-500">{message.time}</p></div>
       </div>)}
       {view && !view.messages.length && <p className="text-xs text-slate-400">Atendimento criado. Envie uma mensagem como cliente para começar.</p>}
       {view?.state.status === 'transferred' && <div role="status" className="rounded-xl border border-emerald-400/25 bg-emerald-400/10 p-3 text-xs text-emerald-50"><div className="flex items-center justify-between gap-2"><strong>Execução real concluída</strong><span className="rounded-full bg-emerald-300/15 px-2 py-0.5 text-[9px] font-bold uppercase text-emerald-200">Executada</span></div><dl className="mt-2 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1 text-[11px]"><dt className="text-emerald-200/70">Ação</dt><dd>Transferir atendimento</dd><dt className="text-emerald-200/70">Destino</dt><dd>{transferTeam}</dd><dt className="text-emerald-200/70">Resultado</dt><dd>Atendimento transferido ou colocado na fila da equipe.</dd></dl><p className="mt-2 text-[10px] text-emerald-100/80">Você pode continuar escrevendo como cliente e acompanhar as respostas humanas aqui.</p></div>}
@@ -145,6 +148,7 @@ export function StudioLiveConversation({ document, resetKey, teams = [] }: { doc
       <div ref={bottom} />
     </div>
     {view && <>
+      <StudioTurnMetrics metrics={view.state.reasoning?.lastTurnMetrics} />
       <details className="shrink-0 border-t border-slate-800 p-3 text-xs"><summary className="cursor-pointer">Execução e dados retornados · {view.state.status}</summary>
         <div className="max-h-48 space-y-2 overflow-auto py-2"><ol>{view.state.events.map((event, index) => <li key={index}>{event.label} · {event.kind}</li>)}</ol><pre className="whitespace-pre-wrap break-all text-[10px]">{JSON.stringify(view.state.values, null, 2)}</pre></div>
       </details>

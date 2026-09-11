@@ -62,6 +62,8 @@ type EnqueueParams = {
   orderId?: string | null;
   transactionId?: string | null;
   executor?: Queryable;
+  expectedCustomerId?: string;
+  expectedConversionActionId?: string;
 };
 
 /**
@@ -89,25 +91,25 @@ export async function enqueueContactConversionExport(params: EnqueueParams): Pro
     SELECT
       aa.workspace_id,
       aa.id,
-      $3,
+      $3::text,
       NULLIF(w.${column}, ''),
       NULLIF(regexp_replace(regexp_replace(w.${column}, '^.*/', ''), '\\D', '', 'g'), ''),
       NULLIF(regexp_replace(w.google_ads_customer_id, '\\D', '', 'g'), ''),
-      $8,
-      $4,
-      $5,
+      $8::text,
+      $4::numeric,
+      $5::text,
       'pending',
       'conversion',
-      $6,
-      $7,
+      $6::text,
+      $7::text,
       jsonb_build_object(
-        'event_name', $3,
+        'event_name', $3::text,
         'contact_id', aa.contact_id,
         'chat_id', aa.chat_id,
         'message_id', aa.message_id,
         'ad_click_id', aa.ad_click_id,
-        'deal_id', $6,
-        'transaction_id', $8
+        'deal_id', $6::text,
+        'transaction_id', $8::text
       )
     FROM ad_attributions aa
     JOIN workspaces w ON w.id = aa.workspace_id::uuid
@@ -115,6 +117,8 @@ export async function enqueueContactConversionExport(params: EnqueueParams): Pro
       AND aa.contact_id = $2
       AND COALESCE(aa.export_eligible, true) = true
       AND NULLIF(w.${column}, '') IS NOT NULL
+      AND ($9::text IS NULL OR regexp_replace(w.google_ads_customer_id, '\\D', '', 'g') = $9)
+      AND ($10::text IS NULL OR w.${column} = $10)
     ORDER BY aa.attributed_at DESC
     LIMIT 1
     ON CONFLICT (workspace_id, event_name, transaction_id) WHERE kind = 'conversion' DO NOTHING
@@ -128,9 +132,19 @@ export async function enqueueContactConversionExport(params: EnqueueParams): Pro
       params.dealId ?? null,
       orderId,
       transactionId,
+      params.expectedCustomerId ?? null,
+      params.expectedConversionActionId ?? null,
     ]
   );
 
+  if ((result.rowCount ?? 0) === 0 && params.expectedCustomerId && params.expectedConversionActionId) {
+    const existing = await executor.query(`SELECT id FROM conversion_exports
+      WHERE workspace_id = $1 AND event_name = $2 AND transaction_id = $3 AND kind = 'conversion'
+      AND google_ads_customer_id = $4 AND conversion_action_id = $5
+      AND status IN ('pending', 'processing', 'sent', 'submitted', 'confirmed') LIMIT 1`,
+    [params.workspaceId, params.eventName, transactionId, params.expectedCustomerId, params.expectedConversionActionId]);
+    if (existing.rows.length) return { enqueued: false, reason: 'already_queued' };
+  }
   return (result.rowCount ?? 0) > 0
     ? { enqueued: true }
     : { enqueued: false, reason: 'sem_atribuicao_ou_acao_nao_configurada' };

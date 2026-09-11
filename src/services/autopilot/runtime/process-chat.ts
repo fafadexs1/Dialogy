@@ -1,6 +1,8 @@
 import { db } from '@/lib/db';
 import { selectStudioConversationRelease } from '@/services/agent-studio/release-selection';
 import { runStudioConversation } from '@/services/agent-studio/runtime';
+import { sendAutomatedMediaAction } from '@/actions/messages';
+import { validateRemoteUrl } from '@/lib/security/safe-remote-url';
 import { randomUUID } from 'crypto';
 import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Chat, Contact, Message, MessageMetadata } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
@@ -45,8 +47,7 @@ import {
     withTimeout,
     type OrchestratorRunHandle,
 } from '@/services/orchestrator/runtime';
-import { analyzeMediaForAutopilot } from '@/ai/flows/analyze-media';
-import { createPrivateObjectDownloadUrl } from '@/lib/storage/private-s3';
+import { buildMediaAnalysisContext } from './media-analysis-context';
 import {
     buildMcpCustomerResponseFromToolResults,
     buildRouterRebootActionFromSgpResults,
@@ -376,7 +377,8 @@ async function loadContactCustomFieldsForAutopilot(input: {
                 ccfv.value,
                 cfd.label
              FROM contact_custom_field_values ccfv
-             LEFT JOIN custom_field_definitions cfd
+             JOIN contacts scoped_contact ON scoped_contact.id = ccfv.contact_id AND scoped_contact.workspace_id = $1
+             JOIN custom_field_definitions cfd
                ON cfd.id = ccfv.field_id
               AND cfd.workspace_id = $1
              WHERE ccfv.contact_id = $2`,
@@ -480,7 +482,6 @@ function buildEnabledAgentToolsDescription(
         .join('\n');
 }
 
-const MAX_AI_ANALYSIS_CHARS = 1000;
 
 /** Kill switch for the AI field extractor; collection falls back to the deterministic parser. */
 function isAiFieldExtractionEnabled(): boolean {
@@ -488,11 +489,6 @@ function isAiFieldExtractionEnabled(): boolean {
     return !['0', 'off', 'false', 'disabled'].includes(raw);
 }
 
-function compactAiAnalysis(value: string): string {
-    const normalized = value.replace(/\s+/g, ' ').trim();
-    if (normalized.length <= MAX_AI_ANALYSIS_CHARS) return normalized;
-    return `${normalized.slice(0, MAX_AI_ANALYSIS_CHARS - 1).trim()}…`;
-}
 
 function cleanKnowledgeCatalogContent(content: string): string {
     let normalized = content
@@ -511,12 +507,6 @@ function cleanKnowledgeCatalogContent(content: string): string {
     return normalized;
 }
 
-function resolveAnalysisKind(type: Message['type']): MessageMetadata['analysisKind'] {
-    if (type === 'audio') return 'transcription';
-    if (type === 'image') return 'visual_summary';
-    if (type === 'video') return 'video_summary';
-    return 'media_summary';
-}
 
 async function broadcastAiProcessing(chatId: string, event: 'ai_processing_start' | 'ai_processing_stop', payload: Record<string, unknown> = {}) {
     try {
@@ -573,44 +563,6 @@ async function loadTurnToolTraces(input: {
     }
 }
 
-async function insertAiAnalysisMessage(input: {
-    workspaceId: string;
-    chatId: string;
-    systemAgentId: string;
-    content: string;
-    sourceMessageId: string;
-    sourceType: Message['type'];
-    analysisKind: NonNullable<MessageMetadata['analysisKind']>;
-}) {
-    await db.query(
-        `INSERT INTO messages (
-            workspace_id,
-            chat_id,
-            type,
-            content,
-            from_me,
-            api_message_status,
-            metadata,
-            is_read,
-            sender_system_agent_id,
-            created_at
-         ) VALUES ($1, $2, 'text', $3, true, 'internal', $4, true, $5, clock_timestamp())`,
-        [
-            input.workspaceId,
-            input.chatId,
-            input.content,
-            JSON.stringify({
-                isAiAnalysis: true,
-                analysisKind: input.analysisKind,
-                sourceMessageId: input.sourceMessageId,
-                sourceType: input.sourceType,
-                sentBy: 'system_agent',
-                tool: 'ai_media_analysis',
-            } satisfies MessageMetadata),
-            input.systemAgentId,
-        ]
-    );
-}
 
 function describeAgentToolAction(action: AgentToolAction): string {
     if (action.type === 'sgp_fetch_contact_panel_data') return 'Consultar dados do cliente no SGP';
@@ -720,81 +672,6 @@ async function insertAgentToolStatusMessage(input: {
     }
 }
 
-async function buildMediaAnalysisContext(input: {
-    workspaceId: string;
-    chatId: string;
-    messageId?: string | null;
-    systemAgentId: string;
-    model?: string | null;
-}): Promise<string> {
-    if (!input.messageId) return '';
-
-    const { rows } = await db.query(
-        `SELECT id, type, content, metadata, media_url
-         FROM messages
-         WHERE id = $1
-           AND chat_id = $2
-         LIMIT 1`,
-        [input.messageId, input.chatId]
-    );
-    const message = rows[0];
-    if (!message) return '';
-
-    const type = message.type as Message['type'];
-    if (!['audio', 'image', 'video'].includes(type)) return '';
-
-    let metadata: MessageMetadata = {};
-    try {
-        metadata = typeof message.metadata === 'string'
-            ? JSON.parse(message.metadata)
-            : message.metadata || {};
-    } catch {
-        metadata = {};
-    }
-
-    let mediaUrl = metadata.mediaUrl || message.media_url;
-    if (metadata.storageKey) {
-        try {
-            mediaUrl = await createPrivateObjectDownloadUrl(metadata.storageKey);
-        } catch (error) {
-            console.error('[AUTOPILOT_MEDIA_ANALYSIS] Failed to sign private media:', error);
-        }
-    }
-    if (!mediaUrl) {
-        return `[Midia recebida: ${type}. Nao foi possivel localizar URL publica para analise automatica.]`;
-    }
-
-    try {
-        const result = await analyzeMediaForAutopilot({
-            workspaceId: input.workspaceId,
-            mediaUrl,
-            mediaType: type as 'audio' | 'image' | 'video',
-            mimetype: metadata.mimetype,
-            caption: message.content,
-            model: input.model,
-        });
-        const compact = compactAiAnalysis(result.analysis);
-        const label = type === 'audio'
-            ? 'Audio do cliente'
-            : type === 'image'
-                ? 'Imagem do cliente'
-                : 'Video do cliente';
-        const content = `${label}: ${compact}`;
-        await insertAiAnalysisMessage({
-            workspaceId: input.workspaceId,
-            chatId: input.chatId,
-            systemAgentId: input.systemAgentId,
-            content,
-            sourceMessageId: message.id,
-            sourceType: type,
-            analysisKind: resolveAnalysisKind(type) as NonNullable<MessageMetadata['analysisKind']>,
-        });
-        return `[Analise automatica de ${type}] ${compact}`;
-    } catch (error) {
-        console.error('[AUTOPILOT_MEDIA_ANALYSIS] Failed:', error);
-        return `[Midia recebida: ${type}. A analise automatica falhou; se necessario, peca ao cliente para descrever o conteudo.]`;
-    }
-}
 
 async function runRequestedAgentTools(input: {
     workspaceId: string;
@@ -1343,9 +1220,32 @@ export async function processAutopilotForChat(
         systemAgentId: assignedSystemAgentId,
         model: resolvedAiModel.model,
     });
+
+    let audioTranscriptionText = '';
+    if (sourceMessageId) {
+        const sourceMsgRes = await db.query(
+            `SELECT type, transcription FROM messages WHERE id = $1 AND workspace_id = $2 LIMIT 1`,
+            [sourceMessageId, workspaceId]
+        );
+        const sourceRow = sourceMsgRes.rows[0];
+        if (sourceRow?.type === 'audio' && sourceRow?.transcription) {
+            audioTranscriptionText = sourceRow.transcription.trim();
+        }
+    }
+    if (!audioTranscriptionText && mediaAnalysisContext) {
+        const audioMatch = mediaAnalysisContext.match(/^\[(?:Analise automatica de audio|Áudio do cliente|Audio do cliente)\]\s*([\s\S]+)$/i);
+        if (audioMatch?.[1]?.trim()) {
+            audioTranscriptionText = audioMatch[1].trim();
+        }
+    }
+
+    const effectiveCustomerMessage = (lastMessageContent || '').trim()
+        ? (audioTranscriptionText ? `${(lastMessageContent || '').trim()}\n\n[Transcrição do áudio]: ${audioTranscriptionText}` : (lastMessageContent || '').trim())
+        : (audioTranscriptionText || (mediaAnalysisContext ? mediaAnalysisContext.replace(/^\[(?:Analise automatica de [^\]]+)\]\s*/i, '').trim() : '') || '');
+
     const enrichedLastMessageContent = [
-        lastMessageContent || '',
-        mediaAnalysisContext,
+        effectiveCustomerMessage || lastMessageContent || '',
+        mediaAnalysisContext && !effectiveCustomerMessage.includes(mediaAnalysisContext) ? mediaAnalysisContext : '',
     ].filter((part) => part.trim().length > 0).join('\n\n');
     let focusedOperationalContext = [
         focusedContractContext,
@@ -1372,6 +1272,8 @@ export async function processAutopilotForChat(
     const studioSelection = await selectStudioConversationRelease({ workspaceId, agentId: autopilotConfig.id, chatId: chat.id, sourceMessageId });
     if (studioSelection.release) {
         const pinnedRelease = studioSelection.release;
+        let studioExecutionStage: 'runtime' | 'delivery' | 'recording' = 'runtime';
+        let studioResultStatus: string | undefined;
         try {
             if (!sourceMessageId) throw new Error('O Estúdio exige uma mensagem identificada para executar com segurança.');
             const store = studioSelection.store;
@@ -1382,10 +1284,20 @@ export async function processAutopilotForChat(
                 attachedToolNames: allowedNative, allowedToolNames: allowedNative, toolInstructionsByName: {},
                 allowedKnowledgeDocumentIds: (pinnedRelease.knowledgeSnapshot || []).map((document) => String(document.id)), reason: 'studio_release' };
             const result = await runStudioConversation({
-                release: pinnedRelease, state: store.state?.releaseId === pinnedRelease.releaseId ? store.state : null,
-                config: autopilotConfig, chatId: chat.id, messageId: sourceMessageId, message: lastMessageContent,
+                release: pinnedRelease, state: store.state,
+                config: autopilotConfig, chatId: chat.id, messageId: sourceMessageId, message: effectiveCustomerMessage || lastMessageContent,
+                mediaAnalysisContext,
                 contact: sanitizedContact, chatHistory: chatHistoryForAI, suggestionOnly: isSuggestionOnlyRuntime,
                 checkpoint: isSuggestionOnlyRuntime ? async () => {} : store.checkpoint,
+                sendCatalogImage: async (image, operationId) => {
+                    if (isSuggestionOnlyRuntime) throw new Error('Mídia não é enviada no modo de sugestão.');
+                    await validateRemoteUrl(image.url);
+                    await assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId });
+                    const result = await sendAutomatedMediaAction(chat.id, image.caption, [{ base64: image.url, mimetype: image.mimeType, filename: `produto.${image.mimeType === 'image/png' ? 'png' : image.mimeType === 'image/webp' ? 'webp' : 'jpg'}`, mediatype: 'image' }], assignedSystemAgentId, instanceName,
+                        { sourceMessageId: sourceMessageId || undefined, studioOperationId: operationId,
+                          studioPresentedProduct: { productId: image.productId, caption: image.caption } });
+                    if (!result.success) throw new Error(result.error || 'Não foi possível confirmar o envio da imagem.');
+                },
                 assertCurrent: () => assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId }),
                 runNative: async (action, operation) => {
                     if (isSuggestionOnlyRuntime) throw new Error('Ações reais não são permitidas no modo de sugestão.');
@@ -1398,14 +1310,14 @@ export async function processAutopilotForChat(
                     if (action.type === 'close_chat' && operation.confirmed) {
                         const goodbye = pinnedRelease.agentSnapshot.concludeStage.successClosingMessage;
                         if (goodbye) {
-                            const delivery = await sendMultiBlockResponse(chat.id, goodbye, assignedSystemAgentId, true, instanceName, null, { ...responseTrace, deliveryKey: `studio-close:${operation.id}` });
+                            const delivery = await sendMultiBlockResponse(chat.id, goodbye, assignedSystemAgentId, true, instanceName, null, { ...responseTrace, deliveryKey: `studio-close:${operation.id}` }, { preserveFormatting: true });
                             if (!delivery.success) throw new Error('A despedida não pôde ser entregue; o atendimento não foi encerrado.');
                         }
                     }
                     const results = await runRequestedAgentToolsWithStatus({
                         workspaceId, chat, contact: sanitizedContact, systemAgentId: assignedSystemAgentId,
                         systemAgentName: assignedSystemAgentName, autopilotConfig: { ...autopilotConfig, enabled_tool_names: allowedNative },
-                        turnPolicy: studioPolicy, customerMessage: lastMessageContent, sourceMessageId,
+                        turnPolicy: studioPolicy, customerMessage: effectiveCustomerMessage || lastMessageContent, sourceMessageId,
                         orchestratorRunId: orchestratorRun.id, actions: [action],
                         confirmedActionFingerprint: operation.confirmed ? fingerprint : null,
                         closeAuthorization: action.type === 'close_chat' && operation.confirmed ? {
@@ -1417,19 +1329,47 @@ export async function processAutopilotForChat(
                     if (action.type === 'transfer_chat' && action.payload?.teamName) return { message: `Vou encaminhar seu atendimento para a equipe ${action.payload.teamName} continuar com você.` };
                 },
             });
+            studioResultStatus = result.state.status;
+            studioExecutionStage = 'delivery';
             if (result.response) {
                 await assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId });
                 const delivery = await sendMultiBlockResponse(chat.id, result.response, assignedSystemAgentId, true, instanceName, null,
-                    { ...responseTrace, deliveryKey: `studio:${result.state.id}:${sourceMessageId}` });
+                    { ...responseTrace, deliveryKey: `studio:${result.state.id}:${sourceMessageId}` }, { preserveFormatting: true });
                 if (!delivery.success) throw new Error('A resposta do Estúdio não pôde ser entregue.');
             }
+            if (result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime) {
+                try {
+                    await db.query(
+                        `UPDATE chats
+                         SET status = 'encerrados',
+                             closed_at = clock_timestamp(),
+                             close_notes = COALESCE(close_notes, $1),
+                             closed_by_system_agent_id = COALESCE(closed_by_system_agent_id, $2),
+                             last_action_at = clock_timestamp(),
+                             updated_at = clock_timestamp()
+                         WHERE id = $3 AND workspace_id = $4 AND status != 'encerrados'`,
+                        [
+                            pinnedRelease.agentSnapshot.concludeStage.successClosingMessage || 'Atendimento concluído pelo Estúdio.',
+                            assignedSystemAgentId,
+                            chat.id,
+                            workspaceId,
+                        ],
+                    );
+                } catch (closeError) {
+                    console.error('[STUDIO_AUTO_CLOSE_CHAT] Falha ao atualizar status do chat para encerrados:', closeError);
+                }
+            }
+            studioExecutionStage = 'recording';
             await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,
-                intent: 'agent_studio', confidenceLevel: 'deterministic',
+                intent: 'agent_studio',
                 metadata: { studioReleaseId: pinnedRelease.releaseId, studioVersion: pinnedRelease.version,
+                    studioDecisionMode: pinnedRelease.agentSnapshot.resolveStage.conversationMode === 'adaptive'
+                        && pinnedRelease.agentSnapshot.resolveStage.reasoning?.enabled ? 'model_reasoning' : 'published_journey',
                     studioStatus: result.state.status, suggestionOnly: isSuggestionOnlyRuntime, replay: result.replay } });
         } catch (error) {
             await finishOrchestratorRun({ run: orchestratorRun, status: 'error', timings: orchestratorTimings,
-                intent: 'agent_studio', metadata: { studioReleaseId: pinnedRelease.releaseId, studioStatus: 'failed' } });
+                intent: 'agent_studio', metadata: { studioReleaseId: pinnedRelease.releaseId,
+                    studioStatus: studioResultStatus || 'failed', studioFailureStage: studioExecutionStage } });
             // Do not fall back to a second runtime or replay side effects after an uncertain result.
             throw error;
         }

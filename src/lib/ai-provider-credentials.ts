@@ -30,7 +30,7 @@ export const AI_CREDENTIAL_PROVIDER_META: Record<AiCredentialProvider, {
   },
   deepseek: {
     label: 'DeepSeek',
-    defaultModel: 'deepseek/deepseek-v4-flash',
+    defaultModel: 'deepseek/deepseek-flash',
     modelProviders: ['deepseek'],
     runtimeProvider: 'deepseek',
   },

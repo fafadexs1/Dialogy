@@ -42,6 +42,7 @@ const MESSAGE_DELIVERY_NODE_TYPES = new Set([
   'interaction.form',
   'output.respond',
   'output.media',
+  'dialogy.sgp_identify_customer',
   'dialogy.sgp_contract_status',
   'dialogy.sgp_second_copy',
   'dialogy.sgp_payment_promise',

@@ -510,6 +510,9 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
   );
   const enforceDocumentScope = <T extends { knowledgeBaseDocuments: KnowledgeBaseDocument[] }>(retrieval: T): T => ({
     ...retrieval,
+    // Defense in depth for older retrieval providers: private cases must never
+    // become customer-facing context through either initial or corrective RAG.
+    resolvedCases: [],
     // Defense in depth: VectorStore applies the filter in SQL, but retain the
     // boundary if a mocked, cached, or future retrieval source returns a row
     // outside the active knowledge step.

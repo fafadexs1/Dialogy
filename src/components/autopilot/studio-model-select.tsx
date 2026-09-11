@@ -1,8 +1,8 @@
 'use client';
 
-import { useId } from 'react';
+import { useEffect, useId } from 'react';
 import Link from 'next/link';
-import { getAiModelProviderLabel, type AiModelCatalogEntry } from '@/lib/ai-models';
+import { getAiModelProviderLabel, resolveConfiguredAiModel, type AiModelCatalogEntry } from '@/lib/ai-models';
 import { Label } from '@/components/ui/label';
 
 export function StudioModelSelect({ models, value, onChange, disabled = false }: {
@@ -14,13 +14,22 @@ export function StudioModelSelect({ models, value, onChange, disabled = false }:
   const id = useId();
   const options = models.filter((model) => model.enabled);
   const selected = options.find((model) => model.id === value);
+  const effectiveValue = selected ? value : (resolveConfiguredAiModel(value, options) || value);
+  const effectiveSelected = options.find((model) => model.id === effectiveValue);
+
+  useEffect(() => {
+    if (value && !selected && effectiveSelected && effectiveValue !== value) {
+      onChange(effectiveValue);
+    }
+  }, [value, selected, effectiveSelected, effectiveValue, onChange]);
+
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>Modelo de IA</Label>
-      <select id={id} aria-describedby={`${id}-help`} value={value} onChange={(event) => onChange(event.target.value)}
+      <select id={id} aria-describedby={`${id}-help`} value={effectiveValue} onChange={(event) => onChange(event.target.value)}
         disabled={disabled || options.length === 0} className="w-full min-w-0 rounded-md border border-input bg-background p-2 text-sm text-foreground disabled:opacity-60">
-        {!value && <option value="" disabled>Selecione um modelo cadastrado</option>}
-        {value && !selected && <option value={value} disabled>Atual: {value} · cadastro indisponível</option>}
+        {!effectiveValue && <option value="" disabled>Selecione um modelo cadastrado</option>}
+        {effectiveValue && !effectiveSelected && <option value={effectiveValue} disabled>Atual: {effectiveValue} · cadastro indisponível</option>}
         {options.map((model) => <option key={model.id} value={model.id}>{getAiModelProviderLabel(model.provider)} · {model.label}</option>)}
       </select>
       <p id={`${id}-help`} className="text-xs font-normal text-muted-foreground">

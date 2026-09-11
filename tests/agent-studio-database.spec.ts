@@ -38,7 +38,7 @@ beforeAll(async () => {
     CREATE TABLE workspace_integrations(workspace_id uuid, provider text, config jsonb, is_active boolean, updated_at timestamptz);
     CREATE TABLE autopilot_configs(id uuid PRIMARY KEY, workspace_id uuid NOT NULL REFERENCES workspaces(id), user_id uuid, name text, is_active boolean DEFAULT false, is_private boolean DEFAULT false, is_primary boolean DEFAULT false, updated_at timestamptz);
     CREATE TABLE chats(id uuid PRIMARY KEY, workspace_id uuid NOT NULL REFERENCES workspaces(id), autopilot_config_id uuid);
-    CREATE TABLE autopilot_conversation_states(chat_id uuid PRIMARY KEY REFERENCES chats(id), workspace_id uuid NOT NULL, config_id uuid, metadata jsonb, updated_at timestamptz);
+    CREATE TABLE autopilot_conversation_states(chat_id uuid PRIMARY KEY REFERENCES chats(id), workspace_id uuid NOT NULL, autopilot_config_id uuid, metadata jsonb, updated_at timestamptz);
     CREATE TABLE autopilot_config_drafts(config_id uuid PRIMARY KEY, workspace_id uuid, user_id uuid, snapshot jsonb, updated_at timestamptz);
     CREATE TABLE autopilot_config_versions(config_id uuid, workspace_id uuid, user_id uuid, version_number int, label text, snapshot jsonb, UNIQUE(config_id, version_number));
     CREATE TABLE workflow_definitions(workflow_id text, workflow_version text, workspace_id uuid, name text, status text, definition jsonb, PRIMARY KEY(workflow_id, workflow_version));
@@ -55,6 +55,7 @@ beforeAll(async () => {
     ADD active_workflow_id text, ADD active_workflow_version text, ADD agent_domain_pack_id uuid,
     ADD default_fallback_reply text, ADD escalation_policy text, ADD closing_policy text, ADD inactivity_timeout_seconds integer`);
   await sql.exec(await readFile('prisma/migrations/20260827130000_agent_studio_session_history/migration.sql', 'utf8'));
+  await sql.exec(await readFile('prisma/migrations/20260908140000_agent_studio_durable_memory/migration.sql', 'utf8'));
   await sql.query('INSERT INTO workspaces VALUES ($1)', [workspaceId]);
   await sql.query('INSERT INTO autopilot_configs (id, workspace_id) VALUES ($1, $2)', [agentId, workspaceId]);
   await sql.query('INSERT INTO chats (id, workspace_id) VALUES ($1, $2)', [chatId, workspaceId]);
@@ -306,6 +307,20 @@ describe('Studio persistence on isolated PostgreSQL (PGlite)', () => {
     const savedDraft = (await sql.query<{ snapshot: { agent_studio_document: { name: string } } }>('SELECT snapshot FROM autopilot_config_drafts')).rows[0];
     expect(savedDraft.snapshot.agent_studio_document.name).toBe('Novo rascunho');
   });
+  it('reuses the current release when publishing the same effective version again', async () => {
+    const document = createDefaultAgentStudioDocument(agentId, workspaceId, 'Versão única');
+    document.concludeStage.handoffTeam = 'Suporte';
+    const first = await publishAgentStudioAction(agentId, document); if (!first.success) throw new Error(first.error);
+
+    const repeated = await publishAgentStudioAction(agentId, first.document); if (!repeated.success) throw new Error(repeated.error);
+
+    expect(repeated).toMatchObject({
+      publishedVersion: first.publishedVersion,
+      reusedExistingVersion: true,
+      manifest: { releaseId: first.manifest.releaseId },
+    });
+    expect((await sql.query('SELECT version_number FROM autopilot_config_versions')).rows).toHaveLength(1);
+  });
   it('rolls back new conversations to the preserved legacy runtime without deleting Studio releases or its draft', async () => {
     await sql.exec("UPDATE autopilot_configs SET name = 'Atendimento anterior', is_active = true, default_fallback_reply = 'Mensagem anterior'");
     const migration = await getAgentStudioDataAction(agentId); if (!migration.success) throw new Error(migration.error);
@@ -394,6 +409,41 @@ describe('Studio persistence on isolated PostgreSQL (PGlite)', () => {
     expect((await readStudioResults(workspaceId, agentId, 30)).sessions).toEqual([]);
     expect((await readStudioResults(workspaceId, agentId, 90)).sessions).toHaveLength(1);
     await expect(readStudioResults(workspaceId, agentId, 1000)).rejects.toThrow('período');
+  });
+  it('publishes successfully when catalog documents lack collectionIds and maps them to default collection', async () => {
+    await sql.query('UPDATE autopilot_configs SET is_active = false, knowledge_collections = $1::jsonb, knowledge_base_documents = $2::jsonb', [
+      JSON.stringify([{ id: 'general', name: 'Geral', isDefault: true }]),
+      JSON.stringify([
+        { id: 'doc-1', name: 'Plano 1', content: 'Detalhes do plano 1', status: 'active' },
+        { id: 'doc-2', name: 'Plano 2', content: 'Detalhes do plano 2', status: 'active' },
+      ]),
+    ]);
+    const document = createDefaultAgentStudioDocument(agentId, workspaceId);
+    document.concludeStage.handoffTeam = 'Suporte';
+    const migration = await getAgentStudioDataAction(agentId);
+    if (migration.success && migration.migrationReport) {
+      document.migrationReview = {
+        sourceHash: migration.migrationReport.sourceHash,
+        acknowledgedKeys: migration.migrationReport.items.map((i) => i.key),
+      };
+    }
+    document.resolveStage.knowledgeCollectionIds = ['general', 'stale-ghost-id-123'];
+    const published = await publishAgentStudioAction(agentId, document);
+    if (!published.success) throw new Error(published.error);
+    expect(published.manifest.knowledgeSnapshot).toHaveLength(2);
+    expect(published.manifest.agentSnapshot.resolveStage.knowledgeCollectionIds).toEqual(['general']);
+  });
+  it('rejects publishing when selected collection has no active documents', async () => {
+    await sql.query('UPDATE autopilot_configs SET is_active = false, knowledge_collections = $1::jsonb, knowledge_base_documents = $2::jsonb', [
+      JSON.stringify([{ id: 'empty_col', name: 'Vazia' }]),
+      JSON.stringify([]),
+    ]);
+    const document = createDefaultAgentStudioDocument(agentId, workspaceId);
+    document.concludeStage.handoffTeam = 'Suporte';
+    document.resolveStage.knowledgeCollectionIds = ['empty_col'];
+    const published = await publishAgentStudioAction(agentId, document);
+    expect(published.success).toBe(false);
+    expect(published.error).toBe('Uma base ou documento selecionado não possui conteúdo ativo para publicar.');
   });
   it('denies history access through untrusted Data API roles', async () => {
     for (const role of ['anon', 'authenticated']) {

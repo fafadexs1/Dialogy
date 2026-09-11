@@ -22,6 +22,21 @@ vi.mock('@/lib/vector-store', () => ({
 import { isLocalRagQueryEmbeddingEnabled, retrieveSupportContext } from '@/services/rag/retrieval';
 
 describe('RAG production memory policy', () => {
+  it('never retrieves private cases, even with semantic retrieval enabled', async () => {
+    process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED = 'true';
+    mocks.generateDocumentQueryEmbedding.mockResolvedValueOnce([0.1, 0.2]);
+    mocks.searchSimilarDocuments.mockResolvedValueOnce([]);
+    mocks.searchSimilarCaseMemories.mockResolvedValueOnce([{ summary: 'PRIVATE_OTHER_CUSTOMER' }]);
+    const result = await retrieveSupportContext({
+      workspaceId: 'workspace-1', autopilotConfigId: 'config-1', query: 'Como funciona o suporte?',
+    });
+    expect(mocks.searchSimilarDocuments).toHaveBeenCalledOnce();
+    expect(mocks.searchSimilarCaseMemories).not.toHaveBeenCalled();
+    expect(result.resolvedCases).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_OTHER_CUSTOMER');
+    expect(result.knowledgeBaseDocuments).toHaveLength(1);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.RAG_LOCAL_QUERY_EMBEDDINGS_ENABLED = 'false';

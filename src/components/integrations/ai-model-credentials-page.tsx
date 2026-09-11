@@ -81,7 +81,7 @@ const PROVIDER_UI: Record<AiCredentialProvider, {
   deepseek: {
     keyHref: 'https://platform.deepseek.com/api_keys',
     keyPlaceholder: 'sk-...',
-    customPlaceholder: 'Ex: deepseek-v4-flash',
+    customPlaceholder: 'Ex: deepseek-flash',
     tone: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   },
 };

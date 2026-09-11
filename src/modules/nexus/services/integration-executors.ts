@@ -12,6 +12,7 @@ import { isRecord, materializeValue, renderTemplate, statePatchAtPath } from '@/
 
 import { loadNexusCredentialPayload } from './credentials';
 import { executeNexusMcpOperation } from './mcp-executor';
+import { sendNexusGoogleAdsLead } from './google-ads-lead';
 
 function source(input: NodeRuntimeInput) {
   return {
@@ -289,13 +290,17 @@ async function appendGoogleSheet(input: NodeRuntimeInput) {
 async function updateCrm(input: NodeRuntimeInput) {
   const workspaceId = input.workflow.workspaceId;
   const chatId = input.execution.conversationId;
-  if (!workspaceId || !chatId) throw new Error('A atualização de CRM exige um atendimento ativo.');
+  const eventContactId = input.execution.context.source === 'internal_event'
+    ? input.execution.input.contactId : undefined;
+  if (!workspaceId || (!chatId && !eventContactId)) throw new Error('A atualização de CRM exige um contato ou atendimento.');
   const materialized = materializeValue(input.node.config.fields || {}, source(input));
   if (!isRecord(materialized) || Object.keys(materialized).length === 0) throw new Error('Informe ao menos um campo do CRM.');
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    const contactResult = await client.query('SELECT contact_id FROM public.chats WHERE id = $1 AND workspace_id = $2 LIMIT 1', [chatId, workspaceId]);
+    const contactResult = chatId
+      ? await client.query('SELECT c.id AS contact_id FROM public.chats ch JOIN public.contacts c ON c.id = ch.contact_id AND c.workspace_id = ch.workspace_id WHERE ch.id = $1 AND ch.workspace_id = $2 LIMIT 1 FOR UPDATE OF c', [chatId, workspaceId])
+      : await client.query('SELECT id AS contact_id FROM public.contacts WHERE id = $1 AND workspace_id = $2 LIMIT 1 FOR UPDATE', [eventContactId, workspaceId]);
     const contactId = contactResult.rows[0]?.contact_id;
     if (!contactId) throw new Error('Contato do atendimento não encontrado.');
     const standard: Record<string, string> = { name: 'name', email: 'email', phone: 'phone_number_jid', phone_number_jid: 'phone_number_jid', address: 'address' };
@@ -491,6 +496,7 @@ async function callMcpTool(input: NodeRuntimeInput) {
 }
 
 export async function executeNexusIntegration(input: NodeRuntimeInput): Promise<Record<string, unknown>> {
+  if (input.node.type === 'integration.google_ads_lead') return stateResult(input, await sendNexusGoogleAdsLead(input));
   if (input.node.type === 'integration.email') return sendSmtp(input);
   if (input.node.type === 'integration.database') return executeDatabase(input);
   if (input.node.type === 'integration.google_sheets_append') return appendGoogleSheet(input);

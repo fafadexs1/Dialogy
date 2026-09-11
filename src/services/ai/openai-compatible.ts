@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import type { StructuredToolContinuation } from './structured-tool-continuation';
 import { getAiModelRuntimeProvider, type AiModelRuntimeProvider } from '@/lib/ai-models';
 import { listModelCallableAgentToolDefinitions } from '@/services/agent-tools/catalog';
 import { parseLmStudioStructuredText } from './lm-studio';
+import { studioCollectionPlanJsonSchema } from '@/services/agent-studio/collection-planner';
 
-export type OpenAiCompatibleOutputKind = 'agent' | 'procedure';
+export type OpenAiCompatibleOutputKind = 'agent' | 'procedure' | 'collection_plan';
 
 type OpenAiCompatibleProvider = Extract<AiModelRuntimeProvider, 'openai' | 'deepseek'>;
 
@@ -26,6 +28,7 @@ function getActionSchema() {
 }
 
 function getStructuredResponseSchema(outputKind: OpenAiCompatibleOutputKind) {
+  if (outputKind === 'collection_plan') return studioCollectionPlanJsonSchema;
   if (outputKind === 'procedure') {
     return {
       type: 'object',
@@ -64,7 +67,9 @@ function getJsonOnlyInstruction(outputKind: OpenAiCompatibleOutputKind): string 
     'Nao use Markdown, comentarios, texto antes/depois do JSON, nem exponha raciocinio interno.',
     'Use exatamente este JSON Schema como contrato de saida:',
     schema,
-    'Quando um campo nao se aplicar, use string vazia ou array vazio.',
+    outputKind === 'collection_plan'
+      ? 'Use null para nextFieldKey quando nao houver proximo campo e para value indisponivel; listas sem itens devem ser [].'
+      : 'Quando um campo nao se aplicar, use string vazia ou array vazio.',
   ].join('\n');
 }
 
@@ -100,7 +105,7 @@ function providerResponseFormat(provider: OpenAiCompatibleProvider, outputKind: 
   return {
     type: 'json_schema',
     json_schema: {
-      name: outputKind === 'procedure' ? 'dialogy_procedure_response' : 'dialogy_agent_response',
+      name: outputKind === 'collection_plan' ? 'dialogy_collection_plan' : outputKind === 'procedure' ? 'dialogy_procedure_response' : 'dialogy_agent_response',
       strict: true,
       schema: getStructuredResponseSchema(outputKind),
     },
@@ -142,7 +147,7 @@ function patchChatCompletionClient(
     body.response_format = providerResponseFormat(provider, outputKind);
     body.stream = false;
 
-    if (provider === 'deepseek' && /^deepseek-v4/i.test(modelId)) {
+    if (provider === 'deepseek' && /^deepseek-(v4|flash|reasoner)/i.test(modelId)) {
       body.thinking = {
         type: process.env.AI_DEEPSEEK_THINKING === 'enabled' ? 'enabled' : 'disabled',
       };
@@ -234,9 +239,15 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
   jsonSchema: Record<string, unknown>;
   systemPrompt: string;
   userPrompt: string;
+  continuation?: StructuredToolContinuation;
   timeoutMs?: number;
   maxTokens?: number;
+  reasoning?: 'low' | 'medium' | 'high';
+  signal?: AbortSignal;
+  fetch?: typeof globalThis.fetch;
+  onUsage?: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; reasoningTokens: number }) => void;
 }): Promise<z.output<TSchema>> {
+  input.signal?.throwIfAborted();
   const provider = getOpenAiCompatibleProvider(input.model);
   const modelId = getOpenAiCompatibleModelId(input.model);
   const { default: OpenAI } = require('openai') as typeof import('openai');
@@ -244,6 +255,8 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
     apiKey: input.apiKey,
     ...(providerBaseUrl(provider) ? { baseURL: providerBaseUrl(provider) } : {}),
     timeout: input.timeoutMs ?? 4000,
+    ...(input.signal ? { maxRetries: 0 } : {}),
+    ...(input.fetch ? { fetch: input.fetch as NonNullable<ConstructorParameters<typeof OpenAI>[0]>['fetch'] } : {}),
   });
 
   const body: Record<string, unknown> = {
@@ -260,8 +273,10 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
       },
       { role: 'user', content: input.userPrompt },
     ],
-    temperature: 0,
-    max_tokens: input.maxTokens ?? 160,
+    ...(input.reasoning ? {} : { temperature: 0 }),
+    ...(provider === 'openai' && input.reasoning
+      ? { max_completion_tokens: input.maxTokens ?? 4096, reasoning_effort: input.reasoning }
+      : { max_tokens: input.maxTokens ?? 160 }),
     response_format: provider === 'deepseek'
       ? { type: 'json_object' }
       : {
@@ -274,15 +289,35 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
         },
   };
 
-  if (provider === 'deepseek' && /^deepseek-v4/i.test(modelId)) {
+  if (provider === 'deepseek' && /^deepseek-(v4|flash|reasoner)/i.test(modelId)) {
     body.thinking = {
-      type: process.env.AI_DEEPSEEK_THINKING === 'enabled' ? 'enabled' : 'disabled',
+      type: input.reasoning || process.env.AI_DEEPSEEK_THINKING === 'enabled' ? 'enabled' : 'disabled',
     };
+    if (input.reasoning) body.reasoning_effort = input.reasoning === 'medium' ? 'high' : input.reasoning;
   }
 
-  const response = await client.chat.completions.create(body as any);
+  if (input.continuation) {
+    if (provider !== 'deepseek') throw new Error('Continuidade de ferramentas ainda não habilitada para este provedor.');
+    delete body.response_format;
+    body.messages = input.continuation.messages(`${input.systemPrompt}\nEnvie cada decisão exclusivamente pela ferramenta ${input.schemaName}. O resultado da ferramenta contém o estado atualizado e as observações da execução ou validação. Use uma chamada por vez, inclusive para responder ao cliente.`, input.userPrompt);
+    body.tools = [{ type: 'function', function: { name: input.schemaName,
+      description: 'Propor a próxima decisão do atendimento. O servidor valida escolhas, permissões e executa a ação autorizada; a próxima observação informa o resultado.',
+      parameters: input.jsonSchema } }];
+  }
+  const response = await client.chat.completions.create(body as any, { signal: input.signal });
+  input.signal?.throwIfAborted();
+  if (response.usage) input.onUsage?.({ inputTokens: response.usage.prompt_tokens,
+    outputTokens: response.usage.completion_tokens, totalTokens: response.usage.total_tokens,
+    reasoningTokens: response.usage.completion_tokens_details?.reasoning_tokens ?? 0 });
   const content = response.choices?.[0]?.message?.content;
-  const text = typeof content === 'string' ? content.trim() : '';
+  if (response.choices?.[0]?.finish_reason === 'length') {
+    const error = new Error(`${provider} exhausted the output budget before completing ${input.schemaName}.`) as Error & { code: string; retryable: boolean };
+    error.code = 'MODEL_OUTPUT_TRUNCATED';
+    error.retryable = true;
+    throw error;
+  }
+  const text = input.continuation ? input.continuation.accept(response.choices?.[0]?.message, input.schemaName)
+    : typeof content === 'string' ? content.trim() : '';
   const parsed = parseLmStudioStructuredText(text);
   if (!parsed) {
     const error = new Error(`${provider} returned invalid JSON for ${input.schemaName}.`) as Error & {

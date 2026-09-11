@@ -422,7 +422,7 @@ export default function AiModelsSuperadminPage() {
                   <Input
                     value={model.id}
                     onChange={(event) => updateModel(index, { id: event.target.value })}
-                    placeholder={model.provider === 'lmstudio' ? 'Ex: google/gemma-4-e4b' : model.provider === 'deepseek' ? 'Ex: deepseek-v4-flash' : model.provider === 'codex' ? 'Ex: gpt-5.3-codex' : model.provider === 'openai' ? 'Ex: gpt-5.5' : 'Ex: googleai/gemini-2.5-flash-lite'}
+                    placeholder={model.provider === 'lmstudio' ? 'Ex: google/gemma-4-e4b' : model.provider === 'deepseek' ? 'Ex: deepseek-flash' : model.provider === 'codex' ? 'Ex: gpt-5.3-codex' : model.provider === 'openai' ? 'Ex: gpt-5.5' : 'Ex: googleai/gemini-2.5-flash-lite'}
                     className="font-mono text-xs"
                   />
                 </div>

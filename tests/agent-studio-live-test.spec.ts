@@ -8,11 +8,14 @@ vi.mock('@/ai/flows/procedure-runtime', () => ({ generateProcedureRuntimeOutput:
 vi.mock('@/services/agent-studio/integrations', () => ({ executeStudioHttp: m.http, executeStudioMcp: m.mcp, resolveStudioMcpTool: m.resolveMcp }));
 vi.mock('@/actions/chats', () => ({ closeChatAction: m.close, transferChatAction: m.transfer }));
 vi.mock('@/lib/storage/private-s3', () => ({ putPrivateObject: m.upload }));
+vi.mock('@/lib/security/safe-remote-url', () => ({ validateRemoteUrl: vi.fn(async () => {}) }));
 vi.mock('@/lib/realtime/chat-broadcast', () => ({ broadcastHydratedChatUpdate: vi.fn(async () => {}) }));
-import { createLiveTest, loadLiveTest, claimLiveTest, decodeLiveTest, readLiveTestView } from '@/services/agent-studio/live-test-store';
+import { createLiveTest, loadLiveTest, claimLiveTest, decodeLiveTest, readLiveTestView, readLiveTestSessionHistory } from '@/services/agent-studio/live-test-store';
 import { sendLiveTestMessage } from '@/services/agent-studio/live-test';
 import { createDefaultAgentStudioDocument, ProcedureDocumentSchema, type AgentReleaseManifest } from '@/services/agent-studio/types';
 import type { AutopilotConfig } from '@/lib/types';
+import { readStudioDurableMemory } from '@/services/agent-studio/durable-memory-store';
+import type { StudioMemoryEvent } from '@/services/agent-studio/durable-memory';
 
 const workspaceId = '00000000-0000-4000-8000-000000000001';
 const agentId = '00000000-0000-4000-8000-000000000002';
@@ -42,6 +45,9 @@ beforeAll(async () => {
     INSERT INTO autopilot_configs VALUES ('${agentId}', '${workspaceId}');
     INSERT INTO teams VALUES ('${teamId}', '${workspaceId}', 'Suporte'); INSERT INTO tags VALUES ('${tagId}', '${workspaceId}');`);
   await sql.exec(await readFile('prisma/migrations/20260830210000_agent_studio_live_tests/migration.sql', 'utf8'));
+  await sql.exec(await readFile('prisma/migrations/20260908140000_agent_studio_durable_memory/migration.sql', 'utf8'));
+  await sql.exec(await readFile('prisma/migrations/20260909150000_agent_studio_live_session_history/migration.sql', 'utf8'));
+  await sql.exec('ALTER TABLE messages ADD COLUMN media_url text');
 });
 afterAll(async () => { await sql.close(); });
 beforeEach(async () => {
@@ -67,6 +73,73 @@ async function start(steps?: unknown[], contact: { name: string; phone?: string;
 }
 
 describe('persistent live Studio test', () => {
+  it('retains encrypted operation evidence across completed execution sessions and isolates the author', async () => {
+    await start();
+    const lease = await claimLiveTest(scope);
+    try {
+      const prior = decodeLiveTest(scope, lease.row).state;
+      prior.status = 'resolved'; prior.phase = 'done';
+      prior.reasoning = { version: 2, requests: [], pendingAction: null, operations: [{
+        id: 'confirmed-effect', requestId: 'order', memoryRequestId: `${prior.id}:order`,
+        capabilityId: 'invoice:api', signature: 'confirmed-signature', status: 'succeeded', readOnly: false,
+        values: { receipt: 'verified-receipt' }, at: new Date().toISOString(),
+      }] };
+      await lease.checkpoint(prior);
+      const next = structuredClone(prior);
+      next.id = randomUUID(); next.status = 'running'; next.phase = 'resolve'; next.reasoning!.operations = [];
+      await lease.checkpoint(next);
+      const history = await readLiveTestSessionHistory(scope);
+      expect(history.currentSessionId).toBe(next.id);
+      expect(history.sessions).toHaveLength(2);
+      expect(history.sessions.find((entry) => entry.id === prior.id)?.reasoning?.operations[0]).toMatchObject({
+        id: 'confirmed-effect', status: 'succeeded', values: { receipt: 'verified-receipt' },
+      });
+      await expect(readLiveTestSessionHistory({ ...scope, userId: randomUUID() })).rejects.toThrow('Teste não encontrado');
+      const ciphertext = await sql.query<{ encrypted_state: string }>('SELECT encrypted_state FROM agent_studio_live_session_history');
+      expect(ciphertext.rows.every((entry) => !entry.encrypted_state.includes('verified-receipt'))).toBe(true);
+      const invalid = structuredClone(next); invalid.id = randomUUID();
+      await expect(lease.checkpoint(invalid)).rejects.toThrow('atendimento pendente');
+      expect((await readLiveTestSessionHistory(scope)).currentSessionId).toBe(next.id);
+    } finally { await lease.release(); }
+  });
+
+  it('persists the selected catalog photo in the test chat and does not duplicate it on replay', async () => {
+    await start([
+      { id: 'api', order: 1, title: 'Catálogo', type: 'http_request', httpRequest: { name: 'Catálogo', connectionId: 'connection', url: '/products', outputMappings: [{ chipKey: 'products', chipLabel: 'Produtos', jsonPath: 'products' }] } },
+      { id: 'photo', order: 2, title: 'Mostrar produto', type: 'native_action', nativeActionType: 'show_catalog_image',
+        nativeActionPayload: { catalogKey: 'products', productIdPath: 'id', titlePath: 'name', imagePath: 'image', allowedHosts: ['images.store.example'], mimeType: 'image/png' },
+        nativeDataMappings: [{ apiField: 'productId', sourceType: 'static_value', sourceValue: 'blue' }] },
+    ]);
+    m.http.mockResolvedValue({ values: { products: [{ id: 'blue', name: 'Vestido azul', image: 'https://images.store.example/blue.png' }] } });
+    await sendLiveTestMessage(scope, config, randomUUID(), 'Quero ver o vestido');
+    const confirmationId = randomUUID();
+    await sendLiveTestMessage(scope, config, confirmationId, 'sim');
+    await sendLiveTestMessage(scope, config, confirmationId, 'sim');
+    const images = await sql.query<{ content: string; metadata: Record<string, unknown> }>("SELECT content, metadata FROM messages WHERE type='image' AND from_me=TRUE");
+    expect(images.rows).toHaveLength(1);
+    expect(images.rows[0]).toMatchObject({ content: 'Vestido azul', metadata: { mediaUrl: 'https://images.store.example/blue.png', mimetype: 'image/png', studioLiveTestId: scope.sessionId } });
+    expect((await readLiveTestView(scope)).messages.some((message) => message.attachmentUrl === 'https://images.store.example/blue.png')).toBe(true);
+  });
+  it('commits choice memory atomically with the live-test lease and rolls back on persistence failure', async () => {
+    const row = await start(); const lease = await claimLiveTest(scope);
+    const { state } = decodeLiveTest(scope, row);
+    const choice: StudioMemoryEvent = { version: 1, requestId: 'contract', kind: 'choice', key: 'plan', label: 'Plano', value: '700 mega',
+      status: 'active', sensitive: false, source: { sessionId: state.id, releaseId: state.releaseId, procedureId: null,
+        messageId: randomUUID(), quote: '700 mega', at: new Date().toISOString() } };
+    await lease.checkpoint(state, [choice]);
+    const memoryScope = { workspaceId, agentId, chatId: row.chat_id };
+    expect((await readStudioDurableMemory(memoryScope)).records[0].event.value).toBe('700 mega');
+    const before = await loadLiveTest(scope);
+    await sql.exec('ALTER TABLE agent_studio_memory_events ADD CONSTRAINT injected_memory_failure CHECK (false) NOT VALID');
+    try {
+      state.status = 'resolved';
+      await expect(lease.checkpoint(state, [{ ...choice, value: '1000 mega' }])).rejects.toThrow();
+      const after = await loadLiveTest(scope);
+      expect(after.revision).toBe(before.revision);
+      expect(decodeLiveTest(scope, after).state.status).toBe('running');
+      expect((await readStudioDurableMemory(memoryScope)).records[0].event.value).toBe('700 mega');
+    } finally { await sql.exec('ALTER TABLE agent_studio_memory_events DROP CONSTRAINT injected_memory_failure'); await lease.release(); }
+  });
   it.each([undefined, '', '   '])('creates a contact without an optional phone (%j) under NOT NULL constraints', async (phone) => {
     const row = await start(undefined, { name: 'Sem telefone', phone });
     const retry = await start(undefined, { name: 'Sem telefone', phone });
