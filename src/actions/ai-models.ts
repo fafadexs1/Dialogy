@@ -14,7 +14,10 @@ import {
   serializeAiDecisionModelConfig,
   SYSTEM_AI_DECISION_MODELS_KEY,
   type AiDecisionModelConfig,
+  AiDecisionModelConfigSchema,
+  assertDecisionModelsAvailable,
 } from '@/lib/ai-decision-models';
+import { readPlatformAiConfig, withPlatformAiSettingsTransaction } from '@/services/ai/platform-config';
 import { getGlobalAiDecisionModelConfig } from '@/services/ai/decision-model-config';
 import { getSystemSettings } from '@/lib/system-settings';
 import { revalidatePath, revalidateTag } from 'next/cache';
@@ -105,21 +108,27 @@ export async function saveAiDecisionModelConfigAction(config: AiDecisionModelCon
   }
 
   try {
-    await db.query(
+    const normalized = AiDecisionModelConfigSchema.parse(config);
+    await withPlatformAiSettingsTransaction(async client => {
+    const platform = await readPlatformAiConfig(client);
+    const legacy = platform ? null : await client.query('SELECT value FROM public.system_settings WHERE key=$1', [SYSTEM_AI_MODEL_CATALOG_KEY]);
+    assertDecisionModelsAvailable(normalized, platform?.models || (legacy?.rows[0]?.value ? parseAiModelCatalog(legacy.rows[0].value) : []));
+    await client.query(
       `
         INSERT INTO system_settings (key, value)
         VALUES ($1, $2)
         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
       `,
-      [SYSTEM_AI_DECISION_MODELS_KEY, serializeAiDecisionModelConfig(config)]
+      [SYSTEM_AI_DECISION_MODELS_KEY, serializeAiDecisionModelConfig(normalized)]
     );
+    });
 
     revalidateTag('system-settings', 'default');
     revalidatePath('/superadmin/ai-models');
     return { success: true };
   } catch (error) {
     console.error('[SAVE_AI_DECISION_MODELS] Error:', error);
-    return { success: false, error: 'Falha ao salvar modelos de decisao.' };
+    return { success: false, error: error instanceof Error ? error.message : 'Falha ao salvar modelos de decisao.' };
   }
 }
 

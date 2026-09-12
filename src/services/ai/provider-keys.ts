@@ -1,6 +1,8 @@
 import { db } from '@/lib/db';
 import type { AiModelRuntimeProvider } from '@/lib/ai-models';
 import type { AiModelKeyCandidate } from './model-client';
+import { platformApiKey, platformModel } from './platform-config';
+import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 
 type WorkspaceProvider = 'gemini' | 'openai' | 'deepseek';
 
@@ -93,17 +95,6 @@ function candidate(
 export async function resolveAiProviderKeyCandidates(
   input: ResolveAiProviderKeyCandidatesInput
 ): Promise<AiModelKeyCandidate[]> {
-  const workspaceConfigs = await loadWorkspaceProviderConfigs(input.config?.workspace_id);
-  const workspaceGeminiKey = cleanKey(input.workspaceGeminiApiKey)
-    || cleanKey(input.config?.gemini_api_key)
-    || cleanKey(workspaceConfigs.gemini?.apiKey);
-
-  return [
-    candidate('workspace-gemini', 'googleai', workspaceGeminiKey),
-    candidate('env-gemini', 'googleai', getDefaultGeminiEnvKey()),
-    candidate('workspace-openai', 'openai', workspaceConfigs.openai?.apiKey),
-    candidate('env-openai', 'openai', getDefaultOpenAiEnvKey()),
-    candidate('workspace-deepseek', 'deepseek', workspaceConfigs.deepseek?.apiKey),
-    candidate('env-deepseek', 'deepseek', getDefaultDeepSeekEnvKey()),
-  ].filter((item): item is AiModelKeyCandidate => Boolean(item));
+  const model = await platformModel();
+  return [{ source: 'platform', provider: getAiModelRuntimeProvider(model.id), key: await platformApiKey(model.id) }];
 }

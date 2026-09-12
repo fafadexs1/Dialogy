@@ -1,5 +1,5 @@
 
-'use server';
+import 'server-only';
 
 /**
  * @fileOverview This file contains the Genkit flow for a rule-based autonomous agent
@@ -10,6 +10,8 @@
  * - AgentResponseOutput - The return type for the generateAgentResponse function.
  */
 
+import { runPlatformModel } from '@/services/ai/platform-model-client';
+import { platformModel } from '@/services/ai/platform-config';
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
@@ -18,7 +20,6 @@ import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
 import { enrichKnowledgeDocumentsForPrompt } from '@/services/rag/knowledge-document';
 import {
   assertAiModelOutput,
-  runAiModelWithFallback,
   type AiModelKeyCandidate,
 } from '@/services/ai/model-client';
 import {
@@ -680,7 +681,7 @@ const autoResponderFlow = ai.defineFlow(
     outputSchema: AgentResponseOutputSchema,
   },
   async (input) => {
-    const model = input.model || DEFAULT_AUTOPILOT_MODEL;
+    const model = (await platformModel()).id;
     const normalizedRules = sanitizeAutopilotRules(input.rules);
     if (normalizedRules.invalid.length > 0) {
       console.warn('[AUTORESPONDER_FLOW] Ignoring invalid automation rules:', normalizedRules.invalid);
@@ -715,7 +716,9 @@ const autoResponderFlow = ai.defineFlow(
 
     if (apiKeyCandidates.length > 0) {
       try {
-        const promptRun = await runAiModelWithFallback({
+        const promptRun = await runPlatformModel({
+          workspaceId: input.config?.workspace_id,
+          inputTokenBudget: Buffer.byteLength(JSON.stringify(promptInput), 'utf8') + 8192,
           label: 'autoResponderFlow',
           modelCandidates: getModelCandidates(model),
           apiKeyCandidates,

@@ -18,6 +18,7 @@ export async function getSuperAdminStatsAction(): Promise<DashboardStats | null>
 
     // Basic security check (ideally rely on middleware/layout, but good to have)
     if (!user) return null;
+    if (!(await db.query('SELECT is_superadmin FROM users WHERE id=$1',[user.id])).rows[0]?.is_superadmin) return null;
 
     try {
         const [

@@ -113,29 +113,7 @@ export function AutopilotSettings({
                 />
               </div>
 
-              {!nativeWorkflow && <div className="space-y-2">
-                <Label>Modelo de IA</Label>
-                <Select value={aiModel} onValueChange={setAiModel}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {effectiveModelOptions.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Escolha entre os modelos adicionados em Integracoes / Modelos de IA.
-                </p>
-                {!modelOptions.some((model) => model.id === aiModel) && (
-                  <p className="text-xs text-amber-700 dark:text-amber-300">
-                    O modelo atualmente salvo nao esta ativo nas integracoes do workspace. Revise antes de publicar.
-                  </p>
-                )}
-              </div>}
+
             </div>
 
             {!nativeWorkflow && <div className="space-y-2">

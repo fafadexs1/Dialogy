@@ -1,3 +1,4 @@
+import { platformModel,platformApiKey } from '@/services/ai/platform-config';
 import type { AutopilotConfig, KnowledgeBaseDocument } from '@/lib/types';
 import type { Pool } from 'pg';
 import type { AgentToolRuntimeContext } from '@/services/agent-tools/types';
@@ -155,36 +156,10 @@ export async function modelChainForNode(input: {
   config: AutopilotConfig;
   modelNode: WorkflowNode;
 }) {
-  const config = modelConfig(input.modelNode);
-  const provider = getAiModelRuntimeProvider(config.model);
-  if (provider === 'lmstudio') {
-    const baseUrl = config.baseUrl || process.env.LM_STUDIO_BASE_URL || 'http://127.0.0.1:1234';
-    return new ModelFallbackChain([{
-      adapter: new LmStudioModelAdapter({
-        baseUrl,
-        apiKey: process.env.LM_STUDIO_API_KEY,
-        capabilities: [{
-          model: config.model,
-          toolCalling: config.supportsTools ? 'supported' : 'unsupported',
-          structuredOutput: config.supportsStructuredOutput,
-          streaming: config.supportsStreaming,
-          recommendedMaxTools: 20,
-          recommendedContextSize: config.contextWindow || 32_768,
-          lastEvaluatedAt: new Date().toISOString(),
-        }],
-      }),
-      config,
-    }]);
-  }
-  const keys = await resolveAiProviderKeyCandidates({
-    config: { workspace_id: input.workspaceId, gemini_api_key: input.config.gemini_api_key },
-  });
-  const key = keys.find((candidate) => !candidate.provider || candidate.provider === provider)?.key;
-  if (!key) throw new Error(`No API key is configured for workflow model provider ${provider}.`);
-  return new ModelFallbackChain([{
-    adapter: new RuntimeProviderModelAdapter({ model: config.model, apiKey: key, timeoutMs: config.timeoutMs }),
-    config,
-  }]);
+  const selected=await platformModel();
+  const config={...modelConfig(input.modelNode),model:selected.id};
+  const key=await platformApiKey(selected.id);
+  return new ModelFallbackChain([{adapter:new RuntimeProviderModelAdapter({workspaceId:input.workspaceId,model:selected.id,apiKey:key,timeoutMs:config.timeoutMs}),config}]);
 }
 
 function scopedDocuments(nodes: WorkflowNode[], documents: KnowledgeBaseDocument[]) {

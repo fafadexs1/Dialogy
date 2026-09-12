@@ -112,14 +112,14 @@ export function AutopilotReadiness({
     {
       key: 'model',
       label: 'Modelo',
-      detail: hasModel ? 'Modelo liberado para o runtime.' : 'Selecione um modelo suportado.',
+      detail: hasModel ? 'Modelo liberado para o runtime.' : 'A IA precisa ser configurada pelo administrador da plataforma.',
       state: hasModel ? 'ready' : 'blocked',
       icon: Rocket,
     },
     {
       key: 'key',
       label: 'Credencial',
-      detail: hasRuntimeKey ? 'Chave disponivel em Modelos de IA.' : 'Configure uma chave em Integracoes / Modelos de IA.',
+      detail: hasRuntimeKey ? 'IA da plataforma disponivel.' : 'A credencial precisa ser configurada no superadmin.',
       state: hasRuntimeKey ? 'ready' : 'blocked',
       icon: KeyRound,
     },

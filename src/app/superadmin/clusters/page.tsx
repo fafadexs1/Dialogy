@@ -1,5 +1,5 @@
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -9,7 +9,7 @@ const clusterTypes = [
     {
         name: "Evolution API",
         description: "Gerencie os servidores da Evolution API que distribuem as instâncias de WhatsApp não-oficiais.",
-        icon: "https://raw.githubusercontent.com/EvolutionAPI/evolution-api/main/public/icon.png",
+        icon: "/icons/evolution-api.png",
         href: "/superadmin/clusters/evolution",
         status: "active"
     }
@@ -26,7 +26,7 @@ export default function ClustersGatewayPage() {
                 {clusterTypes.map(cluster => (
                     <Card key={cluster.name} className="flex flex-col">
                         <CardHeader className="flex-row items-start gap-4">
-                             <Image src={cluster.icon} alt={`${cluster.name} logo`} width={48} height={48} className="rounded-lg border p-1" />
+                             <Image src={cluster.icon} alt={`${cluster.name} logo`} width={96} height={36} className="shrink-0 rounded-lg border object-contain p-1" />
                             <div>
                                 <CardTitle>{cluster.name}</CardTitle>
                                 <CardDescription>{cluster.description}</CardDescription>

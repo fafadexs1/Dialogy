@@ -40,11 +40,13 @@ import {
 } from "react-icons/fa6";
 import { HOME_FAQ_ITEMS } from "@/content/home-seo";
 import { DEFAULT_TRIAL_DAYS } from "@/lib/plans-types";
+import { PlanOffers } from "@/components/pricing/plan-offers";
+import type { OfferedPlan } from "@/lib/billing-catalog";
 import s from "./landing.module.css";
 
 const navigation = [
   ["Plataforma", "#plataforma"],
-  ["Inteligência artificial", "#ia"],
+  ["Inteligência artificial", "/ia"],
   ["Como funciona", "#como-funciona"],
   ["Planos", "#planos"],
 ];
@@ -405,7 +407,7 @@ function ProductDemo() {
   );
 }
 
-export default function LandingPage() {
+export default function LandingPage({ plans }: { plans: OfferedPlan[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -747,7 +749,7 @@ export default function LandingPage() {
                   conversa.
                 </li>
               </ul>
-              <Link href="/register" className={s.textLink}>
+              <Link href="/ia" className={s.textLink}>
                 Conhecer meu próximo agente <ArrowUpRight size={18} />
               </Link>
             </div>
@@ -821,34 +823,7 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
-        <section id="planos" className={s.plansSection}>
-          <div className={`${s.container} ${s.planBanner}`} data-reveal>
-            <div>
-              <span className={s.eyebrow}>
-                <Users size={14} /> ESPAÇO PARA TODA A EQUIPE
-              </span>
-              <h2>
-                Sua operação cresce.
-                <br />
-                <span>A Dialogy acompanha.</span>
-              </h2>
-              <p>
-                Planos por volume de conversas, com usuários ilimitados.
-                <br />
-                Encontre o melhor momento para dar o próximo passo.
-              </p>
-            </div>
-            <div className={s.planAction}>
-              <Link href="/pricing" className={s.primaryButton}>
-                Encontrar meu plano <ArrowUpRight size={18} />
-              </Link>
-              <span>
-                {DEFAULT_TRIAL_DAYS} dias de teste nos planos self-service.
-              </span>
-              <small>Recursos e limites variam conforme o plano.</small>
-            </div>
-          </div>
-        </section>
+        <PlanOffers plans={plans} />
         <section id="faq" className={s.section}>
           <div className={`${s.container} ${s.faqGrid}`}>
             <div data-reveal>
@@ -911,7 +886,7 @@ export default function LandingPage() {
           <div>
             <strong>Plataforma</strong>
             <a href="#plataforma">Explore a Dialogy</a>
-            <a href="#ia">Inteligência artificial</a>
+            <Link href="/ia">Inteligência artificial</Link>
             <Link href="/pricing">Planos e preços</Link>
           </div>
           <div>

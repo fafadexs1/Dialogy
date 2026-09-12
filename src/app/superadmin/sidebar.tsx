@@ -31,7 +31,7 @@ const mainNavItems = [
 
 const configNavItems = [
     { href: '/superadmin/alerts', label: 'Comunicados globais', icon: Megaphone, exact: true },
-    { href: '/superadmin/ai-models', label: 'Modelos de IA', icon: Sparkles, exact: false },
+    { href: '/superadmin/ai-models', label: 'IA e Créditos', icon: Sparkles, exact: false },
     { href: '/superadmin/meta-webhooks', label: 'Webhooks Meta', icon: Activity, exact: false },
     { href: '/superadmin/meta-routing', label: 'Roteamento Meta', icon: Route, exact: false },
     { href: '/superadmin/billing/settings', label: 'Config. Faturamento', icon: Settings, exact: true },

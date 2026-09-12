@@ -52,7 +52,6 @@ import {
 import { cn } from '@/lib/utils';
 import type { AutopilotConfig, KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 import { type AiModelCatalogEntry } from '@/lib/ai-models';
-import { StudioModelSelect } from './studio-model-select';
 import { StudioIntegrationFields, availableStudioData } from './studio-integration-fields';
 import { StudioConversationPreview } from './studio-conversation-preview';
 import { StudioFieldEditor, StudioStageSettings, type StudioResources } from './studio-stage-settings';
@@ -1700,9 +1699,6 @@ export function AiAgentJourneyStudio({
             /* ========================================================= */
             <div className="mx-auto max-w-2xl space-y-6">
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <StudioModelSelect models={models} value={doc.aiModel || config.ai_model || ''}
-                  onChange={(aiModel) => setDoc((previous) => ({ ...previous, aiModel }))} disabled={isPublishing} />
-                <p className="mb-6 mt-3 text-xs text-slate-500">A escolha é salva no rascunho e usada nos testes. Publique para aplicar a mudança aos novos atendimentos.</p>
                 <h3 className="text-sm font-bold text-slate-900">Horário e Políticas de Atendimento</h3>
                 <p className="text-xs text-slate-500">Defina o tom de voz e regras de operação fora do expediente.</p>
 

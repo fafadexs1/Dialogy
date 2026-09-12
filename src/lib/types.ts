@@ -1301,6 +1301,8 @@ export interface PlanIntegration extends Integration {
 }
 
 export interface Plan {
+  scope?: 'public' | 'custom';
+  workspace_ids?: string[];
   id: string;
   slug?: string;
   name: string;

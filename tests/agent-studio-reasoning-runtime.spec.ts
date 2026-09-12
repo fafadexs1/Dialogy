@@ -3,8 +3,10 @@ import type { AutopilotConfig, Contact } from '@/lib/types';
 import { createDefaultAgentStudioDocument, ProcedureDocumentSchema, HttpRequestStepConfigSchema, type AgentReleaseManifest } from '@/services/agent-studio/types';
 import type { StudioSession } from '@/services/agent-studio/engine';
 import type { StudioMemoryEvent } from '@/services/agent-studio/durable-memory';
-const mocks = vi.hoisted(() => ({ query: vi.fn(), legacy: vi.fn(), model: vi.fn(), credentials: vi.fn(), usage: vi.fn(),
+const mocks = vi.hoisted(() => ({ platform: vi.fn(), query: vi.fn(), legacy: vi.fn(), model: vi.fn(), credentials: vi.fn(), usage: vi.fn(),
   memory: vi.fn(), http: vi.fn(), mcp: vi.fn(), resolveMcp: vi.fn(), rag: vi.fn() }));
+vi.mock('@/services/ai/platform-config',()=>({platformModel:mocks.platform,platformApiKey:async()=>'platform-key'}));
+vi.mock('@/services/ai/platform-json',()=>({requestPlatformJson:mocks.model}));
 vi.mock('@/lib/db', () => ({ db: { query: mocks.query } }));
 vi.mock('@/actions/autopilot', () => ({ logAutopilotUsage: mocks.usage }));
 vi.mock('@/ai/flows/procedure-runtime', () => ({ generateProcedureRuntimeOutput: mocks.legacy }));
@@ -43,7 +45,7 @@ function fixture(preview = false) {
   return { release, send, saved, checkpoint, runNative, assertCurrent, sendCatalogImage, get state() { return state; } };
 }
 beforeEach(() => {
-  vi.resetAllMocks(); mocks.query.mockResolvedValue({ rows: [] }); mocks.memory.mockResolvedValue({ records: [], nextCursor: null });
+  vi.resetAllMocks(); mocks.platform.mockResolvedValue({id:'deepseek/deepseek-v4-flash',enabled:true}); mocks.query.mockResolvedValue({ rows: [] }); mocks.memory.mockResolvedValue({ records: [], nextCursor: null });
   mocks.credentials.mockResolvedValue([{ aiModel: 'deepseek/deepseek-v4-flash', apiKey: 'synthetic', isActive: true }]);
   mocks.usage.mockResolvedValue(undefined); mocks.http.mockResolvedValue({ values: { status: 'online' } });
   mocks.model.mockResolvedValue(response('Como posso ajudar?'));
@@ -100,7 +102,7 @@ describe('new reasoning engine through runStudioConversation', () => {
     expect(f.saved.some((event) => event.kind === 'choice' && event.source.messageId === 'old-choice')).toBe(true);
     expect(f.runNative).not.toHaveBeenCalled();
   });
-  it.each([false, true])('uses the explicitly published thinking model and common executor in preview=%s', async (preview) => {
+  it.each([false, true])('uses the platform thinking model and common executor in preview=%s', async (preview) => {
     const f = fixture(preview);
     mocks.model.mockResolvedValueOnce({ ...response(''), requests: [{ id: 'support', procedureId: 'support', objective: 'Verificar conexão', status: 'active' }],
       action: { ...response('').action, kind: 'tool', requestId: 'support', capabilityId: 'support:lookup' } })
@@ -114,20 +116,20 @@ describe('new reasoning engine through runStudioConversation', () => {
     expect(result.state.conversationMemory?.at(-1)?.customer).toBe('Verifique minha conexão');
   });
 
-  it('refuses an inactive/unregistered model instead of silently falling back', async () => {
-    const f = fixture(); mocks.credentials.mockResolvedValue([]);
+  it('refuses to execute when platform configuration is unavailable', async () => {
+    const f = fixture(); mocks.platform.mockRejectedValue(new Error('Plataforma sem modelo ativo'));
     await expect(f.send('Oi', 'm1')).rejects.toThrow('ativo');
     expect(mocks.model).not.toHaveBeenCalled(); expect(mocks.legacy).not.toHaveBeenCalled();
   });
 
-  it('can ask the separately configured stronger model for advice without transferring the customer', async () => {
+  it('uses the platform model for consultation without transferring the customer', async () => {
     const f = fixture(); f.release.agentSnapshot.resolveStage.reasoning!.supportModel = 'openai/configured-support-model';
     mocks.credentials.mockResolvedValue([{ aiModel: 'deepseek/deepseek-v4-flash', apiKey: 'synthetic', isActive: true },
       { aiModel: 'openai/configured-support-model', apiKey: 'synthetic-support', isActive: true }]);
     mocks.model.mockResolvedValueOnce({ ...response(''), action: { ...response('').action, kind: 'consult', query: 'Como investigar essa contradição?' } })
       .mockResolvedValueOnce({ advice: 'Consulte o status atualizado antes de concluir.' }).mockResolvedValueOnce(response('Vamos verificar o status atualizado.'));
     await f.send('Já paguei mas continua bloqueado', 'm1');
-    expect(mocks.model.mock.calls.map(([call]) => call.model)).toEqual(['deepseek/deepseek-v4-flash', 'openai/configured-support-model', 'deepseek/deepseek-v4-flash']);
+    expect(mocks.model.mock.calls.map(([call]) => call.model)).toEqual(['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash']);
     expect(f.runNative).not.toHaveBeenCalled();
   });
 

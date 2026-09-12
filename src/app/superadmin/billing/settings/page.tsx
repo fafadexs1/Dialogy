@@ -1,184 +1,263 @@
-'use client';
-
-import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  ShieldCheck,
+  PlugZap,
+  Loader2,
+  CheckCircle2,
+  Circle,
+} from "lucide-react";
+import {
+  getAsaasSettingsAction,
+  saveAsaasSettingsAction,
+  connectAsaasWebhookAction,
+} from "@/actions/asaas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Save, Key, CreditCard } from 'lucide-react';
-import { toast } from "@/hooks/use-toast";
-import { saveSystemSettingAction, getSystemSettingsAction } from '@/actions/system-settings';
-import { PLANS } from '@/lib/plans-types';
-
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
 export default function BillingSettingsPage() {
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
-
-    // Stripe Credentials
-    const [stripePublicKey, setStripePublicKey] = useState('');
-    const [stripeSecretKey, setStripeSecretKey] = useState('');
-    const [stripeWebhookSecret, setStripeWebhookSecret] = useState('');
-
-    // Plan Mappings (Plan ID -> Stripe Price ID)
-    const [priceIds, setPriceIds] = useState<Record<string, string>>({});
-
-    useEffect(() => {
-        const keysToFetch = [
-            'stripe_public_key',
-            'stripe_secret_key',
-            'stripe_webhook_secret',
-            ...Object.keys(PLANS).map(p => `stripe_price_${p}`)
-        ];
-
-        getSystemSettingsAction(keysToFetch)
-            .then(settings => {
-                setStripePublicKey(settings['stripe_public_key'] || '');
-                setStripeSecretKey(settings['stripe_secret_key'] || '');
-                setStripeWebhookSecret(settings['stripe_webhook_secret'] || '');
-
-                const loadedPrices: Record<string, string> = {};
-                Object.keys(PLANS).forEach(p => {
-                    loadedPrices[p] = settings[`stripe_price_${p}`] || '';
-                });
-                setPriceIds(loadedPrices);
-            })
-            .finally(() => setLoading(false));
-    }, []);
-
-    const handleSave = async () => {
-        setSaving(true);
-        try {
-            // Save Credentials
-            await saveSystemSettingAction('stripe_public_key', stripePublicKey);
-            await saveSystemSettingAction('stripe_secret_key', stripeSecretKey);
-            await saveSystemSettingAction('stripe_webhook_secret', stripeWebhookSecret);
-
-            // Save Price IDs
-            for (const [planId, priceId] of Object.entries(priceIds)) {
-                await saveSystemSettingAction(`stripe_price_${planId}`, priceId);
-            }
-
-            toast({
-                title: "Configurações salvas",
-                description: "As credenciais e mapeamentos do Stripe foram atualizados.",
-            });
-        } catch (error) {
-            toast({
-                title: "Erro ao salvar",
-                description: "Ocorreu um erro ao salvar as configurações.",
-                variant: "destructive"
-            });
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    if (loading) {
-        return <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  const [data, setData] = useState<Awaited<
+    ReturnType<typeof getAsaasSettingsAction>
+  > | null>(null);
+  const [environment, setEnvironment] = useState<"sandbox" | "production">(
+    "sandbox",
+  );
+  const [apiKey, setApiKey] = useState("");
+  const [webhookToken, setWebhookToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  async function load() {
+    try {
+      const d = await getAsaasSettingsAction();
+      setData(d);
+      setEnvironment(d.environment);
+    } catch {
+      setError(
+        "Não foi possível carregar as configurações ASAAS. Verifique a migração de cobrança.",
+      );
     }
-
-    return (
-        <div className="max-w-4xl mx-auto space-y-6">
-            <header>
-                <h1 className="text-2xl font-bold flex items-center gap-2">
-                    <Key className="w-6 h-6 text-primary" />
-                    Configurações de Pagamento (Stripe)
-                </h1>
-                <p className="text-muted-foreground">Configure as chaves da API do Stripe e mapeie os preços dos planos.</p>
-            </header>
-
-            <Tabs defaultValue="credentials">
-                <TabsList>
-                    <TabsTrigger value="credentials">Credenciais da API</TabsTrigger>
-                    <TabsTrigger value="plans">Mapeamento de Planos</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="credentials">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Chaves de Acesso</CardTitle>
-                            <CardDescription>
-                                Encontre essas chaves no Dashboard do Stripe em Developers {'>'} API Keys.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                                <Label>Publishable Key (Chave Pública)</Label>
-                                <Input
-                                    value={stripePublicKey}
-                                    onChange={e => setStripePublicKey(e.target.value)}
-                                    placeholder="pk_test_..."
-                                    className="font-mono"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Secret Key (Chave Secreta)</Label>
-                                <Input
-                                    value={stripeSecretKey}
-                                    onChange={e => setStripeSecretKey(e.target.value)}
-                                    type="password"
-                                    placeholder="sk_test_..."
-                                    className="font-mono"
-                                />
-                                <p className="text-xs text-muted-foreground">Esta chave é armazenada de forma segura no banco de dados.</p>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Webhook Signing Secret</Label>
-                                <Input
-                                    value={stripeWebhookSecret}
-                                    onChange={e => setStripeWebhookSecret(e.target.value)}
-                                    type="password"
-                                    placeholder="whsec_..."
-                                    className="font-mono"
-                                />
-                                <p className="text-xs text-muted-foreground">Necessário para validar eventos de webhook (faturas pagas, etc).</p>
-                            </div>
-                        </CardContent>
-                        <CardFooter className="justify-end">
-                            <Button onClick={handleSave} disabled={saving}>
-                                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                                Salvar Credenciais
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                </TabsContent>
-
-                <TabsContent value="plans">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>IDs de Preço (Price IDs)</CardTitle>
-                            <CardDescription>
-                                Cole o ID do Preço (ex: price_123...) gerado no Stripe para cada plano correspondente.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            {Object.entries(PLANS).filter(([key]) => key !== 'enterprise').map(([key, plan]) => (
-                                <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center p-4 border rounded-lg">
-                                    <div className="font-semibold flex items-center gap-2">
-                                        <CreditCard className="w-4 h-4 text-muted-foreground" />
-                                        {plan.label}
-                                    </div>
-                                    <div className="col-span-2">
-                                        <Input
-                                            value={priceIds[key] || ''}
-                                            onChange={e => setPriceIds(prev => ({ ...prev, [key]: e.target.value }))}
-                                            placeholder={`price_... para ${plan.label}`}
-                                            className="font-mono"
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                        </CardContent>
-                        <CardFooter className="justify-end">
-                            <Button onClick={handleSave} disabled={saving}>
-                                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                                Salvar Mapeamento
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                </TabsContent>
-            </Tabs>
+  }
+  useEffect(() => {
+    void load();
+  }, []);
+  async function run(
+    action: () => Promise<{ success: boolean; error?: string }>,
+    success: string,
+  ) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const r = await action();
+      if (!r.success) {
+        setError(r.error || "Falha na operação.");
+        return;
+      }
+      setNotice(success);
+      setApiKey("");
+      setWebhookToken("");
+      await load();
+    } catch {
+      setError("A operação não foi confirmada. Tente novamente.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mx-auto w-full max-w-5xl space-y-6">
+      <Link
+        href="/superadmin/billing"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground"
+      >
+        <ArrowLeft size={15} /> Voltar para cobranças
+      </Link>
+      <header>
+        <span className="text-xs font-semibold uppercase tracking-widest text-primary">
+          Integração de pagamentos
+        </span>
+        <h1 className="mt-2 text-3xl font-semibold">Conecte sua conta ASAAS</h1>
+        <p className="mt-2 text-muted-foreground">
+          Do primeiro pagamento à renovação, mantenha a assinatura e o acesso do
+          cliente sincronizados.
+        </p>
+      </header>
+      {error && (
+        <p
+          role="alert"
+          className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive"
+        >
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p
+          role="status"
+          className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm"
+        >
+          {notice}
+        </p>
+      )}
+      <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck size={20} /> Acesso seguro
+            </CardTitle>
+            <CardDescription>
+              As chaves salvas são criptografadas e não retornam ao navegador.
+              Deixe em branco para manter uma chave existente.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              className="space-y-5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(
+                  () =>
+                    saveAsaasSettingsAction({
+                      environment,
+                      apiKey,
+                      webhookToken,
+                    }),
+                  "Configurações salvas. Agora conecte o webhook.",
+                );
+              }}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="asaas-environment">Ambiente</Label>
+                <select
+                  id="asaas-environment"
+                  value={environment}
+                  onChange={(e) =>
+                    setEnvironment(e.target.value as typeof environment)
+                  }
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                >
+                  <option value="sandbox">Sandbox · pagamentos de teste</option>
+                  <option value="production">
+                    Produção · pagamentos reais
+                  </option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="asaas-key">Chave de API</Label>
+                <Input
+                  id="asaas-key"
+                  type="password"
+                  autoComplete="new-password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={
+                    data?.apiKeyConfigured
+                      ? "Chave configurada · preencha para substituir"
+                      : "Cole a chave da conta ASAAS"
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="asaas-token">
+                  Token de autenticação do webhook
+                </Label>
+                <Input
+                  id="asaas-token"
+                  type="password"
+                  autoComplete="new-password"
+                  value={webhookToken}
+                  onChange={(e) => setWebhookToken(e.target.value)}
+                  placeholder={
+                    data?.webhookConfigured
+                      ? "Token configurado"
+                      : "Gerado automaticamente ao salvar"
+                  }
+                />
+              </div>
+              {data && !data.encryptionReady && (
+                <p className="text-xs text-amber-600">
+                  Para salvar chaves nesta tela, configure ASAAS_ENCRYPTION_KEY
+                  no servidor com ao menos 32 caracteres. Credenciais via
+                  variáveis de ambiente também são aceitas.
+                </p>
+              )}
+              <Button type="submit" disabled={busy || !data?.encryptionReady}>
+                {busy && <Loader2 className="animate-spin" size={16} />} Salvar
+                configuração
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+        <div className="space-y-5">
+          <Card>
+            <CardHeader>
+              <CardTitle>Pronto para automatizar</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {[
+                [data?.apiKeyConfigured, "Chave de API configurada"],
+                [data?.webhookConfigured, "Autenticação do webhook"],
+                [!!data?.lastEvent, "Primeiro evento recebido"],
+              ].map(([ok, label]) => (
+                <div
+                  key={String(label)}
+                  className="flex items-center gap-3 text-sm"
+                >
+                  {ok ? (
+                    <CheckCircle2 size={18} className="text-primary" />
+                  ) : (
+                    <Circle size={18} className="text-muted-foreground" />
+                  )}
+                  {label}
+                </div>
+              ))}
+              <div className="border-t pt-4">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Endereço de notificação
+                </p>
+                <p className="break-all rounded-lg bg-muted p-3 font-mono text-xs">
+                  {data?.webhookUrl ||
+                    "Configure NEXT_PUBLIC_APP_URL no servidor"}
+                </p>
+                {data?.lastEvent && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Último evento:{" "}
+                    {new Date(data.lastEvent).toLocaleString("pt-BR")}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={
+                  busy || !data?.apiKeyConfigured || !data?.webhookConfigured
+                }
+                onClick={() =>
+                  run(
+                    connectAsaasWebhookAction,
+                    "Webhook conectado no ASAAS. A integração aguarda o primeiro evento.",
+                  )
+                }
+              >
+                <PlugZap size={16} /> Conectar webhook no ASAAS
+              </Button>
+            </CardContent>
+          </Card>
+          <div className="rounded-xl border p-5 text-sm leading-relaxed text-muted-foreground">
+            Os valores vêm do catálogo de planos da Dialogy. Não é necessário
+            cadastrar IDs de preço no ASAAS. Cobranças emitidas e contratos
+            existentes mantêm o valor contratado.
+          </div>
         </div>
-    );
+      </div>
+    </div>
+  );
 }

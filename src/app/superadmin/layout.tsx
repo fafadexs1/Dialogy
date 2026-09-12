@@ -1,5 +1,6 @@
 
 import React, { ReactNode } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
@@ -42,7 +43,14 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
                 >
                     <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
                         <Sidebar />
-                        <div className="flex flex-col">
+                        <div className="flex min-w-0 flex-col">
+                            <nav aria-label="Superadmin" className="flex gap-4 overflow-x-auto border-b bg-card px-4 py-3 text-sm md:hidden">
+                                <Link className="whitespace-nowrap" href="/superadmin">Visão geral</Link>
+                                <Link className="whitespace-nowrap" href="/superadmin/plans">Planos</Link>
+                                <Link className="whitespace-nowrap" href="/superadmin/billing">Cobranças</Link>
+                                <Link className="whitespace-nowrap" href="/superadmin/billing/settings">ASAAS</Link>
+                                <Link className="whitespace-nowrap" href="/inbox">Voltar ao app</Link>
+                            </nav>
                             <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
                                 {children}
                             </main>

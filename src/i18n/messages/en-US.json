@@ -66,6 +66,7 @@
     "autopilotDescription": "AI-powered agents and workflows",
     "systemAgents": "System Agents",
     "systemAgentsDescription": "Operational agents and webhooks",
+    "aiAgents": "AI Agents",
     "aiAgent": "AI Agent"
   },
   "account": {

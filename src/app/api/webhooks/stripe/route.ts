@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { recordReferralBonusForInvoice } from '@/lib/referrals-server';
 import { buildPlanLimits } from '@/lib/plans-types';
 import { getStripe } from '@/lib/stripe';
+import { fulfillAiCreditCheckout } from '@/services/ai/credit-payments';
 import { PlanType } from '@/lib/plans';
 import { logAction } from '@/lib/observability/logger';
 import { recordWebhookMetrics } from '@/lib/observability/metrics';
@@ -40,7 +41,7 @@ async function updateBillingStatusBySubscriptionId(subscriptionId: string | null
         `
             UPDATE billing_info
             SET status = $1, updated_at = NOW()
-            WHERE stripe_subscription_id = $2
+            WHERE stripe_subscription_id = $2 AND provider <> 'asaas'
             RETURNING workspace_id
         `,
         [normalizeStripeStatus(status), subscriptionId]
@@ -64,7 +65,7 @@ async function resolveWorkspaceByStripeCustomer(
             SET status = $2,
                 stripe_subscription_id = COALESCE($3, stripe_subscription_id),
                 updated_at = NOW()
-            WHERE stripe_customer_id = $1
+            WHERE stripe_customer_id = $1 AND provider <> 'asaas'
             RETURNING workspace_id
         `,
         [customerId, normalizeStripeStatus(status), subscriptionId || null]
@@ -161,7 +162,9 @@ export async function POST(req: NextRequest) {
         console.log(`[Stripe Webhook] Received event: ${event.type}`);
 
         switch (event.type) {
+            case 'checkout.session.async_payment_succeeded':
             case 'checkout.session.completed': {
+                if (await fulfillAiCreditCheckout(event.data.object)) break;
                 const session = event.data.object as any;
                 const workspaceId = session.metadata?.workspaceId;
                 const planId = session.metadata?.planId;
@@ -193,6 +196,7 @@ export async function POST(req: NextRequest) {
                                 stripe_customer_id = COALESCE($4, billing_info.stripe_customer_id),
                                 stripe_subscription_id = $5,
                                 updated_at = NOW()
+                            WHERE billing_info.provider <> 'asaas'
                         `,
                         [workspaceId, planId, billingStatus, customerId, subscriptionId]
                     );
@@ -201,7 +205,7 @@ export async function POST(req: NextRequest) {
                         `
                             UPDATE workspaces
                             SET custom_limits = $1, updated_at = NOW()
-                            WHERE id = $2
+                            WHERE id = $2 AND NOT EXISTS(SELECT 1 FROM billing_info b WHERE b.workspace_id=workspaces.id AND b.provider='asaas')
                         `,
                         [JSON.stringify(newLimits), workspaceId]
                     );
@@ -230,13 +234,13 @@ export async function POST(req: NextRequest) {
                     await db.query(
                         `UPDATE billing_info
                          SET plan = $1, status = $2, updated_at = NOW()
-                         WHERE workspace_id = $3`,
+                         WHERE workspace_id = $3 AND provider <> 'asaas'`,
                         [planId, mappedStatus, resolvedWorkspaceId]
                     );
                     await db.query(
                         `UPDATE workspaces
                          SET custom_limits = $1, updated_at = NOW()
-                         WHERE id = $2`,
+                         WHERE id = $2 AND NOT EXISTS(SELECT 1 FROM billing_info b WHERE b.workspace_id=workspaces.id AND b.provider='asaas')`,
                         [JSON.stringify(buildPlanLimits(planType, monthlyChats)), resolvedWorkspaceId]
                     );
                 }

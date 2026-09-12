@@ -1,7 +1,9 @@
 import 'server-only';
+import { requestPlatformJson } from '@/services/ai/platform-json';
+import { platformModel, platformApiKey } from '@/services/ai/platform-config';
 
 import { z } from 'zod';
-import { requestOpenAiCompatibleJson, isOpenAiCompatibleModel } from '@/services/ai/openai-compatible';
+import { isOpenAiCompatibleModel } from '@/services/ai/openai-compatible';
 import { loadWorkspaceAiCredentialRecords } from '@/services/ai/workspace-ai-credentials';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { advanceStudioReasoningSession } from './reasoning-engine';
@@ -22,16 +24,10 @@ export async function runStudioReasoningRuntime(input: StudioRuntimeInput, state
   const { release } = input;
   const document = release.agentSnapshot;
   const settings = document.resolveStage.reasoning;
-  const model = release.runtimeConfig?.aiModel;
+  const model = (await platformModel()).id;
   if (!settings?.enabled || !model) throw new Error('Publique um modelo explícito para o atendimento com raciocínio.');
-  if (!isOpenAiCompatibleModel(model)) throw new Error('Este provedor ainda não tem suporte ao novo núcleo de raciocínio.');
-  const credentials = await loadWorkspaceAiCredentialRecords(release.workspaceId, { activeOnly: true });
-  const credential = (id: string) => {
-    const record = credentials.find((r) => r.aiModel === id && r.isActive && r.apiKey);
-    if (!record || !isOpenAiCompatibleModel(id)) throw new Error('O modelo publicado precisa estar ativo nas integrações deste workspace.');
-    return record.apiKey;
-  };
-  const primaryKey = credential(model);
+  if (!isOpenAiCompatibleModel(model) && !model.startsWith('googleai/') && !model.startsWith('lmstudio/')) throw new Error('Este provedor ainda não tem suporte ao novo núcleo de raciocínio.');
+  const primaryKey = await platformApiKey(model);
   const continuation = model.startsWith('deepseek/') ? createStructuredToolContinuation() : undefined;
   const scope = { workspaceId: release.workspaceId, agentId: release.agentId, chatId: input.chatId };
   if (!input.preview && !input.suggestionOnly && state.reasoning) {
@@ -113,7 +109,8 @@ export async function runStudioReasoningRuntime(input: StudioRuntimeInput, state
         // Preview continuity is scoped to its supplied session, not to customer persistence.
         await input.checkpoint(next, input.preview ? [] : events);
       },
-      decide: (context) => requestOpenAiCompatibleJson({ model, apiKey: primaryKey, schema: StudioReasoningDecisionSchema,
+      decide: (context) => requestPlatformJson({ model, apiKey: primaryKey, schema: StudioReasoningDecisionSchema,
+        workspaceId: release.workspaceId,
         continuation,
         schemaName: 'dialogy_reasoning_decision', jsonSchema: studioReasoningDecisionJsonSchema,
         systemPrompt: studioReasoningSystemPrompt(document), userPrompt: JSON.stringify(context), reasoning: settings.effort,
@@ -134,8 +131,9 @@ export async function runStudioReasoningRuntime(input: StudioRuntimeInput, state
         ?? ((requestId) => readStudioRequestOperationHistory(scope, requestId, state.id)),
       recallHistory: input.preview ? undefined : (cursor) => loadStudioOlderConversationPage(release.workspaceId, input.chatId, input.messageId, cursor),
       consult: settings.supportModel ? async (context) => {
-        const supportModel = settings.supportModel!;
-        const output = await requestOpenAiCompatibleJson({ model: supportModel, apiKey: credential(supportModel),
+        const supportModel = model;
+        const output = await requestPlatformJson({ model: supportModel, apiKey: primaryKey,
+          workspaceId: release.workspaceId,
           schema: z.object({ advice: z.string().min(1).max(6000) }), schemaName: 'dialogy_reasoning_advice',
           jsonSchema: { type: 'object', properties: { advice: { type: 'string' } }, required: ['advice'], additionalProperties: false },
           systemPrompt: `${studioReasoningSystemPrompt(document)}\nVocê é um consultor interno. Retorne somente advice com uma recomendação curta e fundamentada para destravar o pedido. Não execute ações, não fale com o cliente e não transcreva raciocínio interno.`,

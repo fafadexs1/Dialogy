@@ -1,4 +1,4 @@
-'use server';
+import 'server-only';
 
 /**
  * Slim AI flow for Procedure Runtime.
@@ -8,6 +8,8 @@
  * active procedure state, compact tool results, and recent chat context.
  */
 
+import { runPlatformModel } from '@/services/ai/platform-model-client';
+import { platformModel } from '@/services/ai/platform-config';
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
@@ -16,7 +18,6 @@ import { StudioCollectionPlanSchema } from '@/services/agent-studio/collection-p
 import { logAutopilotUsage } from '@/actions/autopilot';
 import {
   assertAiModelOutput,
-  runAiModelWithFallback,
   type AiModelKeyCandidate,
 } from '@/services/ai/model-client';
 import {
@@ -211,7 +212,7 @@ const procedureRuntimeFlow = ai.defineFlow(
     outputSchema: ProcedureRuntimeOutputSchema,
   },
   async (input) => {
-    const model = input.model || DEFAULT_AUTOPILOT_MODEL;
+    const model = (await platformModel()).id;
     const lmStudioConfig = isLmStudioModel(model) ? await getGlobalLmStudioConfig() : null;
     const apiKeyCandidates: AiModelKeyCandidate[] = isLmStudioModel(model)
       ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio', provider: 'lmstudio' }]
@@ -226,7 +227,9 @@ const procedureRuntimeFlow = ai.defineFlow(
     }
 
     try {
-      const promptRun = await runAiModelWithFallback({
+      const promptRun = await runPlatformModel({
+        workspaceId: input.config?.workspace_id,
+        inputTokenBudget: Buffer.byteLength(JSON.stringify(input), 'utf8') + 8192,
         label: 'procedureRuntimeSlimFlow',
         modelCandidates: input.fixedModel ? [model] : getModelCandidates(input.model),
         apiKeyCandidates,

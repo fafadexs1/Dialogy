@@ -34,11 +34,7 @@ export function StudioPolicySettings({ document, onChange, models = [] }: { docu
         <label className="block">Esforço de raciocínio<select className="mt-1 w-full rounded-md border bg-white p-2" value={reasoning.effort} onChange={(event) => patchReasoning({ effort: event.target.value as 'low' | 'medium' | 'high' })}>
           <option value="low">Menor</option><option value="medium">Intermediário</option><option value="high">Maior</option>
         </select><span className="mt-1 block text-slate-500">Maior esforço pode aumentar o tempo e o consumo. Compare os resultados dos testes.</span></label>
-        <label className="block">Modelo de apoio<select className="mt-1 w-full rounded-md border bg-white p-2" value={effectiveSupportModel || ''} onChange={(event) => patchReasoning({ supportModel: event.target.value || null })}>
-          <option value="">Sem modelo de apoio</option>
-          {effectiveSupportModel && !supportModels.some((model) => model.id === effectiveSupportModel) && <option value={effectiveSupportModel} disabled>Modelo configurado indisponível</option>}
-          {supportModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-        </select><span className="mt-1 block text-slate-500">Somente modelos ativos e compatíveis deste workspace. O apoio orienta o agente quando necessário.</span></label>
+
       </>}
     </fieldset>}
   </section>;

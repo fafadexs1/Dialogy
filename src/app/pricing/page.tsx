@@ -1,3 +1,4 @@
+import { readBillingCatalog } from '@/services/billing/catalog';
 import { buildPageMetadata } from '@/lib/seo/metadata';
 import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
 import { JsonLd, getBreadcrumbSchema, getFaqSchema, getSoftwareApplicationSchema } from '@/lib/seo/schema';
@@ -7,7 +8,7 @@ import PricingClient from './pricing-client';
 const pricingFaqs = [
     {
         question: 'Posso cancelar a qualquer momento?',
-        answer: 'Sim. Os planos Basico, Profissional e Empresarial podem ser ajustados conforme a fase da equipe.',
+        answer: 'Sim. Os planos Essencial, Profissional e Operação podem ser ajustados conforme a fase da equipe.',
     },
     {
         question: 'Existe teste gratis?',
@@ -23,7 +24,7 @@ const pricingFaqs = [
     },
     {
         question: 'Quando a API entra no plano?',
-        answer: 'API e webhooks entram no plano Empresarial e seguem disponiveis no fluxo de grandes empresas.',
+        answer: 'API e webhooks entram no plano Operação e seguem disponiveis no fluxo de grandes empresas.',
     },
 ];
 
@@ -50,7 +51,7 @@ export default async function PricingPage() {
             <JsonLd id="pricing-faq-schema" data={faqSchema} />
             <JsonLd id="pricing-breadcrumb-schema" data={breadcrumbSchema} />
             <StoredSeoJsonLd pathname="/pricing" />
-            <PricingClient />
+            <PricingClient plans={await readBillingCatalog()} />
         </>
     );
 }

@@ -176,6 +176,8 @@ export async function createCheckoutSessionAction(planId: string, requestedMonth
         }
 
         const workspace = workspaceResult.rows[0];
+        const provider = (await db.query('SELECT provider FROM billing_info WHERE workspace_id=$1',[workspace.id])).rows[0]?.provider;
+        if (provider === 'asaas' || (await db.query('SELECT 1 FROM asaas_subscriptions WHERE workspace_id=$1',[workspace.id])).rowCount) return {error:'Este workspace é gerenciado pelo ASAAS. Use a página de plano e pagamentos.'};
         let customerId = workspace.stripe_customer_id;
 
         // ---- Existing subscription: UPDATE with proration ----

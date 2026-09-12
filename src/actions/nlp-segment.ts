@@ -1,16 +1,11 @@
 'use server';
+import { requestPlatformJson } from '@/services/ai/platform-json';
 
-import { genkit } from 'genkit';
-import { googleAI } from '@genkit-ai/google-genai';
+
+import { z } from 'zod';
+import { getCurrentUser } from './user';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import type { CriteriaGroup } from '@/lib/crm-query-builder';
-
-const geminiFlashModel = googleAI.model('gemini-2.5-flash');
-
-const ai = genkit({
-    plugins: [googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY })],
-    model: geminiFlashModel,
-});
-
 const SYSTEM_PROMPT = `Você é um assistente que converte descrições em linguagem natural de segmentos de contatos CRM em filtros estruturados JSON.
 
 Os campos disponíveis são:
@@ -59,15 +54,11 @@ Data de hoje: ${today}
 Converta esta descrição em filtros JSON:
 "${description}"`;
 
-        const { text } = await ai.generate(prompt);
-
-        // Extract JSON from response (may have markdown fences)
-        let jsonStr = text.trim();
-        if (jsonStr.startsWith('```')) {
-            jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-        }
-
-        const parsed = JSON.parse(jsonStr);
+        const user=await getCurrentUser();
+        if(!user?.activeWorkspaceId||!await hasWorkspacePermission(user.id,user.activeWorkspaceId,'crm:view')) throw new Error('Acesso negado.');
+        const parsed=await requestPlatformJson({workspaceId:user.activeWorkspaceId,model:'',apiKey:'',schema:z.object({operator:z.enum(['AND','OR']),conditions:z.array(z.object({field:z.string(),operator:z.string(),value:z.string().optional()}))}),
+          schemaName:'dialogy_crm_segment',jsonSchema:{type:'object',properties:{operator:{type:'string',enum:['AND','OR']},conditions:{type:'array',items:{type:'object',properties:{field:{type:'string'},operator:{type:'string'},value:{type:'string'}},required:['field','operator'],additionalProperties:false}}},required:['operator','conditions'],additionalProperties:false},
+          systemPrompt:SYSTEM_PROMPT,userPrompt:prompt,maxTokens:2000,timeoutMs:30000});
 
         // Validate structure
         if (!parsed.operator || !Array.isArray(parsed.conditions)) {

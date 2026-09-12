@@ -1524,46 +1524,11 @@ export function AiRouterInspector({ node, onUpdate }: InspectorProps) {
   );
 }
 
-export function ModelInspector({ node, onUpdate, modelOptions = [], onManageModels }: InspectorProps) {
+export function ModelInspector({ node, onUpdate }: InspectorProps) {
   const { config, rename } = useNodeUpdater(node, onUpdate);
-  const currentModel = String(node.config.model || '');
-  const selectOptions = getWorkflowModelOptions(modelOptions, currentModel);
-  const runtimeProvider = String(node.config.provider || getAiModelRuntimeProvider(currentModel));
-  const showBaseUrl = runtimeProvider === 'lmstudio'
-    || runtimeProvider === 'other'
-    || Boolean(node.config.baseUrl);
-
-  const selectModel = (modelId: string) => {
-    onUpdate(applyWorkflowModelSelection(node, modelId));
-  };
-
   return (
     <div className="space-y-5">
       <Field label="Nome do bloco"><Input value={node.name} onChange={(event) => rename(event.target.value)} /></Field>
-      <Field
-        label="Modelo"
-        description={modelOptions.length > 0
-          ? 'Somente modelos configurados com credencial neste workspace aparecem aqui. O provedor é preenchido automaticamente.'
-          : 'Nenhum modelo com credencial está configurado neste workspace.'}
-      >
-        <NativeSelect value={currentModel} onChange={selectModel} disabled={modelOptions.length === 0}>
-          {!currentModel && <option value="">Selecione um modelo</option>}
-          {selectOptions.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label} · {model.legacy ? 'configuração antiga' : model.provider}
-            </option>
-          ))}
-        </NativeSelect>
-        {modelOptions.length === 0 ? <Button type="button" size="sm" variant="outline" onClick={onManageModels} className="border-amber-300/25 text-amber-100">Configurar modelos de IA</Button> : null}
-      </Field>
-      <Field label="Provedor" description="Definido pelo modelo selecionado.">
-        <Input value={runtimeProvider} readOnly className="cursor-default opacity-75" />
-      </Field>
-      {showBaseUrl ? (
-        <Field label="URL base" description="Opcional para LM Studio ou provedores customizados. A credencial é resolvida pelo workspace no servidor.">
-          <Input value={String(node.config.baseUrl || '')} onChange={(event) => config('baseUrl', event.target.value || undefined)} placeholder="http://host.docker.internal:1234/v1" />
-        </Field>
-      ) : null}
       <div className="grid grid-cols-2 gap-3"><Field label="Temperatura"><Input type="number" min={0} max={2} step={0.1} value={Number(node.config.temperature ?? 0.2)} onChange={(event) => config('temperature', Number(event.target.value))} /></Field><Field label="Máx. tokens"><Input type="number" min={1} value={Number(node.config.maxOutputTokens || 2048)} onChange={(event) => config('maxOutputTokens', Number(event.target.value))} /></Field></div>
       <div className="grid grid-cols-2 gap-3"><Field label="Timeout (ms)"><Input type="number" min={1000} value={Number(node.config.timeoutMs || 60000)} onChange={(event) => config('timeoutMs', Number(event.target.value))} /></Field><Field label="Tentativas"><Input type="number" min={0} max={10} value={Number(node.config.maxRetries ?? 2)} onChange={(event) => config('maxRetries', Number(event.target.value))} /></Field></div>
       <ToggleField label="Tool calling" checked={node.config.supportsTools === true} onCheckedChange={(value) => config('supportsTools', value)} />

@@ -1,3 +1,5 @@
+import { requestPlatformJson } from '@/services/ai/platform-json';
+import { runPlatformModel } from '@/services/ai/platform-model-client';
 import { genkit } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
 import { z } from 'zod';
@@ -6,8 +8,8 @@ import { ai } from '@/ai/genkit';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
-import { isOpenAiCompatibleModel, requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';
-import { runAiModelWithFallback, type AiModelKeyCandidate } from '@/services/ai/model-client';
+import { isOpenAiCompatibleModel } from '@/services/ai/openai-compatible';
+import {  type AiModelKeyCandidate } from '@/services/ai/model-client';
 
 const ConversationLearningSchema = z.object({
   shouldStore: z.boolean(),
@@ -92,6 +94,7 @@ const fallbackModels = [
 ];
 
 export async function learnFromConversation(input: {
+  workspaceId?: string;
   transcript: string;
   closeContext?: string;
   existingKnowledge?: string;
@@ -120,7 +123,7 @@ export async function learnFromConversation(input: {
     };
 
     if (isLmStudioModel(model)) return requestLmStudioJson({ model, ...common });
-    if (isOpenAiCompatibleModel(model)) return requestOpenAiCompatibleJson({ model, apiKey, ...common });
+    if (!isLmStudioModel(model)) return requestPlatformJson({ model, apiKey, ...common });
 
     const defaultKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
     const prompt = apiKey === defaultKey
@@ -131,7 +134,8 @@ export async function learnFromConversation(input: {
     return ConversationLearningSchema.parse(result.output);
   };
 
-  const run = await runAiModelWithFallback({
+  const run = await runPlatformModel({
+    workspaceId: input.workspaceId,
     label: 'conversationLearning',
     modelCandidates: [input.model, ...fallbackModels],
     apiKeyCandidates: input.apiKeyCandidates,

@@ -1,4 +1,5 @@
 import 'server-only';
+import { platformModel } from '@/services/ai/platform-config';
 
 import { randomUUID } from 'node:crypto';
 import { validateSchema } from 'genkit/schema';
@@ -93,7 +94,7 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
     || studioHasUncertainOperation(previous) || previous.suspendedProcedures?.length || previous.lastTurn?.messageId === input.messageId)
     ? previous : createStudioSession(release.agentId, release.releaseId, randomUUID());
   const persona = `${document.name}. Objetivo: ${document.objective || ''}. Idioma: ${document.language}. Tom: ${document.rules.toneOfVoice}. Assuntos fora do escopo: ${JSON.stringify(document.rules.excludedTopics || [])}. Nunca solicite senhas, tokens secretos ou códigos de autenticação. Também não solicite estes dados: ${JSON.stringify(document.rules.prohibitedDataLabels || [])}.`;
-  const modelConfig = { ...input.config, ai_model: release.runtimeConfig?.aiModel || DEFAULT_AUTOPILOT_MODEL };
+  const modelConfig = { ...input.config, ai_model: (await platformModel()).id };
   const historyTurns = input.preview ? [] : await loadStudioConversationTurns(release.workspaceId, input.chatId, input.messageId, Boolean(reasoningEnabled));
   const rawHistory = input.chatHistory ?? historyTurns.map((turn) => `${turn.fromMe ? 'Agente' : 'Cliente'}: ${turn.content}`).join('\n');
   if (previous && state !== previous) {

@@ -1,3 +1,4 @@
+import { requestPlatformJson } from '@/services/ai/platform-json';
 import { genkit } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
 import { z } from 'zod';
@@ -16,7 +17,6 @@ import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
 import {
   isOpenAiCompatibleModel,
-  requestOpenAiCompatibleJson,
 } from '@/services/ai/openai-compatible';
 import {
   V2_FLOW_NODE_KINDS,
@@ -3223,6 +3223,7 @@ export function resolveFlowBuilderApiKeyForModel(input: {
 }
 
 async function runFlowBuilderStage<TSchema extends z.ZodTypeAny>(input: {
+  workspaceId?: string;
   model: string;
   apiKey?: string;
   schema: TSchema;
@@ -3233,99 +3234,12 @@ async function runFlowBuilderStage<TSchema extends z.ZodTypeAny>(input: {
   defaultRunner: any;
   maxTokens?: number;
 }) {
-  if (isLmStudioModel(input.model)) {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= FLOW_BUILDER_RETRY_ATTEMPTS; attempt += 1) {
-      try {
-        return await requestLmStudioJson({
-          model: input.model,
-          schema: input.schema,
-          schemaName: input.schemaName,
-          jsonSchema: input.jsonSchema,
-          systemPrompt: input.systemPrompt,
-          userPrompt: attempt === 1 ? input.userPrompt : retryPrompt(input.userPrompt, lastError),
-          timeoutMs: FLOW_BUILDER_TIMEOUT_MS,
-          maxTokens: input.maxTokens ?? FLOW_BUILDER_MAX_TOKENS,
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt >= FLOW_BUILDER_RETRY_ATTEMPTS || !isRetryableFlowBuilderError(error)) {
-          throw flowBuilderStageError(input.schemaName, error);
-        }
-        console.warn(
-          `[AUTOPILOT_FLOW_BUILDER_AI] Retrying ${input.schemaName} after invalid LM Studio response:`,
-          error
-        );
-      }
-    }
-    throw flowBuilderStageError(input.schemaName, lastError);
-  }
-
-  if (isOpenAiCompatibleModel(input.model)) {
-    const apiKey = resolveFlowBuilderApiKeyForModel({
-      model: input.model,
-      explicitApiKey: input.apiKey,
-    });
-    if (!apiKey) {
-      throw new Error(`Chave ${providerLabelForFlowBuilderModel(input.model)} nao configurada para construir o flow.`);
-    }
-
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= FLOW_BUILDER_RETRY_ATTEMPTS; attempt += 1) {
-      try {
-        return await requestOpenAiCompatibleJson({
-          model: input.model,
-          apiKey,
-          schema: input.schema,
-          schemaName: input.schemaName,
-          jsonSchema: input.jsonSchema,
-          systemPrompt: input.systemPrompt,
-          userPrompt: attempt === 1 ? input.userPrompt : retryPrompt(input.userPrompt, lastError),
-          timeoutMs: FLOW_BUILDER_TIMEOUT_MS,
-          maxTokens: input.maxTokens ?? FLOW_BUILDER_MAX_TOKENS,
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt >= FLOW_BUILDER_RETRY_ATTEMPTS || !isRetryableFlowBuilderError(error)) {
-          throw flowBuilderStageError(input.schemaName, error);
-        }
-        console.warn(
-          `[AUTOPILOT_FLOW_BUILDER_AI] Retrying ${input.schemaName} after invalid OpenAI-compatible response:`,
-          error
-        );
-      }
-    }
-    throw flowBuilderStageError(input.schemaName, lastError);
-  }
-
-  if (getAiModelRuntimeProvider(input.model) !== 'googleai') {
-    throw new Error(`Modelo ${input.model} nao suportado para construir flow.`);
-  }
-
-  const apiKey = resolveFlowBuilderApiKeyForModel({
-    model: input.model,
-    explicitApiKey: input.apiKey,
-  });
-  if (!apiKey) throw new Error('Chave Gemini nao configurada para construir o flow.');
-  const defaultKey = defaultEnvKeyForFlowBuilderModel(input.model);
-  const runner: any = apiKey === defaultKey
-    ? input.defaultRunner
-    : genkit({ plugins: [googleAI({ apiKey })], model: input.model }).definePrompt({
-        name: `${input.schemaName}DynamicPrompt`,
-        input: { schema: z.object({ prompt: z.string() }) },
-        output: { schema: input.schema },
-        prompt: '{{{prompt}}}',
-      });
-  try {
-    const result = await runner({ prompt: input.userPrompt }, { model: input.model });
-    if (!result.output) throw new Error(`A IA nao retornou JSON estruturado para ${input.schemaName}.`);
-    return input.schema.parse(result.output);
-  } catch (error) {
-    throw flowBuilderStageError(input.schemaName, error);
-  }
+  return requestPlatformJson({workspaceId:input.workspaceId,model:'',apiKey:'',schema:input.schema,schemaName:input.schemaName,
+    jsonSchema:input.jsonSchema,systemPrompt:input.systemPrompt,userPrompt:input.userPrompt,timeoutMs:FLOW_BUILDER_TIMEOUT_MS,maxTokens:input.maxTokens??FLOW_BUILDER_MAX_TOKENS});
 }
 
 export async function generateAutopilotFlowProposal(input: {
+  workspaceId?: string;
   conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
   currentGraph?: AutopilotFlowGraph | null;
   currentSystemPrompt?: string | null;
@@ -3339,6 +3253,7 @@ export async function generateAutopilotFlowProposal(input: {
   let architecture: ArchitectureFlowBuilderOutput;
   try {
     architecture = await runFlowBuilderStage({
+      workspaceId: input.workspaceId,
       model: input.model,
       apiKey: input.apiKey,
       schema: ArchitectureFlowBuilderOutputSchema,
@@ -3360,6 +3275,7 @@ export async function generateAutopilotFlowProposal(input: {
   );
   try {
     const topology = await runFlowBuilderStage({
+      workspaceId: input.workspaceId,
       model: input.model,
       apiKey: input.apiKey,
       schema: FlowBuilderTopologySchema,
@@ -3376,6 +3292,7 @@ export async function generateAutopilotFlowProposal(input: {
   }
   try {
     const enrichment = await runFlowBuilderStage({
+      workspaceId: input.workspaceId,
     model: input.model,
     apiKey: input.apiKey,
     schema: FlowBuilderEnrichmentSchema,
@@ -3407,6 +3324,7 @@ export async function generateAutopilotFlowProposal(input: {
   });
   try {
     const toolSelection = await runFlowBuilderStage({
+      workspaceId: input.workspaceId,
     model: input.model,
     apiKey: input.apiKey,
     schema: FlowBuilderToolSelectionSchema,
@@ -3434,6 +3352,7 @@ export async function generateAutopilotFlowProposal(input: {
 
   try {
     const validation = await runFlowBuilderStage({
+      workspaceId: input.workspaceId,
     model: input.model,
     apiKey: input.apiKey,
     schema: FlowBuilderValidationSchema,

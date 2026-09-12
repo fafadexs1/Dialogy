@@ -905,6 +905,7 @@ export async function improveAutopilotKnowledgeDocument(
             workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
         });
         const improved = await improveKnowledgeDocumentForRag({
+            workspaceId,
             document,
             model: runtime.model,
             apiKeyCandidates: modelApiKeyCandidates,
@@ -969,39 +970,10 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
     }
 
     try {
-        const integrationRes = await db.query(`
-            SELECT config, is_active
-            FROM workspace_integrations
-            WHERE workspace_id = $1 AND provider = 'gemini'
-            LIMIT 1
-        `, [workspaceId]);
-
-        if (integrationRes.rows.length > 0 && integrationRes.rows[0].is_active) {
-            const integrationConfig = integrationRes.rows[0].config || {};
-            const apiKey = typeof integrationConfig.apiKey === 'string' && integrationConfig.apiKey.trim().length > 0
-                ? integrationConfig.apiKey.trim()
-                : null;
-            const aiModel = typeof integrationConfig.aiModel === 'string' && integrationConfig.aiModel.trim().length > 0
-                ? normalizeGoogleAiModelId(integrationConfig.aiModel)
-                : null;
-            if (apiKey || aiModel) {
-                return { apiKey, aiModel, hasGlobalKey };
-            }
-        }
-
-        return {
-            apiKey: null,
-            aiModel: null,
-            hasGlobalKey,
-        };
-    } catch (error) {
-        console.error(`[GET_WORKSPACE_AI_RUNTIME_CONFIG] Erro ao resolver config do workspace ${workspaceId}:`, error);
-        return {
-            apiKey: null,
-            aiModel: null,
-            hasGlobalKey,
-            error: 'Falha ao buscar configuração de IA do workspace.',
-        };
+        const { model } = await resolveAutopilotModelFromCatalog();
+        return {apiKey:null,aiModel:model,hasGlobalKey:true};
+    } catch {
+        return {apiKey:null,aiModel:null,hasGlobalKey:false,error:'A IA precisa ser configurada pelo administrador da plataforma.'};
     }
 }
 
@@ -1120,6 +1092,7 @@ export async function generateAutopilotFlowWithAi(input: {
             : parseKnowledgeCollections(config.knowledge_collections);
 
         const proposal = await generateAutopilotFlowProposal({
+            workspaceId,
             conversation,
             currentGraph: input.currentGraph || null,
             currentSystemPrompt: input.currentSystemPrompt || '',
@@ -1938,7 +1911,10 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             snapshot: normalizeDraftSnapshot(row.snapshot, selectedSnapshot),
         })) as AutopilotConfigVersionSummary[];
 
-        const workspaceConfiguredAiModels = await listWorkspaceConfiguredAiModels(workspaceId);
+        const workspaceConfiguredAiModels = await listWorkspaceConfiguredAiModels(workspaceId).catch(error => {
+            console.error('[GET_AUTOPILOT_CONFIG] Platform AI readiness unavailable:', error);
+            return [];
+        });
         const workspaceDefaultAiModel = workspaceConfiguredAiModels[0]?.id || null;
         const hasGlobalAiKey = !!(
             process.env.GOOGLE_GENAI_API_KEY ||
@@ -4258,6 +4234,7 @@ export async function generateConversationKnowledgeDraft(input: {
             workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
         });
         const learned = await learnFromConversation({
+            workspaceId: input.workspaceId,
             transcript,
             closeContext,
             existingKnowledge,

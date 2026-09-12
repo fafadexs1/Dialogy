@@ -24,8 +24,7 @@ import { getAutopilotConfig } from '@/actions/autopilot';
 import { createNewAiAgentAction } from '@/actions/agent-studio';
 import { AGENT_SERVICE_TYPE_LABELS, type AgentServiceType } from '@/services/agent-studio/types';
 import { getWorkspaceConfiguredAiModelsAction } from '@/actions/integrations';
-import { getAiModelLabel, type AiModelCatalogEntry } from '@/lib/ai-models';
-import { StudioModelSelect } from '@/components/autopilot/studio-model-select';
+import { type AiModelCatalogEntry } from '@/lib/ai-models';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -58,8 +57,8 @@ export default function AutopilotPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
   const [newAgentName, setNewAgentName] = useState('');
-  const [newAgentModel, setNewAgentModel] = useState('');
   const selectableModels = useMemo(() => modelCatalog.filter((model) => model.enabled), [modelCatalog]);
+  const newAgentModel = selectableModels[0]?.id || '';
   const [newAgentVisibility, setNewAgentVisibility] = useState<AgentVisibilityMode>('public');
   const [newAgentObjective, setNewAgentObjective] = useState('');
   const [newAgentArea, setNewAgentArea] = useState<AgentServiceType>('support');
@@ -83,7 +82,7 @@ export default function AutopilotPage() {
       }
 
       if (catalogData.error) {
-        toast({ title: 'Modelos cadastrados indisponíveis', description: catalogData.error, variant: 'destructive' });
+        toast({ title: 'IA temporariamente indisponível', description: 'Seus agentes continuam acessíveis. A configuração da IA precisa ser verificada pelo administrador.', variant: 'destructive' });
       }
 
       setAgents(autopilotData.agents || []);
@@ -113,7 +112,6 @@ export default function AutopilotPage() {
 
   const openCreateDialog = useCallback(() => {
     setNewAgentName(`Agente ${agents.length + 1}`);
-    setNewAgentModel('');
     setNewAgentVisibility('public');
     setNewAgentObjective(''); setNewAgentArea('support'); setNewAgentLanguage('pt-BR'); setNewAgentTemplate('blank'); setCreationId(createClientUuid());
     setIsCreateDialogOpen(true);
@@ -234,7 +232,7 @@ export default function AutopilotPage() {
                   <div className="min-w-0 space-y-2">
                     <h3 className="truncate text-xl font-semibold text-foreground">{agent.name}</h3>
                     <p className="text-sm text-muted-foreground">
-                      {getAiModelLabel(agent.ai_model, modelCatalog)}
+                      IA Dialogy
                     </p>
                   </div>
 
@@ -318,7 +316,6 @@ export default function AutopilotPage() {
             </div>
 
             <label className="block space-y-2 text-sm font-medium">O que ele deve resolver?<Textarea value={newAgentObjective} onChange={(event) => setNewAgentObjective(event.target.value)} placeholder="Ex.: ajudar clientes a consultar pedidos e encaminhar solicitações fora do escopo." /></label>
-            <StudioModelSelect models={modelCatalog} value={newAgentModel} onChange={setNewAgentModel} disabled={isCreatingAgent} />
             <div className="grid grid-cols-2 gap-3">
               <label className="block space-y-2 text-sm font-medium">Área de atendimento<select className="w-full rounded-md border bg-background p-2 text-sm" value={newAgentArea} onChange={(event) => setNewAgentArea(event.target.value as AgentServiceType)}>{Object.entries(AGENT_SERVICE_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               <label className="block space-y-2 text-sm font-medium">Idioma<select className="w-full rounded-md border bg-background p-2 text-sm" value={newAgentLanguage} onChange={(event) => setNewAgentLanguage(event.target.value)}><option value="pt-BR">Português (Brasil)</option><option value="en">Inglês</option><option value="es">Espanhol</option></select></label>

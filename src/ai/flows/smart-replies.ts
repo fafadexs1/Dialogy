@@ -1,26 +1,9 @@
-
-
 'use server';
+import { requestPlatformJson } from '@/services/ai/platform-json';
 
-/**
- * @fileOverview This file contains the Genkit flow for generating smart replies based on customer message content.
- *
- * - generateSmartReplies - A function that generates smart reply suggestions.
- * - SmartRepliesInput - The input type for the generateSmartReplies function.
- * - SmartRepliesOutput - The output type for the generateSmartReplies function.
- */
-
-import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
-import { logAutopilotUsage } from '@/actions/autopilot';
-import { DEFAULT_AUTOPILOT_MODEL, getGoogleAiSdkModelName, normalizeGoogleAiModelId } from '@/lib/ai-models';
-import { db } from '@/lib/db';
-import { createClient } from '@/lib/supabase/server';
-import { getWorkspaceAiRuntimeConfig } from '@/actions/autopilot';
-import { isLmStudioModel } from '@/services/ai/lm-studio';
-import { requestLmStudioText } from '@/services/ai/lm-studio-client';
-
-
+import { getCurrentUser } from '@/actions/user';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 const SmartRepliesInputSchema = z.object({
   customerMessage: z
     .string()
@@ -40,157 +23,12 @@ const SmartRepliesOutputSchema = z.object({
 });
 export type SmartRepliesOutput = z.infer<typeof SmartRepliesOutputSchema>;
 
-// Extend the input schema for the flow to include the config object.
-const SmartRepliesFlowInputSchema = SmartRepliesInputSchema.extend({
-  config: z.any(),
-});
-
 
 export async function generateSmartReplies(input: SmartRepliesInput): Promise<SmartRepliesOutput> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    throw new Error("User not authenticated.");
-  }
-  const userId = user.id;
-
-  const configRes = await db.query(
-    'SELECT * FROM autopilot_configs WHERE workspace_id = $1 AND user_id = $2',
-    [input.workspaceId, userId]
-  );
-
-  // Use a default config if none is found to avoid breaking smart replies
-  const config = configRes.rows.length > 0
-    ? configRes.rows[0]
-    : { id: 'default', ai_model: DEFAULT_AUTOPILOT_MODEL };
-  const runtimeConfig = await getWorkspaceAiRuntimeConfig(input.workspaceId);
-  const apiKey = runtimeConfig.apiKey;
-  const requestedModel = config.ai_model || runtimeConfig.aiModel || DEFAULT_AUTOPILOT_MODEL;
-  const configuredModel = isLmStudioModel(requestedModel)
-    ? requestedModel
-    : normalizeGoogleAiModelId(requestedModel) || DEFAULT_AUTOPILOT_MODEL;
-
-  if (isLmStudioModel(configuredModel)) {
-    const text = await requestLmStudioText({
-      model: configuredModel,
-      systemPrompt: 'Sugira respostas curtas para um atendente humano. Responda somente um array JSON com 3 strings.',
-      userPrompt: `Historico: ${input.chatHistory || ''}\nMensagem do cliente: ${input.customerMessage}`,
-      timeoutMs: 5000,
-      maxTokens: 240,
-    });
-    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleanText);
-    return SmartRepliesOutputSchema.parse({
-      suggestedReplies: Array.isArray(parsed) ? parsed.slice(0, 3) : [],
-    });
-  }
-
-  // Check if we have a custom Gemini API Key
-  if (apiKey) {
-    try {
-      const { GoogleGenerativeAI } = await import('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: getGoogleAiSdkModelName(configuredModel)! });
-
-      const prompt = `You are an AI assistant helping support agents by suggesting quick replies to customer messages.
-      
-      Given the customer's message and the chat history, suggest 3 possible replies that the agent can use.
-      The replies should be concise and relevant to the customer's message.
-      Return ONLY a JSON array of strings, like this: ["Reply 1", "Reply 2", "Reply 3"]. Do not include markdown formatting like \`\`\`json.
-
-      Chat History: ${input.chatHistory || ''}
-      Customer Message: ${input.customerMessage}`;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-
-      // Clean up potential markdown code blocks if the model ignores the instruction
-      const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-      let suggestedReplies: string[] = [];
-      try {
-        suggestedReplies = JSON.parse(cleanText);
-      } catch (e) {
-        console.error('Failed to parse JSON from Gemini response:', text);
-        // Fallback: split by newlines if it's not JSON
-        suggestedReplies = cleanText.split('\n').filter(line => line.trim().length > 0).slice(0, 3);
-      }
-
-      // Log usage manually since we are bypassing Genkit
-      if (config.id && config.id !== 'default') {
-        // Note: GoogleGenerativeAI doesn't always return token usage in the same format.
-        // We'll estimate or skip for now, or check usageMetadata if available.
-        const usageMetadata = response.usageMetadata;
-        if (usageMetadata) {
-          await logAutopilotUsage({
-            configId: config.id,
-            flowName: 'generateSmartRepliesFlow (Custom Key)',
-            modelName: configuredModel,
-            inputTokens: usageMetadata.promptTokenCount,
-            outputTokens: usageMetadata.candidatesTokenCount,
-            totalTokens: usageMetadata.totalTokenCount,
-          });
-        }
-      }
-
-      return { suggestedReplies };
-
-    } catch (error) {
-      console.error('Error using custom Gemini API Key:', error);
-      // Fallback to default flow if custom key fails? 
-      // Or throw error? Let's fall back to default flow as a safety net, 
-      // but maybe the user wants to know it failed. 
-      // For now, let's log and fall back.
-    }
-  }
-
-  // Pass the full input including config to the flow
-  const flowInput = { ...input, config: { ...config, ai_model: configuredModel } };
-  return generateSmartRepliesFlow(flowInput);
+  const user = await getCurrentUser();
+  if (!user || !await hasWorkspacePermission(user.id,input.workspaceId,'inbox:access')) throw new Error('Acesso negado ao workspace.');
+  return requestPlatformJson({ workspaceId:input.workspaceId, model:'',apiKey:'', schema:SmartRepliesOutputSchema,
+    schemaName:'dialogy_smart_replies',jsonSchema:{ type:'object',properties:{suggestedReplies:{type:'array',items:{type:'string'}}},required:['suggestedReplies'],additionalProperties:false },
+    systemPrompt:'Sugira tres respostas curtas e relevantes para um atendente humano, com base somente na conversa.',
+    userPrompt:JSON.stringify({history:input.chatHistory,message:input.customerMessage}),maxTokens:500,timeoutMs:15000 });
 }
-
-
-const prompt = ai.definePrompt({
-  name: 'smartRepliesPrompt',
-  input: { schema: SmartRepliesInputSchema },
-  output: { schema: SmartRepliesOutputSchema },
-  prompt: `You are an AI assistant helping support agents by suggesting quick replies to customer messages.
-
-  Given the customer's message and the chat history, suggest 3 possible replies that the agent can use.
-  The replies should be concise and relevant to the customer's message.
-  Format the replies as a numbered list in the suggestedReplies array.
-
-  Chat History: {{{chatHistory}}}
-  Customer Message: {{{customerMessage}}}
-  `,
-});
-
-const generateSmartRepliesFlow = ai.defineFlow(
-  {
-    name: 'generateSmartRepliesFlow',
-    inputSchema: SmartRepliesFlowInputSchema,
-    outputSchema: SmartRepliesOutputSchema,
-  },
-  async (input) => {
-    const model = input.config?.ai_model || DEFAULT_AUTOPILOT_MODEL;
-    // The prompt only receives the fields defined in its own input schema.
-    const promptInput = SmartRepliesInputSchema.parse(input);
-    const result = await prompt(promptInput, { model });
-    const output = result.output!;
-
-    // Log usage
-    if (result.usage && input.config?.id && input.config.id !== 'default') {
-      await logAutopilotUsage({
-        configId: input.config.id,
-        flowName: 'generateSmartRepliesFlow',
-        modelName: model,
-        inputTokens: result.usage.inputTokens || 0,
-        outputTokens: result.usage.outputTokens || 0,
-        totalTokens: result.usage.totalTokens || 0,
-      });
-    }
-
-    return output;
-  }
-);

@@ -1,0 +1,28 @@
+{
+  "viewports": [
+    1440,
+    1024,
+    768,
+    390,
+    320
+  ],
+  "scenarios": [
+    "plan-selection",
+    "checkout-success-and-error",
+    "subscription",
+    "pending-invoices",
+    "refresh",
+    "cancel-confirmation",
+    "permissions",
+    "readiness",
+    "legacy-subscription",
+    "credits-presets",
+    "minimum-recharge",
+    "dynamic-credit-price",
+    "credit-explanation",
+    "ledger",
+    "payment-return"
+  ],
+  "backend": "Isolated fixtures. No charges, cancellations or database changes.",
+  "runtimeErrors": []
+}

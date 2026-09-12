@@ -1,46 +1,9 @@
-import { genkit } from 'genkit';
-import { googleAI } from '@genkit-ai/google-genai';
-import { normalizeGoogleAiModelId } from '@/lib/ai-models';
-
-const geminiFlashModel = googleAI.model('gemini-2.5-flash');
-
-// Initialize Genkit - This file should ONLY be used on the server
-const ai = genkit({
-    plugins: [googleAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY })],
-    model: geminiFlashModel,
-});
-
-export async function generateSummary(conversationText: string, apiKey?: string, modelName?: string): Promise<string> {
-    let localAi = ai;
-    const normalizedModel = normalizeGoogleAiModelId(modelName);
-
-    // Se temos uma chave ou um modelo específico, precisamos re-instanciar
-    if (apiKey || normalizedModel) {
-        localAi = genkit({
-            plugins: [googleAI({ apiKey: apiKey || process.env.GOOGLE_GENAI_API_KEY })],
-            model: normalizedModel || geminiFlashModel,
-        });
-    }
-
-    const prompt = `
-    Resuma o seguinte atendimento de suporte em um parágrafo conciso para notas internas.
-    Foque apenas na conversa atual fornecida.
-    Destaque o problema principal e a resolução (ou estado atual).
-    O resumo deve ter no máximo 500 caracteres.
-    Não invente informações.
-    
-    Conversa:
-    ${conversationText}
-    `;
-
-    try {
-        const { text } = await localAi.generate(prompt);
-        return text;
-    } catch (error: any) {
-        console.error('Error generating summary with Genkit:', error);
-        if (error.message?.includes('404') || error.status === 404) {
-            throw new Error('Modelo de IA não disponível. Verifique a chave de API e permissões.');
-        }
-        throw new Error('Falha na geração do resumo.');
-    }
+import { requestPlatformJson } from '@/services/ai/platform-json';
+import { z } from 'zod';
+export async function generateSummary(conversationText:string, apiKey?:string, modelName?:string, workspaceId?:string):Promise<string> {
+  const result = await requestPlatformJson({workspaceId,model:'',apiKey:'',schema:z.object({summary:z.string()}),
+    schemaName:'dialogy_summary',jsonSchema:{type:'object',properties:{summary:{type:'string'}},required:['summary'],additionalProperties:false},
+    systemPrompt:'Resuma este atendimento para notas internas, em no maximo 500 caracteres. Destaque o problema e a resolucao ou estado atual. Nao invente informacoes.',
+    userPrompt:conversationText,maxTokens:500,timeoutMs:20000});
+  return result.summary;
 }

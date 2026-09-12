@@ -388,11 +388,11 @@ export async function getMetaRoutingOverview(filters?: {
       const processed = parseInt(statsRow.processed || 0, 10);
       const successRate = total > 0 ? parseFloat(((processed / total) * 100).toFixed(1)) : 100.0;
 
-      // Query Latencies
+      // Millisecond durations can exceed PostgreSQL's 32-bit integer range.
       const latencyRes = await db.query(`
         SELECT 
-          COALESCE(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000), 0)::int as avg_latency,
-          COALESCE(MAX(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000), 0)::int as max_latency
+          ROUND(COALESCE(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000), 0))::double precision as avg_latency,
+          ROUND(COALESCE(MAX(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000), 0))::double precision as max_latency
         FROM meta_whatsapp_deliveries
         WHERE status = 'processed'
       `);
@@ -438,8 +438,8 @@ export async function getMetaRoutingOverview(filters?: {
             quarantineCount: parseInt(statsRow.quarantined || 0, 10),
             dlqCount: parseInt(statsRow.dlq || 0, 10),
             successRate,
-            avgLatencyMs: latencyRow?.avg_latency || 120,
-            maxLatencyMs: latencyRow?.max_latency || 2400
+            avgLatencyMs: latencyRow?.avg_latency ?? 0,
+            maxLatencyMs: latencyRow?.max_latency ?? 0
           },
           wabaRoutes: wabaRes.rows,
           phoneRoutes: phoneRes.rows,

@@ -91,7 +91,7 @@ export function isBillingGrace(status: BillingStatus): boolean {
 
 export async function getWorkspaceBillingStatus(workspaceId: string): Promise<BillingStatus> {
     const res = await db.query(
-        `SELECT status FROM billing_info WHERE workspace_id = $1`,
+        `SELECT CASE WHEN provider='asaas' AND (access_until IS NULL OR access_until < now()) THEN 'past_due' ELSE status END AS status FROM billing_info WHERE workspace_id = $1`,
         [workspaceId]
     );
     return (res.rows[0]?.status as BillingStatus) || null;
@@ -111,7 +111,7 @@ export async function getWorkspaceLimits(workspaceId: string): Promise<Workspace
             `SELECT 
                 COALESCE(b.plan, 'starter') as plan, 
                 w.custom_limits,
-                b.status as billing_status
+                CASE WHEN b.provider='asaas' AND (b.access_until IS NULL OR b.access_until < now()) THEN 'past_due' ELSE b.status END as billing_status
              FROM workspaces w
              LEFT JOIN billing_info b ON b.workspace_id = w.id
              WHERE w.id = $1`,

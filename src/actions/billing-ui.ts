@@ -14,6 +14,8 @@ export async function getCurrentPlanAction(workspaceId: string): Promise<{
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
+    const membership = await db.query(`SELECT 1 FROM workspaces w WHERE w.id=$1 AND (w.owner_id=$2 OR EXISTS(SELECT 1 FROM user_workspace_roles r WHERE r.workspace_id=w.id AND r.user_id=$2))`,[workspaceId,user.id]);
+    if (!membership.rowCount) return null;
 
     try {
         const { plan, limits } = await getWorkspaceLimits(workspaceId);

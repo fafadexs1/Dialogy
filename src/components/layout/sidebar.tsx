@@ -103,6 +103,12 @@ const automationNavItems: NavItem[] = [
     descriptionKey: "nav.nexusDescription",
   },
   {
+    href: "/autopilot",
+    icon: BrainCircuit,
+    labelKey: "nav.aiAgents",
+    descriptionKey: "nav.autopilotDescription",
+  },
+  {
     href: "/automations/robots",
     icon: Bot,
     labelKey: "nav.systemAgents",
@@ -125,12 +131,6 @@ const integrationsKeyHubs: NavItem[] = [
     icon: MessageCircleMore,
     labelKey: "nav.whatsapp",
     descriptionKey: "nav.channelsDescription",
-  },
-  {
-    href: "/integrations/ai",
-    icon: BrainCircuit,
-    labelKey: "nav.aiProviders",
-    descriptionKey: "nav.aiProvidersDescription",
   },
   {
     href: "/integrations/mcp",

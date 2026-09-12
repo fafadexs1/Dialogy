@@ -43,7 +43,8 @@ export const getPlan = safe_unstable_cache(
         return {
             id: planType,
             label: plan.name,
-            price: plan.price,
+            price: Number(plan.price),
+            description: plan.description,
             limits: normalizePlanLimits(plan.limits as any, planType),
             stripePriceId: plan.stripe_price_id
         } as PlanDetails;
@@ -54,11 +55,12 @@ export const getPlan = safe_unstable_cache(
 
 export const getAllPlans = safe_unstable_cache(
     async () => {
-        const res = await db.query('SELECT * FROM plans WHERE is_active = true ORDER BY price ASC');
+        const res = await db.query("SELECT * FROM plans WHERE is_active = true AND scope = 'public' ORDER BY price ASC");
         return res.rows.map(plan => ({
             id: plan.slug as PlanType,
             label: plan.name,
-            price: plan.price,
+            price: Number(plan.price),
+            description: plan.description,
             limits: normalizePlanLimits(plan.limits as any, plan.slug as PlanType),
             stripePriceId: plan.stripe_price_id
         })) as PlanDetails[];

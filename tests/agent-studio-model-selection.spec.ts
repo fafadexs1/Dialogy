@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ run: vi.fn(), prompt: vi.fn(), usage: vi.fn() }));
+vi.mock('@/services/ai/platform-config',()=>({platformModel:async()=>({id:'googleai/platform-default',enabled:true}),platformApiKey:async()=>'isolated-key'}));
+vi.mock('@/services/ai/metered-call',()=>({meteredAiCall:async(input:any)=>input.execute(async()=>{})}));
 vi.mock('@/ai/genkit', () => ({ ai: { defineFlow: (_definition: unknown, execute: unknown) => execute, definePrompt: () => mocks.prompt } }));
 vi.mock('@/actions/autopilot', () => ({ logAutopilotUsage: mocks.usage }));
 vi.mock('@/services/ai/provider-keys', () => ({ getDefaultGeminiEnvKey: () => 'isolated-key', resolveAiProviderKeyCandidates: async () => [{ key: 'isolated-key', provider: 'google', source: 'test' }] }));
@@ -17,15 +19,13 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('published Studio model selection at the actual shared AI flow boundary', () => {
   const input = { config: { id: 'agent' }, chatId: 'chat', mode: 'decision' as const, model: 'published-model', customerMessage: 'Fatura', procedure: { name: 'Financeiro', prompt: 'Escolha um procedimento.' } };
-  it('does not substitute an environment override or fallback model for a fixed release', async () => {
+  it('uses the platform default even for an immutable release', async () => {
     await expect(generateProcedureRuntimeOutput({ ...input, fixedModel: true })).resolves.toEqual({ decision: 'invoice' });
-    expect(mocks.run.mock.calls[0][0].modelCandidates).toEqual(['published-model']);
-    expect(mocks.prompt.mock.calls[0][1]).toEqual({ model: 'published-model' });
+    expect(mocks.run.mock.calls[0][0].modelCandidates).toEqual(['googleai/platform-default']);
+    expect(mocks.prompt.mock.calls[0][1]).toEqual({ model: 'googleai/platform-default' });
   });
-  it('preserves the legacy fallback policy for callers that have not opted into a fixed release', async () => {
+  it('ignores legacy fallback and environment model overrides', async () => {
     await generateProcedureRuntimeOutput(input);
-    expect(mocks.run.mock.calls[0][0].modelCandidates[0]).toBe('environment-override');
-    expect(mocks.run.mock.calls[0][0].modelCandidates).toContain('published-model');
-    expect(mocks.run.mock.calls[0][0].modelCandidates.length).toBeGreaterThan(1);
+    expect(mocks.run.mock.calls[0][0].modelCandidates).toEqual(['googleai/platform-default']);
   });
 });

@@ -66,6 +66,7 @@
     "autopilotDescription": "Agentes y flujos con inteligencia artificial",
     "systemAgents": "Agentes del Sistema",
     "systemAgentsDescription": "Agentes operativos y webhooks",
+    "aiAgents": "Agentes de IA",
     "aiAgent": "Agente de IA"
   },
   "account": {

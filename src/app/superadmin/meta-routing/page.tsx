@@ -65,6 +65,7 @@ export default function MetaRoutingDashboard() {
   const { toast } = useToast();
   const [data, setData] = useState<MetaRoutingOverview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditLogsLoading, setAuditLogsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
@@ -112,6 +113,7 @@ export default function MetaRoutingDashboard() {
     q?: string;
   }) => {
     setLoading(true);
+    setLoadError(null);
     try {
       const activeFilters = customFilters || {
         status: statusFilter,
@@ -121,11 +123,13 @@ export default function MetaRoutingDashboard() {
       };
       const res = await getMetaRoutingOverview(activeFilters);
       if (res.error) {
+        setLoadError(res.error);
         toast({ title: 'Erro ao carregar dados', description: res.error, variant: 'destructive' });
       } else {
         setData(res.data);
       }
     } catch (e: any) {
+      setLoadError(e.message || 'Falha de rede.');
       toast({ title: 'Erro de comunicação', description: e.message || 'Falha de rede.', variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -468,6 +472,17 @@ export default function MetaRoutingDashboard() {
         </div>
       </div>
 
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-5 w-5" />
+          <AlertTitle>Não foi possível atualizar o painel</AlertTitle>
+          <AlertDescription>
+            {loadError} {data ? 'Os dados exibidos são da última atualização bem-sucedida. ' : ''}
+            Use “Atualizar Dados” para tentar novamente.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Database Setup Banner */}
       {data && !data.dbConnected && (
         <Alert className="border-amber-500/50 bg-amber-500/10 text-amber-500 dark:border-amber-500/30 dark:bg-amber-500/5">
@@ -497,7 +512,7 @@ export default function MetaRoutingDashboard() {
           <CardHeader className="p-4 pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider">Fila Ativa</CardDescription>
             <CardTitle className="text-2xl font-bold flex items-center justify-between">
-              {loading ? '...' : data?.statistics.pendingCount}
+              {loading ? '...' : data?.statistics.pendingCount ?? '—'}
               <Clock className="h-4 w-4 text-amber-500" />
             </CardTitle>
           </CardHeader>
@@ -510,7 +525,7 @@ export default function MetaRoutingDashboard() {
           <CardHeader className="p-4 pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider">Quarentena</CardDescription>
             <CardTitle className="text-2xl font-bold text-red-500 flex items-center justify-between">
-              {loading ? '...' : data?.statistics.quarantineCount}
+              {loading ? '...' : data?.statistics.quarantineCount ?? '—'}
               <AlertTriangle className="h-4 w-4 text-red-500" />
             </CardTitle>
           </CardHeader>
@@ -523,7 +538,7 @@ export default function MetaRoutingDashboard() {
           <CardHeader className="p-4 pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider">Dead-Letter (DLQ)</CardDescription>
             <CardTitle className="text-2xl font-bold text-red-600 flex items-center justify-between">
-              {loading ? '...' : data?.statistics.dlqCount}
+              {loading ? '...' : data?.statistics.dlqCount ?? '—'}
               <ShieldAlert className="h-4 w-4 text-red-600" />
             </CardTitle>
           </CardHeader>
@@ -536,7 +551,7 @@ export default function MetaRoutingDashboard() {
           <CardHeader className="p-4 pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider">Taxa de Sucesso</CardDescription>
             <CardTitle className="text-2xl font-bold text-emerald-500 flex items-center justify-between">
-              {loading ? '...' : `${data?.statistics.successRate}%`}
+              {loading ? '...' : data ? `${data.statistics.successRate}%` : '—'}
               <CheckCircle2 className="h-4 w-4 text-emerald-500" />
             </CardTitle>
           </CardHeader>
@@ -549,13 +564,13 @@ export default function MetaRoutingDashboard() {
           <CardHeader className="p-4 pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider">Latência da Fila</CardDescription>
             <CardTitle className="text-2xl font-bold flex items-center justify-between font-mono">
-              {loading ? '...' : `${data?.statistics.avgLatencyMs}ms`}
+              {loading ? '...' : data ? `${data.statistics.avgLatencyMs}ms` : '—'}
               <Network className="h-4 w-4 text-blue-500" />
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4 flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">Média Processamento</span>
-            <span className="text-[10px] text-red-400 font-mono">Max: {data?.statistics.maxLatencyMs}ms</span>
+            <span className="text-[10px] text-red-400 font-mono">Max: {data ? `${data.statistics.maxLatencyMs}ms` : '—'}</span>
           </CardContent>
         </Card>
       </div>

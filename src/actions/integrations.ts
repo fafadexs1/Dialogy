@@ -44,6 +44,7 @@ export async function saveIntegrationConfig(
   config: any,
   isActive: boolean = true
 ): Promise<{ success: boolean; error?: string }> {
+  if (isAiCredentialProvider(provider)) return { success:false,error:'A IA e gerenciada pela plataforma.' };
   const user = await getCurrentUser();
 
   if (!user) {
@@ -209,58 +210,8 @@ export async function saveAiProviderCredentialAction(input: {
   model?: string;
   isActive?: boolean;
 }): Promise<{ success: boolean; error?: string }> {
-  const user = await getCurrentUser();
+  return { success:false,error:'A IA e gerenciada pela plataforma.' };
 
-  if (!user) {
-    return { success: false, error: 'Usuario nao autenticado.' };
-  }
-  if (!await hasWorkspacePermission(user.id, input.workspaceId, 'workspace:settings:edit')) {
-    return { success: false, error: 'Acesso negado ao workspace.' };
-  }
-  if (!isAiCredentialProvider(input.provider)) {
-    return { success: false, error: 'Provedor de IA invalido.' };
-  }
-
-  const model = normalizeAiCredentialModel(input.provider, input.model);
-  if (!model) {
-    return { success: false, error: 'Modelo de IA invalido para este provedor.' };
-  }
-
-  try {
-    await ensureWorkspaceIntegrationsTable();
-    const existing = (await loadWorkspaceAiCredentialRecords(input.workspaceId))
-      .find((record) => record.provider === input.provider);
-    const apiKey = cleanConfigValue(input.apiKey) || existing?.apiKey || '';
-    if (!apiKey) {
-      return { success: false, error: 'Informe a chave de API deste modelo.' };
-    }
-
-    await db.query(
-      `
-        INSERT INTO workspace_integrations (workspace_id, provider, config, is_active, updated_at)
-        VALUES ($1, $2, $3, $4, NOW())
-        ON CONFLICT (workspace_id, provider)
-        DO UPDATE SET
-          config = $3,
-          is_active = $4,
-          updated_at = NOW()
-      `,
-      [
-        input.workspaceId,
-        input.provider,
-        JSON.stringify({ apiKey, aiModel: model }),
-        input.isActive !== false,
-      ],
-    );
-
-    revalidatePath('/integrations');
-    revalidatePath('/integrations/ai');
-    revalidatePath('/autopilot');
-    return { success: true };
-  } catch (error) {
-    console.error('[SAVE_AI_PROVIDER_CREDENTIAL] Error:', error);
-    return { success: false, error: 'Falha ao salvar modelo de IA.' };
-  }
 }
 
 export async function removeAiProviderCredentialAction(input: {
@@ -306,75 +257,8 @@ export async function testAiProviderConnectionAction(input: {
   apiKey?: string;
   model?: string;
 }): Promise<AiProviderConnectionTestResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
-    return {
-      ok: false,
-      provider: isAiProvider(input.provider) ? input.provider : 'gemini',
-      model: input.model || '',
-      runtimeProvider: 'other',
-      durationMs: 0,
-      checkedAt: new Date().toISOString(),
-      message: 'Usuario nao autenticado.',
-      keySource: 'missing',
-      error: 'Usuario nao autenticado.',
-    };
-  }
-
-  if (!await hasWorkspacePermission(user.id, input.workspaceId, 'workspace:settings:edit')) {
-    return {
-      ok: false,
-      provider: isAiProvider(input.provider) ? input.provider : 'gemini',
-      model: input.model || '',
-      runtimeProvider: 'other',
-      durationMs: 0,
-      checkedAt: new Date().toISOString(),
-      message: 'Acesso negado ao workspace.',
-      keySource: 'missing',
-      error: 'Acesso negado ao workspace.',
-    };
-  }
-
-  if (!isAiProvider(input.provider)) {
-    return {
-      ok: false,
-      provider: 'gemini',
-      model: input.model || '',
-      runtimeProvider: 'other',
-      durationMs: 0,
-      checkedAt: new Date().toISOString(),
-      message: 'Provedor de IA invalido.',
-      keySource: 'missing',
-      error: 'Provedor de IA invalido.',
-    };
-  }
-
-  const storedConfig = await loadStoredAiProviderConfig(input.workspaceId, input.provider);
-  const formKey = cleanConfigValue(input.apiKey);
-  const workspaceKey = storedConfig.apiKey;
-  const environmentKey = envKeyForProvider(input.provider);
-  const apiKey = formKey || workspaceKey || environmentKey;
-  const keySource = formKey
-    ? 'current-form'
-    : workspaceKey
-      ? 'workspace'
-      : environmentKey
-        ? 'environment'
-        : 'missing';
-  const model = cleanConfigValue(input.model) || storedConfig.aiModel || defaultModelForProvider(input.provider);
-
-  const result = await testAiProviderConnection({
-    provider: input.provider,
-    apiKey,
-    model,
-    timeoutMs: 12000,
-  });
-
-  return {
-    ...result,
-    keySource,
-  };
+  return {ok:false,provider:input.provider,model:'',runtimeProvider:'other',durationMs:0,checkedAt:new Date().toISOString(),
+    message:'A IA e gerenciada pela plataforma.',keySource:'missing',error:'A IA e gerenciada pela plataforma.'};
 }
 
 export async function getIntegrations(): Promise<{ integrations: any[]; error?: string }> {
@@ -431,18 +315,6 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
       .length;
 
     const availableIntegrations = [
-      {
-        id: 'ai-models',
-        name: 'Modelos de IA',
-        description: 'Gerencie Gemini, OpenAI/Codex e DeepSeek em uma unica integracao.',
-        icon_url: '/integration-fallback.svg',
-        tag: activeAiProviderCount > 0 ? `${activeAiProviderCount} ativo(s)` : 'IA',
-        tag_type: 'primary',
-        href: '/integrations/ai',
-        status: 'active',
-        provider: 'ai-models',
-        is_active: activeAiProviderCount > 0,
-      },
       {
         id: 'evolution-api',
         name: 'Evolution API',

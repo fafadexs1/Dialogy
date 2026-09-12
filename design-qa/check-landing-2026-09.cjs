@@ -64,7 +64,9 @@ const assert = require("node:assert/strict");
       .getAttribute("aria-expanded"),
     "false",
   );
-  assert.ok(page.url().endsWith("#ia"));
+  await page.waitForURL('**/ia');
+  assert.ok(page.url().endsWith('/ia'));
+  await page.goto('http://localhost:9002', { waitUntil: 'networkidle' });
   const question = page.locator("summary").first();
   await question.click();
   assert.equal(await page.locator("details").first().getAttribute("open"), "");

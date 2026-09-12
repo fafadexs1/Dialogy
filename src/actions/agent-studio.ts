@@ -9,6 +9,7 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/actions/user';
 import { db } from '@/lib/db';
 import { listWorkspaceConfiguredAiModels } from '@/services/ai/workspace-ai-credentials';
+import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 import { resolveConfiguredAiModel } from '@/lib/ai-models';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import { resolveSafeAutopilotWebhookTarget } from '@/services/autopilot/automation-rules';
@@ -58,17 +59,7 @@ export type AgentApiConnectionSummary = {
 type JsonObject = Record<string, unknown>;
 
 async function resolveStudioModel(workspaceId: string, selected?: string, previous?: unknown) {
-  const models = await listWorkspaceConfiguredAiModels(workspaceId);
-  if (!models || models.length === 0) {
-    throw new Error('Cadastre e ative pelo menos um modelo de IA na aba Modelos de IA deste workspace antes de continuar.');
-  }
-  const resolved = resolveConfiguredAiModel(
-    selected,
-    models,
-    typeof previous === 'string' ? previous : undefined,
-  );
-  if (resolved) return resolved;
-  throw new Error('Selecione um modelo de IA cadastrado e ativo na aba Modelos de IA deste workspace.');
+  return (await resolveAutopilotModelFromCatalog()).model;
 }
 
 async function requireAgent(agentId: string) {
@@ -155,7 +146,10 @@ export async function getAgentStudioDataAction(agentId: string) {
     const migration = planStudioMigration(row, inventory);
     const requiresMigrationReview = !publishedDocument && migration.report.requiresReview;
     document ??= migration.document;
-    const configuredModels = await listWorkspaceConfiguredAiModels(workspaceId);
+    const configuredModels = await listWorkspaceConfiguredAiModels(workspaceId).catch(error => {
+      console.error('[AGENT_STUDIO] Platform AI readiness unavailable:', error);
+      return [];
+    });
     const resolvedAiModel = resolveConfiguredAiModel(
       document.aiModel || String(draft?.ai_model || row.ai_model || ''),
       configuredModels,
@@ -392,6 +386,7 @@ export async function optimizeStudioKnowledgeAction(
       workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
     });
     const improved = await improveKnowledgeDocumentForRag({
+      workspaceId,
       document: {
         id: 'studio-knowledge-opt',
         name: input.name || 'Documento',

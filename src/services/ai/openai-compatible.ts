@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { getGlobalLmStudioConfig, getLmStudioModelId } from './lm-studio';
 import type { StructuredToolContinuation } from './structured-tool-continuation';
 import { getAiModelRuntimeProvider, type AiModelRuntimeProvider } from '@/lib/ai-models';
 import { listModelCallableAgentToolDefinitions } from '@/services/agent-tools/catalog';
@@ -232,6 +233,7 @@ export function defineOpenAiCompatiblePrompt(
 }
 
 export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(input: {
+  workspaceId?: string | null;
   model: string;
   apiKey: string;
   schema: TSchema;
@@ -245,17 +247,36 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
   reasoning?: 'low' | 'medium' | 'high';
   signal?: AbortSignal;
   fetch?: typeof globalThis.fetch;
-  onUsage?: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; reasoningTokens: number }) => void;
+  onUsage?: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; reasoningTokens: number }) => void | Promise<void>;
 }): Promise<z.output<TSchema>> {
   input.signal?.throwIfAborted();
-  const provider = getOpenAiCompatibleProvider(input.model);
-  const modelId = getOpenAiCompatibleModelId(input.model);
+  if (getAiModelRuntimeProvider(input.model) === 'googleai') {
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const client = new GoogleGenerativeAI(input.apiKey);
+    const model = client.getGenerativeModel({ model: input.model.slice('googleai/'.length),
+      systemInstruction: input.systemPrompt,
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: input.maxTokens ?? 4096 } });
+    return (async () => {
+        const response = await model.generateContent(`${input.userPrompt}\nJSON Schema: ${JSON.stringify(input.jsonSchema)}`,
+          { timeout: input.timeoutMs ?? 60000, signal: input.signal });
+        const usage = response.response.usageMetadata;
+        if (usage) {
+          const outputTokens = Math.max(usage.candidatesTokenCount ?? 0, (usage.totalTokenCount ?? 0) - (usage.promptTokenCount ?? 0));
+          await input.onUsage?.({ inputTokens: usage.promptTokenCount, outputTokens, totalTokens: usage.totalTokenCount, reasoningTokens: 0 });
+        }
+        return input.schema.parse(parseLmStudioStructuredText(response.response.text()));
+    })();
+  }
+  const local = input.model.startsWith('lmstudio/') ? await getGlobalLmStudioConfig() : null;
+  const provider = local ? 'openai' : getOpenAiCompatibleProvider(input.model);
+  const modelId = local ? getLmStudioModelId(input.model) : getOpenAiCompatibleModelId(input.model);
   const { default: OpenAI } = require('openai') as typeof import('openai');
   const client = new OpenAI({
     apiKey: input.apiKey,
+    ...(local ? { baseURL: local.baseUrl } : {}),
     ...(providerBaseUrl(provider) ? { baseURL: providerBaseUrl(provider) } : {}),
     timeout: input.timeoutMs ?? 4000,
-    ...(input.signal ? { maxRetries: 0 } : {}),
+    maxRetries: 0,
     ...(input.fetch ? { fetch: input.fetch as NonNullable<ConstructorParameters<typeof OpenAI>[0]>['fetch'] } : {}),
   });
 
@@ -305,10 +326,10 @@ export async function requestOpenAiCompatibleJson<TSchema extends z.ZodTypeAny>(
       parameters: input.jsonSchema } }];
   }
   const response = await client.chat.completions.create(body as any, { signal: input.signal });
-  input.signal?.throwIfAborted();
-  if (response.usage) input.onUsage?.({ inputTokens: response.usage.prompt_tokens,
+  if (response.usage) await input.onUsage?.({ inputTokens: response.usage.prompt_tokens,
     outputTokens: response.usage.completion_tokens, totalTokens: response.usage.total_tokens,
     reasoningTokens: response.usage.completion_tokens_details?.reasoning_tokens ?? 0 });
+  input.signal?.throwIfAborted();
   const content = response.choices?.[0]?.message?.content;
   if (response.choices?.[0]?.finish_reason === 'length') {
     const error = new Error(`${provider} exhausted the output budget before completing ${input.schemaName}.`) as Error & { code: string; retryable: boolean };
