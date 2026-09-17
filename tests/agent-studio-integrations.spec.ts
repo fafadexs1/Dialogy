@@ -60,6 +60,18 @@ describe('typed Studio mappings', () => {
     expect(() => mapStudioOutputs({}, [mappings[0]])).toThrow('Faturas');
   });
 
+  it('supports top-level array index paths like [0].id and $[0].id', () => {
+    const mappings = [
+      { jsonPath: '[0].ID', chipKey: 'deviceId', chipLabel: 'ID Equipamento' },
+      { jsonPath: '$[0].name', chipKey: 'deviceName', chipLabel: 'Nome Equipamento' },
+    ];
+    const data = [{ ID: 'ROUTER-123', name: 'ZTE F670L' }];
+    expect(mapStudioOutputs(data, mappings)).toEqual({
+      deviceId: 'ROUTER-123',
+      deviceName: 'ZTE F670L',
+    });
+  });
+
   it.each(['__proto__.secret', 'constructor.prototype.secret', 'prototype', 'a..b'])('rejects prototype and malformed path %s', (path) => {
     expect(() => readStudioValue({}, path)).toThrow();
   });

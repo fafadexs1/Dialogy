@@ -1,11 +1,10 @@
-
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { createClient } from '@/lib/supabase/server';
 import type { Message } from '@/lib/types';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
-import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 interface MarkAsReadPayload {
     chatId: string;
@@ -86,9 +85,7 @@ export async function POST(request: Request) {
 
             if (unreadMessages.length === 0) {
                 await client.query('COMMIT');
-                await broadcastChatUpdate(workspaceId, chatId, {
-                    unread_count: 0,
-                });
+                await broadcastHydratedChatUpdate(workspaceId, chatId);
                 return NextResponse.json({ success: true, message: 'No unread messages.' });
             }
 
@@ -110,9 +107,7 @@ export async function POST(request: Request) {
             }
 
             await client.query('COMMIT');
-            await broadcastChatUpdate(workspaceId, chatId, {
-                unread_count: 0,
-            });
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
 
             // Revalidation removed to prevent performance issues.
             // Client updates optimistic state via store and Realtime handles sync.

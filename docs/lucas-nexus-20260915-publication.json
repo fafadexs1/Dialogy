@@ -1,0 +1,23 @@
+{
+  "workspaceId": "e3b476a1-5de8-4744-80b5-a5d23fe15fab",
+  "workflowId": "8526ced9-79fe-4fc3-8ad0-02cd699c8168",
+  "name": "Ativar IA Comercial",
+  "oldVersion": "v4",
+  "newVersion": "v5",
+  "agentId": "7d7259ab-a6c3-4057-a9ca-28ddbb15db95",
+  "systemAgentId": "779c0e28-b9c2-4604-9496-44d56cece388",
+  "triggerUnchanged": true,
+  "triggerKeyword": "cabral",
+  "nodes": 6,
+  "validation": {
+    "valid": true,
+    "errors": [],
+    "warnings": []
+  },
+  "bindings": {
+    "valid": true,
+    "issues": []
+  },
+  "apply": true,
+  "publishedAt": "2026-09-15T04:46:47.394Z"
+}

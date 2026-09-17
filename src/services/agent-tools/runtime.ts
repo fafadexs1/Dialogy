@@ -1130,14 +1130,19 @@ async function runMcpCallTool(
       : '';
 
     if ((result as any).isError) {
+      const structured = (result as any).structuredContent;
+      let errorMsg = textError || 'Ferramenta MCP retornou erro.';
+      if (structured?.remedial_suggestion) {
+        errorMsg += `\n[Instrução Corretiva do ACS]: ${structured.remedial_suggestion}`;
+      }
       return {
         toolName: qualifiedName as any,
         status: 'error',
         input: normalizedAction,
-        error: textError || 'Ferramenta MCP retornou erro.',
+        error: errorMsg,
         output: JSON.parse(JSON.stringify({
           content,
-          structuredContent: (result as any).structuredContent || null,
+          structuredContent: structured || null,
           isError: true,
         })),
       };

@@ -23,7 +23,13 @@ export async function getMcpWorkspaceConfig(workspaceId: string): Promise<McpWor
         id: String(server.id || ''),
         name: String(server.name || ''),
         url: server.url ? String(server.url) : undefined,
-        transport: server.transport === 'sse' ? 'sse' : server.transport === 'stdio' ? 'stdio' : 'streamable_http',
+        transport: server.transport === 'sse'
+          ? 'sse'
+          : server.transport === 'stdio'
+            ? 'stdio'
+            : server.transport === 'direct_http'
+              ? 'direct_http'
+              : 'streamable_http',
         command: server.command ? String(server.command) : undefined,
         args: Array.isArray(server.args) ? server.args.map(String) : [],
         ...openMcpServerSecrets(workspaceId, server),
@@ -39,6 +45,8 @@ export async function getMcpWorkspaceConfig(workspaceId: string): Promise<McpWor
           ? Number(server.healthLatencyMs)
           : null,
         tools: Array.isArray(server.tools) ? server.tools : [],
+        manualsCatalog: server.manualsCatalog && typeof server.manualsCatalog === 'object' ? server.manualsCatalog : null,
+        manualsSyncedAt: server.manualsSyncedAt || null,
       }))
       .filter((server: McpServerConfig) => (
         server.id &&

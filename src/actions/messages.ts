@@ -24,6 +24,7 @@ import {
     requireProviderMessageId,
 } from '@/services/whatsapp/template-send-contract';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
+import { isWhatsappBsuidIdentity, preserveWhatsappRecipient } from '@/lib/whatsapp/bsuid';
 import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
 import { MessengerMessagingService } from '@/services/meta/messenger-messaging-service';
 import {
@@ -463,7 +464,8 @@ function serializeErrorPayload(error: unknown): unknown {
 }
 
 function normalizeWhatsappPhoneNumber(value: string): string {
-    return (normalizeWhatsappPhoneIdentity(value) ?? value.replace(/@.*$/, '').replace(/\D/g, '')) || value;
+    if (isWhatsappBsuidIdentity(value)) return '';
+    return (normalizeWhatsappPhoneIdentity(value) ?? preserveWhatsappRecipient(value)) || value;
 }
 
 function normalizeTelegramRecipient(value: string): string {

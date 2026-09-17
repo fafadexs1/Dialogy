@@ -9,6 +9,7 @@ import { closeChatAction, transferChatAction, transferChatToIntelligentAgentActi
 import { db } from '@/lib/db';
 import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
+import { preserveWhatsappRecipient } from '@/lib/whatsapp/bsuid';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 import { dispatchPublishedNexusMessage } from './message-dispatcher';
 import type { NexusRuntimeAdapters } from './runtime';
@@ -495,7 +496,7 @@ export async function createNexusChatAdapters(input: {
         {
           method: 'POST',
           body: JSON.stringify({
-            number: target.number.replace(/@.*$/, '').replace(/\D/g, ''),
+            number: preserveWhatsappRecipient(target.number),
             presence: 'composing',
             delay: Math.max(250, Math.min(60_000, Math.round(durationMs))),
           }),

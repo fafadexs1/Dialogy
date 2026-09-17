@@ -469,7 +469,15 @@ function buildEnabledAgentToolsDescription(
         return 'Nenhuma ferramenta operacional esta habilitada. Nao solicite actions.';
     }
 
-    return enabledTools
+    const hasRouterTools = enabledTools.some((t) => {
+        const lower = t.name.toLowerCase();
+        return lower.includes('router') || lower.includes('wifi') || lower.includes('get_tool_manual') || lower.includes('configure_wifi') || lower.includes('reboot_router') || lower.includes('get_operation_status');
+    }) || enabledToolNames.some((name) => {
+        const lower = name.toLowerCase();
+        return lower.includes('router') || lower.includes('wifi') || lower.includes('get_tool_manual') || lower.includes('configure_wifi') || lower.includes('reboot_router') || lower.includes('get_operation_status');
+    });
+
+    const description = enabledTools
         .map((tool) => {
             const schema = tool.inputSchema
                 ? ` Entrada JSON: ${JSON.stringify(toolInputSchemaForPrompt(tool.inputSchema))}`
@@ -480,6 +488,23 @@ function buildEnabledAgentToolsDescription(
             return `- ${tool.name}: ${tool.description}${schema}${instructions}`;
         })
         .join('\n');
+
+    if (!hasRouterTools) {
+        return description;
+    }
+
+    const routerDirectives = [
+        '',
+        'DIRETRIZES OPERACIONAIS OBRIGATÓRIAS PARA ROTEADORES (ACS / TR-069):',
+        '1. Consulta Obrigatória a /como-usar: Antes de executar qualquer ação técnica em roteadores ou em caso de dúvida sobre parâmetros, consulte o manual da ferramenta via `get_tool_manual` ou siga as instruções oficiais de /como-usar.',
+        '2. Zero Plaintext Secrets: NUNCA revele senhas de Wi-Fi ou credenciais em texto claro no chat. Confirme alterações com o usuário antes de aplicá-las.',
+        '3. Diagnóstico Prévio Obrigatório: SEMPRE consulte os detalhes atuais do roteador via `get_router_details` antes de alterar o Wi-Fi (`configure_wifi`) ou reiniciar (`reboot_router`).',
+        '4. Configuração Atômica de Wi-Fi: Atualize as redes 2.4GHz e 5GHz de forma unificada e consistente (evitando reboots múltiplos).',
+        '5. Justificativa Explícita para Reboot: A ferramenta `reboot_router` exige estritamente `confirm: true` e uma justificativa técnica detalhada (`reason`). Nunca reinicie o roteador sem consentimento explícito do cliente.',
+        '6. Polling de Operação Assíncrona: Se a operação retornar `operation_id` ou status pendente/em andamento via TR-069, consulte periodicamente o status com `get_operation_status`.'
+    ].join('\n');
+
+    return `${description}\n${routerDirectives}`;
 }
 
 
@@ -1277,7 +1302,7 @@ export async function processAutopilotForChat(
         try {
             if (!sourceMessageId) throw new Error('O Estúdio exige uma mensagem identificada para executar com segurança.');
             const store = studioSelection.store;
-            const allowedNative = ['transfer_chat', ...pinnedRelease.publishedProcedures.flatMap((procedure) => procedure.steps)
+            const allowedNative = ['transfer_chat', 'sgp_fetch_contracts', 'sgp_fetch_contact_panel_data', ...pinnedRelease.publishedProcedures.flatMap((procedure) => procedure.steps)
                 .filter((step) => step.type === 'native_action')
                 .map((step) => step.nativeActionType === 'update_crm_field' ? 'crm_update_contact_custom_fields' : step.nativeActionType || '')];
             const studioPolicy: AutopilotTurnPolicy = { activeNodeId: null, toolMode: 'on_demand', globallyEnabledToolNames: allowedNative,

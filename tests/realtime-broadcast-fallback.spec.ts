@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { broadcastRealtimeEvent, resetRealtimeBroadcastState } from '@/lib/realtime/broadcast';
+import {
+  broadcastRealtimeEvent,
+  isPrivateBroadcastTopic,
+  resetRealtimeBroadcastState,
+} from '@/lib/realtime/broadcast';
 
 const httpSend = vi.fn();
 const socketSend = vi.fn();
-const unsubscribe = vi.fn();
+const unsubscribe = vi.fn(async () => {});
 let subscribeStatus: string = 'SUBSCRIBED';
 
-const channel = vi.fn(() => ({
+const channel = vi.fn((_topic: string, _opts?: any) => ({
   httpSend,
   send: socketSend,
   unsubscribe,
@@ -95,5 +99,58 @@ describe('realtime broadcast transport fallback', () => {
     expect(first).toBe('failed');
     expect(second).toBe('websocket');
     expect(unsubscribe).toHaveBeenCalled();
+  });
+
+  it('identifies private broadcast topics correctly', () => {
+    expect(isPrivateBroadcastTopic('workspace:ws-1:chats')).toBe(true);
+    expect(isPrivateBroadcastTopic('workspace:ws-1:messages')).toBe(true);
+    expect(isPrivateBroadcastTopic('workspace:ws-1:contacts')).toBe(true);
+    expect(isPrivateBroadcastTopic('room:chat-1:messages')).toBe(true);
+    expect(isPrivateBroadcastTopic('private:custom')).toBe(true);
+    expect(isPrivateBroadcastTopic('chat:1')).toBe(false);
+
+    expect(isPrivateBroadcastTopic('chat:1', { isPrivate: true })).toBe(true);
+    expect(isPrivateBroadcastTopic('workspace:ws-1:chats', { isPrivate: false })).toBe(false);
+  });
+
+  it('configures channel with private: true for workspace topic in REST path', async () => {
+    httpSend.mockResolvedValue({ success: true });
+
+    await broadcastRealtimeEvent('workspace:ws-1:chats', 'UPDATE', { id: 'chat-1' });
+
+    expect(channel).toHaveBeenCalledWith('workspace:ws-1:chats', {
+      config: { private: true },
+    });
+  });
+
+  it('configures channel with private: true for room topic in REST path', async () => {
+    httpSend.mockResolvedValue({ success: true });
+
+    await broadcastRealtimeEvent('room:chat-1:messages', 'INSERT', { id: 'msg-1' });
+
+    expect(channel).toHaveBeenCalledWith('room:chat-1:messages', {
+      config: { private: true },
+    });
+  });
+
+  it('configures channel with private: true in WebSocket fallback for private topics', async () => {
+    httpSend.mockRejectedValue(new Error('Internal Server Error'));
+
+    await broadcastRealtimeEvent('workspace:ws-1:chats', 'UPDATE', { id: 'chat-1' });
+
+    // REST failed attempt called channel, and WebSocket fallback called channel:
+    expect(channel).toHaveBeenCalledWith('workspace:ws-1:chats', {
+      config: { private: true },
+    });
+  });
+
+  it('respects explicit isPrivate option override', async () => {
+    httpSend.mockResolvedValue({ success: true });
+
+    await broadcastRealtimeEvent('custom:topic', 'ping', {}, { isPrivate: true });
+
+    expect(channel).toHaveBeenCalledWith('custom:topic', {
+      config: { private: true },
+    });
   });
 });

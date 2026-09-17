@@ -344,6 +344,24 @@ export default function CustomerChatLayout({
   const deltaSyncQueuedRef = useRef(false);
   const lastDeltaSyncCompletedAtRef = useRef(0);
   const realtimeHealthyRef = useRef(false);
+  const deltaSyncDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleDebouncedDeltaSync = useCallback(() => {
+    if (deltaSyncDebounceTimerRef.current) return;
+    deltaSyncDebounceTimerRef.current = setTimeout(() => {
+      deltaSyncDebounceTimerRef.current = null;
+      void runDeltaSyncRef.current?.();
+    }, 400);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deltaSyncDebounceTimerRef.current) {
+        clearTimeout(deltaSyncDebounceTimerRef.current);
+        deltaSyncDebounceTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const isHydratedRef = useRef(false);
   const initialResetDoneRef = useRef(false);
@@ -1478,7 +1496,20 @@ export default function CustomerChatLayout({
 
     const snapshot = useInboxStore.getState();
     const existingChat = snapshot.chats.find((chat) => chat.id === newChatData.id);
-    const incomingStatus = newChatData.status || existingChat?.status || 'gerais';
+
+    // Se o payload não traz status e o chat não existe no store, nunca inventar
+    // um chat fantasma com status 'gerais' que possa vazar para o robô/fila.
+    if (!newChatData.status && !existingChat) {
+      scheduleDebouncedDeltaSync();
+      return;
+    }
+
+    const incomingStatus = newChatData.status || existingChat?.status;
+    if (!incomingStatus) {
+      scheduleDebouncedDeltaSync();
+      return;
+    }
+
     const hasHydratedPresentation = hasCompleteRealtimeChatPresentation(newChatData);
     const teamAssignmentChanged = hasRecordKey(newChatData, 'team_id')
       && newChatData.team_id !== existingChat?.team_id;
@@ -1487,6 +1518,11 @@ export default function CustomerChatLayout({
       hydratedChatPresentationRef.current.add(newChatData.id);
     } else if (teamAssignmentChanged) {
       hydratedChatPresentationRef.current.delete(newChatData.id);
+    }
+
+    const statusChanged = Boolean(existingChat?.status && incomingStatus !== existingChat.status);
+    if (statusChanged) {
+      scheduleDebouncedDeltaSync();
     }
 
     const shouldKeepVisible = isChatVisibleForOwnership(
@@ -1502,8 +1538,14 @@ export default function CustomerChatLayout({
     if (!shouldKeepVisible) {
       if (existingChat && snapshot.selectedChatId !== newChatData.id) {
         removeChat(newChatData.id);
+        scheduleDebouncedDeltaSync();
       }
-      return;
+      if (snapshot.selectedChatId !== newChatData.id) {
+        return;
+      }
+      // If the chat is currently selected, do not return early or remove it.
+      // Continue below so optimisticUpdate applies status and assignments
+      // to useInboxStore for the active view.
     }
 
     const contactId: string | null = newChatData.contact_id ?? existingChat?.contact?.id ?? null;
@@ -1601,15 +1643,20 @@ export default function CustomerChatLayout({
         : (existingChat?.messages || []),
     };
 
-    if (!optimisticUpdate.contact && contactId) {
-      optimisticUpdate.contact = {
-        id: contactId,
-        name: 'Novo Contato...',
-        workspace_id: optimisticUpdate.workspace_id || initialUser?.activeWorkspaceId || '',
-        avatar_url: undefined,
-        phone: '',
-      } as Contact;
-      void fetchContactById(contactId);
+    const resolvedContactId = contactId || newChatData.contact_id || existingChat?.contact?.id || null;
+    const broadcastContact: Contact | undefined = (newChatData.contact_name || newChatData.contact_phone || newChatData.contact_phone_number_jid || resolvedContactId) ? {
+      id: resolvedContactId || `temp-contact-${newChatData.id}`,
+      name: newChatData.contact_name || existingChat?.contact?.name || newChatData.protocol || 'Novo Contato...',
+      phone: newChatData.contact_phone || existingChat?.contact?.phone || '',
+      phone_number_jid: newChatData.contact_phone_number_jid || existingChat?.contact?.phone_number_jid || '',
+      avatar_url: newChatData.contact_avatar_url || existingChat?.contact?.avatar_url || undefined,
+      workspace_id: optimisticUpdate.workspace_id || initialUser?.activeWorkspaceId || '',
+    } as Contact : undefined;
+
+    optimisticUpdate.contact = existingChat?.contact || broadcastContact;
+
+    if (resolvedContactId && (!optimisticUpdate.contact || optimisticUpdate.contact.name === 'Novo Contato...')) {
+      void fetchContactById(resolvedContactId);
     }
 
     snapshot.upsertChats([optimisticUpdate as Chat]);
@@ -1623,20 +1670,17 @@ export default function CustomerChatLayout({
     if (shouldHydratePresentation) {
       requestRealtimeChatPresentationHydration(newChatData.id);
     }
-  }, [fetchContactById, formatMessageDay, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, requestRealtimeChatPresentationHydration, workspaceTimezone]);
+  }, [fetchContactById, formatMessageDay, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, requestRealtimeChatPresentationHydration, scheduleDebouncedDeltaSync, workspaceTimezone]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
     if (status === 'SUBSCRIBED') {
-      if (realtimeHealthyRef.current) {
-        clearRecoverySync();
-      } else {
-        scheduleRecoverySync(`${type}:subscribed-waiting-peer`);
-      }
+      clearRecoverySync();
       return;
     }
 
-    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+    // Only recover if an actual network error or timeout occurs on the global channel
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
       console.warn(`[REALTIME] Connection lost (${status}). Running delta sync recovery.`);
       scheduleRecoverySync(`${type}:${status}`);
     }
@@ -1826,7 +1870,11 @@ export default function CustomerChatLayout({
           )}
           <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
           <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
-          <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
+          <ErrorBoundary
+            fallback={<ChatListSkeleton />}
+            onError={handleBoundaryError}
+            resetKeys={[chats.length, selectedChatId, ownershipFilter]}
+          >
             <ChatList
               chats={chats}
               selectedChat={enrichedSelectedChat}
@@ -1847,7 +1895,11 @@ export default function CustomerChatLayout({
               isLoadingMore={isLoadingMoreChats}
             />
           </ErrorBoundary>
-          <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
+          <ErrorBoundary
+            fallback={<ThreadSkeleton />}
+            onError={handleBoundaryError}
+            resetKeys={[selectedChatId, enrichedSelectedChat?.updatedAt]}
+          >
             <ChatPanel
               chat={enrichedSelectedChat}
               currentUser={initialUser}

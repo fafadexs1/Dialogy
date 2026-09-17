@@ -127,22 +127,183 @@ export function parseQualifiedMcpToolName(qualifiedName: string) {
   return { serverId: match[1], toolName: match[2] };
 }
 
+async function directJsonRpcRequest<T>(
+  server: McpServerConfig,
+  method: string,
+  params: Record<string, unknown> = {},
+  totalTimeoutMs = 12000,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!server.url) {
+    throw new Error('Servidor MCP HTTP sem URL configurada.');
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(), totalTimeoutMs);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...(server.headers || {}),
+  };
+
+  const id = Date.now();
+  const payload = {
+    jsonrpc: '2.0',
+    id,
+    method,
+    params,
+  };
+
+  try {
+    const res = await fetch(server.url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`Servidor MCP retornou HTTP ${res.status}: ${errText.slice(0, 300)}`);
+    }
+
+    const data = await res.json();
+    if (data && data.error) {
+      const errCode = data.error.code ?? -32603;
+      const errMsg = data.error.message || 'Erro desconhecido retornado pelo servidor MCP';
+      throw new Error(`MCP Error [${errCode}]: ${errMsg}`);
+    }
+
+    return data.result as T;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
+async function directJsonRpcNotify(
+  server: McpServerConfig,
+  method: string,
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!server.url) return;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(server.headers || {}),
+  };
+  await fetch(server.url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ jsonrpc: '2.0', method, params }),
+    signal,
+  }).catch(() => undefined);
+}
+
+// Operational rules from ACS /como-usar for auto-enrichment
+const ACS_ROUTER_RULES: Record<string, { summary: string; rules: string[] }> = {
+  list_routers: {
+    summary: 'Localiza CPEs por MAC, IP, serial, modelo ou status de conexão.',
+    rules: ['Use para descobrir o device_id de um cliente a partir de IP, MAC ou modelo.'],
+  },
+  get_router_details: {
+    summary: 'Mede atenuação óptica (Rx/Tx dBm), firmware, uptime e status WAN.',
+    rules: [
+      'Faixa aceitável de atenuação óptica: entre -8 dBm e -27 dBm.',
+      'Atenuação pior que -28 dBm indica rompimento ou dobra na fibra.',
+    ],
+  },
+  get_wifi_diagnostics: {
+    summary: 'Coleta estado dos rádios 2.4GHz e 5GHz, SSIDs, canais e segurança.',
+    rules: ['Consulte antes de qualquer alteração de Wi-Fi para conhecer as redes atuais.'],
+  },
+  configure_wifi: {
+    summary: 'Configuração atômica de SSID, senha, canal e rádios.',
+    rules: [
+      'Altere SSID, senha e canal de forma atômica e simultânea em uma única chamada.',
+      'Zero Plaintext Secrets: nunca exiba senhas abertas ao cliente em logs.',
+      'A senha Wi-Fi deve ter no mínimo 8 caracteres.',
+    ],
+  },
+  list_connected_clients: {
+    summary: 'Inventário de aparelhos conectados (IP, MAC, RSSI, banda 2.4G/5G).',
+    rules: ['Sinal RSSI abaixo de -75 dBm indica cobertura fraca no dispositivo do cliente.'],
+  },
+  scan_wifi_spectrum: {
+    summary: 'Varredura de espectro RF dos vizinhos para identificar interferência.',
+    rules: ['Use_cached: true retorna o scan recente em cache imediatamente.'],
+  },
+  reboot_router: {
+    summary: 'Reinício remoto auditado da CPE.',
+    rules: [
+      'Obrigatório passar confirm: true para autorizar o reinício.',
+      'Obrigatório fornecer um reason técnico fundamentado na conversa.',
+    ],
+  },
+  get_operation_status: {
+    summary: 'Status de comandos TR-069 assíncronos no ACS.',
+    rules: ['Consulte periodicamente até obter estado terminal (success, failed, expired).'],
+  },
+  get_tool_manual: {
+    summary: 'Manual técnico oficial de uso das ferramentas MCP (/como-usar).',
+    rules: ['Consulte o manual da ferramenta antes de executar ações críticas em roteadores.'],
+  },
+};
+
+function enrichToolWithAcsMetadata(server: McpServerConfig, tool: any): McpToolConfig {
+  const acsMeta = ACS_ROUTER_RULES[tool.name];
+  return {
+    qualifiedName: qualifyMcpToolName(server.id, tool.name),
+    serverId: server.id,
+    serverName: server.name,
+    name: tool.name,
+    title: tool.title || (acsMeta ? acsMeta.summary.split('.')[0] : null),
+    description: tool.description ?? null,
+    inputSchema: (tool.inputSchema || null) as Record<string, unknown> | null,
+    outputSchema: (tool.outputSchema || null) as Record<string, unknown> | null,
+    annotations: tool.annotations || null,
+    manualSummary: acsMeta?.summary || null,
+    operationalRules: acsMeta?.rules || null,
+  };
+}
+
 export async function listMcpServerTools(server: McpServerConfig, strictPublicNetwork = false): Promise<McpToolConfig[]> {
+  // If transport is direct_http OR an HTTP URL is provided and not explicitly set to stdio or sse
+  const isDirectHttpCandidate =
+    server.transport === 'direct_http' ||
+    (server.transport !== 'stdio' && server.transport !== 'sse' && Boolean(server.url?.startsWith('http')));
+
+  if (isDirectHttpCandidate) {
+    try {
+      beginMcpCircuitRequest(server);
+      await directJsonRpcRequest(server, 'initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'dialogy', version: '1.0.0' },
+      }, 5000);
+
+      await directJsonRpcNotify(server, 'notifications/initialized', {});
+
+      const result = await directJsonRpcRequest<{ tools: any[] }>(server, 'tools/list', {}, 8000);
+      recordMcpCircuitSuccess(server);
+
+      return (result.tools || []).map((tool) => enrichToolWithAcsMetadata(server, tool));
+    } catch (directError) {
+      if (server.transport === 'direct_http') {
+        recordMcpCircuitFailure(server);
+        throw directError;
+      }
+      // If direct HTTP fails on a dual-mode or streamable_http server, fall back to withMcpClient
+    }
+  }
+
   return withMcpClient(server, async (client) => {
     const result = await client.listTools(undefined, {
       timeout: Math.min(resolveMcpToolTimeoutMs(), 15000),
     });
-    return (result.tools || []).map((tool) => ({
-      qualifiedName: qualifyMcpToolName(server.id, tool.name),
-      serverId: server.id,
-      serverName: server.name,
-      name: tool.name,
-      title: tool.title ?? null,
-      description: tool.description ?? null,
-      inputSchema: (tool.inputSchema || null) as Record<string, unknown> | null,
-      outputSchema: (tool.outputSchema || null) as Record<string, unknown> | null,
-      annotations: tool.annotations || null,
-    }));
+    return (result.tools || []).map((tool) => enrichToolWithAcsMetadata(server, tool));
   }, 20_000, strictPublicNetwork);
 }
 
@@ -154,6 +315,43 @@ export async function callMcpServerTool(input: {
   strictPublicNetwork?: boolean;
   signal?: AbortSignal;
 }) {
+  const isDirectHttpCandidate =
+    input.server.transport === 'direct_http' ||
+    (input.server.transport !== 'stdio' && input.server.transport !== 'sse' && Boolean(input.server.url?.startsWith('http')));
+
+  if (isDirectHttpCandidate) {
+    try {
+      beginMcpCircuitRequest(input.server);
+      const res = await directJsonRpcRequest<{
+        content?: any[];
+        structuredContent?: any;
+        isError?: boolean;
+      }>(
+        input.server,
+        'tools/call',
+        {
+          name: input.toolName,
+          arguments: input.arguments || {},
+        },
+        input.totalTimeoutMs || resolveMcpToolTimeoutMs(),
+        input.signal
+      );
+      recordMcpCircuitSuccess(input.server);
+
+      return {
+        content: res.content || [],
+        structuredContent: res.structuredContent || null,
+        isError: Boolean(res.isError),
+      };
+    } catch (directError) {
+      if (input.server.transport === 'direct_http') {
+        recordMcpCircuitFailure(input.server);
+        throw directError;
+      }
+      // Fallback to withMcpClient
+    }
+  }
+
   return withMcpClient(input.server, async (client) => {
     return client.callTool(
       {

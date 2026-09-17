@@ -1,0 +1,96 @@
+{
+  "checks": [
+    {
+      "color": "light",
+      "width": 1440,
+      "actual": 1440,
+      "height": 900,
+      "actualHeight": 900,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "light",
+      "width": 1024,
+      "actual": 1024,
+      "height": 900,
+      "actualHeight": 900,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "light",
+      "width": 768,
+      "actual": 768,
+      "height": 900,
+      "actualHeight": 900,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "light",
+      "width": 390,
+      "actual": 390,
+      "height": 844,
+      "actualHeight": 844,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "light",
+      "width": 320,
+      "actual": 320,
+      "height": 844,
+      "actualHeight": 844,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "dark",
+      "width": 1440,
+      "actual": 1440,
+      "height": 900,
+      "actualHeight": 900,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "dark",
+      "width": 1024,
+      "actual": 1024,
+      "height": 900,
+      "actualHeight": 900,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "dark",
+      "width": 768,
+      "actual": 768,
+      "height": 900,
+      "actualHeight": 900,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "dark",
+      "width": 390,
+      "actual": 390,
+      "height": 844,
+      "actualHeight": 844,
+      "search": true,
+      "conversation": true
+    },
+    {
+      "color": "dark",
+      "width": 320,
+      "actual": 320,
+      "height": 844,
+      "actualHeight": 844,
+      "search": true,
+      "conversation": true
+    }
+  ],
+  "errors": [],
+  "scope": "Actual UI; fixture network and session. Does not verify authenticated runtime or delivery."
+}

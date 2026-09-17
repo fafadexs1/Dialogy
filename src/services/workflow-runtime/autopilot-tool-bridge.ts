@@ -361,7 +361,12 @@ export function createAutopilotToolRegistry(input: {
           toolName,
         );
         if (!result || result.status !== 'success') {
-          const error = new Error(result?.error || `Tool ${toolName} failed.`) as Error & {
+          let errorMsg = result?.error || `Tool ${toolName} failed.`;
+          const structured = (result?.output as any)?.structuredContent;
+          if (structured?.remedial_suggestion && !errorMsg.includes('[Instrução Corretiva do ACS]')) {
+            errorMsg += `\n[Instrução Corretiva do ACS]: ${structured.remedial_suggestion}`;
+          }
+          const error = new Error(errorMsg) as Error & {
             code?: string;
             retryable?: boolean;
           };

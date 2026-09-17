@@ -316,7 +316,7 @@ export const ProcedureStepSchema = z.object({
   collectField: CollectedFieldDefinitionSchema.optional(),
   knowledgeCollectionId: z.string().optional(),
   validationRule: z.string().optional(),
-  nativeActionType: z.enum(['add_tag', 'remove_tag', 'update_crm_field', 'close_chat', 'show_catalog_image']).optional(),
+  nativeActionType: z.enum(['add_tag', 'remove_tag', 'update_crm_field', 'close_chat', 'show_catalog_image', 'sgp_fetch_contracts', 'sgp_fetch_contact_panel_data']).optional(),
   nativeActionPayload: z.record(z.unknown()).optional(),
   nativeDataMappings: z.array(z.object({
     apiField: z.string(), sourceType: z.enum(['collected_field', 'step_output', 'contact_property', 'flow_input', 'static_value']),

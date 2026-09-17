@@ -751,12 +751,23 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
   const canAssign = chat.status === 'gerais';
   const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
-  const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
-  const statusTone = chat.status === 'encerrados'
+  const isActuallyAttending = chat.status === 'atendimentos' || Boolean(chat.agentId || (chat as any).agent_id || chat.agent?.id);
+  const isActuallyClosed = chat.status === 'encerrados';
+  const isActuallyQueue = Boolean(chat.tag?.trim() || (chat as any).team_id || chat.teamName?.trim());
+  const statusLabel = isActuallyClosed
+    ? 'Fechado'
+    : isActuallyAttending
+      ? 'Em atendimento'
+      : isActuallyQueue
+        ? 'Fila'
+        : 'Robô';
+  const statusTone = isActuallyClosed
     ? 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-zinc-300'
-    : chat.status === 'atendimentos'
+    : isActuallyAttending
       ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
-      : 'border-blue-100 bg-blue-50 text-blue-700';
+      : isActuallyQueue
+        ? 'border-blue-100 bg-blue-50 text-blue-700'
+        : 'border-purple-100 bg-purple-50 text-purple-700 dark:border-purple-900/30 dark:bg-purple-950/20 dark:text-purple-300';
   const hasTag = Boolean(chat.tag);
   const tagLabel = hasTag ? chat.tag : 'Sem tag';
   // Sem cor utilizavel o chip cai para o estilo neutro do tema. Antes o fundo
@@ -1009,8 +1020,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 chat.status === 'encerrados' ? "bg-slate-500" : chat.status === 'atendimentos' ? "bg-emerald-400" : "bg-blue-400",
                 hasUnread && "bg-blue-500"
               )} />
-              <p className={cn("max-w-[78%] truncate whitespace-nowrap text-[13.5px] font-semibold tracking-tight text-slate-900 dark:text-zinc-100 min-[1280px]:max-w-[64%]", hasUnread && "font-bold")} title={chat.contact?.name}>
-                {chat.contact?.name || 'Carregando...'}
+              <p className={cn("max-w-[78%] truncate whitespace-nowrap text-[13.5px] font-semibold tracking-tight text-slate-900 dark:text-zinc-100 min-[1280px]:max-w-[64%]", hasUnread && "font-bold")} title={chat.contact?.name || chat.protocol || undefined}>
+                {chat.contact?.name || chat.protocol || 'Sem nome'}
               </p>
               <Badge className={cn("hidden flex-shrink-0 border px-1.5 py-0 text-[8px] font-semibold uppercase tracking-wide min-[1280px]:inline-flex", statusTone)}>
                   {statusLabel}
@@ -1499,7 +1510,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     const result = await guardedAssignChat(chatToAssign.id);
 
     if (result.success) {
-      toast({ title: 'Assumiu atendimento', description: `${chatToAssign.contact.name} agora está com você.` });
+      toast({ title: 'Assumiu atendimento', description: `${chatToAssign.contact?.name || chatToAssign.protocol || 'O contato'} agora está com você.` });
       if ((result as any).chat) {
         useInboxStore.getState().upsertChats([(result as any).chat]);
       }
@@ -1620,11 +1631,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       return timeB - timeA;
     });
 
-    const queueChats = sorted.filter((c) => c.status === 'gerais');
+    const encerrados = sorted.filter((c) => c.status === 'encerrados');
+    const atendimentos = sorted.filter((c) => c.status === 'atendimentos' || (c.status !== 'encerrados' && Boolean(c.agentId || (c as any).agent_id || c.agent?.id)));
+    const queueChats = sorted.filter((c) => c.status === 'gerais' && !atendimentos.includes(c) && !encerrados.includes(c));
     const robo = queueChats.filter((c) => isChatInInboxQueueScope(c, 'robo'));
     const fila = queueChats.filter((c) => isChatInInboxQueueScope(c, 'fila'));
-    const atendimentos = sorted.filter((c) => c.status === 'atendimentos');
-    const encerrados = sorted.filter((c) => c.status === 'encerrados');
 
     return { robo, fila, atendimentos, encerrados };
   }, [chats]);
@@ -1671,8 +1682,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       if (query) {
         const protocol = chat.protocol || buildChatProtocol(chat.id);
         matchesSearch =
-          (chat.contact.name || '').toLocaleLowerCase('pt-BR').includes(query) ||
-          (chat.contact.phone || '').includes(query) ||
+          (chat.contact?.name || '').toLocaleLowerCase('pt-BR').includes(query) ||
+          (chat.contact?.phone || '').includes(query) ||
+          (chat.contact?.phone_number_jid || '').includes(query) ||
           (protocol || '').toLocaleLowerCase('pt-BR').includes(query) ||
           (chat.id || '').toLocaleLowerCase('pt-BR').includes(query) ||
           matchesMessageContent;
@@ -2875,7 +2887,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           <AlertDialogHeader>
             <AlertDialogTitle>Assumir este atendimento?</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              Você será definido como o responsável pela conversa com <strong>{chatToAssign?.contact.name}</strong>.
+              Você será definido como o responsável pela conversa com <strong>{chatToAssign?.contact?.name || chatToAssign?.protocol || 'este cliente'}</strong>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

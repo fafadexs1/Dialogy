@@ -200,9 +200,18 @@ export const useInboxStore = create<InboxState>((set, get) => ({
   setHasMoreChats: (hasMore) => set({ hasMoreChats: hasMore }),
   updateChatContact: (contact) => {
     set((state) => ({
-      chats: state.chats.map((chat) =>
-        chat.contact?.id === contact.id ? { ...chat, contact: { ...chat.contact, ...contact } } : chat
-      ),
+      chats: state.chats.map((chat) => {
+        const matchesContact =
+          chat.contact?.id === contact.id ||
+          (chat as any).contact_id === contact.id ||
+          (Boolean(contact.phone_number_jid) && chat.contact?.phone_number_jid === contact.phone_number_jid);
+        if (!matchesContact) return chat;
+        return {
+          ...chat,
+          contact_id: contact.id,
+          contact: { ...(chat.contact || {}), ...contact },
+        };
+      }),
     }));
   },
   setMessagesForChat: (chatId, messages, lastSync, oldestDate, oldestId, hasMoreHistory, replace = false) => {

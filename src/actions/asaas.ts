@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/server";
 import { encryptWithKey } from "@/lib/security/secret-box";
 import { readBillingCatalog } from "@/services/billing/catalog";
 import { readAsaasConfig, asaasRequest } from "@/services/billing/asaas-client";
+import { checkoutReferenceSchema, paymentMethodSchema, cardPaymentSchema, type CardPayment, type PaymentMethod } from '@/lib/asaas-checkout';
+import { readCheckoutPayment, prepareCheckoutPayment, payCheckoutWithCard } from '@/services/billing/asaas-checkout';
 import {
   startAsaasSubscription,
   cancelAsaasSubscription,
@@ -60,7 +62,7 @@ export async function getAsaasBillingAction() {
   const [plans, subscription, invoices, config, billing] = await Promise.all([
     readBillingCatalog(false, w.id),
     db.query(
-      "SELECT id,plan_slug,price::float8,status,trial_until,paid_until,canceled_at,subscription_id FROM asaas_subscriptions WHERE workspace_id=$1",
+      "SELECT id,plan_slug,price::float8,status,trial_until,paid_until,canceled_at,subscription_id FROM asaas_subscriptions WHERE workspace_id=$1 AND status <> 'superseded'",
       [w.id],
     ),
     db.query(
@@ -69,11 +71,12 @@ export async function getAsaasBillingAction() {
     ),
     readAsaasConfig(),
     db.query(
-      "SELECT provider,status,stripe_subscription_id FROM billing_info WHERE workspace_id=$1",
+      "SELECT provider,status,stripe_subscription_id,access_until FROM billing_info WHERE workspace_id=$1",
       [w.id],
     ),
   ]);
   const s = subscription.rows[0];
+  const accessUntil = billing.rows[0]?.provider === 'asaas' ? billing.rows[0]?.access_until || s?.paid_until || s?.trial_until : s?.paid_until || s?.trial_until;
   return {
     workspace: w,
     plans,
@@ -88,12 +91,12 @@ export async function getAsaasBillingAction() {
           price: Number(s.price),
           status:
             s.subscription_id &&
-            new Date(s.paid_until || s.trial_until || 0).getTime() < Date.now()
+            new Date(accessUntil || 0).getTime() < Date.now()
               ? "past_due"
               : s.status,
           canceled: !!s.canceled_at,
           accessUntil:
-            s.paid_until?.toISOString() || s.trial_until?.toISOString() || null,
+            accessUntil ? new Date(accessUntil).toISOString() : null,
           linked: !!s.subscription_id,
         }
       : null,
@@ -174,6 +177,43 @@ export async function reconcileAsaasBillingAction() {
   } catch (error) {
     return { success: false, error: message(error) };
   }
+}
+
+async function checkoutWorkspace(input: { workspaceId: string; paymentId: string }) {
+  const w = await workspace(true);
+  const reference = checkoutReferenceSchema.parse(input);
+  if (w.id !== reference.workspaceId) throw new Error('O workspace ativo mudou. Atualize a página.');
+  return reference;
+}
+
+function checkoutError(error: unknown) {
+  // Never serialize provider payloads or Zod issues containing payment inputs.
+  return error instanceof z.ZodError ? 'Revise os dados de pagamento e tente novamente.' : message(error);
+}
+
+export async function getAsaasPaymentAction(input: { workspaceId: string; paymentId: string }) {
+  try {
+    const ref = await checkoutWorkspace(input);
+    return { success: true as const, payment: await readCheckoutPayment(ref.workspaceId, ref.paymentId) };
+  } catch (error) { return { success: false as const, error: checkoutError(error) }; }
+}
+
+export async function prepareAsaasPaymentAction(input: { workspaceId: string; paymentId: string; method: PaymentMethod }) {
+  try {
+    const ref = await checkoutWorkspace(input);
+    const method = paymentMethodSchema.parse(input.method);
+    return { success: true as const, payment: await prepareCheckoutPayment(ref.workspaceId, ref.paymentId, method) };
+  } catch (error) { return { success: false as const, error: checkoutError(error) }; }
+}
+
+export async function payAsaasCardAction(input: { workspaceId: string; paymentId: string; card: CardPayment }) {
+  try {
+    const ref = await checkoutWorkspace(input);
+    const card = cardPaymentSchema.parse(input.card);
+    const payment = await payCheckoutWithCard(ref.workspaceId, ref.paymentId, card);
+    revalidatePath('/settings/billing');
+    return { success: true as const, payment };
+  } catch (error) { return { success: false as const, error: checkoutError(error) }; }
 }
 
 export async function getAsaasSettingsAction() {

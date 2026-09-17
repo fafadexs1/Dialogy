@@ -5,6 +5,7 @@ import { sendAutomatedMessageAction } from '@/actions/messages';
 import { getWorkspaceTemplates } from '@/lib/workspace-config';
 import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 interface CloseChatPayload {
     chatId: string;
@@ -138,6 +139,12 @@ export async function POST(request: Request) {
             ]);
 
             await client.query('COMMIT');
+
+            try {
+                await broadcastHydratedChatUpdate(workspace_id, chatId);
+            } catch (broadcastError) {
+                console.error('[AGENT_CLOSE_CHAT] Failed to broadcast hydrated chat update:', broadcastError);
+            }
 
             try {
                 const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [chatId]);

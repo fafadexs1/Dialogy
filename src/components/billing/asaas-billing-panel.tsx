@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ArrowRight, ArrowUpRight, Check, ChevronDown, Coins, CreditCard, Loader2, ReceiptText, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
 import { getAsaasBillingAction, createAsaasCheckoutAction, reconcileAsaasBillingAction, cancelAsaasSubscriptionAction } from '@/actions/asaas';
+import { AsaasPaymentDialog } from '@/components/billing/asaas-payment-dialog';
 import { AiCreditsPanel } from '@/components/billing/ai-credits-panel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,6 +40,7 @@ export function AsaasBillingPanel() {
   const [name, setName] = useState('');
   const [document, setDocument] = useState('');
   const [checkout, setCheckout] = useState(false);
+  const [paymentId, setPaymentId] = useState<string | null>(null);
   const [manage, setManage] = useState(false);
   const [cancel, setCancel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -55,14 +57,14 @@ export function AsaasBillingPanel() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  async function run(action: () => Promise<{ success: boolean; error?: string; url?: string | null }>, success: string) {
+  async function run(action: () => Promise<{ success: boolean; error?: string; paymentId?: string | null }>, success: string) {
     setBusy(true); setError(''); setNotice('');
     try {
       const result = await action();
       if (!result.success) { setError(result.error || 'Não foi possível concluir.'); return; }
       setNotice(success); setCheckout(false); setCancel(false); setManage(false);
       await load();
-      if (result.url) window.location.assign(result.url);
+      if (result.paymentId) setPaymentId(result.paymentId);
     } catch {
       setError('A operação não foi confirmada. Atualize antes de tentar novamente.');
     } finally { setBusy(false); }
@@ -78,7 +80,7 @@ export function AsaasBillingPanel() {
   const current = data.plans.find(p => p.id === data.subscription?.plan);
   const pending = data.invoices.filter(unpaid).sort((a, b) => a.due_date.localeCompare(b.due_date));
   const nextInvoice = pending[0];
-  const canSubscribe = data.ready && data.workspace.canManage && !data.legacyStripe && !data.subscription;
+  const canSubscribe = data.ready && data.workspace.canManage && !data.legacyStripe && (!data.subscription || data.subscription.canceled);
   const subscriptionLabel = data.subscription?.canceled ? 'Renovação cancelada'
     : data.subscription?.status === 'trialing' ? 'Em período de teste'
     : data.subscription?.status === 'active' ? 'Assinatura ativa' : 'Pagamento pendente';
@@ -107,7 +109,7 @@ export function AsaasBillingPanel() {
         {!data.ready && !data.subscription && <p className="border-l-2 border-amber-500 pl-4 text-sm leading-relaxed text-muted-foreground">A contratação online está temporariamente indisponível. Para contratar, entre em contato com o suporte.</p>}
         {!data.workspace.canManage && <p className="text-sm text-muted-foreground">Somente o proprietário deste workspace pode contratar ou gerenciar a assinatura.</p>}
 
-        {data.subscription ? <>
+        {data.subscription && <>
           <section aria-label="Assinatura atual" className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-6">
               <div>
@@ -126,7 +128,7 @@ export function AsaasBillingPanel() {
                 <p className="mt-2 text-2xl font-semibold tabular-nums">{money(nextInvoice.amount)}</p>
                 <p className="mt-1 text-sm text-muted-foreground">Vencimento em {date(nextInvoice.due_date)}</p>
               </div>
-              {nextInvoice.invoice_url ? <Button asChild className="w-full sm:w-auto"><a href={nextInvoice.invoice_url} target="_blank" rel="noopener noreferrer">Pagar fatura<ArrowUpRight /></a></Button> : <p className="text-sm text-muted-foreground">Link de pagamento em preparação.</p>}
+              <Button disabled={!data.ready || !data.workspace.canManage} className="w-full sm:w-auto" onClick={() => setPaymentId(nextInvoice.id)}>Pagar fatura<ArrowRight /></Button>
             </div> : <div className="flex items-start gap-3 py-2">
               <Check className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
               <div><p className="text-sm font-medium">Nenhuma fatura em aberto</p><p className="mt-1 text-sm text-muted-foreground">As cobranças emitidas ficam na aba Faturas.</p></div>
@@ -139,8 +141,9 @@ export function AsaasBillingPanel() {
           <button type="button" onClick={() => setTab('credits')} className="group flex w-full items-center justify-between gap-4 border-b py-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <span className="flex min-w-0 items-start gap-3"><Coins className="mt-0.5 h-5 w-5 shrink-0 text-primary" /><span><span className="block text-sm font-medium">Créditos para seus agentes de IA</span><span className="mt-1 block text-sm text-muted-foreground">Consulte o saldo e recarregue quando precisar.</span></span></span><ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-1" />
           </button>
-        </> : <>
-          <div><h2 className="text-lg font-semibold">Escolha seu plano</h2><p className="mt-1 text-sm text-muted-foreground">Uma assinatura para todo o workspace. Usuários ilimitados.</p></div>
+        </>}
+        {(!data.subscription || data.subscription.canceled) && <>
+          <div id="available-plans"><h2 className="text-lg font-semibold">{data.subscription?.canceled ? 'Escolha um plano para voltar' : 'Escolha seu plano'}</h2><p className="mt-1 text-sm text-muted-foreground">{data.subscription?.canceled ? 'Você pode contratar novamente o mesmo plano ou escolher outro. Seu histórico de faturas será mantido.' : 'Uma assinatura para todo o workspace. Usuários ilimitados.'}</p></div>
           {plan ? <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
             <RadioGroup aria-label="Planos disponíveis" value={plan.id} onValueChange={setSelected} className="gap-3">
               {offers.map(offer => <label key={offer.id} htmlFor={`billing-plan-${offer.id}`} className={cn('flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border bg-background p-4 transition-colors hover:border-primary/50 sm:p-5', plan.id === offer.id && 'border-primary bg-primary/[0.04] ring-1 ring-primary')}>
@@ -157,7 +160,7 @@ export function AsaasBillingPanel() {
               <h3 className="mt-1 text-lg font-semibold">{plan.label}</h3>
               <ul className="order-2 my-5 space-y-2.5 xl:order-none">{planHighlights(plan.limits).map(feature => <li key={feature} className="flex items-start gap-2 text-sm"><Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />{feature}</li>)}</ul>
               <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t pt-4 xl:mt-0"><span className="text-sm text-muted-foreground">Assinatura mensal</span><strong className="text-xl tabular-nums">{money(plan.price)}</strong></div>
-              {!!plan.trialDays && <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">{plan.trialDays} dias de teste na primeira contratação</p>}
+              {!!plan.trialDays && !data.subscription && <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">{plan.trialDays} dias de teste na primeira contratação</p>}
               <Button className="mt-5 h-auto min-h-11 w-full whitespace-normal py-3" disabled={busy || !canSubscribe} onClick={() => { setSelected(plan.id); setError(''); setCheckout(true); }}>Continuar com {plan.label}<ArrowRight /></Button>
               <p className="mt-3 text-xs leading-relaxed text-muted-foreground">PIX, boleto ou cartão. Créditos de IA são recarregados separadamente.</p>
             </section>
@@ -182,31 +185,34 @@ export function AsaasBillingPanel() {
             <ReceiptText className="hidden h-5 w-5 shrink-0 text-muted-foreground sm:block" />
             <div className="min-w-0 flex-1 basis-36"><p className="font-semibold tabular-nums">{money(invoice.amount)}</p><p className="mt-1 text-xs text-muted-foreground">Vencimento {date(invoice.due_date)}</p></div>
             <div className="min-w-0 flex-1 basis-36"><InvoiceStatus status={invoice.status} /><p className="mt-1.5 text-xs text-muted-foreground">{({ UNDEFINED: 'PIX, boleto ou cartão', CREDIT_CARD: 'Cartão', BOLETO: 'Boleto', PIX: 'PIX' } as Record<string, string>)[invoice.billing_type] || invoice.billing_type}</p></div>
-            {invoice.invoice_url ? <Button asChild variant={unpaid(invoice) ? 'default' : 'outline'} size="sm" className="w-full sm:w-auto"><a href={invoice.invoice_url} target="_blank" rel="noopener noreferrer" aria-label={`${unpaid(invoice) ? 'Pagar' : 'Ver'} fatura de ${money(invoice.amount)}, vencimento ${date(invoice.due_date)}`}>{unpaid(invoice) ? 'Pagar fatura' : 'Ver fatura'}<ArrowUpRight /></a></Button> : <span className="text-xs text-muted-foreground">Fatura sem link</span>}
+            {unpaid(invoice) ? <Button disabled={!data.ready || !data.workspace.canManage} size="sm" className="w-full sm:w-auto" onClick={() => setPaymentId(invoice.id)}>Pagar fatura<ArrowRight /></Button> : invoice.invoice_url ? <Button asChild variant="outline" size="sm" className="w-full sm:w-auto"><a href={invoice.invoice_url} target="_blank" rel="noopener noreferrer" aria-label={`${unpaid(invoice) ? 'Pagar' : 'Ver'} fatura de ${money(invoice.amount)}, vencimento ${date(invoice.due_date)}`}>{unpaid(invoice) ? 'Pagar fatura' : 'Ver fatura'}<ArrowUpRight /></a></Button> : <span className="text-xs text-muted-foreground">Fatura sem link</span>}
           </li>)}
         </ul> : <div className="flex min-h-56 flex-col items-center justify-center border-y py-10 text-center"><ReceiptText className="mb-3 h-7 w-7 text-muted-foreground" /><h3 className="text-sm font-medium">Suas faturas aparecerão aqui</h3><p className="mt-2 max-w-sm text-sm text-muted-foreground">Após contratar um plano, acompanhe os vencimentos e os pagamentos neste histórico.</p></div>}
         <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground"><ShieldCheck className="h-4 w-4 shrink-0" />Pagamento do plano processado pelo ASAAS. O extrato das recargas fica na aba Créditos de IA.</p>
       </TabsContent>
     </Tabs>
 
+    {paymentId && <AsaasPaymentDialog key={paymentId} workspaceId={data.workspace.id} workspaceName={data.workspace.name} paymentId={paymentId} onClose={() => { setPaymentId(null); void load(); }} onPaid={() => { setNotice('Pagamento confirmado. Seu plano foi atualizado.'); void load(); }} />}
+
     <Dialog open={checkout} onOpenChange={v => { if (!busy) setCheckout(v); }}>
       <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto rounded-lg">
         <DialogHeader><DialogTitle>Finalizar contratação</DialogTitle><DialogDescription>Informe os dados de quem será responsável pelo pagamento.</DialogDescription></DialogHeader>
         <div className="flex flex-wrap items-center justify-between gap-2 border-y py-4"><span className="font-medium">{plan?.label}</span><span className="font-semibold">{plan && money(plan.price)}<span className="text-sm font-normal text-muted-foreground">/mês</span></span></div>
-        {!!plan?.trialDays && <p className="text-sm text-muted-foreground">Primeiro vencimento após {plan.trialDays} dias de teste. Renovação mensal automática.</p>}
+        {!!plan?.trialDays && !data.subscription && <p className="text-sm text-muted-foreground">Primeiro vencimento após {plan.trialDays} dias de teste. Novas faturas são emitidas mensalmente.</p>}
+        {data.subscription?.canceled && <p className="text-sm text-muted-foreground">Esta é uma nova contratação, sem reiniciar o período de teste. Se ainda houver acesso vigente, o primeiro vencimento será após esse período; caso contrário, será hoje. O novo plano será liberado após a confirmação do pagamento.</p>}
         <form onSubmit={e => { e.preventDefault(); if (plan) void run(() => createAsaasCheckoutAction({ workspaceId: data.workspace.id, planId: plan.id, name, cpfCnpj: document }), 'Assinatura criada. A fatura aparecerá aqui assim que for emitida.'); }} className="space-y-4">
           <div className="space-y-2"><Label htmlFor="payer-name">Nome ou razão social</Label><Input id="payer-name" required minLength={3} maxLength={150} value={name} onChange={e => setName(e.target.value)} autoComplete="name" placeholder="Nome completo ou nome da empresa" /></div>
           <div className="space-y-2"><Label htmlFor="payer-document">CPF ou CNPJ de cobrança</Label><Input id="payer-document" required inputMode="numeric" maxLength={18} value={document} onChange={e => setDocument(e.target.value)} placeholder="CPF ou CNPJ" /></div>
-          <p className="text-xs leading-relaxed text-muted-foreground">Na próxima etapa, escolha PIX, boleto ou cartão na página segura do ASAAS. PIX e boleto precisam ser pagos a cada vencimento. Dados do cartão ficam com o ASAAS.</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">Na próxima etapa, pague com Pix, boleto ou cartão aqui no Dialogy. Cada fatura é paga separadamente. O pagamento é processado pelo Asaas.</p>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" disabled={busy} className="h-11 w-full">{busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}Contratar e abrir fatura</Button>
+          <Button type="submit" disabled={busy} className="h-11 w-full">{busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}Contratar e continuar</Button>
         </form>
       </DialogContent>
     </Dialog>
 
     <Dialog open={manage} onOpenChange={setManage}>
       <DialogContent className="max-w-md rounded-lg"><DialogHeader><DialogTitle>Gerenciar assinatura</DialogTitle><DialogDescription>{current?.label || data.subscription?.plan} · {subscriptionLabel}</DialogDescription></DialogHeader>
-        <p className="text-sm text-muted-foreground">Para trocar de plano{data.subscription?.canceled ? ' ou reativar a assinatura' : ''}, entre em contato com o suporte.</p>
+        {data.subscription?.canceled ? <><p className="text-sm text-muted-foreground">A renovação foi cancelada. Escolha um plano para contratar novamente.</p><Button onClick={() => { setManage(false); setTab('plan'); window.setTimeout(() => window.document.getElementById('available-plans')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0); }}>Escolher novo plano<ArrowRight /></Button></> : <p className="text-sm text-muted-foreground">Para trocar de plano durante uma assinatura ativa, entre em contato com o suporte.</p>}
         {data.subscription?.accessUntil && <p className="text-sm">Acesso ao plano até {date(data.subscription.accessUntil)}.</p>}
         {!data.subscription?.canceled && <Button variant="outline" disabled={!data.workspace.canManage} onClick={() => { setManage(false); setError(''); setCancel(true); }} className="mt-2 text-destructive">Cancelar renovação</Button>}
       </DialogContent>

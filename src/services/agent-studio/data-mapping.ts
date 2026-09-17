@@ -10,7 +10,7 @@ const forbiddenSegments = new Set(['__proto__', 'prototype', 'constructor']);
 
 function pathSegments(path: string): string[] {
   if (path === '$') return [];
-  const normalized = path.replace(/^\$\./, '').replace(/\[(\d+)\]/g, '.$1');
+  const normalized = path.replace(/^\$\.?/, '').replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
   const segments = normalized.split('.');
   if (!normalized || segments.some((part) => !/^[\p{L}\p{N}_-]+$/u.test(part) || forbiddenSegments.has(part))) {
     throw new Error('Selecione um caminho de dados válido.');

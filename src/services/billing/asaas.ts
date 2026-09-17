@@ -74,12 +74,12 @@ export async function startAsaasSubscription(
         "Este workspace possui uma assinatura Stripe. Solicite a migração ao suporte para evitar cobrança dupla.",
       );
     await client.query(
-      `INSERT INTO asaas_subscriptions(workspace_id,environment,plan_slug,price) VALUES($1,$2,$3,$4) ON CONFLICT(workspace_id) DO NOTHING`,
+      `INSERT INTO asaas_subscriptions(workspace_id,environment,plan_slug,price) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
       [workspaceId, config.environment, plan.id, plan.price],
     );
     let local = (
       await client.query(
-        "SELECT * FROM asaas_subscriptions WHERE workspace_id=$1",
+        "SELECT * FROM asaas_subscriptions WHERE workspace_id=$1 AND status <> 'superseded'",
         [workspaceId],
       )
     ).rows[0];
@@ -87,10 +87,36 @@ export async function startAsaasSubscription(
       throw new Error(
         "A assinatura pertence a outro ambiente ASAAS. Solicite a migração ao administrador.",
       );
-    if (local.canceled_at)
-      throw new Error(
-        "A assinatura foi cancelada. Entre em contato com o suporte para uma nova contratação.",
-      );
+    if (local.canceled_at) {
+      // Confirm that the old recurring contract really ended before creating another.
+      if (local.subscription_id) {
+        try {
+          const previous = await asaasRequest<AsaasSubscription>(config, `/subscriptions/${encodeURIComponent(local.subscription_id)}`);
+          if (!previous.deleted) throw new Error('O cancelamento anterior ainda não foi concluído no Asaas. Atualize a assinatura antes de contratar novamente.');
+          if (previous.id !== local.subscription_id || previous.customer !== local.customer_id) throw new Error('Vínculo da assinatura anterior divergente.');
+        } catch (error) {
+          if (!(error instanceof AsaasError && error.status === 404)) throw error;
+        }
+      } else if (local.create_started_at) {
+        throw new Error('A contratação anterior ainda aguarda conciliação. Nenhuma assinatura adicional será criada.');
+      }
+      await client.query('BEGIN');
+      try {
+        await client.query("UPDATE asaas_subscriptions SET status='superseded',updated_at=now() WHERE id=$1", [local.id]);
+        local = (await client.query(
+          `INSERT INTO asaas_subscriptions(workspace_id,environment,plan_slug,price,customer_id)
+           VALUES($1,$2,$3,$4,$5) RETURNING *`,
+          [workspaceId, config.environment, plan.id, plan.price, local.customer_id],
+        )).rows[0];
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        if ((error as { code?: string; constraint?: string }).code === '23505' && (error as { constraint?: string }).constraint === 'asaas_subscriptions_workspace_id_key') {
+          throw new Error('A nova contratação ainda precisa ser habilitada no sistema. Seu plano anterior e suas faturas foram preservados; nenhuma nova assinatura foi criada.');
+        }
+        throw error;
+      }
+    }
     if (local.plan_slug !== plan.id)
       throw new Error(
         "Já existe uma assinatura ou contratação deste workspace. Cancele ou gerencie o plano atual antes de iniciar outra.",
@@ -132,15 +158,19 @@ export async function startAsaasSubscription(
           throw new Error(
             "A criação está aguardando conciliação com o ASAAS. Tente novamente em instantes; nenhuma cobrança será duplicada.",
           );
+        const returning = !!(await client.query("SELECT 1 FROM asaas_subscriptions WHERE workspace_id=$1 AND status='superseded' LIMIT 1", [workspaceId])).rows[0];
         const due = new Date(`${billingDate()}T12:00:00Z`);
-        due.setUTCDate(
-          due.getUTCDate() +
-            (billing?.stripe_subscription_id ? 0 : plan.trialDays || 0),
-        );
+        if (returning && billing?.access_until && new Date(billing.access_until).getTime() > Date.now()) {
+          const accessDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(billing.access_until));
+          due.setTime(new Date(`${accessDay}T12:00:00Z`).getTime());
+          due.setUTCDate(due.getUTCDate() + 1);
+        } else if (!returning) {
+          due.setUTCDate(due.getUTCDate() + (billing?.stripe_subscription_id ? 0 : plan.trialDays || 0));
+        }
         const dueDate = due.toISOString().slice(0, 10);
         await client.query(
           "UPDATE asaas_subscriptions SET create_started_at=now(),trial_until=$2,updated_at=now() WHERE id=$1",
-          [local.id, `${dueDate}T23:59:59-03:00`],
+          [local.id, returning ? null : `${dueDate}T23:59:59-03:00`],
         );
         try {
           subscription = await asaasRequest<AsaasSubscription>(
@@ -195,6 +225,9 @@ export async function startAsaasSubscription(
       await persistPayment(client, local, payment);
     await refreshAccess(client, local.id);
     return {
+      paymentId: payments.data
+        .filter((p) => !p.deleted && ["PENDING", "OVERDUE"].includes(p.status))
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]?.id || null,
       url: safeInvoiceUrl(
         payments.data
           .filter((p) => !p.deleted && !ASAAS_PAID_STATUSES.includes(p.status))
@@ -251,23 +284,26 @@ export async function refreshAccess(
   subscriptionId: string,
 ) {
   const subscription = (
-    await client.query("SELECT * FROM asaas_subscriptions WHERE id=$1", [
+    await client.query("SELECT * FROM asaas_subscriptions WHERE workspace_id=(SELECT workspace_id FROM asaas_subscriptions WHERE id=$1) AND status <> 'superseded'", [
       subscriptionId,
     ])
   ).rows[0];
   const paid = (
     await client.query(
-      "SELECT plan_slug,due_date::text FROM asaas_payments WHERE subscription_id=$1 AND status=ANY($2) ORDER BY due_date DESC LIMIT 1",
-      [subscriptionId, ASAAS_PAID_STATUSES],
+      "SELECT plan_slug,due_date::text FROM asaas_payments WHERE subscription_id IN (SELECT id FROM asaas_subscriptions WHERE workspace_id=$1) AND status=ANY($2) ORDER BY due_date DESC,paid_at DESC NULLS LAST LIMIT 1",
+      [subscription.workspace_id, ASAAS_PAID_STATUSES],
     )
   ).rows[0];
   const paidUntil = paid
     ? `${nextMonthlyDate(paid.due_date)}T23:59:59-03:00`
     : null;
-  const accessUntil = paidUntil || subscription.trial_until;
+  const trial = (await client.query('SELECT plan_slug,trial_until FROM asaas_subscriptions WHERE workspace_id=$1 AND trial_until IS NOT NULL ORDER BY trial_until DESC LIMIT 1', [subscription.workspace_id])).rows[0];
+  const trialUntil = trial?.trial_until || subscription.trial_until;
+  const usePaid = !!paidUntil && new Date(paidUntil).getTime() >= new Date(trialUntil || 0).getTime();
+  const accessUntil = usePaid ? paidUntil : trialUntil;
   const current = accessUntil && new Date(accessUntil).getTime() > Date.now();
   const status = current
-    ? paid
+    ? usePaid
       ? "active"
       : "trialing"
     : subscription.canceled_at
@@ -275,14 +311,14 @@ export async function refreshAccess(
       : "past_due";
   await client.query(
     "UPDATE asaas_subscriptions SET status=$2,paid_until=$3,updated_at=now() WHERE id=$1",
-    [subscriptionId, status, paidUntil],
+    [subscription.id, status, paidUntil],
   );
   await client.query(
     "UPDATE billing_info SET status=$2,plan=$3,access_until=$4,updated_at=now() WHERE workspace_id=$1 AND provider='asaas'",
     [
       subscription.workspace_id,
       status,
-      paid?.plan_slug || subscription.plan_slug,
+      (usePaid ? paid?.plan_slug : trial?.plan_slug) || subscription.plan_slug,
       accessUntil,
     ],
   );
@@ -293,7 +329,7 @@ export async function reconcileAsaasSubscription(workspaceId: string) {
   return withBillingLock(workspaceId, async (client) => {
     const local = (
       await client.query(
-        "SELECT * FROM asaas_subscriptions WHERE workspace_id=$1",
+        "SELECT * FROM asaas_subscriptions WHERE workspace_id=$1 AND status <> 'superseded'",
         [workspaceId],
       )
     ).rows[0];
@@ -324,7 +360,7 @@ export async function cancelAsaasSubscription(workspaceId: string) {
   return withBillingLock(workspaceId, async (client) => {
     const local = (
       await client.query(
-        "SELECT * FROM asaas_subscriptions WHERE workspace_id=$1",
+        "SELECT * FROM asaas_subscriptions WHERE workspace_id=$1 AND status <> 'superseded'",
         [workspaceId],
       )
     ).rows[0];

@@ -64,6 +64,7 @@ import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { createClient } from '@/lib/supabase/client';
 import { createUniqueMediaFileName, createUniqueMediaStoragePath } from '@/lib/media-file-name';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
+import { isChatInInboxQueueScope } from '@/lib/inbox-pagination';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
 import { Switch } from '../ui/switch';
@@ -179,7 +180,7 @@ type TextSendJob = {
     startedAt: number;
 };
 
-function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
+export function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
     const [internalIsOpen, setInternalIsOpen] = React.useState(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
     const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
@@ -853,7 +854,7 @@ export default function ChatPanel({
             setIsLoadingHistory(true);
             setAllContactMessages([]);
             getContactMessages({
-                contactId: chat.contact.id,
+                contactId: chat.contact?.id || '',
                 workspaceId: currentUser.activeWorkspaceId,
                 limit: 1000
             })
@@ -1117,7 +1118,7 @@ export default function ChatPanel({
             const a = document.createElement('a');
             a.href = url;
             const dateStr = new Date().toISOString().split('T')[0];
-            const safeName = chat.contact.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const safeName = (chat.contact?.name || chat.protocol || 'chat').replace(/[^a-z0-9]/gi, '_').toLowerCase();
             a.download = `chat-${safeName}-${dateStr}.html`;
             document.body.appendChild(a);
             a.click();
@@ -1317,7 +1318,7 @@ export default function ChatPanel({
     const resolvedPlatform = resolveChatPlatform(chat);
     const isMetaPlatform = resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger';
     const contactDisplayValue = getChatIdentityDisplayValue(chat, resolvedPlatform);
-    const headerContactValue = contactDisplayValue || (isMetaPlatform ? '' : chat?.contact.phone || chat?.contact.phone_number_jid || '');
+    const headerContactValue = contactDisplayValue || (isMetaPlatform ? '' : chat?.contact?.phone || chat?.contact?.phone_number_jid || '');
 
     const optimisticPlatform =
         resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger' || resolvedPlatform === 'telegram'
@@ -2089,16 +2090,21 @@ export default function ChatPanel({
     const copilotAgentAvatarUrl = selectedInboxAiAgent?.systemAgentAvatarUrl || null;
     const canAiTakeOverConversation = Boolean(selectedInboxAiAgent?.canTakeOverConversation);
     const headerAssigneeName = chat.agent?.name || chat.assignedSystemAgent?.name || 'Não atribuído';
+    const isRoboQueue = isChatInInboxQueueScope(chat, 'robo');
     const headerStatusLabel = chat.status === 'atendimentos'
         ? 'Em atendimento'
         : chat.status === 'encerrados'
             ? 'Encerrado'
-            : 'Na fila';
+            : isRoboQueue
+                ? 'Robô'
+                : 'Na fila';
     const headerStatusClassName = chat.status === 'atendimentos'
         ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
         : chat.status === 'encerrados'
             ? 'border-slate-200 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300'
-            : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
+            : isRoboQueue
+                ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
+                : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
     const headerPlatformLabel = resolvedPlatform === 'instagram'
         ? 'Instagram'
         : resolvedPlatform === 'messenger'
@@ -2150,14 +2156,14 @@ export default function ChatPanel({
                     )}
                     <div className="relative shrink-0">
                         <Avatar className="h-10 w-10 border border-slate-200 bg-white md:h-11 md:w-11 dark:border-white/10 dark:bg-[#0B0B10]">
-                            <AvatarImage fallbackOnBlank src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
-                            <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
+                            <AvatarImage fallbackOnBlank src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || chat.protocol || 'Contato'} data-ai-hint="person" />
+                            <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{((chat.contact?.name || chat.protocol || '?').trim()[0] || '?').toUpperCase()}</AvatarFallback>
                         </Avatar>
                         <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-[#050507]" aria-hidden="true" />
                     </div>
                     <div className="min-w-0 flex-1">
                         <h2 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold text-slate-950 md:text-base dark:text-white">
-                            <span className="min-w-0 truncate">{chat.contact.name}</span>
+                            <span className="min-w-0 truncate">{chat.contact?.name || chat.protocol || 'Sem nome'}</span>
                             <Badge
                                 data-chat-status
                                 variant="secondary"

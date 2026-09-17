@@ -162,6 +162,9 @@ export type MessageSender = Partial<User> & { type?: 'user' | 'contact' | 'syste
 
 
 export type MessageMetadata = {
+  whatsappUserId?: string;
+  whatsappParentUserId?: string;
+  whatsappUsername?: string;
   studioOperationId?: string;
   studioPresentedProduct?: { productId: string | number; caption: string };
   sharedContactName?: string;
@@ -413,6 +416,8 @@ export type Chat = {
   status: 'atendimentos' | 'gerais' | 'encerrados';
   workspace_id: string;
   assigned_at?: string;
+  closed_at?: string | null;
+  closedAt?: string | null;
   source?: string;
   team_id?: string;
   instance_name?: string;

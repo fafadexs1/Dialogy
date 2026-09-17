@@ -1,6 +1,7 @@
 'use server';
 
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
+import { preserveWhatsappRecipient } from '@/lib/whatsapp/bsuid';
 import type { EvolutionApiConfig } from '@/lib/types';
 
 // Arquivo "use server": só funções async podem ser exportadas, então os tipos
@@ -39,7 +40,7 @@ type SendButtonsPayload = {
 };
 
 function normalizeRecipientNumber(value: string): string {
-    const normalized = value.replace(/@.*$/, '').replace(/\D/g, '');
+    const normalized = preserveWhatsappRecipient(value);
     return normalized || value;
 }
 

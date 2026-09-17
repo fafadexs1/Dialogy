@@ -75,11 +75,26 @@ export const EMPTY_INBOX_STATUS_PAGINATION: InboxTabPagination = {
 };
 
 export function isChatInInboxQueueScope(
-  chat: Pick<Chat, 'status' | 'tag'>,
+  chat: {
+    status?: Chat['status'] | null;
+    tag?: string | null;
+    agentId?: string | null;
+    agent_id?: string | null;
+    agent?: { id?: string | null } | null;
+    team_id?: string | null;
+    teamName?: string | null;
+  },
   scope: InboxQueueScope
 ): boolean {
   if (chat.status !== 'gerais') return false;
-  return scope === 'robo' ? !chat.tag?.trim() : Boolean(chat.tag?.trim());
+
+  // Um chat com agente humano atribuído nunca deve aparecer em Robô nem em Fila.
+  const hasHumanAgent = Boolean(chat.agentId || chat.agent_id || chat.agent?.id);
+  if (hasHumanAgent) return false;
+
+  // Um chat pertence à fila humana se tiver equipe ou tag de equipe definida.
+  const hasTeamOrTag = Boolean(chat.tag?.trim() || chat.team_id || chat.teamName?.trim());
+  return scope === 'robo' ? !hasTeamOrTag : hasTeamOrTag;
 }
 
 export function getInboxPaginationTab(

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { isWhatsappBsuid, parseScopedWhatsappBsuid, scopeWhatsappBsuid } from '@/lib/whatsapp/bsuid';
 import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
@@ -1425,12 +1426,13 @@ async function handleMessagesUpsert(payload: any) {
     let isNewContact = false;
     let shouldRunRealtimeSideEffects = true;
     let sideEffectSkipReason: string | null = null;
-    const contactJid = resolveWhatsappJid(
+    const rawContactJid = resolveWhatsappJid(
         data?.key?.remoteJid,
         data?.key?.remoteJidAlt,
         data?.remoteJid,
         data?.remoteJidAlt
     );
+    const contactJid = rawContactJid ? scopeWhatsappBsuid(rawContactJid, instanceName) : null;
 
     if (!data || !data.key || !data.message) {
         console.log('[WEBHOOK_MSG_UPSERT] Payload invalido, data, key ou message ausente.');
@@ -1616,6 +1618,9 @@ async function handleMessagesUpsert(payload: any) {
 
     const base64Content = (mediaDetails as any)?.base64 || (message as any)?.base64 || undefined;
     let metadata: MessageMetadata = {
+        ...(isWhatsappBsuid(key.userId) ? { whatsappUserId: key.userId } : {}),
+        ...(isWhatsappBsuid(key.parentUserId) ? { whatsappParentUserId: key.parentUserId } : {}),
+        ...(typeof key.username === 'string' ? { whatsappUsername: key.username } : {}),
         mediaUrl: mediaUrl || undefined,
         signedMediaUrl: rawMediaUrl || undefined,
         originalMediaUrl: rawMediaUrl || undefined,
@@ -1684,8 +1689,8 @@ async function handleMessagesUpsert(payload: any) {
         const resolvedContact = await findOrCreateWhatsappContact(client, {
             workspaceId,
             phoneOrJid: contactJid,
-            fallbackName: pushName || contactJid.split('@')[0],
-            fallbackPhone: contactJid.split('@')[0],
+            fallbackName: pushName || (parseScopedWhatsappBsuid(contactJid) ? 'Contato do WhatsApp' : contactJid.split('@')[0]),
+            fallbackPhone: parseScopedWhatsappBsuid(contactJid) ? '' : contactJid.split('@')[0],
             avatarUrl: null,
         });
 

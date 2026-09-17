@@ -1,5 +1,6 @@
 import { withDebug } from '@/lib/observability/logger';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
+import { preserveWhatsappRecipient } from '@/lib/whatsapp/bsuid';
 import {
     assertValidTemplateComponents,
     requireProviderMessageId,
@@ -25,7 +26,7 @@ interface ApiConfig {
 }
 
 function sanitizePhoneNumber(value: string): string {
-    return value.replace(/@.*$/, '').replace(/\D/g, '');
+    return preserveWhatsappRecipient(value);
 }
 
 export const sendTemplateMessage = withDebug(

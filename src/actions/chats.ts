@@ -1279,6 +1279,7 @@ type ChatRow = {
     contact_name: string | null;
     contact_avatar_url: string | null;
     contact_email: string | null;
+    contact_phone?: string | null;
     contact_phone_number_jid: string | null;
     contact_address: string | null;
     last_message_id: string | null;
@@ -1367,9 +1368,9 @@ function buildInboxListFilterClause({
     )`;
 
     if (filters.queueScope === 'robo') {
-        clauses.push(`NULLIF(BTRIM(${chatAlias}.tag), '') IS NULL`);
+        clauses.push(`NULLIF(BTRIM(${chatAlias}.tag), '') IS NULL AND ${chatAlias}.team_id IS NULL AND ${chatAlias}.agent_id IS NULL`);
     } else if (filters.queueScope === 'fila') {
-        clauses.push(`NULLIF(BTRIM(${chatAlias}.tag), '') IS NOT NULL`);
+        clauses.push(`(NULLIF(BTRIM(${chatAlias}.tag), '') IS NOT NULL OR ${chatAlias}.team_id IS NOT NULL) AND ${chatAlias}.agent_id IS NULL`);
     }
 
     if (filters.responsibleId) {
@@ -1495,11 +1496,14 @@ async function fetchInboxTabCounts({
         `SELECT
             COUNT(*) FILTER (
                 WHERE c.status = 'gerais'
+                  AND c.agent_id IS NULL
+                  AND c.team_id IS NULL
                   AND NULLIF(BTRIM(c.tag), '') IS NULL
             )::int AS robo,
             COUNT(*) FILTER (
                 WHERE c.status = 'gerais'
-                  AND NULLIF(BTRIM(c.tag), '') IS NOT NULL
+                  AND c.agent_id IS NULL
+                  AND (c.team_id IS NOT NULL OR NULLIF(BTRIM(c.tag), '') IS NOT NULL)
             )::int AS gerais,
             COUNT(*) FILTER (
                 WHERE c.status = 'atendimentos'
@@ -1906,6 +1910,7 @@ async function fetchChats({
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
             cont.email AS contact_email,
+            cont.phone AS contact_phone,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address,
             lmd.id AS last_message_id,
@@ -2901,6 +2906,32 @@ export const refreshChatAction = withDebug(
     }
 );
 
+export const getContactAction = withDebug(
+    'get_contact',
+    async function getContactAction(contactId: string): Promise<{ contact?: Contact; error?: string }> {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return { error: "Usuário não autenticado." };
+
+        try {
+            const { rows } = await db.query(
+                `SELECT id, workspace_id, name, avatar_url, email, phone, phone_number_jid, address, owner_id, created_at
+                 FROM contacts
+                 WHERE id = $1`,
+                [contactId]
+            );
+            if (rows.length === 0) return { error: "Contato não encontrado." };
+            return { contact: rows[0] as Contact };
+        } catch (error: any) {
+            console.error("Erro ao buscar contato:", error);
+            return { error: "Falha ao buscar contato." };
+        }
+    },
+    {
+        contextResolver: (contactId) => ({ payload: { contactId } })
+    }
+);
+
 export const getOrCreateChatAction = withDebug(
     'get_or_create_chat',
     async function getOrCreateChatAction(
@@ -3435,6 +3466,7 @@ async function fetchChatsDelta({
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
             cont.email AS contact_email,
+            cont.phone AS contact_phone,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address,
             lmd.id AS last_message_id,
@@ -3736,15 +3768,20 @@ function parseMetadata(metadata: any, shape: 'full' | 'preview' = 'full'): Messa
     return { chats, chatMap, lastSyncChats: lastSync };
 }
 
-function buildContactFromRow(row: ChatRow): Contact | undefined {
-    if (!row.contact_id) return undefined;
+function buildContactFromRow(row: ChatRow): Contact {
+    const contactId = row.contact_id || `temp-contact-${row.id}`;
+    const name = (row.contact_name && row.contact_name.trim()) ||
+        row.contact_phone_number_jid?.replace(/@.+$/, '') ||
+        row.contact_phone ||
+        (row.protocol ? `Contato ${row.protocol}` : 'Contato');
     return {
-        id: row.contact_id,
+        id: contactId,
         workspace_id: row.workspace_id,
-        name: row.contact_name || 'Contato',
+        name,
         avatar_url: row.contact_avatar_url || undefined,
         email: row.contact_email || undefined,
         phone_number_jid: row.contact_phone_number_jid || undefined,
+        phone: row.contact_phone || undefined,
         address: row.contact_address || undefined,
         custom_fields: row.contact_custom_fields || undefined,
     };
@@ -3779,6 +3816,7 @@ export async function getContactMessages({
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
             cont.email AS contact_email,
+            cont.phone AS contact_phone,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address
         FROM messages m
@@ -3979,6 +4017,7 @@ export async function getChatMessagesWindow({
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
             cont.email AS contact_email,
+            cont.phone AS contact_phone,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address
         FROM matching_chats c
@@ -4060,6 +4099,7 @@ async function fetchMessageDeltas({
             cont.name AS contact_name,
             cont.avatar_url AS contact_avatar_url,
             cont.email AS contact_email,
+            cont.phone AS contact_phone,
             cont.phone_number_jid AS contact_phone_number_jid,
             cont.address AS contact_address
         FROM messages m

@@ -7,6 +7,14 @@ export async function broadcastChatUpdate(
   chatId: string,
   updatedFields: Record<string, unknown>,
 ) {
+  // Se o update não traz o status do chat, faz o broadcast hidratado completo
+  // para garantir que clientes Realtime nunca recebam um payload esquelético
+  // com status indefinido que caia no fallback incorreto.
+  if (!updatedFields.status) {
+    await broadcastHydratedChatUpdate(workspaceId, chatId);
+    return;
+  }
+
   try {
     const topic = `workspace:${workspaceId}:chats`;
     await broadcastRealtimeEvent(topic, 'UPDATE', {
@@ -32,6 +40,8 @@ export async function broadcastHydratedChatUpdate(workspaceId: string, chatId: s
     const { rows } = await db.query(
       `SELECT
         c.status,
+        c.contact_id,
+        c.protocol,
         c.agent_id,
         c.assigned_system_agent_id,
         c.is_autopilot_active,
@@ -48,8 +58,13 @@ export async function broadcastHydratedChatUpdate(workspaceId: string, chatId: s
         t.color AS team_color,
         sa.name AS assigned_system_agent_name,
         sa.avatar_url AS assigned_system_agent_avatar_url,
-        sa.type AS assigned_system_agent_type
+        sa.type AS assigned_system_agent_type,
+        ct.name AS contact_name,
+        ct.phone AS contact_phone,
+        ct.phone_number_jid AS contact_phone_number_jid,
+        ct.avatar_url AS contact_avatar_url
      FROM chats c
+     LEFT JOIN contacts ct ON ct.id = c.contact_id
      LEFT JOIN users u ON u.id = c.agent_id
      LEFT JOIN system_agents sa ON sa.id = c.assigned_system_agent_id
      ${buildChatTeamLateralSql({ chatAlias: 'c' })}

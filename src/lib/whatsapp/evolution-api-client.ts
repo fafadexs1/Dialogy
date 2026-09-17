@@ -1,4 +1,5 @@
 import { resilientFetch } from '@/lib/http/resilient-fetch';
+import { isWhatsappBsuidIdentity, unwrapWhatsappBsuid } from '@/lib/whatsapp/bsuid';
 import { buildAlternateBrazilianDigits, extractWhatsappDigits } from '@/lib/whatsapp/contact-identity';
 import { getPreferredSendDigits, rememberSendDigits } from '@/lib/whatsapp/number-form-memory';
 
@@ -36,7 +37,7 @@ function parseSendBody(endpoint: string, options: RequestInit): { parsed: any; n
   }
 
   const number = typeof parsed?.number === 'string' ? parsed.number : null;
-  if (!number) return null;
+  if (!number || isWhatsappBsuidIdentity(number)) return null;
 
   return { parsed, number };
 }
@@ -91,6 +92,25 @@ export async function fetchEvolutionAPI(
     );
 
   try {
+    if (typeof options.body === 'string') {
+      let body: any;
+      try { body = JSON.parse(options.body); } catch { /* Preserve non-JSON request behavior. */ }
+      if (body && typeof body === 'object') {
+        const instanceName = decodeURIComponent(endpoint.split('?')[0].split('/').at(-1) || '');
+        let changed = false;
+        for (const key of ['number', 'remoteJid']) {
+          if (typeof body[key] === 'string' && body[key].startsWith('bsuid:')) {
+            body[key] = unwrapWhatsappBsuid(body[key], instanceName);
+            changed = true;
+          }
+        }
+        if (typeof body.key?.remoteJid === 'string' && body.key.remoteJid.startsWith('bsuid:')) {
+          body.key = { ...body.key, remoteJid: unwrapWhatsappBsuid(body.key.remoteJid, instanceName) };
+          changed = true;
+        }
+        if (changed) options = { ...options, body: JSON.stringify(body) };
+      }
+    }
     const send = parseSendBody(endpoint, options);
 
     // Se ja aprendemos qual forma esse numero aceita, sai direto nela em vez de

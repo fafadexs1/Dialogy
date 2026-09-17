@@ -1,0 +1,50 @@
+import 'dotenv/config';
+import { writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { db } from '../src/lib/db';
+import { createWorkflowNode } from '../src/services/workflow-runtime/catalog';
+import { WorkflowDefinitionSchema } from '../src/services/workflow-runtime/schemas';
+import { validateWorkflowDefinition } from '../src/services/workflow-runtime/validator';
+import { validateNexusWorkflowDialogyBindings } from '../src/modules/nexus/services/dialogy-resources';
+import { PostgresWorkflowPersistence } from '../src/services/workflow-runtime/postgres-persistence';
+const ws='e3b476a1-5de8-4744-80b5-a5d23fe15fab', id='8526ced9-79fe-4fc3-8ad0-02cd699c8168';
+const agent='7d7259ab-a6c3-4057-a9ca-28ddbb15db95', systemAgent='779c0e28-b9c2-4604-9496-44d56cece388', team='b9a74d62-7f65-46c1-a5ae-4887fde9926e';
+const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const repair=process.argv.includes('--repair-error-routes');
+const revision=repair?5:4;
+async function main(){
+const c=await db.connect();try{
+ await c.query('BEGIN');
+ const row=(await c.query('SELECT * FROM nexus_workflows WHERE workspace_id=$1 AND id=$2 FOR UPDATE',[ws,id])).rows[0];
+ if(row?.published_revision!==revision-1)throw Error('Revisão mudou; preservar e revisar.');
+ const old=WorkflowDefinitionSchema.parse(row.draft_definition);
+ const oldAgent=old.nodes.find(n=>n.id==='ai_published_agent_68c96f4e-c3b3-49c2-b3eb-b3ef69b1b72b');
+ if(!oldAgent||(!repair&&(old.nodes.length!==2||oldAgent.config.agentId!=='0a952e14-2fdc-47eb-99d6-733a2d4868a5'))||(repair&&oldAgent.config.systemAgentId!==systemAgent))throw Error('Fluxo divergiu do revisado.');
+ const cfg=(await c.query('SELECT name,knowledge_base,is_active FROM autopilot_configs WHERE workspace_id=$1 AND id=$2',[ws,agent])).rows[0];
+ if(!cfg?.is_active)throw Error('Lucas inativo');
+ const main=createWorkflowNode('output.handoff',{id:oldAgent.id,name:'Ativar Lucas · Suporte Técnico',position:{x:370,y:50},config:{destinationType:'intelligent_agent',systemAgentId:systemAgent,customErrorRoute:true,reason:'Atendimento técnico com Lucas, conforme acionamento deste fluxo.'}});
+ const done=createWorkflowNode('output.end',{id:'lucas_ativado',name:'Lucas assume o atendimento',position:{x:720,y:10},config:{output:{agent:'Lucas Suporte Técnico',activated:true}}});
+ const fallback=createWorkflowNode('output.handoff',{id:'suporte_em_falha',name:'Falha ao ativar IA · Suporte humano',position:{x:720,y:210},config:{destinationType:'human',teamId:team,persistReason:true,customErrorRoute:true,reason:'Não foi possível ativar Lucas no fluxo Ativar IA Comercial. Conferir falha registrada na execução e continuar com suporte humano.'}});
+ const failure=createWorkflowNode('output.end',{id:'ativacao_nao_concluida',name:'Registrar falha de transferência',position:{x:1090,y:300},config:{output:{activated:false,requiresReview:true}}});
+ const human=createWorkflowNode('output.end',{id:'suporte_humano_acionado',name:'Suporte humano assume',position:{x:1090,y:160},config:{output:{activated:false,handoff:'Suporte'}}});
+ for(const n of [fallback,failure]) n.inputPorts=n.inputPorts.map(p=>({...p,connectionType:'error' as const}));
+ const conn=(source:string,port:string,target:string)=>({id:`${source}_${port}`,sourceNodeId:source,sourcePortId:port,targetNodeId:target,targetPortId:'main',connectionType:port==='error'?'error':'main'});
+ const draft=WorkflowDefinitionSchema.parse({...old,nodes:[old.nodes[0],main,done,fallback,human,failure],connections:[old.connections[0],conn(main.id,'completed',done.id),conn(main.id,'error',fallback.id),conn(fallback.id,'completed',human.id),conn(fallback.id,'error',failure.id)],metadata:{...old.metadata,senderSystemAgentId:systemAgent},updatedAt:new Date().toISOString()});
+ const validation=validateWorkflowDefinition(draft);
+ const bindings=await validateNexusWorkflowDialogyBindings({workspaceId:ws,definition:draft});
+ if(!validation.valid||!bindings.valid)throw Error(JSON.stringify({validation,bindings}));
+ if(hash(draft.nodes[0])!==hash(old.nodes[0]))throw Error('Gatilho foi alterado');
+ const report={workspaceId:ws,workflowId:id,name:old.name,oldVersion:`v${revision-1}`,newVersion:`v${revision}`,agentId:agent,systemAgentId:systemAgent,triggerUnchanged:true,triggerKeyword:'cabral',nodes:draft.nodes.length,validation,bindings,apply:process.argv.includes('--apply')};
+ console.log(JSON.stringify(report,null,2));
+ if(!process.argv.includes('--apply')){await c.query('ROLLBACK');return;}
+ if(!cfg.knowledge_base.includes('JORNADA'))throw Error('Melhoria Lucas ainda não aplicada');
+ const time=new Date().toISOString();
+ const published=WorkflowDefinitionSchema.parse({...draft,version:`v${revision}`,status:'published',updatedAt:time});
+ await new PostgresWorkflowPersistence(c).saveWorkflowDefinition(published);
+ await c.query("UPDATE nexus_workflows SET status='published',draft_definition=$3::jsonb,published_workflow_id=$4,published_workflow_version=$6,published_revision=$7,published_at=$5,updated_at=$5 WHERE workspace_id=$1 AND id=$2",[ws,id,JSON.stringify(draft),published.id,time,`v${revision}`,revision]);
+ await c.query(`INSERT INTO nexus_workflow_versions(nexus_workflow_id,workspace_id,revision,published_revision,definition,description,source,created_by) SELECT $1,$2,COALESCE(MAX(revision),0)+1,$6,$3::jsonb,$4,'publish',$5 FROM nexus_workflow_versions WHERE nexus_workflow_id=$1`,[id,ws,JSON.stringify(published),'Lucas Suporte Técnico substitui Raquel neste fluxo, por transferência nativa. Gatilho preservado; fallback Suporte. Agente Raquel não alterado.',row.created_by,revision]);
+ await c.query('COMMIT');
+ await writeFile('docs/lucas-nexus-20260915-publication.json',JSON.stringify({...report,publishedAt:time},null,2));
+ console.log(`PUBLICADO v${revision}: Ativar IA Comercial -> Lucas Suporte Técnico.`);
+}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();await db.end();}}
+main().catch(e=>{console.error(e.message);process.exitCode=1});

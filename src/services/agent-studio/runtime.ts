@@ -13,6 +13,7 @@ import { executeStudioHttp, executeStudioMcp, resolveStudioMcpTool } from './int
 import type { AgentReleaseManifest, ProcedureStep } from './types';
 import { buildStudioHttpRequest, buildStudioMcpArguments, mapStudioOutputs, type StudioDataContext } from './data-mapping';
 import { executeStudioContactAction } from './native-actions';
+import { lookupSgpCustomerContracts, runSgpWorkspaceTool } from '@/services/agent-tools/sgp-tools';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import { interpretStudioCollection } from './collection-interpreter';
 import { buildStudioConversationContext } from './conversation-context';
@@ -316,6 +317,82 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
         if (step.type === 'native_action' && ['add_tag', 'remove_tag', 'update_crm_field'].includes(step.nativeActionType || '')) {
           await executeStudioContactAction({ workspaceId: release.workspaceId, chatId: input.chatId, step, context, confirmed: operation.confirmed });
           return {};
+        }
+        if (step.type === 'native_action' && step.nativeActionType === 'sgp_fetch_contracts') {
+          const rawCpf = String(context.values?.customer_cpf || context.contact?.custom_fields?.cpf || context.contact?.custom_fields?.['53d4dc37-fa88-4749-be3a-194953864e80'] || '').replace(/\D/g, '')
+            || (input.message || '').replace(/\D/g, '').match(/(\d{11}|\d{14})/)?.[1] || '';
+          const result = await lookupSgpCustomerContracts({
+            workspaceId: release.workspaceId,
+            chatId: input.chatId,
+            contactId: input.contact?.id,
+            customerIdentifier: rawCpf || undefined,
+          });
+          if (result.status === 'not-found') {
+            return { values: { contracts: [], contracts_count: 0 } };
+          }
+          if (result.status !== 'found') {
+            throw new Error('Não foi possível consultar os contratos no SGP no momento.');
+          }
+          if (rawCpf && input.contact?.id) {
+            try {
+              const globalInt = await db.query(
+                `SELECT config->>'cpfFieldId' as cpf_field_id FROM workspace_integrations WHERE workspace_id = $1 AND provider = 'sgp' LIMIT 1`,
+                [release.workspaceId]
+              );
+              const cpfFieldId = globalInt.rows[0]?.cpf_field_id;
+              if (cpfFieldId) {
+                await db.query(
+                  `INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)
+                   ON CONFLICT (contact_id, field_id) DO UPDATE SET value = EXCLUDED.value`,
+                  [input.contact.id, cpfFieldId, rawCpf]
+                );
+              }
+            } catch (err) {
+              console.warn('[STUDIO_SGP] Erro ao salvar CPF no contato:', err);
+            }
+          }
+          const contracts = result.contracts.map((c) => ({
+            id: c.id,
+            label: `${c.id} - ${c.planDescription || 'Plano'}${c.addressLabel ? ` - ${c.addressLabel}` : ''}${c.statusLabel ? ` (${c.statusLabel})` : ''}`,
+            plan: c.planDescription,
+            address: c.addressLabel,
+            status: c.statusLabel,
+          }));
+          return {
+            values: {
+              contracts,
+              contracts_count: contracts.length,
+              cpf_cnpj: result.cpfCnpj,
+            },
+          };
+        }
+        if (step.type === 'native_action' && step.nativeActionType === 'sgp_fetch_contact_panel_data') {
+          const rawCpf = String(context.values?.customer_cpf || context.contact?.custom_fields?.cpf || '').replace(/\D/g, '')
+            || (input.message || '').replace(/\D/g, '').match(/(\d{11}|\d{14})/)?.[1] || '';
+          const contractId = String(context.values?.customer_contract || '').replace(/\D/g, '');
+          const toolResult = await runSgpWorkspaceTool({
+            workspaceId: release.workspaceId,
+            chatId: input.chatId,
+            contactId: input.contact?.id,
+            customerIdentifier: rawCpf || undefined,
+          }, {
+            type: 'sgp_fetch_contact_panel_data',
+            payload: { contractId: contractId || undefined },
+          });
+          if (toolResult.status !== 'success' || !toolResult.output) {
+            throw new Error(toolResult.error || 'Falha ao consultar painel SGP.');
+          }
+          const out = toolResult.output as Record<string, any>;
+          return {
+            values: {
+              customer_name: out.customerName,
+              contracts: out.contracts,
+              online_contracts: out.onlineContracts,
+              invoices: out.invoices,
+              open_invoices: out.openInvoices,
+              overdue_invoices: out.overdueInvoices,
+            },
+          };
         }
         if (step.type === 'native_action' && step.nativeActionType === 'close_chat') {
           await input.runNative({ type: 'close_chat', reason: step.title, payload: { sendCloseMessage: false, notes: document.concludeStage.successClosingMessage } }, operation);

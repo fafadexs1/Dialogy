@@ -15,6 +15,28 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 
 export type RealtimeBroadcastTransport = 'http' | 'websocket' | 'failed';
 
+export type RealtimeBroadcastOptions = {
+  isPrivate?: boolean;
+};
+
+export function isPrivateBroadcastTopic(
+  topic: string,
+  options?: RealtimeBroadcastOptions,
+): boolean {
+  if (typeof options?.isPrivate === 'boolean') {
+    return options.isPrivate;
+  }
+  return (
+    topic.startsWith('workspace:') ||
+    topic.startsWith('room:') ||
+    topic.startsWith('private:')
+  );
+}
+
+function getBroadcastChannelOptions(topic: string, options?: RealtimeBroadcastOptions) {
+  return isPrivateBroadcastTopic(topic, options) ? { config: { private: true } } : undefined;
+}
+
 const HTTP_COOLDOWN_MS = Number.parseInt(process.env.REALTIME_HTTP_COOLDOWN_MS || '', 10) || 300_000;
 const SUBSCRIBE_TIMEOUT_MS = Number.parseInt(process.env.REALTIME_SUBSCRIBE_TIMEOUT_MS || '', 10) || 8_000;
 const MAX_CACHED_CHANNELS = 64;
@@ -48,7 +70,10 @@ async function getSocketClient(): Promise<SupabaseClient | null> {
  * Channels are cached because joining costs a round-trip. A worker handling many
  * chats would otherwise open one socket channel per event.
  */
-async function getJoinedChannel(topic: string): Promise<RealtimeChannel | null> {
+async function getJoinedChannel(
+  topic: string,
+  options?: RealtimeBroadcastOptions,
+): Promise<RealtimeChannel | null> {
   const cached = joinedChannels.get(topic);
   if (cached) return cached;
 
@@ -56,7 +81,8 @@ async function getJoinedChannel(topic: string): Promise<RealtimeChannel | null> 
     const client = await getSocketClient();
     if (!client) return null;
 
-    const channel = client.channel(topic);
+    const channelOpts = getBroadcastChannelOptions(topic, options);
+    const channel = channelOpts ? client.channel(topic, channelOpts) : client.channel(topic);
     const joined = await new Promise<boolean>((resolve) => {
       let settled = false;
       const timer = setTimeout(() => {
@@ -82,7 +108,7 @@ async function getJoinedChannel(topic: string): Promise<RealtimeChannel | null> 
     });
 
     if (!joined) {
-      await channel.unsubscribe().catch(() => undefined);
+      await Promise.resolve(channel.unsubscribe()).catch(() => undefined);
       return null;
     }
     return channel;
@@ -101,7 +127,7 @@ async function getJoinedChannel(topic: string): Promise<RealtimeChannel | null> 
     if (oldestTopic && oldestTopic !== topic) {
       const evicted = await joinedChannels.get(oldestTopic);
       joinedChannels.delete(oldestTopic);
-      await evicted?.unsubscribe().catch(() => undefined);
+      await Promise.resolve(evicted?.unsubscribe()).catch(() => undefined);
     }
   }
 
@@ -112,9 +138,10 @@ async function broadcastOverWebsocket(
   topic: string,
   event: string,
   payload: Record<string, unknown>,
+  options?: RealtimeBroadcastOptions,
 ): Promise<boolean> {
   try {
-    const channel = await getJoinedChannel(topic);
+    const channel = await getJoinedChannel(topic, options);
     if (!channel) return false;
 
     const result = await channel.send({ type: 'broadcast', event, payload });
@@ -122,7 +149,7 @@ async function broadcastOverWebsocket(
 
     // A dead channel must not stay cached, or every later event reuses it.
     joinedChannels.delete(topic);
-    await channel.unsubscribe().catch(() => undefined);
+    await Promise.resolve(channel.unsubscribe()).catch(() => undefined);
     return false;
   } catch (error) {
     joinedChannels.delete(topic);
@@ -135,11 +162,15 @@ export async function broadcastRealtimeEvent(
   topic: string,
   event: string,
   payload: Record<string, unknown>,
+  options?: RealtimeBroadcastOptions,
 ): Promise<RealtimeBroadcastTransport> {
   if (!httpIsInCooldown()) {
     try {
       const { getSupabaseAdmin } = await import('@/lib/supabase');
-      await getSupabaseAdmin().channel(topic).httpSend(event, payload);
+      const channelOpts = getBroadcastChannelOptions(topic, options);
+      const adminClient = getSupabaseAdmin();
+      const channel = channelOpts ? adminClient.channel(topic, channelOpts) : adminClient.channel(topic);
+      await channel.httpSend(event, payload);
       return 'http';
     } catch (error) {
       markHttpUnavailable();
@@ -150,7 +181,7 @@ export async function broadcastRealtimeEvent(
     }
   }
 
-  const delivered = await broadcastOverWebsocket(topic, event, payload);
+  const delivered = await broadcastOverWebsocket(topic, event, payload, options);
   if (delivered) return 'websocket';
 
   console.error(`[REALTIME_BROADCAST] Could not deliver ${topic}/${event} over any transport.`);

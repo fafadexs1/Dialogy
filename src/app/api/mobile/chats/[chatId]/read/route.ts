@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireMobileAuth } from '@/lib/mobile-api/auth';
-import { broadcastChatUpdate } from '@/lib/realtime/chat-broadcast';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 type Params = {
   params: Promise<{ chatId: string }>;
@@ -36,6 +36,6 @@ export async function POST(request: NextRequest, { params }: Params) {
   );
 
   const workspaceId = String(access.rows[0].workspace_id);
-  await broadcastChatUpdate(workspaceId, chatId, { unread_count: 0 });
+  await broadcastHydratedChatUpdate(workspaceId, chatId);
   return NextResponse.json({ success: true });
 }

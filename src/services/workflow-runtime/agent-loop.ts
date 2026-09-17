@@ -104,6 +104,26 @@ export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
     '10. Responda exclusivamente no contrato estruturado solicitado (type "final" para falar com o cliente, "needs_input" para fazer perguntas/pedir dados ausentes, "tool_call" para ferramentas, "handoff" para transferir).',
     '11. Nunca pergunte qual opção, item, horário, produto, serviço ou alternativa o cliente prefere antes de apresentar as escolhas. Referências como "desses", "dessas", "deles", "delas", "esse" e "qual mais interessou" precisam ter um referente claro na conversa ou na própria resposta.',
     '12. Ao retornar handoff, use summary somente como contexto interno objetivo para a equipe e customerMessage como a mensagem visível ao cliente. Agradeça ou confirme o encaminhamento em customerMessage, nunca apenas em summary.',
+    ...((typeof context.tools?.list === 'function' ? context.tools.list() : Array.isArray(context.tools) ? context.tools : []).some((tool: any) => {
+      const lower = String(tool.name || '').toLowerCase();
+      return (
+        lower.includes('router') ||
+        lower.includes('wifi') ||
+        lower.includes('get_tool_manual') ||
+        lower.includes('configure_wifi') ||
+        lower.includes('reboot_router') ||
+        lower.includes('get_operation_status')
+      );
+    }) ? [
+      '',
+      'DIRETRIZES OPERACIONAIS OBRIGATÓRIAS PARA ROTEADORES (ACS / TR-069):',
+      '1. Consulta Obrigatória a /como-usar: Antes de alterar qualquer configuração de roteador ou em caso de dúvida sobre parâmetros, consulte a ferramenta get_tool_manual para verificar o manual técnico e as regras de segurança.',
+      '2. Zero Plaintext Secrets: NUNCA revele senhas de Wi-Fi ou credenciais em texto claro no chat. Confirme alterações com o usuário antes de aplicá-las.',
+      '3. Diagnóstico Prévio Obrigatório: SEMPRE execute get_router_details para verificar o estado atual antes de executar configure_wifi ou reboot_router.',
+      '4. Configuração Atômica de Wi-Fi: Atualize as bandas 2.4GHz e 5GHz de forma unificada e informe apply_immediately: true.',
+      '5. Justificativa Explícita para Reboot: O reboot exige confirm: true e uma justificativa técnica clara no campo reason. Nunca reinicie sem consentimento do cliente.',
+      '6. Polling de Operações Assíncronas: Quando uma operação retornar operation_id ou status pendente/em andamento, consulte periodicamente com get_operation_status.',
+    ] : []),
   ].join('\n');
 }
 

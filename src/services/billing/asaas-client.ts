@@ -47,6 +47,7 @@ export async function asaasRequest<T>(
   path: string,
   method = "GET",
   body?: unknown,
+  timeoutMs = 20000,
 ): Promise<T> {
   if (!config.apiKey || !config.webhookToken)
     throw new Error(
@@ -65,7 +66,7 @@ export async function asaasRequest<T>(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw new AsaasError(response.status);
   return response.json();
@@ -95,10 +96,12 @@ export type AsaasPayment = {
   paymentDate?: string;
   confirmedDate?: string;
   invoiceUrl?: string;
+  bankSlipUrl?: string;
   deleted?: boolean;
 };
 export type AsaasSubscription = {
   id: string;
+  deleted?: boolean;
   customer: string;
   status: string;
   value: number;

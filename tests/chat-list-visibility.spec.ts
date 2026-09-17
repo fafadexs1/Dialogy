@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Message } from '@/lib/types';
 import { isMarketingMessage, matchesChatTeamFilter } from '@/components/chat/chat-list-visibility';
+import { isChatInInboxQueueScope } from '@/lib/inbox-pagination';
 
 describe('chat list team visibility', () => {
   const teams = [
@@ -60,3 +61,106 @@ describe('chat list marketing visibility', () => {
     expect(isMarketingMessage(message)).toBe(true);
   });
 });
+
+describe('isChatInInboxQueueScope', () => {
+  it('prevents chats in attendance from entering robo or fila', () => {
+    const chat = {
+      status: 'atendimentos' as const,
+      agentId: 'user-123',
+      team_id: 'team-comercial',
+      tag: 'Comercial',
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(false);
+  });
+
+  it('prevents closed chats from entering robo or fila', () => {
+    const chat = {
+      status: 'encerrados' as const,
+      agentId: 'user-123',
+      tag: 'Inviabilidade técnica',
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(false);
+  });
+
+  it('prevents chats with human agent assigned from entering robo or fila even if status is gerais', () => {
+    expect(
+      isChatInInboxQueueScope(
+        {
+          status: 'gerais',
+          agentId: 'user-123',
+        },
+        'robo'
+      )
+    ).toBe(false);
+
+    expect(
+      isChatInInboxQueueScope(
+        {
+          status: 'gerais',
+          agent_id: 'user-123',
+        },
+        'robo'
+      )
+    ).toBe(false);
+
+    expect(
+      isChatInInboxQueueScope(
+        {
+          status: 'gerais',
+          agent: { id: 'user-123' },
+        },
+        'robo'
+      )
+    ).toBe(false);
+  });
+
+  it('routes chats with team_id to fila and NOT robo, even if tag is missing or null', () => {
+    const chat = {
+      status: 'gerais' as const,
+      team_id: 'team-support',
+      tag: null,
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(true);
+  });
+
+  it('routes chats with teamName to fila and NOT robo', () => {
+    const chat = {
+      status: 'gerais' as const,
+      teamName: 'Suporte Técnico',
+      tag: '',
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(true);
+  });
+
+  it('routes chats with tag to fila and NOT robo', () => {
+    const chat = {
+      status: 'gerais' as const,
+      tag: 'Comercial',
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(true);
+  });
+
+  it('routes unassigned chats without team/tag to robo and NOT fila', () => {
+    const chat = {
+      status: 'gerais' as const,
+      tag: '',
+      team_id: undefined,
+      teamName: undefined,
+      agentId: undefined,
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(true);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(false);
+  });
+});
+
