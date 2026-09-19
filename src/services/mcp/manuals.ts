@@ -1,6 +1,6 @@
 import 'server-only';
 
-import type { ManualCatalogResponse, McpServerConfig, ToolManualInfo } from './types';
+import type { ManualCatalogResponse, McpServerConfig } from './types';
 import { callMcpServerTool } from './client';
 
 /**

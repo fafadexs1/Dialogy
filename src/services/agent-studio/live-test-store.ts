@@ -25,7 +25,8 @@ export async function loadLiveTest(scope: LiveTestScope): Promise<LiveTestRow> {
 }
 
 export function decodeLiveTest(scope: LiveTestScope, row: LiveTestRow) {
-  const release = AgentReleaseManifestSchema.parse(row.release);
+  const parsedRelease = AgentReleaseManifestSchema.safeParse(row.release);
+  const release = parsedRelease.success ? parsedRelease.data : (row.release as AgentReleaseManifest);
   if (release.agentId !== scope.agentId || release.workspaceId !== scope.workspaceId || release.releaseId !== scope.sessionId) throw new Error('Configuração do teste fora do escopo.');
   const state = openStudioSession(cipherScope(scope, row.chat_id), row.encrypted_state);
   if (state.releaseId !== release.releaseId) throw new Error('Estado do teste incompatível com a configuração.');

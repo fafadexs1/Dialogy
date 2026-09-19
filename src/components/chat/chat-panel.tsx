@@ -86,7 +86,7 @@ import {
     type InboxAiAgent,
 } from '@/actions/copilot';
 import { CopilotSuggestionCard, type CopilotSuggestionView } from './copilot-suggestion-card';
-import { useFormStatus } from 'react-dom';
+
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction, getMessageStatusBatchAction, retryMessageAction } from '@/actions/messages';
 import { getAutopilotConfig } from '@/actions/autopilot';
@@ -124,6 +124,7 @@ import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioRecorder } from './audio-recorder';
 import { ComposerAiMenu } from './composer-ai-menu';
+import { AnimatedComposer } from './animated-composer';
 import composerStyles from './composer.module.css';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
@@ -362,22 +363,7 @@ export function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpen
     )
 }
 
-function SendMessageButton({
-    disabled,
-    feedbackKey,
-}: {
-    disabled?: boolean;
-    feedbackKey?: number;
-}) {
-    const { pending } = useFormStatus();
-    const isEnabled = !disabled && !pending;
 
-    return (
-        <button type="submit" className={composerStyles.send} disabled={!isEnabled} aria-label="Enviar mensagem" title="Enviar mensagem (Enter)">
-            {pending ? <Loader2 className="animate-spin" /> : <span key={feedbackKey} className={composerStyles.sendIcon}><ArrowUp /></span>}
-        </button>
-    )
-}
 
 export default function ChatPanel({
     chat,
@@ -486,7 +472,6 @@ export default function ChatPanel({
     }, [autopilotAgents, autopilotConfig, chat?.autopilot_config_id]);
     const isProtocolScoped = !!(chat as any)?.protocolScoped;
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
-    const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
     const [isSpellChecking, setIsSpellChecking] = useState(false);
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -497,6 +482,7 @@ export default function ChatPanel({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const fileDragDepthRef = useRef(0);
     const contentEditableRef = useRef<any>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const savedRange = useRef<Range | null>(null);
     const userScrolledUpRef = useRef(false);
     const isFetchingHistoryRef = useRef(false);
@@ -1539,6 +1525,7 @@ export default function ChatPanel({
             setSkipUserSignature(false);
             setIsInternalNote(false);
             if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+            if (textareaRef.current) textareaRef.current.value = '';
 
             setDraft(chat.id, '');
             enqueueTextSend({
@@ -1568,6 +1555,7 @@ export default function ChatPanel({
         setSkipUserSignature(false);
         setIsInternalNote(false);
         if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+        if (textareaRef.current) textareaRef.current.value = '';
         setDraft(chatId, '');
 
         // Generate optimistic messages for all files
@@ -1855,10 +1843,19 @@ export default function ChatPanel({
             element.innerHTML = html;
         }
 
-        setNewMessage(html);
+        const plain = htmlToWhatsappMarkdown(html);
+        if (textareaRef.current) {
+            textareaRef.current.value = plain;
+            if (focusToEnd) {
+                textareaRef.current.focus();
+                textareaRef.current.setSelectionRange(plain.length, plain.length);
+            }
+        }
+
+        setNewMessage(plain);
 
         if (chat?.id) {
-            setDraft(chat.id, html);
+            setDraft(chat.id, plain);
         }
 
         if (focusToEnd && element) {
@@ -1868,30 +1865,30 @@ export default function ChatPanel({
     }, [chat?.id, moveComposerCaretToEnd, setDraft]);
 
     const syncComposerPlainText = useCallback((text: string, focusToEnd: boolean = false) => {
-        const normalized = text.replace(/\r\n/g, '\n');
-        const html = escapeHtml(normalized).replace(/\n/g, '<br>');
-        syncComposerHtml(html, focusToEnd);
-    }, [escapeHtml, syncComposerHtml]);
-
-    const filteredShortcuts = useMemo(() => {
-        if (!showShortcutSuggestions) return [];
-        const command = debouncedMessageInput.substring(debouncedMessageInput.lastIndexOf('/') + 1).toLowerCase();
-        return shortcuts.filter(s => s.name.toLowerCase().startsWith(command));
-    }, [debouncedMessageInput, shortcuts, showShortcutSuggestions]);
-
-    const handleMessageChange = (e: React.FormEvent<HTMLDivElement>) => {
-        const text = e.currentTarget.innerHTML;
         setNewMessage(text);
-    };
+        if (chat?.id) {
+            setDraft(chat.id, text);
+        }
+        if (textareaRef.current) {
+            textareaRef.current.value = text;
+            if (focusToEnd) {
+                textareaRef.current.focus();
+                textareaRef.current.setSelectionRange(text.length, text.length);
+            }
+        }
+        const element = contentEditableRef.current as HTMLElement | null;
+        if (element) {
+            const normalized = text.replace(/\r\n/g, '\n');
+            const html = escapeHtml(normalized).replace(/\n/g, '<br>');
+            element.innerHTML = html;
+            if (focusToEnd) {
+                element.focus();
+                moveComposerCaretToEnd(element);
+            }
+        }
+    }, [chat?.id, escapeHtml, moveComposerCaretToEnd, setDraft]);
 
-    useEffect(() => {
-        setShowShortcutSuggestions(debouncedMessageInput.includes('/'));
-    }, [debouncedMessageInput]);
 
-    const handleShortcutSelect = (shortcut: Shortcut) => {
-        syncComposerPlainText(shortcut.message, true);
-        setShowShortcutSuggestions(false);
-    };
 
     const handleSpellCheck = async () => {
         const plainText = composerPlainText.trim();
@@ -1926,7 +1923,7 @@ export default function ChatPanel({
 
             if (data.correctedText) {
                 const corrected = data.correctedText;
-                const el = contentEditableRef.current as HTMLElement | null;
+                const el = (textareaRef.current || contentEditableRef.current) as HTMLElement | null;
 
                 // Remove glow, prepare for typewriter
                 if (inputContainer) inputContainer.classList.remove('spellcheck-processing');
@@ -1943,7 +1940,15 @@ export default function ChatPanel({
                 }
 
                 // Clear the text first with a brief pause
-                el.innerText = '';
+                const setComposerElementText = (txt: string) => {
+                    if (el instanceof HTMLTextAreaElement) {
+                        el.value = txt;
+                        setNewMessage(txt);
+                    } else {
+                        el.innerText = txt;
+                    }
+                };
+                setComposerElementText('');
                 syncComposerHtml('');
 
                 // Typewriter effect — character by character
@@ -1953,7 +1958,7 @@ export default function ChatPanel({
                 await new Promise<void>((resolve) => {
                     const typeChar = () => {
                         if (i < corrected.length) {
-                            el.innerText = corrected.substring(0, i + 1);
+                            setComposerElementText(corrected.substring(0, i + 1));
                             i++;
                             setTimeout(typeChar, typeSpeed);
                         } else {
@@ -2539,308 +2544,73 @@ export default function ChatPanel({
 
             {
                 isChatOpen ? (
-                    <footer className="z-20 max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain bg-[#F8F9FB] p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-[clamp(12px,1.8vh,18px)] md:px-[clamp(16px,2.5vw,40px)] md:pb-[calc(clamp(12px,1.8vh,18px)+env(safe-area-inset-bottom))] data-[state=open]:p-0 dark:bg-black/25">
-                        {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                            <div className="mb-2 p-2 border border-border rounded-xl bg-popover max-h-40 overflow-y-auto">
-                                {filteredShortcuts.map(shortcut => (
-                                    <button
-                                        key={shortcut.id}
-                                        className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors"
-                                        onClick={() => handleShortcutSelect(shortcut)}
-                                    >
-                                        <span className="font-bold text-primary">/{shortcut.name}</span>
-                                        <span className="text-muted-foreground ml-2 truncate">{shortcut.message}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                        {/* {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
-                        <SmartReplies
-                            customerMessage={lastCustomerMessage?.content || ''}
-                            chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
-                            workspaceId={currentUser.activeWorkspaceId!}
-                            onSelectReply={(reply) => {
-                                setNewMessage(reply);
-                                if (contentEditableRef.current) contentEditableRef.current.innerHTML = reply;
-                            }}
-                        />
-                    )} */}
-
+                    <footer className="z-20 shrink-0 bg-[#F8F9FB] p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-[clamp(12px,1.8vh,18px)] md:px-[clamp(16px,2.5vw,40px)] md:pb-[calc(clamp(12px,1.8vh,18px)+env(safe-area-inset-bottom))] dark:bg-black/25">
                         {/* AI Copilot draft: same orchestrator as the Intelligent Attendant,
                             proposed to the operator instead of sent to the customer. */}
                         {isCopilotActive && (
-                            <CopilotSuggestionCard
-                                suggestion={aiSuggestion}
-                                isThinking={isAiTyping || isRequestingSuggestion}
-                                agentName={copilotAgentName}
-                                agentAvatarUrl={copilotAgentAvatarUrl}
-                                canRequest={hasAutopilotAvailable}
-                                onSend={(text) => {
-                                    // Send exactly what the preview showed: one message per block.
-                                    const blocks = aiSuggestion?.blocks?.length ? aiSuggestion.blocks : [text];
-                                    blocks.forEach((block) => { void handleFormSubmit(block); });
-                                    resolveSuggestion('sent');
-                                }}
-                                onEdit={(text) => {
-                                    syncComposerPlainText(text, true);
-                                    resolveSuggestion('edited');
-                                }}
-                                onRegenerate={handleRequestSuggestion}
-                                onDismiss={() => resolveSuggestion('dismissed')}
-                            />
+                            <div className="mb-2.5">
+                                <CopilotSuggestionCard
+                                    suggestion={aiSuggestion}
+                                    isThinking={isAiTyping || isRequestingSuggestion}
+                                    agentName={copilotAgentName}
+                                    agentAvatarUrl={copilotAgentAvatarUrl}
+                                    canRequest={hasAutopilotAvailable}
+                                    onSend={(text) => {
+                                        // Send exactly what the preview showed: one message per block.
+                                        const blocks = aiSuggestion?.blocks?.length ? aiSuggestion.blocks : [text];
+                                        blocks.forEach((block) => { void handleFormSubmit(block); });
+                                        resolveSuggestion('sent');
+                                    }}
+                                    onEdit={(text) => {
+                                        syncComposerPlainText(text, true);
+                                        resolveSuggestion('edited');
+                                    }}
+                                    onRegenerate={handleRequestSuggestion}
+                                    onDismiss={() => resolveSuggestion('dismissed')}
+                                />
+                            </div>
                         )}
 
-                        <div className="space-y-2.5 md:space-y-3">
-                            <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown}>
-                                <input type="hidden" name="chatId" value={chat.id} />
-
-                                <div
-                                    data-input-container
-                                    data-ready={canSendFromComposer}
-                                    data-note={isInternalNote}
-                                    data-voice={isVoiceActive}
-                                    data-dragging={isDraggingFiles}
-                                    className={composerStyles.composer}
-                                    onDragEnter={handleComposerDragEnter}
-                                    onDragOver={handleComposerDragOver}
-                                    onDragLeave={handleComposerDragLeave}
-                                    onDrop={handleComposerDrop}
-                                >
-                                    {isSendBurstActive && <span key={sendFeedbackKey} className={composerStyles.burst} />}
-                                    {isDraggingFiles && (
-                                        <div className={composerStyles.dropOverlay} aria-hidden="true">
-                                            <span className={composerStyles.dropIcon}><Paperclip size={18} /></span>
-                                            <span><strong>Solte para anexar</strong><small>Fotos, vídeos, documentos ou áudios</small></span>
-                                        </div>
-                                    )}
-                                    {isInternalNote && <div className={composerStyles.mode}><StickyNote size={13} /><span>Nota interna · somente sua equipe pode ver</span><button type="button" onClick={() => setIsInternalNote(false)} aria-label="Sair da nota interna"><X size={13} /></button></div>}
-                                    {skipUserSignature && <div className={composerStyles.mode}><Signature size={13} /><span>Esta mensagem será enviada sem assinatura</span><button type="button" onClick={() => setSkipUserSignature(false)} aria-label="Restaurar assinatura"><X size={13} /></button></div>}
-                                    {mediaFiles.length > 0 && <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />}
-
-                                    {isSpellChecking && (
-                                        <div className="px-4 pt-1">
-                                            <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-300">
-                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                Revisando ortografia...
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Text Input Area */}
-                                    <div className={cn("relative min-w-0 px-5 pb-1 pt-4", isVoiceActive && "hidden")}>
-                                        {showTextInput && isComposerTextEmpty && !showAiTypingOverlay && (
-                                            <div className="pointer-events-none absolute inset-0 px-5 pb-1 pt-4 select-none">
-                                                <span className={cn(
-                                                    "text-[15px] leading-relaxed",
-                                                    isInternalNote ? "text-amber-700/60" : "text-muted-foreground/70"
-                                                )}>{isInternalNote ? 'Escreva uma nota para sua equipe…' : mediaFiles.length ? 'Adicione uma legenda…' : 'Escreva uma mensagem…'}</span>
-                                            </div>
-                                        )}
-                                        {showAiTypingOverlay && (
-                                            <div className="absolute inset-0 z-10 px-4 pt-3 pb-2 pointer-events-none select-none">
-                                                <div className="flex items-center gap-2 text-sm font-medium text-cyan-600 dark:text-cyan-300">
-                                                    <Sparkles className="h-4 w-4" />
-                                                    <span>{aiTypingDisplayName} está escrevendo uma resposta</span>
-                                                    <div className="flex items-center gap-1">
-                                                        {[0, 1, 2].map((dot) => (
-                                                            <span
-                                                                key={`ai-typing-dot-${dot}`}
-                                                                className="h-1.5 w-1.5 rounded-full bg-current"
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <div className="mt-3 space-y-2">
-                                                    {[72, 94, 61].map((width, index) => (
-                                                        <div
-                                                            key={`ai-typing-line-${index}`}
-                                                            className="h-3 rounded-full bg-cyan-300/20"
-                                                            style={{ width: `${width}%` }}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {showTextInput ? (
-                                            <ContentEditable
-                                                innerRef={contentEditableRef as any}
-                                                html={newMessage}
-                                                disabled={isAiTyping}
-                                                onChange={handleMessageChange}
-                                                onPaste={handlePaste}
-                                                className={cn(
-                                                    composerStyles.editor, "w-full resize-none overflow-y-auto whitespace-pre-wrap border-0 bg-transparent focus:outline-none focus:ring-0 scrollbar-hide",
-                                                    isInternalNote ? "text-amber-950" : "text-foreground",
-                                                    showAiTypingOverlay && "opacity-0"
-                                                )}
-                                                role="textbox"
-                                                aria-label={isInternalNote ? "Nota interna" : "Mensagem"}
-                                                aria-multiline="true"
-                                                tagName="div"
-                                                onKeyUp={saveCursorPosition}
-                                                onClick={saveCursorPosition}
-                                            />
-                                        ) : null}
-                                    </div>
-
-                                    {/* Bottom Toolbar */}
-                                    <div className={composerStyles.toolbar}>
-                                        {/* Left Action Buttons */}
-                                        <div className={cn("flex min-w-0 items-center gap-1.5", isVoiceActive && "hidden")}>
-                                            <input
-                                                type="file"
-                                                ref={fileInputRef}
-                                                onChange={handleFileChange}
-                                                className="hidden"
-                                                multiple
-                                                accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
-                                            />
-
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button type="button" className={cn(composerStyles.tool, composerStyles.add)} disabled={isAiTyping} aria-label="Anexos e ferramentas" title="Anexos e ferramentas">
-                                                        <Plus size={19} />
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" side="top" sideOffset={12} className="w-72 rounded-2xl p-2 shadow-xl">
-                                                    <DropdownMenuItem className="gap-3 rounded-xl py-3" onSelect={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" /><div><p className="text-sm font-medium">Anexar mídia</p><p className="text-[11px] text-muted-foreground">Fotos, vídeos, documentos e áudios</p></div></DropdownMenuItem>
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuSub>
-                                                        <DropdownMenuSubTrigger className="gap-3 rounded-xl py-3"><MessageSquareQuote className="h-4 w-4" /><span>Respostas rápidas</span><kbd className="ml-auto text-xs text-muted-foreground">/</kbd></DropdownMenuSubTrigger>
-                                                        <DropdownMenuSubContent className="max-h-80 w-[min(300px,calc(100vw-40px))] overflow-y-auto rounded-xl p-2">
-                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Atalhos disponíveis
-                                                    </div>
-                                                    <DropdownMenuSeparator />
-                                                    {shortcuts.length === 0 ? (
-                                                        <DropdownMenuItem disabled>
-                                                            Nenhum atalho encontrado.
-                                                        </DropdownMenuItem>
-                                                    ) : (
-                                                        shortcuts.map(shortcut => (
-                                                            <DropdownMenuItem
-                                                                key={shortcut.id}
-                                                                className="items-start gap-0 px-0 py-0 focus:bg-transparent"
-                                                                onSelect={() => handleShortcutSelect(shortcut)}
-                                                            >
-                                                                <div className="flex w-full flex-col gap-1 rounded-sm px-2 py-2 hover:bg-accent">
-                                                                    <div className="flex items-center justify-between w-full gap-2">
-                                                                        <span className="font-bold text-primary flex items-center gap-2">
-                                                                            /{shortcut.name}
-                                                                            {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
-                                                                        </span>
-                                                                    </div>
-                                                                    <span className="w-full truncate text-xs text-muted-foreground">{shortcut.message}</span>
-                                                                </div>
-                                                            </DropdownMenuItem>
-                                                        ))
-                                                    )}
-                                                        </DropdownMenuSubContent>
-                                                    </DropdownMenuSub>
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuLabel>
-                                                        <span className="block text-sm">Próxima mensagem</span>
-                                                        <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">As opções são desativadas após o envio.</span>
-                                                    </DropdownMenuLabel>
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuCheckboxItem
-                                                        checked={isInternalNote}
-                                                        onCheckedChange={(checked) => {
-                                                            const enabled = checked === true;
-                                                            setIsInternalNote(enabled);
-                                                            if (enabled) setSkipUserSignature(false);
-                                                        }}
-                                                        onSelect={(event) => event.preventDefault()}
-                                                    >
-                                                        <StickyNote className="mr-2 h-4 w-4 text-amber-500" />
-                                                        <div>
-                                                            <p className="text-sm font-medium">Nota interna</p>
-                                                            <p className="text-[10px] text-muted-foreground">Visível somente para a equipe</p>
-                                                        </div>
-                                                    </DropdownMenuCheckboxItem>
-                                                    <DropdownMenuCheckboxItem
-                                                        checked={skipUserSignature}
-                                                        disabled={isInternalNote}
-                                                        onCheckedChange={(checked) => {
-                                                            const enabled = checked === true;
-                                                            setSkipUserSignature(enabled);
-                                                            if (enabled) setIsInternalNote(false);
-                                                        }}
-                                                        onSelect={(event) => event.preventDefault()}
-                                                    >
-                                                        <Signature className="mr-2 h-4 w-4 text-violet-500" />
-                                                        <div>
-                                                            <p className="text-sm font-medium">Sem assinatura</p>
-                                                            <p className="text-[10px] text-muted-foreground">Envia sem o nome do atendente</p>
-                                                        </div>
-                                                    </DropdownMenuCheckboxItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-
-
-
-                                            <ComposerAiMenu
-                                                key={chat.id}
-                                                agents={composerAiAgents}
-                                                selectedId={selectedAutopilotAgent?.id}
-                                                active={isCopilotActive}
-                                                busy={isAiTyping || isRequestingSuggestion || isTakingOverWithAi}
-                                                autonomous={Boolean(chat.assigned_system_agent_id)}
-                                                canTakeOver={canAiTakeOverConversation}
-                                                canSpellCheck={!isComposerTextEmpty}
-                                                spellChecking={isSpellChecking}
-                                                onActivate={handleAgentChange}
-                                                onDeactivate={disableCopilot}
-                                                onSuggest={() => { void handleRequestSuggestion(); }}
-                                                onSpellCheck={() => { void handleSpellCheck(); }}
-                                                onLearn={handleLearnFromConversation}
-                                                onExecutions={() => setIsToolExecutionsOpen(true)}
-                                                onTakeOver={() => setIsAiTakeOverDialogOpen(true)}
-                                            />
-
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className={composerStyles.tool}
-                                                        disabled={isAiTyping}
-                                                        aria-label="Abrir emojis"
-                                                    >
-                                                        <Smile className="h-4 w-4" />
-                                                    </button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                                    <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme as any} />
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-
-                                        {/* Right: Audio / Send */}
-                                        <div className={cn("flex items-center gap-1.5", isVoiceActive && "w-full min-w-0")}>
-                                            {!canSendFromComposer ? (
-                                                <div className={cn("min-w-0", isVoiceActive && "w-full")} >
-                                                    <AudioRecorder key={chat.id} onSend={handleSendAudio} onActiveChange={setIsVoiceActive} disabled={isAiTyping || isInternalNote} />
-                                                </div>
-                                            ) : (
-                                                <div className="animate-in zoom-in duration-150">
-                                                    <SendMessageButton
-                                                        disabled={isAiTyping}
-                                                        feedbackKey={sendFeedbackKey}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </form>
-                            <div className={composerStyles.hint}>
-                                <span aria-live="polite">{isDraggingFiles ? 'Solte os arquivos para anexar' : isSendBurstActive ? <span className={composerStyles.feedback}><Check size={12} />Mensagem adicionada à conversa</span> : isVoiceActive ? 'Você pode ouvir e revisar antes de enviar.' : mediaFiles.length ? `${mediaFiles.length} arquivo(s) pronto(s) para enviar` : 'Use / para encontrar uma resposta rápida'}</span>
-                                {!isVoiceActive && <span><kbd>Enter</kbd> envia · <kbd>Shift + Enter</kbd> quebra a linha</span>}
-                            </div>
-                            {/* Agent UI removed from here, moving to header */}
-                        </div>
+                        <AnimatedComposer
+                            chat={chat}
+                            value={newMessage}
+                            onChange={(text) => setNewMessage(text)}
+                            onSubmit={(textOverride) => handleFormSubmit(textOverride)}
+                            onSendAudio={handleSendAudio}
+                            mediaFiles={mediaFiles}
+                            setMediaFiles={setMediaFiles}
+                            isInternalNote={isInternalNote}
+                            setIsInternalNote={setIsInternalNote}
+                            skipUserSignature={skipUserSignature}
+                            setSkipUserSignature={setSkipUserSignature}
+                            isVoiceActive={isVoiceActive}
+                            setIsVoiceActive={setIsVoiceActive}
+                            shortcuts={shortcuts}
+                            isAiTyping={isAiTyping}
+                            aiTypingDisplayName={copilotAgentName}
+                            showAiTypingOverlay={showAiTypingOverlay}
+                            isSpellChecking={isSpellChecking}
+                            onSpellCheck={handleSpellCheck}
+                            composerAiAgents={composerAiAgents}
+                            selectedAutopilotAgent={selectedAutopilotAgent}
+                            isCopilotActive={isCopilotActive}
+                            isRequestingSuggestion={isRequestingSuggestion}
+                            isTakingOverWithAi={isTakingOverWithAi}
+                            canAiTakeOverConversation={canAiTakeOverConversation}
+                            onAgentChange={handleAgentChange}
+                            onDisableCopilot={disableCopilot}
+                            onRequestSuggestion={handleRequestSuggestion}
+                            onLearnFromConversation={handleLearnFromConversation}
+                            onOpenToolExecutions={() => setIsToolExecutionsOpen(true)}
+                            onOpenAiTakeOver={() => setIsAiTakeOverDialogOpen(true)}
+                            emojiPickerTheme={emojiPickerTheme as any}
+                            isSendBurstActive={isSendBurstActive}
+                            sendFeedbackKey={sendFeedbackKey}
+                            fileInputRef={fileInputRef}
+                            handleFileChange={handleFileChange}
+                            processFiles={processFiles}
+                            externalTextareaRef={textareaRef}
+                        />
                     </footer>
                 ) : (
                     <footer className="p-4 flex-shrink-0 text-center bg-background border-t border-border">

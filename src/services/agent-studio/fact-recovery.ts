@@ -3,7 +3,7 @@ import { extractStudioFieldCandidate, validateStudioField } from './collection';
 import { matchProhibitedStudioField } from './policy';
 import type { AgentStudioDocument, CollectedFieldDefinition } from './types';
 import type { StudioSession } from './engine';
-import { extractExplicitChoiceClause, isStudioInformationQuestion, resolveStudioOption } from './option-resolution';
+import { resolveStudioOption } from './option-resolution';
 
 export type StudioFactRecoveryInput = {
   document: AgentStudioDocument; state: StudioSession; message: string;

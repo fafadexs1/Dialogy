@@ -967,7 +967,8 @@ export async function listPublishedStudioAgentsAction(workspaceId: string) {
           AND r.agent_id = a.id AND r.release_id::text = v.snapshot->'agent_release_manifest'->>'releaseId')
       ORDER BY a.name, v.version_number DESC LIMIT 200`, [workspaceId, user.id]);
     return { success: true as const, releases: result.rows.map((row) => {
-      const document = AgentStudioDocumentSchema.parse(row.release.agentSnapshot);
+      const parsedDoc = AgentStudioDocumentSchema.safeParse(row.release.agentSnapshot);
+      const document = parsedDoc.success ? parsedDoc.data : (row.release.agentSnapshot as AgentStudioDocument);
       return { agentId: String(row.id), agentName: String(row.name), releaseId: String(row.release.releaseId), version: Number(row.version_number), inputs: studioFlowInputs(document), outputs: studioFlowOutputs(document) };
     }) };
   } catch (error) { return { success: false as const, releases: [], error: error instanceof Error ? error.message : 'Não foi possível carregar os agentes publicados.' }; }

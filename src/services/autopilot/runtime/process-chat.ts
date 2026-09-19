@@ -4,7 +4,7 @@ import { runStudioConversation } from '@/services/agent-studio/runtime';
 import { sendAutomatedMediaAction } from '@/actions/messages';
 import { validateRemoteUrl } from '@/lib/security/safe-remote-url';
 import { randomUUID } from 'crypto';
-import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Chat, Contact, Message, MessageMetadata } from '@/lib/types';
+import type { AutopilotConfig, KnowledgeBaseDocument, Chat, Contact } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
 import { buildUniversalAgentRuntimeContext } from '@/services/agent-runtime/prompt-context';
 import { generateProcedureRuntimeOutput } from '@/ai/flows/procedure-runtime';
@@ -515,22 +515,7 @@ function isAiFieldExtractionEnabled(): boolean {
 }
 
 
-function cleanKnowledgeCatalogContent(content: string): string {
-    let normalized = content
-        .replace(/\r\n?/g, '\n')
-        .split('\n')
-        .map((line) => line.replace(/[ \t]+$/g, '').trimStart())
-        .join('\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
 
-    const firstCatalogLine = normalized.search(/(?:[\p{Extended_Pictographic}]|\*)\s*\*?.{0,80}(?:PLANOS?|PROMO|CONHE[ÇC]A|INTERNET|FIBRA)/iu);
-    if (firstCatalogLine > 0) {
-        normalized = normalized.slice(firstCatalogLine).trim();
-    }
-
-    return normalized;
-}
 
 
 async function broadcastAiProcessing(chatId: string, event: 'ai_processing_start' | 'ai_processing_stop', payload: Record<string, unknown> = {}) {
@@ -1063,7 +1048,7 @@ export async function processAutopilotForChat(
     );
     logToDebugFile(`[processAutopilotForChat] ChatId=${chat.id}, CopilotMode=${currentCopilotMode}, IsActive=${currentIsActive} (Raw: ${rawIsActive})`);
 
-    const { config: autopilotConfig, rules: autopilotRules, agents: autopilotAgents } =
+    const { config: autopilotConfig, rules: autopilotRules } =
         await getAutopilotConfigService(workspaceId, effectiveAutopilotConfigId || undefined);
 
     if (!autopilotConfig || !autopilotConfig.is_active) {

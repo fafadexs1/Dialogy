@@ -1,7 +1,6 @@
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   require('dotenv').config();
-} catch (err) {
+} catch {
   // dotenv is not present in production docker images as env vars are injected by the environment
 }
 

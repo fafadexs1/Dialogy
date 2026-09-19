@@ -30,10 +30,7 @@ const ThemeContext = React.createContext<ThemeContextValue | undefined>(undefine
 const DEFAULT_THEMES: ThemeMode[] = ['light', 'dark'];
 const SYSTEM_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 
-function getSystemTheme() {
-  if (typeof window === 'undefined') return undefined;
-  return window.matchMedia(SYSTEM_MEDIA_QUERY).matches ? 'dark' : 'light';
-}
+
 
 function readStoredTheme(storageKey: string, fallback: ThemeMode) {
   if (typeof window === 'undefined') return fallback;

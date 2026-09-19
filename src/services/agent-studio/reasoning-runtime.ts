@@ -4,7 +4,6 @@ import { platformModel, platformApiKey } from '@/services/ai/platform-config';
 
 import { z } from 'zod';
 import { isOpenAiCompatibleModel } from '@/services/ai/openai-compatible';
-import { loadWorkspaceAiCredentialRecords } from '@/services/ai/workspace-ai-credentials';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import { advanceStudioReasoningSession } from './reasoning-engine';
 import { StudioReasoningDecisionSchema, studioReasoningDecisionJsonSchema } from './reasoning-contract';

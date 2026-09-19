@@ -1,15 +1,6 @@
-import { db } from '@/lib/db';
-import type { AiModelRuntimeProvider } from '@/lib/ai-models';
 import type { AiModelKeyCandidate } from './model-client';
 import { platformApiKey, platformModel } from './platform-config';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
-
-type WorkspaceProvider = 'gemini' | 'openai' | 'deepseek';
-
-type WorkspaceProviderConfig = {
-  apiKey?: string;
-  aiModel?: string;
-};
 
 type ResolveAiProviderKeyCandidatesInput = {
   config?: {
@@ -24,24 +15,6 @@ function cleanKey(value?: string | null): string {
   return key === 'no-key-configured' ? '' : key;
 }
 
-function parseProviderConfig(value: unknown): WorkspaceProviderConfig {
-  if (!value) return {};
-  if (typeof value === 'string') {
-    try {
-      return parseProviderConfig(JSON.parse(value));
-    } catch {
-      return {};
-    }
-  }
-  if (typeof value !== 'object' || Array.isArray(value)) return {};
-
-  const raw = value as Record<string, unknown>;
-  return {
-    apiKey: typeof raw.apiKey === 'string' ? raw.apiKey.trim() : undefined,
-    aiModel: typeof raw.aiModel === 'string' ? raw.aiModel.trim() : undefined,
-  };
-}
-
 export function getDefaultGeminiEnvKey(): string {
   return cleanKey(process.env.GOOGLE_GENAI_API_KEY) || cleanKey(process.env.GEMINI_API_KEY);
 }
@@ -54,46 +27,8 @@ export function getDefaultDeepSeekEnvKey(): string {
   return cleanKey(process.env.DEEPSEEK_API_KEY);
 }
 
-async function loadWorkspaceProviderConfigs(
-  workspaceId?: string | null
-): Promise<Partial<Record<WorkspaceProvider, WorkspaceProviderConfig>>> {
-  if (!workspaceId) return {};
-
-  try {
-    const result = await db.query(
-      `
-        SELECT provider, config
-        FROM workspace_integrations
-        WHERE workspace_id = $1
-          AND provider = ANY($2::text[])
-          AND is_active = true
-      `,
-      [workspaceId, ['gemini', 'openai', 'deepseek']]
-    );
-
-    return Object.fromEntries(
-      result.rows.map((row) => [
-        row.provider as WorkspaceProvider,
-        parseProviderConfig(row.config),
-      ])
-    );
-  } catch (error) {
-    console.error('[AI_PROVIDER_KEYS] Failed to load workspace AI provider keys:', error);
-    return {};
-  }
-}
-
-function candidate(
-  source: string,
-  provider: AiModelRuntimeProvider,
-  key?: string | null
-): AiModelKeyCandidate | null {
-  const cleaned = cleanKey(key);
-  return cleaned ? { source, provider, key: cleaned } : null;
-}
-
 export async function resolveAiProviderKeyCandidates(
-  input: ResolveAiProviderKeyCandidatesInput
+  _input: ResolveAiProviderKeyCandidatesInput
 ): Promise<AiModelKeyCandidate[]> {
   const model = await platformModel();
   return [{ source: 'platform', provider: getAiModelRuntimeProvider(model.id), key: await platformApiKey(model.id) }];

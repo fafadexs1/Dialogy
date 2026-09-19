@@ -5,7 +5,6 @@ import {
   getLmStudioModelId,
   getLmStudioMessageText,
   normalizeLmStudioConfig,
-  parseLmStudioStructuredText,
 } from './lm-studio';
 
 type LmStudioMessageContent =

@@ -5,7 +5,6 @@ import {
   getGoogleAccessToken,
   normalizeGoogleAdsCustomerId,
   resolveGoogleAdsCredentials,
-  type GoogleAdsCredentials,
 } from './credentials';
 import { buildUserData, buildUserIdentifiers } from './identifiers';
 

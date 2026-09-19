@@ -3,8 +3,6 @@ import type { AutopilotConfig, KnowledgeBaseDocument } from '@/lib/types';
 import type { Pool } from 'pg';
 import type { AgentToolRuntimeContext } from '@/services/agent-tools/types';
 import type { AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
-import { resolveAiProviderKeyCandidates } from '@/services/ai/provider-keys';
-import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import {
   createAutopilotToolRegistry,
@@ -12,7 +10,6 @@ import {
   type NativeToolStatusEvent,
 } from './autopilot-tool-bridge';
 import { RuntimeProviderModelAdapter } from './adapters/runtime-provider';
-import { LmStudioModelAdapter } from './adapters/lm-studio';
 import { WorkflowExecutor } from './executor';
 import { ModelFallbackChain } from './model-adapter';
 import { createDefaultNodeHandlerRegistry } from './node-handlers';

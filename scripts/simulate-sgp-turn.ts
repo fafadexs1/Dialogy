@@ -22,7 +22,8 @@ async function main() {
   if (!studioSelection.release) {
     throw new Error('Nenhuma release ativa encontrada!');
   }
-  console.log(`✔ Release carregada: v${studioSelection.release.versionNumber || studioSelection.release.version}`);
+  const releaseVersion = (studioSelection.release as any).versionNumber || studioSelection.release.version;
+  console.log(`✔ Release carregada: v${releaseVersion}`);
 
   const configRow = (await db.query('SELECT * FROM autopilot_configs WHERE id = $1', [agentId])).rows[0];
   const contactRow = (await db.query(

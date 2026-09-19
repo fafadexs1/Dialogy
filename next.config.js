@@ -17,6 +17,7 @@ function buildAllowedImagePatterns() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  compress: false,
   distDir: process.env.NEXT_DIST_DIR || '.next',
   output: 'standalone',
   turbopack: {},
@@ -28,8 +29,6 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '10mb',
     },
-    // Renamed from middlewareClientMaxBodySize
-    // Renamed from middlewareClientMaxBodySize
     proxyClientMaxBodySize: '10mb',
   },
   transpilePackages: ['@supabase/node-fetch', '@radix-ui/react-slot', 'class-variance-authority'],

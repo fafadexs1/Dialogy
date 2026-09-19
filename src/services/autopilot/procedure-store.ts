@@ -12,7 +12,6 @@ import type {
   ProcedureExecutionContext,
   ProcedureExecutionStatus,
   ProcedureGraph,
-  StepExecutionRecord,
 } from './procedure-types';
 import { compactToolOutputForContinuation } from './runtime/tool-memory';
 

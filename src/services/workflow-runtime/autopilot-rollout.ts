@@ -10,7 +10,7 @@ import { createDefaultNodeHandlerRegistry } from './node-handlers';
 import { ModelFallbackChain, type GenerateRequest, type GenerateResult, type ModelAdapter, type ModelInfo, type ModelHealth, type ModelStreamEvent, type StructuredGenerateRequest } from './model-adapter';
 import { PostgresWorkflowPersistence } from './postgres-persistence';
 import { ToolRegistry } from './tools';
-import type { ModelConfiguration, WorkflowDefinition, WorkflowExecution, WorkflowValidationResult } from './types';
+import type { ModelConfiguration, WorkflowDefinition, WorkflowValidationResult } from './types';
 import { WorkflowDefinitionSchema } from './schemas';
 import { validateWorkflowDefinition } from './validator';
 import { WorkflowExecutor } from './executor';

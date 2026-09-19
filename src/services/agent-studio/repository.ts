@@ -33,7 +33,18 @@ export async function loadStudioRelease(workspaceId: string, agentId: string, re
     return null;
   }
   if (result.rows[0]?.revoked) throw new Error('Esta versão do agente foi revogada por um administrador e não pode mais executar.');
-  const release = AgentReleaseManifestSchema.parse(stored);
+  const parsed = AgentReleaseManifestSchema.safeParse(stored);
+  let release: AgentReleaseManifest;
+  if (parsed.success) {
+    release = parsed.data;
+  } else {
+    console.warn('[STUDIO_RELEASE_LOAD_WARN] Manifest validation mismatch, proceeding with defensive fallback:', parsed.error.issues);
+    if (stored && typeof stored === 'object' && (stored as Record<string, unknown>).agentSnapshot) {
+      release = stored as AgentReleaseManifest;
+    } else {
+      throw new Error('A publicação do Estúdio possui formato inválido.');
+    }
+  }
   if (release.workspaceId !== workspaceId || release.agentId !== agentId) throw new Error('A versão não pertence a este agente e workspace.');
   if (release.runtimeVersion !== 'studio-v1') throw new Error('Esta publicação antiga do Estúdio precisa ser revisada e publicada novamente.');
   const revokedSources = new Set((result.rows[0]?.revoked_sources || []).map(String));

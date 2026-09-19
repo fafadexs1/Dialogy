@@ -16,8 +16,7 @@ export function suspendStudioProcedure(document: AgentStudioDocument, state: Stu
   const procedure = document.resolveStage.procedures.find((p) => p.id === state.procedureId);
   if (!procedure || state.phase !== 'resolve' || studioProcedureHasExecutedOperation(document, state)) return;
   const values: Record<string, unknown> = {};
-  const adaptive = document.resolveStage.conversationMode === 'adaptive';
-  for (const step of adaptive ? procedure.steps : procedure.steps.slice(0, state.stepIndex)) {
+  for (const step of procedure.steps) {
     const field = step.collectField;
     if (!field || field.isSensitive || field.optionsSourceKey || ['cpf', 'cnpj', 'cpf_cnpj', 'file'].includes(field.type)) continue;
     const fact = state.sessionFacts?.[field.variableKey];
@@ -46,7 +45,6 @@ export function restoreStudioProcedure(document: AgentStudioDocument, state: Stu
     delete state.values[field.variableKey];
     if (state.valueOrigins) delete state.valueOrigins[field.variableKey];
     if (state.sessionFacts) delete state.sessionFacts[field.variableKey];
-    if (index >= snapshot.stepIndex && document.resolveStage.conversationMode !== 'adaptive') continue;
     const validation = !field.isSensitive && !field.optionsSourceKey && !['cpf', 'cnpj', 'cpf_cnpj', 'file'].includes(field.type)
       ? validateStudioField(field, snapshot.values[field.variableKey]) : { valid: false };
     if (validation.valid && 'value' in validation) {
@@ -56,7 +54,9 @@ export function restoreStudioProcedure(document: AgentStudioDocument, state: Stu
       state.sessionFacts ||= {};
       state.sessionFacts[field.variableKey] = { value: validation.value, fieldType: field.type, labels: [field.name, ...(field.aliases || [])],
         source: 'customer', confirmed: true, isSensitive: false, at: new Date(snapshot.at).toISOString() };
-    } else restart = Math.min(restart, index);
+    } else if (index < snapshot.stepIndex) {
+      restart = Math.min(restart, index);
+    }
   }
   state.procedureId = id; state.phase = 'resolve'; state.status = 'waiting_input';
   state.stepIndex = Math.max(0, restart); state.activeIntent = snapshot.intent;

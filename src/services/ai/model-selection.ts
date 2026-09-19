@@ -2,7 +2,6 @@ import { db } from '@/lib/db';
 import { platformModel } from './platform-config';
 import {
   DEFAULT_AUTOPILOT_MODEL,
-  getAutopilotSelectableModels,
   parseAiModelCatalog,
   SYSTEM_AI_MODEL_CATALOG_KEY,
   type AiModelCatalogEntry,

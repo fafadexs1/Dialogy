@@ -1,12 +1,9 @@
 import { requestPlatformJson } from '@/services/ai/platform-json';
 import { z } from 'zod';
 import { platformModel } from '@/services/ai/platform-config';
-import { genkit } from 'genkit';
 import { toJsonSchema } from 'genkit/schema';
-import { googleAI } from '@genkit-ai/google-genai';
 
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
-import { withTimeout } from '../utils';
 import type {
   GenerateRequest,
   GenerateResult,
@@ -24,16 +21,7 @@ export type RuntimeProviderModelAdapterOptions = {
   timeoutMs?: number;
 };
 
-function promptText(request: GenerateRequest) {
-  return request.messages.map((message) => `${message.role.toUpperCase()}\n${message.content}`).join('\n\n');
-}
 
-function unsupported(message: string) {
-  const error = new Error(message) as Error & { code?: string; retryable?: boolean };
-  error.code = 'MODEL_CAPABILITY_MISMATCH';
-  error.retryable = false;
-  return error;
-}
 
 export class RuntimeProviderModelAdapter implements ModelAdapter {
   private readonly provider;

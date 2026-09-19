@@ -2,17 +2,17 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { db } from 'c:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/src/lib/db';
+import { db } from '@/lib/db';
 import {
   AgentStudioDocumentSchema,
   AgentReleaseManifestSchema,
   type AgentStudioDocument,
   type AgentReleaseManifest,
   type ProcedureDocument,
-} from 'c:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/src/services/agent-studio/types';
-import { validateAgentForPublication } from 'c:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/src/services/agent-studio/assistant-validator';
-import { resolveStudioMcpTool } from 'c:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/src/services/agent-studio/integrations';
-import { compileStudioReasoningCapabilities } from 'c:/Users/fabri/Desktop/Dialogy-apps/Conexão/Dialogy/src/services/agent-studio/reasoning-capabilities';
+} from '@/services/agent-studio/types';
+import { validateAgentForPublication } from '@/services/agent-studio/assistant-validator';
+import { resolveStudioMcpTool } from '@/services/agent-studio/integrations';
+import { compileStudioReasoningCapabilities } from '@/services/agent-studio/reasoning-capabilities';
 
 async function main() {
   const workspaceId = 'e3b476a1-5de8-4744-80b5-a5d23fe15fab';
@@ -1124,7 +1124,7 @@ async function main() {
     runtimeConfig: {
       aiModel: 'deepseek/deepseek-flash'
     },
-    knowledgeSnapshot: (document.inlineKnowledge || []).map((k) => ({
+    knowledgeSnapshot: (document.inlineKnowledge || []).map((k: any) => ({
       id: k.id,
       name: k.name,
       content: k.content,

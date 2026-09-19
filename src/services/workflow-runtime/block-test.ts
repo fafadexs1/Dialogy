@@ -4,7 +4,6 @@ import { ToolRegistry } from './tools';
 import type {
   WorkflowConnection,
   WorkflowDefinition,
-  WorkflowNode,
   WorkflowStartInput,
 } from './types';
 import { isRecord, mergeStatePatch } from './utils';

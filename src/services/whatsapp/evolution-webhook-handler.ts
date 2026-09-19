@@ -1416,12 +1416,11 @@ async function resumePersistedInboundRealtimeEffects(input: {
 }
 
 async function handleMessagesUpsert(payload: any) {
-    const { instance: instanceName, data, sender, server_url } = payload;
+    const { instance: instanceName, data, sender } = payload;
 
     let savedChat: Chat | null = null;
     let savedMessage: Message | null = null;
     let workspaceId: string | null = null;
-    let apiConfig: { api_url: string; api_key: string; } | null = null;
     let contactData: Contact | null = null;
     let isNewContact = false;
     let shouldRunRealtimeSideEffects = true;
@@ -1679,7 +1678,6 @@ async function handleMessagesUpsert(payload: any) {
             workspaceId = instanceRes.rows[0].workspace_id;
         }
 
-        apiConfig = await getApiConfigForInstance(instanceName, workspaceId);
         if (!workspaceId) {
             throw new Error(`Workspace para a instancia '${instanceName}' nao encontrado.`);
         }
@@ -2015,7 +2013,7 @@ async function handleContactsUpdate(_payload: any) {
 }
 
 async function handleChatsUpsert(payload: any) {
-    const { instance: instanceName, data } = payload;
+    const { data } = payload;
     if (!Array.isArray(data) || data.length === 0) return;
 
     for (const chatUpdate of data) {

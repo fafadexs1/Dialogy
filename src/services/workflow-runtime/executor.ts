@@ -13,7 +13,6 @@ import {
 import type {
   ConnectionType,
   NodeExecutionResult,
-  NodeHandler,
   NodeHandlerRegistry,
   WorkflowDefinition,
   WorkflowEvent,

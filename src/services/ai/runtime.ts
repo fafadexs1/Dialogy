@@ -1,5 +1,4 @@
 import { db } from '@/lib/db';
-import { DEFAULT_AUTOPILOT_MODEL, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import type { AutopilotConfig, KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 
@@ -38,29 +37,6 @@ function mapAutopilotConfig(row: any): AutopilotConfig {
         default_fallback_reply: row.default_fallback_reply || null,
         transcription_model: row.transcription_model || null,
     } as AutopilotConfig;
-}
-
-function normalizeWorkspaceIntegrationModel(provider: string, value: unknown): string | undefined {
-    const model = typeof value === 'string' ? value.trim() : '';
-    if (!model) return undefined;
-
-    if (provider === 'gemini') {
-        return normalizeGoogleAiModelId(model) || undefined;
-    }
-
-    if (provider === 'openai') {
-        if (model.startsWith('openai/') || model.startsWith('codex/')) return model;
-        if (model.includes('/')) return undefined;
-        return `openai/${model}`;
-    }
-
-    if (provider === 'deepseek') {
-        if (model.startsWith('deepseek/')) return model;
-        if (model.includes('/')) return undefined;
-        return `deepseek/${model}`;
-    }
-
-    return undefined;
 }
 
 export type WorkspaceAiExecutionContext = {

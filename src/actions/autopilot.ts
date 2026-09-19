@@ -37,7 +37,6 @@ import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/t
 import { getAiModelRuntimeProvider, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-rewrite';
 import { learnFromConversation } from '@/ai/flows/conversation-learning';
-import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
 import {
     generateNativeWorkflowAiProposal,
     type NativeWorkflowAiProposal,
@@ -1022,94 +1021,6 @@ export async function getAgentToolCatalogAction(workspaceId: string) {
     }
 
     return { tools: await listWorkspaceAgentToolCatalog(workspaceId) };
-}
-
-export async function generateAutopilotFlowWithAi(input: {
-    configId: string;
-    conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
-    currentGraph?: AutopilotFlowGraph | null;
-    currentSystemPrompt?: string | null;
-    knowledgeDocuments?: KnowledgeBaseDocument[] | null;
-    knowledgeCollections?: KnowledgeCollection[] | null;
-    enabledToolNames?: string[] | null;
-    model?: string | null;
-}): Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { proposal: null, error: 'Usuario nao autenticado.' };
-
-    try {
-        const configRes = await db.query(
-            `SELECT id, workspace_id, gemini_api_key, enabled_tool_names, knowledge_base_documents, knowledge_collections
-             FROM autopilot_configs
-             WHERE id = $1
-             LIMIT 1`,
-            [input.configId],
-        );
-        if (configRes.rowCount === 0) return { proposal: null, error: 'Agente nao encontrado.' };
-        const config = configRes.rows[0];
-        const workspaceId = String(config.workspace_id);
-        if (!await isWorkspaceMember(user.id, workspaceId)) {
-            return { proposal: null, error: 'Acesso nao autorizado.' };
-        }
-
-        const conversation = input.conversation
-            .filter((message) => (message.role === 'user' || message.role === 'assistant') && message.content?.trim())
-            .slice(-12)
-            .map((message) => ({ role: message.role, content: message.content.trim().slice(0, 12000) }));
-        if (!conversation.some((message) => message.role === 'user')) {
-            return { proposal: null, error: 'Descreva o fluxo que deseja construir.' };
-        }
-
-        const [runtime, catalog] = await Promise.all([
-            resolveWorkspaceAiExecutionContext(workspaceId, input.configId),
-            getAgentToolCatalogAction(workspaceId),
-        ]);
-        if (catalog.error) return { proposal: null, error: catalog.error };
-        const scopedTools = selectFlowBuilderTools({
-            catalog: catalog.tools,
-            requestedEnabledToolNames: input.enabledToolNames,
-            persistedEnabledToolNames: config.enabled_tool_names,
-            mode: 'all_eligible',
-        });
-
-        let targetModel = runtime.model;
-        if (input.model) {
-            const resolved = await resolveAutopilotModelFromCatalog(input.model);
-            targetModel = resolved.model;
-        }
-
-        const modelApiKey = await resolveApiKeyForModel({
-            config,
-            workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
-            model: targetModel,
-        });
-        const knowledgeDocuments = Array.isArray(input.knowledgeDocuments)
-            ? input.knowledgeDocuments
-            : parseKnowledgeBaseDocuments(config.knowledge_base_documents);
-        const knowledgeCollections = Array.isArray(input.knowledgeCollections)
-            ? input.knowledgeCollections
-            : parseKnowledgeCollections(config.knowledge_collections);
-
-        const proposal = await generateAutopilotFlowProposal({
-            workspaceId,
-            conversation,
-            currentGraph: input.currentGraph || null,
-            currentSystemPrompt: input.currentSystemPrompt || '',
-            tools: scopedTools,
-            knowledgeDocuments,
-            knowledgeCollections,
-            model: targetModel,
-            apiKey: modelApiKey,
-        });
-        return { proposal };
-    } catch (error) {
-        console.error('[AUTOPILOT_FLOW_BUILDER_AI] Falha ao gerar proposta:', error);
-        return {
-            proposal: null,
-            error: error instanceof Error ? error.message : 'Falha ao construir flow com IA.',
-        };
-    }
 }
 
 async function loadNativeWorkflowEditContext(configId: string, userId: string) {

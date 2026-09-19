@@ -15,6 +15,7 @@ import { buildStudioHttpRequest, buildStudioMcpArguments, mapStudioOutputs, type
 import { executeStudioContactAction } from './native-actions';
 import { lookupSgpCustomerContracts, runSgpWorkspaceTool } from '@/services/agent-tools/sgp-tools';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
+import { extractStudioFieldCandidate, validateStudioField } from './collection';
 import { interpretStudioCollection } from './collection-interpreter';
 import { buildStudioConversationContext } from './conversation-context';
 import { loadStudioConversationTurns } from './history';
@@ -25,6 +26,7 @@ import { studioCollectionPlanningPrompt } from './collection-planner';
 import { studioActionPlanningPrompt } from './action-planner';
 import { runStudioReasoningRuntime } from './reasoning-runtime';
 import type { StudioMemoryEvent } from './durable-memory';
+import { readStudioDurableMemory } from './durable-memory-store';
 import { resolveStudioCatalogImage, StudioCatalogImageSchema } from './catalog-media';
 import { resolveStudioMapping } from './data-mapping';
 import type { StudioReasoningInput } from './reasoning-engine';
@@ -94,8 +96,35 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
     || (reasoningEnabled && previous.status === 'resolved' && previous.reasoning)
     || studioHasUncertainOperation(previous) || previous.suspendedProcedures?.length || previous.lastTurn?.messageId === input.messageId)
     ? previous : createStudioSession(release.agentId, release.releaseId, randomUUID());
+  if (!previous && !input.preview) {
+    try {
+      const scope = { workspaceId: release.workspaceId, agentId: release.agentId, chatId: input.chatId };
+      const memory = await readStudioDurableMemory(scope, { limit: 20 });
+      for (const record of memory.records) {
+        if (record.event.status === 'resolved' || record.event.status === 'active') {
+          const key = record.event.key;
+          if (key && record.event.value !== undefined && !record.event.sensitive) {
+            state.values[key] = record.event.value;
+            state.sessionFacts ||= {};
+            state.sessionFacts[key] = {
+              value: record.event.value,
+              fieldType: typeof record.event.value === 'number' ? 'number' : 'text',
+              labels: [record.event.label].filter(Boolean),
+              source: 'customer',
+              confirmed: true,
+              isSensitive: false,
+              at: record.event.source.at,
+            };
+          }
+        }
+      }
+    } catch {
+      // Non-blocking memory initialization
+    }
+  }
   const persona = `${document.name}. Objetivo: ${document.objective || ''}. Idioma: ${document.language}. Tom: ${document.rules.toneOfVoice}. Assuntos fora do escopo: ${JSON.stringify(document.rules.excludedTopics || [])}. Nunca solicite senhas, tokens secretos ou códigos de autenticação. Também não solicite estes dados: ${JSON.stringify(document.rules.prohibitedDataLabels || [])}.`;
-  const modelConfig = { ...input.config, ai_model: (await platformModel()).id };
+  const resolvedPlatformModel = !input.preview && !release.runtimeConfig?.aiModel ? await platformModel().catch(() => null) : null;
+  const modelConfig = { ...input.config, ai_model: release.runtimeConfig?.aiModel || resolvedPlatformModel?.id || input.config?.ai_model || DEFAULT_AUTOPILOT_MODEL };
   const historyTurns = input.preview ? [] : await loadStudioConversationTurns(release.workspaceId, input.chatId, input.messageId, Boolean(reasoningEnabled));
   const rawHistory = input.chatHistory ?? historyTurns.map((turn) => `${turn.fromMe ? 'Agente' : 'Cliente'}: ${turn.content}`).join('\n');
   if (previous && state !== previous) {
@@ -119,7 +148,7 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
       }
     : undefined;
   let modelFailed = false;
-  const decision = async (message: string, prompt: string, options: { id: string; label: string }[], values?: Record<string, unknown>, recoverable = false) => {
+  const decision = async (message: string, prompt: string, options: Array<{ id: string; label: string }>, values?: Record<string, unknown>, recoverable = false) => {
     input.signal?.throwIfAborted();
     if (!options.length) return null;
     const result = await generateProcedureRuntimeOutput({
@@ -137,7 +166,7 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
     // A webchat identity is not a phone number and must not become a lookup key.
     context: { contact: { ...input.contact, phone: studioContactPhone(input.contact) }, input: input.flowInput || {} },
     dependencies: {
-      recoverFacts: document.resolveStage.conversationMode === 'adaptive' ? async (recovery) => {
+      recoverFacts: async (recovery) => {
         // Keep roles from database rows, never parse role labels from customer
         // content or a caller-supplied textual history into trusted evidence.
         const sources: StudioFactSource[] = historyTurns.length ? historyTurns.flatMap((turn, index) => turn.fromMe ? [] : [{
@@ -151,13 +180,33 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
           if (bytes + size > 24_000) return false;
           bytes += size; return true;
         }).reverse();
+
+        if (document.resolveStage.conversationMode !== 'adaptive') {
+          const observations: Array<{ fieldKey: string; status: 'provided'; value: string; evidence: string }> = [];
+          for (const { field } of recovery.fields) {
+            for (const source of bounded) {
+              const candidate = extractStudioFieldCandidate(field, source.customer, false);
+              const validated = candidate !== undefined ? validateStudioField(field, candidate) : { valid: false };
+              if (validated.valid && 'value' in validated) {
+                observations.push({
+                  fieldKey: field.variableKey,
+                  status: 'provided',
+                  value: String(validated.value),
+                  evidence: source.customer,
+                });
+              }
+            }
+          }
+          return { plan: { intent: 'contribute', observations, deferFields: [], nextFieldKey: null }, sources: bounded };
+        }
+
         const output = await generateProcedureRuntimeOutput({ config: modelConfig, model: modelConfig.ai_model || undefined,
           fixedModel: true, chatId: input.chatId, mode: 'collection_plan', customerMessage: recovery.message, persona,
           procedure: { name: document.name, prompt: studioFactRecoveryPrompt(recovery, bounded) },
         });
         input.signal?.throwIfAborted();
         return { plan: output.collectionPlan, sources: bounded };
-      } : undefined,
+      },
       planAction: document.resolveStage.conversationMode === 'adaptive' ? async (planning) => {
         input.signal?.throwIfAborted();
         const choices = ['continue', ...(planning.canAnswer ? ['answer'] : []), ...planning.capabilities.map((c) => c.id)];
@@ -319,7 +368,8 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
           return {};
         }
         if (step.type === 'native_action' && step.nativeActionType === 'sgp_fetch_contracts') {
-          const rawCpf = String(context.values?.customer_cpf || context.contact?.custom_fields?.cpf || context.contact?.custom_fields?.['53d4dc37-fa88-4749-be3a-194953864e80'] || '').replace(/\D/g, '')
+          const customFields = (context.contact?.custom_fields || {}) as Record<string, unknown>;
+          const rawCpf = String(context.values?.customer_cpf || customFields.cpf || customFields['53d4dc37-fa88-4749-be3a-194953864e80'] || '').replace(/\D/g, '')
             || (input.message || '').replace(/\D/g, '').match(/(\d{11}|\d{14})/)?.[1] || '';
           const result = await lookupSgpCustomerContracts({
             workspaceId: release.workspaceId,
@@ -367,7 +417,8 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
           };
         }
         if (step.type === 'native_action' && step.nativeActionType === 'sgp_fetch_contact_panel_data') {
-          const rawCpf = String(context.values?.customer_cpf || context.contact?.custom_fields?.cpf || '').replace(/\D/g, '')
+          const customFields = (context.contact?.custom_fields || {}) as Record<string, unknown>;
+          const rawCpf = String(context.values?.customer_cpf || customFields.cpf || '').replace(/\D/g, '')
             || (input.message || '').replace(/\D/g, '').match(/(\d{11}|\d{14})/)?.[1] || '';
           const contractId = String(context.values?.customer_contract || '').replace(/\D/g, '');
           const toolResult = await runSgpWorkspaceTool({

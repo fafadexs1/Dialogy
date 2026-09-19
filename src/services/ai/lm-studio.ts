@@ -122,6 +122,83 @@ export async function getGlobalLmStudioConfig(): Promise<LmStudioConfig> {
   return parseLmStudioConfig(result.rows[0]?.value || null);
 }
 
+export function deterministicJsonRepair(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+
+  let cleaned = text;
+  if (cleaned.includes('<think>')) {
+    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  }
+
+  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
+  let target = (fenced || cleaned).trim();
+
+  const firstBrace = target.indexOf('{');
+  if (firstBrace === -1) return target;
+
+  const lastBrace = target.lastIndexOf('}');
+  if (lastBrace > firstBrace) {
+    target = target.slice(firstBrace, lastBrace + 1);
+  } else {
+    target = target.slice(firstBrace);
+  }
+
+  // 1. Strip comments
+  target = target.replace(/\/\*[\s\S]*?\*\//g, '');
+  target = target.replace(/(^|[^:])\/\/[^\r\n]*/g, '$1');
+
+  // 2. Fix unquoted keys
+  target = target.replace(/([{,]\s*)([a-zA-Z0-9_$-]+)\s*:/g, '$1"$2":');
+
+  // 3. Fix single-quoted keys and string values
+  target = target.replace(/([{,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'\s*:/g, '$1"$2":');
+  target = target.replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'/g, ': "$1"');
+
+  // 4. Remove trailing commas before } or ]
+  target = target.replace(/,\s*([}\]])/g, '$1');
+
+  // 5. Balance open braces and brackets for truncated responses
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < target.length; i++) {
+    const char = target[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === '\\') {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (char === '{') stack.push('}');
+      else if (char === '[') stack.push(']');
+      else if (char === '}' || char === ']') {
+        if (stack.length > 0 && stack[stack.length - 1] === char) {
+          stack.pop();
+        }
+      }
+    }
+  }
+
+  if (inString) {
+    target += '"';
+  }
+
+  while (stack.length > 0) {
+    target += stack.pop();
+  }
+
+  target = target.replace(/,\s*([}\]])/g, '$1');
+
+  return target;
+}
+
 export function parseLmStudioStructuredText(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'string' || !value.trim()) return null;
 
@@ -144,6 +221,19 @@ export function parseLmStudioStructuredText(value: unknown): Record<string, unkn
       }
     } catch {
       // Try the next representation.
+    }
+  }
+
+  // Deterministic local repair fallback (0 tokens, zero latency)
+  for (const candidate of candidates) {
+    try {
+      const repaired = deterministicJsonRepair(candidate);
+      const parsed = JSON.parse(repaired);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Continue to next candidate
     }
   }
 
@@ -191,6 +281,24 @@ export function tryParseJsonResponse(text: string): {
   for (const candidate of attempts) {
     try {
       const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && typeof parsed.response === 'string' && parsed.response.trim()) {
+        return {
+          response: parsed.response,
+          messageBlocks: Array.isArray(parsed.messageBlocks) ? parsed.messageBlocks : null,
+          triggeredRule: typeof parsed.triggeredRule === 'string' ? parsed.triggeredRule : null,
+          actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+        };
+      }
+    } catch {
+      // Try the next representation.
+    }
+  }
+
+  // Deterministic local repair fallback (0 tokens, zero latency)
+  for (const candidate of attempts) {
+    try {
+      const repaired = deterministicJsonRepair(candidate);
+      const parsed = JSON.parse(repaired);
       if (parsed && typeof parsed === 'object' && typeof parsed.response === 'string' && parsed.response.trim()) {
         return {
           response: parsed.response,

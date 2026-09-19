@@ -1,5 +1,4 @@
 import { listAgentToolCatalogItems } from '@/services/agent-tools/catalog';
-import type { AgentToolName } from '@/services/agent-tools/types';
 import { resolveAutopilotIntent } from '@/services/autopilot-intent';
 import { mergeAndRerankKnowledgeDocuments } from '@/services/rag/hybrid-retrieval';
 import { extractAutopilotSlots } from './slots';

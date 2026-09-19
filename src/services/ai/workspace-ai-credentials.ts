@@ -1,15 +1,7 @@
-import { db } from '@/lib/db';
 import { platformModel, platformApiKey, readPlatformAiConfig } from './platform-config';
-import { ensureWorkspaceIntegrationsTable } from '@/lib/workspace-integrations';
 import { resolveConfiguredAiModel, type AiModelCatalogEntry } from '@/lib/ai-models';
 import {
-  AI_CREDENTIAL_PROVIDERS,
-  formatAiCredentialModelLabel,
   getAiCredentialModelProvider,
-  getAiCredentialProviderLabel,
-  getDefaultAiCredentialModel,
-  isAiCredentialProvider,
-  normalizeAiCredentialModel,
   type AiCredentialProvider,
 } from '@/lib/ai-provider-credentials';
 
@@ -52,7 +44,7 @@ export function parseWorkspaceAiProviderConfig(value: unknown): { apiKey: string
 
 export async function loadWorkspaceAiCredentialRecords(
   workspaceId: string,
-  options: { activeOnly?: boolean } = {},
+  _options: { activeOnly?: boolean } = {},
 ): Promise<WorkspaceAiCredentialRecord[]> {
   if (!workspaceId) return [];
   const model = await platformModel();
