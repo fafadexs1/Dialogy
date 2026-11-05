@@ -9,15 +9,12 @@
  *   - "enviei o boleto / a fatura"              requires a successful operation in this turn.
  * It does NOT judge commercial facts (prices, coverage, deadlines): that needs source grounding and is a separate step.
  *
- * STUDIO_PROMISE_GUARD = off | observe | enforce. Default `observe`: violations are recorded in the ledger and the
- * reply is sent unchanged, so the rate can be measured before anything is rewritten.
+ * Each agent chooses the mode in the Studio (concludeStage.automation.promiseGuard): off | observe | enforce.
+ * The default is `observe`: violations are recorded in the ledger and the reply is sent unchanged, so the rate can be
+ * measured before anything is rewritten.
  */
 
 export type StudioPromiseGuardMode = 'off' | 'observe' | 'enforce';
-export function studioPromiseGuardMode(): StudioPromiseGuardMode {
-  const value = (process.env.STUDIO_PROMISE_GUARD || 'observe').trim().toLowerCase();
-  return value === 'off' || value === 'enforce' ? value : 'observe';
-}
 
 export type StudioPromiseFacts = {
   /** The transfer was confirmed in this turn. */

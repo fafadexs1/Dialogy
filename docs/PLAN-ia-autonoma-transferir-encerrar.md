@@ -77,11 +77,11 @@ Medido com `node scripts/baseline-ia-decisions.cjs --days=30`, somente leitura, 
 
 **Como verificar depois do deploy:** `node scripts/baseline-ia-decisions.cjs --days=7`: `handoff_failed_reasons` deve cair (restam só equipe sem membros e rotas com `onUnavailable: 'error'`) e `handoff_queued_events` deve aparecer.
 
-### 1.3 Encerramento explícito do Estúdio (05/11/2026, atrás de flag)
+### 1.3 Encerramento explícito do Estúdio (05/11/2026, configurável por agente)
 
 **Problema.** No núcleo novo, o chat era encerrado como efeito colateral de "todos os pedidos resolvidos", sem confirmação do cliente. Neste banco, esse `UPDATE` ainda falha por usar uma coluna inexistente, então na prática a IA não encerrava; corrigir o `UPDATE` sozinho a faria encerrar cedo demais.
 
-**O que mudou** (`close-gate.ts` + `process-chat.ts`). Com `STUDIO_EXPLICIT_CLOSE_AGENT_IDS` contendo o agente (ou `*`), a sessão `resolved` passa por um portão em código, sem LLM. O chat só fecha se **todas** estas condições valem:
+**O que mudou** (`close-gate.ts` + `process-chat.ts`). Com a opção **Encerrar o atendimento só quando o cliente confirmar que acabou** ligada no agente (Estúdio, Concluir o atendimento, Autonomia), a sessão `resolved` passa por um portão em código, sem LLM. O chat só fecha se **todas** estas condições valem:
 - sessão `resolved` e `done`, sem operação em voo ou de resultado incerto, sem ação pendente, sem pedido aberto, sem campo pendente, sem confirmação pendente;
 - a mensagem do cliente que originou o turno é **só uma despedida** ("obrigado, era só isso", "pode fechar", "valeu"). Qualquer outra coisa mantém aberto: pergunta, "obrigado, mas ainda não funcionou", "obrigado, vou aguardar o técnico", mensagem longa.
 
@@ -89,7 +89,7 @@ O fechamento usa o mesmo caminho auditado das ferramentas (`close_chat` com `clo
 
 **Ledger.** `closeMode` (`legacy` ou `explicit`), `closeBlockedBy` (todos os motivos que barraram) e a base `customer_confirmed_close` ou `resolved_awaiting_customer_confirmation`. Esta última é a que alimenta o monitor de conversas "resolvidas e esquecidas".
 
-**Sem a flag, nada muda** (continua o `UPDATE` antigo, com o mesmo defeito).
+**Com a opção desligada, nada muda** (continua o `UPDATE` antigo, com o mesmo defeito).
 
 **Limites que ficam para a próxima etapa.**
 - O detector de despedida é uma lista de frases, não um classificador. É conservador de propósito, e o prejuízo dele é o chat ficar aberto, não fechar errado.
@@ -97,18 +97,26 @@ O fechamento usa o mesmo caminho auditado das ferramentas (`close_chat` com `clo
 - Não valida o detector contra conversas reais ainda: isso é o replay no dataset ouro.
 - O caminho de produção do `process-chat` não tem teste automatizado de ponta a ponta; o gate e o ledger têm.
 
-**Como ligar com segurança:** um agente de baixo risco primeiro (`STUDIO_EXPLICIT_CLOSE_AGENT_IDS=<id>` no app e no worker de IA), acompanhar `ledger_studio_decisions` do baseline por 1 a 2 dias úteis e só então ampliar. Voltar atrás é esvaziar a variável.
+**Como ligar com segurança:** num agente de baixo risco primeiro, acompanhar `ledger_studio_decisions` do baseline por 1 a 2 dias úteis e só então ampliar. Para voltar atrás, desligue a opção e publique de novo.
 
-### 1.4 Fase 1 completa no código (05/11/2026): cinco itens, todos atrás de flag
+### 1.4 Fase 1 completa no código (05/11/2026): configuração por agente, na interface
 
-| Item | O que faz | Flag (padrão) | Onde medir |
+Cada empresa decide o que **seus** agentes fazem sozinhos. A configuração fica no próprio agente, em **Estúdio > Concluir o atendimento > Autonomia do agente**, é salva no rascunho e **versionada a cada publicação** (`concludeStage.automation`). Não existe variável de ambiente por agente.
+
+| Item | O que faz | Opção na tela (padrão) | Onde medir |
 |---|---|---|---|
-| Motivo de transferência em lista fechada + briefing | O modelo informa `reasonCode`; código válido vence, texto livre é classificado como segunda opção, `nao_classificado` quando nada casa. O humano recebe uma nota interna com motivo, pedidos, dados já informados, o que a IA fez e o que falta. Segredos não entram. | Sempre ativo | `ledger_handoff_reasons` |
-| Pedido de humano | Quando o cliente pede uma pessoa de forma clara, a transferência acontece **antes** de chamar o modelo (sem espera de 10 a 30 s). Frases ambíguas ("pode chamar o técnico?") não casam. Se a transferência não confirmar, o laço do modelo continua. | `STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS` (vazio) | `ledger_handoff_reasons` (`cliente_pediu`) |
-| Validador de promessas | Compara a resposta com o que o sistema fez no turno: "encaminhei", "vou encerrar", "reservei/alterei/cancelei", "enviei o boleto" só passam com o fato correspondente. Ofertas e perguntas ("posso agendar?") passam. | `STUDIO_PROMISE_GUARD` (`observe`: só registra; `enforce` remove a frase) | `ledger_promise_guard`, `ledger_promise_guard_coverage` |
-| Classificador de despedida | Segunda opinião do modelo, só quando o portão de encerramento barrou **exclusivamente** por falta de confirmação e a mensagem é curta e sem pergunta. Pode acrescentar a confirmação, nunca remove outro bloqueio. | junto de `STUDIO_EXPLICIT_CLOSE_AGENT_IDS` | `ledger_close_gate` (`closeClassifierUsed`) |
-| Vigilante de inatividade | Aviso único após 30 min, encerramento 30 min depois com base `inatividade_pos_followup`. Só age entre 8h e 21h (America/Sao_Paulo), nunca encerra sem ter avisado, piso de 10 min em qualquer espera, não encerra se a mensagem de despedida falhar. Depois de 23 h sem mensagem do cliente (fora da janela do canal oficial) fecha sem mensagem. | `STUDIO_INACTIVITY_AGENT_IDS` (vazio = desligado) | `inactivity_watchdog` |
-| SLA da fila | Em 10 min sem resposta humana: marcador visível na conversa, aviso honesto ao cliente e alerta (webhook opcional, só ids e minutos). Em 20 min: escalona para a equipe de escalonamento, ou marca "precisa de atenção" quando não há uma. Fila por "fora do expediente" não entra. | `QUEUE_SLA_ENABLED` (`false`) | `queue_sla_events`, `handoff_queue_wait_for_first_human` |
+| Motivo de transferência em lista fechada + briefing | O modelo informa `reasonCode`; código válido vence, texto livre é classificado como segunda opção, `nao_classificado` quando nada casa. A pessoa que assume recebe uma nota interna com motivo, pedidos, dados já informados, o que a IA fez e o que falta. Segredos não entram. | Sempre ativo | `ledger_handoff_reasons` |
+| Pedido de humano | Quando o cliente pede uma pessoa de forma clara, a transferência acontece **antes** de chamar o modelo (sem espera de 10 a 30 s). Frases ambíguas ("pode chamar o técnico?") não casam. Se a transferência não confirmar, o laço do modelo continua. | "Transferir na hora quando o cliente pedir uma pessoa" (desligado) | `ledger_handoff_reasons` (`cliente_pediu`) |
+| Validador de promessas | Compara a resposta com o que o sistema fez no turno: "encaminhei", "vou encerrar", "reservei/alterei/cancelei", "enviei o boleto" só passam com o fato correspondente. Ofertas e perguntas ("posso agendar?") passam. | "Quando a resposta prometer algo que não aconteceu": só registrar (padrão), corrigir antes de enviar ou não verificar | `ledger_promise_guard`, `ledger_promise_guard_coverage` |
+| Classificador de despedida | Segunda opinião do modelo, só quando o portão de encerramento barrou **exclusivamente** por falta de confirmação e a mensagem é curta e sem pergunta. Pode acrescentar a confirmação, nunca remove outro bloqueio. | Junto de "Encerrar só quando o cliente confirmar" (desligado) | `ledger_close_gate` (`closeClassifierUsed`) |
+| Vigilante de inatividade | Aviso único, depois encerramento com base `inatividade_pos_followup`. Esperas e horário configuráveis (padrão 30 min + 30 min, das 8h às 21h no fuso do agente), com **piso de 10 min** em qualquer espera, mensagens próprias opcionais, nunca encerra sem ter avisado e não encerra se a despedida falhar. Depois de 23 h sem mensagem do cliente (fora da janela do canal oficial) fecha sem mensagem. | "Avisar e encerrar quando o cliente parar de responder" (desligado) | `inactivity_watchdog` |
+| Acompanhamento da fila | Passado o prazo sem resposta humana: marcador visível na conversa, aviso honesto ao cliente e alerta (endereço https opcional, só ids e minutos). Passado o prazo de escalonamento: move para a equipe que a empresa escolheu, ou marca "precisa de atenção". Fila por "fora do expediente" não entra. Vale para as conversas que **aquele agente** transferiu. | "Acompanhar a fila quando a equipe não tiver ninguém disponível" (desligado; 10 e 20 min) | `queue_sla_events`, `handoff_queue_wait_for_first_human` |
+
+**Como o servidor lê isso.** O atendimento lê a configuração da versão **publicada e fixada** na sessão. O vigilante lê a versão fixada na sessão do chat; o acompanhamento da fila lê a **última versão publicada** do agente que fez a transferência. Os dois só olham agentes que ligaram a opção, então não há custo para quem não usa.
+
+**Único controle de ambiente: um freio de emergência do operador.** `STUDIO_AUTOMATION_KILL_SWITCH=true` desliga toda a autonomia de todos os agentes, sem tocar na configuração de nenhuma empresa. Não é uma configuração de cliente.
+
+**Validação na publicação.** Horário inicial antes do final, escalonamento depois do alerta e endereço https sem usuário e senha. Esperas abaixo de 10 minutos nem são aceitas pelo esquema. A equipe de escalonamento é conferida no momento de usar (precisa ser do mesmo workspace).
 
 **Mudança de definição no baseline.** "Resposta humana" passou a ser mensagem com `sender_user_id`. Antes, o aviso de fila enviado por um agente de sistema contava como resposta humana e escondia chats sem atendimento.
 
@@ -116,10 +124,11 @@ O fechamento usa o mesmo caminho auditado das ferramentas (`close_chat` com `clo
 - Os detectores são conservadores por escolha e ainda **não foram medidos contra conversas reais**. Isso é o replay no dataset ouro; sem ele, as taxas de acerto são desconhecidas.
 - O validador de promessas não julga fatos comerciais (preço, prazo, cobertura). Isso exige amarrar a resposta a fonte ou resultado de ferramenta e é um passo à parte.
 - O briefing e a lista fechada ainda não aparecem em tela para o operador além da nota interna; o motivo está no ledger e no baseline.
-- Nada disso está ligado em produção: tudo depende de variáveis de ambiente (app e worker com os mesmos valores).
+- Nada disso está ligado em produção: cada empresa precisa ligar a opção no seu agente e publicar. A tela nova **não foi vista em um navegador**; foi coberta por testes de renderização e pelo typecheck.
+- Conversas transferidas por um fluxo (Nexus) sem agente de IA vinculado não têm acompanhamento de fila, porque não há agente cujas opções valham para elas.
 - O caminho de `process-chat.ts` não tem teste de ponta a ponta; os blocos puros e o motor de raciocínio têm.
 
-**Ordem sugerida para ligar:** 1) `STUDIO_PROMISE_GUARD=observe` (já é o padrão) por alguns dias e ler `ledger_promise_guard`; 2) `STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS` em um agente; 3) `STUDIO_EXPLICIT_CLOSE_AGENT_IDS` no mesmo agente; 4) `STUDIO_INACTIVITY_AGENT_IDS` no mesmo agente, depois que o item 3 estiver estável; 5) `QUEUE_SLA_ENABLED` com um `QUEUE_SLA_ESCALATION_TEAM_ID` válido; 6) só então `STUDIO_PROMISE_GUARD=enforce`.
+**Ordem sugerida para ligar (no Estúdio, por agente):** 1) deixar o validador de promessas em "só registrar" por alguns dias e ler `ledger_promise_guard`; 2) pedido de humano; 3) encerrar só com confirmação do cliente; 4) avisar e encerrar por inatividade, depois que o passo 3 estiver estável; 5) acompanhamento da fila, com uma equipe de escalonamento escolhida; 6) só então "corrigir antes de enviar" nas promessas.
 
 ## 2. Metas (SLOs de decisão), a calibrar na Fase 0
 

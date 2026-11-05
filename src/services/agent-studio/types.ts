@@ -375,6 +375,43 @@ export const AGENT_SERVICE_TYPE_LABELS: Record<AgentServiceType, string> = {
   custom: 'Personalizado',
 };
 
+/**
+ * Autonomy settings of one agent (docs/PLAN-ia-autonoma-transferir-encerrar.md). They are part of the document, so they
+ * are versioned with every publication and each company decides for its own agents. Defaults keep the previous behaviour,
+ * except the promise guard, which only observes and records.
+ */
+export const StudioAutomationSchema = z.object({
+  /** Close the chat only when the customer confirms they are done (never as a side effect of resolving requests). */
+  closeOnCustomerConfirmation: z.boolean().default(false),
+  /** Hand over right away, without waiting for the model, when the customer clearly asks for a person. */
+  transferWhenCustomerAsksForPerson: z.boolean().default(false),
+  /** off: do nothing. observe: record replies that claim something that did not happen. enforce: drop that sentence before sending. */
+  promiseGuard: z.enum(['off', 'observe', 'enforce']).default('observe'),
+  /** One follow-up, then closing, for a customer who stopped answering. */
+  inactivity: z.object({
+    enabled: z.boolean().default(false),
+    followupMinutes: z.number().int().min(10).max(1440).default(30),
+    closeMinutes: z.number().int().min(10).max(1440).default(30),
+    windowStartHour: z.number().int().min(0).max(23).default(8),
+    windowEndHour: z.number().int().min(1).max(24).default(21),
+    /** Empty uses the default text. */
+    followupMessage: z.string().max(500).default(''),
+    closeMessage: z.string().max(500).default(''),
+  }).default({}),
+  /** What happens to a chat this agent handed to a team that has nobody available. */
+  queue: z.object({
+    enabled: z.boolean().default(false),
+    alertAfterMinutes: z.number().int().min(2).max(1440).default(10),
+    escalateAfterMinutes: z.number().int().min(3).max(2880).default(20),
+    /** Team id that receives the chat when the queue is not attended. Empty: only a "needs attention" marker. */
+    escalationTeamId: z.string().max(80).nullable().default(null),
+    notifyCustomer: z.boolean().default(true),
+    /** Receives ids and minutes only, never customer text. https only. */
+    alertWebhookUrl: z.string().max(500).nullable().default(null),
+  }).default({}),
+});
+export type StudioAutomation = z.infer<typeof StudioAutomationSchema>;
+
 export const AgentStudioDocumentSchema = z.object({
   flowBuilder: StudioFlowContractSchema.optional(),
   id: z.string().min(1),
@@ -429,6 +466,8 @@ export const AgentStudioDocumentSchema = z.object({
     handoffTeam: z.string().default('Suporte'),
     handoffMessage: z.string().default('Vou transferir seu atendimento para um de nossos especialistas.'),
     maxRetriesBeforeHandoff: z.number().int().min(1).max(5).default(3),
+    /** How autonomously the agent closes, hands over and follows up. Edited by the workspace in the Studio, never by the server. */
+    automation: StudioAutomationSchema.default({}),
   }),
   // Regras e Aparência
   appearance: z.object({
@@ -649,6 +688,7 @@ export function createInvoiceAgentStudioTemplate(
       handoffTeam: 'Suporte',
       handoffMessage: 'Vou transferir você agora mesmo para a nossa equipe de suporte.',
       maxRetriesBeforeHandoff: 3,
+      automation: StudioAutomationSchema.parse({}),
     },
     appearance: {
       colorTheme: 'emerald',

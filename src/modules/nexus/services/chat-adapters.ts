@@ -556,6 +556,7 @@ export async function createNexusChatAdapters(input: {
         teamId: failure.teamId,
         reasonCode: failure.reasonCode as TeamAvailabilityReason,
         operationId,
+        agentId: sender.autopilotConfigId,
         sendNotice: notify ? (text) => sendAutomatedMessageAction(input.chatId, text, sender.id, true, input.instanceName) : undefined,
         describeBusinessHours: formatTeamBusinessHours,
         afterQueued: async ({ teamId, tag, color }) => {

@@ -515,7 +515,7 @@ async function runTransferChatTool(
           await db.query(
             `INSERT INTO messages (id, workspace_id, chat_id, type, content, metadata, created_at) VALUES ($1, $2, $3, 'system', $4, $5::jsonb, clock_timestamp())`,
             [randomUUID(), context.workspaceId, context.chat.id, `Atendimento encaminhado para a fila de ${teamName}.`,
-              JSON.stringify({ event: 'transfer_queued', to_team_id: target.teamId, reason: result.reasonCode })],
+              JSON.stringify({ event: 'transfer_queued', to_team_id: target.teamId, reason: result.reasonCode, agentId: context.autopilotConfig?.id ?? null })],
           ).catch((markerError) => console.error('[TRANSFER_CHAT_FALLBACK] Queue marker failed:', markerError));
 
           let notificationDelivered = true;

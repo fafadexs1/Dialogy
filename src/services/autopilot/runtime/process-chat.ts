@@ -216,8 +216,9 @@ import {
 import { persistAutopilotContactFacts } from '@/services/autopilot/contact-facts';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
 import { buildStudioDecisionLedgerEntry } from '@/services/agent-studio/decision-record';
-import { closingClassifierEligible, evaluateStudioCloseGate, studioExplicitCloseEnabled, type StudioCloseGateResult } from '@/services/agent-studio/close-gate';
-import { guardStudioPromises, studioPromiseGuardMode } from '@/services/agent-studio/promise-guard';
+import { closingClassifierEligible, evaluateStudioCloseGate, type StudioCloseGateResult } from '@/services/agent-studio/close-gate';
+import { guardStudioPromises } from '@/services/agent-studio/promise-guard';
+import { studioAutomation } from '@/services/agent-studio/automation';
 import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
 import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
 import {
@@ -1390,7 +1391,9 @@ export async function processAutopilotForChat(
             studioResultStatus = result.state.status;
             studioExecutionStage = 'delivery';
             const studioSessionResolved = result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime;
-            const studioExplicitClose = studioSessionResolved && studioExplicitCloseEnabled(autopilotConfig.id);
+            // What this company chose for this agent in the Studio (versioned with the published release).
+            const studioAutomationSettings = studioAutomation(pinnedRelease.agentSnapshot);
+            const studioExplicitClose = studioSessionResolved && studioAutomationSettings.closeOnCustomerConfirmation;
             // The close decision comes before the reply is sent, so the promise guard knows whether "vou encerrar" is true.
             let studioCloseGate: StudioCloseGateResult | null = null;
             let studioCloseClassifierUsed = false;
@@ -1411,7 +1414,7 @@ export async function processAutopilotForChat(
             }
             // Promise guard (3.4): the reply may not claim a transfer, close or action the system did not perform.
             // Default mode only observes and records; `enforce` removes the unsupported sentence before sending.
-            const promiseMode = studioPromiseGuardMode();
+            const promiseMode = studioAutomationSettings.promiseGuard;
             let studioPromiseGuard: { mode: string; kinds: string[]; rewritten: boolean } | null = null;
             let studioReply = result.response;
             if (promiseMode !== 'off' && result.response && !isSuggestionOnlyRuntime) {

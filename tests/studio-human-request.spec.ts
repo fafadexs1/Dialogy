@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { detectHumanRequest, studioHumanRequestGuardEnabled } from '@/services/agent-studio/human-request';
+import { detectHumanRequest } from '@/services/agent-studio/human-request';
 
 describe('human request detection', () => {
   it.each([
@@ -23,20 +23,5 @@ describe('human request detection', () => {
 
   it('ignores a very long message', () => {
     expect(detectHumanRequest(`quero falar com um atendente ${'texto '.repeat(80)}`)).toBe(false);
-  });
-});
-
-describe('human request guard flag', () => {
-  const original = process.env.STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS;
-  afterEach(() => { if (original === undefined) delete process.env.STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS; else process.env.STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS = original; });
-
-  it('is off by default and opt-in per agent', () => {
-    delete process.env.STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS;
-    expect(studioHumanRequestGuardEnabled('a')).toBe(false);
-    process.env.STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS = 'a';
-    expect(studioHumanRequestGuardEnabled('a')).toBe(true);
-    expect(studioHumanRequestGuardEnabled('b')).toBe(false);
-    process.env.STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS = '*';
-    expect(studioHumanRequestGuardEnabled('b')).toBe(true);
   });
 });

@@ -1,14 +1,16 @@
+import type { StudioAutomation } from '../agent-studio/types';
+
 /**
  * Queue SLA, pure part (docs/PLAN-ia-autonoma-transferir-encerrar.md, 3.2).
  * A chat that waits in a team queue must not wait unseen: past the SLA it gets a visible marker and an honest note to the
  * customer; past the escalation wait it moves to a fallback team, or raises a "needs attention" marker when none is set.
  *
- * Off unless QUEUE_SLA_ENABLED=true. Chats queued because the team is outside business hours are not measured here:
- * their clock would run while nobody is supposed to be working.
+ * Configured per agent in the Studio (concludeStage.automation.queue): the agent that handed the chat over decides what
+ * happens to it. Chats queued because the team is outside business hours are not measured here: their clock would run
+ * while nobody is supposed to be working.
  */
 
 export type QueueSlaConfig = {
-  enabled: boolean;
   slaMs: number;
   escalateAfterMs: number;
   escalationTeamId: string | null;
@@ -18,20 +20,18 @@ export type QueueSlaConfig = {
 
 export const MIN_SLA_MINUTES = 2;
 
-export function queueSlaConfig(env: Record<string, string | undefined> = process.env): QueueSlaConfig {
-  const parse = (value: string | undefined, fallback: number, floor: number) => {
-    const parsed = Number.parseInt(value || '', 10);
-    return Math.max(floor, Number.isInteger(parsed) && parsed > 0 ? parsed : fallback);
-  };
-  const sla = parse(env.QUEUE_SLA_MINUTES, 10, MIN_SLA_MINUTES);
-  const escalate = Math.max(sla + 1, parse(env.QUEUE_SLA_ESCALATE_MINUTES, sla * 2, sla + 1));
-  const team = env.QUEUE_SLA_ESCALATION_TEAM_ID?.trim();
+/** null when the agent did not turn the queue follow-up on. Escalation is always later than the alert. */
+export function queueSlaConfigFromAutomation(automation: StudioAutomation): QueueSlaConfig | null {
+  const { queue } = automation;
+  if (!queue.enabled) return null;
+  const sla = Math.max(MIN_SLA_MINUTES, queue.alertAfterMinutes);
+  const escalate = Math.max(sla + 1, queue.escalateAfterMinutes);
+  const team = queue.escalationTeamId?.trim();
   return {
-    enabled: (env.QUEUE_SLA_ENABLED || 'false').trim().toLowerCase() === 'true',
     slaMs: sla * 60_000, escalateAfterMs: escalate * 60_000,
     escalationTeamId: team && /^[0-9a-f-]{36}$/i.test(team) ? team : null,
-    customerNotice: (env.QUEUE_SLA_CUSTOMER_NOTICE || 'true').trim().toLowerCase() !== 'false',
-    alertWebhookUrl: env.QUEUE_SLA_ALERT_WEBHOOK_URL?.trim() || null,
+    customerNotice: queue.notifyCustomer,
+    alertWebhookUrl: queue.alertWebhookUrl?.trim() || null,
   };
 }
 

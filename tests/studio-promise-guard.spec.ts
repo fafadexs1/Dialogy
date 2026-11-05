@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { guardStudioPromises, studioPromiseGuardMode, type StudioPromiseFacts } from '@/services/agent-studio/promise-guard';
+import { guardStudioPromises, type StudioPromiseFacts } from '@/services/agent-studio/promise-guard';
 
 const none: StudioPromiseFacts = { transferred: false, closing: false, successfulWrites: 0, successfulOperations: 0 };
 const check = (response: string, facts: Partial<StudioPromiseFacts> = {}) => guardStudioPromises({ response, facts: { ...none, ...facts } });
@@ -64,18 +64,5 @@ describe('promises the AI cannot back', () => {
 
   it('is accent- and case-insensitive', () => {
     expect(check('JÁ ENCAMINHEI SEU ATENDIMENTO.').violations).toEqual([{ kind: 'transfer' }]);
-  });
-});
-
-describe('promise guard mode', () => {
-  const original = process.env.STUDIO_PROMISE_GUARD;
-  afterEach(() => { if (original === undefined) delete process.env.STUDIO_PROMISE_GUARD; else process.env.STUDIO_PROMISE_GUARD = original; });
-
-  it('observes by default and accepts only off, observe or enforce', () => {
-    delete process.env.STUDIO_PROMISE_GUARD;
-    expect(studioPromiseGuardMode()).toBe('observe');
-    for (const mode of ['off', 'observe', 'enforce'] as const) { process.env.STUDIO_PROMISE_GUARD = mode; expect(studioPromiseGuardMode()).toBe(mode); }
-    process.env.STUDIO_PROMISE_GUARD = 'ENFORCE'; expect(studioPromiseGuardMode()).toBe('enforce');
-    process.env.STUDIO_PROMISE_GUARD = 'banana'; expect(studioPromiseGuardMode()).toBe('observe');
   });
 });

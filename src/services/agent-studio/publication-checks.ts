@@ -7,6 +7,7 @@ import { isSafeStudioPattern } from './collection';
 import { studioDataAtSteps } from './data-availability';
 import { checkStudioReasoningPublication } from './reasoning-publication';
 import { StudioCatalogImageSchema } from './catalog-media';
+import { checkStudioAutomation } from './automation';
 
 /** Publication is stricter than draft storage: reject incomplete paths before any real conversation. */
 export function checkStudioDependencies(doc: AgentStudioDocument): PublicationValidationIssue[] {
@@ -145,5 +146,6 @@ export function checkStudioDependencies(doc: AgentStudioDocument): PublicationVa
       } else if (!['finish', 'handoff'].includes(step.type) && step.nativeActionType !== 'close_chat') target(step.nextStepId);
     });
   }
-  return [...issues, ...checkStudioReasoningPublication(doc)];
+  const automation = checkStudioAutomation(doc).map((issue): PublicationValidationIssue => ({ code: issue.code, title: issue.title, description: issue.title, severity: 'error' }));
+  return [...issues, ...automation, ...checkStudioReasoningPublication(doc)];
 }

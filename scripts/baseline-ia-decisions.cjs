@@ -185,7 +185,7 @@ const QUERIES = [
   },
   {
     name: 'queue_sla_events',
-    note: 'Marcadores do SLA da fila: alerta, escalonamento e "precisa de atenção". Vazio até QUEUE_SLA_ENABLED=true.',
+    note: 'Marcadores do SLA da fila: alerta, escalonamento e "precisa de atenção". Vazio até algum agente ligar o acompanhamento da fila no Estúdio.',
     sql: `SELECT m.metadata->>'event' AS event, count(*)::int chats FROM messages m
           WHERE m.type = 'system' AND m.metadata->>'event' IN ('queue_sla_breached', 'queue_sla_escalated', 'queue_sla_escalation_needed')
             AND m.created_at >= $1 AND m.created_at < $2 AND ($3::uuid IS NULL OR m.workspace_id = $3) GROUP BY 1 ORDER BY 2 DESC`,

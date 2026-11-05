@@ -3,12 +3,8 @@
  * High precision on purpose: the cost of a false positive is one transfer, but a missed request is the worst
  * thing the AI can do. Ambiguous phrasings ("pode chamar o técnico", "preciso de uma pessoa para instalar") are NOT matched.
  *
- * Opt-in per agent while the rollout is measured. `*` enables all agents. Without the variable nothing changes.
+ * Each agent opts in from the Studio (concludeStage.automation.transferWhenCustomerAsksForPerson).
  */
-export function studioHumanRequestGuardEnabled(agentId: string): boolean {
-  const selected = process.env.STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS?.split(',').map((id) => id.trim()).filter(Boolean) || [];
-  return selected.includes('*') || selected.includes(agentId);
-}
 
 const normalize = (value: string) => value
   .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()

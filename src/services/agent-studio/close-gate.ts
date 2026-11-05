@@ -6,13 +6,8 @@ import { detectHumanRequest } from './human-request';
  * preconditions, not a by-product of "every request is resolved". The model proposes by resolving
  * its requests; this gate, in plain code, decides whether the chat may actually be closed.
  *
- * Opt-in per agent while the rollout is measured. `*` enables all agents. Without the variable the
- * previous behaviour is untouched.
+ * Each agent opts in from the Studio (concludeStage.automation.closeOnCustomerConfirmation).
  */
-export function studioExplicitCloseEnabled(agentId: string): boolean {
-  const selected = process.env.STUDIO_EXPLICIT_CLOSE_AGENT_IDS?.split(',').map((id) => id.trim()).filter(Boolean) || [];
-  return selected.includes('*') || selected.includes(agentId);
-}
 
 const normalize = (value: string) => value
   .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()

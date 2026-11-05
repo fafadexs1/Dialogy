@@ -1,10 +1,13 @@
+import type { AgentStudioDocument, StudioAutomation } from './types';
+import { studioAutomation } from './automation';
+
 /**
  * Inactivity watchdog, pure part (docs/PLAN-ia-autonoma-transferir-encerrar.md, 3.5).
  * An AI chat where the customer stopped answering is followed up once and, if still silent, closed with an explicit
  * basis (`inatividade_pos_followup`). It never closes without having warned the customer first, never acts outside
  * the allowed hours, and enforces a floor on every wait so a misconfiguration cannot recreate 6-second closes.
  *
- * Opt-in per agent (STUDIO_INACTIVITY_AGENT_IDS, ids or *). Empty keeps the watchdog off.
+ * Each agent turns it on and sets the waits, hours and messages in the Studio (concludeStage.automation.inactivity).
  */
 
 export const MIN_WAIT_MINUTES = 10;
@@ -24,26 +27,23 @@ export type InactivityConfig = {
 const DEFAULT_FOLLOWUP = 'Oi! Você ainda está por aí? Se precisar de mais alguma coisa, é só me dizer. Se não precisar, vou encerrar este atendimento em breve.';
 const DEFAULT_CLOSE = 'Como não tivemos retorno, estou encerrando este atendimento por aqui. Se precisar de algo, é só chamar de novo!';
 
-const minutes = (value: string | undefined, fallback: number) => {
-  const parsed = Number.parseInt(value || '', 10);
-  return Math.max(MIN_WAIT_MINUTES, Number.isInteger(parsed) && parsed > 0 ? parsed : fallback);
-};
-
-export function studioInactivityAgentIds(): string[] {
-  return process.env.STUDIO_INACTIVITY_AGENT_IDS?.split(',').map((id) => id.trim()).filter(Boolean) || [];
+/** null when the agent did not turn the watchdog on. The floor applies even if a stored value is lower. */
+export function inactivityConfigFromAutomation(automation: StudioAutomation, timeZone?: string | null): InactivityConfig | null {
+  const { inactivity } = automation;
+  if (!inactivity.enabled) return null;
+  const valid = inactivity.windowStartHour < inactivity.windowEndHour;
+  return {
+    followupAfterMs: Math.max(MIN_WAIT_MINUTES, inactivity.followupMinutes) * 60_000,
+    closeAfterMs: Math.max(MIN_WAIT_MINUTES, inactivity.closeMinutes) * 60_000,
+    windowStartHour: valid ? inactivity.windowStartHour : 8, windowEndHour: valid ? inactivity.windowEndHour : 21,
+    timeZone: timeZone || 'America/Sao_Paulo',
+    followupText: inactivity.followupMessage.trim() || DEFAULT_FOLLOWUP,
+    closeText: inactivity.closeMessage.trim() || DEFAULT_CLOSE,
+  };
 }
 
-export function studioInactivityConfig(env: Record<string, string | undefined> = process.env): InactivityConfig {
-  const [start, end] = (env.STUDIO_INACTIVITY_WINDOW || '8-21').split('-').map((part) => Number.parseInt(part, 10));
-  const valid = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end <= 24 && start < end;
-  return {
-    followupAfterMs: minutes(env.STUDIO_INACTIVITY_FOLLOWUP_MINUTES, 30) * 60_000,
-    closeAfterMs: minutes(env.STUDIO_INACTIVITY_CLOSE_MINUTES, 30) * 60_000,
-    windowStartHour: valid ? start : 8, windowEndHour: valid ? end : 21,
-    timeZone: env.STUDIO_INACTIVITY_TZ || 'America/Sao_Paulo',
-    followupText: env.STUDIO_INACTIVITY_FOLLOWUP_TEXT?.trim() || DEFAULT_FOLLOWUP,
-    closeText: env.STUDIO_INACTIVITY_CLOSE_TEXT?.trim() || DEFAULT_CLOSE,
-  };
+export function inactivityConfigForAgent(document: Pick<AgentStudioDocument, 'concludeStage' | 'rules'>, env: Record<string, string | undefined> = process.env): InactivityConfig | null {
+  return inactivityConfigFromAutomation(studioAutomation(document, env), document.rules?.timeZone);
 }
 
 export function insideAllowedHours(now: Date, config: Pick<InactivityConfig, 'windowStartHour' | 'windowEndHour' | 'timeZone'>): boolean {

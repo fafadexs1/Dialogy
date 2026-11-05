@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FIELD_DATA_TYPES, FIELD_DATA_TYPE_LABELS, type AgentStudioDocument, type CollectedFieldDefinition } from '@/services/agent-studio/types';
+import { StudioAutomationSettings } from './studio-automation-settings';
 
 export type StudioResources = { teams: { id: string; name: string }[]; tags: { id: string; name: string }[]; fields: { id: string; name: string; type: string }[] };
 const control = 'mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white';
@@ -66,6 +67,7 @@ export function StudioStageSettings({ stage, document, onChange, onClose, resour
         <label className="block">Equipe quando não conseguir resolver<select className={control} value={resources.teams.find((team) => team.id === draft.concludeStage.handoffTeam || team.name === draft.concludeStage.handoffTeam)?.id || ''} onChange={(event) => conclude({ handoffTeam: event.target.value })}><option value="">Selecione uma equipe</option>{resources.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
         <label className="block">Mensagem de transferência<Textarea className={control} value={draft.concludeStage.handoffMessage} onChange={(event) => conclude({ handoffMessage: event.target.value })} /></label>
         <label className="block">Tentativas para entender o pedido<select className={control} value={draft.concludeStage.maxRetriesBeforeHandoff} onChange={(event) => conclude({ maxRetriesBeforeHandoff: Number(event.target.value) })}>{[1, 2, 3, 4, 5].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <StudioAutomationSettings automation={draft.concludeStage.automation} teams={resources.teams} onChange={(automation) => conclude({ automation })} />
       </>}
     </div><DialogFooter><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button className="bg-emerald-600" onClick={() => { onChange(draft); onClose(); }}>Aplicar ao rascunho</Button></DialogFooter>
   </DialogContent></Dialog>;

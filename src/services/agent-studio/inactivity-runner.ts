@@ -4,29 +4,35 @@ import { randomUUID } from 'node:crypto';
 
 import { db } from '@/lib/db';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
-import { decideInactivityAction, studioInactivityAgentIds, studioInactivityConfig, type InactivityAction, type InactivityConfig } from './inactivity';
+import { studioAutomationKilled } from './automation';
+import { decideInactivityAction, inactivityConfigFromAutomation, type InactivityAction } from './inactivity';
+import { StudioAutomationSchema } from './types';
 
 const ADVISORY_LOCK_KEY = 6_178_202_611;
 const BATCH = 25;
+const INTERVAL_MS = 120_000;
 let timer: ReturnType<typeof setInterval> | undefined;
 let running = false;
 
 type Candidate = {
   chat_id: string; workspace_id: string; system_agent_id: string; system_agent_name: string | null; agent_id: string; session_id: string;
   last_ai_at: Date; last_customer_at: Date | null; followup_at: Date | null;
+  /** The automation settings of the release this chat's session is pinned to, exactly as the company published them. */
+  automation: unknown; time_zone: string | null;
 };
 
 /**
  * Open chats owned by an AI agent whose last word was the AI's, in a session that is waiting for the customer or
- * already resolved. Human-owned, closed and flow-owned chats never match.
+ * already resolved, and whose agent turned the watchdog on in the Studio. Human-owned, closed and flow-owned chats
+ * never match, and neither does any agent that did not opt in: each company decides for its own agents.
  */
-export async function findInactivityCandidates(agentIds: string[], database: Pick<typeof db, 'query'> = db): Promise<Candidate[]> {
+export async function findInactivityCandidates(database: Pick<typeof db, 'query'> = db): Promise<Candidate[]> {
   const result = await database.query(
     `WITH latest AS (
-       SELECT DISTINCT ON (s.chat_id) s.chat_id, s.id AS session_id, s.agent_id, s.status
+       SELECT DISTINCT ON (s.chat_id) s.chat_id, s.id AS session_id, s.agent_id, s.release_id, s.status
          FROM agent_studio_sessions s ORDER BY s.chat_id, s.updated_at DESC)
      SELECT c.id AS chat_id, c.workspace_id, c.assigned_system_agent_id AS system_agent_id, sa.name AS system_agent_name,
-            l.agent_id, l.session_id,
+            l.agent_id, l.session_id, rel.automation, rel.time_zone,
             (SELECT max(m.created_at) FROM messages m WHERE m.chat_id = c.id AND m.workspace_id = c.workspace_id AND m.from_me = TRUE AND m.type <> 'system') AS last_ai_at,
             (SELECT max(m.created_at) FROM messages m WHERE m.chat_id = c.id AND m.workspace_id = c.workspace_id AND m.from_me = FALSE AND m.type <> 'system') AS last_customer_at,
             (SELECT max(m.created_at) FROM messages m WHERE m.chat_id = c.id AND m.workspace_id = c.workspace_id AND m.type = 'system'
@@ -35,13 +41,19 @@ export async function findInactivityCandidates(agentIds: string[], database: Pic
                                              AND x.from_me = FALSE AND x.type <> 'system'), 'epoch'::timestamptz)) AS followup_at
        FROM chats c
        JOIN latest l ON l.chat_id = c.id
+       JOIN LATERAL (
+         SELECT v.snapshot->'agent_release_manifest'->'agentSnapshot'->'concludeStage'->'automation' AS automation,
+                v.snapshot->'agent_release_manifest'->'agentSnapshot'->'rules'->>'timeZone' AS time_zone
+           FROM autopilot_config_versions v
+          WHERE v.config_id = l.agent_id AND v.workspace_id = c.workspace_id
+            AND v.snapshot->'agent_release_manifest'->>'releaseId' = l.release_id::text
+          LIMIT 1) rel ON rel.automation->'inactivity'->>'enabled' = 'true'
        LEFT JOIN system_agents sa ON sa.id = c.assigned_system_agent_id AND sa.workspace_id = c.workspace_id
       WHERE c.status <> 'encerrados' AND c.agent_id IS NULL AND c.assigned_system_agent_id IS NOT NULL AND c.is_autopilot_active = TRUE
         AND l.status IN ('waiting_input', 'resolved')
-        AND ($1::text[] IS NULL OR l.agent_id::text = ANY($1::text[]))
       ORDER BY c.updated_at ASC
-      LIMIT $2`,
-    [agentIds.includes('*') ? null : agentIds, BATCH * 4]);
+      LIMIT $1`,
+    [BATCH * 4]);
   return result.rows as Candidate[];
 }
 
@@ -52,15 +64,17 @@ export type InactivityDeps = {
   database?: Pick<typeof db, 'query'>;
 };
 
-export async function runInactivityWatchdogOnce(deps: InactivityDeps, config: InactivityConfig = studioInactivityConfig()) {
-  const agentIds = studioInactivityAgentIds();
+export async function runInactivityWatchdogOnce(deps: InactivityDeps) {
   const summary = { examined: 0, followups: 0, closed: 0, failed: 0 };
-  if (!agentIds.length) return summary;
+  if (studioAutomationKilled()) return summary;
   const database = deps.database || db;
   const now = deps.now();
-  for (const candidate of await findInactivityCandidates(agentIds, database)) {
+  for (const candidate of await findInactivityCandidates(database)) {
     if (summary.followups + summary.closed >= BATCH) break;
     summary.examined += 1;
+    const settings = StudioAutomationSchema.safeParse(candidate.automation ?? {});
+    const config = settings.success ? inactivityConfigFromAutomation(settings.data, candidate.time_zone) : null;
+    if (!config) continue;
     const action: InactivityAction = decideInactivityAction({ now, config,
       lastAiAt: new Date(candidate.last_ai_at), lastCustomerAt: candidate.last_customer_at ? new Date(candidate.last_customer_at) : null,
       followupAt: candidate.followup_at ? new Date(candidate.followup_at) : null });
@@ -127,10 +141,9 @@ export async function runStudioInactivityWatchdogLocked() {
   } finally { client.release(); }
 }
 
+/** Always started: the query only returns chats of agents whose company turned the watchdog on in the Studio. */
 export function startStudioInactivityWatchdog() {
-  if (!studioInactivityAgentIds().length || timer) return;
-  const parsed = Number.parseInt(process.env.STUDIO_INACTIVITY_INTERVAL_MS || '', 10);
-  const interval = Math.max(30_000, Number.isInteger(parsed) && parsed > 0 ? parsed : 120_000);
+  if (timer) return;
   const tick = () => {
     if (running) return;
     running = true;
@@ -139,7 +152,7 @@ export function startStudioInactivityWatchdog() {
     }).catch((error) => console.error('[STUDIO_INACTIVITY] Ciclo falhou:', error)).finally(() => { running = false; });
   };
   const initial = setTimeout(tick, 45_000); (initial as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
-  timer = setInterval(tick, interval); (timer as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.();
+  timer = setInterval(tick, INTERVAL_MS); (timer as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.();
 }
 
 export function stopStudioInactivityWatchdog() {

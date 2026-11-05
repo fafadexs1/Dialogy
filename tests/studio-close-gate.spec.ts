@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { detectCustomerClosingIntent, evaluateStudioCloseGate, studioExplicitCloseEnabled } from '@/services/agent-studio/close-gate';
+import { closingClassifierEligible, detectCustomerClosingIntent, evaluateStudioCloseGate } from '@/services/agent-studio/close-gate';
 import { createStudioSession, type StudioSession } from '@/services/agent-studio/engine';
 
 describe('customer closing intent', () => {
@@ -61,17 +61,22 @@ describe('close gate', () => {
   });
 });
 
-describe('explicit close flag', () => {
-  const original = process.env.STUDIO_EXPLICIT_CLOSE_AGENT_IDS;
-  afterEach(() => { if (original === undefined) delete process.env.STUDIO_EXPLICIT_CLOSE_AGENT_IDS; else process.env.STUDIO_EXPLICIT_CLOSE_AGENT_IDS = original; });
+describe('model second opinion', () => {
+  const resolved = createStudioSession('agent-1', 'release-1', 's-1');
+  const state = { ...resolved, status: 'resolved' as const, phase: 'done' as const,
+    reasoning: { version: 2, requests: [{ id: 'r1', status: 'resolved' }], operations: [], pendingAction: null } as never };
 
-  it('is off by default and opt-in per agent, with * for all', () => {
-    delete process.env.STUDIO_EXPLICIT_CLOSE_AGENT_IDS;
-    expect(studioExplicitCloseEnabled('a')).toBe(false);
-    process.env.STUDIO_EXPLICIT_CLOSE_AGENT_IDS = 'a, b';
-    expect(studioExplicitCloseEnabled('a')).toBe(true);
-    expect(studioExplicitCloseEnabled('c')).toBe(false);
-    process.env.STUDIO_EXPLICIT_CLOSE_AGENT_IDS = '*';
-    expect(studioExplicitCloseEnabled('c')).toBe(true);
+  it('is only worth asking for a short message that is not a question or a request for a person', () => {
+    expect(closingClassifierEligible('fechou então, até amanhã')).toBe(true);
+    expect(closingClassifierEligible('Qual o prazo de instalação?')).toBe(false);
+    expect(closingClassifierEligible('quero falar com um atendente')).toBe(false);
+    expect(closingClassifierEligible('')).toBe(false);
+    expect(closingClassifierEligible('a'.repeat(101))).toBe(false);
+  });
+
+  it('can supply the missing confirmation, and nothing else', () => {
+    expect(evaluateStudioCloseGate({ state, customerMessage: 'fechou então, até amanhã', confirmedByClassifier: true })).toEqual({ close: true, basis: 'cliente_confirmou', blockedBy: [] });
+    expect(evaluateStudioCloseGate({ state: { ...state, pendingField: 'cpf' }, customerMessage: 'fechou então', confirmedByClassifier: true }).blockedBy).toEqual(['pending_field']);
+    expect(evaluateStudioCloseGate({ state: { ...state, inFlight: { key: 'k', stepId: 's' } }, customerMessage: 'fechou então', confirmedByClassifier: true }).close).toBe(false);
   });
 });

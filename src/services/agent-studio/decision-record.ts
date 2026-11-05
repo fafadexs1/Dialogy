@@ -44,7 +44,7 @@ export function buildStudioDecisionLedgerEntry(input: {
   replay: boolean;
   /** null: no close attempted. true/false: whether the chat row was actually closed. */
   chatClosed?: boolean | null;
-  /** How the close was decided for a resolved session. `explicit` runs the close gate (STUDIO_EXPLICIT_CLOSE_AGENT_IDS). */
+  /** How the close was decided for a resolved session. `explicit` runs the close gate (the agent's closeOnCustomerConfirmation setting). */
   closeDecision?: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[]; classifier?: boolean } | null;
   /** What the promise guard found in the reply. `rewritten` is true only in enforce mode. */
   promiseGuard?: { mode: string; kinds: string[]; rewritten: boolean } | null;

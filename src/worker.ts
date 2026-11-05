@@ -37,8 +37,8 @@ async function main() {
   startAgentStudioRetention();
   startStudioToolMemoryRetention();
 
-  // Both are opt-in by environment variable and do nothing otherwise
-  // (STUDIO_INACTIVITY_AGENT_IDS, QUEUE_SLA_ENABLED). Each takes a database advisory lock, so extra workers are harmless.
+  // Both read each agent's own settings (Studio > Concluir o atendimento > Autonomia) and do nothing for agents that did not
+  // turn them on. Each takes a database advisory lock, so extra workers are harmless.
   startStudioInactivityWatchdog();
   startQueueSla();
 
