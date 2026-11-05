@@ -28,7 +28,9 @@ const disagreements = []; let total = 0; let same = 0; let unlabelled = 0; let s
 
 for (const id of ids) {
   const a = A.get(id); const b = B.get(id);
-  if (!a.gold?.rater || !b.gold?.rater) { unlabelled += 1; continue; }
+  // A conversation only counts once both raters marked it reviewed: no decision recorded means "continue",
+  // which is only meaningful for a conversation somebody actually read to the end.
+  if (!a.gold?.reviewed || !b.gold?.reviewed) { unlabelled += 1; continue; }
   const la = labels(a); const lb = labels(b);
   la.forEach((item, index) => {
     const other = lb[index]; if (!other) return;

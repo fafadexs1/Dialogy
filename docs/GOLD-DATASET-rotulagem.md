@@ -29,9 +29,12 @@ Para cada turno com `role: "customer"`, responda: **o que um atendente automáti
 
 Preencha `gold.decisions` só nas **exceções ao `continue`**; turno sem registro conta como `continue`.
 
+A página grava isto por você; o formato é só para referência:
+
 ```json
 "gold": {
-  "rater": "ana",
+  "rater": "rater-a",
+  "reviewed": true,
   "decisions": [
     { "turn": 12, "decision": "handoff", "reason": "cliente_pediu" },
     { "turn": 20, "decision": "close", "closeBasis": "cliente_confirmou" }
@@ -73,12 +76,22 @@ Preencha `gold.decisions` só nas **exceções ao `continue`**; turno sem regist
 6. **Mídia (`[MIDIA:audio]` etc.)**: se o conteúdo é essencial e não dá para saber o que foi dito, não force `handoff`; use `continue` e escreva em `gold.note` que faltava o conteúdo.
 7. **Mensagens de `role: "system"`** (transferência, encerramento) mostram o que o sistema fez; não são do cliente.
 
-## Duas pessoas por conversa
+## Como rotular: página offline
 
-Cada conversa precisa de **duas pessoas independentes**. Copie `.gold-dataset/` para uma pasta por pessoa (`rater-a/`, `rater-b/`) e preencha só o `gold` do seu arquivo. Depois:
+Ninguém precisa editar JSON. `node scripts/build-gold-labeling-pages.cjs` gera, em `.gold-dataset/package/`, uma página por avaliador (`rotulagem-rater-a.html`, `rotulagem-rater-b.html`) e este guia (`GUIA.md`). Cada pessoa abre a sua página no navegador, sem internet e sem instalar nada:
+
+- as 151 conversas aparecem em ordem embaralhada, sem o grupo de origem e sem as linhas de sistema que anunciam a transferência ou o encerramento reais;
+- depois de cada mensagem do cliente há um seletor: **Continuar** (padrão), **Transferir para uma pessoa** (pede o motivo) ou **Encerrar** (pede a base);
+- marque **Revisei esta conversa inteira** ao terminar; só as marcadas contam;
+- o progresso é salvo no navegador. Para parar e continuar em outro computador, use **Baixar rotulagem** e depois **Carregar arquivo salvo**;
+- ao final, a pessoa devolve o arquivo `rotulagem-rater-X.jsonl`.
+
+O mapa que liga cada conversa ao grupo e ao desfecho real (`answer-key.json`) fica em `.gold-dataset/` e **não deve ser enviado**.
+
+Cada conversa precisa de **duas pessoas independentes**, cada uma com a própria página, sem combinar respostas. Com os dois arquivos devolvidos:
 
 ```bash
-node scripts/gold-agreement.cjs rater-a/transferred.jsonl rater-b/transferred.jsonl
+node scripts/gold-agreement.cjs rotulagem-rater-a.jsonl rotulagem-rater-b.jsonl
 ```
 
 O script mostra a concordância e o kappa de Cohen por decisão e lista as conversas em que divergiram (só ids, sem texto). Divergências vão para uma terceira pessoa decidir. Kappa abaixo de 0,6 indica que este guia precisa de ajuste antes de seguir.
