@@ -60,7 +60,7 @@ const QUERIES = [
     sql: `WITH h AS (
             SELECT s.id, s.completed_at, (SELECT min(m.created_at) FROM messages m
               WHERE m.chat_id = s.chat_id AND m.workspace_id = s.workspace_id AND m.from_me = true
-                AND NOT (m.metadata ? 'autopilotSourceMessageId') AND m.type <> 'system' AND m.created_at > s.completed_at) first_human
+                AND m.sender_user_id IS NOT NULL AND m.type <> 'system' AND m.created_at > s.completed_at) first_human
             FROM ${REAL_SESSIONS} AND s.status = 'transferred' AND s.completed_at IS NOT NULL)
           SELECT count(*)::int handoffs, count(first_human)::int answered, (count(*) - count(first_human))::int never_answered,
             round((percentile_cont(.5) WITHIN GROUP (ORDER BY extract(epoch FROM first_human - completed_at)))::numeric, 0) p50_s,
@@ -135,12 +135,60 @@ const QUERIES = [
     sql: `WITH q AS (
             SELECT cm.chat_id, cm.workspace_id, cm.created_at AS queued_at, (SELECT min(m.created_at) FROM messages m
               WHERE m.chat_id = cm.chat_id AND m.workspace_id = cm.workspace_id AND m.from_me = true
-                AND NOT (m.metadata ? 'autopilotSourceMessageId') AND m.type <> 'system' AND m.created_at > cm.created_at) AS first_human
+                AND m.sender_user_id IS NOT NULL AND m.type <> 'system' AND m.created_at > cm.created_at) AS first_human
             FROM messages cm WHERE cm.type = 'system' AND cm.metadata->>'event' = 'transfer_queued' AND cm.created_at >= $1 AND cm.created_at < $2
               AND ($3::uuid IS NULL OR cm.workspace_id = $3))
           SELECT count(*)::int queued, count(first_human)::int answered, (count(*) - count(first_human))::int never_answered,
             round((percentile_cont(.5) WITHIN GROUP (ORDER BY extract(epoch FROM first_human - queued_at)))::numeric, 0) p50_s,
             round((percentile_cont(.95) WITHIN GROUP (ORDER BY extract(epoch FROM first_human - queued_at)))::numeric, 0) p95_s FROM q`,
+  },
+  {
+    name: 'ledger_handoff_reasons',
+    note: 'Motivo (lista fechada) das transferências feitas pelo Estúdio. nao_classificado é o que ainda precisa de regra ou de reasonCode do modelo.',
+    sql: `SELECT COALESCE(l.metadata->>'handoffReasonCode', 'sem_motivo') AS reason_code, count(*)::int handoffs FROM agent_decision_ledger l
+          WHERE l.created_at >= $1 AND l.created_at < $2 AND ($3::uuid IS NULL OR l.workspace_id = $3)
+            AND l.metadata->>'decisionStage' = 'studio_turn' AND l.decision_type = 'handoff' GROUP BY 1 ORDER BY 2 DESC`,
+  },
+  {
+    name: 'ledger_close_gate',
+    note: 'Encerramento explícito: quantos resolvidos foram fechados, quantos ficaram abertos esperando confirmação e o que barrou. closeClassifierUsed mostra quando o modelo foi consultado.',
+    sql: `SELECT l.metadata->>'closeMode' AS close_mode, l.metadata->>'basis' AS basis, COALESCE(l.metadata->>'closeClassifierUsed', 'null') AS classifier_used,
+            COALESCE(l.metadata->'closeBlockedBy'->>0, 'none') AS first_blocker, count(*)::int turns
+          FROM agent_decision_ledger l WHERE l.created_at >= $1 AND l.created_at < $2 AND ($3::uuid IS NULL OR l.workspace_id = $3)
+            AND l.metadata->>'decisionStage' = 'studio_turn' AND l.metadata->>'closeMode' IS NOT NULL GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC`,
+  },
+  {
+    name: 'ledger_promise_guard',
+    note: 'Promessas que a resposta fez sem lastro (transfer, close, action, delivery), por modo. rewritten=true só em enforce. Taxa = violações / turnos com resposta.',
+    sql: `SELECT l.metadata->>'promiseGuardMode' AS mode, v.kind, COALESCE(l.metadata->>'promiseRewritten', 'false') AS rewritten, count(*)::int turns
+          FROM agent_decision_ledger l, jsonb_array_elements_text(l.metadata->'promiseViolations') AS v(kind)
+          WHERE l.created_at >= $1 AND l.created_at < $2 AND ($3::uuid IS NULL OR l.workspace_id = $3)
+            AND l.metadata->>'decisionStage' = 'studio_turn' AND jsonb_typeof(l.metadata->'promiseViolations') = 'array' GROUP BY 1, 2, 3 ORDER BY 4 DESC`,
+  },
+  {
+    name: 'ledger_promise_guard_coverage',
+    note: 'Turnos do Estúdio avaliados pelo validador de promessas, com e sem violação.',
+    sql: `SELECT l.metadata->>'promiseGuardMode' AS mode, count(*)::int turns, count(*) FILTER (WHERE jsonb_typeof(l.metadata->'promiseViolations') = 'array')::int with_violation
+          FROM agent_decision_ledger l WHERE l.created_at >= $1 AND l.created_at < $2 AND ($3::uuid IS NULL OR l.workspace_id = $3)
+            AND l.metadata->>'decisionStage' = 'studio_turn' AND l.metadata->>'promiseGuardMode' IS NOT NULL GROUP BY 1`,
+  },
+  {
+    name: 'inactivity_watchdog',
+    note: 'Avisos de inatividade enviados e encerramentos por inatividade (ledger), e quantos clientes responderam em até 2 h depois do aviso.',
+    sql: `SELECT count(*)::int followups,
+            count(*) FILTER (WHERE EXISTS (SELECT 1 FROM messages r WHERE r.chat_id = f.chat_id AND r.workspace_id = f.workspace_id AND r.from_me = FALSE
+                              AND r.type <> 'system' AND r.created_at > f.created_at AND r.created_at <= f.created_at + interval '2 hours'))::int customer_replied_2h,
+            (SELECT count(*)::int FROM agent_decision_ledger l WHERE l.created_at >= $1 AND l.created_at < $2 AND ($3::uuid IS NULL OR l.workspace_id = $3)
+               AND l.metadata->>'basis' IN ('inatividade_pos_followup', 'inatividade_fora_da_janela')) AS inactivity_closes
+          FROM messages f WHERE f.type = 'system' AND f.metadata->>'event' = 'studio_inactivity_followup' AND f.created_at >= $1 AND f.created_at < $2
+            AND ($3::uuid IS NULL OR f.workspace_id = $3)`,
+  },
+  {
+    name: 'queue_sla_events',
+    note: 'Marcadores do SLA da fila: alerta, escalonamento e "precisa de atenção". Vazio até QUEUE_SLA_ENABLED=true.',
+    sql: `SELECT m.metadata->>'event' AS event, count(*)::int chats FROM messages m
+          WHERE m.type = 'system' AND m.metadata->>'event' IN ('queue_sla_breached', 'queue_sla_escalated', 'queue_sla_escalation_needed')
+            AND m.created_at >= $1 AND m.created_at < $2 AND ($3::uuid IS NULL OR m.workspace_id = $3) GROUP BY 1 ORDER BY 2 DESC`,
   },
   {
     name: 'handoff_failed_by_week',

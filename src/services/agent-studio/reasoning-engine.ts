@@ -11,6 +11,8 @@ import { studioMemoryContext, studioMemoryEventContext, type StudioMemoryEvent, 
 import { resolveStudioMapping, type StudioDataContext } from './data-mapping';
 import { studioReasoningPaths } from './reasoning-paths';
 import { resolveStudioCatalogImage, StudioCatalogImageSchema } from './catalog-media';
+import { buildHandoffBriefing, resolveHandoffReasonCode } from './handoff-reasons';
+import { detectHumanRequest } from './human-request';
 
 type Source = { messageId: string; content: string; fromMe: boolean };
 export type StudioReasoningInput = {
@@ -19,6 +21,8 @@ export type StudioReasoningInput = {
   maxDecisions?: number;
   mediaAnalysisContext?: string;
   suggestionOnly?: boolean;
+  /** Transfer straight away, without a model round trip, when the customer clearly asks for a person. */
+  humanRequestGuard?: boolean;
   compactContext?: boolean;
   surfaceProviderFailures?: boolean;
   historyCursor?: string | null;
@@ -278,6 +282,56 @@ export async function advanceStudioReasoningSession(input: StudioReasoningInput)
     observations,
     ...(input.compactContext ? { finalDecisionOnly: modelDecisions >= (input.maxDecisions ?? 8) } : {}),
   });
+
+  // One transfer routine for the model's `handoff` action and for the human-request guard below.
+  // Returns true once the transfer is confirmed (the turn is then finished in `handoffOutcome`).
+  let handoffOutcome: Awaited<ReturnType<typeof finish>> | null = null;
+  const customerAskedForHuman = detectHumanRequest(input.message);
+  const attemptHandoff = async (action: { requestId: string | null; reason: string; declaredCode?: unknown }): Promise<boolean> => {
+    const targetRequest = state.reasoning!.requests.find((request) => request.id === action.requestId && request.status === 'active');
+    const publishedHandoff = targetRequest ? businessPaths(targetRequest)?.handoffs[0] : undefined;
+    const operationId = `${state.id}:handoff`;
+    if (state.reasoning!.operations.some((op) => op.id === operationId)) {
+      observations.push({ error: 'handoff_already_attempted', detail: 'Não repita uma transferência já solicitada.' }); return false;
+    }
+    // Preserve any business operation requiring reconciliation when a customer asks for a person.
+    const priorInFlight = state.inFlight;
+    const transfer: StudioReasoningState['operations'][number] = { id: operationId, requestId: '_handoff', capabilityId: '_handoff',
+      signature: operationId, status: 'unknown', readOnly: false, title: 'Transferir atendimento', values: {}, at: now() };
+    state.reasoning!.operations.push(transfer);
+    state.inFlight = priorInFlight || { key: operationId, stepId: 'handoff' }; await checkpoint();
+    const reason = action.reason || publishedHandoff?.reason || '';
+    const reasonCode = resolveHandoffReasonCode({ declared: action.declaredCode, reason, customerAskedForHuman });
+    let briefing = '';
+    try {
+      briefing = buildHandoffBriefing({ reasonCode, reason,
+        requests: state.reasoning!.requests.map((request) => ({ objective: request.objective, status: request.status,
+          values: currentChoiceValues(request), choiceLabels: request.choiceLabels, unavailable: request.unavailable })),
+        operations: state.reasoning!.operations.map((operation) => ({ title: operation.title, status: operation.status, readOnly: operation.readOnly })),
+        pendingActionText: state.reasoning!.pendingAction?.proposalText, budgetReached });
+    } catch { /* A missing briefing must never block the transfer itself. */ }
+    let result: Awaited<ReturnType<typeof deps.handoff>>;
+    try {
+      result = await deps.handoff(publishedHandoff?.team || document.concludeStage.handoffTeam, reason, { ...input.context, values: {} }, operationId, { reasonCode, briefing });
+    } catch {
+      deps.assertActive?.();
+      transfer.failureCategory = 'unknown_effect';
+      observations.push({ error: 'handoff_outcome_unknown', detail: 'A transferência não teve confirmação. Não anuncie que o cliente foi encaminhado, não repita a transferência e preserve pedidos pendentes. Explique o impedimento; consultas sem alteração ainda podem ajudar.' });
+      event('Transferência sem confirmação de resultado', 'outcome_unknown');
+      await checkpoint();
+      return false;
+    }
+    deps.assertActive?.(); transfer.status = 'succeeded'; state.inFlight = priorInFlight; state.phase = 'done'; state.status = 'transferred';
+    state.handoff = { reasonCode, at: now() };
+    event('Transferência executada', 'transferred');
+    handoffOutcome = await finish(result?.message || document.concludeStage.handoffMessage);
+    return true;
+  };
+  // A customer asking for a person beats everything, and must not wait for a model round trip.
+  if (input.humanRequestGuard && customerAskedForHuman && !input.suggestionOnly) {
+    event('Pedido de atendimento humano detectado', 'human_request_guard');
+    if (await attemptHandoff({ requestId: null, reason: 'O cliente pediu atendimento humano.', declaredCode: 'cliente_pediu' })) return handoffOutcome!;
+  }
 
   for (let iteration = 0; iteration < (input.maxDecisions ?? 8); iteration++) {
     deps.assertActive?.();
@@ -602,32 +656,8 @@ export async function advanceStudioReasoningSession(input: StudioReasoningInput)
       deps.assertActive?.(); continue;
     }
     if (action.kind === 'handoff') {
-      const targetRequest = state.reasoning.requests.find((request) => request.id === action.requestId && request.status === 'active');
-      const publishedHandoff = targetRequest ? businessPaths(targetRequest)?.handoffs[0] : undefined;
-      const operationId = `${state.id}:handoff`;
-      if (state.reasoning.operations.some((op) => op.id === operationId)) {
-        observations.push({ error: 'handoff_already_attempted', detail: 'Não repita uma transferência já solicitada.' }); continue;
-      }
-      // Preserve any business operation requiring reconciliation when a customer asks for a person.
-      const priorInFlight = state.inFlight;
-      const transfer: StudioReasoningState['operations'][number] = { id: operationId, requestId: '_handoff', capabilityId: '_handoff',
-        signature: operationId, status: 'unknown', readOnly: false, title: 'Transferir atendimento', values: {}, at: now() };
-      state.reasoning.operations.push(transfer);
-      state.inFlight = priorInFlight || { key: operationId, stepId: 'handoff' }; await checkpoint();
-      let result: Awaited<ReturnType<typeof deps.handoff>>;
-      try {
-        result = await deps.handoff(publishedHandoff?.team || document.concludeStage.handoffTeam, action.reason || publishedHandoff?.reason || '', { ...input.context, values: {} }, operationId);
-      } catch {
-        deps.assertActive?.();
-        transfer.failureCategory = 'unknown_effect';
-        observations.push({ error: 'handoff_outcome_unknown', detail: 'A transferência não teve confirmação. Não anuncie que o cliente foi encaminhado, não repita a transferência e preserve pedidos pendentes. Explique o impedimento; consultas sem alteração ainda podem ajudar.' });
-        event('Transferência sem confirmação de resultado', 'outcome_unknown');
-        await checkpoint();
-        continue;
-      }
-      deps.assertActive?.(); transfer.status = 'succeeded'; state.inFlight = priorInFlight; state.phase = 'done'; state.status = 'transferred';
-      event('Transferência executada', 'transferred');
-      return finish(result?.message || document.concludeStage.handoffMessage);
+      if (await attemptHandoff({ requestId: action.requestId, reason: action.reason, declaredCode: action.reasonCode })) return handoffOutcome!;
+      continue;
     }
     const request = state.reasoning.requests.find((r) => r.id === action.requestId && r.status === 'active');
     const capability = request && capabilities(request).find((c) => c.id === action.capabilityId);

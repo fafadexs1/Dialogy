@@ -31,6 +31,8 @@ export async function queueChatForUnavailableTeam(input: {
   chatId: string;
   teamId: string;
   reasonCode: TeamAvailabilityReason;
+  /** What to record as the reason when it is not the availability code (for example an SLA escalation). */
+  recordedReason?: string;
   /** Stable per handoff attempt; replays return `alreadyQueued` instead of notifying twice. */
   operationId: string;
   /** Customer-facing notice. Omit to queue silently (the flow sends its own message). */
@@ -71,7 +73,7 @@ export async function queueChatForUnavailableTeam(input: {
      SELECT $6, $2, moved.id, 'system', $7, $8::jsonb, clock_timestamp() FROM moved RETURNING chat_id`,
     [input.chatId, input.workspaceId, input.teamId, teamRow.tag, teamRow.color, randomUUID(),
       `Atendimento encaminhado para a fila de ${teamName}.`,
-      JSON.stringify({ event: 'transfer_queued', to_team_id: input.teamId, reason: input.reasonCode, operationId: input.operationId })],
+      JSON.stringify({ event: 'transfer_queued', to_team_id: input.teamId, reason: input.recordedReason || input.reasonCode, operationId: input.operationId })],
   );
   if ((queued.rowCount ?? queued.rows.length) === 0) return { queued: false, skipped: 'chat_closed_or_missing', teamName };
 

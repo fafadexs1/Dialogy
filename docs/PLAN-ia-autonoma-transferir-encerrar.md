@@ -99,6 +99,28 @@ O fechamento usa o mesmo caminho auditado das ferramentas (`close_chat` com `clo
 
 **Como ligar com segurança:** um agente de baixo risco primeiro (`STUDIO_EXPLICIT_CLOSE_AGENT_IDS=<id>` no app e no worker de IA), acompanhar `ledger_studio_decisions` do baseline por 1 a 2 dias úteis e só então ampliar. Voltar atrás é esvaziar a variável.
 
+### 1.4 Fase 1 completa no código (05/11/2026): cinco itens, todos atrás de flag
+
+| Item | O que faz | Flag (padrão) | Onde medir |
+|---|---|---|---|
+| Motivo de transferência em lista fechada + briefing | O modelo informa `reasonCode`; código válido vence, texto livre é classificado como segunda opção, `nao_classificado` quando nada casa. O humano recebe uma nota interna com motivo, pedidos, dados já informados, o que a IA fez e o que falta. Segredos não entram. | Sempre ativo | `ledger_handoff_reasons` |
+| Pedido de humano | Quando o cliente pede uma pessoa de forma clara, a transferência acontece **antes** de chamar o modelo (sem espera de 10 a 30 s). Frases ambíguas ("pode chamar o técnico?") não casam. Se a transferência não confirmar, o laço do modelo continua. | `STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS` (vazio) | `ledger_handoff_reasons` (`cliente_pediu`) |
+| Validador de promessas | Compara a resposta com o que o sistema fez no turno: "encaminhei", "vou encerrar", "reservei/alterei/cancelei", "enviei o boleto" só passam com o fato correspondente. Ofertas e perguntas ("posso agendar?") passam. | `STUDIO_PROMISE_GUARD` (`observe`: só registra; `enforce` remove a frase) | `ledger_promise_guard`, `ledger_promise_guard_coverage` |
+| Classificador de despedida | Segunda opinião do modelo, só quando o portão de encerramento barrou **exclusivamente** por falta de confirmação e a mensagem é curta e sem pergunta. Pode acrescentar a confirmação, nunca remove outro bloqueio. | junto de `STUDIO_EXPLICIT_CLOSE_AGENT_IDS` | `ledger_close_gate` (`closeClassifierUsed`) |
+| Vigilante de inatividade | Aviso único após 30 min, encerramento 30 min depois com base `inatividade_pos_followup`. Só age entre 8h e 21h (America/Sao_Paulo), nunca encerra sem ter avisado, piso de 10 min em qualquer espera, não encerra se a mensagem de despedida falhar. Depois de 23 h sem mensagem do cliente (fora da janela do canal oficial) fecha sem mensagem. | `STUDIO_INACTIVITY_AGENT_IDS` (vazio = desligado) | `inactivity_watchdog` |
+| SLA da fila | Em 10 min sem resposta humana: marcador visível na conversa, aviso honesto ao cliente e alerta (webhook opcional, só ids e minutos). Em 20 min: escalona para a equipe de escalonamento, ou marca "precisa de atenção" quando não há uma. Fila por "fora do expediente" não entra. | `QUEUE_SLA_ENABLED` (`false`) | `queue_sla_events`, `handoff_queue_wait_for_first_human` |
+
+**Mudança de definição no baseline.** "Resposta humana" passou a ser mensagem com `sender_user_id`. Antes, o aviso de fila enviado por um agente de sistema contava como resposta humana e escondia chats sem atendimento.
+
+**O que isto não resolve.**
+- Os detectores são conservadores por escolha e ainda **não foram medidos contra conversas reais**. Isso é o replay no dataset ouro; sem ele, as taxas de acerto são desconhecidas.
+- O validador de promessas não julga fatos comerciais (preço, prazo, cobertura). Isso exige amarrar a resposta a fonte ou resultado de ferramenta e é um passo à parte.
+- O briefing e a lista fechada ainda não aparecem em tela para o operador além da nota interna; o motivo está no ledger e no baseline.
+- Nada disso está ligado em produção: tudo depende de variáveis de ambiente (app e worker com os mesmos valores).
+- O caminho de `process-chat.ts` não tem teste de ponta a ponta; os blocos puros e o motor de raciocínio têm.
+
+**Ordem sugerida para ligar:** 1) `STUDIO_PROMISE_GUARD=observe` (já é o padrão) por alguns dias e ler `ledger_promise_guard`; 2) `STUDIO_HUMAN_REQUEST_GUARD_AGENT_IDS` em um agente; 3) `STUDIO_EXPLICIT_CLOSE_AGENT_IDS` no mesmo agente; 4) `STUDIO_INACTIVITY_AGENT_IDS` no mesmo agente, depois que o item 3 estiver estável; 5) `QUEUE_SLA_ENABLED` com um `QUEUE_SLA_ESCALATION_TEAM_ID` válido; 6) só então `STUDIO_PROMISE_GUARD=enforce`.
+
 ## 2. Metas (SLOs de decisão), a calibrar na Fase 0
 
 **Transferência**

@@ -1,4 +1,5 @@
 import type { StudioSession } from './engine';
+import { detectHumanRequest } from './human-request';
 
 /**
  * Phase 1 of docs/PLAN-ia-autonoma-transferir-encerrar.md: closing a chat is a decision with
@@ -46,6 +47,16 @@ export function detectCustomerClosingIntent(message: string): boolean {
   return rest.every((word) => FILLERS.has(word));
 }
 
+/**
+ * Worth a model call only for a short, non-question message that is not a request for a person.
+ * The phrase list says no to many real goodbyes ("fechou então, até amanhã"); the classifier gets a second look,
+ * and the gate's other blockers still apply to whatever it answers.
+ */
+export function closingClassifierEligible(message: string): boolean {
+  const text = normalize(message || '');
+  return Boolean(text) && text.length <= 100 && !message.includes('?') && !detectHumanRequest(message);
+}
+
 export type StudioCloseBlocker =
   | 'not_resolved' | 'uncertain_operation' | 'pending_action' | 'open_requests'
   | 'pending_field' | 'pending_confirmation' | 'no_customer_confirmation';
@@ -56,6 +67,8 @@ export function evaluateStudioCloseGate(input: {
   state: Pick<StudioSession, 'status' | 'phase' | 'inFlight' | 'reasoning' | 'pendingField' | 'confirmation'>;
   /** The customer message that started this turn. */
   customerMessage: string;
+  /** A model second opinion that the message is only a goodbye. It can add a confirmation, never remove a blocker. */
+  confirmedByClassifier?: boolean;
 }): StudioCloseGateResult {
   const { state } = input;
   const blockedBy: StudioCloseBlocker[] = [];
@@ -65,6 +78,6 @@ export function evaluateStudioCloseGate(input: {
   if (state.reasoning?.requests.some((request) => !['resolved', 'cancelled'].includes(request.status))) blockedBy.push('open_requests');
   if (state.pendingField) blockedBy.push('pending_field');
   if (state.confirmation) blockedBy.push('pending_confirmation');
-  if (!detectCustomerClosingIntent(input.customerMessage)) blockedBy.push('no_customer_confirmation');
+  if (!detectCustomerClosingIntent(input.customerMessage) && !input.confirmedByClassifier) blockedBy.push('no_customer_confirmation');
   return blockedBy.length ? { close: false, blockedBy } : { close: true, basis: 'cliente_confirmou', blockedBy: [] };
 }

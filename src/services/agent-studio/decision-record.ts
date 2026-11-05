@@ -45,7 +45,9 @@ export function buildStudioDecisionLedgerEntry(input: {
   /** null: no close attempted. true/false: whether the chat row was actually closed. */
   chatClosed?: boolean | null;
   /** How the close was decided for a resolved session. `explicit` runs the close gate (STUDIO_EXPLICIT_CLOSE_AGENT_IDS). */
-  closeDecision?: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[] } | null;
+  closeDecision?: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[]; classifier?: boolean } | null;
+  /** What the promise guard found in the reply. `rewritten` is true only in enforce mode. */
+  promiseGuard?: { mode: string; kinds: string[]; rewritten: boolean } | null;
   /** Wall-clock for the whole turn, when the caller measured it. */
   latencyMs?: number | null;
 }): DecisionLedgerEntry {
@@ -84,8 +86,13 @@ export function buildStudioDecisionLedgerEntry(input: {
       suggestionOnly: input.suggestionOnly,
       replay: input.replay,
       chatClosed: input.chatClosed ?? null,
+      handoffReasonCode: state.handoff?.reasonCode ?? null,
       closeMode: input.closeDecision?.mode ?? null,
       closeBlockedBy: input.closeDecision?.blockedBy?.length ? input.closeDecision.blockedBy : null,
+      closeClassifierUsed: input.closeDecision?.classifier ?? null,
+      promiseGuardMode: input.promiseGuard?.mode ?? null,
+      promiseViolations: input.promiseGuard?.kinds.length ? input.promiseGuard.kinds : null,
+      promiseRewritten: input.promiseGuard?.rewritten ?? null,
       sessionStatus: state.status,
       sessionPhase: state.phase,
       turnCount: state.turnCount ?? null,

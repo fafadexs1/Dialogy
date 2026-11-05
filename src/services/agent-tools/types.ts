@@ -24,6 +24,9 @@ export type AgentToolAction =
         teamId?: string | null;
         teamName?: string | null;
         agentId?: string | null;
+        /** Closed-vocabulary reason (agent-studio/handoff-reasons.ts) and the internal note for the person taking over. */
+        reasonCode?: string | null;
+        briefing?: string | null;
       } | null;
     }
   | {

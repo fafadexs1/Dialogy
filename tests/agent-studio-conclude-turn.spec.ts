@@ -104,7 +104,8 @@ describe('AI-driven conversation conclusion', () => {
       'Support',
       expect.stringContaining('não foi resolvida'),
       expect.anything(),
-      expect.anything()
+      expect.anything(),
+      expect.objectContaining({ reasonCode: 'reclamacao_grave', briefing: expect.stringContaining('Resumo da IA') })
     );
   });
 
@@ -119,7 +120,8 @@ describe('AI-driven conversation conclusion', () => {
       'Support',
       expect.stringContaining('atendimento humano'),
       expect.anything(),
-      expect.anything()
+      expect.anything(),
+      expect.objectContaining({ reasonCode: 'cliente_pediu' })
     );
   });
 

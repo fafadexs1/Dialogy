@@ -48,6 +48,10 @@ beforeAll(async () => {
   await sql.exec(await readFile('prisma/migrations/20260908140000_agent_studio_durable_memory/migration.sql', 'utf8'));
   await sql.exec(await readFile('prisma/migrations/20260909150000_agent_studio_live_session_history/migration.sql', 'utf8'));
   await sql.exec('ALTER TABLE messages ADD COLUMN media_url text');
+  // transferSnapshot reads the idempotency journal added by 20261028141517_protected_opportunity_distribution.
+  await sql.exec(`CREATE TABLE chat_transfer_operations(workspace_id uuid NOT NULL, actor_id uuid NOT NULL, operation_id text NOT NULL, request_hash text NOT NULL,
+    chat_id uuid NOT NULL, outcome text NOT NULL, agent_id uuid, agent_name text, team_id uuid, event_id uuid, preconditions jsonb NOT NULL DEFAULT '{}'::jsonb,
+    replay_count integer NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT clock_timestamp(), PRIMARY KEY (workspace_id, actor_id, operation_id))`);
 });
 afterAll(async () => { await sql.close(); });
 beforeEach(async () => {
@@ -203,7 +207,8 @@ describe('persistent live Studio test', () => {
   it('transfers through the regular action and shows actual human replies without restarting AI', async () => {
     const row = await start();
     await sendLiveTestMessage(scope, config, randomUUID(), 'quero falar com humano');
-    expect(m.transfer).toHaveBeenCalledWith({ chatId: row.chat_id, teamId });
+    // The transfer also carries its idempotency key and the preconditions read just before (distribution rollout).
+    expect(m.transfer).toHaveBeenCalledWith(expect.objectContaining({ chatId: row.chat_id, teamId, operationId: expect.stringContaining('studio:') }));
     expect((await readLiveTestView(scope)).messages.at(-1)?.text).toContain('equipe Suporte');
     const before = m.model.mock.calls.length;
     await sendLiveTestMessage(scope, config, randomUUID(), 'Estou aguardando');

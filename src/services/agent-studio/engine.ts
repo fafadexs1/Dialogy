@@ -12,6 +12,7 @@ import { normalizeStudioDirectAnswer } from './natural-values';
 import { studioPendingField, type StudioTurnDecision, type StudioTurnInput } from './turn-interpreter';
 import { studioCollectionWindow, validateStudioCollectionPlan, type StudioCollectionPlanningInput } from './collection-planner';
 import { availableStudioActions, studioVerifiedEvidence, type StudioActionPlanningInput } from './action-planner';
+import { buildHandoffBriefing, resolveHandoffReasonCode, type HandoffReasonCode } from './handoff-reasons';
 import { recoverableStudioFields, validateStudioRecoveredFacts, type StudioFactRecoveryInput, type StudioFactSource } from './fact-recovery';
 import {
   detectExplicitStudioConversationControl,
@@ -55,6 +56,8 @@ export const StudioSessionSchema = z.object({
   inFlight: z.object({ key: z.string(), stepId: z.string() }).nullable(),
   events: z.array(z.object({ stepId: z.string(), label: z.string(), kind: z.string(), at: z.string() })),
   lastTurn: z.object({ messageId: z.string(), response: z.string(), outcome: z.string() }).optional(),
+  /** Why the AI handed this chat to a person (closed vocabulary in handoff-reasons.ts). Set once the transfer succeeds. */
+  handoff: z.object({ reasonCode: z.string(), at: z.string() }).optional(),
 });
 export type StudioSession = z.infer<typeof StudioSessionSchema>;
 export function studioHasUncertainOperation(state: StudioSession) {
@@ -81,7 +84,9 @@ export type StudioEngineDependencies = {
     requireSources: boolean;
     collectionContext?: { fieldName: string; options: string[] };
   }) => Promise<string | null>;
-  handoff: (team: string, reason: string, context: StudioDataContext, operationId: string) => Promise<void | { message?: string }>;
+  handoff: (team: string, reason: string, context: StudioDataContext, operationId: string,
+    /** Closed-vocabulary reason and the internal briefing for the person who takes over. */
+    meta?: { reasonCode: HandoffReasonCode; briefing: string }) => Promise<void | { message?: string }>;
   needsConfirmation?: (step: ProcedureStep) => Promise<boolean>;
   now?: () => number;
 };
@@ -239,8 +244,12 @@ export async function advanceStudioSession(input: {
     state.inFlight = { key: `${state.id}:handoff`, stepId: 'handoff' };
     await checkpoint();
     try {
-      const handoffResult = await deps.handoff(team, reason, context(), `${state.id}:handoff`);
+      const reasonCode = resolveHandoffReasonCode({ reason });
+      const briefing = buildHandoffBriefing({ reasonCode, reason,
+        requests: state.procedureId ? [{ objective: state.activeIntent || state.procedureId, status: 'active' }] : [], operations: [] });
+      const handoffResult = await deps.handoff(team, reason, context(), `${state.id}:handoff`, { reasonCode, briefing });
       state.status = 'transferred';
+      state.handoff = { reasonCode, at: new Date().toISOString() };
       state.inFlight = previousOperation;
       // A response step may have announced a stale or different team. Once the
       // transfer succeeds, expose one authoritative destination to the customer.

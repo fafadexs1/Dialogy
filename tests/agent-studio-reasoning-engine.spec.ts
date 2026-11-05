@@ -30,6 +30,55 @@ function fixture() {
   return { input, dependencies, memory };
 }
 
+describe('human request guard', () => {
+  it('transfers straight away, without a model round trip, when the customer asks for a person', async () => {
+    const f = fixture();
+    const result = await advanceStudioReasoningSession({ ...f.input, message: 'Quero falar com um atendente', humanRequestGuard: true });
+    expect(f.dependencies.decide).not.toHaveBeenCalled();
+    expect(f.dependencies.handoff).toHaveBeenCalledWith(expect.any(String), 'O cliente pediu atendimento humano.', expect.any(Object), expect.any(String),
+      expect.objectContaining({ reasonCode: 'cliente_pediu', briefing: expect.stringContaining('O cliente pediu uma pessoa') }));
+    expect(result.state).toMatchObject({ status: 'transferred', handoff: { reasonCode: 'cliente_pediu' } });
+    expect(result.response).toBe('Transferência confirmada');
+  });
+
+  it('does nothing special when the guard is off: the model still decides', async () => {
+    const f = fixture();
+    f.dependencies.decide.mockResolvedValueOnce(decision('respond', { response: 'Claro, já resolvo.' }, { requests: [request()] }));
+    await advanceStudioReasoningSession({ ...f.input, message: 'Quero falar com um atendente' });
+    expect(f.dependencies.decide).toHaveBeenCalledTimes(1);
+    expect(f.dependencies.handoff).not.toHaveBeenCalled();
+  });
+
+  it('never transfers in suggestion mode and ignores messages that are not a request', async () => {
+    const f = fixture();
+    f.dependencies.decide.mockResolvedValue(decision('respond', { response: 'Resposta.' }, { requests: [request()] }));
+    await advanceStudioReasoningSession({ ...f.input, message: 'Quero falar com um atendente', humanRequestGuard: true, suggestionOnly: true });
+    await advanceStudioReasoningSession({ ...f.input, messageId: 'm2', message: 'Quanto custa o plano de 700?', humanRequestGuard: true });
+    expect(f.dependencies.handoff).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the model loop when the guarded transfer is not confirmed', async () => {
+    const f = fixture();
+    f.dependencies.handoff.mockRejectedValueOnce(new Error('timeout'));
+    f.dependencies.decide.mockResolvedValueOnce(decision('respond', { response: 'Não consegui transferir agora.' }, { requests: [request()] }));
+    const result = await advanceStudioReasoningSession({ ...f.input, message: 'Quero falar com um atendente', humanRequestGuard: true });
+    expect(f.dependencies.decide).toHaveBeenCalledTimes(1);
+    expect(result.state.status).not.toBe('transferred');
+    expect(f.dependencies.decide.mock.calls[0][0].observations).toContainEqual(expect.objectContaining({ error: 'handoff_outcome_unknown' }));
+  });
+
+  it('keeps the model-declared reason code and falls back to the text when it is invalid', async () => {
+    const f = fixture();
+    f.dependencies.decide.mockResolvedValueOnce(decision('handoff', { reason: 'Consulta indisponível.', reasonCode: 'falha_de_ferramenta' }, { requests: [request()] }));
+    await advanceStudioReasoningSession(f.input);
+    expect(f.dependencies.handoff.mock.calls[0][4]).toMatchObject({ reasonCode: 'falha_de_ferramenta' });
+    const g = fixture();
+    g.dependencies.decide.mockResolvedValueOnce(decision('handoff', { reason: 'A conversa não avançou, limite de mensagens.', reasonCode: 'inventado' }, { requests: [request()] }));
+    await advanceStudioReasoningSession(g.input);
+    expect(g.dependencies.handoff.mock.calls[0][4]).toMatchObject({ reasonCode: 'limite_de_turnos' });
+  });
+});
+
 describe('reasoning loop: controlled decisions and real orchestration', () => {
   it('requires a contextual proposal before accepting confirmation for a write', async () => {
     const f = fixture();
@@ -70,7 +119,8 @@ describe('reasoning loop: controlled decisions and real orchestration', () => {
       requests: [request(), { id: 'technical', procedureId: 'support', objective: 'Revisar conexão', status: 'active' }],
     }));
     await advanceStudioReasoningSession(f.input);
-    expect(f.dependencies.handoff).toHaveBeenCalledWith('general-team', expect.any(String), expect.any(Object), expect.any(String));
+    expect(f.dependencies.handoff).toHaveBeenCalledWith('general-team', expect.any(String), expect.any(Object), expect.any(String),
+      expect.objectContaining({ reasonCode: 'cliente_pediu', briefing: expect.stringContaining('Resumo da IA') }));
   });
   it('uses the published team only after the model elects to hand off the matching request', async () => {
     const f = fixture();
@@ -80,7 +130,8 @@ describe('reasoning loop: controlled decisions and real orchestration', () => {
     expect(f.dependencies.handoff).not.toHaveBeenCalled();
     f.dependencies.decide.mockResolvedValueOnce(decision('handoff', { requestId: 'contract', reason: 'Cliente pediu revisão humana.' }));
     await advanceStudioReasoningSession({ ...f.input, state: first.state, messageId: 'm2', message: 'Quero falar com uma pessoa' });
-    expect(f.dependencies.handoff).toHaveBeenCalledWith('sales-review', 'Cliente pediu revisão humana.', expect.any(Object), expect.any(String));
+    expect(f.dependencies.handoff).toHaveBeenCalledWith('sales-review', 'Cliente pediu revisão humana.', expect.any(Object), expect.any(String),
+      expect.objectContaining({ reasonCode: 'cliente_pediu' }));
   });
   it('blocks an ineligible business write and preserves the published denial when concluding the request', async () => {
     const f = fixture(); const procedure = f.input.document.resolveStage.procedures[0];

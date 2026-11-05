@@ -7,6 +7,8 @@ import {
 import { startNexusScheduleRunner, stopNexusScheduleRunner } from '@/modules/nexus/services/schedule-runner';
 import { startAgentStudioRetention, stopAgentStudioRetention } from '@/services/agent-studio/retention-runner';
 import { startStudioToolMemoryRetention, stopStudioToolMemoryRetention } from '@/services/agent-studio/tool-memory-retention';
+import { startStudioInactivityWatchdog, stopStudioInactivityWatchdog } from '@/services/agent-studio/inactivity-runner';
+import { startQueueSla, stopQueueSla } from '@/services/chat-distribution/queue-sla-runner';
 
 async function loadEnvironment() {
   if (process.env.NODE_ENV === 'production') {
@@ -35,6 +37,11 @@ async function main() {
   startAgentStudioRetention();
   startStudioToolMemoryRetention();
 
+  // Both are opt-in by environment variable and do nothing otherwise
+  // (STUDIO_INACTIVITY_AGENT_IDS, QUEUE_SLA_ENABLED). Each takes a database advisory lock, so extra workers are harmless.
+  startStudioInactivityWatchdog();
+  startQueueSla();
+
   // Executa, com claim durável por minuto, os fluxos Nexus publicados que usam cron.
   startNexusScheduleRunner();
 
@@ -46,6 +53,8 @@ async function main() {
       stopEvolutionWebhookRetention();
       stopAgentStudioRetention();
     stopStudioToolMemoryRetention();
+      stopStudioInactivityWatchdog();
+      stopQueueSla();
       stopNexusScheduleRunner();
       await worker.close();
       await connection.quit();

@@ -216,7 +216,8 @@ import {
 import { persistAutopilotContactFacts } from '@/services/autopilot/contact-facts';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
 import { buildStudioDecisionLedgerEntry } from '@/services/agent-studio/decision-record';
-import { evaluateStudioCloseGate, studioExplicitCloseEnabled } from '@/services/agent-studio/close-gate';
+import { closingClassifierEligible, evaluateStudioCloseGate, studioExplicitCloseEnabled, type StudioCloseGateResult } from '@/services/agent-studio/close-gate';
+import { guardStudioPromises, studioPromiseGuardMode } from '@/services/agent-studio/promise-guard';
 import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
 import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
 import {
@@ -1329,6 +1330,7 @@ export async function processAutopilotForChat(
             const studioPolicy: AutopilotTurnPolicy = { activeNodeId: null, toolMode: 'on_demand', globallyEnabledToolNames: allowedNative,
                 attachedToolNames: allowedNative, allowedToolNames: allowedNative, toolInstructionsByName: {},
                 allowedKnowledgeDocumentIds: (pinnedRelease.knowledgeSnapshot || []).map((document) => String(document.id)), reason: 'studio_release' };
+            const studioTurnStartedAt = Date.now();
             const result = await runStudioConversation({
                 release: pinnedRelease, state: store.state,
                 config: autopilotConfig, chatId: chat.id, messageId: sourceMessageId, message: effectiveCustomerMessage || lastMessageContent,
@@ -1347,9 +1349,12 @@ export async function processAutopilotForChat(
                 assertCurrent: () => assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId }),
                 runNative: async (action, operation) => {
                     if (isSuggestionOnlyRuntime) throw new Error('Ações reais não são permitidas no modo de sugestão.');
+                    let handoffBriefing = '';
                     if (action.type === 'transfer_chat') {
                         const team = availableTeams.find((item) => item.id === action.payload?.teamId || item.name === action.payload?.teamName);
                         if (!team) throw new Error('Equipe de destino indisponível neste workspace.');
+                        // The briefing travels with the action but must not change what is being authorised.
+                        handoffBriefing = (action.payload?.briefing || '').trim().slice(0, 2000);
                         action.payload = { teamId: team.id, teamName: team.name };
                     }
                     const fingerprint = fingerprintToolAction(action);
@@ -1360,39 +1365,83 @@ export async function processAutopilotForChat(
                             if (!delivery.success) throw new Error('A despedida não pôde ser entregue; o atendimento não foi encerrado.');
                         }
                     }
+                    // A handoff carries an internal note so the person taking over does not ask the customer again.
+                    // The note runs first and never decides the outcome: only the action itself can fail the step.
+                    const withNote = (names: string[]) => Array.from(new Set([...names, 'add_internal_note']));
+                    const runPolicy: AutopilotTurnPolicy = handoffBriefing ? { ...studioPolicy, globallyEnabledToolNames: withNote(studioPolicy.globallyEnabledToolNames),
+                        attachedToolNames: withNote(studioPolicy.attachedToolNames), allowedToolNames: withNote(studioPolicy.allowedToolNames) } : studioPolicy;
                     const results = await runRequestedAgentToolsWithStatus({
                         workspaceId, chat, contact: sanitizedContact, systemAgentId: assignedSystemAgentId,
-                        systemAgentName: assignedSystemAgentName, autopilotConfig: { ...autopilotConfig, enabled_tool_names: allowedNative },
-                        turnPolicy: studioPolicy, customerMessage: effectiveCustomerMessage || lastMessageContent, sourceMessageId,
-                        orchestratorRunId: orchestratorRun.id, actions: [action],
+                        systemAgentName: assignedSystemAgentName, autopilotConfig: { ...autopilotConfig, enabled_tool_names: handoffBriefing ? runPolicy.allowedToolNames : allowedNative },
+                        turnPolicy: runPolicy, customerMessage: effectiveCustomerMessage || lastMessageContent, sourceMessageId,
+                        orchestratorRunId: orchestratorRun.id,
+                        actions: handoffBriefing ? [{ type: 'add_internal_note' as const, reason: 'Resumo da IA para continuidade humana.', payload: { content: handoffBriefing } }, action] : [action],
                         confirmedActionFingerprint: operation.confirmed ? fingerprint : null,
                         closeAuthorization: action.type === 'close_chat' && operation.confirmed ? {
                             source: 'procedure_goal_completed', chatId: chat.id, orchestratorRunId: orchestratorRun.id,
                             procedureExecutionId: operation.id, actionFingerprint: fingerprint,
                         } : null,
                     });
-                    if (results.length !== 1 || results[0].status !== 'success') throw new Error(results[0]?.error || 'A ação não foi concluída.');
+                    const actionResult = results[results.length - 1];
+                    if (results.length !== (handoffBriefing ? 2 : 1) || actionResult?.status !== 'success') throw new Error(actionResult?.error || 'A ação não foi concluída.');
                     if (action.type === 'transfer_chat' && action.payload?.teamName) return { message: `Vou encaminhar seu atendimento para a equipe ${action.payload.teamName} continuar com você.` };
                 },
             });
             studioResultStatus = result.state.status;
             studioExecutionStage = 'delivery';
-            if (result.response) {
+            const studioSessionResolved = result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime;
+            const studioExplicitClose = studioSessionResolved && studioExplicitCloseEnabled(autopilotConfig.id);
+            // The close decision comes before the reply is sent, so the promise guard knows whether "vou encerrar" is true.
+            let studioCloseGate: StudioCloseGateResult | null = null;
+            let studioCloseClassifierUsed = false;
+            if (studioExplicitClose) {
+                const customerText = effectiveCustomerMessage || lastMessageContent || '';
+                studioCloseGate = evaluateStudioCloseGate({ state: result.state, customerMessage: customerText });
+                // The phrase list alone refuses many real goodbyes. A model second opinion may only supply the missing
+                // confirmation: when anything else blocks the close, it is not even asked.
+                if (!studioCloseGate.close && studioCloseGate.blockedBy.length === 1 && studioCloseGate.blockedBy[0] === 'no_customer_confirmation'
+                    && closingClassifierEligible(customerText)) {
+                    studioCloseClassifierUsed = true;
+                    // Replays and early returns of the runtime carry no classifier: the chat then simply stays open.
+                    const classifyClosing = (result as { classifyClosing?: (message: string) => Promise<boolean> }).classifyClosing;
+                    if (classifyClosing && await classifyClosing(customerText)) {
+                        studioCloseGate = evaluateStudioCloseGate({ state: result.state, customerMessage: customerText, confirmedByClassifier: true });
+                    }
+                }
+            }
+            // Promise guard (3.4): the reply may not claim a transfer, close or action the system did not perform.
+            // Default mode only observes and records; `enforce` removes the unsupported sentence before sending.
+            const promiseMode = studioPromiseGuardMode();
+            let studioPromiseGuard: { mode: string; kinds: string[]; rewritten: boolean } | null = null;
+            let studioReply = result.response;
+            if (promiseMode !== 'off' && result.response && !isSuggestionOnlyRuntime) {
+                // Legacy journeys keep no operation log: their actions are not judged, only transfer and close.
+                const turnOperations = (result.state.reasoning?.operations || []).filter((operation) =>
+                    operation.status === 'succeeded' && operation.capabilityId !== '_handoff' && Date.parse(operation.at) >= studioTurnStartedAt - 1000);
+                const judged = Boolean(result.state.reasoning);
+                const guarded = guardStudioPromises({ response: result.response, facts: {
+                    transferred: result.state.status === 'transferred',
+                    closing: studioCloseGate ? studioCloseGate.close : studioSessionResolved,
+                    successfulWrites: judged ? turnOperations.filter((operation) => operation.readOnly === false).length : 1,
+                    successfulOperations: judged ? turnOperations.length : 1 } });
+                studioPromiseGuard = { mode: promiseMode, kinds: guarded.violations.map((violation) => violation.kind), rewritten: promiseMode === 'enforce' && guarded.changed };
+                if (studioPromiseGuard.rewritten) studioReply = guarded.response;
+            }
+            if (studioReply) {
                 await assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId });
-                const delivery = await sendMultiBlockResponse(chat.id, result.response, assignedSystemAgentId, true, instanceName, null,
+                const delivery = await sendMultiBlockResponse(chat.id, studioReply, assignedSystemAgentId, true, instanceName, null,
                     { ...responseTrace, deliveryKey: `studio:${result.state.id}:${sourceMessageId}` }, { preserveFormatting: true });
                 if (!delivery.success) throw new Error('A resposta do Estúdio não pôde ser entregue.');
             }
             // null = no close was attempted; true/false = the UPDATE below changed a row or not. The ledger records this
             // so "the session resolved" is never mistaken for "the chat was closed".
             let studioChatClosed: boolean | null = null;
-            let studioCloseDecision: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[] } | null = null;
-            const studioSessionResolved = result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime;
-            if (studioSessionResolved && studioExplicitCloseEnabled(autopilotConfig.id)) {
+            let studioCloseDecision: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[]; classifier?: boolean } | null = null;
+            if (studioExplicitClose && studioCloseGate) {
                 // Explicit close (docs/PLAN-ia-autonoma-transferir-encerrar.md, 3.1): resolving the requests is only a
                 // proposal. The chat closes when the gate agrees, through the same audited tool path as any close.
-                const gate = evaluateStudioCloseGate({ state: result.state, customerMessage: effectiveCustomerMessage || lastMessageContent || '' });
-                studioCloseDecision = { mode: 'explicit', basis: gate.basis ?? null, blockedBy: gate.blockedBy };
+                const gate = studioCloseGate;
+                studioCloseDecision = { mode: 'explicit', basis: gate.basis ?? null, blockedBy: gate.blockedBy, classifier: studioCloseClassifierUsed };
                 if (gate.close) {
                     studioChatClosed = false;
                     try {
@@ -1454,7 +1503,7 @@ export async function processAutopilotForChat(
                     decisionMode: pinnedRelease.agentSnapshot.resolveStage.conversationMode === 'adaptive'
                         && pinnedRelease.agentSnapshot.resolveStage.reasoning?.enabled ? 'model_reasoning' : 'published_journey',
                     suggestionOnly: isSuggestionOnlyRuntime, replay: result.replay, chatClosed: studioChatClosed,
-                    closeDecision: studioCloseDecision,
+                    closeDecision: studioCloseDecision, promiseGuard: studioPromiseGuard,
                 }));
             }
             await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,

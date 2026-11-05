@@ -17,6 +17,7 @@ import { loadStudioOlderConversationPage } from './history';
 import { db } from '@/lib/db';
 import { readArchivedStudioSession, readStudioRequestOperationHistory } from './session-store';
 import { lia1CompactContextEnabled, lia1ContextDelta, lia1ContextSizes, lia1ObservationTelemetry } from './lia1-context';
+import { studioHumanRequestGuardEnabled } from './human-request';
 import { resolveStudioMcpTool } from './integrations';
 import { studioConnectionFingerprint } from './integration-identity';
 import { listNexusCredentialSummaries } from '@/modules/nexus/services/credentials';
@@ -222,6 +223,7 @@ export async function runStudioReasoningRuntime(input: StudioRuntimeInput, state
     context: { contact: { ...input.contact, phone: studioContactPhone(input.contact) }, input: input.flowInput || {} },
     memory, sources, maxDecisions: settings.maxDecisions, suggestionOnly: input.suggestionOnly,
     compactContext, surfaceProviderFailures: input.testMode,
+    humanRequestGuard: !input.preview && studioHumanRequestGuardEnabled(input.release.agentId),
     historyCursor: !input.preview && history.length >= (compactContext ? 12 : 80)
       ? history[compactContext ? history.length - 11 : 0]?.messageId : null,
     dependencies: {

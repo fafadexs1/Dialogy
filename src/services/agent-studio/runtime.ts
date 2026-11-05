@@ -171,6 +171,18 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
     if (!recoverable && (input.preview || input.testMode) && !options.some((option) => option.id === result.decision)) modelFailed = true;
     return options.some((option) => option.id === result.decision) ? result.decision! : null;
   };
+  /**
+   * Conservative second opinion for the close gate (close-gate.ts): true only when the whole message is a final goodbye.
+   * Any provider failure or doubt answers false, which keeps the chat open.
+   */
+  const classifyClosing = async (message: string): Promise<boolean> => {
+    try {
+      return await decision(message,
+        'Classifique a mensagem do cliente. "conclude" = é somente uma despedida ou um agradecimento final, sem nenhum novo pedido, dúvida, reclamação ou algo que ele ainda aguarda. '
+        + '"continue" = qualquer outra coisa, inclusive agradecimento seguido de pedido ou dúvida, "vou aguardar", ou uma mensagem ambígua. Na dúvida, escolha continue.',
+        [{ id: 'conclude', label: 'Somente despedida final' }, { id: 'continue', label: 'Não é uma despedida final' }], undefined, true) === 'conclude';
+    } catch { return false; }
+  };
   const engineInput: Parameters<typeof advanceStudioSession>[0] = {
     document, state, message: input.message, messageId: input.messageId, suggestionOnly: input.suggestionOnly, attachment,
     // A webchat identity is not a phone number and must not become a lookup key.
@@ -398,11 +410,12 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
         }
         throw new Error('Ação não configurada ou não suportada.');
       },
-      handoff: async (team, reason, _context, operationId) => {
+      handoff: async (team, reason, _context, operationId, meta) => {
         input.signal?.throwIfAborted();
         if (input.preview) return;
         await input.assertCurrent();
-        return input.runNative({ type: 'transfer_chat', reason, payload: /^[0-9a-f-]{36}$/i.test(team) ? { teamId: team } : { teamName: team } }, { id: operationId, confirmed: false });
+        return input.runNative({ type: 'transfer_chat', reason, payload: { ...(/^[0-9a-f-]{36}$/i.test(team) ? { teamId: team } : { teamName: team }),
+          ...(meta ? { reasonCode: meta.reasonCode, briefing: meta.briefing } : {}) } }, { id: operationId, confirmed: false });
       },
     },
   };
@@ -414,5 +427,6 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
   });
   input.signal?.throwIfAborted();
   if (modelFailed) throw new Error('A IA não retornou uma resposta válida. Confira o modelo e a conexão do provedor e tente novamente.');
-  return result;
+  // `classifyClosing` is offered to the caller that owns the chat-closing decision; it is never called here.
+  return { ...result, classifyClosing };
 }

@@ -25,6 +25,8 @@ export const StudioReasoningDecisionSchema = z.object({
     consent: z.enum(['none', 'approve', 'decline']),
     consentQuote: z.string().max(4000).nullable(),
     reason: z.string().max(1000),
+    /** Only meaningful with kind=handoff. Validated against the closed vocabulary in code; unknown values are ignored. */
+    reasonCode: z.string().max(60).nullable().optional(),
   }).strict(),
 }).strict();
 export type StudioReasoningDecision = z.infer<typeof StudioReasoningDecisionSchema>;
@@ -85,5 +87,5 @@ export const studioReasoningDecisionJsonSchema = object({
     status: { type: 'string', enum: ['active', 'unavailable', 'cancelled'] }, sourceMessageId: string, quote: string }) },
   action: object({ kind: { type: 'string', enum: ['respond', 'tool', 'knowledge', 'recall', 'recall_history', 'handoff', 'branch'] },
     requestId: nullableString, capabilityId: nullableString, query: nullableString, response: nullableString,
-    consent: { type: 'string', enum: ['none', 'approve', 'decline'] }, consentQuote: nullableString, reason: string }),
+    consent: { type: 'string', enum: ['none', 'approve', 'decline'] }, consentQuote: nullableString, reason: string, reasonCode: nullableString }),
 });

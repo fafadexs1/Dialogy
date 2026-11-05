@@ -79,6 +79,12 @@ describe('studio ledger entry', () => {
     expect(entryFor(resolved).metadata).toMatchObject({ chatClosed: null });
   });
 
+  it('records why the AI handed the chat to a person, in the closed vocabulary', () => {
+    const transferred = base({ status: 'transferred', phase: 'done', handoff: { reasonCode: 'cliente_pediu', at: 'now' } });
+    expect(entryFor(transferred).metadata).toMatchObject({ basis: 'handoff_executed', handoffReasonCode: 'cliente_pediu' });
+    expect(entryFor(base({ status: 'waiting_input' })).metadata).toMatchObject({ handoffReasonCode: null });
+  });
+
   it('does not call a resolved session a close when the explicit gate held it open', () => {
     const resolved = base({ status: 'resolved', phase: 'done', reasoning: reasoning() });
     const held = entryFor(resolved, { chatClosed: null, closeDecision: { mode: 'explicit', basis: null, blockedBy: ['no_customer_confirmation'] } });
