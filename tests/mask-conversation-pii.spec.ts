@@ -19,6 +19,21 @@ describe('conversation PII masking', () => {
     expect(maskConversationText('contrato 1234567890123')).toBe('contrato [NUM]');
   });
 
+  it('masks a CPF typed with spaces and boleto-style grouped digits', () => {
+    expect(maskConversationText('meu cpf 123 456 789-00')).toBe('meu cpf [NUM]');
+    expect(maskConversationText('linha 12345.67890 12345.678901 12345.678901 1 12345678901234')).not.toMatch(/\d{6}/);
+  });
+
+  it('masks Pix copy-and-paste payloads and long tokens glued to letters', () => {
+    const pix = '00020126580014br.gov.bcb.pix0136a1b2c3d4-e5f6-7890-abcd-ef1234567890520400005303986540510.005802BR';
+    expect(maskConversationText(`pague: ${pix} obrigado`)).toBe('pague: [CODIGO] obrigado');
+    expect(maskConversationText('protocolo ID1234567 aberto')).toBe('protocolo ID[NUM] aberto');
+  });
+
+  it('keeps dates, amounts and short ids readable', () => {
+    expect(maskConversationText('vence 10/11/2026 valor 89,99 fatura 12345')).toBe('vence 10/11/2026 valor 89,99 fatura 12345');
+  });
+
   it('keeps short numbers that carry meaning for the decision', () => {
     expect(maskConversationText('quero o plano 600 mega, dia 10')).toBe('quero o plano 600 mega, dia 10');
   });
@@ -30,6 +45,6 @@ describe('conversation PII masking', () => {
   });
 
   it('truncates very long messages', () => {
-    expect(maskConversationText('a'.repeat(5000), [], 100)).toHaveLength(100);
+    expect(maskConversationText('palavra '.repeat(1000), [], 100)).toHaveLength(100);
   });
 });
