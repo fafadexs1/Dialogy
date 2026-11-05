@@ -1761,7 +1761,8 @@ export const toggleChatTagAction = withDebug(
                 [chatId]
             );
             await client.query('COMMIT');
-            revalidatePath('/', 'layout');
+            // Sem revalidatePath: ele re-renderiza o layout inteiro e reidrata o
+            // inbox (parece reload e troca a aba). O cliente atualiza via delta sync.
             return { success: true, tags: tagsResult.rows as Tag[] };
         } catch (error) {
             await client.query('ROLLBACK');

@@ -63,6 +63,7 @@ import { formatInboxCount, getInboxPaginationScope, hasMoreChatsInScope, isChatI
 import { sanitizeNationalPhoneInput } from '@/lib/phone-input';
 
 import { SearchDetailsDialog } from './search-details-dialog';
+import { QuickTagPopover } from './quick-tag-popover';
 import { InboxSearchInput } from './inbox-search-input';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { usePremiumWheelScroller } from '@/hooks/use-premium-wheel-scroller';
@@ -1132,6 +1133,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 <TooltipContent>{classificationTitle}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
+          )}
+          {chat.status !== 'encerrados' && !isForwarding && !isBulkMode && (
+            <QuickTagPopover chat={chat} onUpdate={onUpdate} />
           )}
         </div>
 
