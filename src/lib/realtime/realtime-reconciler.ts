@@ -83,8 +83,44 @@ export function shouldDeliverMessagePayload(
   return !payloadChatId || visibleChatIds.has(payloadChatId);
 }
 
+export type WorkspaceMessageDisposition = 'ignore-selected' | 'deliver' | 'reconcile-list';
+
+export function getWorkspaceMessageDisposition(
+  payload: RealtimePostgresChangesPayload<RealtimeRow>,
+  visibleChatIds: Set<string> | null,
+  selectedChatId: string | null,
+): WorkspaceMessageDisposition {
+  const payloadChatId = getPayloadChatId(payload);
+
+  // The room-scoped subscription already delivers the selected thread.
+  if (selectedChatId && payloadChatId === selectedChatId) {
+    return 'ignore-selected';
+  }
+
+  // A message for a chat that is not in the current list is precisely the signal
+  // that the list must be reconciled (for example, a brand-new customer).
+  if (visibleChatIds && payloadChatId && !visibleChatIds.has(payloadChatId)) {
+    return 'reconcile-list';
+  }
+
+  return 'deliver';
+}
+
 const hasOwn = (record: RealtimeRow, key: string) =>
   Object.prototype.hasOwnProperty.call(record, key);
+
+export function hasCompleteRealtimeChatPresentation(record: RealtimeRow): boolean {
+  if (!hasOwn(record, 'team_name') || !hasOwn(record, 'team_color')) {
+    return false;
+  }
+
+  const teamName = typeof record.team_name === 'string' ? record.team_name.trim() : '';
+  const teamColor = typeof record.team_color === 'string' ? record.team_color.trim() : '';
+
+  // A named team without a color is not hydrated enough for the inbox chip.
+  // A chat with no team at all is complete even though both values are null.
+  return !teamName || Boolean(teamColor);
+}
 
 export function reconcileRealtimeChatAssignment(
   existingChat: Chat | undefined,

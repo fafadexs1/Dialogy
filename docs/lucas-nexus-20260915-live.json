@@ -1,0 +1,35 @@
+{
+  "checkedAt": "2026-09-15T04:48:44.093Z",
+  "workspaceId": "e3b476a1-5de8-4744-80b5-a5d23fe15fab",
+  "contactId": "88ebeaa1-7ef4-462a-be32-ed6f6e3512cd",
+  "chatId": "2a383f7a-8200-4c82-b1c9-c86d30315a93",
+  "messageId": "d4f6841c-c36b-4d83-8aec-dbbbbdadca71",
+  "handled": true,
+  "passed": true,
+  "chat": {
+    "id": "2a383f7a-8200-4c82-b1c9-c86d30315a93",
+    "status": "atendimentos",
+    "assigned_system_agent_id": "779c0e28-b9c2-4604-9496-44d56cece388",
+    "autopilot_config_id": "7d7259ab-a6c3-4057-a9ca-28ddbb15db95",
+    "is_autopilot_active": true,
+    "team_id": "b9a74d62-7f65-46c1-a5ae-4887fde9926e"
+  },
+  "runs": [
+    {
+      "workflow_id": "nexus:8526ced9-79fe-4fc3-8ad0-02cd699c8168",
+      "workflow_version": "v5",
+      "status": "completed",
+      "id": "nexus_message_47e490740cdee5d543b70ebeb4bffd05ec272d32f75560f3d7c663a0f301bf6d"
+    }
+  ],
+  "events": [
+    {
+      "content": "Atendimento transferido para Lucas Suporte.",
+      "execution_id": "nexus_message_47e490740cdee5d543b70ebeb4bffd05ec272d32f75560f3d7c663a0f301bf6d",
+      "node_id": "ai_published_agent_68c96f4e-c3b3-49c2-b3eb-b3ef69b1b72b"
+    }
+  ],
+  "testChannel": "webchat",
+  "realPhoneProvided": false,
+  "scope": "Real published Nexus dispatcher and native transfer; no manual chat assignment."
+}

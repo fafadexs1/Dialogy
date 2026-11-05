@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { isWhatsappBsuid, parseScopedWhatsappBsuid, scopeWhatsappBsuid } from '@/lib/whatsapp/bsuid';
 import { db } from '@/lib/db';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import type { Message, MessageMetadata, Chat, Contact } from '@/lib/types';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import {
     enqueueAiAutopilotProcess,
-    enqueueAiCaseMemoryRefresh,
     enqueueEvolutionWebhookProcess,
     enqueueQueueAutoClose,
     enqueueWebhookOutbound,
@@ -14,6 +14,7 @@ import {
 } from '@/lib/queue';
 import { evolutionWebhookQueue } from '@/lib/task-queue';
 import { buildChatProtocol, sanitizeUrl } from '@/lib/utils';
+import { normalizeStoredMediaUrl } from '@/lib/storage-url';
 import { normalizeMimeType, resolveMediaMessageType } from '@/lib/media-message-type';
 import { normalizeImageThumbnailSource } from '@/lib/storage-url';
 import {
@@ -22,18 +23,24 @@ import {
     resolveEvolutionInstance,
 } from '@/lib/whatsapp/evolution-config';
 import {
+    extractEvolutionInteractiveResponseId,
     extractEvolutionInteractiveResponseText,
     mapEvolutionInboundMessageTypeToDbType,
+    resolveEvolutionInteractiveSelectionFromQuotedMessage,
     resolveEvolutionInboundMessageType,
     shouldAppendInboundToClosedWhatsappChat,
 } from '@/lib/whatsapp/evolution-inbound-message';
 import { extractAttributionToken } from '@/lib/marketing-attribution';
-import { attributeInboundWhatsappMessageByToken } from '@/lib/marketing-attribution-server';
+import {
+    attributeInboundWhatsappMessageByProximity,
+    attributeInboundWhatsappMessageByToken,
+} from '@/lib/marketing-attribution-server';
 import {
     findOrCreateWhatsappContact,
     findWhatsappChatByIdentity,
     lockWhatsappIdentityTransaction,
 } from '@/lib/whatsapp/contact-identity';
+import { rememberSendDigits } from '@/lib/whatsapp/number-form-memory';
 import {
     claimEvolutionWebhookEvent,
     markEvolutionWebhookEventFailed,
@@ -41,6 +48,9 @@ import {
     persistEvolutionWebhookEvent,
 } from '@/services/whatsapp/evolution-webhook-inbox';
 import { verifyDialogyRequest } from '@/services/meta/dialogy-hmac';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
+import { createNexusChatAdapters } from '@/modules/nexus/services/chat-adapters';
+import { dispatchPublishedNexusMessage } from '@/modules/nexus/services/message-dispatcher';
 
 const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 const DISALLOWED_CONTACT_JID_SUFFIXES = ['@g.us', '@broadcast', '@newsletter'];
@@ -577,17 +587,22 @@ async function scheduleQueueAutoClose(
                 return;
             }
 
-            const closeRes = await client.query(
+            const queueRes = await client.query(
                 `UPDATE chats
-                 SET status = 'encerrados', closed_at = NOW()
+                 SET status = 'gerais',
+                     closed_at = NULL,
+                     assigned_system_agent_id = NULL,
+                     assigned_at = NULL,
+                     is_autopilot_active = FALSE,
+                     copilot_mode = 'off'
                  WHERE id = $1
                    AND status = 'gerais'
                    AND agent_id IS NULL
-                 RETURNING closed_at`,
+                 RETURNING id`,
                 [chatId]
             );
 
-            if ((closeRes.rowCount ?? 0) === 0) {
+            if ((queueRes.rowCount ?? 0) === 0) {
                 await client.query('ROLLBACK');
                 return;
             }
@@ -600,10 +615,10 @@ async function scheduleQueueAutoClose(
                 [
                     workspaceId,
                     chatId,
-                    `Atendimento encerrado automaticamente apos ${seconds} segundos na fila sem atendimento.`,
+                    `Atendimento mantido na fila apos ${seconds} segundos sem atendimento.`,
                     {
-                        event: 'queue_auto_close',
-                        autoClosedAfterMs: autoCloseMs,
+                        event: 'queue_timeout_kept_in_queue',
+                        queueTimeoutMs: autoCloseMs,
                         lastIncomingAt: anchor.toISOString(),
                     },
                 ]
@@ -611,28 +626,7 @@ async function scheduleQueueAutoClose(
 
             await client.query('COMMIT');
 
-            const closedAt = closeRes.rows[0]?.closed_at
-                ? new Date(closeRes.rows[0].closed_at).toISOString()
-                : null;
-
-            try {
-                if (shouldEnqueueJob('ai_case_memory_refresh')) {
-                    await enqueueAiCaseMemoryRefresh({
-                        workspaceId,
-                        chatId,
-                        closedAt,
-                    });
-                } else {
-                    const { refreshCaseMemoryForChat } = await import('@/services/rag/case-memory');
-                    await refreshCaseMemoryForChat({
-                        workspaceId,
-                        chatId,
-                        closedAt,
-                    });
-                }
-            } catch (caseMemoryError) {
-                console.error('[QUEUE_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
-            }
+            await broadcastHydratedChatUpdate(workspaceId, chatId);
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('[QUEUE_AUTO_CLOSE] Falha ao encerrar chat da fila:', error);
@@ -1206,13 +1200,14 @@ async function handleMessagesUpdate(payload: any) {
             // 2. If it's a read receipt for a message sent by us, mark all older messages in the same chat as READ
             if (from_me) {
                 const olderMessagesRes = await client.query(
-                    `UPDATE messages 
-                     SET api_message_status = 'READ',
-                         metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
-                     WHERE chat_id = $1 
-                       AND from_me = TRUE 
-                       AND created_at <= $2 
-                       AND (api_message_status IS NULL OR api_message_status NOT IN ('READ', 'PLAYED'))`,
+                    `UPDATE messages
+                      SET api_message_status = 'READ',
+                          metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
+                      WHERE chat_id = $1
+                        AND from_me = TRUE
+                        AND created_at <= $2
+                        AND message_id_from_api IS NOT NULL
+                        AND UPPER(COALESCE(api_message_status, '')) IN ('SENT', 'DELIVERED')`,
                     [chat_id, created_at]
                 );
                 if ((olderMessagesRes.rowCount ?? 0) > 0) {
@@ -1245,6 +1240,12 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
 }): Promise<void> {
     const tasks: Promise<any>[] = [];
     const { chat, message, workspaceId, content, instanceName } = input;
+    const queueStatus = (chat as any).status;
+    const queueAgent = (chat as any).agent_id || (chat as any).agentId || null;
+
+    if (queueStatus === 'encerrados') {
+        return;
+    }
 
     const webhookTask = shouldEnqueueJob('webhook_outbound')
         ? enqueueWebhookOutbound({
@@ -1255,8 +1256,6 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
         : dispatchMessageToWebhooks(chat, message, instanceName);
     tasks.push(webhookTask);
 
-    const queueStatus = (chat as any).status;
-    const queueAgent = (chat as any).agent_id || (chat as any).agentId || null;
     if (queueStatus === 'gerais' && !queueAgent) {
         tasks.push((async () => {
             const autoCloseMs = await getQueueAutoCloseMs(workspaceId);
@@ -1267,7 +1266,28 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
         })());
     }
 
-    if (chat.is_autopilot_active) {
+    let nexusHandled = false;
+    try {
+        const nexus = await dispatchPublishedNexusMessage({
+            workspaceId,
+            chatId: chat.id,
+            message: content,
+            sourceMessageId: message.id,
+            instanceName,
+            metadata: {
+                platform: 'whatsapp',
+                messageType: message.type,
+                selectedOptionId: message.metadata?.interactiveSelectionId,
+            },
+            adapters: () => createNexusChatAdapters({ workspaceId, chatId: chat.id, instanceName }),
+        });
+        nexusHandled = nexus.handled;
+        if (nexusHandled) console.log(`[NEXUS_MESSAGE] Message ${message.id} handled by a native Nexus flow.`);
+    } catch (error) {
+        console.error('[NEXUS_MESSAGE] Failed to dispatch inbound message:', error);
+    }
+
+    if (chat.is_autopilot_active && !nexusHandled) {
         console.log(`[WEBHOOK_MSG_UPSERT] Scheduling Autopilot for chat ${chat.id}`);
         const autopilotTask = shouldEnqueueJob('ai_autopilot_process')
             ? enqueueAiAutopilotProcess({
@@ -1288,7 +1308,7 @@ async function dispatchPersistedInboundRealtimeEffects(input: {
                 );
             })();
         tasks.push(autopilotTask);
-    } else {
+    } else if (!nexusHandled) {
         console.log(`[WEBHOOK_MSG_UPSERT] Autopilot SKIPPED (Inactive) for chat ${chat.id}`);
     }
 
@@ -1396,22 +1416,22 @@ async function resumePersistedInboundRealtimeEffects(input: {
 }
 
 async function handleMessagesUpsert(payload: any) {
-    const { instance: instanceName, data, sender, server_url } = payload;
+    const { instance: instanceName, data, sender } = payload;
 
     let savedChat: Chat | null = null;
     let savedMessage: Message | null = null;
     let workspaceId: string | null = null;
-    let apiConfig: { api_url: string; api_key: string; } | null = null;
     let contactData: Contact | null = null;
     let isNewContact = false;
     let shouldRunRealtimeSideEffects = true;
     let sideEffectSkipReason: string | null = null;
-    const contactJid = resolveWhatsappJid(
+    const rawContactJid = resolveWhatsappJid(
         data?.key?.remoteJid,
         data?.key?.remoteJidAlt,
         data?.remoteJid,
         data?.remoteJidAlt
     );
+    const contactJid = rawContactJid ? scopeWhatsappBsuid(rawContactJid, instanceName) : null;
 
     if (!data || !data.key || !data.message) {
         console.log('[WEBHOOK_MSG_UPSERT] Payload invalido, data, key ou message ausente.');
@@ -1463,7 +1483,6 @@ async function handleMessagesUpsert(payload: any) {
     ) ?? new Date();
 
     const messageCreatedAt = new Date(Math.min(rawMessageCreatedAt.getTime(), Date.now()));
-    const isLiveInbound = isRecentInboundEvent(messageCreatedAt);
 
     // Log payload for incoming messages as requested
     console.log('[WEBHOOK_MSG_UPSERT] Incoming message received.', {
@@ -1471,6 +1490,12 @@ async function handleMessagesUpsert(payload: any) {
         event: payload?.event || null,
         hasData: Boolean(payload?.data),
     });
+
+    // O JID com que o WhatsApp entregou e a fonte mais confiavel sobre qual
+    // forma do numero (com/sem nono digito) a conta realmente usa.
+    if (contactJid) {
+        await rememberSendDigits(contactJid, contactJid, 'inbound');
+    }
 
     let content = '';
     let dbMessageType: Message['type'] = 'text';
@@ -1501,6 +1526,7 @@ async function handleMessagesUpsert(payload: any) {
             : 'Contato compartilhado')
         : '';
     const interactiveText = extractEvolutionInteractiveResponseText(message);
+    const interactiveSelectionId = extractEvolutionInteractiveResponseId(message);
 
     content = pickFirstNonEmptyString(
         message.conversation,
@@ -1514,7 +1540,11 @@ async function handleMessagesUpsert(payload: any) {
     const replyContext = extractReplyContextFromPayload(data, message);
 
     // A URL da midia esta no nivel superior do objeto `message`
-    const mediaUrl = sanitizeUrl(message.mediaUrl) || null;
+    // A Evolution entrega a midia do MinIO como URL assinada de 7 dias
+    // (`presignedGetObject` sem prazo explicito). Guardar a assinatura junto faz
+    // a midia "expirar" com o arquivo intacto no bucket, entao gravamos so o
+    const rawMediaUrl = sanitizeUrl(message.mediaUrl) || null;
+    const mediaUrl = normalizeStoredMediaUrl(rawMediaUrl) || null;
     console.log('[WEBHOOK_MSG_UPSERT] Message Object Keys:', Object.keys(message));
     console.log('[WEBHOOK_MSG_UPSERT] Extracted mediaUrl:', mediaUrl);
     console.log('[WEBHOOK_MSG_UPSERT] Message Type:', messageType);
@@ -1585,12 +1615,20 @@ async function handleMessagesUpsert(payload: any) {
         ? `https://www.google.com/maps?q=${latitude},${longitude}`
         : undefined;
 
+    const base64Content = (mediaDetails as any)?.base64 || (message as any)?.base64 || undefined;
     let metadata: MessageMetadata = {
+        ...(isWhatsappBsuid(key.userId) ? { whatsappUserId: key.userId } : {}),
+        ...(isWhatsappBsuid(key.parentUserId) ? { whatsappParentUserId: key.parentUserId } : {}),
+        ...(typeof key.username === 'string' ? { whatsappUsername: key.username } : {}),
         mediaUrl: mediaUrl || undefined,
+        signedMediaUrl: rawMediaUrl || undefined,
+        originalMediaUrl: rawMediaUrl || undefined,
+        base64: base64Content,
         mimetype: normalizedMime || mimetype,
         fileName,
         duration: mediaDetails?.seconds,
         thumbnail: normalizeInboundThumbnail((mediaDetails as any)?.thumbnail || (mediaDetails as any)?.jpegThumbnail),
+        interactiveSelectionId,
     };
 
     if (locationDetails) {
@@ -1640,7 +1678,6 @@ async function handleMessagesUpsert(payload: any) {
             workspaceId = instanceRes.rows[0].workspace_id;
         }
 
-        apiConfig = await getApiConfigForInstance(instanceName, workspaceId);
         if (!workspaceId) {
             throw new Error(`Workspace para a instancia '${instanceName}' nao encontrado.`);
         }
@@ -1650,8 +1687,8 @@ async function handleMessagesUpsert(payload: any) {
         const resolvedContact = await findOrCreateWhatsappContact(client, {
             workspaceId,
             phoneOrJid: contactJid,
-            fallbackName: pushName || contactJid.split('@')[0],
-            fallbackPhone: contactJid.split('@')[0],
+            fallbackName: pushName || (parseScopedWhatsappBsuid(contactJid) ? 'Contato do WhatsApp' : contactJid.split('@')[0]),
+            fallbackPhone: parseScopedWhatsappBsuid(contactJid) ? '' : contactJid.split('@')[0],
             avatarUrl: null,
         });
 
@@ -1683,19 +1720,21 @@ async function handleMessagesUpsert(payload: any) {
             } else if (recentChat.status === 'encerrados') {
                 const closedAt = recentChat.closed_at ? new Date(recentChat.closed_at).getTime() : 0;
                 const msgTime = messageCreatedAt.getTime();
+                const isDelayedMessage = shouldAppendInboundToClosedWhatsappChat({
+                    closedAt,
+                    messageCreatedAt: msgTime,
+                });
 
-                // Messages timestamped before the close are delayed/replayed events and belong to
-                // the closed chat. New inbound messages after closing must open a fresh queue chat.
-                if (shouldAppendInboundToClosedWhatsappChat({ closedAt, messageCreatedAt: msgTime })) {
-                    chat = recentChat;
-                    console.log(`[WEBHOOK_MSG_UPSERT] Mensagem atrasada apos encerramento. Reutilizando chat encerrado ${chat.id}.`);
-                } else if (!isLiveInbound) {
-                    // Historical/replayed events must not reopen queue chats.
+                if (isDelayedMessage) {
+                    // Eventos atrasados, com timestamp anterior ao encerramento,
+                    // pertencem apenas ao historico e nao reabrem a conversa.
                     chat = recentChat;
                     shouldRunRealtimeSideEffects = false;
-                    sideEffectSkipReason = `stale_inbound_after_close_${recentChat.id}`;
-                    console.log(`[WEBHOOK_MSG_UPSERT] Evento stale apos encerramento. Mantendo no chat encerrado ${chat.id}.`);
+                    sideEffectSkipReason = `delayed_inbound_after_close_${recentChat.id}`;
                 } else {
+                    // Uma mensagem realmente nova inicia outro atendimento.
+                    // Reutilizar o chat encerrado herdava tag, setor e contexto
+                    // da conversa anterior antes de o cliente escolher uma opção.
                     requiresNewChat = true;
                 }
             } else {
@@ -1769,11 +1808,12 @@ async function handleMessagesUpsert(payload: any) {
             type: Message['type'];
             from_me: boolean;
             created_at: string | Date;
+            metadata: MessageMetadata | string | null;
         } | null = null;
 
         if (replyContext.messageIdFromApi) {
             const replyReferenceRes = await client.query(
-                `SELECT m.id, m.chat_id, m.content, m.type, m.from_me, m.created_at
+                `SELECT m.id, m.chat_id, m.content, m.type, m.from_me, m.created_at, m.metadata
                  FROM messages m
                  JOIN chats c ON c.id = m.chat_id
                  WHERE m.workspace_id = $1
@@ -1796,6 +1836,8 @@ async function handleMessagesUpsert(payload: any) {
 
             metadata = {
                 ...metadata,
+                interactiveSelectionId: metadata.interactiveSelectionId
+                    || resolveEvolutionInteractiveSelectionFromQuotedMessage(content, replyReferenceRow?.metadata),
                 replyToMessageIdFromApi: replyContext.messageIdFromApi,
                 ...(replyContext.participantJid ? { replyToParticipantJid: replyContext.participantJid } : {}),
                 ...(replyReferenceRow?.id ? { replyToMessageId: replyReferenceRow.id } : {}),
@@ -1859,18 +1901,25 @@ async function handleMessagesUpsert(payload: any) {
         );
 
         const attributionToken = !key.fromMe ? extractAttributionToken(content) : null;
-        if (attributionToken) {
+        if (!key.fromMe) {
             await client.query('SAVEPOINT ad_attribution');
             try {
-                const attribution = await attributeInboundWhatsappMessageByToken({
+                const attributionInput = {
                     client,
                     workspaceId,
                     instanceName,
-                    token: attributionToken,
                     contactId: contactData.id,
                     chatId: chat.id,
                     messageId: messageResult.rows[0].id,
-                });
+                };
+
+                // Token e deterministico. Sem ele, cai no casamento por
+                // proximidade, que ja se recusa a atuar quando o contato tem
+                // atribuicao — caso contrario cada mensagem roubaria um clique.
+                const attribution = attributionToken
+                    ? await attributeInboundWhatsappMessageByToken({ ...attributionInput, token: attributionToken })
+                    : await attributeInboundWhatsappMessageByProximity(attributionInput);
+
                 await client.query('RELEASE SAVEPOINT ad_attribution');
                 if (attribution) {
                     messageResult.rows[0].metadata = {
@@ -1964,7 +2013,7 @@ async function handleContactsUpdate(_payload: any) {
 }
 
 async function handleChatsUpsert(payload: any) {
-    const { instance: instanceName, data } = payload;
+    const { data } = payload;
     if (!Array.isArray(data) || data.length === 0) return;
 
     for (const chatUpdate of data) {

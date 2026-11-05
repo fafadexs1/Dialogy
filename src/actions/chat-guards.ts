@@ -70,7 +70,7 @@ export async function guardedCloseChat(chatId: string, reasonTagId: string | nul
   }
 }
 
-export async function guardedTransferChat(input: { chatId: string; teamId?: string; agentId?: string }) {
+export async function guardedTransferChat(input: Parameters<typeof transferChatAction>[0]) {
   const currentUser = await getCurrentUser();
   if (!currentUser?.id) {
     return { success: false, error: 'Usuario nao autenticado.' };

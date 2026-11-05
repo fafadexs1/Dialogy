@@ -1,0 +1,486 @@
+{
+  "at": "2026-09-10T01:16:58.453Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [
+    {
+      "scenario": "dress-photo",
+      "response": "Prontinho! Aqui está a foto real do Vestido azul. 😊 Se quiser, também posso mostrar o Vestido vermelho ou ajudar com outra dúvida.",
+      "ms": 6978,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "shop-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Cliente quer ver a foto do vestido azul.",
+            "status": "resolved",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "values": {
+              "product": "blue"
+            },
+            "integrationValues": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "product": "Vestido azul"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-dress-session:17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c:read-0",
+            "requestId": "shop-1",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:16:50.944Z"
+          },
+          {
+            "id": "synthetic-dress-session:ea5a7265b35f8cb8ea0000b46cc6d2b227d579776d957cbb2a64622d95df30aa",
+            "requestId": "shop-1",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "capabilityId": "shop:photo",
+            "title": "Mostrar foto do vestido solicitado",
+            "signature": "ea5a7265b35f8cb8ea0000b46cc6d2b227d579776d957cbb2a64622d95df30aa",
+            "status": "succeeded",
+            "readOnly": false,
+            "values": {},
+            "at": "2026-09-10T01:16:53.846Z",
+            "presentedProduct": {
+              "productId": "blue",
+              "url": "https://images.store.example/blue.jpg",
+              "caption": "Vestido azul",
+              "mimeType": "image/jpeg"
+            }
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-dress",
+          "durationMs": 6946,
+          "modelDecisions": 3,
+          "toolCalls": 2,
+          "activeRequests": 0,
+          "pausedRequests": 0,
+          "resolvedRequests": 1,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 3,
+              "inputTokens": 15560,
+              "outputTokens": 1057,
+              "totalTokens": 16617
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-dress",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 15560,
+          "outputTokens": 1057,
+          "totalTokens": 16617
+        }
+      },
+      "photos": [
+        {
+          "productId": "blue",
+          "url": "https://images.store.example/blue.jpg",
+          "caption": "Vestido azul",
+          "mimeType": "image/jpeg"
+        }
+      ]
+    },
+    {
+      "scenario": "dress-photo-resume",
+      "response": "Era o Vestido azul 🩵 — aquele que te mostrei na foto. Se quiser, posso te mostrar outros modelos ou cores; é só dizer.",
+      "ms": 2493,
+      "reasoning": {
+        "version": 2,
+        "usageTotals": {
+          "lastMessageId": "synthetic-dress-resume",
+          "recordedTurns": 2,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 19635,
+          "outputTokens": 1504,
+          "totalTokens": 21139
+        },
+        "lastTurnMetrics": {
+          "messageId": "synthetic-dress-resume",
+          "durationMs": 2468,
+          "modelDecisions": 1,
+          "toolCalls": 0,
+          "activeRequests": 0,
+          "pausedRequests": 0,
+          "resolvedRequests": 1,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-v4-flash",
+              "stage": "decision",
+              "calls": 1,
+              "inputTokens": 4075,
+              "outputTokens": 447,
+              "totalTokens": 4522
+            }
+          ]
+        },
+        "requests": [
+          {
+            "id": "shop-1",
+            "procedureId": "shop",
+            "resumeFrom": "synthetic-dress-session:shop-1",
+            "objective": "Cliente quer ver a foto do vestido azul.",
+            "status": "resolved",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "values": {
+              "product": "blue"
+            },
+            "integrationValues": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "choiceLabels": {
+              "product": "Vestido azul"
+            },
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-dress-session:17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c:read-0",
+            "requestId": "shop-1",
+            "capabilityId": "shop:catalog",
+            "signature": "17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "status": "succeeded",
+            "readOnly": true,
+            "title": "Consultar vestidos",
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:16:50.944Z"
+          },
+          {
+            "id": "synthetic-dress-session:ea5a7265b35f8cb8ea0000b46cc6d2b227d579776d957cbb2a64622d95df30aa",
+            "requestId": "shop-1",
+            "capabilityId": "shop:photo",
+            "signature": "ea5a7265b35f8cb8ea0000b46cc6d2b227d579776d957cbb2a64622d95df30aa",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "status": "succeeded",
+            "readOnly": false,
+            "title": "Mostrar foto do vestido solicitado",
+            "values": {},
+            "at": "2026-09-10T01:16:53.846Z",
+            "presentedProduct": {
+              "productId": "blue",
+              "caption": "Vestido azul",
+              "url": "https://images.store.example/blue.jpg"
+            }
+          }
+        ],
+        "pendingAction": null
+      },
+      "photos": [
+        {
+          "productId": "blue",
+          "url": "https://images.store.example/blue.jpg",
+          "caption": "Vestido azul",
+          "mimeType": "image/jpeg"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "shop-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Cliente quer ver a foto do vestido azul.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "shop-1",
+          "capabilityId": "shop:catalog",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Consultar o catálogo para localizar o vestido azul antes de mostrar a foto."
+        }
+      },
+      "ms": 1911
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c:read-0",
+            "requestId": "shop-1",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:16:50.944Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "shop-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Cliente quer ver a foto do vestido azul.",
+            "status": "active"
+          }
+        ],
+        "choices": [
+          {
+            "requestId": "shop-1",
+            "key": "product",
+            "label": "Vestido azul",
+            "value": "Vestido azul",
+            "status": "active",
+            "sourceMessageId": "synthetic-dress",
+            "quote": "vestido azul"
+          }
+        ],
+        "action": {
+          "kind": "tool",
+          "requestId": "shop-1",
+          "capabilityId": "shop:photo",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Catálogo consultado e escolha 'Vestido azul' registrada; mostrar a foto real do produto solicitado."
+        }
+      },
+      "ms": 2896
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c:read-0",
+            "requestId": "shop-1",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "capabilityId": "shop:catalog",
+            "title": "Consultar vestidos",
+            "signature": "17831f62ab005eb960997af2d0e04aafdf1ee3cc90e0e54a208c97fff824c77c",
+            "status": "succeeded",
+            "readOnly": true,
+            "values": {
+              "products": [
+                {
+                  "id": "blue",
+                  "name": "Vestido azul",
+                  "image": "https://images.store.example/blue.jpg"
+                },
+                {
+                  "id": "red",
+                  "name": "Vestido vermelho",
+                  "image": "https://images.store.example/red.jpg"
+                }
+              ]
+            },
+            "at": "2026-09-10T01:16:50.944Z"
+          }
+        },
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-dress-session:ea5a7265b35f8cb8ea0000b46cc6d2b227d579776d957cbb2a64622d95df30aa",
+            "requestId": "shop-1",
+            "memoryRequestId": "synthetic-dress-session:shop-1",
+            "capabilityId": "shop:photo",
+            "title": "Mostrar foto do vestido solicitado",
+            "signature": "ea5a7265b35f8cb8ea0000b46cc6d2b227d579776d957cbb2a64622d95df30aa",
+            "status": "succeeded",
+            "readOnly": false,
+            "values": {},
+            "at": "2026-09-10T01:16:53.846Z",
+            "presentedProduct": {
+              "productId": "blue",
+              "url": "https://images.store.example/blue.jpg",
+              "caption": "Vestido azul",
+              "mimeType": "image/jpeg"
+            }
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "shop-1",
+            "procedureId": "shop",
+            "resumeFrom": null,
+            "objective": "Cliente quer ver a foto do vestido azul.",
+            "status": "resolved"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "shop-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Prontinho! Aqui está a foto real do Vestido azul. 😊 Se quiser, também posso mostrar o Vestido vermelho ou ajudar com outra dúvida.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Foto do vestido azul mostrada com sucesso; objetivo do pedido atendido."
+        }
+      },
+      "ms": 2105
+    },
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "shop-1",
+            "procedureId": "shop",
+            "resumeFrom": "synthetic-dress-session:shop-1",
+            "objective": "Cliente quer ver a foto do vestido azul.",
+            "status": "resolved"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "shop-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Era o Vestido azul 🩵 — aquele que te mostrei na foto. Se quiser, posso te mostrar outros modelos ou cores; é só dizer.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O histórico confirma que a foto apresentada foi do produto blue (Vestido azul). O cliente só quer confirmar a cor e pediu explicitamente para não reenviar a foto, então basta responder textualmente, sem novas chamadas de ferramenta."
+        }
+      },
+      "ms": 2468
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3402,
+      "outputTokens": 233,
+      "totalTokens": 3635,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4926,
+      "outputTokens": 544,
+      "totalTokens": 5470,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 7232,
+      "outputTokens": 280,
+      "totalTokens": 7512,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 4075,
+      "outputTokens": 447,
+      "totalTokens": 4522,
+      "ruleName": "decision"
+    }
+  ]
+}

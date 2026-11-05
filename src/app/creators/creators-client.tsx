@@ -1,7 +1,8 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Award, Code, Cpu, Github, Linkedin, Mail, Sparkles, Twitter } from 'lucide-react';
+import { Award, Code, Cpu, Mail, Sparkles } from 'lucide-react';
+import { FaGithub as Github, FaLinkedin as Linkedin, FaTwitter as Twitter } from 'react-icons/fa6';
 
 import { Footer } from '@/components/landing/footer';
 import { Navbar } from '@/components/landing/navbar';

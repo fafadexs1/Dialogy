@@ -39,7 +39,7 @@ function hostnameMatchesAllowlist(hostname: string, allowedHosts: readonly strin
   const normalized = hostname.toLowerCase();
   return allowedHosts.some((entry) => {
     const allowed = entry.trim().toLowerCase();
-    return allowed !== '' && (normalized === allowed || normalized.endsWith(`.${allowed}`));
+    return allowed !== '' && (allowed === '*' || normalized === allowed || normalized.endsWith(`.${allowed}`));
   });
 }
 

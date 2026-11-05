@@ -1,0 +1,30 @@
+{
+  "checkedAt": "2026-10-25T12:15:39.654Z",
+  "workflow": {
+    "id": "79962002-b803-4bac-b549-98fb5607f19f",
+    "name": "Aurora Work · Vendedora IA (Nina)",
+    "status": "draft",
+    "published_revision": 0,
+    "nodes": 2,
+    "versions": 6
+  },
+  "agent": {
+    "id": "bc053c26-6c89-4415-96bf-16592252afca",
+    "name": "Nina · Aurora Work (demonstração)",
+    "is_private": true,
+    "is_primary": false,
+    "is_active": true
+  },
+  "checks": {
+    "regressionTests": 42,
+    "realProviderTests": 1,
+    "modelCallsInProviderTest": 5,
+    "build": "passed",
+    "typecheck": "passed",
+    "targetedLint": "passed",
+    "studioBrowserTest": "real DeepSeek, free text, memory, exact prices, discount refusal"
+  },
+  "businessEffects": "intercepted; no real contact, CRM, payment, transfer or delivery",
+  "webDeployment": "pending user authorization",
+  "workflowPublished": false
+}

@@ -37,7 +37,6 @@ import { classifyMcpToolSafety, resolveMcpToolTimeoutMs } from '@/services/mcp/t
 import { getAiModelRuntimeProvider, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import { improveKnowledgeDocumentForRag } from '@/ai/flows/knowledge-document-rewrite';
 import { learnFromConversation } from '@/ai/flows/conversation-learning';
-import { generateAutopilotFlowProposal } from '@/ai/flows/autopilot-flow-builder';
 import {
     generateNativeWorkflowAiProposal,
     type NativeWorkflowAiProposal,
@@ -102,7 +101,10 @@ import {
     prepareWorkflowBlockTest,
     createWorkflowBlockTestSideEffectAdapters,
     type WorkflowBlockTestFixtures,
+    type WorkflowTestChatMessage,
+    type WorkflowTestExecutionResult,
 } from '@/services/workflow-runtime';
+export type { WorkflowTestChatMessage, WorkflowTestExecutionResult };
 import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
 import {
     getPrimaryWorkflowModelId,
@@ -425,11 +427,54 @@ async function reindexChangedKnowledgeDocuments({
     const nextById = new Map(nextDocs.map((doc) => [doc.id, doc]));
 
     const removedDocs = previousDocs.filter((doc) => !nextById.has(doc.id));
-    const changedDocs = nextDocs.filter((doc) => {
+    const failedDocumentNames = new Set<string>();
+
+    const alteradosDesdeOUltimoSalvamento = nextDocs.filter((doc) => {
         const previous = previousById.get(doc.id);
         return hasKnowledgeDocumentIndexChanged(previous, doc);
     });
-    const failedDocumentNames = new Set<string>();
+
+    // Um id que nao e uuid explode no INSERT com "invalid input syntax for type
+    // uuid" — erro que so aparecia no log do worker, deixando o documento
+    // silenciosamente invisivel para a IA. Aqui ele vira falha reportada.
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const comIdInvalido = nextDocs.filter((doc) => doc.id && !UUID.test(doc.id));
+    for (const doc of comIdInvalido) {
+        console.error(`[RAG] Documento com id fora do formato uuid, nao indexavel: ${doc.id}`);
+        failedDocumentNames.add(doc.name || doc.id);
+    }
+
+    // Reindexa tambem o que nunca chegou a ser indexado. Sem isto, um documento
+    // adicionado enquanto a ingestao estava fora fica invisivel para sempre: no
+    // salvamento seguinte ele nao conta como alterado, e nada o retenta.
+    const jaNaFila = new Set(alteradosDesdeOUltimoSalvamento.map((doc) => doc.id));
+    const invalidos = new Set(comIdInvalido.map((doc) => doc.id));
+    let nuncaIndexados: KnowledgeBaseDocument[] = [];
+    try {
+        const candidatos = nextDocs.filter(
+            (doc) => doc.id && !jaNaFila.has(doc.id) && !invalidos.has(doc.id) && (doc.content || '').trim(),
+        );
+        if (candidatos.length > 0) {
+            const semIndice = new Set(
+                await VectorStore.listDocumentIdsWithoutEmbeddings({
+                    workspaceId,
+                    autopilotConfigId: configId,
+                    documentIds: candidatos.map((doc) => doc.id),
+                }),
+            );
+            nuncaIndexados = candidatos.filter((doc) => semIndice.has(doc.id));
+            if (nuncaIndexados.length > 0) {
+                console.info(
+                    `[RAG] ${nuncaIndexados.length} documento(s) sem embedding serao reindexados no agente ${configId}.`,
+                );
+            }
+        }
+    } catch (ragError) {
+        // Nao impede o salvamento nem a reindexacao do que mudou.
+        console.error('[RAG] Falha ao detectar documentos sem embedding:', ragError);
+    }
+
+    const changedDocs = [...alteradosDesdeOUltimoSalvamento, ...nuncaIndexados];
 
     await Promise.all(
         removedDocs.map((doc) =>
@@ -500,6 +545,33 @@ async function reindexChangedKnowledgeDocuments({
             failedDocumentNames.add(doc.name || doc.id);
         }
     }
+
+    // O diff acima cobre o que saiu ENTRE estes dois estados. Isto aqui cobre o
+    // que ja estava orfao antes: embeddings cujo documento nao existe mais na
+    // configuracao, vindos de reenvio do mesmo arquivo (id novo a cada upload),
+    // exclusao que falhou, ou salvamento de um cliente defasado.
+    //
+    // Sem isto o vazamento e permanente — um id que cai fora de `previousDocs`
+    // nunca mais volta a ser comparado. Auditoria de 26/07/2026 encontrou 149
+    // documentos orfaos com 251 chunks ainda marcados como ativos, ou seja,
+    // recuperaveis pela busca semantica e passiveis de virar resposta da IA.
+    try {
+        const removidos = await VectorStore.deleteEmbeddingsNotIn({
+            workspaceId,
+            autopilotConfigId: configId,
+            keepDocumentIds: nextDocs.map((doc) => doc.id).filter(Boolean),
+        });
+        if (removidos > 0) {
+            console.info(
+                `[RAG] Reconciliacao removeu ${removidos} embedding(s) orfao(s) do agente ${configId}.`,
+            );
+        }
+    } catch (ragError) {
+        // Nao falha o salvamento: orfao e desperdicio e risco de resposta velha,
+        // nao motivo para impedir o usuario de salvar a base de conhecimento.
+        console.error('[RAG] Falha ao reconciliar embeddings orfaos:', ragError);
+    }
+
     return { failedDocumentNames: [...failedDocumentNames] };
 }
 
@@ -577,12 +649,31 @@ export async function getAutopilotRagHealth(configId: string): Promise<{
             ? collections
             : [{ id: 'general', name: 'Geral', isDefault: true }, ...collections];
 
+        // "Nao indexado" tem duas causas opostas, e junta-las esconde as duas.
+        // A ingestao recusa de proposito transcricao bruta de conversa
+        // (isUnsafeAsCustomerFacingKnowledge): indexar historico de um cliente
+        // faria a IA repetir dados pessoais dele ao responder outro. O job
+        // completa com status 'skipped_unsafe', sem erro — entao o documento
+        // some da contagem de indexados sem nada explicar.
+        //
+        // Auditoria de 26/07/2026: dos 51 nao indexados, 50 eram exatamente
+        // isso — conversas coladas na base esperando virar conhecimento. So 1
+        // era falha real. Sem separar, o numero em ambar sugeria 51 defeitos.
+        const naoIndexados = documents.filter((document) => !indexedIds.has(document.id));
+        const bloqueadosPorSeguranca = naoIndexados.filter((document) =>
+            isUnsafeAsCustomerFacingKnowledge(document),
+        );
+
         return {
             health: {
                 configuredDocuments: documents.length,
                 indexedDocuments: indexedIds.size,
                 indexedChunks,
-                missingDocuments: documents.filter((document) => !indexedIds.has(document.id)).length,
+                missingDocuments: naoIndexados.length,
+                blockedAsRawConversation: bloqueadosPorSeguranca.length,
+                blockedDocumentNames: bloqueadosPorSeguranca
+                    .map((document) => document.name || document.id)
+                    .slice(0, 20),
                 quarantinedDocuments: quarantinedDocuments.length,
                 staleDocuments: Number(staleRes.rows[0]?.documents || 0),
                 wrongDimensionChunks,
@@ -813,6 +904,7 @@ export async function improveAutopilotKnowledgeDocument(
             workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
         });
         const improved = await improveKnowledgeDocumentForRag({
+            workspaceId,
             document,
             model: runtime.model,
             apiKeyCandidates: modelApiKeyCandidates,
@@ -877,39 +969,10 @@ export async function getWorkspaceAiRuntimeConfig(workspaceId: string): Promise<
     }
 
     try {
-        const integrationRes = await db.query(`
-            SELECT config, is_active
-            FROM workspace_integrations
-            WHERE workspace_id = $1 AND provider = 'gemini'
-            LIMIT 1
-        `, [workspaceId]);
-
-        if (integrationRes.rows.length > 0 && integrationRes.rows[0].is_active) {
-            const integrationConfig = integrationRes.rows[0].config || {};
-            const apiKey = typeof integrationConfig.apiKey === 'string' && integrationConfig.apiKey.trim().length > 0
-                ? integrationConfig.apiKey.trim()
-                : null;
-            const aiModel = typeof integrationConfig.aiModel === 'string' && integrationConfig.aiModel.trim().length > 0
-                ? normalizeGoogleAiModelId(integrationConfig.aiModel)
-                : null;
-            if (apiKey || aiModel) {
-                return { apiKey, aiModel, hasGlobalKey };
-            }
-        }
-
-        return {
-            apiKey: null,
-            aiModel: null,
-            hasGlobalKey,
-        };
-    } catch (error) {
-        console.error(`[GET_WORKSPACE_AI_RUNTIME_CONFIG] Erro ao resolver config do workspace ${workspaceId}:`, error);
-        return {
-            apiKey: null,
-            aiModel: null,
-            hasGlobalKey,
-            error: 'Falha ao buscar configuração de IA do workspace.',
-        };
+        const { model } = await resolveAutopilotModelFromCatalog();
+        return {apiKey:null,aiModel:model,hasGlobalKey:true};
+    } catch {
+        return {apiKey:null,aiModel:null,hasGlobalKey:false,error:'A IA precisa ser configurada pelo administrador da plataforma.'};
     }
 }
 
@@ -960,93 +1023,6 @@ export async function getAgentToolCatalogAction(workspaceId: string) {
     return { tools: await listWorkspaceAgentToolCatalog(workspaceId) };
 }
 
-export async function generateAutopilotFlowWithAi(input: {
-    configId: string;
-    conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
-    currentGraph?: AutopilotFlowGraph | null;
-    currentSystemPrompt?: string | null;
-    knowledgeDocuments?: KnowledgeBaseDocument[] | null;
-    knowledgeCollections?: KnowledgeCollection[] | null;
-    enabledToolNames?: string[] | null;
-    model?: string | null;
-}): Promise<{ proposal: AutopilotFlowAiProposal | null; error?: string }> {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { proposal: null, error: 'Usuario nao autenticado.' };
-
-    try {
-        const configRes = await db.query(
-            `SELECT id, workspace_id, gemini_api_key, enabled_tool_names, knowledge_base_documents, knowledge_collections
-             FROM autopilot_configs
-             WHERE id = $1
-             LIMIT 1`,
-            [input.configId],
-        );
-        if (configRes.rowCount === 0) return { proposal: null, error: 'Agente nao encontrado.' };
-        const config = configRes.rows[0];
-        const workspaceId = String(config.workspace_id);
-        if (!await isWorkspaceMember(user.id, workspaceId)) {
-            return { proposal: null, error: 'Acesso nao autorizado.' };
-        }
-
-        const conversation = input.conversation
-            .filter((message) => (message.role === 'user' || message.role === 'assistant') && message.content?.trim())
-            .slice(-12)
-            .map((message) => ({ role: message.role, content: message.content.trim().slice(0, 12000) }));
-        if (!conversation.some((message) => message.role === 'user')) {
-            return { proposal: null, error: 'Descreva o fluxo que deseja construir.' };
-        }
-
-        const [runtime, catalog] = await Promise.all([
-            resolveWorkspaceAiExecutionContext(workspaceId, input.configId),
-            getAgentToolCatalogAction(workspaceId),
-        ]);
-        if (catalog.error) return { proposal: null, error: catalog.error };
-        const scopedTools = selectFlowBuilderTools({
-            catalog: catalog.tools,
-            requestedEnabledToolNames: input.enabledToolNames,
-            persistedEnabledToolNames: config.enabled_tool_names,
-            mode: 'all_eligible',
-        });
-
-        let targetModel = runtime.model;
-        if (input.model) {
-            const resolved = await resolveAutopilotModelFromCatalog(input.model);
-            targetModel = resolved.model;
-        }
-
-        const modelApiKey = await resolveApiKeyForModel({
-            config,
-            workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
-            model: targetModel,
-        });
-        const knowledgeDocuments = Array.isArray(input.knowledgeDocuments)
-            ? input.knowledgeDocuments
-            : parseKnowledgeBaseDocuments(config.knowledge_base_documents);
-        const knowledgeCollections = Array.isArray(input.knowledgeCollections)
-            ? input.knowledgeCollections
-            : parseKnowledgeCollections(config.knowledge_collections);
-
-        const proposal = await generateAutopilotFlowProposal({
-            conversation,
-            currentGraph: input.currentGraph || null,
-            currentSystemPrompt: input.currentSystemPrompt || '',
-            tools: scopedTools,
-            knowledgeDocuments,
-            knowledgeCollections,
-            model: targetModel,
-            apiKey: modelApiKey,
-        });
-        return { proposal };
-    } catch (error) {
-        console.error('[AUTOPILOT_FLOW_BUILDER_AI] Falha ao gerar proposta:', error);
-        return {
-            proposal: null,
-            error: error instanceof Error ? error.message : 'Falha ao construir flow com IA.',
-        };
-    }
-}
-
 async function loadNativeWorkflowEditContext(configId: string, userId: string) {
     const configRes = await db.query('SELECT * FROM autopilot_configs WHERE id = $1 LIMIT 1', [configId]);
     if (configRes.rowCount === 0) throw new Error('Automação não encontrada.');
@@ -1088,6 +1064,8 @@ async function persistNativeWorkflowDraft(input: {
         [input.configId, input.workspaceId, input.userId, JSON.stringify(synchronizedSnapshot)],
     );
     revalidatePath(`/autopilot/${input.configId}`);
+    revalidatePath('/nexus');
+    revalidatePath(`/nexus/${input.configId}`);
     return saved.rows[0]?.updated_at as string | undefined;
 }
 
@@ -1319,28 +1297,28 @@ export async function runAutopilotNativeWorkflowTest(input: {
     workflowDefinition?: WorkflowDefinition;
     startNodeId?: string;
     fixtures?: WorkflowBlockTestFixtures;
-}) {
+}): Promise<WorkflowTestExecutionResult> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { success: false, error: 'Usuário não autenticado.' };
+    if (!user) return { success: false, error: 'Usuário não autenticado.', messages: [], variables: {} };
     try {
         const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
         const requestedWorkflowInput = input.workflowDefinition
             ? WorkflowDefinitionSchema.parse(input.workflowDefinition)
             : snapshot.workflow_definition;
-        if (!requestedWorkflowInput) return { success: false, error: 'O rascunho nativo não possui workflow.' };
+        if (!requestedWorkflowInput) return { success: false, error: 'O rascunho nativo não possui workflow.', messages: [], variables: {} };
         const [configuredModels, toolCatalog] = await Promise.all([
             listWorkspaceConfiguredAiModels(workspaceId),
             listWorkspaceAgentToolCatalog(workspaceId),
         ]);
         const toolReconciliation = reconcileNativeWorkflowTools(requestedWorkflowInput, toolCatalog);
         if (toolReconciliation.errors.length > 0) {
-            return { success: false, error: toolReconciliation.errors.join(' ') };
+            return { success: false, error: toolReconciliation.errors.join(' '), messages: [], variables: {} };
         }
         const requestedWorkflow = toolReconciliation.workflow;
         const availableModelIds = configuredModels.map((model) => model.id);
         const sourceValidation = validateWorkflowDefinition(requestedWorkflow, { availableModelIds });
-        if (!input.startNodeId && !sourceValidation.valid) return { success: false, error: sourceValidation.errors.map((issue) => issue.message).join(' ') };
+        if (!input.startNodeId && !sourceValidation.valid) return { success: false, error: sourceValidation.errors.map((issue) => issue.message).join(' '), messages: [], variables: {} };
         const timestamp = new Date().toISOString();
         const standardInput = { customerMessage: input.customerMessage, message: input.customerMessage, text: input.customerMessage };
         const prepared = input.startNodeId
@@ -1362,7 +1340,7 @@ export async function runAutopilotNativeWorkflowTest(input: {
             updatedAt: timestamp,
         });
         const validation = validateWorkflowDefinition(workflow, { availableModelIds });
-        if (!validation.valid) return { success: false, error: validation.errors.map((issue) => issue.message).join(' ') };
+        if (!validation.valid) return { success: false, error: validation.errors.map((issue) => issue.message).join(' '), messages: [], variables: {} };
         const runtimeConfig: AutopilotConfig = {
             ...config,
             id: String(config.id),
@@ -1384,6 +1362,7 @@ export async function runAutopilotNativeWorkflowTest(input: {
             created_at: new Date(config.created_at || Date.now()).toISOString(),
             updated_at: new Date(config.updated_at || Date.now()).toISOString(),
         };
+        const chatMessages: WorkflowTestChatMessage[] = [];
         const sandboxSideEffects = createWorkflowBlockTestSideEffectAdapters();
         const handlers = createDefaultNodeHandlerRegistry({
             resolveModelChain: async (context) => modelChainForNode({
@@ -1409,8 +1388,58 @@ export async function runAutopilotNativeWorkflowTest(input: {
             },
             applyGuardrails: async (_phase, value) => value,
             ...sandboxSideEffects.dependencies,
+            sendResponse: async (message, runtimeInput) => {
+                const isOptions = runtimeInput.node.type === 'interaction.options';
+                const isInput = runtimeInput.node.type.startsWith('interaction.');
+                const rawOptions = runtimeInput.node.config.options;
+                const options = isOptions && Array.isArray(rawOptions)
+                    ? rawOptions.filter((opt) => opt && typeof opt === 'object').map((opt: any, idx: number) => ({
+                        id: String(opt.id || `opt_${idx}`),
+                        label: String(opt.label || opt.value || `Opção ${idx + 1}`),
+                        value: String(opt.value || opt.label || `Opção ${idx + 1}`),
+                    }))
+                    : undefined;
+
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: message,
+                    type: isOptions ? 'options' : isInput ? 'input' : 'text',
+                    options,
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, characterCount: message.length };
+            },
+            sendMedia: async (media, runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: media.caption || `[Mídia: ${media.type}]`,
+                    type: 'media',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, mediaType: media.type };
+            },
+            handoff: async (runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'system',
+                    text: 'Atendimento transferido para equipe humana.',
+                    type: 'handoff',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, transferred: true };
+            },
         });
-        const execution = await new WorkflowExecutor(new PostgresWorkflowPersistence(db), handlers).start({
+        const persistence = new PostgresWorkflowPersistence(db);
+        await persistence.saveWorkflowDefinition(workflow);
+        const execution = await new WorkflowExecutor(persistence, handlers).start({
             workflow,
             input: prepared?.startInput.input || standardInput,
             variables: prepared?.startInput.variables,
@@ -1419,9 +1448,233 @@ export async function runAutopilotNativeWorkflowTest(input: {
             conversationId: `sandbox:${input.configId}`,
             executionId: `sandbox_${uuidv4()}`,
         }, { workerId: `sandbox_${user.id}` });
-        return { success: true, executionId: execution.executionId, status: execution.status };
+
+        // Collect any AI agent responses if not delivered through sendResponse
+        for (const step of execution.executionPath || []) {
+            const nodeResult = execution.nodeResults[step.nodeId];
+            if (step.nodeType === 'ai.agent' || step.nodeType === 'agent.intelligent') {
+                const out = nodeResult?.output as Record<string, unknown> | undefined;
+                const responseText = out?.response || out?.question || out?.summary;
+                if (typeof responseText === 'string' && responseText.trim()) {
+                    const alreadyRecorded = chatMessages.some((msg) => msg.nodeId === step.nodeId && msg.text === responseText);
+                    if (!alreadyRecorded) {
+                        chatMessages.push({
+                            id: `msg_${uuidv4()}`,
+                            nodeId: step.nodeId,
+                            nodeType: step.nodeType,
+                            role: 'bot',
+                            text: responseText,
+                            type: out?.type === 'needs_input' ? 'input' : 'text',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if (chatMessages.length === 0 && execution.status === 'failed') {
+            const failure = execution.failure as Record<string, unknown> | undefined;
+            chatMessages.push({
+                id: `msg_${uuidv4()}`,
+                role: 'system',
+                text: `O fluxo falhou: ${String(failure?.message || 'Erro desconhecido durante a execução.')}`,
+                type: 'error',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        return {
+            success: true,
+            executionId: execution.executionId,
+            status: execution.status,
+            resumeToken: execution.resumeToken,
+            waitingNodeId: execution.currentNodeId || undefined,
+            messages: chatMessages,
+            variables: execution.variables || {},
+            nodeResults: execution.nodeResults,
+        };
     } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : 'Falha ao executar teste.' };
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Falha ao executar teste.',
+            messages: [],
+            variables: {},
+        };
+    }
+}
+
+export async function resumeAutopilotNativeWorkflowTest(input: {
+    configId: string;
+    resumeToken: string;
+    customerMessage: string;
+    workflowDefinition?: WorkflowDefinition;
+}): Promise<WorkflowTestExecutionResult> {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Usuário não autenticado.', messages: [], variables: {} };
+    try {
+        const { config, snapshot, workspaceId } = await loadNativeWorkflowEditContext(input.configId, user.id);
+        const runtimeConfig: AutopilotConfig = {
+            ...config,
+            id: String(config.id),
+            workspace_id: workspaceId,
+            user_id: String(config.user_id),
+            name: String(config.name || snapshot.name),
+            gemini_api_key: config.gemini_api_key || null,
+            ai_model: config.ai_model || snapshot.ai_model || null,
+            transcription_model: config.transcription_model || null,
+            knowledge_base: config.knowledge_base || null,
+            knowledge_base_documents: snapshot.knowledge_base_documents
+                .filter((document) => document.content?.trim() && !isUnsafeAsCustomerFacingKnowledge(document)),
+            is_primary: Boolean(config.is_primary),
+            is_active: Boolean(config.is_active),
+            is_private: Boolean(config.is_private),
+            default_fallback_reply: config.default_fallback_reply || null,
+            escalation_policy: config.escalation_policy || null,
+            closing_policy: config.closing_policy || null,
+            created_at: new Date(config.created_at || Date.now()).toISOString(),
+            updated_at: new Date(config.updated_at || Date.now()).toISOString(),
+        };
+
+        const chatMessages: WorkflowTestChatMessage[] = [];
+        const sandboxSideEffects = createWorkflowBlockTestSideEffectAdapters();
+        const handlers = createDefaultNodeHandlerRegistry({
+            resolveModelChain: async (context) => modelChainForNode({
+                workspaceId,
+                config: runtimeConfig,
+                modelNode: context.modelNode,
+            }),
+            loadMemory: async () => ({ sandbox: true }),
+            retrieveKnowledge: async (context) => {
+                const documents = selectNativeKnowledgeDocuments(
+                    context.knowledgeNodes,
+                    runtimeConfig.knowledge_base_documents || [],
+                );
+                if (documents.length === 0) return [];
+                const retrieval = await retrieveHybridSupportContext({
+                    workspaceId,
+                    autopilotConfigId: input.configId,
+                    query: input.customerMessage,
+                    staticDocuments: documents,
+                    allowedDocumentIds: documents.map((document) => document.id),
+                });
+                return retrieval.knowledgeBaseDocuments.map((document) => ({ ...document }));
+            },
+            applyGuardrails: async (_phase, value) => value,
+            ...sandboxSideEffects.dependencies,
+            sendResponse: async (message, runtimeInput) => {
+                const isOptions = runtimeInput.node.type === 'interaction.options';
+                const isInput = runtimeInput.node.type.startsWith('interaction.');
+                const rawOptions = runtimeInput.node.config.options;
+                const options = isOptions && Array.isArray(rawOptions)
+                    ? rawOptions.filter((opt) => opt && typeof opt === 'object').map((opt: any, idx: number) => ({
+                        id: String(opt.id || `opt_${idx}`),
+                        label: String(opt.label || opt.value || `Opção ${idx + 1}`),
+                        value: String(opt.value || opt.label || `Opção ${idx + 1}`),
+                    }))
+                    : undefined;
+
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: message,
+                    type: isOptions ? 'options' : isInput ? 'input' : 'text',
+                    options,
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, characterCount: message.length };
+            },
+            sendMedia: async (media, runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'bot',
+                    text: media.caption || `[Mídia: ${media.type}]`,
+                    type: 'media',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, delivered: true, mediaType: media.type };
+            },
+            handoff: async (runtimeInput) => {
+                chatMessages.push({
+                    id: `msg_${uuidv4()}`,
+                    nodeId: runtimeInput.node.id,
+                    nodeType: runtimeInput.node.type,
+                    role: 'system',
+                    text: 'Atendimento transferido para equipe humana.',
+                    type: 'handoff',
+                    timestamp: new Date().toISOString(),
+                });
+                return { sandbox: true, transferred: true };
+            },
+        });
+
+        const persistence = new PostgresWorkflowPersistence(db);
+        const executor = new WorkflowExecutor(persistence, handlers);
+        const execution = await executor.resume({
+            resumeToken: input.resumeToken,
+            input: {
+                message: input.customerMessage,
+                customerMessage: input.customerMessage,
+                text: input.customerMessage,
+                value: input.customerMessage,
+            },
+        });
+
+        // Collect any AI agent responses if not delivered through sendResponse
+        for (const step of execution.executionPath || []) {
+            const nodeResult = execution.nodeResults[step.nodeId];
+            if (step.nodeType === 'ai.agent' || step.nodeType === 'agent.intelligent') {
+                const out = nodeResult?.output as Record<string, unknown> | undefined;
+                const responseText = out?.response || out?.question || out?.summary;
+                if (typeof responseText === 'string' && responseText.trim()) {
+                    const alreadyRecorded = chatMessages.some((msg) => msg.nodeId === step.nodeId && msg.text === responseText);
+                    if (!alreadyRecorded) {
+                        chatMessages.push({
+                            id: `msg_${uuidv4()}`,
+                            nodeId: step.nodeId,
+                            nodeType: step.nodeType,
+                            role: 'bot',
+                            text: responseText,
+                            type: out?.type === 'needs_input' ? 'input' : 'text',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if (chatMessages.length === 0 && execution.status === 'failed') {
+            const failure = execution.failure as Record<string, unknown> | undefined;
+            chatMessages.push({
+                id: `msg_${uuidv4()}`,
+                role: 'system',
+                text: `O fluxo falhou: ${String(failure?.message || 'Erro desconhecido durante a execução.')}`,
+                type: 'error',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        return {
+            success: true,
+            executionId: execution.executionId,
+            status: execution.status,
+            resumeToken: execution.resumeToken,
+            waitingNodeId: execution.currentNodeId || undefined,
+            messages: chatMessages,
+            variables: execution.variables || {},
+            nodeResults: execution.nodeResults,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Falha ao retomar teste.',
+            messages: [],
+            variables: {},
+        };
     }
 }
 
@@ -1569,7 +1822,10 @@ export async function getAutopilotConfig(workspaceId: string, agentId?: string):
             snapshot: normalizeDraftSnapshot(row.snapshot, selectedSnapshot),
         })) as AutopilotConfigVersionSummary[];
 
-        const workspaceConfiguredAiModels = await listWorkspaceConfiguredAiModels(workspaceId);
+        const workspaceConfiguredAiModels = await listWorkspaceConfiguredAiModels(workspaceId).catch(error => {
+            console.error('[GET_AUTOPILOT_CONFIG] Platform AI readiness unavailable:', error);
+            return [];
+        });
         const workspaceDefaultAiModel = workspaceConfiguredAiModels[0]?.id || null;
         const hasGlobalAiKey = !!(
             process.env.GOOGLE_GENAI_API_KEY ||
@@ -1892,6 +2148,8 @@ export async function saveAutopilotDraft(
 
         revalidatePath('/autopilot');
         revalidatePath(`/autopilot/${configId}`);
+        revalidatePath('/nexus');
+        revalidatePath(`/nexus/${configId}`);
         return { success: true, updatedAt: saveRes.rows[0]?.updated_at };
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Falha ao salvar rascunho.';
@@ -2199,6 +2457,8 @@ export async function publishAutopilotDraft(configId: string): Promise<{
 
         revalidatePath('/autopilot');
         revalidatePath(`/autopilot/${configId}`);
+        revalidatePath('/nexus');
+        revalidatePath(`/nexus/${configId}`);
         return {
             success: true,
             versionNumber,
@@ -2416,6 +2676,7 @@ export async function createAutopilotAgent(workspaceId: string, name: string, is
 
         const newId = insertRes.rows[0]?.id;
         revalidatePath('/autopilot');
+        revalidatePath('/nexus');
         return { success: true, id: newId };
     } catch (error) {
         console.error('[CREATE_AUTOPILOT_AGENT] Erro ao criar agente:', error);
@@ -2469,8 +2730,14 @@ export async function deleteAutopilotAgent(agentId: string) {
 
         const isMember = await isWorkspaceMember(user.id, workspaceId);
         if (!isMember) return { success: false, error: 'Sem permissão no workspace' };
+        if (!await hasWorkspacePermission(user.id, workspaceId, 'automations:manage')) return { success: false, error: 'Sem permissão para excluir agentes.' };
 
-        await db.query('DELETE FROM autopilot_configs WHERE id = $1', [agentId]);
+        const dependencies = await db.query(`SELECT name FROM workflow_definitions WHERE workspace_id = $1 AND status = 'published'
+          AND EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(definition->'nodes', '[]'::jsonb)) node
+            WHERE node->>'type' IN ('ai.published_agent', 'ai.studio_agent', 'integration.studio_procedure', 'tool.studio_agent', 'tool.studio_procedure')
+              AND node->'config'->>'agentId' = $2) LIMIT 10`, [workspaceId, agentId]);
+        if (dependencies.rows.length) return { success: false, error: `Este agente é usado por fluxos publicados: ${dependencies.rows.map((row) => row.name).join(', ')}. Resolva essas referências antes de excluí-lo.` };
+        await db.query('DELETE FROM autopilot_configs WHERE id = $1 AND workspace_id = $2', [agentId, workspaceId]);
 
         revalidatePath('/autopilot');
         return { success: true };
@@ -3880,6 +4147,7 @@ export async function generateConversationKnowledgeDraft(input: {
             workspaceGeminiApiKey: runtime.workspaceGeminiApiKey,
         });
         const learned = await learnFromConversation({
+            workspaceId: input.workspaceId,
             transcript,
             closeContext,
             existingKnowledge,

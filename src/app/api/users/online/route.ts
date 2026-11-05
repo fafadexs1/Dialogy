@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { PresenceEventSource } from '@/lib/presence';
 import { updateUserOnlineStatus } from '@/lib/presence-server';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 /**
  * Endpoint para ser chamado via navigator.sendBeacon()
@@ -13,6 +14,9 @@ export async function POST(request: Request) {
     try {
         const supabase = await createClient();
         const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
+            return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+        }
         const contentType = request.headers.get('content-type') || '';
         let payload: { userId?: string; workspaceId?: string } = {};
 
@@ -36,10 +40,13 @@ export async function POST(request: Request) {
             forceOffline?: boolean;
             source?: PresenceEventSource;
         };
-        const effectiveUserId = authUser?.id ?? userId;
+        const effectiveUserId = authUser.id;
 
-        if (!effectiveUserId || !workspaceId) {
-            return NextResponse.json({ error: 'User ID and workspaceId are required' }, { status: 400 });
+        if (!workspaceId) {
+            return NextResponse.json({ error: 'workspaceId is required' }, { status: 400 });
+        }
+        if (!await hasWorkspacePermission(effectiveUserId, workspaceId, 'inbox:access')) {
+            return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 });
         }
 
         await updateUserOnlineStatus(

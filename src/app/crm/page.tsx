@@ -1,151 +1,100 @@
 'use client';
 
-import Link from 'next/link';
-import type { Contact } from '@/lib/types';
+import { useCallback, useEffect, useState } from 'react';
+import { KanbanSquare, LayoutDashboard, List, Loader2, Zap } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getContacts, getWorkspaceUsers } from '@/actions/crm';
+import { useCurrentUser } from '@/hooks/use-online-status';
+import type { Contact, User } from '@/lib/types';
 import CustomerList from '@/components/crm/customer-list';
 import CrmKanban from '@/components/crm/crm-kanban';
 import CrmDashboard from '@/components/crm/crm-dashboard';
 import CrmAutomations from '@/components/crm/crm-automations';
-import { Loader2, LayoutDashboard, Kanban, List, Zap, Send, BarChart2 } from 'lucide-react';
-import { useEffect, useState, useCallback } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getContacts } from '@/actions/crm';
-import { useCurrentUser } from '@/hooks/use-online-status';
-import { motion } from 'framer-motion';
-import { Button } from '@/components/ui/button';
+import CustomerProfile from '@/components/crm/customer-profile';
+import { AddContactForm } from '@/components/crm/add-contact-form';
+import { AddActivityForm } from '@/components/crm/add-activity-form';
+
+const sections = [
+  { value: 'dashboard', label: 'Visão geral', icon: LayoutDashboard },
+  { value: 'kanban', label: 'Funil', icon: KanbanSquare },
+  { value: 'list', label: 'Contatos', icon: List },
+  { value: 'automations', label: 'Automações', icon: Zap },
+] as const;
+type Section = (typeof sections)[number]['value'];
 
 export default function CrmPage() {
   const user = useCurrentUser();
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [totalContacts, setTotalContacts] = useState<number | null>(null);
+  const [section, setSection] = useState<Section>('dashboard');
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [workspaceUsers, setWorkspaceUsers] = useState<User[]>([]);
+  const [kanbanVersion, setKanbanVersion] = useState(0);
 
   const fetchData = useCallback(async () => {
     if (!user?.activeWorkspaceId) return;
     try {
-      const contactsRes = await getContacts(user.activeWorkspaceId);
-      if (contactsRes.contacts) setContacts(contactsRes.contacts);
+      const result = await getContacts(user.activeWorkspaceId, { limit: 1 });
+      if (result.contacts) setTotalContacts(result.total);
     } catch (error) {
-      console.error("Error fetching CRM data", error);
+      console.error('Error fetching CRM data', error);
     }
   }, [user?.activeWorkspaceId]);
 
+  useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
-    if (user?.activeWorkspaceId) {
-      fetchData();
-    }
-  }, [fetchData, user?.activeWorkspaceId]);
+    const sync = () => {
+      const hash = window.location.hash.slice(1);
+      setSection(sections.find((item) => item.value === hash)?.value || 'dashboard');
+    };
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
 
-  if (!user) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative">
-            <div className="absolute inset-0 animate-pulse rounded-full bg-emerald-500/20 blur-xl" />
-            <Loader2 className="relative h-12 w-12 animate-spin text-emerald-500" />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const changeSection = (value: string) => {
+    const next = value as Section;
+    setSection(next);
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${next}`);
+  };
 
+  const openContact = (contact: Contact) => {
+    setSelectedContact(contact);
+    setProfileOpen(true);
+    if (user?.activeWorkspaceId) getWorkspaceUsers(user.activeWorkspaceId).then((result) => setWorkspaceUsers(result.users || []));
+  };
+
+  const refreshContact = (updated?: Contact | null) => {
+    if (updated) setSelectedContact(updated);
+    setEditOpen(false);
+    setActivityOpen(false);
+    fetchData();
+    setKanbanVersion((version) => version + 1);
+  };
+
+  if (!user) return <div className="flex h-full items-center justify-center bg-[#f4f6f2] dark:bg-[#090e0c]"><Loader2 className="h-9 w-9 animate-spin text-emerald-600" /></div>;
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-slate-50 selection:bg-emerald-500/20 dark:bg-black dark:selection:bg-emerald-500/30">
-      <div className="pointer-events-none absolute inset-0 hidden overflow-hidden dark:block">
-        <div className="absolute -top-[20%] left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 rounded-full bg-emerald-500/8 blur-[120px]" />
-        <div className="absolute bottom-[8%] right-[8%] h-[620px] w-[620px] rounded-full bg-emerald-900/12 blur-[120px]" />
-      </div>
-
-      <div className="relative z-10 flex h-full w-full flex-col overflow-hidden">
-        <Tabs defaultValue="dashboard" className="flex h-full flex-col">
-          <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-4 dark:border-emerald-400/15 dark:bg-[#050807]/95 dark:shadow-[0_18px_50px_-34px_rgba(16,185,129,0.32)] dark:backdrop-blur-md">
-            <div className="flex items-center gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:shadow-lg dark:shadow-emerald-500/10">
-                <LayoutDashboard className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold tracking-tight text-slate-950 dark:text-white">CRM</h1>
-                <p className="text-xs text-slate-500 dark:text-zinc-400">Gerencie seus contatos e negociacoes.</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <TabsList className="h-10 border border-slate-200 bg-slate-50 p-1 dark:border-emerald-400/15 dark:bg-white/[0.04]">
-                <TabsTrigger
-                  value="dashboard"
-                  className="text-slate-500 transition-colors hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm dark:text-zinc-400 dark:hover:text-white dark:data-[state=active]:bg-emerald-400/15 dark:data-[state=active]:text-emerald-100"
-                >
-                  <LayoutDashboard className="mr-2 h-4 w-4" />Visao
-                </TabsTrigger>
-                <TabsTrigger
-                  value="kanban"
-                  className="text-slate-500 transition-colors hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm dark:text-zinc-400 dark:hover:text-white dark:data-[state=active]:bg-emerald-400/15 dark:data-[state=active]:text-emerald-100"
-                >
-                  <Kanban className="mr-2 h-4 w-4" />Kanban
-                </TabsTrigger>
-                <TabsTrigger
-                  value="list"
-                  className="text-slate-500 transition-colors hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm dark:text-zinc-400 dark:hover:text-white dark:data-[state=active]:bg-emerald-400/15 dark:data-[state=active]:text-emerald-100"
-                >
-                  <List className="mr-2 h-4 w-4" />Lista
-                </TabsTrigger>
-                <TabsTrigger
-                  value="automations"
-                  className="text-slate-500 transition-colors hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm dark:text-zinc-400 dark:hover:text-white dark:data-[state=active]:bg-emerald-400/15 dark:data-[state=active]:text-emerald-100"
-                >
-                  <Zap className="mr-2 h-4 w-4" />Auto
-                </TabsTrigger>
-              </TabsList>
-
-              <div className="hidden items-center gap-2 xl:flex">
-                <Button asChild variant="outline" size="sm" className="gap-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-100 dark:hover:bg-emerald-400/20 dark:hover:text-white">
-                  <Link href="/campaigns">
-                    <Send className="h-4 w-4" />
-                    Campanhas
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" size="sm" className="gap-2 border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200 dark:hover:bg-white/10 dark:hover:text-white">
-                  <Link href="/analytics">
-                    <BarChart2 className="h-4 w-4" />
-                    Analytics
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-hidden">
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4 }}
-              className="h-full"
-            >
-              <TabsContent value="dashboard" className="m-0 h-full border-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden bg-background p-4 md:p-6">
-                  <CrmDashboard contacts={contacts} tags={[]} workspaceId={user.activeWorkspaceId} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="kanban" className="m-0 h-full border-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden bg-background">
-                  <CrmKanban user={user} onContactClick={() => {}} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="list" className="m-0 h-full border-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden bg-slate-50 dark:bg-black">
-                  <CustomerList user={user} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="automations" className="m-0 h-full border-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden bg-background p-4 md:p-6">
-                  {user.activeWorkspaceId && <CrmAutomations workspaceId={user.activeWorkspaceId} />}
-                </div>
-              </TabsContent>
-            </motion.div>
-          </div>
-        </Tabs>
-      </div>
+    <div className="crm-experience flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-[#f4f6f2] text-[#13231c] dark:bg-[#090e0c] dark:text-white">
+      <Tabs value={section} onValueChange={changeSection} className="flex h-full min-h-0 flex-col">
+        <div className="shrink-0 border-b border-[#dfe7dd] bg-white/90 px-4 shadow-[0_8px_30px_-25px_rgba(14,40,24,.45)] backdrop-blur-xl dark:border-white/10 dark:bg-[#101a15]/95 md:px-8">
+          <TabsList className="mx-auto flex h-auto w-full max-w-[1800px] justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-1.5 md:gap-2 md:p-2">
+            {sections.map(({ value, label, icon: Icon }) => <TabsTrigger key={value} value={value} className="flex h-11 shrink-0 items-center gap-2.5 rounded-xl border border-transparent px-3.5 text-slate-500 shadow-none transition hover:bg-[#f2f6f0] hover:text-[#183b29] data-[state=active]:border-emerald-200 data-[state=active]:bg-emerald-50 data-[state=active]:text-[#146b42] data-[state=active]:shadow-none dark:text-zinc-400 dark:hover:bg-white/[0.05] dark:hover:text-white dark:data-[state=active]:border-emerald-400/20 dark:data-[state=active]:bg-emerald-400/10 dark:data-[state=active]:text-emerald-200 md:h-12 md:px-4"><Icon className="h-[18px] w-[18px] shrink-0" /><span className="text-[13px] font-semibold">{label}</span></TabsTrigger>)}
+          </TabsList>
+        </div>
+        <div className="min-h-0 flex-1">
+          <TabsContent value="dashboard" className="m-0 h-full min-h-0 p-0"><CrmDashboard totalContacts={totalContacts} workspaceId={user.activeWorkspaceId} /></TabsContent>
+          <TabsContent value="kanban" className="m-0 h-full min-h-0 p-0"><CrmKanban key={kanbanVersion} user={user} onContactClick={openContact} /></TabsContent>
+          <TabsContent value="list" className="m-0 h-full min-h-0 p-0"><CustomerList user={user} /></TabsContent>
+          <TabsContent value="automations" className="m-0 h-full min-h-0 p-0">{user.activeWorkspaceId && <CrmAutomations workspaceId={user.activeWorkspaceId} />}</TabsContent>
+        </div>
+      </Tabs>
+      {selectedContact && <>
+        <CustomerProfile contact={selectedContact} isOpen={profileOpen} setIsOpen={setProfileOpen} onAction={(action, contact) => { setSelectedContact(contact); if (action === 'edit') setEditOpen(true); else setActivityOpen(true); }} onMutate={() => refreshContact()} />
+        {user.activeWorkspaceId && <AddContactForm isOpen={editOpen} setIsOpen={setEditOpen} onSave={refreshContact} contact={selectedContact} workspaceId={user.activeWorkspaceId} agents={workspaceUsers} user={user} />}
+        <AddActivityForm contact={selectedContact} isOpen={activityOpen} setIsOpen={setActivityOpen} onSave={() => refreshContact()} />
+      </>}
     </div>
   );
 }

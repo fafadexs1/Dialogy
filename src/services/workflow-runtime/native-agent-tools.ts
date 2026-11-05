@@ -44,8 +44,8 @@ const INTERNAL_GROUPS: Record<string, Pick<NativeAgentToolGroup, 'label' | 'desc
     description: 'Leitura e atualização dos dados do contato.',
   },
   sgp: {
-    label: 'SGP',
-    description: 'Contratos, faturas e operações do provedor.',
+    label: 'Sistema de gestão (SGP)',
+    description: 'Cadastros, contratos, cobranças e operações configuradas do negócio.',
   },
   other: {
     label: 'Outras ferramentas',
@@ -372,6 +372,9 @@ export function reconcileNativeWorkflowTools(
 
   const nodes = definition.nodes.map((node) => {
     if (!attachedToolNodeIds.has(node.id)) return node;
+    // Built-in utilities are identified by their immutable node type and use no
+    // workspace catalog credentials. They are resolved by the Nexus registry.
+    if (['tool.calculator', 'tool.clock', 'tool.read_url', 'tool.web_search', 'tool.sandbox', 'tool.image', 'tool.image_analysis', 'tool.video_analysis', 'tool.document_read', 'tool.document_write', 'tool.audio_transcribe', 'tool.text_to_speech', 'tool.browser', 'tool.schedule_workflow', 'tool.email_notification', 'tool.zapier', 'tool.google_ads_report', 'tool.whatsapp_reply', 'tool.whatsapp_history'].includes(node.type)) return node;
     const name = getWorkflowToolName(node);
     const tool = catalogByName.get(name);
     if (!tool) {

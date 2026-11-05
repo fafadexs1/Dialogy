@@ -9,11 +9,12 @@ node_modules
 !.yarn/versions
 
 # build artifacts
-.next
+# Ignore the Next.js output directory and all local validation/build copies
+# (for example .next-turbopack-*, .next-perf, and .next-codex-dev).
+.next*
 out
 build
 dist
-public/sw.js
 public/workbox-*.js
 
 # testing
@@ -60,11 +61,22 @@ tmp
 scratch
 
 # repository-only directories
-tests
+# The opt-in workflow preview page is compiled by Next even when disabled.
+# Include only its synthetic fixture dependency graph in the build context.
+tests/*
+!tests/fixtures/
+tests/fixtures/*
+!tests/fixtures/workflow-editor-preview.tsx
+!tests/fixtures/workflow-editor-fixture.ts
+!tests/fixtures/studio-composition-preview.ts
+!tests/fixtures/studio-flow-fixture.ts
+!tests/fixtures/toolbox-preview.ts
 docs
 delivery-app
+mobile
 
 # local artifacts
+artifacts/reasoning-v2
 *.bak
 *.log
 *.sqlite

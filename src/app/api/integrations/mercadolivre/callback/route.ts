@@ -1,23 +1,45 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
+import { verifySignedOAuthState } from '@/lib/security/oauth-state';
+import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');
-    const workspaceId = searchParams.get('state'); // We passed workspaceId as state
+    const state = searchParams.get('state');
     const error = searchParams.get('error');
 
     if (error) {
         return NextResponse.json({ error: `Mercado Livre Error: ${error}` }, { status: 400 });
     }
 
-    if (!code || !workspaceId) {
+    if (!code || !state) {
         return NextResponse.json({ error: 'Missing code or state' }, { status: 400 });
     }
 
     const appId = process.env.MERCADOLIVRE_APP_ID;
     const clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
     const redirectUri = `${process.env.NEXTAUTH_URL}/api/integrations/mercadolivre/callback`;
+
+    if (!clientSecret) {
+        return NextResponse.json({ error: 'Mercado Livre OAuth is not configured' }, { status: 500 });
+    }
+
+    const statePayload = verifySignedOAuthState(state, clientSecret);
+    if (!statePayload) {
+        return NextResponse.json({ error: 'Invalid or expired OAuth state' }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || user.id !== statePayload.userId) {
+        return NextResponse.json({ error: 'OAuth session mismatch' }, { status: 403 });
+    }
+    if (!await hasWorkspacePermission(user.id, statePayload.workspaceId, 'workspace:settings:edit')) {
+        return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 });
+    }
+    const workspaceId = statePayload.workspaceId;
 
     try {
         // 1. Exchange code for token
@@ -41,7 +63,7 @@ export async function GET(request: Request) {
         }
 
         const { access_token, refresh_token, expires_in, user_id } = tokenData;
-        const expiresAt = Date.now() + expires_in * 1000;
+        const expiresAt = new Date(Date.now() + expires_in * 1000);
 
         // 2. Fetch User Info (Nickname)
         const userRes = await fetch(`https://api.mercadolibre.com/users/me`, {

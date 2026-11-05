@@ -350,6 +350,7 @@ export default function ApiClient() {
                                     <li>O template precisa estar aprovado na Meta e disponivel na instancia informada.</li>
                                     <li>Se o template tiver HEADER IMAGE, o envio deve incluir um header com imagem valida; caso contrario a Meta retorna erro de formato.</li>
                                     <li>Valores monetarios em order_details usam centavos com offset 100. Exemplo: R$ 99,90 deve ser enviado como value 9990 e offset 100.</li>
+                                    <li>O valor do exemplo nao e um padrao: calcule total_amount, subtotal e o valor dos itens para cada fatura e confira o valor do codigo Pix gerado na origem. Divergencias identificadas impedem o envio.</li>
                                     <li>A chave Pix e o codigo Pix devem ser reais no ambiente de producao. Placeholders podem gerar falhas ou botoes sem acao util.</li>
                                 </ul>
                             </div>

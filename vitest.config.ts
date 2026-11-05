@@ -12,6 +12,7 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
+      '**/.next*/**',
       '**/.{idea,git,cache,output,temp}/**',
       '**/tests/seo-audit.spec.ts',
     ],

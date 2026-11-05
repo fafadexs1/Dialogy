@@ -141,9 +141,30 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
     }, [fallbackSrc]);
     const internalRef = React.useRef<HTMLImageElement | null>(null);
 
-    const [currentSrc, setCurrentSrc] = React.useState<string | undefined>(
-      safeSrc || safeFallbackSrc
-    )
+    const desiredSrc = safeSrc || safeFallbackSrc;
+
+    // `currentSrc` só existe para permitir a queda para `fallbackSrc` quando a
+    // imagem principal falha. Ele NÃO pode ficar um render atrás de `src`.
+    //
+    // Antes, `currentSrc` e `status` eram sincronizados por `useEffect`, que só
+    // roda depois da pintura: quando a conversa mudava de responsável, o render
+    // seguinte ainda desenhava o `<img>` da pessoa anterior com a classe
+    // `avatar-loaded` (visível), e só no efeito é que a troca acontecia. Era a
+    // foto da pessoa errada aparecendo a cada transferência e a cada
+    // reordenação da lista. Aqui o descarte é feito durante o render, antes de
+    // qualquer pintura.
+    const [fallbackAttempt, setFallbackAttempt] = React.useState<string | undefined>(undefined)
+    const [trackedSrc, setTrackedSrc] = React.useState<string | undefined>(desiredSrc);
+
+    if (trackedSrc !== desiredSrc) {
+      setTrackedSrc(desiredSrc);
+      if (fallbackAttempt !== undefined) setFallbackAttempt(undefined);
+      if (status !== 'loading') setStatus('loading');
+    }
+
+    // Enquanto o ajuste acima não é reprocessado, `desiredSrc` já manda: nunca
+    // se cai de volta para a imagem anterior.
+    const currentSrc = trackedSrc === desiredSrc ? (fallbackAttempt ?? desiredSrc) : desiredSrc;
 
     const setRefs = React.useCallback((node: HTMLImageElement | null) => {
       internalRef.current = node;
@@ -153,11 +174,6 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
         (ref as React.MutableRefObject<HTMLImageElement | null>).current = node;
       }
     }, [ref]);
-
-    React.useEffect(() => {
-      setCurrentSrc(safeSrc || safeFallbackSrc)
-      setStatus('loading')
-    }, [safeSrc, safeFallbackSrc])
 
     // Catch images that loaded before React hydrated (race condition fix)
     React.useEffect(() => {
@@ -183,6 +199,10 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
 
     return (
       <img
+        // A key amarra o elemento à imagem que ele representa. Sem isso o React
+        // reaproveita o mesmo <img> ao trocar de pessoa, e o navegador mantém o
+        // bitmap antigo na tela enquanto o novo carrega.
+        key={currentSrc}
         ref={setRefs}
         src={currentSrc}
         alt={alt ?? ""}
@@ -201,7 +221,7 @@ const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
         }}
         onError={(e) => {
           if (safeFallbackSrc && currentSrc !== safeFallbackSrc) {
-            setCurrentSrc(safeFallbackSrc)
+            setFallbackAttempt(safeFallbackSrc)
             setStatus('loading')
             return
           }

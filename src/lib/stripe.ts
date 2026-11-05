@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { getSystemSettingsAction } from '@/actions/system-settings';
+import { getSystemSettings } from '@/lib/system-settings';
 
 // Helper to get a Stripe instance with keys from DB or Env
 export async function getStripe() {
@@ -8,7 +8,6 @@ export async function getStripe() {
 
     try {
         // Use internal function to bypass auth check (webhooks have no user session)
-        const { getSystemSettings } = await import('@/actions/system-settings');
         const settings = await getSystemSettings(['stripe_secret_key']);
         if (settings['stripe_secret_key']) {
             secretKey = settings['stripe_secret_key'];

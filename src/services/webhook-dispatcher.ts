@@ -81,6 +81,11 @@ async function logWebhookAttempt({
     headers?: Record<string, any>;
 }) {
     try {
+        const safeResponseBody =
+            typeof responseBody === 'object' && responseBody !== null
+                ? responseBody
+                : { raw: String(responseBody ?? '') };
+
         await db.query(
             `INSERT INTO webhook_logs (source, direction, event, status_code, payload, headers, response_body)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -91,7 +96,7 @@ async function logWebhookAttempt({
                 statusCode,
                 payload,
                 headers || {},
-                responseBody || {}
+                safeResponseBody,
             ]
         );
     } catch (err) {
@@ -266,8 +271,9 @@ export async function dispatchMessageToWebhooks(
     instanceName: string
 ) {
     try {
-        const conversationId =
-            (await resolveCanonicalWhatsappChatIdByIdentity(db, {
+        const conversationId = chat.status === 'encerrados'
+            ? chat.id
+            : (await resolveCanonicalWhatsappChatIdByIdentity(db, {
                 workspaceId: chat.workspace_id,
                 phoneOrJid: chat.contact?.phone_number_jid,
                 currentChatId: chat.id,
@@ -298,7 +304,25 @@ export async function dispatchMessageToWebhooks(
             return;
         }
 
-        const agents = await db.query('SELECT * FROM system_agents WHERE workspace_id = $1 AND is_active = TRUE AND webhook_url IS NOT NULL', [chat.workspace_id]);
+        const agents = await db.query(
+            `SELECT agent.*
+             FROM system_agents agent
+             WHERE agent.workspace_id = $1
+               AND agent.is_active = TRUE
+               AND agent.webhook_url IS NOT NULL
+               AND NULLIF(BTRIM(agent.webhook_url), '') IS NOT NULL
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM nexus_workflows workflow
+                 JOIN workflow_definitions definition
+                   ON definition.workflow_id = workflow.published_workflow_id
+                  AND definition.workflow_version = workflow.published_workflow_version
+                 WHERE workflow.workspace_id = agent.workspace_id
+                   AND workflow.status = 'published'
+                   AND definition.definition #>> '{metadata,senderSystemAgentId}' = agent.id::text
+               )`,
+            [chat.workspace_id]
+        );
         const activeAgents = agents.rows.filter((a: any) => {
             const url = (a.webhook_url || '').trim();
             // Marketing agents sem webhook não devem disparar nada.

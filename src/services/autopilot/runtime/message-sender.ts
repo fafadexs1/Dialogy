@@ -10,7 +10,10 @@ import {
   prepareAutopilotResponseDelivery,
   type AutopilotResponseTrace,
 } from '@/services/autopilot/runtime/response-delivery';
-import { waitForAutomatedProviderAcceptance } from '@/services/autopilot/runtime/provider-delivery';
+import {
+  UncertainProviderDeliveryError,
+  waitForAutomatedProviderAcceptance,
+} from '@/services/autopilot/runtime/provider-delivery';
 import { assertAutopilotSourceMessageCurrent } from '@/services/autopilot/runtime/stale-source-guard';
 
 function assertAutomatedMessageSent<T extends { success: boolean; error?: string }>(
@@ -61,8 +64,10 @@ async function sendGuardedAutomatedMessage(input: {
   isSystemAgent: boolean;
   instanceName?: string;
   metadata?: MessageMetadata;
+  preserveFormatting?: boolean;
 }) {
-  const message = await guardAutomatedMessage(input.chatId, input.message);
+  // Studio owns its conversational guards. Transport must not rewrite its content.
+  const message = input.preserveFormatting ? input.message : await guardAutomatedMessage(input.chatId, input.message);
   if (!message) {
     throw new Error(
       `Resposta automatizada suprimida pelo guard de repeticao para o chat ${input.chatId}.`,
@@ -98,6 +103,7 @@ export async function sendMultiBlockResponse(
   instanceName?: string,
   aiMessageBlocks?: string[] | null,
   responseTrace?: AutopilotResponseTrace,
+  options?: { preserveFormatting?: boolean },
 ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
   await assertAutopilotSourceMessageCurrent({
     chatId,
@@ -106,13 +112,13 @@ export async function sendMultiBlockResponse(
 
   const sourceBlocks = (aiMessageBlocks && aiMessageBlocks.length >= 1)
     ? aiMessageBlocks
-    : splitIntoMessageBlocks(formattedResponse);
+    : options?.preserveFormatting ? [formattedResponse] : splitIntoMessageBlocks(formattedResponse);
   let blocks = sourceBlocks
-    .map((block) => formatCustomerFacingAiResponse(block))
+    .map((block) => options?.preserveFormatting ? block : formatCustomerFacingAiResponse(block))
     .filter((block) => block.trim() !== '');
 
   if (blocks.length === 0) {
-    blocks = [formatCustomerFacingAiResponse(formattedResponse)];
+    blocks = [options?.preserveFormatting ? formattedResponse : formatCustomerFacingAiResponse(formattedResponse)];
   }
 
   const delivery = responseTrace
@@ -126,6 +132,12 @@ export async function sendMultiBlockResponse(
     blocks = delivery.blocks;
     if (delivery.status === 'sent') {
       return { success: true };
+    }
+    if (delivery.uncertainBlockIndexes?.size > 0) {
+      throw new UncertainProviderDeliveryError(
+        `A entrega ${delivery.id} possui blocos sem confirmacao definitiva do provedor: `
+        + `${[...delivery.uncertainBlockIndexes].join(', ')}. Reenvio automatico bloqueado.`,
+      );
     }
   }
 
@@ -141,6 +153,10 @@ export async function sendMultiBlockResponse(
       maxTypingDelay,
     );
     await new Promise((resolve) => setTimeout(resolve, typingDelay));
+    await assertAutopilotSourceMessageCurrent({
+      chatId,
+      sourceMessageId: responseTrace?.sourceMessageId,
+    });
 
     const deliveryMetadata: MessageMetadata | undefined = delivery && responseTrace
       ? {
@@ -168,6 +184,7 @@ export async function sendMultiBlockResponse(
           isSystemAgent,
           instanceName,
           metadata: deliveryMetadata,
+          preserveFormatting: options?.preserveFormatting,
         }),
         chatId,
       );

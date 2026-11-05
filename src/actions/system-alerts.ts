@@ -2,6 +2,7 @@
 
 import { db } from '@/lib/db';
 import {
+    GLOBAL_ALERT_REALTIME_CHANNEL_OPTIONS,
     GLOBAL_ALERT_REALTIME_EVENT,
     GLOBAL_ALERT_REALTIME_TOPIC,
     GlobalAlertSchema,
@@ -38,15 +39,21 @@ async function checkSuperAdmin(userId: string): Promise<boolean> {
 }
 
 async function broadcastGlobalAlert(alert: GlobalAlertConfig): Promise<void> {
+    const supabase = getSupabaseAdmin();
+    const channel = supabase.channel(
+        GLOBAL_ALERT_REALTIME_TOPIC,
+        GLOBAL_ALERT_REALTIME_CHANNEL_OPTIONS,
+    );
+
     try {
-        await getSupabaseAdmin()
-            .channel(GLOBAL_ALERT_REALTIME_TOPIC)
-            .httpSend(GLOBAL_ALERT_REALTIME_EVENT, {
-                alert,
-                updatedAt: new Date().toISOString(),
-            });
+        await channel.httpSend(GLOBAL_ALERT_REALTIME_EVENT, {
+            alert,
+            updatedAt: new Date().toISOString(),
+        });
     } catch (error) {
         console.error('[GLOBAL_ALERT] Failed to broadcast alert update:', error);
+    } finally {
+        supabase.removeChannel(channel);
     }
 }
 

@@ -8,6 +8,7 @@ import { enqueueAiAutopilotProcess, enqueueWebhookOutbound, shouldEnqueueJob } f
 import { processAutopilotForChat } from '@/services/autopilot-service';
 import { dispatchMessageToWebhooks } from '@/services/webhook-dispatcher';
 import { getTelegramInstanceByWebhookKey } from '@/services/telegram/instance-store';
+import { dispatchNexusChatMessage } from '@/modules/nexus/services/chat-adapters';
 
 type TelegramUser = {
   id?: number;
@@ -352,7 +353,7 @@ export async function POST(
       [instance.workspace_id, contact.id]
     );
 
-    if ((chatRes.rowCount ?? 0) === 0 || chatRes.rows[0].status === 'encerrados') {
+    if ((chatRes.rowCount ?? 0) === 0) {
       const chatId = randomUUID();
       const protocol = buildChatProtocol(chatId);
       chatRes = await client.query(
@@ -365,7 +366,26 @@ export async function POST(
       );
     }
 
-    const chatRow = chatRes.rows[0];
+    let chatRow = chatRes.rows[0];
+
+    if (chatRow.status === 'encerrados') {
+      const reopened = await client.query(
+        `UPDATE chats
+         SET status = 'gerais',
+             closed_at = NULL,
+             agent_id = NULL,
+             assigned_system_agent_id = NULL,
+             assigned_at = NULL,
+             is_autopilot_active = FALSE,
+             copilot_mode = 'off',
+             updated_at = clock_timestamp()
+         WHERE id = $1
+           AND status = 'encerrados'
+         RETURNING *`,
+        [chatRow.id]
+      );
+      chatRow = reopened.rows[0] || chatRow;
+    }
 
     const insertedMessage = await client.query(
       `
@@ -452,7 +472,7 @@ export async function POST(
     }
   }
 
-  if (savedChat && savedMessage) {
+  if (savedChat && savedMessage && savedChat.status !== 'encerrados') {
     try {
       if (shouldEnqueueJob('webhook_outbound')) {
         await enqueueWebhookOutbound({
@@ -467,7 +487,23 @@ export async function POST(
       console.error('[TELEGRAM_WEBHOOK] Falha ao despachar webhook de saida:', error);
     }
 
-    if (savedChat.is_autopilot_active) {
+    let nexusHandled = false;
+    try {
+      const nexus = await dispatchNexusChatMessage({
+        workspaceId: instance.workspace_id,
+        chatId: savedChat.id,
+        message: savedMessage.content,
+        sourceMessageId: savedMessage.id,
+        instanceName: instance.instance_name,
+        platform: 'telegram',
+        messageType: savedMessage.type,
+      });
+      nexusHandled = nexus.handled;
+    } catch (error) {
+      console.error('[TELEGRAM_WEBHOOK] Falha ao disparar fluxo Nexus:', error);
+    }
+
+    if (savedChat.is_autopilot_active && !nexusHandled) {
       try {
         if (shouldEnqueueJob('ai_autopilot_process')) {
           await enqueueAiAutopilotProcess({

@@ -1,0 +1,1045 @@
+{
+  "id": "autopilot:23749803-7d16-404b-bc91-2ba2393c0358",
+  "name": "Financeiro Sofia",
+  "nodes": [
+    {
+      "id": "message_received",
+      "name": "Mensagem recebida",
+      "type": "trigger.received_message",
+      "config": {},
+      "position": {
+        "x": 80,
+        "y": -120
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "message",
+          "label": "Mensagem",
+          "multiple": false,
+          "required": true,
+          "direction": "output",
+          "connectionType": "main"
+        }
+      ]
+    },
+    {
+      "id": "shared_model",
+      "name": "Modelo principal",
+      "type": "ai.model",
+      "config": {
+        "model": "googleai/gemini-3-flash",
+        "provider": "googleai",
+        "timeoutMs": 60000,
+        "maxRetries": 2,
+        "temperature": 0.2,
+        "supportsTools": true,
+        "maxOutputTokens": 2048,
+        "supportsStreaming": true,
+        "supportsStructuredOutput": true
+      },
+      "position": {
+        "x": 80,
+        "y": 60
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "model",
+          "label": "Modelo",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "model"
+        }
+      ]
+    },
+    {
+      "id": "shared_memory",
+      "name": "Memória da conversa",
+      "type": "memory.session",
+      "config": {
+        "provider": "postgres",
+        "ttlSeconds": 86400,
+        "maxMessages": 20
+      },
+      "position": {
+        "x": 80,
+        "y": 250
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "memory",
+          "label": "Memória",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "memory"
+        }
+      ]
+    },
+    {
+      "id": "shared_guardrail",
+      "name": "Políticas da automação",
+      "type": "guardrail.policy",
+      "config": {
+        "name": "Políticas da automação",
+        "checks": [
+          "no_secret_exposure",
+          "no_unconfirmed_tool_success"
+        ],
+        "onViolation": "route_to_error"
+      },
+      "position": {
+        "x": 80,
+        "y": 440
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "guardrail",
+          "label": "Política",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "guardrail"
+        }
+      ]
+    },
+    {
+      "id": "workflow_error",
+      "name": "Tratador de erro",
+      "type": "error.handler",
+      "config": {
+        "mode": "fail",
+        "publicMessage": "Não foi possível concluir esta etapa com segurança."
+      },
+      "position": {
+        "x": 1120,
+        "y": 620
+      },
+      "inputPorts": [
+        {
+          "id": "error",
+          "label": "Erro",
+          "multiple": true,
+          "required": true,
+          "direction": "input",
+          "connectionType": "error"
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "recovered",
+          "label": "Recuperado",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "failed",
+          "label": "Falhou",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        }
+      ]
+    },
+    {
+      "id": "primary_agent",
+      "name": "Agente de atendimento",
+      "type": "ai.agent",
+      "config": {
+        "name": "Agente de atendimento",
+        "role": "atendimento principal",
+        "persona": "A Sofia é uma agente virtual financeira de uma empresa de telecom, responsável por atender clientes com dúvidas sobre faturas, pagamentos, vencimentos, débitos, segunda via, comprovantes, desbloqueio de confiança e negociações simples.\r\n\r\nEla deve ter uma comunicação educada, clara, paciente e profissional, mantendo sempre um tom humano, acolhedor e objetivo. A Sofia fala como uma atendente financeira experiente, que entende a situação do cliente, explica com calma e conduz o atendimento sem parecer robótica.\r\n\r\nA Sofia deve transmitir confiança e segurança, principalmente ao tratar de assuntos sensíveis como valores em aberto, bloqueios, cobranças e pagamentos pendentes. Ela nunca deve constranger o cliente, acusar inadimplência ou usar linguagem rude. Deve preferir expressões como “fatura em aberto”, “valor pendente” ou “pagamento ainda não identificado”.\r\n\r\nSua postura deve ser sempre prestativa: primeiro entende o problema, depois orienta o cliente de forma simples e direta. Quando não puder resolver sozinha, deve encaminhar para um atendente humano do setor financeiro.\r\n\r\nA Sofia deve ser simpática, mas sem exageros. Pode usar emojis com moderação, principalmente para deixar a conversa mais leve, mas sempre mantendo profissionalismo.\r\n\r\nExemplo de tom da Sofia:\r\n\r\nOi! Tudo bem? Eu sou a Sofia, assistente financeira. Vou te ajudar com sua fatura ou pagamento da forma mais rápida possível.",
+        "language": "pt-BR",
+        "maxTurns": 8,
+        "objective": "Resolver a solicitação atual do cliente dentro das políticas configuradas.",
+        "timeoutMs": 120000,
+        "instructions": [
+          "Use somente as capacidades conectadas a este agente.",
+          "Não invente resultados de ferramentas ou informações ausentes."
+        ],
+        "maxToolCalls": 20,
+        "toolTimeoutMs": 30000,
+        "modelTimeoutMs": 60000,
+        "onLimitReached": "handoff",
+        "availableContext": [
+          "input",
+          "context",
+          "variables"
+        ],
+        "completionCriteria": [
+          "Responder, perguntar ou encaminhar a solicitação de forma segura."
+        ],
+        "fallbackOnToolError": "route_to_error",
+        "maxRepeatedToolCalls": 2,
+        "allowParallelToolCalls": false,
+        "requireStructuredFinalOutput": false
+      },
+      "position": {
+        "x": 430,
+        "y": -120
+      },
+      "timeoutMs": 120000,
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        },
+        {
+          "id": "model",
+          "label": "Modelo",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "model"
+        },
+        {
+          "id": "tools",
+          "label": "Ferramentas",
+          "multiple": true,
+          "required": false,
+          "direction": "input",
+          "connectionType": "tool"
+        },
+        {
+          "id": "memory",
+          "label": "Memória",
+          "multiple": false,
+          "required": false,
+          "direction": "input",
+          "connectionType": "memory"
+        },
+        {
+          "id": "knowledge",
+          "label": "Conhecimento",
+          "multiple": true,
+          "required": false,
+          "direction": "input",
+          "connectionType": "knowledge"
+        },
+        {
+          "id": "guardrails",
+          "label": "Guardrails",
+          "multiple": true,
+          "required": false,
+          "direction": "input",
+          "connectionType": "guardrail"
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "completed",
+          "label": "Concluído",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "needs_input",
+          "label": "Precisa de dados",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "handoff",
+          "label": "Transferir",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "limit_reached",
+          "label": "Limite atingido",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "error"
+        }
+      ]
+    },
+    {
+      "id": "primary_knowledge",
+      "name": "Conhecimento de Agente de atendimento",
+      "type": "knowledge.rag_retriever",
+      "config": {
+        "rerank": true,
+        "filters": {
+          "documentIds": [],
+          "collectionIds": []
+        },
+        "strategy": "hybrid",
+        "tokenLimit": 6000,
+        "maxDocuments": 6,
+        "minimumScore": 0.55
+      },
+      "position": {
+        "x": 170,
+        "y": 70
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "knowledge",
+          "label": "Conhecimento",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "knowledge"
+        }
+      ]
+    },
+    {
+      "id": "primary_respond",
+      "name": "Responder",
+      "type": "output.respond",
+      "config": {
+        "channel": "source",
+        "message": "{{current.response}}",
+        "idempotent": true
+      },
+      "position": {
+        "x": 710,
+        "y": -220
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "error"
+        }
+      ]
+    },
+    {
+      "id": "primary_ask",
+      "name": "Pedir informação",
+      "type": "output.respond",
+      "config": {
+        "channel": "source",
+        "message": "{{current.question}}",
+        "idempotent": true
+      },
+      "position": {
+        "x": 710,
+        "y": -80
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "error"
+        }
+      ]
+    },
+    {
+      "id": "primary_limit",
+      "name": "Informar limite",
+      "type": "output.respond",
+      "config": {
+        "channel": "source",
+        "message": "{{current.response}}",
+        "idempotent": true
+      },
+      "position": {
+        "x": 710,
+        "y": 60
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "error"
+        }
+      ]
+    },
+    {
+      "id": "primary_handoff",
+      "name": "Transferir para humano",
+      "type": "output.handoff",
+      "config": {
+        "reason": "{{current.reason}}",
+        "teamId": "",
+        "permissionScope": "automations:execute_handoff",
+        "requireConfirmation": true
+      },
+      "position": {
+        "x": 710,
+        "y": 200
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "completed",
+          "label": "Transferido",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "main"
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "multiple": false,
+          "required": false,
+          "direction": "output",
+          "connectionType": "error"
+        }
+      ]
+    },
+    {
+      "id": "primary_respond_end",
+      "name": "Finalizar resposta",
+      "type": "output.end",
+      "config": {
+        "output": {}
+      },
+      "position": {
+        "x": 990,
+        "y": -220
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "primary_ask_end",
+      "name": "Finalizar pergunta",
+      "type": "output.end",
+      "config": {
+        "output": {}
+      },
+      "position": {
+        "x": 990,
+        "y": -80
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "primary_limit_end",
+      "name": "Finalizar limite",
+      "type": "output.end",
+      "config": {
+        "output": {}
+      },
+      "position": {
+        "x": 990,
+        "y": 60
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "primary_handoff_end",
+      "name": "Finalizar transferência",
+      "type": "output.end",
+      "config": {
+        "output": {}
+      },
+      "position": {
+        "x": 990,
+        "y": 200
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "multiple": false,
+          "required": true,
+          "direction": "input",
+          "connectionType": "main"
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "cutover_tool_sgp_generate_invoice_pix_0",
+      "name": "sgp_generate_invoice_pix",
+      "type": "tool.internal",
+      "config": {
+        "name": "sgp_generate_invoice_pix",
+        "action": "sgp_generate_invoice_pix",
+        "idempotent": true,
+        "description": "sgp_generate_invoice_pix",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 280
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    },
+    {
+      "id": "cutover_tool_sgp_fetch_contact_panel_data_1",
+      "name": "sgp_fetch_contact_panel_data",
+      "type": "tool.internal",
+      "config": {
+        "name": "sgp_fetch_contact_panel_data",
+        "action": "sgp_fetch_contact_panel_data",
+        "idempotent": true,
+        "description": "sgp_fetch_contact_panel_data",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 400
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    },
+    {
+      "id": "cutover_tool_sgp_fetch_contracts_2",
+      "name": "sgp_fetch_contracts",
+      "type": "tool.internal",
+      "config": {
+        "name": "sgp_fetch_contracts",
+        "action": "sgp_fetch_contracts",
+        "idempotent": true,
+        "description": "sgp_fetch_contracts",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 520
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    },
+    {
+      "id": "cutover_tool_sgp_create_payment_promise_3",
+      "name": "sgp_create_payment_promise",
+      "type": "tool.internal",
+      "config": {
+        "name": "sgp_create_payment_promise",
+        "action": "sgp_create_payment_promise",
+        "idempotent": true,
+        "description": "sgp_create_payment_promise",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 640
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    },
+    {
+      "id": "cutover_tool_transfer_chat_4",
+      "name": "transfer_chat",
+      "type": "tool.internal",
+      "config": {
+        "name": "transfer_chat",
+        "action": "transfer_chat",
+        "idempotent": true,
+        "description": "transfer_chat",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 760
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    },
+    {
+      "id": "cutover_tool_close_chat_5",
+      "name": "close_chat",
+      "type": "tool.internal",
+      "config": {
+        "name": "close_chat",
+        "action": "close_chat",
+        "idempotent": true,
+        "description": "close_chat",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 880
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    },
+    {
+      "id": "cutover_tool_add_internal_note_6",
+      "name": "add_internal_note",
+      "type": "tool.internal",
+      "config": {
+        "name": "add_internal_note",
+        "action": "add_internal_note",
+        "idempotent": true,
+        "description": "add_internal_note",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 1000
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    },
+    {
+      "id": "cutover_tool_crm_update_contact_custom_fields_7",
+      "name": "crm_update_contact_custom_fields",
+      "type": "tool.internal",
+      "config": {
+        "name": "crm_update_contact_custom_fields",
+        "action": "crm_update_contact_custom_fields",
+        "idempotent": true,
+        "description": "crm_update_contact_custom_fields",
+        "inputSchema": {},
+        "outputSchema": {}
+      },
+      "position": {
+        "x": 170,
+        "y": 1120
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "tool",
+          "label": "Ferramenta",
+          "multiple": true,
+          "required": true,
+          "direction": "output",
+          "connectionType": "tool"
+        }
+      ]
+    }
+  ],
+  "status": "published",
+  "version": "v1",
+  "metadata": {
+    "source": "native_flowbuilder",
+    "configId": "23749803-7d16-404b-bc91-2ba2393c0358",
+    "template": "single_agent",
+    "editorVersion": 2,
+    "cutoverStrategy": "single_agent_template",
+    "cutoverSourceHash": "6b8ec9c258ee5dfaadc13a482e0c5d8cce5c24dc5234d0ba14dbff5c0c564a66",
+    "preservedToolNames": [
+      "sgp_generate_invoice_pix",
+      "sgp_fetch_contact_panel_data",
+      "sgp_fetch_contracts",
+      "sgp_create_payment_promise",
+      "transfer_chat",
+      "close_chat",
+      "add_internal_note",
+      "crm_update_contact_custom_fields"
+    ],
+    "preservedKnowledgeDocumentIds": [],
+    "preservedKnowledgeCollectionIds": []
+  },
+  "settings": {
+    "maxSteps": 100,
+    "maxToolCalls": 20,
+    "maxModelCalls": 15,
+    "concurrencyLimit": 1,
+    "executionTimeoutMs": 120000,
+    "maxTotalInputTokens": 100000,
+    "maxAgentTurnsPerNode": 8,
+    "maxTotalOutputTokens": 20000,
+    "maxRepeatedDecisionSignatures": 2
+  },
+  "createdAt": "2026-07-10T11:29:49.179Z",
+  "updatedAt": "2026-07-10T11:29:49.201Z",
+  "connections": [
+    {
+      "id": "primary_main",
+      "sourceNodeId": "message_received",
+      "sourcePortId": "message",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_model",
+      "sourceNodeId": "shared_model",
+      "sourcePortId": "model",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "model",
+      "connectionType": "model"
+    },
+    {
+      "id": "primary_memory",
+      "sourceNodeId": "shared_memory",
+      "sourcePortId": "memory",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "memory",
+      "connectionType": "memory"
+    },
+    {
+      "id": "primary_knowledge_link",
+      "sourceNodeId": "primary_knowledge",
+      "sourcePortId": "knowledge",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "knowledge",
+      "connectionType": "knowledge"
+    },
+    {
+      "id": "primary_guardrail",
+      "sourceNodeId": "shared_guardrail",
+      "sourcePortId": "guardrail",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "guardrails",
+      "connectionType": "guardrail"
+    },
+    {
+      "id": "primary_completed",
+      "sourceNodeId": "primary_agent",
+      "sourcePortId": "completed",
+      "targetNodeId": "primary_respond",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_needs_input",
+      "sourceNodeId": "primary_agent",
+      "sourcePortId": "needs_input",
+      "targetNodeId": "primary_ask",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_limit_reached",
+      "sourceNodeId": "primary_agent",
+      "sourcePortId": "limit_reached",
+      "targetNodeId": "primary_limit",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_handoff_route",
+      "sourceNodeId": "primary_agent",
+      "sourcePortId": "handoff",
+      "targetNodeId": "primary_handoff",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_agent_error",
+      "sourceNodeId": "primary_agent",
+      "sourcePortId": "error",
+      "targetNodeId": "workflow_error",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "primary_respond_done",
+      "sourceNodeId": "primary_respond",
+      "sourcePortId": "success",
+      "targetNodeId": "primary_respond_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_ask_done",
+      "sourceNodeId": "primary_ask",
+      "sourcePortId": "success",
+      "targetNodeId": "primary_ask_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_limit_done",
+      "sourceNodeId": "primary_limit",
+      "sourcePortId": "success",
+      "targetNodeId": "primary_limit_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_handoff_done",
+      "sourceNodeId": "primary_handoff",
+      "sourcePortId": "completed",
+      "targetNodeId": "primary_handoff_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "primary_respond_error",
+      "sourceNodeId": "primary_respond",
+      "sourcePortId": "error",
+      "targetNodeId": "workflow_error",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "primary_ask_error",
+      "sourceNodeId": "primary_ask",
+      "sourcePortId": "error",
+      "targetNodeId": "workflow_error",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "primary_limit_error",
+      "sourceNodeId": "primary_limit",
+      "sourcePortId": "error",
+      "targetNodeId": "workflow_error",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "primary_handoff_error",
+      "sourceNodeId": "primary_handoff",
+      "sourcePortId": "error",
+      "targetNodeId": "workflow_error",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_sgp_generate_invoice_pix_0_primary_agent",
+      "sourceNodeId": "cutover_tool_sgp_generate_invoice_pix_0",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_sgp_fetch_contact_panel_data_1_primary_agent",
+      "sourceNodeId": "cutover_tool_sgp_fetch_contact_panel_data_1",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_sgp_fetch_contracts_2_primary_agent",
+      "sourceNodeId": "cutover_tool_sgp_fetch_contracts_2",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_sgp_create_payment_promise_3_primary_agent",
+      "sourceNodeId": "cutover_tool_sgp_create_payment_promise_3",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_transfer_chat_4_primary_agent",
+      "sourceNodeId": "cutover_tool_transfer_chat_4",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_close_chat_5_primary_agent",
+      "sourceNodeId": "cutover_tool_close_chat_5",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_add_internal_note_6_primary_agent",
+      "sourceNodeId": "cutover_tool_add_internal_note_6",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    },
+    {
+      "id": "cutover_tool_cutover_tool_crm_update_contact_custom_fields_7_primary_agent",
+      "sourceNodeId": "cutover_tool_crm_update_contact_custom_fields_7",
+      "sourcePortId": "tool",
+      "targetNodeId": "primary_agent",
+      "targetPortId": "tools",
+      "connectionType": "tool"
+    }
+  ],
+  "workspaceId": "e3b476a1-5de8-4744-80b5-a5d23fe15fab"
+}

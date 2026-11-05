@@ -1,0 +1,13 @@
+{
+  "viewports": [
+    1440,
+    390
+  ],
+  "overflow": false,
+  "legacyCatalogPreserved": true,
+  "allTabsClicked": true,
+  "decisionModelAndTimeoutSaved": true,
+  "pricingSaved": true,
+  "addAndSave": true,
+  "backend": "explicit test fixtures"
+}

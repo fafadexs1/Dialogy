@@ -1,5 +1,11 @@
+import { isStudioFlowNode } from '@/services/agent-studio/flow-contract';
+import { StudioFlowInputMappingsSchema } from '@/services/agent-studio/flow-inputs';
+import { readStudioValue } from '@/services/agent-studio/data-mapping';
+import { whatsappCatalogSchema } from '@/lib/whatsapp/catalog';
 import { getWorkflowNodeManifest } from './catalog';
+import { toolboxConfigurationErrors } from './toolbox-validation';
 import { WorkflowDefinitionSchema } from './schemas';
+import { assertValidCronExpression } from './cron';
 import type {
   WorkflowConnection,
   WorkflowDefinition,
@@ -64,6 +70,7 @@ function collectKnownVariables(
   const names = new Set<string>([
     'input',
     'current',
+    'arguments',
     'context',
     'variables',
     'nodeResults',
@@ -210,6 +217,7 @@ function validateNodeConfig(
   options: WorkflowValidatorOptions,
 ) {
   const manifest = getWorkflowNodeManifest(node.type);
+  for (const message of toolboxConfigurationErrors(node)) error(collector, 'toolbox_configuration_invalid', message, { nodeId: node.id });
   if (!manifest) {
     warning(
       collector,
@@ -241,6 +249,343 @@ function validateNodeConfig(
     }
   }
 
+  if (isStudioFlowNode(node.type)) {
+    if (!configuredText(node.config.agentId) || !configuredText(node.config.releaseId)) error(collector, 'studio_flow_missing_release', `Selecione uma publicação no bloco “${node.name}”.`, { nodeId: node.id });
+    if (node.type.endsWith('studio_procedure') && !configuredText(node.config.procedureId)) error(collector, 'studio_flow_missing_procedure', `Selecione uma habilidade em “${node.name}”.`, { nodeId: node.id });
+    if (!StudioFlowInputMappingsSchema.safeParse(node.config.inputMappings || []).success) error(collector, 'studio_flow_invalid_mapping', 'Revise os mapeamentos do Studio.', { nodeId: node.id });
+    try { readStudioValue({}, String(node.config.outputKey || 'studioResult')); } catch { error(collector, 'studio_flow_invalid_output', 'Revise a variável de saída do Studio.', { nodeId: node.id }); }
+  }
+
+  if (node.type === 'ai.published_agent' && (!configuredText(node.config.agentId) || !configuredText(node.config.releaseId))) {
+    error(collector, 'published_agent_missing_release', `Selecione uma versão publicada no bloco “${node.name}”.`, { nodeId: node.id });
+  }
+
+  if (node.type.startsWith('interaction.')) {
+    if (!configuredText(node.config.prompt)) {
+      error(collector, 'interaction_prompt_missing', `O bloco "${node.name}" precisa de uma pergunta.`, { nodeId: node.id });
+    }
+    if (!configuredText(node.config.outputKey)) {
+      error(collector, 'interaction_output_missing', `O bloco "${node.name}" precisa informar onde salvar a resposta.`, { nodeId: node.id });
+    }
+    if (node.type === 'interaction.options') {
+      const options = Array.isArray(node.config.options) ? node.config.options.filter(isObject) : [];
+      if (options.length === 0) {
+        error(collector, 'interaction_options_missing', `O bloco "${node.name}" precisa de ao menos uma opção.`, { nodeId: node.id });
+      }
+      const ids = options.map((option) => configuredText(option.id));
+      if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+        error(collector, 'interaction_option_id_invalid', `As opções de "${node.name}" precisam de identificadores únicos.`, { nodeId: node.id });
+      }
+      for (const id of ids.filter(Boolean)) {
+        if (!node.outputPorts.some((port) => port.id === id)) {
+          error(collector, 'interaction_option_route_missing', `A opção "${id}" de "${node.name}" não possui saída.`, { nodeId: node.id });
+        }
+      }
+      if (
+        node.config.customFallbackRoutes === true
+        && !outgoing.some((connection) => connection.sourcePortId === 'default')
+      ) {
+        error(collector, 'interaction_custom_fallback_missing', `O bloco "${node.name}" habilitou a rota avançada “Não reconhecida”, mas ela não está conectada.`, { nodeId: node.id });
+      }
+    }
+  }
+
+  if (node.type === 'data.code') {
+    if (node.config.language !== 'javascript' || !configuredText(node.config.source) || !configuredText(node.config.outputKey)) {
+      error(collector, 'code_config_invalid', `O bloco "${node.name}" precisa de JavaScript e variável de saída.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'memory.session') {
+    const scope = configuredText(node.config.scope) || 'hybrid';
+    const maxMessages = Number(node.config.maxMessages ?? 20);
+    const maxAgeDays = Number(node.config.maxAgeDays ?? 180);
+    if (node.config.provider !== 'dialogy' || !['hybrid', 'conversation', 'contact'].includes(scope)) {
+      error(collector, 'dialogy_memory_config_invalid', `O bloco "${node.name}" precisa usar a memória nativa da Dialogy e um escopo válido.`, { nodeId: node.id });
+    }
+    if (!Number.isInteger(maxMessages) || maxMessages < 1 || maxMessages > 200 || !Number.isInteger(maxAgeDays) || maxAgeDays < 1 || maxAgeDays > 730) {
+      error(collector, 'dialogy_memory_limits_invalid', `O bloco "${node.name}" possui limites de memória inválidos.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'data.transform' && node.config.mode === 'jsonata') {
+    if (!configuredText(node.config.expression)) {
+      error(collector, 'jsonata_expression_missing', `O bloco "${node.name}" precisa de uma expressão JSONata.`, { nodeId: node.id });
+    }
+    if (!configuredText(node.config.outputKey)) {
+      error(collector, 'jsonata_output_missing', `O bloco "${node.name}" precisa informar onde salvar o resultado JSONata.`, { nodeId: node.id });
+    }
+    const evaluationTimeoutMs = Number(node.config.evaluationTimeoutMs || 250);
+    if (!Number.isFinite(evaluationTimeoutMs) || evaluationTimeoutMs < 25 || evaluationTimeoutMs > 2_000) {
+      error(collector, 'jsonata_timeout_invalid', `O limite JSONata de "${node.name}" deve ficar entre 25 e 2000 ms.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'trigger.received_message') {
+    const mode = configuredText(node.config.matchMode) || 'all';
+    if (!['all', 'any_keyword', 'all_keywords', 'regex'].includes(mode)) {
+      error(collector, 'message_trigger_mode_invalid', `O modo do gatilho "${node.name}" é inválido.`, { nodeId: node.id });
+    }
+    if (mode === 'any_keyword' || mode === 'all_keywords') {
+      const keywords = Array.isArray(node.config.keywords) ? node.config.keywords.map(configuredText).filter(Boolean) : [];
+      if (keywords.length === 0) error(collector, 'message_trigger_keywords_missing', `O gatilho "${node.name}" precisa de palavras-chave.`, { nodeId: node.id });
+      const thresholds = isObject(node.config.keywordThresholds) ? node.config.keywordThresholds : {};
+      if (Object.values(thresholds).some((value) => !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100)) {
+        error(collector, 'message_trigger_threshold_invalid', `O gatilho "${node.name}" possui compatibilidade fora do intervalo de 0 a 100%.`, { nodeId: node.id });
+      }
+      if (isObject(node.config.keywordOutputPorts)) {
+        const invalidOutput = Object.entries(node.config.keywordOutputPorts).some(([keyword, outputId]) => (
+          !keywords.includes(keyword)
+          || !node.outputPorts.some((port) => port.id === configuredText(outputId) && port.connectionType === 'main')
+        ));
+        if (invalidOutput) error(collector, 'message_trigger_keyword_route_invalid', `O gatilho "${node.name}" possui uma saída de frase inválida.`, { nodeId: node.id });
+      }
+    }
+    if (mode === 'regex') {
+      try { new RegExp(configuredText(node.config.pattern), node.config.caseSensitive === true ? '' : 'i'); } catch {
+        error(collector, 'message_trigger_regex_invalid', `A expressão regular de "${node.name}" é inválida.`, { nodeId: node.id });
+      }
+      if (!configuredText(node.config.pattern)) error(collector, 'message_trigger_regex_missing', `O gatilho "${node.name}" precisa de uma expressão regular.`, { nodeId: node.id });
+    }
+    const configuredList = (value: unknown) => Array.isArray(value) ? value.map(configuredText).filter(Boolean) : [];
+    const platforms = configuredList(node.config.platforms);
+    const messageTypes = configuredList(node.config.messageTypes);
+    if (platforms.some((platform) => !['whatsapp', 'telegram', 'instagram', 'messenger', 'webchat'].includes(platform))) {
+      error(collector, 'message_trigger_platform_invalid', `O gatilho "${node.name}" possui um canal inválido.`, { nodeId: node.id });
+    }
+    if (messageTypes.some((messageType) => !['text', 'image', 'video', 'audio', 'document'].includes(messageType))) {
+      error(collector, 'message_trigger_content_type_invalid', `O gatilho "${node.name}" possui um tipo de mensagem inválido.`, { nodeId: node.id });
+    }
+    if (!['all', 'unassigned_only'].includes(configuredText(node.config.startPolicy) || 'all')) {
+      error(collector, 'message_trigger_start_policy_invalid', `A regra de atribuição do gatilho "${node.name}" é inválida.`, { nodeId: node.id });
+    }
+    const defaultOutput = configuredText(node.config.defaultOutput);
+    if (defaultOutput && !node.outputPorts.some((port) => port.id === defaultOutput && port.connectionType === 'main')) {
+      error(collector, 'message_trigger_default_route_invalid', `O gatilho "${node.name}" aponta para uma saída padrão inexistente.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'interaction.options' && node.config.intelligentMatching === true) {
+    const minimumConfidence = Number(node.config.intelligentMinimumConfidence ?? 0.65);
+    if (!Number.isFinite(minimumConfidence) || minimumConfidence < 0.5 || minimumConfidence > 1) {
+      error(collector, 'interaction_option_confidence_invalid', `A confiança inteligente de "${node.name}" deve ficar entre 0,5 e 1.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'trigger.internal_event') {
+    if (node.config.crmOption !== undefined) {
+      const option = node.config.crmOption as { fieldId?: unknown; value?: unknown } | null;
+      if (!option || typeof option.fieldId !== 'string' || !option.fieldId || typeof option.value !== 'string' || !option.value) {
+        error(collector, 'crm_option_invalid', 'Selecione o campo do CRM e a opção que inicia o fluxo.', { nodeId: node.id });
+      }
+    }
+    const eventName = configuredText(node.config.eventName);
+    if (!eventName || !/^[a-z0-9][a-z0-9._:-]*$/.test(eventName)) {
+      error(collector, 'internal_event_name_invalid', `O gatilho "${node.name}" precisa de um nome de acontecimento interno válido.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'trigger.webhook' && !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(configuredText(node.config.method).toUpperCase())) {
+    error(collector, 'webhook_method_invalid', `O método do webhook "${node.name}" é inválido.`, { nodeId: node.id });
+  }
+
+  if (node.type === 'trigger.schedule') {
+    try { assertValidCronExpression(configuredText(node.config.cron), configuredText(node.config.timezone) || 'UTC'); } catch {
+      error(collector, 'schedule_config_invalid', `O cron ou fuso horário de "${node.name}" é inválido.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'logic.time_window') {
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!timePattern.test(configuredText(node.config.startTime)) || !timePattern.test(configuredText(node.config.endTime))) {
+      error(collector, 'time_window_invalid', `A faixa horária de "${node.name}" é inválida.`, { nodeId: node.id });
+    }
+    try {
+      new Intl.DateTimeFormat('pt-BR', { timeZone: configuredText(node.config.timezone) }).format();
+    } catch {
+      error(collector, 'time_window_timezone_invalid', `O fuso horário de "${node.name}" é inválido.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'logic.goto') {
+    const targetNodeId = configuredText(node.config.targetNodeId);
+    if (!targetNodeId || targetNodeId === node.id || !definition.nodes.some((candidate) => candidate.id === targetNodeId && !candidate.type.startsWith('trigger.'))) {
+      error(collector, 'goto_target_invalid', `O destino de "${node.name}" precisa ser outro bloco executável deste fluxo.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'output.media') {
+    const url = configuredText(node.config.url);
+      if (!node.config.file && (!url || (!url.includes('{{') && !/^https:\/\//i.test(url)))) {
+      error(collector, 'media_url_invalid', `O bloco "${node.name}" precisa de uma URL HTTPS pública ou variável.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'output.redirect') {
+    const url = configuredText(node.config.url);
+    if (!url || (!url.includes('{{') && !/^https?:\/\//i.test(url))) {
+      error(collector, 'redirect_url_invalid', `O bloco "${node.name}" precisa de uma URL HTTP(S) ou variável.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'output.handoff') {
+    const destinationType = configuredText(node.config.destinationType) || 'human';
+    if (
+      (destinationType === 'intelligent_agent' && !configuredText(node.config.systemAgentId))
+      || (destinationType === 'human' && !configuredText(node.config.teamId) && !configuredText(node.config.agentId))
+      || !['human', 'intelligent_agent'].includes(destinationType)
+    ) {
+      error(collector, 'handoff_destination_invalid', `O bloco "${node.name}" precisa de uma equipe, atendente ou Atendente Inteligente válido.`, { nodeId: node.id });
+    }
+    if (node.config.requireConfirmation === true && !configuredText(node.config.confirmationPath)) {
+      error(collector, 'handoff_confirmation_missing', `O bloco "${node.name}" exige o caminho de uma confirmação booleana explícita.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'output.close_conversation') {
+    const mode = configuredText(node.config.closePolicy) || 'goal_evidence';
+    if (!['goal_evidence', 'deterministic_route'].includes(mode)) {
+      error(collector, 'close_authorization_invalid', `O bloco "${node.name}" possui uma autorização de encerramento inválida.`, { nodeId: node.id });
+    }
+    if (mode === 'goal_evidence') {
+      const hasGoalInput = incoming
+        .filter((connection) => connection.connectionType === 'main')
+        .some((connection) => {
+          const sourceNode = definition.nodes.find((candidate) => candidate.id === connection.sourceNodeId);
+          return sourceNode?.type === 'logic.goal_completion' && connection.sourcePortId === 'completed';
+        });
+      if (!hasGoalInput) error(collector, 'close_goal_evidence_missing', `O bloco "${node.name}" precisa receber a saída Concluído de um verificador de objetivo.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'integration.http_request') {
+    const url = configuredText(node.config.url);
+    if (!url || (!url.includes('{{') && !/^https:\/\//i.test(url))) {
+      error(collector, 'http_url_invalid', `O bloco "${node.name}" precisa de uma URL HTTPS pública ou variável.`, { nodeId: node.id });
+    }
+    if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(configuredText(node.config.method).toUpperCase())) {
+      error(collector, 'http_method_invalid', `O método HTTP de "${node.name}" é inválido.`, { nodeId: node.id });
+    }
+    if (!configuredText(node.config.outputKey)) {
+      error(collector, 'http_output_missing', `O bloco "${node.name}" precisa de uma variável de saída.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'integration.mcp_call') {
+    const toolName = configuredText(node.config.toolName);
+    if (!/^mcp:[^:]+:.+$/.test(toolName) || !configuredText(node.config.outputKey) || !isObject(node.config.arguments)) {
+      error(collector, 'mcp_call_config_invalid', `O bloco "${node.name}" precisa de uma ferramenta MCP sincronizada, argumentos JSON e variável de saída.`, { nodeId: node.id });
+    }
+    if (node.config.requiresConfirmation === true && !configuredText(node.config.confirmationPath)) {
+      error(collector, 'mcp_call_confirmation_missing', `O bloco "${node.name}" exige o caminho de uma confirmação booleana explícita.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'integration.email') {
+    if (!configuredText(node.config.credentialId) || !configuredText(node.config.to) || !configuredText(node.config.subject) || (!configuredText(node.config.text) && !configuredText(node.config.html))) {
+      error(collector, 'email_config_invalid', `O bloco "${node.name}" precisa de SMTP, destinatário, assunto e conteúdo.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'integration.google_sheets_append') {
+    if (!configuredText(node.config.credentialId) || !configuredText(node.config.spreadsheetId) || !configuredText(node.config.range) || !Array.isArray(node.config.values) || node.config.values.length === 0) {
+      error(collector, 'sheets_config_invalid', `O bloco "${node.name}" precisa de OAuth, planilha, intervalo e valores.`, { nodeId: node.id });
+    }
+  }
+  if (node.type === 'integration.google_ads_lead') {
+    if (!/^\d+$/.test(String(node.config.customerId || '')) || !configuredText(node.config.conversionActionId)
+      || !['lead_qualified', 'sale_won', 'whatsapp_message_received'].includes(String(node.config.eventName))) {
+      error(collector, 'google_ads_destination_required', 'Selecione a conta e a conversão do Google Ads.', { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'integration.database') {
+    const operation = configuredText(node.config.operation);
+    const filters = Array.isArray(node.config.filters) ? node.config.filters : [];
+    if (!configuredText(node.config.credentialId) || !configuredText(node.config.table) || !['select', 'insert', 'update', 'delete'].includes(operation)) {
+      error(collector, 'database_config_invalid', `O bloco "${node.name}" precisa de conexão, tabela e operação declarativa.`, { nodeId: node.id });
+    }
+    if (['update', 'delete'].includes(operation) && filters.length === 0) {
+      error(collector, 'database_filter_required', `O bloco "${node.name}" exige filtro para ${operation.toUpperCase()}.`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'dialogy.crm_update' && (!isObject(node.config.fields) || Object.keys(node.config.fields).length === 0)) {
+    error(collector, 'crm_fields_missing', `O bloco "${node.name}" precisa de ao menos um campo do CRM.`, { nodeId: node.id });
+  }
+
+  if (node.type.startsWith('dialogy.sgp_')) {
+    if (!configuredText(node.config.outputKey) || Number(node.config.timeoutMs || 0) < 60_000) {
+      error(collector, 'sgp_config_invalid', `O bloco "${node.name}" precisa de uma variável de saída e timeout de pelo menos um minuto.`, { nodeId: node.id });
+    }
+    if (node.type === 'dialogy.sgp_payment_promise') {
+      const promiseDate = configuredText(node.config.promiseDate);
+      if (promiseDate && !promiseDate.includes('{{') && !/^\d{4}-\d{2}-\d{2}$/.test(promiseDate)) {
+        error(collector, 'sgp_promise_date_invalid', `A data de "${node.name}" deve usar AAAA-MM-DD ou uma variável.`, { nodeId: node.id });
+      }
+    }
+    if (node.type === 'dialogy.sgp_second_copy' && node.config.deliveryMode === 'cloud-template') {
+      const templateFields = ['pixTemplateName', 'pixTemplateInstance', 'boletoTemplateName', 'boletoTemplateInstance'];
+      if (templateFields.some((field) => !configuredText(node.config[field]))) {
+        error(collector, 'sgp_templates_missing', `O bloco "${node.name}" precisa dos templates e instâncias de PIX e boleto.`, { nodeId: node.id });
+      }
+      if (
+        configuredText(node.config.pixTemplateName) === configuredText(node.config.boletoTemplateName)
+        && configuredText(node.config.pixTemplateInstance) === configuredText(node.config.boletoTemplateInstance)
+      ) {
+        error(collector, 'sgp_templates_equal', `O bloco "${node.name}" precisa usar templates diferentes para PIX e boleto.`, { nodeId: node.id });
+      }
+    }
+  }
+
+  if (node.type === 'dialogy.team_availability' && !configuredText(node.config.teamId)) {
+    error(collector, 'dialogy_team_missing', `O bloco "${node.name}" precisa de uma equipe do workspace.`, { nodeId: node.id });
+  }
+
+  if (node.type === 'dialogy.chat_tag' && !configuredText(node.config.tagId)) {
+    error(collector, 'dialogy_tag_missing', `O bloco "${node.name}" precisa de uma etiqueta do workspace.`, { nodeId: node.id });
+  }
+
+  if (node.type === 'whatsapp.group_create') {
+    const participants = Array.isArray(node.config.participants)
+      ? node.config.participants.map(configuredText).filter(Boolean)
+      : configuredText(node.config.participants).split(/[\n,;]+/).filter(Boolean);
+    const hasMessageTrigger = definition.nodes.some((candidate) => candidate.type === 'trigger.received_message');
+    if (!configuredText(node.config.groupName) || participants.length === 0 || (!configuredText(node.config.instanceName) && !hasMessageTrigger)) {
+      error(collector, 'whatsapp_group_config_invalid', `O bloco "${node.name}" precisa de nome, participantes e uma instância (ou gatilho de mensagem).`, { nodeId: node.id });
+    }
+  }
+
+  if (node.type === 'whatsapp.send_text' || node.type === 'whatsapp.send_media') {
+    const hasMessageTrigger = definition.nodes.some((candidate) => candidate.type === 'trigger.received_message');
+    const targetConfigured = configuredText(node.config.phoneNumber) || hasMessageTrigger;
+    const instanceConfigured = configuredText(node.config.instanceName) || hasMessageTrigger;
+    const contentConfigured = node.type === 'whatsapp.send_text'
+      ? configuredText(node.config.message)
+      : configuredText(node.config.url);
+    if (!targetConfigured || !instanceConfigured || !contentConfigured) {
+      error(
+        collector,
+        'whatsapp_send_config_invalid',
+        `O bloco "${node.name}" precisa do conteúdo, telefone e instância (telefone/instância podem vir do gatilho de mensagem).`,
+        { nodeId: node.id },
+      );
+    }
+  }
+
+  if (node.type === 'whatsapp.send_catalog') {
+    // Substitute expressions only for publication-time shape validation. Runtime
+    // validates the actual resolved values before making any external call.
+    const replaceExpressions = (value: unknown, key = ''): unknown => {
+      if (typeof value === 'string') return value.replace(/\{\{[^{}]+\}\}/g, key === 'url' || key === 'imageUrl' ? 'https://example.com/product.jpg' : 'produto');
+      if (Array.isArray(value)) return value.map((child) => replaceExpressions(child));
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, child]) => [name, replaceExpressions(child, name)]));
+      return value;
+    };
+    const parsed = whatsappCatalogSchema.safeParse(replaceExpressions({ body: node.config.body, cards: node.config.cards }));
+    if (!parsed.success) error(collector, 'whatsapp_catalog_config_invalid', `O bloco "${node.name}" precisa de apresentação e 1 a 10 produtos com nome, descrição, foto HTTPS e botão.`, { nodeId: node.id });
+  }
+
   if (node.type.startsWith('tool.')) {
     if (!configuredText(node.config.name) || !configuredText(node.config.description)) {
       error(
@@ -250,7 +595,7 @@ function validateNodeConfig(
         { nodeId: node.id },
       );
     }
-    if (!isSchemaLike(node.config.inputSchema) || !isSchemaLike(node.config.outputSchema)) {
+    if (!isStudioFlowNode(node.type) && (!isSchemaLike(node.config.inputSchema) || !isSchemaLike(node.config.outputSchema))) {
       error(
         collector,
         'tool_missing_schema',
@@ -265,6 +610,37 @@ function validateNodeConfig(
         `A ferramenta "${node.name}" permite SQL livre; prefira operações declarativas.`,
         { nodeId: node.id },
       );
+    }
+    if (node.type === 'tool.database') {
+      const operation = configuredText(node.config.operation);
+      const filters = Array.isArray(node.config.filters) ? node.config.filters : [];
+      if (!configuredText(node.config.credentialId) || !configuredText(node.config.table) || !['select', 'insert', 'update', 'delete'].includes(operation)) {
+        error(collector, 'database_tool_config_invalid', `A ferramenta "${node.name}" precisa de conexão, tabela e operação declarativa.`, { nodeId: node.id });
+      }
+      if (['update', 'delete'].includes(operation) && filters.length === 0) {
+        const properties = isObject(node.config.inputSchema) && isObject(node.config.inputSchema.properties)
+          ? node.config.inputSchema.properties
+          : {};
+        if (!Object.prototype.hasOwnProperty.call(properties, 'filter_column')) {
+          error(collector, 'database_tool_filter_required', `A ferramenta "${node.name}" precisa de filtro fixo ou argumento de filtro para ${operation.toUpperCase()}.`, { nodeId: node.id });
+        }
+      }
+    }
+    if (node.type === 'tool.http') {
+      const url = configuredText(node.config.url);
+      const method = configuredText(node.config.method).toUpperCase();
+      if (!url || (!url.includes('{{') && !/^https:\/\//i.test(url)) || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method)) {
+        error(collector, 'http_tool_config_invalid', `A ferramenta "${node.name}" precisa de método permitido e URL HTTPS pública ou variável.`, { nodeId: node.id });
+      }
+      if (!isObject(node.config.inputSchema) || node.config.inputSchema.type !== 'object') {
+        error(collector, 'http_tool_schema_invalid', `A ferramenta "${node.name}" precisa de argumentos definidos como objeto.`, { nodeId: node.id });
+      }
+      if (!['none', 'json', 'raw', 'text', 'form-data'].includes(configuredText(node.config.bodyType) || 'none')) {
+        error(collector, 'http_tool_body_invalid', `O tipo de corpo da ferramenta "${node.name}" é inválido.`, { nodeId: node.id });
+      }
+      if (node.config.credentialRequired === true && !configuredText(node.config.credentialId)) {
+        error(collector, 'http_tool_credential_missing', `A ferramenta "${node.name}" exige uma credencial segura.`, { nodeId: node.id });
+      }
     }
   }
 
@@ -321,11 +697,30 @@ function validateNodeConfig(
     const hasEventInput = node.inputPorts.some((port) => port.connectionType === 'event');
     const resumeEvent = configuredText(node.config.resumeEvent);
     const mode = configuredText(node.config.mode);
-    if (!hasEventInput || (mode !== 'time' && !resumeEvent)) {
+    if (mode && !['time', 'event', 'message'].includes(mode)) {
+      error(collector, 'wait_invalid_mode', `O bloco "${node.name}" precisa aguardar tempo, evento externo ou mensagem.`, { nodeId: node.id });
+    }
+    if (!hasEventInput || (mode !== 'time' && mode !== 'message' && !resumeEvent)) {
       error(
         collector,
         'wait_missing_resume_mechanism',
         `O bloco "${node.name}" precisa declarar como a execução será retomada.`,
+        { nodeId: node.id },
+      );
+    }
+    if (mode === 'time' && !outgoing.some((connection) => connection.sourcePortId === 'expired')) {
+      error(
+        collector,
+        'wait_missing_expired_route',
+        `O bloco "${node.name}" precisa conectar a saída de expiração.`,
+        { nodeId: node.id },
+      );
+    }
+    if (mode !== 'time' && !outgoing.some((connection) => connection.sourcePortId === 'resumed')) {
+      error(
+        collector,
+        'wait_missing_resumed_route',
+        `O bloco "${node.name}" precisa conectar a saída de retomada.`,
         { nodeId: node.id },
       );
     }
@@ -345,11 +740,15 @@ function validateNodeConfig(
     }
   }
 
-  if (manifest?.requiresErrorRoute && !outgoing.some((connection) => connection.connectionType === 'error')) {
+  if (
+    node.config.customErrorRoute === true
+    && node.outputPorts.some((port) => port.connectionType === 'error')
+    && !outgoing.some((connection) => connection.connectionType === 'error')
+  ) {
     error(
       collector,
       'required_error_route_missing',
-      `O bloco "${node.name}" precisa de um caminho explícito de erro.`,
+      `O bloco "${node.name}" habilitou o caminho de erro personalizado, mas ele não está conectado.`,
       { nodeId: node.id },
     );
   }
@@ -582,6 +981,10 @@ export function validateWorkflowDefinition(
   for (const connection of executionEdges) {
     adjacency.get(connection.sourceNodeId)?.push(connection.targetNodeId);
   }
+  for (const node of definition.nodes.filter((candidate) => candidate.type === 'logic.goto')) {
+    const targetNodeId = configuredText(node.config.targetNodeId);
+    if (targetNodeId && adjacency.has(targetNodeId)) adjacency.get(node.id)?.push(targetNodeId);
+  }
 
   const triggerIds = triggers.map((node) => node.id);
   const reachable = new Set<string>();
@@ -610,13 +1013,15 @@ export function validateWorkflowDefinition(
     error(collector, 'missing_terminal', 'O workflow precisa de um bloco de finalização.');
   } else {
     const terminalMemo = new Map<string, boolean>();
-    for (const triggerId of triggerIds) {
-      if (!canReachTerminal(triggerId, terminalIds, adjacency, terminalMemo)) {
+    for (const nodeId of reachable) {
+      const node = nodeById.get(nodeId);
+      if (!node || getWorkflowNodeManifest(node.type)?.attachment || terminalIds.has(nodeId)) continue;
+      if (!canReachTerminal(nodeId, terminalIds, adjacency, terminalMemo)) {
         error(
           collector,
           'path_without_terminal',
-          `O caminho iniciado em "${nodeById.get(triggerId)?.name || triggerId}" não alcança uma finalização.`,
-          { nodeId: triggerId },
+          `O caminho iniciado em "${node.name}" não alcança uma finalização.`,
+          { nodeId },
         );
       }
     }

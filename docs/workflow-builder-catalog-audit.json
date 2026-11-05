@@ -1,0 +1,2014 @@
+{
+  "library": "@xyflow/react 12",
+  "categories": [
+    "triggers",
+    "interaction",
+    "data",
+    "utilities",
+    "logic",
+    "ai",
+    "knowledge_memory",
+    "tools",
+    "integrations",
+    "output",
+    "error"
+  ],
+  "nodeCount": 60,
+  "nodes": [
+    {
+      "type": "trigger.received_message",
+      "category": "triggers",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "message",
+          "type": "main",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "matchMode",
+        "keywords",
+        "keywordThresholds",
+        "pattern",
+        "caseSensitive",
+        "continueMatching",
+        "platforms",
+        "instanceNames",
+        "messageTypes",
+        "startPolicy",
+        "sessionTimeoutMs",
+        "defaultOutput"
+      ]
+    },
+    {
+      "type": "trigger.webhook",
+      "category": "triggers",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "request",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "method",
+        "authentication"
+      ]
+    },
+    {
+      "type": "trigger.internal_event",
+      "category": "triggers",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "event",
+          "type": "main",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "eventName"
+      ]
+    },
+    {
+      "type": "trigger.schedule",
+      "category": "triggers",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "tick",
+          "type": "main",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "timezone",
+        "cron"
+      ]
+    },
+    {
+      "type": "trigger.manual",
+      "category": "triggers",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "started",
+          "type": "main",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": []
+    },
+    {
+      "type": "interaction.input",
+      "category": "interaction",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "resumed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "prompt",
+        "outputKey",
+        "validation",
+        "customRegex",
+        "invalidInputMessage",
+        "timeoutMs"
+      ]
+    },
+    {
+      "type": "interaction.options",
+      "category": "interaction",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "default",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "prompt",
+        "footer",
+        "deliveryMode",
+        "options",
+        "outputKey",
+        "timeoutMs",
+        "customFallbackRoutes",
+        "invalidOptionMessage",
+        "intelligentMatching",
+        "intelligentMinimumConfidence"
+      ]
+    },
+    {
+      "type": "interaction.date",
+      "category": "interaction",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "resumed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "prompt",
+        "outputKey",
+        "validation",
+        "invalidInputMessage",
+        "timeoutMs"
+      ]
+    },
+    {
+      "type": "interaction.file",
+      "category": "interaction",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "resumed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "prompt",
+        "outputKey",
+        "accept",
+        "maxFileSizeMb",
+        "invalidInputMessage",
+        "timeoutMs"
+      ]
+    },
+    {
+      "type": "interaction.rating",
+      "category": "interaction",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "resumed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "prompt",
+        "outputKey",
+        "minimum",
+        "maximum",
+        "icon",
+        "invalidInputMessage",
+        "timeoutMs"
+      ]
+    },
+    {
+      "type": "data.set",
+      "category": "data",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "assignments"
+      ]
+    },
+    {
+      "type": "data.transform",
+      "category": "data",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "mode",
+        "mappings",
+        "expression",
+        "source",
+        "outputKey",
+        "evaluationTimeoutMs"
+      ]
+    },
+    {
+      "type": "data.extract",
+      "category": "data",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        },
+        {
+          "id": "model",
+          "type": "model",
+          "multiple": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "invalid_output",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "schema",
+        "maxAttempts"
+      ]
+    },
+    {
+      "type": "data.code",
+      "category": "data",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "language",
+        "source",
+        "outputKey",
+        "memoryLimitMb",
+        "allowedResources",
+        "inputSchema",
+        "outputSchema"
+      ]
+    },
+    {
+      "type": "data.log",
+      "category": "utilities",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "message",
+        "level"
+      ]
+    },
+    {
+      "type": "data.template",
+      "category": "data",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "template",
+        "outputKey"
+      ]
+    },
+    {
+      "type": "logic.if",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "true",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "false",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "left",
+        "operator",
+        "right",
+        "dataType"
+      ]
+    },
+    {
+      "type": "logic.switch",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "default",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "value",
+        "cases",
+        "defaultOutput"
+      ]
+    },
+    {
+      "type": "logic.ai_router",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        },
+        {
+          "id": "model",
+          "type": "model",
+          "multiple": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "default",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "low_confidence",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "routes",
+        "minimumConfidence",
+        "lowConfidenceOutput",
+        "defaultOutput"
+      ]
+    },
+    {
+      "type": "logic.goal_completion",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "completed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "incomplete",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "requiredFields",
+        "requiredOperations",
+        "requireCompletionSignal",
+        "allowFieldlessCompletion"
+      ]
+    },
+    {
+      "type": "logic.merge",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "branches",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "mode"
+      ]
+    },
+    {
+      "type": "logic.loop",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "iterate",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "done",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "limit_reached",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "maxIterations",
+        "exitCondition",
+        "totalTimeoutMs"
+      ]
+    },
+    {
+      "type": "logic.parallel",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "branches",
+          "type": "main",
+          "multiple": true
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "outputs",
+        "joinMode"
+      ]
+    },
+    {
+      "type": "logic.time_window",
+      "category": "utilities",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "inside",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "outside",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "startTime",
+        "endTime",
+        "timezone"
+      ]
+    },
+    {
+      "type": "logic.wait",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        },
+        {
+          "id": "resume",
+          "type": "event",
+          "multiple": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "resumed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "mode",
+        "timeoutMs",
+        "resumeEvent",
+        "showTyping"
+      ]
+    },
+    {
+      "type": "logic.subflow",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "workflowId",
+        "inputMapping",
+        "inputSchema",
+        "outputSchema"
+      ]
+    },
+    {
+      "type": "logic.goto",
+      "category": "logic",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "targetNodeId"
+      ]
+    },
+    {
+      "type": "ai.model",
+      "category": "ai",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "model",
+          "type": "model",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "provider",
+        "model",
+        "temperature",
+        "maxOutputTokens",
+        "supportsTools",
+        "supportsStructuredOutput",
+        "supportsStreaming",
+        "timeoutMs",
+        "maxRetries"
+      ]
+    },
+    {
+      "type": "ai.agent",
+      "category": "ai",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        },
+        {
+          "id": "model",
+          "type": "model",
+          "multiple": false
+        },
+        {
+          "id": "tools",
+          "type": "tool",
+          "multiple": true
+        },
+        {
+          "id": "memory",
+          "type": "memory",
+          "multiple": false
+        },
+        {
+          "id": "knowledge",
+          "type": "knowledge",
+          "multiple": true
+        },
+        {
+          "id": "guardrails",
+          "type": "guardrail",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "completed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "needs_input",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "handoff",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "limit_reached",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "AgentInspector",
+      "configKeys": [
+        "name",
+        "role",
+        "useSelectedSystemAgent",
+        "persona",
+        "language",
+        "objective",
+        "instructions",
+        "completionCriteria",
+        "availableContext",
+        "maxTurns",
+        "maxToolCalls",
+        "maxRepeatedToolCalls",
+        "timeoutMs",
+        "modelTimeoutMs",
+        "toolTimeoutMs",
+        "allowParallelToolCalls",
+        "requireStructuredFinalOutput",
+        "fallbackOnToolError",
+        "onLimitReached"
+      ]
+    },
+    {
+      "type": "ai.published_agent",
+      "category": "ai",
+      "attachment": false,
+      "terminal": true,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [],
+      "configuration": "PublishedAgentInspector",
+      "configKeys": [
+        "agentId",
+        "releaseId",
+        "outputKeys"
+      ]
+    },
+    {
+      "type": "knowledge.rag_retriever",
+      "category": "knowledge_memory",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "knowledge",
+          "type": "knowledge",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "maxDocuments",
+        "minimumScore",
+        "filters",
+        "strategy",
+        "rerank",
+        "tokenLimit"
+      ]
+    },
+    {
+      "type": "memory.session",
+      "category": "knowledge_memory",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "memory",
+          "type": "memory",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "provider",
+        "scope",
+        "maxMessages",
+        "maxAgeDays",
+        "maxEntries",
+        "layers"
+      ]
+    },
+    {
+      "type": "tool.http",
+      "category": "tools",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "tool",
+          "type": "tool",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "name",
+        "description",
+        "method",
+        "url",
+        "headers",
+        "query",
+        "bodyType",
+        "body",
+        "credentialId",
+        "responsePath",
+        "inputSchema",
+        "outputSchema",
+        "timeoutMs",
+        "maxRequestBytes",
+        "maxResponseBytes",
+        "idempotent",
+        "cacheResult",
+        "requiresConfirmation",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "integration.mcp_call",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "toolName",
+        "serverId",
+        "serverName",
+        "arguments",
+        "inputSchema",
+        "outputSchema",
+        "riskLevel",
+        "requiresConfirmation",
+        "confirmationPath",
+        "outputKey",
+        "timeoutMs",
+        "maxOutputBytes",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "integration.http_request",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "method",
+        "url",
+        "headers",
+        "query",
+        "bodyType",
+        "body",
+        "credentialId",
+        "outputKey",
+        "responsePath",
+        "timeoutMs",
+        "maxResponseBytes"
+      ]
+    },
+    {
+      "type": "tool.database",
+      "category": "tools",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "tool",
+          "type": "tool",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "name",
+        "description",
+        "credentialId",
+        "operation",
+        "table",
+        "columns",
+        "values",
+        "filters",
+        "returning",
+        "limit",
+        "inputSchema",
+        "outputSchema",
+        "allowRawSql",
+        "idempotent",
+        "requiresConfirmation",
+        "timeoutMs",
+        "maxOutputBytes",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "integration.email",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "credentialId",
+        "to",
+        "cc",
+        "subject",
+        "text",
+        "html",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "integration.google_sheets_append",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "credentialId",
+        "spreadsheetId",
+        "range",
+        "values",
+        "valueInputOption",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "integration.google_ads_lead",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "customerId",
+        "eventName",
+        "conversionActionId",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "integration.database",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "credentialId",
+        "operation",
+        "table",
+        "columns",
+        "values",
+        "filters",
+        "returning",
+        "limit",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "dialogy.crm_update",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "fields",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "dialogy.team_availability",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "open",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "closed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "teamId",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "dialogy.chat_tag",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "tagId",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "dialogy.sgp_identify_customer",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "selected",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "new_customer",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "cancelled",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "allowNewCustomer",
+        "saveDocumentIfEmpty",
+        "deliveryMode",
+        "timeoutMs",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "dialogy.sgp_contract_status",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "active",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "suspended",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "cpfCnpj",
+        "deliveryMode",
+        "timeoutMs",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "dialogy.sgp_second_copy",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "cpfCnpj",
+        "deliveryMode",
+        "timeoutMs",
+        "outputKey",
+        "pixTemplateInstance",
+        "pixTemplateName",
+        "pixTemplateLanguage",
+        "pixTemplateBodyParameter",
+        "pixTemplateBodyParameterCount",
+        "boletoTemplateInstance",
+        "boletoTemplateName",
+        "boletoTemplateLanguage",
+        "boletoTemplateBodyParameter",
+        "boletoTemplateBodyParameterCount",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "dialogy.sgp_payment_promise",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "status-0",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "status-1",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "status-2",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "limit-reached",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "cpfCnpj",
+        "deliveryMode",
+        "promiseDate",
+        "sendSms",
+        "timeoutMs",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "whatsapp.send_text",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "instanceName",
+        "phoneNumber",
+        "message",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "whatsapp.send_media",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "instanceName",
+        "phoneNumber",
+        "mediaType",
+        "url",
+        "caption",
+        "fileName",
+        "mimeType",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "whatsapp.group_create",
+      "category": "integrations",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "instanceName",
+        "groupName",
+        "participants",
+        "outputKey",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "tool.internal",
+      "category": "tools",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "tool",
+          "type": "tool",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "name",
+        "description",
+        "action",
+        "inputSchema",
+        "outputSchema",
+        "idempotent"
+      ]
+    },
+    {
+      "type": "tool.mcp",
+      "category": "tools",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "tool",
+          "type": "tool",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "name",
+        "description",
+        "serverId",
+        "allowedTools",
+        "inputSchema",
+        "outputSchema",
+        "timeoutMs",
+        "requiresConfirmation",
+        "audit"
+      ]
+    },
+    {
+      "type": "guardrail.policy",
+      "category": "ai",
+      "attachment": true,
+      "terminal": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "guardrail",
+          "type": "guardrail",
+          "multiple": true
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "name",
+        "checks",
+        "onViolation"
+      ]
+    },
+    {
+      "type": "output.respond",
+      "category": "output",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "channel",
+        "message",
+        "idempotent"
+      ]
+    },
+    {
+      "type": "output.media",
+      "category": "output",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "success",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "mediaType",
+        "url",
+        "caption",
+        "fileName",
+        "mimeType"
+      ]
+    },
+    {
+      "type": "output.redirect",
+      "category": "output",
+      "attachment": false,
+      "terminal": true,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "url"
+      ]
+    },
+    {
+      "type": "output.handoff",
+      "category": "output",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "completed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "destinationType",
+        "teamId",
+        "agentId",
+        "systemAgentId",
+        "reason",
+        "requireConfirmation",
+        "confirmationPath",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "output.close_conversation",
+      "category": "output",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "completed",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "reason",
+        "notes",
+        "reasonTagId",
+        "sendCloseMessage",
+        "closePolicy",
+        "permissionScope"
+      ]
+    },
+    {
+      "type": "output.end",
+      "category": "output",
+      "attachment": false,
+      "terminal": true,
+      "inputs": [
+        {
+          "id": "main",
+          "type": "main",
+          "multiple": true
+        }
+      ],
+      "outputs": [],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "output"
+      ]
+    },
+    {
+      "type": "error.handler",
+      "category": "error",
+      "attachment": false,
+      "terminal": false,
+      "inputs": [
+        {
+          "id": "error",
+          "type": "error",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "recovered",
+          "type": "main",
+          "multiple": false
+        },
+        {
+          "id": "failed",
+          "type": "main",
+          "multiple": false
+        }
+      ],
+      "configuration": "NativeSpecializedNodeInspector",
+      "configKeys": [
+        "mode",
+        "publicMessage"
+      ]
+    }
+  ]
+}

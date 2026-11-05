@@ -11,11 +11,22 @@ import {
   WHATSAPP_MESSAGE_EVENT,
 } from '@/lib/marketing-attribution';
 
+/**
+ * Janela do casamento por proximidade. Curta de proposito: quanto maior, maior
+ * a chance de atribuir a conversa errada a um clique.
+ */
+const PROXIMITY_WINDOW_MINUTES = Math.max(
+  1,
+  Number(process.env.GOOGLE_ADS_PROXIMITY_WINDOW_MINUTES || 30)
+);
+
 type CreateTrackedWhatsappClickInput = {
   workspaceId: string;
   instanceName: string;
   requestUrl: URL;
   message?: string | null;
+  userAgent?: string | null;
+  ipHash?: string | null;
 };
 
 type TrackedWhatsappClick = {
@@ -87,9 +98,10 @@ export async function createTrackedWhatsappClick(
     INSERT INTO ad_clicks (
       workspace_id, instance_name, token, destination_phone, destination_url,
       source, medium, campaign, campaign_id, ad_group_id, creative_id,
-      keyword, device, match_type, gclid, gbraid, wbraid, raw_params
+      keyword, device, match_type, gclid, gbraid, wbraid, raw_params,
+      user_agent, ip_hash
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20)
     `,
     [
       input.workspaceId,
@@ -110,6 +122,8 @@ export async function createTrackedWhatsappClick(
       adParams.gbraid ?? null,
       adParams.wbraid ?? null,
       JSON.stringify(adParams.rawParams),
+      input.userAgent?.slice(0, 500) ?? null,
+      input.ipHash ?? null,
     ]
   );
 
@@ -149,16 +163,17 @@ export async function attributeInboundWhatsappMessageByToken(params: {
     inserted_attribution AS (
       INSERT INTO ad_attributions (
         workspace_id, ad_click_id, contact_id, chat_id, message_id,
-        source, medium, campaign, campaign_id, match_type, confidence
+        source, medium, campaign, campaign_id, match_type, confidence, export_eligible
       )
       SELECT
         workspace_id, id, $4, $5, $6,
-        source, medium, campaign, campaign_id, 'token', 'deterministic'
+        source, medium, campaign, campaign_id, 'token', 'deterministic', true
       FROM updated_click
       ON CONFLICT (ad_click_id) DO UPDATE SET
         contact_id = EXCLUDED.contact_id,
         chat_id = EXCLUDED.chat_id,
-        message_id = EXCLUDED.message_id
+        message_id = EXCLUDED.message_id,
+        export_eligible = true
       RETURNING *
     )
     SELECT
@@ -170,6 +185,7 @@ export async function attributeInboundWhatsappMessageByToken(params: {
       ia.campaign_id,
       ia.match_type,
       ia.confidence,
+      ia.export_eligible,
       uc.gclid,
       uc.gbraid,
       uc.wbraid,
@@ -183,46 +199,141 @@ export async function attributeInboundWhatsappMessageByToken(params: {
   const row = attributionRes.rows[0];
   if (!row) return null;
 
+  return finalizeAttribution(params.client, row, params.messageId);
+}
+
+async function finalizeAttribution(client: PoolClient, row: any, messageId: string) {
   const attributionMetadata = buildAttributionMetadata(row);
-  await params.client.query(
+  await client.query(
     `
     UPDATE messages
     SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
     WHERE id = $1
     `,
-    [params.messageId, JSON.stringify(attributionMetadata)]
+    [messageId, JSON.stringify(attributionMetadata)]
   );
 
-  await params.client.query(
+  await client.query(
     `
     INSERT INTO conversion_exports (
       workspace_id, ad_attribution_id, event_name, conversion_action_id,
-      conversion_value, currency, status, payload
+      product_destination_id, google_ads_customer_id, transaction_id,
+      conversion_value, currency, status, kind, order_id, payload
     )
     SELECT
       aa.workspace_id,
       aa.id,
       $2,
       NULLIF(w.google_ads_conversion_action_whatsapp_message, ''),
+      NULLIF(regexp_replace(regexp_replace(w.google_ads_conversion_action_whatsapp_message, '^.*/', ''), '\\D', '', 'g'), ''),
+      NULLIF(regexp_replace(w.google_ads_customer_id, '\\D', '', 'g'), ''),
+      'dialogy:' || aa.workspace_id || ':' || $2 || ':' || aa.chat_id || ':' || aa.message_id,
       1,
       'BRL',
       'pending',
+      'conversion',
+      $2 || ':' || aa.chat_id || ':' || aa.message_id,
       jsonb_build_object(
         'event_name', $2,
         'message_id', aa.message_id,
         'chat_id', aa.chat_id,
         'contact_id', aa.contact_id,
-        'ad_click_id', aa.ad_click_id
+        'ad_click_id', aa.ad_click_id,
+        'transaction_id', 'dialogy:' || aa.workspace_id || ':' || $2 || ':' || aa.chat_id || ':' || aa.message_id
       )
     FROM ad_attributions aa
-    JOIN workspaces w ON w.id::text = aa.workspace_id
-    JOIN ad_clicks ac ON ac.id = aa.ad_click_id
+    JOIN workspaces w ON w.id = aa.workspace_id::uuid
     WHERE aa.id = $1
-      AND (ac.gclid IS NOT NULL OR ac.gbraid IS NOT NULL OR ac.wbraid IS NOT NULL)
-    ON CONFLICT (ad_attribution_id, event_name) DO NOTHING
+      AND COALESCE(aa.export_eligible, true) = true
+      AND NULLIF(w.google_ads_conversion_action_whatsapp_message, '') IS NOT NULL
+    ON CONFLICT (workspace_id, event_name, transaction_id) WHERE kind = 'conversion' DO NOTHING
     `,
     [row.attribution_id, WHATSAPP_MESSAGE_EVENT]
   );
 
   return attributionMetadata.attribution;
+}
+
+/**
+ * Rede de seguranca para quem apagou o codigo da mensagem pre-preenchida do
+ * WhatsApp: casa a primeira mensagem do contato com o clique mais recente ainda
+ * nao casado da mesma instancia. O clique e reivindicado de forma atomica, entao
+ * duas conversas simultaneas nunca disputam o mesmo clique.
+ * Nota: export_eligible = false por padrao para correspondencias probabilisticas,
+ * garantindo que o aprendizado do Smart Bidding no Google Ads nao seja contaminado.
+ */
+export async function attributeInboundWhatsappMessageByProximity(params: {
+  client: PoolClient;
+  workspaceId: string;
+  instanceName: string;
+  contactId: string;
+  chatId: string;
+  messageId: string;
+  windowMinutes?: number;
+}) {
+  const windowMinutes = Math.max(1, params.windowMinutes ?? PROXIMITY_WINDOW_MINUTES);
+
+  const attributionRes = await params.client.query(
+    `
+    WITH claimed_click AS (
+      UPDATE ad_clicks ac
+      SET matched_at = timezone('utc', now()),
+          matched_contact_id = $4,
+          matched_chat_id = $5,
+          matched_message_id = $6
+      WHERE ac.id = (
+        SELECT id
+        FROM ad_clicks
+        WHERE workspace_id = $1
+          AND instance_name = $2
+          AND matched_at IS NULL
+          AND expires_at >= timezone('utc', now())
+          AND clicked_at >= timezone('utc', now()) - ($3 * interval '1 minute')
+          -- Contato que ja tem atribuicao nao pode roubar outro clique.
+          AND NOT EXISTS (
+            SELECT 1 FROM ad_attributions
+            WHERE workspace_id = $1 AND contact_id = $4
+          )
+        ORDER BY clicked_at DESC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING ac.*
+    ),
+    inserted_attribution AS (
+      INSERT INTO ad_attributions (
+        workspace_id, ad_click_id, contact_id, chat_id, message_id,
+        source, medium, campaign, campaign_id, match_type, confidence, export_eligible
+      )
+      SELECT
+        workspace_id, id, $4, $5, $6,
+        source, medium, campaign, campaign_id, 'proximity', 'probabilistic', false
+      FROM claimed_click
+      ON CONFLICT (ad_click_id) DO NOTHING
+      RETURNING *
+    )
+    SELECT
+      ia.id AS attribution_id,
+      ia.ad_click_id,
+      ia.source,
+      ia.medium,
+      ia.campaign,
+      ia.campaign_id,
+      ia.match_type,
+      ia.confidence,
+      ia.export_eligible,
+      cc.gclid,
+      cc.gbraid,
+      cc.wbraid,
+      cc.token
+    FROM inserted_attribution ia
+    JOIN claimed_click cc ON cc.id = ia.ad_click_id
+    `,
+    [params.workspaceId, params.instanceName, windowMinutes, params.contactId, params.chatId, params.messageId]
+  );
+
+  const row = attributionRes.rows[0];
+  if (!row) return null;
+
+  return finalizeAttribution(params.client, row, params.messageId);
 }

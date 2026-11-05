@@ -1,5 +1,6 @@
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import { RecursiveCharacterTextSplitter } from '@/lib/text-splitter';
+import { getCanonicalKnowledgeAnswer } from './document-safety';
 
 export type KnowledgeContextRole = 'fact' | 'procedure' | 'policy' | 'persona';
 
@@ -23,6 +24,28 @@ export function inferKnowledgeContextRole(document: Pick<KnowledgeBaseDocument, 
   if (POLICY_CATEGORY_PATTERN.test(category)) return 'policy';
   if (PROCEDURE_CATEGORY_PATTERN.test(category)) return 'procedure';
   return 'fact';
+}
+
+/**
+ * Preenche os campos curados antes do parse do zod.
+ *
+ * Sem isto, dois vazamentos silenciosos: documentos antigos usam
+ * `canonical_answer` em vez de `canonicalAnswer` e o zod descartaria a grafia
+ * nao declarada; e `contextRole` costuma estar implicito na categoria, entao
+ * so seria enviado quando alguem o preencheu na mao.
+ */
+export function enrichKnowledgeDocumentsForPrompt(
+  documents: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return (documents || []).map((document) => {
+    const typed = document as unknown as KnowledgeBaseDocument;
+    const canonicalAnswer = getCanonicalKnowledgeAnswer(typed);
+    return {
+      ...document,
+      canonicalAnswer: canonicalAnswer || null,
+      contextRole: inferKnowledgeContextRole(typed) || null,
+    };
+  });
 }
 
 function validTimestamp(value: string | null | undefined): string | null {

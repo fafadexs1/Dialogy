@@ -16,14 +16,46 @@ export function WebchatClient({ publicKey, parentOrigin, currentUrl, referrer }:
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const messagesRequestRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
-    fetch(`/api/webchat/widgets/${encodeURIComponent(publicKey)}?origin=${encodeURIComponent(parentOrigin)}`)
-      .then(async (response) => { if (!response.ok) throw new Error('Widget indisponível.'); return response.json(); })
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    messagesRef.current = [];
+    setMessages([]);
+  }, [session?.sessionId]);
+
+  useEffect(() => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const edgeEndpoint = supabaseUrl
+      ? `${supabaseUrl}/functions/v1/webchat-widget/${encodeURIComponent(publicKey)}?origin=${encodeURIComponent(parentOrigin)}`
+      : null;
+    const fallbackEndpoint = `/api/webchat/widgets/${encodeURIComponent(publicKey)}?origin=${encodeURIComponent(parentOrigin)}`;
+
+    const fetchConfig = async () => {
+      if (edgeEndpoint) {
+        try {
+          const res = await fetch(edgeEndpoint);
+          if (res.ok) return await res.json();
+        } catch {
+          // Silenciosamente tenta fallback
+        }
+      }
+      const fallbackRes = await fetch(fallbackEndpoint);
+      if (!fallbackRes.ok) throw new Error('Widget indisponível.');
+      return await fallbackRes.json();
+    };
+
+    fetchConfig()
       .then((loaded) => {
         setConfig(loaded);
         parent.postMessage({ type: 'dialogy:webchat:config', primaryColor: loaded.primaryColor, position: loaded.position }, '*');
-      }).catch((err) => setError(err.message));
+      })
+      .catch((err) => setError(err.message));
+
     try { const saved = localStorage.getItem(storageKey); if (saved) setSession(JSON.parse(saved)); } catch {}
   }, [parentOrigin, publicKey, storageKey]);
 
@@ -37,9 +69,32 @@ export function WebchatClient({ publicKey, parentOrigin, currentUrl, referrer }:
   );
   const loadMessages = useCallback(async () => {
     if (!session) return;
-    const response = await fetch(`/api/webchat/sessions/${session.sessionId}/messages`, { headers: authHeaders });
-    if (response.status === 401) { localStorage.removeItem(storageKey); setSession(null); return; }
-    if (response.ok) setMessages((await response.json()).messages);
+    if (messagesRequestRef.current) return messagesRequestRef.current;
+    const request = (async () => {
+      const latestMessage = messagesRef.current.at(-1);
+      const params = new URLSearchParams();
+      if (latestMessage?.createdAt) params.set('after', latestMessage.createdAt);
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      const response = await fetch(`/api/webchat/sessions/${session.sessionId}/messages${suffix}`, { headers: authHeaders });
+      if (response.status === 401) { localStorage.removeItem(storageKey); setSession(null); return; }
+      if (!response.ok) return;
+      const incoming = ((await response.json()).messages ?? []) as ChatMessage[];
+      if (!incoming.length) return;
+      setMessages((current) => {
+        const byId = new Map(current.map((message) => [message.id, message]));
+        incoming.forEach((message) => byId.set(message.id, message));
+        return [...byId.values()].sort((a, b) => {
+          const timeDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          return timeDiff || a.id.localeCompare(b.id);
+        });
+      });
+    })();
+    messagesRequestRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (messagesRequestRef.current === request) messagesRequestRef.current = null;
+    }
   }, [authHeaders, session, storageKey]);
 
   useEffect(() => {

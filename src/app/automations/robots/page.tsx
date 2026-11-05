@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -22,13 +22,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogClose
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { getSystemAgents, createSystemAgent, deleteSystemAgent, updateSystemAgent } from '@/actions/system-agents';
 import { getAutopilotConfig } from '@/actions/autopilot';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
-import { type AutopilotConfig, type SystemAgent, type Team, type User } from '@/lib/types';
+import { type AutopilotConfig, type SystemAgent, type Team } from '@/lib/types';
 import { Loader2, PlusCircle, MoreVertical, Edit, Trash2, Copy, Rocket, KeyRound, Webhook, Save, Bot, Users } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCurrentUser } from '@/hooks/use-online-status';
@@ -288,7 +287,7 @@ export default function RobotsPage() {
       <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><Rocket /> Agentes do Sistema</h1>
-          <p className="text-muted-foreground">Crie e gerencie agentes virtuais para automatizar tarefas via webhooks.</p>
+          <p className="text-muted-foreground">Crie e gerencie agentes virtuais para seus fluxos e automações.</p>
         </div>
         <Dialog open={isModalOpen} onOpenChange={(isOpen) => { setIsModalOpen(isOpen); if (!isOpen) setEditingAgent(null); }}>
           <DialogTrigger asChild>
@@ -393,13 +392,6 @@ export default function RobotsPage() {
                     <div className="flex items-center">
                       <Input readOnly value={agent.webhook_url || 'N/A'} className="h-8 font-mono text-xs flex-1" />
                       {agent.webhook_url && <CopyButton textToCopy={agent.webhook_url} />}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5"><Rocket className="h-3 w-3" /> Link para Disparos (Webhook)</Label>
-                    <div className="flex items-center">
-                      <Input readOnly value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/hooks/${agent.token}`} className="h-8 font-mono text-xs flex-1" />
-                      <CopyButton textToCopy={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/hooks/${agent.token}`} />
                     </div>
                   </div>
                 </CardContent>

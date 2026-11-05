@@ -5,6 +5,7 @@ import { sendAutomatedMessageAction } from '@/actions/messages';
 import { getWorkspaceTemplates } from '@/lib/workspace-config';
 import { enqueueAiCaseMemoryRefresh, shouldEnqueueJob } from '@/lib/queue';
 import { refreshCaseMemoryForChat } from '@/services/rag/case-memory';
+import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 
 interface CloseChatPayload {
     chatId: string;
@@ -74,10 +75,15 @@ export async function POST(request: Request) {
             // 3. Resolve Tag Info
             let tagInfo = { label: null as string | null, color: null as string | null };
             if (reasonTagId) {
-                const tagRes = await client.query('SELECT label, color FROM tags WHERE id = $1', [reasonTagId]);
-                if ((tagRes.rowCount ?? 0) > 0) {
-                    tagInfo = tagRes.rows[0];
+                const tagRes = await client.query(
+                    'SELECT label, color FROM tags WHERE id = $1 AND workspace_id = $2',
+                    [reasonTagId, workspace_id]
+                );
+                if ((tagRes.rowCount ?? 0) === 0) {
+                    await client.query('ROLLBACK');
+                    return NextResponse.json({ error: 'Invalid close reason for this workspace.' }, { status: 400 });
                 }
+                tagInfo = tagRes.rows[0];
             }
 
             // 4. Update Chat Status
@@ -89,7 +95,12 @@ export async function POST(request: Request) {
                     close_reason_tag_id = $1,
                     close_notes = $2,
                     tag = $3,
-                    color = $4
+                    color = $4,
+                    assigned_system_agent_id = NULL,
+                    is_autopilot_active = FALSE,
+                    copilot_mode = 'off',
+                    assigned_at = NULL,
+                    updated_at = timezone('utc', now())
                  WHERE id = $5`,
                 [
                     reasonTagId,
@@ -128,6 +139,12 @@ export async function POST(request: Request) {
             ]);
 
             await client.query('COMMIT');
+
+            try {
+                await broadcastHydratedChatUpdate(workspace_id, chatId);
+            } catch (broadcastError) {
+                console.error('[AGENT_CLOSE_CHAT] Failed to broadcast hydrated chat update:', broadcastError);
+            }
 
             try {
                 const closedAtRes = await db.query('SELECT closed_at FROM chats WHERE id = $1', [chatId]);

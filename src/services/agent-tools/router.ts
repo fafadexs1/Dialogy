@@ -1,4 +1,5 @@
 import type { AgentToolAction } from './types';
+import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
 
 export type ToolRouterTeam = {
   id: string;
@@ -10,6 +11,40 @@ export type ToolRouterTeam = {
     responseHint?: string | null;
   } | null;
 };
+
+/** Resolve only an unambiguous destination; never rely on array order. */
+export function resolveHandoffTeam(input: {
+  intent: UniversalAutopilotIntent;
+  availableTeams: ToolRouterTeam[];
+  customerMessage?: string;
+}): ToolRouterTeam | null {
+  const teams = input.availableTeams;
+  const message = normalizeSearchText(input.customerMessage || '');
+  const mentioned = teams.filter((team) => {
+    const name = normalizeSearchText(team.name);
+    return name.length >= 3 && message.includes(name);
+  });
+  if (mentioned.length === 1) return mentioned[0];
+  if (mentioned.length > 1) return null;
+  // An explicit sector that is not in the workspace must not silently become
+  // an unrelated default team.
+  if (/\b(?:setor|equipe)\s+(?:de\s+|do\s+|da\s+)?(?:financeiro|comercial|suporte|cobranca|vendas)\b/.test(message)
+    || /\b(?:para|pro|pra)\s+(?:o\s+|a\s+)?(?:financeiro|comercial|suporte|cobranca|vendas)\b/.test(message)) return null;
+  const hints: Partial<Record<UniversalAutopilotIntent, RegExp>> = {
+    billing_or_payment: /\b(financeiro|cobranca|billing)\b/,
+    support_request: /\b(suporte|sac|atendimento|help)\b/,
+    troubleshooting: /\b(suporte|tecnico|noc|atendimento)\b/,
+    order_or_request_status: /\b(suporte|atendimento|operacao|logistica)\b/,
+    human_handoff: /\b(atendimento|suporte|sac|help|humano)\b/,
+    complaint: /\b(sac|ouvidoria|qualidade|atendimento)\b/,
+  };
+  const hint = hints[input.intent];
+  const matches = hint ? teams.filter((team) => hint.test(normalizeSearchText(team.name))) : [];
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) return null;
+  const configured = teams.filter((team) => team.routingConfig?.enabled && team.routingConfig.autoTransfer !== false);
+  return configured.length === 1 ? configured[0] : null;
+}
 
 export type DeterministicToolRoutingInput = {
   customerMessage: string;
@@ -28,7 +63,7 @@ export type ToolRoutingCandidate = {
   toolName: 'transfer_chat';
   team: Pick<ToolRouterTeam, 'id' | 'name'>;
   reason: string;
-  source: 'configured_keyword' | 'team_mention' | 'domain_hint';
+  source: 'configured_keyword' | 'team_mention';
   matchedText?: string | null;
   responseHint: string;
 };
@@ -58,29 +93,6 @@ const HUMAN_TARGETS = new Set([
   'operador',
   'suporte',
 ]);
-
-const DOMAIN_KEYWORDS: Array<{ domain: string; terms: RegExp[]; teamHints: RegExp[] }> = [
-  {
-    domain: 'financeiro',
-    terms: [/\b(boleto|fatura|pix|pagamento|cobranca|cobrança|segunda via|mensalidade|negociar|debito|débito)\b/i],
-    teamHints: [/\b(financeiro|cobranca|cobrança|billing)\b/i],
-  },
-  {
-    domain: 'suporte',
-    terms: [/\b(sem internet|internet caiu|internet|conexao|conexão|sinal|los|lento|lentidao|lentidão|roteador|modem|tecnico|técnico|suporte|merda|ruim|caindo)\b/i],
-    teamHints: [/\b(suporte|tecnico|técnico|noc|atendimento)\b/i],
-  },
-  {
-    domain: 'comercial',
-    terms: [/\b(plano|contratar|upgrade|vendas|comercial|proposta|orcamento|orçamento)\b/i],
-    teamHints: [/\b(comercial|vendas|sales)\b/i],
-  },
-  {
-    domain: 'cancelamento',
-    terms: [/\b(cancelar|cancelamento|encerrar contrato|rescindir|desistir)\b/i],
-    teamHints: [/\b(cancelamento|retencao|retenção|sucesso|atendimento|suporte)\b/i],
-  },
-];
 
 function normalizeSearchText(value: string): string {
   return value
@@ -123,16 +135,18 @@ function findMentionedTeam(message: string, teams: ToolRouterTeam[]) {
   const normalizedMessage = normalizeSearchText(message);
   if (!normalizedMessage) return null;
 
-  return teams.find((team) => {
+  const matches = teams.filter((team) => {
     const normalizedName = normalizeSearchText(team.name);
     return normalizedName.length >= 3 && normalizedMessage.includes(normalizedName);
-  }) ?? null;
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function findConfiguredTeam(message: string, teams: ToolRouterTeam[]) {
   const normalizedMessage = normalizeSearchText(message);
   if (!normalizedMessage) return null;
 
+  const matches: Array<{ team: ToolRouterTeam; matchedKeyword: string }> = [];
   for (const team of teams) {
     const config = team.routingConfig;
     if (!config?.enabled || config.autoTransfer === false) continue;
@@ -143,31 +157,11 @@ function findConfiguredTeam(message: string, teams: ToolRouterTeam[]) {
 
     const matchedKeyword = keywords.find((keyword) => normalizedMessage.includes(keyword));
     if (matchedKeyword) {
-      return { team, matchedKeyword };
+      matches.push({ team, matchedKeyword });
     }
   }
 
-  return null;
-}
-
-function findDomainTeam(message: string, teams: ToolRouterTeam[]) {
-  for (const domain of DOMAIN_KEYWORDS) {
-    if (!domain.terms.some((pattern) => pattern.test(message))) continue;
-
-    const team = teams.find((candidate) => domain.teamHints.some((pattern) => pattern.test(candidate.name)));
-    if (team) {
-      return { team, domain: domain.domain };
-    }
-  }
-
-  return null;
-}
-
-function findHumanHandoffTeam(teams: ToolRouterTeam[]) {
-  return teams.find((candidate) => /\b(atendimento|suporte|sac|help|humano)\b/i.test(candidate.name))
-    ?? teams.find((candidate) => candidate.routingConfig?.enabled && candidate.routingConfig.autoTransfer !== false)
-    ?? teams[0]
-    ?? null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function shouldHandoffToHuman(message: string) {
@@ -214,7 +208,10 @@ export function routeDeterministicAgentTools(
 
   const candidates: ToolRoutingCandidate[] = [];
 
-  const configuredTeam = findConfiguredTeam(message, input.availableTeams);
+  const explicitlyMentioned = findMentionedTeam(message, input.availableTeams);
+  const configuredMatch = findConfiguredTeam(message, input.availableTeams);
+  const configuredTeam = explicitlyMentioned && hasExplicitTeamHandoff(message, explicitlyMentioned)
+    && configuredMatch?.team.id !== explicitlyMentioned.id ? null : configuredMatch;
   const configuredTeamIsExplicit = configuredTeam
     ? shouldHandoffToHuman(message) || hasExplicitTeamHandoff(message, configuredTeam.team)
     : false;
@@ -297,46 +294,8 @@ export function routeDeterministicAgentTools(
     });
   }
 
-  const domainMatch = findDomainTeam(message, input.availableTeams);
-  if (domainMatch && shouldHandoffToHuman(message)) {
-    const reason = `Pedido de atendimento humano com indícios de assunto ${domainMatch.domain}.`;
-    return {
-      matchedReason: reason,
-      responseHint: `Vou encaminhar seu atendimento para a equipe ${domainMatch.team.name}.`,
-      candidates,
-      actions: [
-        {
-          type: 'add_internal_note',
-          reason,
-          payload: {
-            content: buildNoteContent({
-              reason,
-              customerMessage: message,
-              contactName: input.contactName,
-            }),
-          },
-        },
-        {
-          type: 'transfer_chat',
-          reason,
-          payload: { teamId: domainMatch.team.id },
-        },
-      ],
-    };
-  }
-  if (domainMatch) {
-    candidates.push({
-      toolName: 'transfer_chat',
-      team: { id: domainMatch.team.id, name: domainMatch.team.name },
-      reason: `Mensagem tem indicios de assunto ${domainMatch.domain}, mas nao houve pedido explicito de transferencia.`,
-      source: 'domain_hint',
-      matchedText: domainMatch.domain,
-      responseHint: `Vou encaminhar seu atendimento para a equipe ${domainMatch.team.name}.`,
-    });
-  }
-
   if (shouldHandoffToHuman(message)) {
-    const handoffTeam = findHumanHandoffTeam(input.availableTeams);
+    const handoffTeam = resolveHandoffTeam({ intent: 'human_handoff', availableTeams: input.availableTeams, customerMessage: message });
     if (handoffTeam) {
       const reason = `Cliente pediu atendimento humano sem indicar setor.`;
       return {

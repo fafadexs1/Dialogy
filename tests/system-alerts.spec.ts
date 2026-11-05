@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { GlobalAlertSchema } from '@/lib/system-alerts';
+import {
+    GLOBAL_ALERT_REALTIME_CHANNEL_OPTIONS,
+    GlobalAlertSchema,
+} from '@/lib/system-alerts';
+
+describe('GlobalAlert Realtime channel', () => {
+    it('uses a private channel for both the Inbox subscriber and server broadcast', () => {
+        expect(GLOBAL_ALERT_REALTIME_CHANNEL_OPTIONS).toEqual({
+            config: { private: true },
+        });
+    });
+});
 
 describe('GlobalAlertSchema', () => {
     it('preenche linkUrl vazio quando o campo nao existe', () => {

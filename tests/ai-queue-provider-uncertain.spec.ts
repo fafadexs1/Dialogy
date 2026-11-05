@@ -59,6 +59,7 @@ describe('AI queue uncertain provider delivery', () => {
         copilot_mode: 'auto',
         contact_id: 'contact-1',
         contact_name: 'Cliente',
+        contact_phone: '5500000000000',
         contact_phone_number_jid: '5500000000000@s.whatsapp.net',
       }],
       rowCount: 1,
@@ -90,6 +91,9 @@ describe('AI queue uncertain provider delivery', () => {
     await expect(handleAiQueueJob(job)).resolves.toBeUndefined();
 
     expect(mocks.processAutopilot).toHaveBeenCalledTimes(1);
+    expect(mocks.dbQuery).toHaveBeenCalledWith(expect.stringContaining('ct.workspace_id = c.workspace_id'), ['chat-1','workspace-1']);
+    expect(mocks.dbQuery.mock.calls[0][0]).toContain('c.workspace_id = $2');
+    expect(mocks.processAutopilot.mock.calls[0][1].contact.phone).toBe('5500000000000');
     expect(mocks.handoff).toHaveBeenCalledWith({
       workspaceId: 'workspace-1',
       chatId: 'chat-1',

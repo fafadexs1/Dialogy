@@ -1,0 +1,60 @@
+{
+  "observedAt": "2026-09-08T15:53:22.256Z",
+  "apply": true,
+  "workspaceId": "e3b476a1-5de8-4744-80b5-a5d23fe15fab",
+  "workflowId": "77bc3879-e0eb-584f-b1bb-4ca1e640ab52",
+  "previousVersion": "v19",
+  "version": "v20",
+  "change": {
+    "field": "velpro_trigger.config.instanceNames",
+    "before": [
+      "zap1"
+    ],
+    "after": []
+  },
+  "nodes": 70,
+  "validation": {
+    "workflow": true,
+    "credentials": true,
+    "bindings": true
+  },
+  "matrix": [
+    {
+      "platform": "whatsapp",
+      "matchedBefore": true,
+      "matchedAfter": true,
+      "assignedChatBlocked": true
+    },
+    {
+      "platform": "instagram",
+      "matchedBefore": false,
+      "matchedAfter": true,
+      "assignedChatBlocked": true
+    },
+    {
+      "platform": "messenger",
+      "matchedBefore": false,
+      "matchedAfter": true,
+      "assignedChatBlocked": true
+    },
+    {
+      "platform": "telegram",
+      "matchedBefore": false,
+      "matchedAfter": true,
+      "assignedChatBlocked": true
+    },
+    {
+      "platform": "webchat",
+      "matchedBefore": false,
+      "matchedAfter": true,
+      "assignedChatBlocked": true
+    }
+  ],
+  "historicalEligibility": {
+    "messages": 54,
+    "before": 0,
+    "after": 54,
+    "assumption": "Conversation in the general queue with no assigned agent at trigger entry."
+  },
+  "providerDeliveryTested": false
+}

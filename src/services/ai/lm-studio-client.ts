@@ -1,10 +1,10 @@
+import { requestPlatformJson } from '@/services/ai/platform-json';
 import { z } from 'zod';
 import {
   getGlobalLmStudioConfig,
   getLmStudioModelId,
   getLmStudioMessageText,
   normalizeLmStudioConfig,
-  parseLmStudioStructuredText,
 } from './lm-studio';
 
 type LmStudioMessageContent =
@@ -98,6 +98,7 @@ async function requestLmStudioCompletion(input: LmStudioCompletionInput): Promis
 }
 
 export async function requestLmStudioJson<TSchema extends z.ZodTypeAny>(input: {
+  workspaceId?: string;
   model: string;
   schema: TSchema;
   schemaName: string;
@@ -107,41 +108,7 @@ export async function requestLmStudioJson<TSchema extends z.ZodTypeAny>(input: {
   timeoutMs?: number;
   maxTokens?: number;
 }): Promise<z.output<TSchema>> {
-  const text = await requestLmStudioCompletion({
-    model: input.model,
-    messages: [
-      { role: 'system', content: input.systemPrompt },
-      { role: 'user', content: input.userPrompt },
-    ],
-    timeoutMs: input.timeoutMs,
-    maxTokens: input.maxTokens,
-    responseFormat: {
-      type: 'json_schema',
-      json_schema: {
-        name: input.schemaName,
-        strict: true,
-        schema: input.jsonSchema,
-      },
-    },
-    allowReasoningContentFallback: true,
-  });
-  const parsed = parseLmStudioStructuredText(text);
-  if (!parsed) {
-    throw new Error(
-      `LM Studio returned invalid JSON for ${input.schemaName}. ` +
-      'The response may be truncated or incompatible with the requested schema.'
-    );
-  }
-
-  const result = input.schema.safeParse(parsed);
-  if (!result.success) {
-    const issueSummary = result.error.issues
-      .slice(0, 3)
-      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-      .join('; ');
-    throw new Error(`LM Studio returned JSON that does not match ${input.schemaName}: ${issueSummary}`);
-  }
-  return result.data;
+  return requestPlatformJson({...input,apiKey:''});
 }
 
 export function requestLmStudioText(input: {

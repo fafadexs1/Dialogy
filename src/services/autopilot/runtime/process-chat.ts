@@ -1,7 +1,16 @@
 import { db } from '@/lib/db';
+import { getWorkspaceTimezone } from '@/lib/workspace-config';
+import { selectStudioConversationRelease } from '@/services/agent-studio/release-selection';
+import { runStudioConversation } from '@/services/agent-studio/runtime';
+import { loadStudioRelease } from '@/services/agent-studio/repository';
+import { runStudioCopilot } from '@/services/agent-studio/copilot';
+import { loadStudioCopilotContext } from '@/services/agent-studio/copilot-context';
+import { sendAutomatedMediaAction } from '@/actions/messages';
+import { validateRemoteUrl } from '@/lib/security/safe-remote-url';
 import { randomUUID } from 'crypto';
-import type { AutopilotConfig, NexusFlowInstance, KnowledgeBaseDocument, Chat, Contact, Message, MessageMetadata } from '@/lib/types';
+import type { AutopilotConfig, KnowledgeBaseDocument, Chat, Contact } from '@/lib/types';
 import { generateAgentResponse } from '@/ai/flows/auto-responder';
+import { buildUniversalAgentRuntimeContext } from '@/services/agent-runtime/prompt-context';
 import { generateProcedureRuntimeOutput } from '@/ai/flows/procedure-runtime';
 import { logToDebugFile } from '@/lib/debug-file';
 import { resolveCanonicalWhatsappChatIdByIdentity } from '@/lib/whatsapp/contact-identity';
@@ -42,8 +51,7 @@ import {
     withTimeout,
     type OrchestratorRunHandle,
 } from '@/services/orchestrator/runtime';
-import { analyzeMediaForAutopilot } from '@/ai/flows/analyze-media';
-import { createPrivateObjectDownloadUrl } from '@/lib/storage/private-s3';
+import { buildMediaAnalysisContext } from './media-analysis-context';
 import {
     buildMcpCustomerResponseFromToolResults,
     buildRouterRebootActionFromSgpResults,
@@ -78,8 +86,10 @@ import {
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import {
     isConversationCloseRequest,
+    hasConversationCloseClaim,
     isPotentialConversationCloseRequest,
 } from '@/services/autopilot/close-intent';
+import { compactKnowledgeDocumentsForPrompt } from '@/services/autopilot/knowledge-prompt-budget';
 import { planAutopilotTools } from '@/services/autopilot/tool-planner';
 import { buildToolPrearmContent, deriveToolPrearmSignal, type ToolPrearmSignal } from '@/services/autopilot/tool-prearm';
 import { validateAutopilotResponse } from '@/services/autopilot/response-validator';
@@ -136,8 +146,10 @@ import { runAutopilotWorkflowRuntimeV2Shadow } from '@/services/workflow-runtime
 import { runAutopilotWorkflowRuntimeV2Primary } from '@/services/workflow-runtime/autopilot-primary';
 import {
     canonicalWorkflowFieldName,
+    hasKnownWorkflowField,
     isValidWorkflowGoalCompletionEvidence,
 } from '@/services/workflow-runtime/goal-completion';
+import { extractCollectionFieldsWithAi } from '@/ai/flows/collection-field-extractor';
 import {
     completeProcedureToolReuse,
     planProcedureToolReuse,
@@ -203,6 +215,10 @@ import {
 } from '@/services/autopilot/collection-completion';
 import { persistAutopilotContactFacts } from '@/services/autopilot/contact-facts';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
+import { buildStudioDecisionLedgerEntry } from '@/services/agent-studio/decision-record';
+import { closingClassifierEligible, evaluateStudioCloseGate, type StudioCloseGateResult } from '@/services/agent-studio/close-gate';
+import { guardStudioPromises } from '@/services/agent-studio/promise-guard';
+import { studioAutomation } from '@/services/agent-studio/automation';
 import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
 import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
 import {
@@ -217,13 +233,14 @@ import {
     shouldBypassKnowledgeForOperationalTurn,
     shouldPrioritizeAutopilotTurnPlan,
 } from '@/services/autopilot/turn-plan';
+import { listPublishedProcedureGraphs } from '@/services/procedures/repository';
 
-function compileRuntimeProcedures(input: {
+async function compileRuntimeProcedures(input: {
     config: AutopilotConfig;
     documents: KnowledgeBaseDocument[];
     tools: AgentToolCatalogItem[];
     enabledToolNames: string[];
-}): ProcedureGraph[] {
+}): Promise<ProcedureGraph[]> {
     const documentProcedures = compileAllProcedures({
         documents: input.documents,
         tools: input.tools,
@@ -235,9 +252,17 @@ function compileRuntimeProcedures(input: {
         name: `Fluxo visual: ${input.config.name}`,
     });
 
-    return flowProcedure.success && flowProcedure.graph
-        ? [...documentProcedures, flowProcedure.graph]
-        : documentProcedures;
+    const studioProcedures = await listPublishedProcedureGraphs({
+        workspaceId: input.config.workspace_id,
+        configId: input.config.id,
+    }).catch((error) => {
+        console.error('[PROCEDURE_STUDIO] Failed to load published procedures:', error);
+        return [];
+    });
+    const combined = flowProcedure.success && flowProcedure.graph
+        ? [...studioProcedures, ...documentProcedures, flowProcedure.graph]
+        : [...studioProcedures, ...documentProcedures];
+    return Array.from(new Map(combined.map((procedure) => [procedure.id, procedure])).values());
 }
 
 async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames: string[]): Promise<AgentToolCatalogItem[]> {
@@ -287,6 +312,23 @@ async function listRuntimeAgentToolCatalog(workspaceId: string, enabledToolNames
         });
 
     return [...listAgentToolCatalogItems(), ...mcpCatalogItems];
+}
+
+async function recordGeneratedAgentTaskPlan(input: {
+    run: OrchestratorRunHandle;
+    taskPlan: Record<string, unknown> | null | undefined;
+    source: 'initial_response' | 'tool_continuation' | 'tool_final_response';
+}) {
+    if (!input.taskPlan) return;
+    await recordOrchestratorEvent({
+        run: input.run,
+        kind: 'agent_task_plan',
+        status: 'success',
+        payload: {
+            ...input.taskPlan,
+            source: input.source,
+        },
+    });
 }
 
 function resolveEnabledToolNames(config: AutopilotConfig) {
@@ -344,7 +386,8 @@ async function loadContactCustomFieldsForAutopilot(input: {
                 ccfv.value,
                 cfd.label
              FROM contact_custom_field_values ccfv
-             LEFT JOIN custom_field_definitions cfd
+             JOIN contacts scoped_contact ON scoped_contact.id = ccfv.contact_id AND scoped_contact.workspace_id = $1
+             JOIN custom_field_definitions cfd
                ON cfd.id = ccfv.field_id
               AND cfd.workspace_id = $1
              WHERE ccfv.contact_id = $2`,
@@ -435,7 +478,15 @@ function buildEnabledAgentToolsDescription(
         return 'Nenhuma ferramenta operacional esta habilitada. Nao solicite actions.';
     }
 
-    return enabledTools
+    const hasRouterTools = enabledTools.some((t) => {
+        const lower = t.name.toLowerCase();
+        return lower.includes('router') || lower.includes('wifi') || lower.includes('get_tool_manual') || lower.includes('configure_wifi') || lower.includes('reboot_router') || lower.includes('get_operation_status');
+    }) || enabledToolNames.some((name) => {
+        const lower = name.toLowerCase();
+        return lower.includes('router') || lower.includes('wifi') || lower.includes('get_tool_manual') || lower.includes('configure_wifi') || lower.includes('reboot_router') || lower.includes('get_operation_status');
+    });
+
+    const description = enabledTools
         .map((tool) => {
             const schema = tool.inputSchema
                 ? ` Entrada JSON: ${JSON.stringify(toolInputSchemaForPrompt(tool.inputSchema))}`
@@ -446,97 +497,42 @@ function buildEnabledAgentToolsDescription(
             return `- ${tool.name}: ${tool.description}${schema}${instructions}`;
         })
         .join('\n');
-}
 
-const MAX_AI_ANALYSIS_CHARS = 1000;
-const MAX_PROMPT_DOCUMENT_CHARS = 1200;
-const MAX_PROMPT_DOCUMENT_TOTAL_CHARS = 4500;
-
-function compactAiAnalysis(value: string): string {
-    const normalized = value.replace(/\s+/g, ' ').trim();
-    if (normalized.length <= MAX_AI_ANALYSIS_CHARS) return normalized;
-    return `${normalized.slice(0, MAX_AI_ANALYSIS_CHARS - 1).trim()}…`;
-}
-
-function resolvePromptDocumentLimit(document: KnowledgeBaseDocument): number {
-    return typeof document.maxPromptChars === 'number' && Number.isFinite(document.maxPromptChars) && document.maxPromptChars > 0
-        ? Math.floor(document.maxPromptChars)
-        : MAX_PROMPT_DOCUMENT_CHARS;
-}
-
-function resolvePromptDocumentsTotalLimit(documents: KnowledgeBaseDocument[]): number {
-    const configuredExtra = (documents || []).reduce((total, document) => {
-        const limit = resolvePromptDocumentLimit(document);
-        return total + Math.max(0, limit - MAX_PROMPT_DOCUMENT_CHARS);
-    }, 0);
-    return MAX_PROMPT_DOCUMENT_TOTAL_CHARS + configuredExtra;
-}
-
-function compactKnowledgeDocumentsForPrompt(documents: KnowledgeBaseDocument[]): KnowledgeBaseDocument[] {
-    let totalChars = 0;
-    const compacted: KnowledgeBaseDocument[] = [];
-    const totalLimit = resolvePromptDocumentsTotalLimit(documents);
-
-    for (const document of documents || []) {
-        const rawContent = String(document.content || '')
-            .replace(/\r\n?/g, '\n')
-            .split('\n')
-            .map((line) => line.replace(/[ \t]+/g, ' ').trim())
-            .join('\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-        if (!rawContent) continue;
-
-        const remaining = totalLimit - totalChars;
-        if (remaining <= 0) break;
-
-        const configuredDocumentLimit = resolvePromptDocumentLimit(document);
-        const maxForDocument = Math.min(configuredDocumentLimit, remaining);
-        const content = rawContent.length > maxForDocument
-            ? `${rawContent.slice(0, Math.max(0, maxForDocument - 1)).trim()}…`
-            : rawContent;
-
-        compacted.push({
-            ...document,
-            content,
-        });
-        totalChars += content.length;
+    if (!hasRouterTools) {
+        return description;
     }
 
-    return compacted;
+    const routerDirectives = [
+        '',
+        'DIRETRIZES OPERACIONAIS OBRIGATÓRIAS PARA ROTEADORES (ACS / TR-069):',
+        '1. Consulta Obrigatória a /como-usar: Antes de executar qualquer ação técnica em roteadores ou em caso de dúvida sobre parâmetros, consulte o manual da ferramenta via `get_tool_manual` ou siga as instruções oficiais de /como-usar.',
+        '2. Zero Plaintext Secrets: NUNCA revele senhas de Wi-Fi ou credenciais em texto claro no chat. Confirme alterações com o usuário antes de aplicá-las.',
+        '3. Diagnóstico Prévio Obrigatório: SEMPRE consulte os detalhes atuais do roteador via `get_router_details` antes de alterar o Wi-Fi (`configure_wifi`) ou reiniciar (`reboot_router`).',
+        '4. Configuração Atômica de Wi-Fi: Atualize as redes 2.4GHz e 5GHz de forma unificada e consistente (evitando reboots múltiplos).',
+        '5. Justificativa Explícita para Reboot: A ferramenta `reboot_router` exige estritamente `confirm: true` e uma justificativa técnica detalhada (`reason`). Nunca reinicie o roteador sem consentimento explícito do cliente.',
+        '6. Polling de Operação Assíncrona: Se a operação retornar `operation_id` ou status pendente/em andamento via TR-069, consulte periodicamente o status com `get_operation_status`.'
+    ].join('\n');
+
+    return `${description}\n${routerDirectives}`;
 }
 
-function cleanKnowledgeCatalogContent(content: string): string {
-    let normalized = content
-        .replace(/\r\n?/g, '\n')
-        .split('\n')
-        .map((line) => line.replace(/[ \t]+$/g, '').trimStart())
-        .join('\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
 
-    const firstCatalogLine = normalized.search(/(?:[\p{Extended_Pictographic}]|\*)\s*\*?.{0,80}(?:PLANOS?|PROMO|CONHE[ÇC]A|INTERNET|FIBRA)/iu);
-    if (firstCatalogLine > 0) {
-        normalized = normalized.slice(firstCatalogLine).trim();
-    }
-
-    return normalized;
+/** Kill switch for the AI field extractor; collection falls back to the deterministic parser. */
+function isAiFieldExtractionEnabled(): boolean {
+    const raw = String(process.env.AUTOPILOT_AI_FIELD_EXTRACTION || '').trim().toLowerCase();
+    return !['0', 'off', 'false', 'disabled'].includes(raw);
 }
 
-function resolveAnalysisKind(type: Message['type']): MessageMetadata['analysisKind'] {
-    if (type === 'audio') return 'transcription';
-    if (type === 'image') return 'visual_summary';
-    if (type === 'video') return 'video_summary';
-    return 'media_summary';
-}
+
+
+
 
 async function broadcastAiProcessing(chatId: string, event: 'ai_processing_start' | 'ai_processing_stop', payload: Record<string, unknown> = {}) {
     try {
-        const { getSupabaseAdmin } = await import('@/lib/supabase');
-        const supabase = getSupabaseAdmin();
-        await supabase.channel(`chat:${chatId}`).httpSend(event, {
-                chatId,
-                ...payload,
+        const { broadcastRealtimeEvent } = await import('@/lib/realtime/broadcast');
+        await broadcastRealtimeEvent(`chat:${chatId}`, event, {
+            chatId,
+            ...payload,
         });
     } catch (error) {
         console.error(`[AUTOPILOT_SERVICE] Failed to broadcast ${event}:`, error);
@@ -586,44 +582,6 @@ async function loadTurnToolTraces(input: {
     }
 }
 
-async function insertAiAnalysisMessage(input: {
-    workspaceId: string;
-    chatId: string;
-    systemAgentId: string;
-    content: string;
-    sourceMessageId: string;
-    sourceType: Message['type'];
-    analysisKind: NonNullable<MessageMetadata['analysisKind']>;
-}) {
-    await db.query(
-        `INSERT INTO messages (
-            workspace_id,
-            chat_id,
-            type,
-            content,
-            from_me,
-            api_message_status,
-            metadata,
-            is_read,
-            sender_system_agent_id,
-            created_at
-         ) VALUES ($1, $2, 'text', $3, true, 'internal', $4, true, $5, clock_timestamp())`,
-        [
-            input.workspaceId,
-            input.chatId,
-            input.content,
-            JSON.stringify({
-                isAiAnalysis: true,
-                analysisKind: input.analysisKind,
-                sourceMessageId: input.sourceMessageId,
-                sourceType: input.sourceType,
-                sentBy: 'system_agent',
-                tool: 'ai_media_analysis',
-            } satisfies MessageMetadata),
-            input.systemAgentId,
-        ]
-    );
-}
 
 function describeAgentToolAction(action: AgentToolAction): string {
     if (action.type === 'sgp_fetch_contact_panel_data') return 'Consultar dados do cliente no SGP';
@@ -714,9 +672,8 @@ async function insertAgentToolStatusMessage(input: {
 
         // Broadcast tool status in real-time so the operator panel updates instantly
         try {
-            const { getSupabaseAdmin } = await import('@/lib/supabase');
-            const supabase = getSupabaseAdmin();
-            await supabase.channel(`chat:${input.chatId}`).httpSend('agent_tool_status', {
+            const { broadcastRealtimeEvent } = await import('@/lib/realtime/broadcast');
+            await broadcastRealtimeEvent(`chat:${input.chatId}`, 'agent_tool_status', {
                     chatId: input.chatId,
                     toolName: input.toolName,
                     status: input.status,
@@ -734,81 +691,6 @@ async function insertAgentToolStatusMessage(input: {
     }
 }
 
-async function buildMediaAnalysisContext(input: {
-    workspaceId: string;
-    chatId: string;
-    messageId?: string | null;
-    systemAgentId: string;
-    model?: string | null;
-}): Promise<string> {
-    if (!input.messageId) return '';
-
-    const { rows } = await db.query(
-        `SELECT id, type, content, metadata, media_url
-         FROM messages
-         WHERE id = $1
-           AND chat_id = $2
-         LIMIT 1`,
-        [input.messageId, input.chatId]
-    );
-    const message = rows[0];
-    if (!message) return '';
-
-    const type = message.type as Message['type'];
-    if (!['audio', 'image', 'video'].includes(type)) return '';
-
-    let metadata: MessageMetadata = {};
-    try {
-        metadata = typeof message.metadata === 'string'
-            ? JSON.parse(message.metadata)
-            : message.metadata || {};
-    } catch {
-        metadata = {};
-    }
-
-    let mediaUrl = metadata.mediaUrl || message.media_url;
-    if (metadata.storageKey) {
-        try {
-            mediaUrl = await createPrivateObjectDownloadUrl(metadata.storageKey);
-        } catch (error) {
-            console.error('[AUTOPILOT_MEDIA_ANALYSIS] Failed to sign private media:', error);
-        }
-    }
-    if (!mediaUrl) {
-        return `[Midia recebida: ${type}. Nao foi possivel localizar URL publica para analise automatica.]`;
-    }
-
-    try {
-        const result = await analyzeMediaForAutopilot({
-            workspaceId: input.workspaceId,
-            mediaUrl,
-            mediaType: type as 'audio' | 'image' | 'video',
-            mimetype: metadata.mimetype,
-            caption: message.content,
-            model: input.model,
-        });
-        const compact = compactAiAnalysis(result.analysis);
-        const label = type === 'audio'
-            ? 'Audio do cliente'
-            : type === 'image'
-                ? 'Imagem do cliente'
-                : 'Video do cliente';
-        const content = `${label}: ${compact}`;
-        await insertAiAnalysisMessage({
-            workspaceId: input.workspaceId,
-            chatId: input.chatId,
-            systemAgentId: input.systemAgentId,
-            content,
-            sourceMessageId: message.id,
-            sourceType: type,
-            analysisKind: resolveAnalysisKind(type) as NonNullable<MessageMetadata['analysisKind']>,
-        });
-        return `[Analise automatica de ${type}] ${compact}`;
-    } catch (error) {
-        console.error('[AUTOPILOT_MEDIA_ANALYSIS] Failed:', error);
-        return `[Midia recebida: ${type}. A analise automatica falhou; se necessario, peca ao cliente para descrever o conteudo.]`;
-    }
-}
 
 async function runRequestedAgentTools(input: {
     workspaceId: string;
@@ -847,6 +729,7 @@ async function runRequestedAgentTools(input: {
             systemAgentName: input.systemAgentName,
             autopilotConfig: input.autopilotConfig,
             turnPolicy: input.turnPolicy,
+            slotExtraction: input.slotExtraction ?? null,
             customerMessage: input.customerMessage,
             confirmedActionFingerprint: input.confirmedActionFingerprint ?? null,
             orchestratorRunId: input.orchestratorRunId ?? null,
@@ -1010,10 +893,12 @@ export async function processAutopilotForChat(
     chat: Chat,
     lastMessageContent: string,
     instanceName: string,
-    sourceMessageId?: string | null
+    sourceMessageId?: string | null,
+    suggestionRequest?: { agentId: string }
 ) {
-    const resolvedChatId =
-        (await resolveCanonicalWhatsappChatIdByIdentity(db, {
+    const resolvedChatId = chat.status === 'encerrados'
+        ? chat.id
+        : (await resolveCanonicalWhatsappChatIdByIdentity(db, {
             workspaceId,
             phoneOrJid: chat.contact?.phone_number_jid,
             currentChatId: chat.id,
@@ -1045,7 +930,7 @@ export async function processAutopilotForChat(
     }
 
     try {
-    if (await hasCompletedAutopilotSourceMessage({
+    if (!suggestionRequest && await hasCompletedAutopilotSourceMessage({
         workspaceId,
         chatId: chat.id,
         sourceMessageId,
@@ -1057,12 +942,12 @@ export async function processAutopilotForChat(
     }
 
     console.log(`[AUTOPILOT_SERVICE] Verificando autopilot para chat ${chat.id}`);
-    await broadcastAiProcessing(chat.id, 'ai_processing_start');
 
     try {
     const chatConfigRes = await db.query(
         `SELECT
             c.workspace_id,
+            c.status,
             c.copilot_mode,
             c.is_autopilot_active,
             c.assigned_system_agent_id,
@@ -1089,6 +974,11 @@ export async function processAutopilotForChat(
         console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} nao encontrado no workspace ${workspaceId}. Ignorando.`);
         return;
     }
+    if (chatConfig.status === 'encerrados') {
+        console.log(`[AUTOPILOT_SERVICE] Chat ${chat.id} esta encerrado. Ignorando processamento pendente.`);
+        return;
+    }
+    await broadcastAiProcessing(chat.id, 'ai_processing_start');
     const rawIsActive = chatConfig?.is_autopilot_active ?? chat.is_autopilot_active;
     const currentIsActive = rawIsActive === true;
     let assignedSystemAgentId = chatConfig?.assigned_system_agent_id || null;
@@ -1100,6 +990,9 @@ export async function processAutopilotForChat(
     //  - "copilot": a human still owns the chat and turned the AI on from the inbox. Same
     //    reasoning, knowledge and tools, but the reply is proposed to the operator instead
     //    of being delivered, so the human keeps the conversation.
+    if (suggestionRequest && (chatConfig?.copilot_mode !== 'suggest'
+        || assignedSystemAgentId || chatConfig?.autopilot_config_id !== suggestionRequest.agentId)) return;
+
     const isAttendantRuntime = Boolean(assignedSystemAgentId)
         && chatConfig?.assigned_system_agent_type === 'intelligent_attendant'
         && chatConfig?.assigned_system_agent_active !== false
@@ -1168,7 +1061,7 @@ export async function processAutopilotForChat(
     );
     logToDebugFile(`[processAutopilotForChat] ChatId=${chat.id}, CopilotMode=${currentCopilotMode}, IsActive=${currentIsActive} (Raw: ${rawIsActive})`);
 
-    const { config: autopilotConfig, rules: autopilotRules, agents: autopilotAgents } =
+    const { config: autopilotConfig, rules: autopilotRules } =
         await getAutopilotConfigService(workspaceId, effectiveAutopilotConfigId || undefined);
 
     if (!autopilotConfig || !autopilotConfig.is_active) {
@@ -1208,6 +1101,7 @@ export async function processAutopilotForChat(
             source: 'autopilot-service',
             instanceName,
             copilotMode: currentCopilotMode,
+            domainPackId: autopilotConfig.agent_domain_pack_id || null,
         },
     });
     const orchestratorTimings: Record<string, number> = {};
@@ -1242,6 +1136,7 @@ export async function processAutopilotForChat(
         blocks?: string[] | null;
         stage?: CopilotSuggestionStage;
         insights?: Partial<CopilotSuggestionInsights>;
+        assertCurrent?: () => Promise<void>;
     }) => {
         const incoming = (input.blocks && input.blocks.length > 0 ? input.blocks : [input.response])
             .map((block) => (typeof block === 'string' ? block.trim() : ''))
@@ -1253,7 +1148,7 @@ export async function processAutopilotForChat(
         }
         if (turnSuggestionBlocks.length === 0) return;
 
-        const toolsUsed = await loadTurnToolTraces({
+        const toolsUsed = input.stage === 'studio_copilot' ? [] : await loadTurnToolTraces({
             chatId: chat.id,
             since: turnStartedAt,
         });
@@ -1266,6 +1161,7 @@ export async function processAutopilotForChat(
             sourceMessageId: sourceMessageId ?? null,
             orchestratorRunId: orchestratorRun.id,
             stage: input.stage || copilotTrace.stage,
+            assertCurrent: input.assertCurrent,
             suggestion: turnSuggestionBlocks.join('\n\n'),
             messageBlocks: turnSuggestionBlocks,
             insights: {
@@ -1291,7 +1187,7 @@ export async function processAutopilotForChat(
 
         const result = await sendMultiBlockResponseRaw(...args);
         if (result.success) {
-            scheduleAutopilotInactivityClose({
+            await scheduleAutopilotInactivityClose({
                 workspaceId,
                 chatId: chat.id,
                 autopilotConfigId: autopilotConfig.id,
@@ -1349,10 +1245,56 @@ export async function processAutopilotForChat(
         systemAgentId: assignedSystemAgentId,
         model: resolvedAiModel.model,
     });
+
+    let audioTranscriptionText = '';
+    if (sourceMessageId) {
+        const sourceMsgRes = await db.query(
+            `SELECT type, transcription FROM messages WHERE id = $1 AND workspace_id = $2 LIMIT 1`,
+            [sourceMessageId, workspaceId]
+        );
+        const sourceRow = sourceMsgRes.rows[0];
+        if (sourceRow?.type === 'audio' && sourceRow?.transcription) {
+            audioTranscriptionText = sourceRow.transcription.trim();
+        }
+    }
+    if (!audioTranscriptionText && mediaAnalysisContext) {
+        const audioMatch = mediaAnalysisContext.match(/^\[(?:Analise automatica de audio|Áudio do cliente|Audio do cliente)\]\s*([\s\S]+)$/i);
+        if (audioMatch?.[1]?.trim()) {
+            audioTranscriptionText = audioMatch[1].trim();
+        }
+    }
+
+    const effectiveCustomerMessage = (lastMessageContent || '').trim()
+        ? (audioTranscriptionText ? `${(lastMessageContent || '').trim()}\n\n[Transcrição do áudio]: ${audioTranscriptionText}` : (lastMessageContent || '').trim())
+        : (audioTranscriptionText || (mediaAnalysisContext ? mediaAnalysisContext.replace(/^\[(?:Analise automatica de [^\]]+)\]\s*/i, '').trim() : '') || '');
+
     const enrichedLastMessageContent = [
-        lastMessageContent || '',
-        mediaAnalysisContext,
+        effectiveCustomerMessage || lastMessageContent || '',
+        mediaAnalysisContext && !effectiveCustomerMessage.includes(mediaAnalysisContext) ? mediaAnalysisContext : '',
     ].filter((part) => part.trim().length > 0).join('\n\n');
+    // Human assistance has its own reasoning path and never opens or advances an autonomous Studio session.
+    if (isSuggestionOnlyRuntime) {
+        try {
+            const release = await loadStudioRelease(workspaceId, autopilotConfig.id);
+            if (release) {
+                if (!sourceMessageId) throw new Error('O copiloto exige uma mensagem identificada.');
+                const context = await loadStudioCopilotContext({ workspaceId, agentId: autopilotConfig.id, chatId: chat.id, messageId: sourceMessageId });
+                const result = await runStudioCopilot({ release, workspaceId, agentId: autopilotConfig.id, chatId: chat.id,
+                    message: effectiveCustomerMessage || lastMessageContent, mediaAnalysisContext, ...context });
+                await context.assertCurrent();
+                await publishSuggestion({ response: result.response, blocks: result.messageBlocks, stage: 'studio_copilot',
+                    insights: { ...result.insights, contextMessageId: context.history.at(-1)?.messageId }, assertCurrent: context.assertCurrent });
+                await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,
+                    intent: result.insights.intent || 'agent_studio', metadata: { studioReleaseId: release.releaseId,
+                        studioVersion: release.version, studioDecisionMode: 'copilot_advisory', suggestionOnly: true } });
+                return;
+            }
+        } catch (error) {
+            await finishOrchestratorRun({ run: orchestratorRun, status: 'error', timings: orchestratorTimings,
+                intent: 'agent_studio', metadata: { studioDecisionMode: 'copilot_advisory', suggestionOnly: true } });
+            throw error;
+        }
+    }
     let focusedOperationalContext = [
         focusedContractContext,
         enrichedLastMessageContent,
@@ -1373,6 +1315,215 @@ export async function processAutopilotForChat(
         },
     };
     const availableTeams = await loadToolRouterTeams(workspaceId);
+
+    // Studio publications own their entire journey. They never pass through the legacy canvas planner.
+    const studioSelection = await selectStudioConversationRelease({ workspaceId, agentId: autopilotConfig.id, chatId: chat.id, sourceMessageId });
+    if (studioSelection.release) {
+        const pinnedRelease = studioSelection.release;
+        let studioExecutionStage: 'runtime' | 'delivery' | 'recording' = 'runtime';
+        let studioResultStatus: string | undefined;
+        try {
+            if (!sourceMessageId) throw new Error('O Estúdio exige uma mensagem identificada para executar com segurança.');
+            const store = studioSelection.store;
+            const allowedNative = ['transfer_chat', 'sgp_fetch_contracts', 'sgp_fetch_contact_panel_data', ...pinnedRelease.publishedProcedures.flatMap((procedure) => procedure.steps)
+                .filter((step) => step.type === 'native_action')
+                .map((step) => step.nativeActionType === 'update_crm_field' ? 'crm_update_contact_custom_fields' : step.nativeActionType || '')];
+            const studioPolicy: AutopilotTurnPolicy = { activeNodeId: null, toolMode: 'on_demand', globallyEnabledToolNames: allowedNative,
+                attachedToolNames: allowedNative, allowedToolNames: allowedNative, toolInstructionsByName: {},
+                allowedKnowledgeDocumentIds: (pinnedRelease.knowledgeSnapshot || []).map((document) => String(document.id)), reason: 'studio_release' };
+            const studioTurnStartedAt = Date.now();
+            const result = await runStudioConversation({
+                release: pinnedRelease, state: store.state,
+                config: autopilotConfig, chatId: chat.id, messageId: sourceMessageId, message: effectiveCustomerMessage || lastMessageContent,
+                mediaAnalysisContext,
+                contact: sanitizedContact, chatHistory: chatHistoryForAI, suggestionOnly: isSuggestionOnlyRuntime,
+                checkpoint: isSuggestionOnlyRuntime ? async () => {} : store.checkpoint,
+                sendCatalogImage: async (image, operationId) => {
+                    if (isSuggestionOnlyRuntime) throw new Error('Mídia não é enviada no modo de sugestão.');
+                    await validateRemoteUrl(image.url);
+                    await assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId });
+                    const result = await sendAutomatedMediaAction(chat.id, image.caption, [{ base64: image.url, mimetype: image.mimeType, filename: `produto.${image.mimeType === 'image/png' ? 'png' : image.mimeType === 'image/webp' ? 'webp' : 'jpg'}`, mediatype: 'image' }], assignedSystemAgentId, instanceName,
+                        { sourceMessageId: sourceMessageId || undefined, studioOperationId: operationId,
+                          studioPresentedProduct: { productId: image.productId, caption: image.caption } });
+                    if (!result.success) throw new Error(result.error || 'Não foi possível confirmar o envio da imagem.');
+                },
+                assertCurrent: () => assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId }),
+                runNative: async (action, operation) => {
+                    if (isSuggestionOnlyRuntime) throw new Error('Ações reais não são permitidas no modo de sugestão.');
+                    let handoffBriefing = '';
+                    if (action.type === 'transfer_chat') {
+                        const team = availableTeams.find((item) => item.id === action.payload?.teamId || item.name === action.payload?.teamName);
+                        if (!team) throw new Error('Equipe de destino indisponível neste workspace.');
+                        // The briefing travels with the action but must not change what is being authorised.
+                        handoffBriefing = (action.payload?.briefing || '').trim().slice(0, 2000);
+                        action.payload = { teamId: team.id, teamName: team.name };
+                    }
+                    const fingerprint = fingerprintToolAction(action);
+                    if (action.type === 'close_chat' && operation.confirmed) {
+                        const goodbye = pinnedRelease.agentSnapshot.concludeStage.successClosingMessage;
+                        if (goodbye) {
+                            const delivery = await sendMultiBlockResponse(chat.id, goodbye, assignedSystemAgentId, true, instanceName, null, { ...responseTrace, deliveryKey: `studio-close:${operation.id}` }, { preserveFormatting: true });
+                            if (!delivery.success) throw new Error('A despedida não pôde ser entregue; o atendimento não foi encerrado.');
+                        }
+                    }
+                    // A handoff carries an internal note so the person taking over does not ask the customer again.
+                    // The note runs first and never decides the outcome: only the action itself can fail the step.
+                    const withNote = (names: string[]) => Array.from(new Set([...names, 'add_internal_note']));
+                    const runPolicy: AutopilotTurnPolicy = handoffBriefing ? { ...studioPolicy, globallyEnabledToolNames: withNote(studioPolicy.globallyEnabledToolNames),
+                        attachedToolNames: withNote(studioPolicy.attachedToolNames), allowedToolNames: withNote(studioPolicy.allowedToolNames) } : studioPolicy;
+                    const results = await runRequestedAgentToolsWithStatus({
+                        workspaceId, chat, contact: sanitizedContact, systemAgentId: assignedSystemAgentId,
+                        systemAgentName: assignedSystemAgentName, autopilotConfig: { ...autopilotConfig, enabled_tool_names: handoffBriefing ? runPolicy.allowedToolNames : allowedNative },
+                        turnPolicy: runPolicy, customerMessage: effectiveCustomerMessage || lastMessageContent, sourceMessageId,
+                        orchestratorRunId: orchestratorRun.id,
+                        actions: handoffBriefing ? [{ type: 'add_internal_note' as const, reason: 'Resumo da IA para continuidade humana.', payload: { content: handoffBriefing } }, action] : [action],
+                        confirmedActionFingerprint: operation.confirmed ? fingerprint : null,
+                        closeAuthorization: action.type === 'close_chat' && operation.confirmed ? {
+                            source: 'procedure_goal_completed', chatId: chat.id, orchestratorRunId: orchestratorRun.id,
+                            procedureExecutionId: operation.id, actionFingerprint: fingerprint,
+                        } : null,
+                    });
+                    const actionResult = results[results.length - 1];
+                    if (results.length !== (handoffBriefing ? 2 : 1) || actionResult?.status !== 'success') throw new Error(actionResult?.error || 'A ação não foi concluída.');
+                    if (action.type === 'transfer_chat' && action.payload?.teamName) return { message: `Vou encaminhar seu atendimento para a equipe ${action.payload.teamName} continuar com você.` };
+                },
+            });
+            studioResultStatus = result.state.status;
+            studioExecutionStage = 'delivery';
+            const studioSessionResolved = result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime;
+            // What this company chose for this agent in the Studio (versioned with the published release).
+            const studioAutomationSettings = studioAutomation(pinnedRelease.agentSnapshot);
+            const studioExplicitClose = studioSessionResolved && studioAutomationSettings.closeOnCustomerConfirmation;
+            // The close decision comes before the reply is sent, so the promise guard knows whether "vou encerrar" is true.
+            let studioCloseGate: StudioCloseGateResult | null = null;
+            let studioCloseClassifierUsed = false;
+            if (studioExplicitClose) {
+                const customerText = effectiveCustomerMessage || lastMessageContent || '';
+                studioCloseGate = evaluateStudioCloseGate({ state: result.state, customerMessage: customerText });
+                // The phrase list alone refuses many real goodbyes. A model second opinion may only supply the missing
+                // confirmation: when anything else blocks the close, it is not even asked.
+                if (!studioCloseGate.close && studioCloseGate.blockedBy.length === 1 && studioCloseGate.blockedBy[0] === 'no_customer_confirmation'
+                    && closingClassifierEligible(customerText)) {
+                    studioCloseClassifierUsed = true;
+                    // Replays and early returns of the runtime carry no classifier: the chat then simply stays open.
+                    const classifyClosing = (result as { classifyClosing?: (message: string) => Promise<boolean> }).classifyClosing;
+                    if (classifyClosing && await classifyClosing(customerText)) {
+                        studioCloseGate = evaluateStudioCloseGate({ state: result.state, customerMessage: customerText, confirmedByClassifier: true });
+                    }
+                }
+            }
+            // Promise guard (3.4): the reply may not claim a transfer, close or action the system did not perform.
+            // Default mode only observes and records; `enforce` removes the unsupported sentence before sending.
+            const promiseMode = studioAutomationSettings.promiseGuard;
+            let studioPromiseGuard: { mode: string; kinds: string[]; rewritten: boolean } | null = null;
+            let studioReply = result.response;
+            if (promiseMode !== 'off' && result.response && !isSuggestionOnlyRuntime) {
+                // Legacy journeys keep no operation log: their actions are not judged, only transfer and close.
+                const turnOperations = (result.state.reasoning?.operations || []).filter((operation) =>
+                    operation.status === 'succeeded' && operation.capabilityId !== '_handoff' && Date.parse(operation.at) >= studioTurnStartedAt - 1000);
+                const judged = Boolean(result.state.reasoning);
+                const guarded = guardStudioPromises({ response: result.response, facts: {
+                    transferred: result.state.status === 'transferred',
+                    closing: studioCloseGate ? studioCloseGate.close : studioSessionResolved,
+                    successfulWrites: judged ? turnOperations.filter((operation) => operation.readOnly === false).length : 1,
+                    successfulOperations: judged ? turnOperations.length : 1 } });
+                studioPromiseGuard = { mode: promiseMode, kinds: guarded.violations.map((violation) => violation.kind), rewritten: promiseMode === 'enforce' && guarded.changed };
+                if (studioPromiseGuard.rewritten) studioReply = guarded.response;
+            }
+            if (studioReply) {
+                await assertAutopilotSourceMessageCurrent({ chatId: chat.id, sourceMessageId });
+                const delivery = await sendMultiBlockResponse(chat.id, studioReply, assignedSystemAgentId, true, instanceName, null,
+                    { ...responseTrace, deliveryKey: `studio:${result.state.id}:${sourceMessageId}` }, { preserveFormatting: true });
+                if (!delivery.success) throw new Error('A resposta do Estúdio não pôde ser entregue.');
+            }
+            // null = no close was attempted; true/false = the UPDATE below changed a row or not. The ledger records this
+            // so "the session resolved" is never mistaken for "the chat was closed".
+            let studioChatClosed: boolean | null = null;
+            let studioCloseDecision: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[]; classifier?: boolean } | null = null;
+            if (studioExplicitClose && studioCloseGate) {
+                // Explicit close (docs/PLAN-ia-autonoma-transferir-encerrar.md, 3.1): resolving the requests is only a
+                // proposal. The chat closes when the gate agrees, through the same audited tool path as any close.
+                const gate = studioCloseGate;
+                studioCloseDecision = { mode: 'explicit', basis: gate.basis ?? null, blockedBy: gate.blockedBy, classifier: studioCloseClassifierUsed };
+                if (gate.close) {
+                    studioChatClosed = false;
+                    try {
+                        const closeAction = { type: 'close_chat' as const, reason: 'Cliente confirmou o encerramento.',
+                            payload: { sendCloseMessage: false, notes: 'Encerrado pelo Estúdio com confirmação do cliente.' } };
+                        const closeFingerprint = fingerprintToolAction(closeAction);
+                        const withClose = (names: string[]) => Array.from(new Set([...names, 'close_chat']));
+                        const closePolicy: AutopilotTurnPolicy = { ...studioPolicy, globallyEnabledToolNames: withClose(studioPolicy.globallyEnabledToolNames),
+                            attachedToolNames: withClose(studioPolicy.attachedToolNames), allowedToolNames: withClose(studioPolicy.allowedToolNames) };
+                        const closeResults = await runRequestedAgentToolsWithStatus({
+                            workspaceId, chat, contact: sanitizedContact, systemAgentId: assignedSystemAgentId,
+                            systemAgentName: assignedSystemAgentName, autopilotConfig: { ...autopilotConfig, enabled_tool_names: closePolicy.allowedToolNames },
+                            turnPolicy: closePolicy, customerMessage: effectiveCustomerMessage || lastMessageContent || '', sourceMessageId,
+                            orchestratorRunId: orchestratorRun.id, actions: [closeAction], confirmedActionFingerprint: closeFingerprint,
+                            closeAuthorization: { source: 'procedure_goal_completed', chatId: chat.id, orchestratorRunId: orchestratorRun.id,
+                                procedureExecutionId: `studio-close:${result.state.id}`, actionFingerprint: closeFingerprint },
+                        });
+                        const closeResult = closeResults.find((item) => item.toolName === 'close_chat');
+                        studioChatClosed = closeResult?.status === 'success';
+                        // The reply is already delivered: a failed close must not fail the run, only be visible.
+                        if (!studioChatClosed) console.error('[STUDIO_EXPLICIT_CLOSE] O encerramento não foi concluído:', closeResult?.error);
+                    } catch (closeError) {
+                        console.error('[STUDIO_EXPLICIT_CLOSE] Falha ao encerrar o atendimento:', closeError);
+                    }
+                }
+            } else if (studioSessionResolved) {
+                studioCloseDecision = { mode: 'legacy' };
+                studioChatClosed = false;
+                try {
+                    const closedChat = await db.query(
+                        `UPDATE chats
+                         SET status = 'encerrados',
+                             closed_at = clock_timestamp(),
+                             close_notes = COALESCE(close_notes, $1),
+                             closed_by_system_agent_id = COALESCE(closed_by_system_agent_id, $2),
+                             last_action_at = clock_timestamp(),
+                             updated_at = clock_timestamp()
+                         WHERE id = $3 AND workspace_id = $4 AND status != 'encerrados'`,
+                        [
+                            pinnedRelease.agentSnapshot.concludeStage.successClosingMessage || 'Atendimento concluído pelo Estúdio.',
+                            assignedSystemAgentId,
+                            chat.id,
+                            workspaceId,
+                        ],
+                    );
+                    studioChatClosed = (closedChat.rowCount ?? 0) > 0;
+                } catch (closeError) {
+                    console.error('[STUDIO_AUTO_CLOSE_CHAT] Falha ao atualizar status do chat para encerrados:', closeError);
+                }
+            }
+            studioExecutionStage = 'recording';
+            // Phase 0 (docs/PLAN-ia-autonoma-transferir-encerrar.md): one auditable decision per turn.
+            // Replays are skipped so a redelivered message never counts twice; the recorder never throws.
+            if (!result.replay) {
+                await recordAgentDecisionLedger(buildStudioDecisionLedgerEntry({
+                    workspaceId, chatId: chat.id, messageId: sourceMessageId, runId: orchestratorRun.id,
+                    systemAgentId: assignedSystemAgentId, autopilotConfigId: autopilotConfig.id,
+                    releaseId: pinnedRelease.releaseId, releaseVersion: pinnedRelease.version, state: result.state,
+                    decisionMode: pinnedRelease.agentSnapshot.resolveStage.conversationMode === 'adaptive'
+                        && pinnedRelease.agentSnapshot.resolveStage.reasoning?.enabled ? 'model_reasoning' : 'published_journey',
+                    suggestionOnly: isSuggestionOnlyRuntime, replay: result.replay, chatClosed: studioChatClosed,
+                    closeDecision: studioCloseDecision, promiseGuard: studioPromiseGuard,
+                }));
+            }
+            await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,
+                intent: 'agent_studio',
+                metadata: { studioReleaseId: pinnedRelease.releaseId, studioVersion: pinnedRelease.version,
+                    studioDecisionMode: pinnedRelease.agentSnapshot.resolveStage.conversationMode === 'adaptive'
+                        && pinnedRelease.agentSnapshot.resolveStage.reasoning?.enabled ? 'model_reasoning' : 'published_journey',
+                    studioStatus: result.state.status, suggestionOnly: isSuggestionOnlyRuntime, replay: result.replay } });
+        } catch (error) {
+            await finishOrchestratorRun({ run: orchestratorRun, status: 'error', timings: orchestratorTimings,
+                intent: 'agent_studio', metadata: { studioReleaseId: pinnedRelease.releaseId,
+                    studioStatus: studioResultStatus || 'failed', studioFailureStage: studioExecutionStage } });
+            // Do not fall back to a second runtime or replay side effects after an uncertain result.
+            throw error;
+        }
+        return;
+    }
 
     const contactIdForMemory = sanitizedContact.id
         || (chat as { contact_id?: string | null }).contact_id
@@ -1415,6 +1566,10 @@ export async function processAutopilotForChat(
             currentSlotExtraction.invalidSlots,
         ),
     };
+    for (const [field, value] of Object.entries(structuredKnownFields)) {
+        if (canonicalWorkflowFieldName(field) === 'invoice_or_payment_id'
+            && !/^[a-z0-9-]*\d[a-z0-9-]*$/i.test(String(value))) delete structuredKnownFields[field];
+    }
     const focusedConversationFields: Record<string, string> = focusedContractId
         ? { contract_id: focusedContractId }
         : {};
@@ -1489,6 +1644,58 @@ export async function processAutopilotForChat(
         })
         : {};
     Object.assign(structuredKnownFields, pendingCollectionReplyFields);
+
+    // The deterministic parser above only accepts "label: value", a single-field
+    // answer, or a lone remaining field. A plain "Joao Silva, 11 99999-8888,
+    // joao@x.com" loses every value and the agent re-asks. Read whatever it left
+    // behind with the model; each value still goes through the same validators.
+    const aiExtractedCollectionFields: Record<string, string> = {};
+    const fieldsMissingAfterDeterministic = activeCollectionCheckpoint
+        ? activeCollectionCheckpoint.pendingFields.filter(
+            (field) => !hasKnownWorkflowField(field, structuredKnownFields),
+        )
+        : [];
+    if (isAiFieldExtractionEnabled() && fieldsMissingAfterDeterministic.length > 0) {
+        try {
+            const extractionStage = await timeOrchestratorStage(
+                orchestratorRun,
+                'collection_field_extractor_ai',
+                () => extractCollectionFieldsWithAi({
+                    customerMessage: enrichedLastMessageContent || '',
+                    pendingFields: fieldsMissingAfterDeterministic,
+                    previousQuestion: previousCollectionQuestion,
+                    chatHistory: chatHistoryForAI,
+                    workspaceId,
+                }),
+                { pendingFields: fieldsMissingAfterDeterministic },
+            );
+            Object.assign(aiExtractedCollectionFields, extractionStage.value);
+            Object.assign(structuredKnownFields, extractionStage.value);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'collection_field_extractor_ai',
+                status: 'success',
+                payload: {
+                    requestedFields: fieldsMissingAfterDeterministic,
+                    extractedFields: Object.keys(extractionStage.value),
+                },
+            });
+        } catch (error) {
+            // Collection must survive an extractor outage: the deterministic
+            // fields already applied and the agent re-asks the rest.
+            console.warn('[AI_FIELD_EXTRACTOR] Stage failed, keeping deterministic fields only:', error);
+            await recordOrchestratorEvent({
+                run: orchestratorRun,
+                kind: 'collection_field_extractor_ai',
+                status: 'fallback',
+                payload: {
+                    requestedFields: fieldsMissingAfterDeterministic,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+        }
+    }
+
     const messageSlotDetails = currentSlotExtraction.details.filter((detail) => detail.source === 'message');
     const messageSlotsToPersist = Object.fromEntries(
         messageSlotDetails.map((detail) => [detail.name, detail.value]),
@@ -1498,6 +1705,7 @@ export async function processAutopilotForChat(
         ...focusedConversationFields,
         ...recoveredCollectionHistoryFields,
         ...pendingCollectionReplyFields,
+        ...aiExtractedCollectionFields,
     });
     let conversationFieldsPersisted = true;
     if (Object.keys(discoveredConversationFields).length > 0) {
@@ -1767,6 +1975,12 @@ export async function processAutopilotForChat(
         }
         : compiledTurnPolicy;
     enabledToolNames = turnPolicy.allowedToolNames;
+    const agentRuntimeContext = buildUniversalAgentRuntimeContext({
+        domainPack: orchestratorRun.domainPack,
+        task: orchestratorRun.taskExecution,
+        fallbackAgentName: assignedSystemAgentName,
+        enabledToolNames,
+    });
     const flowCompletionPlan = resolveFlowCompletionPlan(autopilotConfig, turnPolicy.activeNodeId);
     const allowedDocumentIds = resolveAllowedKnowledgeDocumentIds({
         config: autopilotConfig,
@@ -1969,6 +2183,7 @@ export async function processAutopilotForChat(
                 maxAgeDays: verificationReceiptTtlDays,
             })
             : [];
+        const responseTimeZone = await getWorkspaceTimezone(workspaceId);
         let collectionCloseSucceeded = false;
         const nativeStage = await timeOrchestratorStage(
             orchestratorRun,
@@ -1981,6 +2196,7 @@ export async function processAutopilotForChat(
                 staticDocuments: staticKnowledgeDocuments,
                 dependencies: {
                     database: db,
+                    responseTimeZone,
                     toolContext: {
                         workspaceId,
                         chat,
@@ -2046,7 +2262,7 @@ export async function processAutopilotForChat(
                         },
                         policy: 'Use os campos conhecidos; nunca solicite novamente um campo ja preenchido. Revalide apenas resultados operacionais que possam ter mudado.',
                     },
-                    sendResponse: async (message, nodeInput) => {
+                    sendResponse: async (message, nodeInput, preparation) => {
                         await assertAutopilotSourceMessageCurrent({
                             chatId: chat.id,
                             sourceMessageId,
@@ -2170,15 +2386,18 @@ export async function processAutopilotForChat(
                                 }
                             }
                         }
-                        const formatted = formatCustomerFacingAiResponse(messageToSend);
+                        const preservedPreparation = messageToSend === message ? preparation : undefined;
+                        const formatted = preservedPreparation?.preserveFormatting
+                            ? messageToSend : formatCustomerFacingAiResponse(messageToSend);
                         const delivery = await sendMultiBlockResponse(
                             chat.id,
                             formatted,
                             assignedSystemAgentId,
                             true,
                             instanceName,
-                            null,
+                            preservedPreparation?.blocks || null,
                             { ...responseTrace, deliveryKey: `workflow:${nodeInput.node.id}` },
+                            { preserveFormatting: preservedPreparation?.preserveFormatting },
                         );
                         if (delivery.success && collectionRoute?.kind === 'needs_input') {
                             const checkpoint = buildCollectionCompletionCheckpoint({
@@ -2279,9 +2498,11 @@ export async function processAutopilotForChat(
                         const transferOutput = result.output && typeof result.output === 'object'
                             ? result.output as Record<string, unknown>
                             : {};
-                        let customerMessageSent = transferOutput.fallbackExecuted === true;
-                        if (!customerMessageSent && customerHandoffMessage) {
-                            const formattedCustomerMessage = formatCustomerFacingAiResponse(customerHandoffMessage);
+                        let customerMessageSent = transferOutput.fallbackExecuted === true && transferOutput.notificationDelivered === true;
+                        if (!customerMessageSent && (customerHandoffMessage || transferOutput.fallbackExecuted === true)) {
+                            const formattedCustomerMessage = formatCustomerFacingAiResponse(transferOutput.fallbackExecuted === true
+                                ? 'Seu atendimento foi colocado na fila para acompanhamento pela equipe.'
+                                : customerHandoffMessage);
                             const delivery = await sendMultiBlockResponse(
                                 chat.id,
                                 formattedCustomerMessage,
@@ -2309,7 +2530,8 @@ export async function processAutopilotForChat(
                             });
                         }
                         return {
-                            transferred: true,
+                            transferred: transferOutput.transferred === true,
+                            queued: transferOutput.fallbackExecuted === true,
                             customerMessage: customerHandoffMessage,
                             customerMessageSent,
                             output: result.output || null,
@@ -2981,6 +3203,7 @@ export async function processAutopilotForChat(
                     error: retrieval.error ?? null,
                     retrieved: retrieval.retrieved,
                     selected: retrieval.selected,
+                    provenance: retrieval.provenance,
                     internalKnowledgeSources: retrieval.diagnostics?.internalKnowledgeSources || [],
                     correctiveRetrieval: retrieval.diagnostics?.correctiveRetrieval || null,
                     discarded: retrieval.discarded.slice(0, 8),
@@ -3559,8 +3782,8 @@ export async function processAutopilotForChat(
         `flowSubAgent=${activeFlowIntentScope?.title || 'main_agent'}`,
         intentResolution.intent === 'troubleshooting' && turnPlan.customerNeed === 'none'
             ? [
-                'troubleshootingOpeningPolicy=acolha o relato e faca primeiro uma pergunta tecnica discriminante sobre alcance do problema, dispositivos, luzes do equipamento ou tipo de conexao.',
-                'Nao solicite CPF/CNPJ no primeiro relato generico e nao prometa consultar cadastro, status ou sistema sem uma action executavel no mesmo turno.',
+                'troubleshootingOpeningPolicy=acolha o relato e faca primeiro uma pergunta discriminante baseada no contexto ativo: alcance, sintoma observado, ultimo estado conhecido, momento de inicio ou tentativa ja realizada.',
+                'Nao solicite identificadores sensiveis no primeiro relato generico e nao prometa consultar cadastro, status ou sistema sem uma action executavel no mesmo turno.',
             ].join('\n')
             : '',
         flowReferencesForPrompt,
@@ -3682,7 +3905,7 @@ export async function processAutopilotForChat(
     }
 
     // Pre-load active procedure and compiled procedures early to be used by tool memory and lookup bypasses.
-    const compiledProcedures = compileRuntimeProcedures({
+    const compiledProcedures = await compileRuntimeProcedures({
         config: autopilotConfig,
         documents: scopedStaticKnowledgeDocuments,
         tools: runtimeToolCatalog,
@@ -3824,6 +4047,10 @@ export async function processAutopilotForChat(
                 },
             });
             return;
+        }
+
+        if (responseValidator.actions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+            finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
         }
 
         const sendStage = await timeOrchestratorStage(
@@ -4036,6 +4263,10 @@ export async function processAutopilotForChat(
         const validatedWorkflowActions = responseValidator.actions.length > 0
             ? mergeAgentActions(responseValidator.actions, workflowPlan.actions)
             : workflowPlan.actions;
+
+        if (validatedWorkflowActions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+            finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
+        }
 
         if (workflowPrearmSignal) {
         await insertAgentToolStatusMessage({
@@ -4890,6 +5121,10 @@ export async function processAutopilotForChat(
             finalResponse = formatCustomerFacingAiResponse(responseValidator.response);
         }
 
+        if (responseValidator.actions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+            finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
+        }
+
         const sendStage = await timeOrchestratorStage(
             orchestratorRun,
             'message_send',
@@ -4941,7 +5176,7 @@ export async function processAutopilotForChat(
             });
         }
 
-        const workflowHadToolFailure = toolResults.some((result) => result.status !== 'success');
+        const workflowHadToolFailure = toolResults.some((result) => result.status !== 'success' || result.output?.disposition === 'queued');
 
         await logIntelligentAttendantResponse({
             configId: autopilotConfig.id,
@@ -5163,6 +5398,7 @@ export async function processAutopilotForChat(
                     strategy: retrieval.strategy,
                     knowledgeCoverage: retrieval.knowledgeCoverage,
                     selected: retrieval.selected,
+                    provenance: retrieval.provenance,
                     chunkCount: chunks.length,
                 },
             });
@@ -5180,12 +5416,6 @@ export async function processAutopilotForChat(
 
         if (activePEC) {
             // Resume the active procedure
-            const compiledProcedures = compileRuntimeProcedures({
-                config: autopilotConfig,
-                documents: scopedStaticKnowledgeDocuments,
-                tools: runtimeToolCatalog,
-                enabledToolNames,
-            });
             const graph = compiledProcedures.find((g) => g.id === activePEC.procedureId);
             if (graph) {
                 procedureRuntimeSource = 'active';
@@ -5206,13 +5436,6 @@ export async function processAutopilotForChat(
 
         if (!procedureResult) {
             // 2. Try to match a new procedure
-            const compiledProcedures = compileRuntimeProcedures({
-                config: autopilotConfig,
-                documents: scopedStaticKnowledgeDocuments,
-                tools: runtimeToolCatalog,
-                enabledToolNames,
-            });
-
             if (compiledProcedures.length > 0) {
                 const match = matchProcedure({
                     intent: intentResolution.intent,
@@ -5682,6 +5905,7 @@ export async function processAutopilotForChat(
                 : buildEnabledAgentToolsDescription(enabledToolNames, runtimeToolCatalog, turnPolicy.toolInstructionsByName),
             enabledAgentToolNames: isConversationalLlmTurn ? [] : enabledToolNames,
             knowledgeToolProcedures: isConversationalLlmTurn ? '' : knowledgeToolProcedures,
+            agentRuntimeContext,
             intentContext: isConversationalLlmTurn
                 ? `intent=${intentResolution.intent}; responda somente ao turno atual`
                 : intentContextForAI,
@@ -5700,6 +5924,11 @@ export async function processAutopilotForChat(
         );
         orchestratorTimings.llm_ms = llmStage.durationMs;
         const result = llmStage.value;
+        await recordGeneratedAgentTaskPlan({
+            run: orchestratorRun,
+            taskPlan: result?.taskPlan || null,
+            source: 'initial_response',
+        });
 
         if (result?.response) {
             let finalResponse = result.response;
@@ -6119,6 +6348,7 @@ export async function processAutopilotForChat(
                                     enabledAgentToolNames: enabledToolNames,
                                     allowNativeLmStudioToolCalls: false,
                                     knowledgeToolProcedures,
+                                    agentRuntimeContext,
                                     intentContext: intentContextForAI,
                                 }), orchestratorRun.budget.maxLlmMs, 'llm tool continuation'),
                                 {
@@ -6130,6 +6360,11 @@ export async function processAutopilotForChat(
                             orchestratorTimings.llm_tool_continuation_ms = continuationStage.durationMs;
 
                             const continuation = continuationStage.value;
+                            await recordGeneratedAgentTaskPlan({
+                                run: orchestratorRun,
+                                taskPlan: continuation?.taskPlan || null,
+                                source: 'tool_continuation',
+                            });
                             const continuationActions = filterAlreadyExecutedActions(
                                 normalizeAgentActions(continuation?.actions),
                                 toolResults
@@ -6240,6 +6475,7 @@ export async function processAutopilotForChat(
                                     enabledAgentToolNames: enabledToolNames,
                                     allowNativeLmStudioToolCalls: false,
                                     knowledgeToolProcedures,
+                                    agentRuntimeContext,
                                     intentContext: intentContextForAI,
                                 }), orchestratorRun.budget.maxLlmMs, 'llm tool final response'),
                                 {
@@ -6252,6 +6488,11 @@ export async function processAutopilotForChat(
                                 }
                             );
                             orchestratorTimings.llm_tool_final_response_ms = finalResponseStage.durationMs;
+                            await recordGeneratedAgentTaskPlan({
+                                run: orchestratorRun,
+                                taskPlan: finalResponseStage.value?.taskPlan || null,
+                                source: 'tool_final_response',
+                            });
                             if (finalResponseStage.value?.response) {
                                 postToolAiResponse = finalResponseStage.value.response;
                             }
@@ -6291,7 +6532,11 @@ export async function processAutopilotForChat(
                     availableTeams,
                     contact: sanitizedContact,
                     knowledgeCoverage,
-                    knowledgeDocuments: promptKnowledgeDocuments,
+                    // Grounding evidence is the full retrieved set, not the
+                    // prompt-truncated slice: a fact cut for budget is still a
+                    // fact backed by the knowledge base, and flagging it as
+                    // unsupported replaces a correct answer with the fallback.
+                    knowledgeDocuments: factKnowledgeDocuments,
                     source: 'llm',
                     systemAgentName: assignedSystemAgentName,
                 });
@@ -6312,6 +6557,11 @@ export async function processAutopilotForChat(
                 const finalPostResponseActions = responseValidator.actions.length > 0
                     ? mergeAgentActions(responseValidator.actions, postResponseActions)
                     : postResponseActions;
+
+                if (finalPostResponseActions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+                    finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
+                    aiMessageBlocks = null;
+                }
 
                 console.log(`[AUTOPILOT_SERVICE] Enviando resposta: ${finalResponse}`);
                 const agentId = assignedSystemAgentId;
@@ -6382,7 +6632,7 @@ export async function processAutopilotForChat(
                 });
                 await finishOrchestratorRun({
                     run: orchestratorRun,
-                    status: 'success',
+                    status: toolResults.some((toolResult) => toolResult.status !== 'success' || toolResult.output?.disposition === 'queued') ? 'fallback' : 'success',
                     timings: orchestratorTimings,
                     intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : intentResolution.intent,
                     confidenceLevel: deterministicRouting.matchedReason ? 'deterministic' : 'plausible',

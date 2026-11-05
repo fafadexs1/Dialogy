@@ -8,13 +8,62 @@ if (!connectionString) {
   throw new Error('A variável de ambiente DATABASE_URL não está definida.');
 }
 
+// Este módulo é carregado por processos distintos (app e workers), cada um com
+// o seu próprio pool. O default do `pg` é 10 por processo e não cabe no orçamento
+// compartilhado do Postgres — daí o valor vir do ambiente, orçado por serviço
+// no docker-compose.
+function resolvePoolMax(): number {
+  const parsed = Number.parseInt(process.env.DB_POOL_MAX ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+}
+
 // A nova implementação cria um único pool de conexões que é exportado.
 // Isso é mais seguro e mais compatível com o ambiente Vercel/Next.js.
 export const db = new Pool({
   connectionString,
+  max: resolvePoolMax(),
+  // Sem isto o default é esperar para sempre: sob saturação as requisições
+  // ficam penduradas em vez de falhar, e o sintoma vira "o sistema travou"
+  // sem nada nos logs.
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
 });
 
-// A lógica de pooling global foi removida por ser a causa provável de instabilidade
-// no ambiente serverless.
+// Um erro em cliente ocioso emite 'error' no pool. Sem listener, o Node derruba
+// o processo inteiro — uma queda de rede momentânea com o banco tiraria o app do ar.
+db.on('error', (error) => {
+  console.error('[DB_POOL] Erro em cliente ocioso:', error);
+});
 
-    
+export type PoolStats = {
+  /** Conexões abertas no momento. */
+  total: number;
+  /** Abertas e livres. */
+  idle: number;
+  /** Em uso. */
+  inUse: number;
+  /** Requisições esperando por conexão — acima de zero significa pool saturado. */
+  waiting: number;
+  max: number;
+  /** Fração do pool em uso, 0 a 1. */
+  utilization: number;
+};
+
+/**
+ * Estado do pool. `waiting` é a métrica que importa sob carga: enquanto for
+ * zero, o pool não é o gargalo, por mais alta que esteja a latência.
+ */
+export function getPoolStats(): PoolStats {
+  const max = resolvePoolMax();
+  const total = db.totalCount;
+  const idle = db.idleCount;
+
+  return {
+    total,
+    idle,
+    inUse: total - idle,
+    waiting: db.waitingCount,
+    max,
+    utilization: max > 0 ? Number(((total - idle) / max).toFixed(3)) : 0,
+  };
+}

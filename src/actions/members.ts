@@ -125,10 +125,20 @@ export async function updateMemberRoleAction(
     }
 
     try {
-        await db.query(
-            'UPDATE user_workspace_roles SET role_id = $1 WHERE user_id = $2 AND workspace_id = $3',
+        const updateResult = await db.query(
+            `UPDATE user_workspace_roles uwr
+                SET role_id = r.id
+               FROM roles r
+              WHERE r.id = $1
+                AND r.workspace_id = $3
+                AND uwr.user_id = $2
+                AND uwr.workspace_id = $3
+              RETURNING uwr.user_id`,
             [newRoleId, memberId, workspaceId]
         );
+        if ((updateResult.rowCount ?? 0) === 0) {
+            return { success: false, error: "Função ou membro não encontrado neste workspace." };
+        }
         revalidatePath('/team/members');
         return { success: true };
     } catch (error) {

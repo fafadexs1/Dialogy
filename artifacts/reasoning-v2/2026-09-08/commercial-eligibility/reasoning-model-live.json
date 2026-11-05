@@ -1,0 +1,137 @@
+{
+  "at": "2026-09-08T19:43:21.271Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [
+    {
+      "scenario": "commercial-eligibility",
+      "response": "Esta oferta não está disponível para este contrato.",
+      "ms": 7575,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "offer-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar elegibilidade antes de responder se a oferta está disponível.",
+            "status": "resolved",
+            "memoryRequestId": "synthetic-eligibility-session:offer-1",
+            "values": {},
+            "integrationValues": {
+              "eligible": false
+            },
+            "choiceLabels": {},
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-eligibility-session:48c7aa51b38f50fac2061f487b6ad3c34ef89074e2b18fb832ae8ff1b20905fb:read-0",
+            "requestId": "offer-1",
+            "memoryRequestId": "synthetic-eligibility-session:offer-1",
+            "capabilityId": "offer:eligibility",
+            "signature": "48c7aa51b38f50fac2061f487b6ad3c34ef89074e2b18fb832ae8ff1b20905fb",
+            "status": "succeeded",
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-08T19:43:17.295Z"
+          }
+        ],
+        "pendingAction": null
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "offer-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar elegibilidade antes de responder se a oferta está disponível.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "offer-1",
+          "capabilityId": "offer:eligibility",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Cliente solicita verificar se a oferta está disponível para ele. Vou executar a consulta de elegibilidade para obter o resultado antes de responder."
+        }
+      },
+      "ms": 3564
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-eligibility-session:48c7aa51b38f50fac2061f487b6ad3c34ef89074e2b18fb832ae8ff1b20905fb:read-0",
+            "requestId": "offer-1",
+            "memoryRequestId": "synthetic-eligibility-session:offer-1",
+            "capabilityId": "offer:eligibility",
+            "signature": "48c7aa51b38f50fac2061f487b6ad3c34ef89074e2b18fb832ae8ff1b20905fb",
+            "status": "succeeded",
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-08T19:43:17.295Z"
+          }
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "offer-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar elegibilidade antes de responder se a oferta está disponível.",
+            "status": "resolved"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "offer-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Esta oferta não está disponível para este contrato.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "A consulta de elegibilidade retornou eligible=false. Vou responder ao cliente com o texto publicado correspondente ao resultado."
+        }
+      },
+      "ms": 3970
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2541,
+      "outputTokens": 435,
+      "totalTokens": 2976,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 3944,
+      "outputTokens": 503,
+      "totalTokens": 4447,
+      "ruleName": "decision"
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+import { markWorkflowSensitivePaths } from './sensitive-data';
+import { effectiveWorkflowLimits } from './runtime-limits';
 import { randomUUID } from 'node:crypto';
 import { getWorkflowNodeManifest } from './catalog';
 import { WorkflowEventBus } from './events';
@@ -13,7 +15,6 @@ import {
 import type {
   ConnectionType,
   NodeExecutionResult,
-  NodeHandler,
   NodeHandlerRegistry,
   WorkflowDefinition,
   WorkflowEvent,
@@ -29,9 +30,12 @@ import {
   isRecord,
   mergeStatePatch,
   normalizeRuntimeError,
+  readPath,
+  statePatchAtPath,
   withTimeout,
 } from './utils';
 import { validateWorkflowDefinition } from './validator';
+import { matchWorkflowOptionByHeuristics } from './option-matching';
 
 export class InvalidWorkflowDefinitionError extends Error {
   readonly code = 'INVALID_WORKFLOW_DEFINITION';
@@ -53,6 +57,18 @@ export type WorkflowExecutorOptions = {
   defaultNodeTimeoutMs?: number;
   lockLeaseMs?: number;
   validateBeforeRun?: boolean;
+  classifyInteractionOption?: (input: {
+    workflow: WorkflowDefinition;
+    execution: WorkflowExecution;
+    node: WorkflowNode;
+    message: string;
+    options: Array<{ id: string; value: string; label: string }>;
+  }) => Promise<{
+    optionId: string | null;
+    confidence?: number;
+    model?: string;
+    modelCalls?: number;
+  }>;
 };
 
 const TERMINAL_EXECUTION_STATUSES = new Set([
@@ -71,12 +87,14 @@ const ATTACHMENT_CONNECTION_TYPES = new Set<ConnectionType>([
 ]);
 
 const MODEL_CONSUMING_NODE_TYPES = new Set([
+  'media.analyze',
   'data.extract',
   'logic.ai_router',
   'memory.history_summarizer',
 ]);
 
 const TOOL_CONSUMING_NODE_TYPES = new Set([
+  'audio.elevenlabs', 'audio.transcribe', 'integration.connector',
   'ai.agent',
   'ai.supervisor',
   'ai.plan_executor',
@@ -98,15 +116,18 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-function findTrigger(workflow: WorkflowDefinition): WorkflowNode {
-  const trigger = workflow.nodes.find((node) => node.type.startsWith('trigger.'));
+function findTrigger(workflow: WorkflowDefinition, triggerNodeId?: string): WorkflowNode {
+  const trigger = triggerNodeId
+    ? workflow.nodes.find((node) => node.id === triggerNodeId && node.type.startsWith('trigger.'))
+    : workflow.nodes.find((node) => node.type.startsWith('trigger.'));
+  if (triggerNodeId && !trigger) throw new Error(`Workflow trigger ${triggerNodeId} not found.`);
   if (!trigger) throw new Error('Workflow trigger not found.');
   return trigger;
 }
 
 function createExecution(input: WorkflowStartInput): WorkflowExecution {
   const timestamp = now();
-  const trigger = findTrigger(input.workflow);
+  const trigger = findTrigger(input.workflow, input.triggerNodeId);
   return WorkflowExecutionSchema.parse({
     executionId: input.executionId || createId('exec'),
     workflowId: input.workflow.id,
@@ -231,7 +252,11 @@ function selectedConnections(
   node: WorkflowNode,
   result: NodeExecutionResult,
 ): string[] {
+  if (result.status === 'error' && node.config.customErrorRoute !== true) return [];
   if (result.nextNodeId) {
+    if (node.type === 'logic.goto' && workflow.nodes.some((candidate) => candidate.id === result.nextNodeId)) {
+      return [result.nextNodeId];
+    }
     const connected = workflow.connections.some((connection) => (
       connection.sourceNodeId === node.id
       && connection.targetNodeId === result.nextNodeId
@@ -276,6 +301,58 @@ function selectedConnections(
     : [];
 }
 
+function resumeValue(input: Record<string, unknown>): unknown {
+  return input.value
+    ?? input.text
+    ?? input.message
+    ?? input.answer
+    ?? input.rating
+    ?? input.file
+    ?? input;
+}
+
+function validateInteractionValue(node: WorkflowNode, value: unknown): string | null {
+  if (node.type === 'interaction.file') {
+    if (!isRecord(value) || typeof value.url !== 'string' || !value.url.trim()) return 'Nenhum arquivo válido foi recebido.';
+    const maximumBytes = Math.max(1, Number(node.config.maxFileSizeMb || 10)) * 1024 * 1024;
+    if (Number(value.size || 0) > maximumBytes) return 'O arquivo excede o tamanho permitido.';
+    const accept = String(node.config.accept || '*/*').trim();
+    const mimeType = String(value.mimeType || value.type || '').trim();
+    if (accept && accept !== '*/*' && mimeType) {
+      const accepted = accept.split(',').map((item) => item.trim()).filter(Boolean).some((pattern) => (
+        pattern.endsWith('/*') ? mimeType.startsWith(pattern.slice(0, -1)) : pattern === mimeType
+      ));
+      if (!accepted) return 'O tipo do arquivo não é permitido.';
+    }
+    return null;
+  }
+  const text = String(value ?? '').trim();
+  if (!text) return 'A resposta está vazia.';
+  if (node.type === 'interaction.rating') {
+    const rating = Number(text);
+    if (!Number.isFinite(rating) || rating < Number(node.config.minimum || 1) || rating > Number(node.config.maximum || 5)) {
+      return 'A avaliação está fora do intervalo permitido.';
+    }
+    return null;
+  }
+  const validation = node.type === 'interaction.date' ? 'date' : String(node.config.validation || 'none');
+  const digits = text.replace(/\D/g, '');
+  if (validation === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return 'O e-mail informado é inválido.';
+  if (validation === 'cpf' && digits.length !== 11) return 'O CPF informado é inválido.';
+  if (validation === 'cnpj' && digits.length !== 14) return 'O CNPJ informado é inválido.';
+  if (validation === 'phone' && (digits.length < 10 || digits.length > 15)) return 'O telefone informado é inválido.';
+  if (validation === 'number' && !Number.isFinite(Number(text.replace(',', '.')))) return 'O valor informado não é um número.';
+  if (validation === 'date' && !/^\d{4}-\d{2}-\d{2}$|^\d{2}\/\d{2}\/\d{4}$/.test(text)) return 'A data informada é inválida.';
+  if (validation === 'custom_regex') {
+    try {
+      if (!new RegExp(String(node.config.customRegex || '')).test(text)) return 'A resposta não corresponde ao formato esperado.';
+    } catch {
+      return 'A expressão regular configurada é inválida.';
+    }
+  }
+  return null;
+}
+
 function retryDelay(
   attempt: number,
   retryPolicy: NonNullable<WorkflowNode['retryPolicy']>,
@@ -288,11 +365,42 @@ function retryDelay(
   );
 }
 
+function continueAfterConfiguredError(node: WorkflowNode, result: NodeExecutionResult): NodeExecutionResult {
+  if (result.status !== 'error' || node.config.continueOnError !== true) return result;
+  const error = result.error || {
+    code: 'NODE_EXECUTION_FAILED',
+    message: 'A etapa falhou sem detalhes adicionais.',
+    retryable: false,
+  };
+  const errorValue = { error: error.message, code: error.code };
+  const outputKey = String(node.config.outputKey || '').trim();
+  const statePatch = outputKey
+    ? mergeStatePatch(result.statePatch || {}, statePatchAtPath(outputKey, errorValue))
+    : result.statePatch;
+  const selectedOutput = String(node.config.continueOutput || '').trim()
+    || node.outputPorts.find((port) => port.connectionType === 'main')?.id
+    || 'success';
+  return {
+    ...result,
+    status: 'route',
+    selectedOutput,
+    output: {
+      ...(result.output || {}),
+      continuedAfterError: true,
+      error: errorValue,
+    },
+    statePatch,
+    error,
+  };
+}
+
 export class WorkflowExecutor {
   readonly events: WorkflowEventBus;
   private readonly defaultNodeTimeoutMs: number;
   private readonly lockLeaseMs: number;
   private readonly validateBeforeRun: boolean;
+  private readonly classifyInteractionOption?: WorkflowExecutorOptions['classifyInteractionOption'];
+  private readonly timeWaitTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly persistence: WorkflowPersistence,
@@ -303,6 +411,7 @@ export class WorkflowExecutor {
     this.defaultNodeTimeoutMs = options.defaultNodeTimeoutMs || 30_000;
     this.lockLeaseMs = options.lockLeaseMs || 150_000;
     this.validateBeforeRun = options.validateBeforeRun ?? true;
+    this.classifyInteractionOption = options.classifyInteractionOption;
   }
 
   async start(input: WorkflowStartInput, options: WorkflowRunOptions = {}): Promise<WorkflowExecution> {
@@ -312,7 +421,7 @@ export class WorkflowExecutor {
       if (!validation.valid) throw new InvalidWorkflowDefinitionError(validation);
     }
     await this.persistence.saveWorkflowDefinition(workflow);
-    const execution = await this.persistence.createExecution(createExecution({ ...input, workflow }));
+    const execution = await this.persistence.createExecution(createExecution({ ...input, workflow, context: { ...input.context, ...(options.limits ? { __workflowRuntimeCaps: effectiveWorkflowLimits(workflow.settings, options.limits) } : {}) } }));
     await this.events.initializeExecution(execution.executionId);
     await this.emit(execution, {
       type: 'execution.started',
@@ -337,19 +446,46 @@ export class WorkflowExecutor {
     );
     if (!workflow) throw new Error(`Workflow ${execution.workflowId}@${execution.workflowVersion} not found.`);
 
-    const leaseMs = Math.max(this.lockLeaseMs, workflow.settings.executionTimeoutMs + 30_000);
+    const managed = execution.context.automationManaged === true;
+    const leaseMs = managed ? this.lockLeaseMs : Math.max(this.lockLeaseMs, workflow.settings.executionTimeoutMs + 30_000);
     const locked = await this.persistence.acquireExecutionLock(executionId, workerId, leaseMs);
     if (!locked) throw new WorkflowExecutionLockError(executionId);
     execution = locked;
+    let leaseLost = false, renewing = false;
+    const heartbeat = managed ? setInterval(() => {
+      if (renewing) return;
+      renewing = true;
+      void this.persistence.renewExecutionLock(executionId, workerId, leaseMs).then(renewed => {
+        if (!renewed) leaseLost = true;
+        else if (execution) execution.lockExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+      }).catch(() => { /* The next lock check or optimistic write fences a lost lease. */ }).finally(() => { renewing = false; });
+    }, Math.max(1000, Math.min(30000, Math.floor(leaseMs / 3)))) : null;
+    heartbeat?.unref?.();
 
     try {
+      if (execution.status === 'waiting') {
+        const expiresAt = this.waitExpiration(execution);
+        if (expiresAt == null || expiresAt > Date.now()) {
+          this.scheduleTimeWaitExpiration(execution);
+          return execution;
+        }
+        execution = await this.routeWaitingExecution(
+          execution,
+          workflow,
+          'expired',
+          { resumeToken: execution.resumeToken || '', input: {} },
+        );
+      }
       if (execution.status === 'queued') {
         execution.status = 'running';
         execution.updatedAt = now();
         execution = await this.persistence.saveExecution(execution, execution.version);
       }
       while (execution.status === 'running') {
-        await this.persistence.renewExecutionLock(executionId, workerId, leaseMs);
+        if (leaseLost) throw new WorkflowExecutionLockError(executionId);
+        const renewed = await this.persistence.renewExecutionLock(executionId, workerId, leaseMs);
+        if (!renewed) throw new WorkflowExecutionLockError(executionId);
+        if (managed) execution.lockExpiresAt = new Date(Date.now() + leaseMs).toISOString();
         if (options.signal?.aborted) {
           execution = await this.markCancelled(execution, 'Execution aborted by caller.');
           break;
@@ -380,56 +516,321 @@ export class WorkflowExecutor {
           execution = await this.persistence.saveExecution(execution, execution.version);
           continue;
         }
-        execution = await this.executeStep(workflow, execution, node, options.signal);
+        try {
+          execution = await this.executeStep(workflow, execution, node, options.signal);
+        } catch (stepError) {
+          const normalized = normalizeRuntimeError(stepError, 'STEP_EXECUTION_UNHANDLED');
+          execution = await this.failExecution(execution, normalized.code, normalized.message);
+          break;
+        }
       }
       return execution;
     } finally {
+      if (heartbeat) clearInterval(heartbeat);
       await this.persistence.releaseExecutionLock(executionId, workerId);
     }
   }
 
-  async resume(input: WorkflowResumeInput): Promise<WorkflowExecution> {
-    const waiting = await this.persistence.getExecutionByResumeToken(input.resumeToken);
-    if (!waiting) throw new Error('Waiting execution not found for the supplied resume token.');
-    const workerId = input.workerId || `worker_${randomUUID()}`;
-    const locked = await this.persistence.acquireExecutionLock(waiting.executionId, workerId, this.lockLeaseMs);
-    if (!locked) throw new WorkflowExecutionLockError(waiting.executionId);
-    try {
-      const workflow = await this.persistence.getWorkflowDefinition(locked.workflowId, locked.workflowVersion);
-      if (!workflow) throw new Error(`Workflow ${locked.workflowId}@${locked.workflowVersion} not found.`);
-      const waitingNode = locked.currentNodeId ? nodeById(workflow, locked.currentNodeId) : null;
-      if (!waitingNode) throw new Error('Waiting node not found.');
-      const waitingResult = locked.nodeResults[waitingNode.id];
-      const nextNodeIds = waitingResult
-        ? selectedConnections(workflow, waitingNode, {
-            ...waitingResult,
-            status: 'route',
-            selectedOutput: waitingResult.selectedOutput || 'resumed',
-          })
-        : [];
-      if (nextNodeIds.length === 0) {
-        throw new Error(`Waiting node ${waitingNode.id} has no resume route.`);
-      }
-      locked.status = 'running';
+  private waitExpiration(execution: WorkflowExecution): number | null {
+    if (execution.status !== 'waiting' || !execution.currentNodeId) {
+      return null;
+    }
+    const output = execution.nodeResults[execution.currentNodeId]?.output;
+    if (execution.waitingReason !== 'time' && output?.expireWait !== true) return null;
+    if (!isRecord(output) || typeof output.expiresAt !== 'string') return null;
+    const expiresAt = new Date(output.expiresAt).getTime();
+    return Number.isFinite(expiresAt) ? expiresAt : null;
+  }
+
+  private scheduleTimeWaitExpiration(execution: WorkflowExecution) {
+    const resumeToken = execution.resumeToken;
+    const expiresAt = this.waitExpiration(execution);
+    if (!resumeToken || expiresAt == null || this.timeWaitTimers.has(resumeToken)) return;
+    const maximumTimerDelay = 2_147_000_000;
+    const delayMs = Math.min(Math.max(expiresAt - Date.now(), 0), maximumTimerDelay);
+    const timer = setTimeout(() => {
+      this.timeWaitTimers.delete(resumeToken);
+      void this.expireTimeWait(resumeToken).catch((error) => {
+        console.error('[WORKFLOW_TIME_WAIT] Failed to expire waiting execution:', error);
+      });
+    }, delayMs);
+    const maybeTimer = timer as unknown as { unref?: () => void };
+    if (typeof maybeTimer.unref === 'function') maybeTimer.unref();
+    this.timeWaitTimers.set(resumeToken, timer);
+  }
+
+  private async routeWaitingExecution(
+    locked: WorkflowExecution,
+    workflow: WorkflowDefinition,
+    selectedOutput: 'resumed' | 'expired',
+    input: WorkflowResumeInput,
+  ): Promise<WorkflowExecution> {
+    const waitingNode = locked.currentNodeId ? nodeById(workflow, locked.currentNodeId) : null;
+    if (!waitingNode) throw new Error('Waiting node not found.');
+    const waitingResult = locked.nodeResults[waitingNode.id];
+    let resolvedOutput: string = selectedOutput;
+    let routeStatus: NodeExecutionResult['status'] = 'route';
+    let interactionError: string | null = null;
+    let retryInteraction = false;
+    let interactionRetryReason: 'unrecognized' | 'invalid' | null = null;
+    const waitingMetadata = isRecord(waitingResult?.output) ? waitingResult.output : {};
+    if (waitingMetadata.pauseTimeoutWhileWaiting === true && typeof waitingMetadata.waitingSince === 'string') {
+      const since = Date.parse(waitingMetadata.waitingSince);
+      if (Number.isFinite(since)) locked.context.__automationPausedMs = Math.max(0, Number(locked.context.__automationPausedMs || 0)) + Math.max(0, Date.now() - since);
+    }
+    if (selectedOutput === 'expired') await this.stopNodeSession(locked, 'expired', workflow);
+    if (
+      selectedOutput === 'expired'
+      && waitingNode.type === 'interaction.options'
+      && waitingNode.config.customFallbackRoutes !== true
+    ) {
       locked.previousNodeId = waitingNode.id;
-      locked.currentNodeId = nextNodeIds[0]!;
-      locked.pendingNodeIds.push(...nextNodeIds.slice(1));
+      locked.currentNodeId = null;
       locked.waitingReason = undefined;
       locked.resumeToken = undefined;
       locked.context = mergeStatePatch(locked.context, {
         ...(input.contextPatch || {}),
+        __waitOutcome: 'expired',
+      });
+      locked.updatedAt = now();
+      return this.completeExecution(locked);
+    }
+    if (selectedOutput === 'expired' && typeof waitingMetadata.expirationOutput === 'string') {
+      resolvedOutput = waitingMetadata.expirationOutput;
+      const expirationPort = waitingNode.outputPorts.find((port) => port.id === resolvedOutput);
+      routeStatus = resolvedOutput === 'error' || expirationPort?.connectionType === 'error' ? 'error' : 'route';
+    }
+    if (selectedOutput === 'resumed' && waitingMetadata.resumeMode === 'reexecute') {
+      locked.status = 'running';
+      locked.currentNodeId = waitingNode.id;
+      locked.waitingReason = undefined;
+      locked.resumeToken = undefined;
+      // Each response replaces the previous payload, including omitted button IDs.
+      locked.context = mergeStatePatch({ ...locked.context, __resumeInput: null }, {
+        ...(input.contextPatch || {}),
         __resumeInput: input.input || {},
+        __waitOutcome: selectedOutput,
       });
       locked.updatedAt = now();
       const saved = await this.persistence.saveExecution(locked, locked.version);
       await this.emit(saved, {
         type: 'execution.resumed',
-        safeSummary: 'Execução retomada',
+        nodeId: waitingNode.id,
+        safeSummary: 'Execução retomada no bloco aguardando resposta',
+        data: { selectedOutput, resumeMode: 'reexecute' },
       });
+      return saved;
+    }
+    if (selectedOutput === 'resumed' && waitingNode.type.startsWith('interaction.')) {
+      const rawValue = resumeValue(input.input || {});
+      const responsePath = String(waitingNode.config.legacyApiResponsePathForValue || '').trim();
+      const extractedValue = responsePath ? readPath(rawValue, responsePath) : undefined;
+      const value = extractedValue === undefined ? rawValue : extractedValue;
+      interactionError = validateInteractionValue(waitingNode, value);
+      if (interactionError) {
+        if (waitingNode.config.customErrorRoute === true) {
+          routeStatus = 'error';
+          resolvedOutput = 'error';
+        } else {
+          retryInteraction = true;
+          interactionRetryReason = 'invalid';
+        }
+      } else {
+        const outputKey = String(waitingNode.config.outputKey || 'answer').trim();
+        if (waitingNode.type === 'interaction.options') {
+          const choices = Array.isArray(waitingNode.config.options)
+            ? waitingNode.config.options.filter(isRecord)
+            : [];
+          const selectedOptionId = typeof input.input?.selectedOptionId === 'string'
+            ? input.input.selectedOptionId.trim()
+            : '';
+          const selectedChoiceIndex = selectedOptionId
+            ? choices.findIndex((choice, index) => String(choice.id || choice.value || `option_${index + 1}`) === selectedOptionId)
+            : -1;
+          const selectedChoice = selectedChoiceIndex >= 0 ? choices[selectedChoiceIndex] : null;
+          let match = selectedChoice ? {
+            index: selectedChoiceIndex,
+            id: String(selectedChoice.id || selectedChoice.value || `option_${selectedChoiceIndex + 1}`),
+            value: String(selectedChoice.value || selectedChoice.label || selectedChoice.id || ''),
+            label: String(selectedChoice.label || selectedChoice.value || selectedChoice.id || ''),
+            strategy: 'exact' as const,
+          } : matchWorkflowOptionByHeuristics(choices, value);
+          if (
+            !match
+            && waitingNode.config.intelligentMatching === true
+            && input.input?.optionResolutionAttempted !== true
+            && this.classifyInteractionOption
+          ) {
+            try {
+              const classified = await this.classifyInteractionOption({
+                workflow,
+                execution: locked,
+                node: waitingNode,
+                message: String(value ?? ''),
+                options: choices.map((choice, index) => ({
+                  id: String(choice.id || choice.value || `option_${index + 1}`),
+                  value: String(choice.value || choice.label || choice.id || ''),
+                  label: String(choice.label || choice.value || choice.id || ''),
+                })),
+              });
+              const classifiedOption = choices.find((choice, index) => (
+                String(choice.id || choice.value || `option_${index + 1}`) === classified.optionId
+              ));
+              if (classifiedOption) {
+                const index = choices.indexOf(classifiedOption);
+                match = {
+                  index,
+                  id: String(classifiedOption.id || classifiedOption.value || `option_${index + 1}`),
+                  value: String(classifiedOption.value || classifiedOption.label || classifiedOption.id || ''),
+                  label: String(classifiedOption.label || classifiedOption.value || classifiedOption.id || ''),
+                  strategy: 'exact',
+                };
+                locked.totalModelCalls += Math.max(1, Number(classified.modelCalls || 1));
+                locked.context = mergeStatePatch(locked.context, {
+                  __interactionClassification: {
+                    nodeId: waitingNode.id,
+                    optionId: match.id,
+                    confidence: classified.confidence,
+                    model: classified.model,
+                  },
+                });
+              }
+            } catch (error) {
+              console.warn('[WORKFLOW_OPTION_CLASSIFIER] Intelligent option matching failed; using automatic retry.', error);
+            }
+          }
+          if (!match && waitingNode.config.customFallbackRoutes !== true) {
+            retryInteraction = true;
+            interactionRetryReason = 'unrecognized';
+          } else {
+            const candidate = String(match?.id || 'default');
+            resolvedOutput = waitingNode.outputPorts.some((port) => port.id === candidate) ? candidate : 'default';
+            if (outputKey) locked.variables = mergeStatePatch(locked.variables, statePatchAtPath(outputKey, match?.value ?? value));
+          }
+        } else if (outputKey) {
+          locked.variables = mergeStatePatch(locked.variables, statePatchAtPath(outputKey, value));
+        }
+      }
+    }
+    if (retryInteraction) {
+      const previousRetry = isRecord(locked.context.__interactionRetry)
+        ? locked.context.__interactionRetry
+        : {};
+      locked.status = 'running';
+      locked.currentNodeId = waitingNode.id;
+      locked.waitingReason = undefined;
+      locked.resumeToken = undefined;
+      locked.context = mergeStatePatch({ ...locked.context, __resumeInput: null }, {
+        ...(input.contextPatch || {}),
+        __resumeInput: input.input || {},
+        __waitOutcome: interactionRetryReason,
+        __interactionRetry: {
+          nodeId: waitingNode.id,
+          attempt: Number(previousRetry.attempt || 0) + 1,
+          reason: interactionRetryReason,
+          message: interactionError || undefined,
+        },
+      });
+      locked.updatedAt = now();
+      const saved = await this.persistence.saveExecution(locked, locked.version);
+      await this.emit(saved, {
+        type: 'execution.resumed',
+        nodeId: waitingNode.id,
+        safeSummary: interactionRetryReason === 'unrecognized'
+          ? 'Opção não reconhecida; pergunta repetida automaticamente'
+          : 'Resposta inválida; pergunta repetida automaticamente',
+        data: { selectedOutput: 'automatic_retry', reason: interactionRetryReason },
+      });
+      return saved;
+    }
+    const resumedResult: NodeExecutionResult | undefined = waitingResult ? {
+          ...waitingResult,
+          status: routeStatus,
+          selectedOutput: resolvedOutput,
+          ...(selectedOutput === 'expired' && routeStatus === 'error' ? {
+            error: { code: 'WAIT_EXPIRED', message: 'O prazo de resposta desta etapa terminou.', retryable: false },
+          } : {}),
+          ...(interactionError ? {
+            error: { code: 'INVALID_INTERACTION_INPUT', message: interactionError, retryable: false },
+          } : {}),
+        } : undefined;
+    const nextNodeIds = resumedResult ? selectedConnections(workflow, waitingNode, resumedResult) : [];
+    if (resumedResult) locked.nodeResults[waitingNode.id] = resumedResult;
+    if (nextNodeIds.length === 0) {
+      if (selectedOutput === 'expired' && routeStatus === 'error') return this.failExecution(locked, 'WAIT_EXPIRED', 'O prazo de resposta desta etapa terminou.');
+      throw new Error(`Waiting node ${waitingNode.id} has no ${selectedOutput} route.`);
+    }
+    locked.status = 'running';
+    locked.previousNodeId = waitingNode.id;
+    locked.currentNodeId = nextNodeIds[0]!;
+    locked.pendingNodeIds.push(...nextNodeIds.slice(1));
+    locked.waitingReason = undefined;
+    locked.resumeToken = undefined;
+    locked.context = mergeStatePatch({ ...locked.context, __resumeInput: null }, {
+      ...(input.contextPatch || {}),
+      __resumeInput: input.input || {},
+      __waitOutcome: selectedOutput,
+      __interactionRetry: null,
+      ...(interactionError ? { __interactionError: interactionError } : {}),
+    });
+    locked.updatedAt = now();
+    const saved = await this.persistence.saveExecution(locked, locked.version);
+    await this.emit(saved, {
+      type: 'execution.resumed',
+      safeSummary: selectedOutput === 'expired'
+        ? 'Execução retomada por expiração'
+        : 'Execução retomada',
+      data: { selectedOutput: resolvedOutput },
+    });
+    return saved;
+  }
+
+  private async continueWaitingExecution(
+    input: WorkflowResumeInput,
+    selectedOutput: 'resumed' | 'expired',
+    missingIsNoop = false,
+  ): Promise<WorkflowExecution | null> {
+    const waiting = await this.persistence.getExecutionByResumeToken(input.resumeToken);
+    if (!waiting) {
+      if (missingIsNoop) return null;
+      throw new Error('Waiting execution not found for the supplied resume token.');
+    }
+    const timer = this.timeWaitTimers.get(input.resumeToken);
+    if (timer) clearTimeout(timer);
+    this.timeWaitTimers.delete(input.resumeToken);
+    const workerId = input.workerId || `worker_${randomUUID()}`;
+    const locked = await this.persistence.acquireExecutionLock(waiting.executionId, workerId, this.lockLeaseMs);
+    if (!locked) throw new WorkflowExecutionLockError(waiting.executionId);
+    try {
+      if (locked.status !== 'waiting' || locked.resumeToken !== input.resumeToken) {
+        if (missingIsNoop) return locked;
+        throw new Error('Waiting execution changed before it could be resumed.');
+      }
+      const workflow = await this.persistence.getWorkflowDefinition(locked.workflowId, locked.workflowVersion);
+      if (!workflow) throw new Error(`Workflow ${locked.workflowId}@${locked.workflowVersion} not found.`);
+      await this.routeWaitingExecution(locked, workflow, selectedOutput, input);
     } finally {
       await this.persistence.releaseExecutionLock(waiting.executionId, workerId);
     }
     return this.runExecution(waiting.executionId, { workerId });
+  }
+
+  private async expireTimeWait(resumeToken: string): Promise<WorkflowExecution | null> {
+    const waiting = await this.persistence.getExecutionByResumeToken(resumeToken);
+    if (!waiting) return null;
+    const expiresAt = this.waitExpiration(waiting);
+    if (expiresAt == null) return null;
+    if (expiresAt > Date.now()) {
+      this.scheduleTimeWaitExpiration(waiting);
+      return waiting;
+    }
+    return this.continueWaitingExecution({ resumeToken, input: {} }, 'expired', true);
+  }
+
+  async resume(input: WorkflowResumeInput): Promise<WorkflowExecution> {
+    const resumed = await this.continueWaitingExecution(input, 'resumed');
+    if (!resumed) throw new Error('Waiting execution not found for the supplied resume token.');
+    return resumed;
   }
 
   async cancel(executionId: string, reason = 'Cancelled by request.'): Promise<WorkflowExecution> {
@@ -452,21 +853,25 @@ export class WorkflowExecutor {
     options: WorkflowRunOptions,
     nextNode: WorkflowNode,
   ): { code: string; message: string } | null {
+    workflow = { ...workflow, settings: effectiveWorkflowLimits(workflow.settings, execution.context.__workflowRuntimeCaps) };
     const maxSteps = Math.min(options.maxSteps || workflow.settings.maxSteps, workflow.settings.maxSteps);
     if (execution.totalSteps >= maxSteps) {
       return { code: 'MAX_STEPS_REACHED', message: `Execution reached ${maxSteps} steps.` };
     }
-    if (Date.now() - new Date(execution.startedAt).getTime() >= workflow.settings.executionTimeoutMs) {
+    const confirmedRecovery = isRecord(execution.context.__automationRecovery) && execution.context.__automationRecovery.nodeId === nextNode.id;
+    if (Date.now() - new Date(execution.startedAt).getTime() - Math.max(0, Number(execution.context.__automationPausedMs || 0)) >= workflow.settings.executionTimeoutMs) {
       return { code: 'EXECUTION_TIMEOUT', message: 'Execution exceeded its total timeout.' };
     }
     if (
       nodeMayConsumeModel(nextNode)
+      && !confirmedRecovery
       && execution.totalModelCalls >= workflow.settings.maxModelCalls
     ) {
       return { code: 'MAX_MODEL_CALLS_REACHED', message: 'Execution reached the model call limit.' };
     }
     if (
-      nodeMayConsumeTools(nextNode)
+      (nodeMayConsumeTools(nextNode) || (execution.context.automationManaged === true && /^(integration\.|whatsapp\.|dialogy\.)/.test(nextNode.type)))
+      && !confirmedRecovery
       && execution.totalToolCalls >= workflow.settings.maxToolCalls
     ) {
       return { code: 'MAX_TOOL_CALLS_REACHED', message: 'Execution reached the tool call limit.' };
@@ -506,16 +911,28 @@ export class WorkflowExecutor {
       safeSummary: `${node.name} iniciado`,
     });
 
-    const result = await this.executeNodeSafely(
+    const rawResult = await this.executeNodeSafely(
       workflow,
       execution,
       node,
       input,
       signal,
     );
+    const result = continueAfterConfiguredError(node, rawResult);
+    if (isRecord(execution.context.__automationRecovery) && execution.context.__automationRecovery.nodeId === node.id) {
+      execution.context.__lastAutomationRecovery = execution.context.__automationRecovery;
+      delete execution.context.__automationRecovery;
+    }
+    if (rawResult.status === 'error') await this.stopNodeSession(execution, 'failed', workflow);
     const stateAfter = result.statePatch
       ? mergeStatePatch(execution.variables, result.statePatch)
       : execution.variables;
+    if (result.sensitiveData) {
+      markWorkflowSensitivePaths(input, result.sensitiveData.inputPaths);
+      markWorkflowSensitivePaths(execution.input, result.sensitiveData.initialInputPaths);
+      markWorkflowSensitivePaths(stateBefore, result.sensitiveData.variablePaths);
+      markWorkflowSensitivePaths(stateAfter, result.sensitiveData.variablePaths);
+    }
     const finishedAt = now();
     const durationMs = Math.max(0, new Date(finishedAt).getTime() - new Date(startedAt).getTime());
     const finalResult = NodeExecutionResultSchema.parse({
@@ -572,11 +989,12 @@ export class WorkflowExecutor {
         safeSummary: 'Execução aguardando retomada',
         data: { reason: finalResult.waitingReason },
       });
+      this.scheduleTimeWaitExpiration(execution);
       return execution;
     }
 
     const manifest = getWorkflowNodeManifest(node.type);
-    if (finalResult.status === 'completed' || manifest?.terminal) {
+    if (finalResult.status === 'completed' || (manifest?.terminal && finalResult.status !== 'error')) {
       execution.currentNodeId = null;
       execution.previousNodeId = node.id;
       execution = await this.persistence.saveExecution(execution, execution.version);
@@ -637,16 +1055,20 @@ export class WorkflowExecutor {
       __resumeInput: undefined,
     };
     execution = await this.persistence.saveExecution(execution, execution.version);
+    const continuedAfterError = finalResult.output?.continuedAfterError === true;
     await this.emit(execution, {
-      type: finalResult.status === 'error' ? 'node.failed' : 'node.completed',
+      type: finalResult.status === 'error' || continuedAfterError ? 'node.failed' : 'node.completed',
       nodeId: node.id,
-      safeSummary: finalResult.status === 'error'
+      safeSummary: continuedAfterError
+        ? `${node.name} falhou e o fluxo continuou pela configuração da etapa`
+        : finalResult.status === 'error'
         ? `${node.name} encaminhado para tratamento de erro`
         : `${node.name} concluído`,
       data: {
         durationMs,
         selectedOutput: finalResult.selectedOutput,
         nextNodeIds: targets,
+        continuedAfterError,
       },
     });
     return execution;
@@ -706,7 +1128,7 @@ export class WorkflowExecutor {
         const result = NodeExecutionResultSchema.parse(await withTimeout(
           (nodeSignal) => handler.execute({
             execution: clone(execution),
-            workflow,
+            workflow: { ...workflow, settings: effectiveWorkflowLimits(workflow.settings, execution.context.__workflowRuntimeCaps) },
             node,
             input: clone(input),
             attachments: nodeAttachments(workflow, node.id),
@@ -796,6 +1218,7 @@ export class WorkflowExecutor {
     code: string,
     message: string,
   ): Promise<WorkflowExecution> {
+    await this.stopNodeSession(execution, 'failed');
     execution.status = 'failed';
     execution.failure = { code, message, nodeId: execution.currentNodeId || undefined };
     execution.finishedAt = now();
@@ -814,7 +1237,10 @@ export class WorkflowExecutor {
     execution: WorkflowExecution,
     reason: string,
   ): Promise<WorkflowExecution> {
+    await this.stopNodeSession(execution, 'cancelled');
     execution.status = 'cancelled';
+    execution.resumeToken = undefined;
+    execution.waitingReason = undefined;
     execution.failure = { code: 'EXECUTION_CANCELLED', message: reason };
     execution.finishedAt = now();
     execution.updatedAt = execution.finishedAt;
@@ -826,6 +1252,19 @@ export class WorkflowExecutor {
       data: { reason },
     });
     return saved;
+  }
+
+  private async stopNodeSession(execution: WorkflowExecution, reason: 'cancelled' | 'expired' | 'failed', definition?: WorkflowDefinition) {
+    if (!execution.currentNodeId) return;
+    const workflow = definition || await this.persistence.getWorkflowDefinition(execution.workflowId, execution.workflowVersion);
+    if (!workflow) throw new Error('Workflow definition not found while ending the active session.');
+    const node = nodeById(workflow, execution.currentNodeId);
+    await this.handlers.get(node.type)?.stop?.({ execution, workflow, node, reason });
+    if (execution.resumeToken) {
+      const timer = this.timeWaitTimers.get(execution.resumeToken);
+      if (timer) clearTimeout(timer);
+      this.timeWaitTimers.delete(execution.resumeToken);
+    }
   }
 
   private emit(

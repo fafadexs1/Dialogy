@@ -1,6 +1,13 @@
 import type { Chat, Contact, Message } from '@/lib/types';
 
-export type ResolvedChatPlatform = 'instagram' | 'messenger' | 'telegram' | 'webchat' | 'wa_cloud' | 'baileys';
+export type ResolvedChatPlatform =
+  | 'instagram'
+  | 'messenger'
+  | 'telegram'
+  | 'webchat'
+  | 'wa_cloud'
+  | 'baileys'
+  | 'whatsapp';
 
 function normalizeSignal(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -25,6 +32,10 @@ function isTelegramSignal(signal: string): boolean {
 
 function isCloudApiSignal(signal: string): boolean {
   return signal === 'wa_cloud' || signal.includes('wa_cloud');
+}
+
+function isBaileysSignal(signal: string): boolean {
+  return signal === 'baileys' || signal.includes('whatsapp_baileys');
 }
 
 function isWebchatSignal(signal: string): boolean {
@@ -55,17 +66,17 @@ function collectMessageSignals(messages: Message[] | undefined): string[] {
 
 export function resolveChatPlatform(chat: Chat | null | undefined): ResolvedChatPlatform {
   if (!chat) {
-    return 'baileys';
+    return 'whatsapp';
   }
 
   const metaPlatform = normalizeSignal(chat.metaPlatform);
+  const instanceType = normalizeSignal(chat.instance_type);
   const messageSignals = collectMessageSignals(chat.messages);
   const contactJid = normalizeSignal(chat.contact?.phone_number_jid);
   const contactPhone = normalizeSignal(chat.contact?.phone);
   const chatSignals = [
     ...messageSignals,
     normalizeSignal(chat.source),
-    normalizeSignal(chat.instance_type),
     normalizeSignal(chat.instance_name),
     contactJid,
     contactPhone,
@@ -102,11 +113,72 @@ export function resolveChatPlatform(chat: Chat | null | undefined): ResolvedChat
     return 'webchat';
   }
 
+  // The instance registry is authoritative for the two WhatsApp transports.
+  // Do not infer Baileys merely because no other platform signal was found.
+  if (instanceType === 'wa_cloud') {
+    return 'wa_cloud';
+  }
+
+  if (instanceType === 'baileys') {
+    return 'baileys';
+  }
+
   if (chatSignals.some(isCloudApiSignal)) {
     return 'wa_cloud';
   }
 
-  return 'baileys';
+  if (chatSignals.some(isBaileysSignal)) {
+    return 'baileys';
+  }
+
+  return 'whatsapp';
+}
+
+export function resolveOutboundMessagePlatform(input: {
+  source?: unknown;
+  metaPlatform?: unknown;
+  instanceType?: Chat['instance_type'] | null;
+  instanceName?: unknown;
+  remoteIdentity?: unknown;
+}): ResolvedChatPlatform | null {
+  const source = normalizeSignal(input.source);
+  const metaPlatform = normalizeSignal(input.metaPlatform);
+  const instanceType = normalizeSignal(input.instanceType);
+  const instanceName = normalizeSignal(input.instanceName);
+  const remoteIdentity = normalizeSignal(input.remoteIdentity);
+
+  if (metaPlatform === 'instagram' || metaPlatform === 'messenger') {
+    return metaPlatform;
+  }
+
+  if (isInstagramSignal(source)) return 'instagram';
+  if (isMessengerSignal(source)) return 'messenger';
+  if (isWebchatSignal(source)) return 'webchat';
+
+  if (
+    isTelegramSignal(source) ||
+    isTelegramSignal(instanceName) ||
+    remoteIdentity.startsWith('telegram:')
+  ) {
+    return 'telegram';
+  }
+
+  if (instanceType === 'wa_cloud' || instanceType === 'baileys' || instanceType === 'telegram') {
+    return instanceType;
+  }
+
+  if (isCloudApiSignal(source)) return 'wa_cloud';
+  if (isBaileysSignal(source)) return 'baileys';
+
+  if (
+    source === 'whatsapp' ||
+    isWhatsappIdentity(remoteIdentity) ||
+    Boolean(instanceName)
+  ) {
+    return 'whatsapp';
+  }
+
+  return null;
 }
 
 export function getChatPlatformLabel(platform: ResolvedChatPlatform): string {
@@ -121,8 +193,11 @@ export function getChatPlatformLabel(platform: ResolvedChatPlatform): string {
       return 'Chat do site';
     case 'wa_cloud':
       return 'Cloud API';
+    case 'baileys':
+    case 'whatsapp':
+      return 'WhatsApp';
     default:
-      return 'Baileys';
+      return 'WhatsApp';
   }
 }
 

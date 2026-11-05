@@ -7,10 +7,16 @@ import {
   buildPresenceAvailabilitySql,
   getPresenceRecentActivitySeconds,
   getPresenceTtlSeconds,
+  normalizePresenceSessionId,
   reconcilePresenceSessions,
   type PresenceEventSource,
   type PresenceSessionSnapshot,
 } from '@/lib/presence';
+import {
+  isRedisPresenceEnabled,
+  releasePresenceSession,
+  touchPresenceSession,
+} from '@/lib/presence-redis';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { normalizeSupabaseStorageUrl } from '@/lib/storage-url';
 import type { OnlineAgent } from '@/lib/types';
@@ -322,9 +328,115 @@ async function syncPresenceProjection(
   };
 }
 
+/**
+ * Caminho do Redis: o heartbeat não toca no Postgres.
+ *
+ * O custo do modelo antigo estava na frequência, não na operação — 9
+ * round-trips numa transação com advisory lock, 2x por minuto por agente. Aqui
+ * o keep-alive é O(1) no Redis, e o Postgres só é escrito quando o agente
+ * cruza a fronteira offline<->online, para que a distribuição de chats reaja na
+ * hora. O resto da frescura de `last_seen` fica com o reconciliador, em lote.
+ *
+ * Devolve false quando o Redis não respondeu, para o chamador cair no Postgres.
+ */
+async function mutatePresenceViaRedis(options: PresenceMutationOptions): Promise<boolean> {
+  const sessionId = normalizePresenceSessionId(options.tabId);
+  const encerrando = options.forceOffline || !options.isOnline;
+
+  const transicao = encerrando
+    ? await releasePresenceSession({
+        workspaceId: options.workspaceId,
+        userId: options.userId,
+        sessionId,
+        forceAll: options.forceOffline,
+      })
+    : await touchPresenceSession({
+        workspaceId: options.workspaceId,
+        userId: options.userId,
+        sessionId,
+      });
+
+  if (!transicao) return false;
+
+  // Sem mudança de estado, o heartbeat termina aqui — nenhum I/O de banco.
+  if (!transicao.changed) return true;
+
+  const nowIso = new Date().toISOString();
+  const previousState: PresenceProjectionSnapshot = {
+    activeSessions: {},
+    isOnline: !transicao.isOnline,
+    lastSeen: null,
+    onlineSince: null,
+    recentActivityAt: null,
+  };
+
+  try {
+    await db.query(
+      `
+        INSERT INTO user_workspace_presence (
+          user_id, workspace_id, is_online, online_since, last_seen,
+          recent_activity_at, last_event_at, last_event_source, metadata
+        )
+        VALUES (
+          $1, $2, $3,
+          CASE WHEN $3 THEN $4::timestamptz ELSE NULL END,
+          $4::timestamptz,
+          CASE WHEN $5 THEN $4::timestamptz ELSE NULL END,
+          NOW(), $6,
+          jsonb_build_object('session_count', to_jsonb($7::int), 'last_event_source', to_jsonb($6::text))
+        )
+        ON CONFLICT (user_id, workspace_id) DO UPDATE SET
+          is_online = $3,
+          online_since = CASE
+            WHEN $3 THEN COALESCE(user_workspace_presence.online_since, $4::timestamptz)
+            ELSE NULL
+          END,
+          last_seen = GREATEST(COALESCE(user_workspace_presence.last_seen, $4::timestamptz), $4::timestamptz),
+          recent_activity_at = CASE
+            WHEN $8 THEN NULL
+            WHEN $5 THEN $4::timestamptz
+            ELSE user_workspace_presence.recent_activity_at
+          END,
+          last_event_at = NOW(),
+          last_event_source = $6,
+          metadata = COALESCE(user_workspace_presence.metadata, '{}'::jsonb) || jsonb_build_object(
+            'session_count', to_jsonb($7::int), 'last_event_source', to_jsonb($6::text)
+          )
+      `,
+      [
+        options.userId,
+        options.workspaceId,
+        transicao.isOnline,
+        nowIso,
+        options.touchRecentActivity ?? false,
+        options.source ?? 'unknown',
+        transicao.sessionsAfter,
+        options.clearRecentActivity ?? false,
+      ],
+    );
+  } catch (error) {
+    console.error('[PRESENCE] Falha ao gravar transicao no Postgres:', error);
+    return false;
+  }
+
+  await broadcastPresenceChange({
+    userId: options.userId,
+    workspaceId: options.workspaceId,
+    source: options.source ?? 'unknown',
+    previousState,
+    nextState: { ...previousState, isOnline: transicao.isOnline, lastSeen: nowIso },
+  });
+
+  return true;
+}
+
 async function mutatePresence(options: PresenceMutationOptions): Promise<void> {
   if (!options.userId || !options.workspaceId) {
     console.warn('[PRESENCE] Missing userId or workspaceId.');
+    return;
+  }
+
+  if (isRedisPresenceEnabled() && (await mutatePresenceViaRedis(options))) {
     return;
   }
 
@@ -514,12 +626,52 @@ export async function touchUserPresenceFromChat(
   await touchUserPresenceActivity(userId, workspaceId, tabId, source);
 }
 
+// Toda mudanca de presenca faz broadcast, e cada cliente do workspace responde
+// refazendo esta consulta — o custo cresce com o quadrado do numero de agentes
+// conectados (~1 query/s com 6 agentes, ~89 query/s com 400).
+//
+// O TTL corta isso para no maximo uma execucao por janela, independente de
+// quantos clientes pediram. Deliberadamente NAO invalidamos no broadcast: seria
+// justamente no instante em que os N clientes chegam juntos, e todos errariam o
+// cache de uma vez. Presenca tolera 5s de defasagem; um thundering herd nao.
+const ONLINE_AGENTS_TTL_MS = 5_000;
+const onlineAgentsCache = new Map<string, { expiresAt: number; agents: OnlineAgent[] }>();
+// Requisicoes simultaneas que erram o cache compartilham a mesma query em voo.
+const onlineAgentsInFlight = new Map<string, Promise<OnlineAgent[]>>();
+
 export async function getOnlineAgents(workspaceId: string): Promise<OnlineAgent[]> {
   if (!workspaceId) {
     console.error('[GET_ONLINE_AGENTS] Workspace ID nao fornecido.');
     return [];
   }
 
+  const cached = onlineAgentsCache.get(workspaceId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.agents;
+  }
+
+  const inFlight = onlineAgentsInFlight.get(workspaceId);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = queryOnlineAgents(workspaceId)
+    .then((agents) => {
+      onlineAgentsCache.set(workspaceId, {
+        expiresAt: Date.now() + ONLINE_AGENTS_TTL_MS,
+        agents,
+      });
+      return agents;
+    })
+    .finally(() => {
+      onlineAgentsInFlight.delete(workspaceId);
+    });
+
+  onlineAgentsInFlight.set(workspaceId, request);
+  return request;
+}
+
+async function queryOnlineAgents(workspaceId: string): Promise<OnlineAgent[]> {
   try {
     const ttlSeconds = getPresenceTtlSeconds();
     const recentActivitySeconds = getPresenceRecentActivitySeconds();

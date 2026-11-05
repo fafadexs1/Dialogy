@@ -6,6 +6,11 @@ import type { Deal, DealMetrics } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { getDefaultPipelineStageValueForWorkspace } from '@/lib/crm-pipeline-server';
+import { SALE_WON_EVENT } from '@/lib/marketing-attribution';
+import {
+    enqueueContactConversionExport,
+    enqueueConversionAdjustment,
+} from '@/services/google-ads/conversion-queue';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -37,6 +42,69 @@ async function syncContactConvertedAt(contactId: string): Promise<void> {
         `,
         [contactId]
     );
+}
+
+type DealConversionSnapshot = {
+    workspace_id: string;
+    contact_id: string | null;
+    won: boolean | null;
+    value: unknown;
+    currency: string | null;
+};
+
+/**
+ * Espelha o ciclo de vida do negocio no Google Ads: negocio ganho vira conversao
+ * com o valor real, mudanca de valor vira RESTATEMENT e reabertura vira
+ * RETRACTION. Nunca deixa a exportacao derrubar a operacao do CRM.
+ */
+async function syncGoogleAdsSaleConversion(
+    previous: DealConversionSnapshot | null,
+    updated: { id: string; workspace_id: string; contact_id: string | null; won: boolean | null; value: number; currency: string | null }
+): Promise<void> {
+    if (!updated.contact_id) return;
+
+    const wasWon = previous?.won === true;
+    const isWon = updated.won === true;
+    const previousValue = Number(previous?.value ?? 0);
+
+    try {
+        if (!wasWon && isWon) {
+            await enqueueContactConversionExport({
+                workspaceId: updated.workspace_id,
+                contactId: updated.contact_id,
+                eventName: SALE_WON_EVENT,
+                value: updated.value,
+                currency: updated.currency,
+                dealId: updated.id,
+            });
+            return;
+        }
+
+        if (wasWon && !isWon) {
+            await enqueueConversionAdjustment({
+                workspaceId: updated.workspace_id,
+                contactId: updated.contact_id,
+                eventName: SALE_WON_EVENT,
+                adjustmentType: 'RETRACTION',
+                dealId: updated.id,
+            });
+            return;
+        }
+
+        if (wasWon && isWon && previousValue !== updated.value) {
+            await enqueueConversionAdjustment({
+                workspaceId: updated.workspace_id,
+                contactId: updated.contact_id,
+                eventName: SALE_WON_EVENT,
+                adjustmentType: 'RESTATEMENT',
+                value: updated.value,
+                currency: updated.currency,
+                dealId: updated.id,
+            });
+        }
+    } catch (error) {
+        console.error('[DEAL_GADS_SYNC] Falha ao sincronizar conversao Google Ads:', error);
+    }
 }
 
 // ─── READ ───────────────────────────────────────────────────────────────────
@@ -194,6 +262,14 @@ export async function updateDeal(
             data.closed_at = new Date().toISOString();
         }
 
+        // Estado anterior e necessario para decidir entre conversao nova, ajuste
+        // de valor e retratacao.
+        const previousRes = await db.query(
+            'SELECT workspace_id, contact_id, won, value, currency FROM deals WHERE id = $1',
+            [dealId]
+        );
+        const previousDeal = (previousRes.rows[0] as DealConversionSnapshot | undefined) ?? null;
+
         const setClauses: string[] = [];
         const values: any[] = [];
         let paramIdx = 1;
@@ -225,6 +301,15 @@ export async function updateDeal(
         if ((data.won !== undefined || data.closed_at !== undefined) && deal.contact_id) {
             await syncContactConvertedAt(deal.contact_id);
         }
+
+        await syncGoogleAdsSaleConversion(previousDeal, {
+            id: dealId,
+            workspace_id: deal.workspace_id,
+            contact_id: deal.contact_id,
+            won: deal.won,
+            value: deal.value,
+            currency: deal.currency,
+        });
 
         revalidatePath('/crm');
         return { deal };

@@ -18,6 +18,7 @@ import type {
   AnalyticsEventPayload,
   EvolutionWebhookProcessPayload,
   MarketingAutoClosePayload,
+  NexusInternalEventPayload,
   NotificationPayload,
   QueueAutoClosePayload,
   QueueJobPayload,
@@ -31,6 +32,11 @@ export type EnqueueOptions = {
   priority?: number;
   maxAttempts?: number;
   client?: { query: (query: string, params?: any[]) => Promise<any> };
+  // Sobrescreve o jobId deterministico de getJobId. O id deterministico existe
+  // para deduplicar reenvios acidentais do mesmo envio; quem pede explicitamente
+  // um novo disparo do mesmo messageId (retry manual) precisa de um id distinto,
+  // senao o BullMQ devolve o job antigo e nao enfileira nada.
+  jobId?: string;
 };
 
 const QUEUE_DISABLED_MESSAGE = 'Queue system disabled.';
@@ -123,6 +129,14 @@ function getJobId(type: QueueJobType, payload: QueueJobPayload) {
         typedPayload.closedAt || 'pending'
       )}`;
     }
+    case 'nexus_internal_event': {
+      const typedPayload = payload as NexusInternalEventPayload;
+      const eventKey = createHash('sha256')
+        .update(`${typedPayload.workspaceId}:${typedPayload.eventName}:${typedPayload.eventId}`)
+        .digest('hex')
+        .slice(0, 32);
+      return `nexus_internal_event__${eventKey}`;
+    }
     case 'analytics_event': {
       const typedPayload = payload as AnalyticsEventPayload;
       return `analytics_event__${toSafeJobIdPart(typedPayload.workspaceId || 'global')}__${toSafeJobIdPart(
@@ -153,7 +167,10 @@ function getDefaultMaxAttemptsForType(type: QueueJobType) {
     case 'evolution_webhook_process':
       return 5;
     case 'whatsapp_send':
-      return 1;
+      // A segunda tentativa nao reenvia direto: o handler reconcilia com a
+      // Evolution antes e so segue se confirmar que a mensagem nao saiu.
+      // Poucas tentativas de proposito -- cada uma custa uma consulta extra.
+      return 2;
     case 'ai_document_ingest':
     case 'ai_autopilot_process':
     case 'ai_autopilot_learning_cycle':
@@ -175,12 +192,14 @@ export async function enqueueJob(
 
   const runAt = options?.runAt;
   const delay = runAt ? Math.max(runAt.getTime() - Date.now(), 0) : 0;
+  // whatsapp_send nao herda QUEUE_MAX_ATTEMPTS: cada tentativa extra custa uma
+  // consulta de reconciliacao a Evolution, entao o teto e proprio e baixo.
   const attempts = type === 'whatsapp_send'
-    ? 1
+    ? (options?.maxAttempts ?? getDefaultMaxAttemptsForType(type))
     : getQueueMaxAttempts(options?.maxAttempts ?? getDefaultMaxAttemptsForType(type));
 
   const job = await getDialogyQueue(type).add(type, payload, {
-    jobId: getJobId(type, payload),
+    jobId: options?.jobId ?? getJobId(type, payload),
     delay,
     priority: options?.priority,
     attempts,
@@ -241,6 +260,13 @@ export async function enqueueAiCaseMemoryRefresh(
   return enqueueJob('ai_case_memory_refresh', payload, options);
 }
 
+export async function enqueueNexusInternalEvent(
+  payload: NexusInternalEventPayload,
+  options?: EnqueueOptions,
+) {
+  return enqueueJob('nexus_internal_event', payload, options);
+}
+
 export async function enqueueAnalyticsEvent(payload: AnalyticsEventPayload, options?: EnqueueOptions) {
   return enqueueJob('analytics_event', payload, options);
 }
@@ -259,7 +285,8 @@ export async function processQueueOnce() {
     !shouldEnqueueJob('evolution_webhook_process') &&
     !shouldEnqueueJob('webhook_outbound') &&
     !shouldEnqueueJob('queue_auto_close') &&
-    !shouldEnqueueJob('marketing_auto_close')
+    !shouldEnqueueJob('marketing_auto_close') &&
+    !shouldEnqueueJob('nexus_internal_event')
   ) {
     return {
       processed: 0,

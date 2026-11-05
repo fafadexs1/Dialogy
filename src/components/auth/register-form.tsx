@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { startTransition, useState } from 'react';
 import { ArrowRight, Eye, EyeOff, Gift, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -14,17 +14,18 @@ interface RegisterFormProps {
   onRegister: (data: FormData) => void;
   pending: boolean;
   referralCode?: string | null;
+  redirectTo?: string | null;
 }
 
 const FIELD_CLASS =
-  'h-12 rounded-2xl border-slate-200 bg-white px-4 text-sm text-slate-950 placeholder:text-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] focus:border-[#20E401]/35 focus:ring-[#20E401]/10';
+  'h-12 rounded-xl border-slate-200 bg-white px-4 text-base sm:text-sm text-slate-950 placeholder:text-slate-400 transition-colors hover:border-slate-300 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/15 focus-visible:ring-offset-0';
 
 const PasswordStrengthIndicator = ({ strength }: { strength: number }) => {
   const { t } = useI18n();
   const strengthLevels = [
     { label: t('Muito fraca'), color: 'bg-red-500', width: '20%' },
     { label: t('Fraca'), color: 'bg-orange-500', width: '40%' },
-    { label: t('Media'), color: 'bg-yellow-500', width: '60%' },
+    { label: t('Média'), color: 'bg-yellow-500', width: '60%' },
     { label: t('Forte'), color: 'bg-green-500', width: '80%' },
     { label: t('Muito forte'), color: 'bg-emerald-600', width: '100%' },
   ];
@@ -41,18 +42,19 @@ const PasswordStrengthIndicator = ({ strength }: { strength: number }) => {
         />
       </div>
       <p className="text-xs font-medium text-slate-500">
-        {t('Forca da senha: {label}', { label: strengthLabel })}
+        {t('Força da senha: {label}', { label: strengthLabel })}
       </p>
     </div>
   );
 };
 
-export function RegisterForm({ onRegister, pending, referralCode }: RegisterFormProps) {
+export function RegisterForm({ onRegister, pending, referralCode, redirectTo }: RegisterFormProps) {
   const { t } = useI18n();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordStrength, setPasswordStrength] = useState(0);
   const [formData, setLocalFormData] = useState({
     name: '',
@@ -91,6 +93,11 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (pending) return;
+    if (step === 1) {
+      handleNext();
+      return;
+    }
     const fullFormData = new FormData(event.currentTarget);
     const pass = fullFormData.get('password') as string;
     const confirmPass = fullFormData.get('confirmPassword') as string;
@@ -104,21 +111,21 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
       return;
     }
 
-    onRegister(fullFormData);
+    startTransition(() => onRegister(fullFormData));
   };
 
   return (
     <div className="space-y-6">
-      <div className="mb-2 flex items-center justify-between px-2">
+      <ol aria-label={t('Etapas do cadastro')} className="mb-2 flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/70 px-4 py-3">
         {[1, 2].map((i) => (
-          <div key={i} className="flex items-center gap-2">
+          <li key={i} aria-current={step === i ? 'step' : undefined} className="flex items-center gap-2">
             <div
               className={cn(
                 'flex h-7 w-7 items-center justify-center rounded-full border text-[10px] font-bold transition-all',
                 step === i
-                  ? 'border-[#20E401] bg-[#20E401] text-black shadow-[0_0_15px_rgba(32,228,1,0.3)]'
+                  ? 'border-emerald-600 bg-emerald-600 text-white'
                   : step > i
-                    ? 'border-[#20E401]/30 bg-[#20E401]/15 text-[#20E401]'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                     : 'border-slate-200 bg-white text-slate-400'
               )}
             >
@@ -126,20 +133,30 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
             </div>
             <span
               className={cn(
-                'text-[10px] font-bold uppercase tracking-widest',
+                'text-[11px] font-medium',
                 step === i ? 'text-slate-950' : 'text-slate-400'
               )}
             >
-              {i === 1 ? t('Dados') : t('Segurança')}
+              {i === 1 ? t('Seus dados') : t('Sua segurança')}
             </span>
-            {i === 1 && <div className="mx-2 h-px w-12 bg-slate-200" />}
-          </div>
+            {i === 1 && <div aria-hidden="true" className="mx-2 h-px w-6 bg-slate-200 sm:w-12" />}
+          </li>
         ))}
-      </div>
+      </ol>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={(event) => {
+          if (step === 1 && event.key === 'Enter' && !event.nativeEvent.isComposing && event.target instanceof HTMLInputElement) {
+            event.preventDefault();
+            event.currentTarget.requestSubmit();
+          }
+        }}
+        aria-busy={pending}
+        className="space-y-4"
+      >
         {referralCode ? (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-sm text-emerald-900">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-sm text-emerald-900">
             <div className="flex items-start gap-3">
               <div className="rounded-full bg-emerald-100 p-2 text-emerald-600">
                 <Gift className="h-4 w-4" />
@@ -158,15 +175,17 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
         ) : null}
 
         <input type="hidden" name="referralCode" value={referralCode || ''} />
+        <input type="hidden" name="redirectTo" value={redirectTo || ''} />
 
         {step === 1 && (
           <div className="animate-in space-y-4 fade-in slide-in-from-right-4 duration-300">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="name" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t('Nome')}</Label>
+                <Label htmlFor="name" className="text-[12px] font-medium text-slate-700">{t('Nome')}</Label>
                 <Input
                   id="name"
                   name="name"
+                  autoComplete="given-name"
                   type="text"
                   placeholder={t('Nome')}
                   required
@@ -176,10 +195,11 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="lastname" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t('Sobrenome')}</Label>
+                <Label htmlFor="lastname" className="text-[12px] font-medium text-slate-700">{t('Sobrenome')}</Label>
                 <Input
                   id="lastname"
                   name="lastname"
+                  autoComplete="family-name"
                   type="text"
                   placeholder={t('Sobrenome')}
                   required
@@ -191,10 +211,11 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t('E-mail')}</Label>
+              <Label htmlFor="email" className="text-[12px] font-medium text-slate-700">{t('E-mail')}</Label>
               <Input
                 id="email"
                 name="email"
+                autoComplete="email"
                 type="email"
                 placeholder={t('Ex: seu@email.com')}
                 required
@@ -205,10 +226,11 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="phone" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t('WhatsApp')}</Label>
+              <Label htmlFor="phone" className="text-[12px] font-medium text-slate-700">{t('WhatsApp')}</Label>
               <Input
                 id="phone"
                 name="phone"
+                autoComplete="tel"
                 type="tel"
                 placeholder={t('(00) 00000-0000')}
                 required
@@ -219,9 +241,8 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
             </div>
 
             <Button
-              type="button"
-              onClick={handleNext}
-              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-semibold text-white shadow-[0_20px_40px_-24px_rgba(15,23,42,0.48)] transition-colors hover:bg-slate-800"
+              type="submit"
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#087f5b] text-sm font-semibold text-white shadow-[0_3px_6px_-3px_rgba(6,95,70,0.3)] transition-colors hover:bg-[#066648]"
             >
               {t('Continuar')}
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
@@ -237,11 +258,13 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
             <input type="hidden" name="phone" value={formData.phone} />
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t('Senha')}</Label>
+              <Label htmlFor="password" className="text-[12px] font-medium text-slate-700">{t('Senha')}</Label>
               <div className="relative">
                 <Input
                   id="password"
                   name="password"
+                  autoComplete="new-password"
+                  autoFocus
                   type={showPassword ? 'text' : 'password'}
                   placeholder="************"
                   required
@@ -253,18 +276,23 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
                   type="button"
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? t('Ocultar senha') : t('Mostrar senha')}
+                  aria-pressed={showPassword}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              <PasswordStrengthIndicator strength={passwordStrength} />
+              {password && <PasswordStrengthIndicator strength={passwordStrength} />}
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="ml-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t('Confirmar Senha')}</Label>
+              <Label htmlFor="confirmPassword" className="text-[12px] font-medium text-slate-700">{t('Confirmar Senha')}</Label>
               <Input
                 id="confirmPassword"
                 name="confirmPassword"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
                 type={showPassword ? 'text' : 'password'}
                 placeholder="************"
                 required
@@ -273,7 +301,7 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
             </div>
 
             <div className="flex items-start space-x-3 pt-2">
-              <Checkbox id="terms" required className="mt-0.5 border-slate-300 data-[state=checked]:border-[#20E401] data-[state=checked]:bg-[#20E401]" />
+              <Checkbox id="terms" required className="mt-0.5 border-slate-300 data-[state=checked]:border-emerald-600 data-[state=checked]:bg-emerald-600 data-[state=checked]:text-white" />
               <label htmlFor="terms" className="cursor-pointer text-[11px] font-medium leading-relaxed text-slate-500">
                 {t('Li e aceito os termos de uso e política de privacidade.')}
               </label>
@@ -284,17 +312,18 @@ export function RegisterForm({ onRegister, pending, referralCode }: RegisterForm
                 type="button"
                 variant="outline"
                 onClick={() => setStep(1)}
-                className="h-12 rounded-2xl border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-950"
+                disabled={pending}
+                className="h-12 rounded-xl border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-950"
               >
                 {t('Voltar')}
               </Button>
               <Button
                 type="submit"
                 disabled={pending}
-                className="h-12 rounded-2xl bg-slate-950 font-semibold text-white shadow-[0_20px_40px_-24px_rgba(15,23,42,0.48)] transition-colors hover:bg-slate-800"
+                className="h-12 rounded-xl bg-[#087f5b] font-semibold text-white shadow-[0_3px_6px_-3px_rgba(6,95,70,0.3)] transition-colors hover:bg-[#066648]"
               >
                 {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {pending ? t('Finalizando...') : t('Finalizar')}
+                {pending ? t('Criando conta...') : t('Criar minha conta')}
               </Button>
             </div>
           </div>

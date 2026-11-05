@@ -1,0 +1,212 @@
+{
+  "source": "Real components; controlled server action and authenticated-settings fixtures. No database writes.",
+  "results": [
+    {
+      "name": "identity-1440",
+      "viewport": 1440,
+      "document": 1440,
+      "body": 1440,
+      "stepperOverlap": false
+    },
+    {
+      "name": "segment-1440",
+      "viewport": 1440,
+      "document": 1440,
+      "body": 1440,
+      "stepperOverlap": false
+    },
+    {
+      "name": "review-1440",
+      "viewport": 1440,
+      "document": 1440,
+      "body": 1440,
+      "stepperOverlap": false
+    },
+    {
+      "name": "identity-1100",
+      "viewport": 1100,
+      "document": 1100,
+      "body": 1100,
+      "stepperOverlap": false
+    },
+    {
+      "name": "segment-1100",
+      "viewport": 1100,
+      "document": 1100,
+      "body": 1100,
+      "stepperOverlap": false
+    },
+    {
+      "name": "review-1100",
+      "viewport": 1100,
+      "document": 1100,
+      "body": 1100,
+      "stepperOverlap": false
+    },
+    {
+      "name": "identity-900",
+      "viewport": 900,
+      "document": 900,
+      "body": 900,
+      "stepperOverlap": false
+    },
+    {
+      "name": "segment-900",
+      "viewport": 900,
+      "document": 900,
+      "body": 900,
+      "stepperOverlap": false
+    },
+    {
+      "name": "review-900",
+      "viewport": 900,
+      "document": 900,
+      "body": 900,
+      "stepperOverlap": false
+    },
+    {
+      "name": "identity-768",
+      "viewport": 768,
+      "document": 768,
+      "body": 768,
+      "stepperOverlap": false
+    },
+    {
+      "name": "segment-768",
+      "viewport": 768,
+      "document": 768,
+      "body": 768,
+      "stepperOverlap": false
+    },
+    {
+      "name": "review-768",
+      "viewport": 768,
+      "document": 768,
+      "body": 768,
+      "stepperOverlap": false
+    },
+    {
+      "name": "identity-600",
+      "viewport": 600,
+      "document": 600,
+      "body": 600,
+      "stepperOverlap": false
+    },
+    {
+      "name": "segment-600",
+      "viewport": 600,
+      "document": 600,
+      "body": 600,
+      "stepperOverlap": false
+    },
+    {
+      "name": "review-600",
+      "viewport": 600,
+      "document": 600,
+      "body": 600,
+      "stepperOverlap": false
+    },
+    {
+      "name": "identity-390",
+      "viewport": 390,
+      "document": 390,
+      "body": 390,
+      "stepperOverlap": false
+    },
+    {
+      "name": "segment-390",
+      "viewport": 390,
+      "document": 390,
+      "body": 390,
+      "stepperOverlap": false
+    },
+    {
+      "name": "review-390",
+      "viewport": 390,
+      "document": 390,
+      "body": 390,
+      "stepperOverlap": false
+    },
+    {
+      "name": "identity-320",
+      "viewport": 320,
+      "document": 320,
+      "body": 320,
+      "stepperOverlap": false
+    },
+    {
+      "name": "segment-320",
+      "viewport": 320,
+      "document": 320,
+      "body": 320,
+      "stepperOverlap": false
+    },
+    {
+      "name": "review-320",
+      "viewport": 320,
+      "document": 320,
+      "body": 320,
+      "stepperOverlap": false
+    },
+    {
+      "name": "light-identity-1440",
+      "viewport": 1440,
+      "document": 1440,
+      "body": 1440,
+      "stepperOverlap": false
+    },
+    {
+      "name": "light-review-long-name-1440",
+      "viewport": 1440,
+      "document": 1440,
+      "body": 1440,
+      "stepperOverlap": false
+    },
+    {
+      "name": "light-error-1440",
+      "viewport": 1440,
+      "document": 1440,
+      "body": 1440,
+      "stepperOverlap": false
+    },
+    {
+      "name": "light-identity-390",
+      "viewport": 390,
+      "document": 390,
+      "body": 390,
+      "stepperOverlap": false
+    },
+    {
+      "name": "light-review-long-name-390",
+      "viewport": 390,
+      "document": 390,
+      "body": 390,
+      "stepperOverlap": false
+    },
+    {
+      "name": "light-error-390",
+      "viewport": 390,
+      "document": 390,
+      "body": 390,
+      "stepperOverlap": false
+    }
+  ],
+  "runtimeErrors": [],
+  "checks": [
+    "empty and whitespace validation",
+    "no submission before review",
+    "live name preview",
+    "native radio keyboard controls",
+    "preserved name and segment on back/edit",
+    "optional segment",
+    "pending controls disabled",
+    "exact action payload",
+    "error retention",
+    "network failure message",
+    "success only after action confirmation",
+    "long names",
+    "light and dark themes",
+    "animated transitions",
+    "reduced motion"
+  ]
+}

@@ -1,6 +1,9 @@
 
 'use server';
 
+import { lockWorkspaceAssignments } from '@/services/chat-distribution/transfer-operation';
+import { recordDirectAssignment, resolveAgentTeam } from '@/services/chat-distribution/direct-assignment';
+import { claimQueueChat } from '@/services/chat-distribution/claim-queue-chat';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { MessageMetadata, Message } from '@/lib/types';
@@ -15,8 +18,18 @@ import { sendVideoMessage } from '@/services/whatsapp/send-video-message';
 import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
 import { sendDocumentMessage } from '@/services/whatsapp/send-document-message';
 import { sendListMessage } from '@/services/whatsapp/send-list-message';
+import { sendButtonsMessage } from '@/services/whatsapp/send-buttons-message';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
+import {
+    assertValidTemplateComponents,
+    InvalidTemplatePayloadError,
+    normalizeTemplateOrderDetailsAmounts as normalizeTemplateOrderDetailsContractAmounts,
+    parseCurrencyStringToCents as parseTemplateCurrencyToCents,
+    ProviderAcceptanceNotConfirmedError,
+    requireProviderMessageId,
+} from '@/services/whatsapp/template-send-contract';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
+import { isWhatsappBsuidIdentity, preserveWhatsappRecipient } from '@/lib/whatsapp/bsuid';
 import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
 import { MessengerMessagingService } from '@/services/meta/messenger-messaging-service';
 import {
@@ -32,7 +45,6 @@ import {
     enqueueAiCaseMemoryRefresh,
     enqueueAiTask,
     enqueueJob,
-    enqueueMarketingAutoClose,
     shouldEnqueueJob
 } from '@/lib/queue';
 import { touchUserPresenceActivity, touchUserPresenceFromChat } from '@/lib/presence-server';
@@ -50,6 +62,7 @@ import { prependIntelligentAttendantSignature } from '@/lib/message-signature';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { isBillingBlocked, type BillingStatus } from '@/lib/billing-logic';
 import { requireChatAccess } from '@/server/inbox/access';
+import { automatedActorCanAccessChat } from '@/lib/security/system-agent-access';
 import {
     buildRetryMediaPayload,
     extractRetriedMediaResponseDetails,
@@ -57,6 +70,12 @@ import {
     type RetryMediaPayload,
 } from '@/services/messages/retry-media';
 import { RETRY_MEDIA_RETENTION_MS } from '@/services/messages/temp-media-retention';
+import { archiveOutboundMediaSafely, isTemporaryMediaUrl } from '@/services/messages/archive-outbound-media';
+import { createSystemAgentMessageAttribution } from '@/services/messages/sender-attribution';
+import { normalizeStoredMediaUrl } from '@/lib/storage-url';
+import { resolveOutboundMessagePlatform } from '@/lib/chat-platform';
+import { getMarketingAutoCloseMs } from '@/services/chat/auto-close';
+import { scheduleMarketingAutoClose } from '@/services/chat/marketing-auto-close';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -99,6 +118,8 @@ type MediaFilePayload = {
     filename: string;
     mediatype: 'image' | 'video' | 'document' | 'audio';
     thumbnail?: string;
+    /** When present, overrides the action caption for this specific file. */
+    caption?: string;
     deleteAfterSend?: boolean;
     storageBucket?: string;
     storagePath?: string;
@@ -132,144 +153,40 @@ type InteractiveListPayload = {
     mentioned?: string[];
 };
 
-const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
+type InteractiveButton = {
+    type: 'reply' | 'copy' | 'url' | 'call' | 'pix';
+    displayText?: string;
+    id?: string;
+    url?: string;
+    copyCode?: string;
+    phoneNumber?: string;
+    currency?: string;
+    name?: string;
+    keyType?: 'phone' | 'email' | 'cpf' | 'cnpj' | 'random';
+    key?: string;
+};
 
-async function getMarketingAutoCloseMs(workspaceId: string): Promise<number> {
-    try {
-        const res = await db.query(
-            'SELECT marketing_auto_close_seconds FROM workspaces WHERE id = $1',
-            [workspaceId]
-        );
-        if ((res.rowCount ?? 0) === 0) return DEFAULT_MARKETING_AUTO_CLOSE_MS;
-        const raw = res.rows[0].marketing_auto_close_seconds;
-        if (raw === null || raw === undefined) return DEFAULT_MARKETING_AUTO_CLOSE_MS;
-        const seconds = Number(raw);
-        if (!Number.isFinite(seconds) || seconds <= 0) return 0; // 0 ou negativo desabilita
-        return seconds * 1000;
-    } catch (err) {
-        console.error('[MARKETING_AUTO_CLOSE] Falha ao buscar configuracao, usando padrao:', err);
-        return DEFAULT_MARKETING_AUTO_CLOSE_MS;
-    }
-}
+type InteractiveButtonsPayload = {
+    title: string;
+    description?: string;
+    footer?: string;
+    thumbnailUrl?: string;
+    buttons: InteractiveButton[];
+    delay?: number;
+    quoted?: {
+        key?: {
+            id?: string;
+        };
+        message?: Record<string, any>;
+    };
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+};
 
-async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, marketingSentAt: Date, autoCloseMs: number) {
-    if (!autoCloseMs || autoCloseMs <= 0) return;
-    const timer = setTimeout(async () => {
-        const client = await db.connect();
-        try {
-            await client.query('BEGIN');
-
-            const chatRes = await client.query(
-                `SELECT status, agent_id FROM chats WHERE id = $1 FOR UPDATE`,
-                [chatId]
-            );
-            if (chatRes.rowCount === 0) {
-                await client.query('ROLLBACK');
-                return;
-            }
-            const { status, agent_id } = chatRes.rows[0];
-
-            // Evita encerrar se já está encerrado ou com agente em atendimento
-            if (status === 'encerrados' || agent_id) {
-                await client.query('ROLLBACK');
-                return;
-            }
-
-            const hasReply = await client.query(
-                `SELECT 1 FROM messages WHERE chat_id = $1 AND from_me = FALSE AND created_at > $2 LIMIT 1`,
-                [chatId, marketingSentAt.toISOString()]
-            );
-
-            if ((hasReply.rowCount ?? 0) > 0) {
-                await client.query('ROLLBACK');
-                return;
-            }
-
-            const closeRes = await client.query(
-                `UPDATE chats 
-                 SET status = 'encerrados',
-                     closed_at = NOW(),
-                     updated_at = clock_timestamp()
-                 WHERE id = $1
-                 RETURNING closed_at`,
-                [chatId]
-            );
-
-            const seconds = Math.max(1, Math.round(autoCloseMs / 1000));
-            const humanDelay = seconds >= 60 ? `${Math.round(seconds / 60)} minutos` : `${seconds} segundos`;
-
-            await client.query(
-                `INSERT INTO messages (
-                    workspace_id, chat_id, type, content, from_me, is_read, metadata
-                 ) VALUES ($1, $2, 'system', $3, true, true, $4)`,
-                [
-                    workspaceId,
-                    chatId,
-                    `Atendimento encerrado automaticamente após ${humanDelay} sem resposta à mensagem de marketing.`,
-                    {
-                        event: 'marketing_auto_close',
-                        autoClosedAfterMs: autoCloseMs,
-                        marketingSentAt: marketingSentAt.toISOString(),
-                    }
-                ]
-            );
-
-            await client.query('COMMIT');
-            await broadcastHydratedChatUpdate(workspaceId, chatId);
-
-            const closedAt = closeRes.rows[0]?.closed_at
-                ? new Date(closeRes.rows[0].closed_at).toISOString()
-                : null;
-
-            try {
-                if (shouldEnqueueJob('ai_case_memory_refresh')) {
-                    await enqueueAiCaseMemoryRefresh({
-                        workspaceId,
-                        chatId,
-                        closedAt,
-                    });
-                } else {
-                    await refreshCaseMemoryForChat({
-                        workspaceId,
-                        chatId,
-                        closedAt,
-                    });
-                }
-            } catch (caseMemoryError) {
-                console.error('[MARKETING_AUTO_CLOSE] Falha ao atualizar memoria de caso:', caseMemoryError);
-            }
-        } catch (err) {
-            await client.query('ROLLBACK');
-            console.error('[MARKETING_AUTO_CLOSE] Falha ao encerrar automaticamente:', err);
-        } finally {
-            client.release();
-        }
-    }, autoCloseMs);
-    (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
-}
-
-async function scheduleMarketingAutoCloseAsync(chatId: string, workspaceId: string, marketingSentAt: Date, autoCloseMs: number) {
-    if (!autoCloseMs || autoCloseMs <= 0) return;
-
-    if (!shouldEnqueueJob('marketing_auto_close')) {
-        await scheduleMarketingAutoClose(chatId, workspaceId, marketingSentAt, autoCloseMs);
-        return;
-    }
-
-    const anchor = Number.isFinite(marketingSentAt.getTime()) ? marketingSentAt : new Date();
-    await enqueueMarketingAutoClose(
-        {
-            chatId,
-            workspaceId,
-            marketingSentAt: anchor.toISOString(),
-            autoCloseMs,
-        },
-        {
-            runAt: new Date(anchor.getTime() + autoCloseMs),
-            maxAttempts: 1,
-        }
-    );
-}
+// O WhatsApp renderiza no máximo 3 botões de resposta rápida.
+// Num arquivo "use server" todo export precisa ser uma função async, então
+// esta constante fica local. Se a UI precisar dela, mova para src/lib.
+const MAX_INTERACTIVE_REPLY_BUTTONS = 3;
 
 async function cleanupTempMedia(file: MediaFilePayload) {
     if (!file.deleteAfterSend || !file.storageBucket || !file.storagePath) return;
@@ -424,7 +341,8 @@ function serializeErrorPayload(error: unknown): unknown {
 }
 
 function normalizeWhatsappPhoneNumber(value: string): string {
-    return (normalizeWhatsappPhoneIdentity(value) ?? value.replace(/@.*$/, '').replace(/\D/g, '')) || value;
+    if (isWhatsappBsuidIdentity(value)) return '';
+    return (normalizeWhatsappPhoneIdentity(value) ?? preserveWhatsappRecipient(value)) || value;
 }
 
 function normalizeTelegramRecipient(value: string): string {
@@ -551,9 +469,14 @@ async function reopenClosedWhatsappChat(
         lastCustomerMessageAt: Date | null;
     }
 ): Promise<void> {
+    const snapshot=await client.query('SELECT team_id FROM chats WHERE id=$1 AND workspace_id=$2 FOR UPDATE',[input.chatId,input.workspaceId]);
+    const assignmentTeam=await resolveAgentTeam(client,input.workspaceId,input.senderId,snapshot.rows[0]?.team_id ?? null);
+    await recordDirectAssignment(client,{workspaceId:input.workspaceId,teamId:assignmentTeam,agentId:input.senderId,
+      chatId:input.chatId,source:'reopened_assignment',currentAgentId:null});
     const reopenRes = await client.query(
         `UPDATE chats
          SET status = 'atendimentos',
+             team_id = $4,
              closed_at = NULL,
              agent_id = $1,
              assigned_system_agent_id = NULL,
@@ -564,7 +487,7 @@ async function reopenClosedWhatsappChat(
          WHERE id = $2
            AND workspace_id = $3
          RETURNING id`,
-        [input.senderId, input.chatId, input.workspaceId]
+        [input.senderId, input.chatId, input.workspaceId, assignmentTeam]
     );
 
     if ((reopenRes.rowCount ?? 0) === 0) {
@@ -603,6 +526,45 @@ function buildInteractiveListPreview(list: InteractiveListPayload): string {
         return summary;
     }
     return `[Lista interativa] ${list.buttonText}`;
+}
+
+function buildInteractiveButtonsPreview(payload: InteractiveButtonsPayload): string {
+    const summary = [payload.title, payload.description].filter(Boolean).join(' - ').trim();
+    const labels = payload.buttons
+        .map((button) => (button.displayText || button.name || button.id || '').trim())
+        .filter(Boolean)
+        .join(' | ');
+
+    if (summary && labels) return `${summary}\n\n[Botões] ${labels}`;
+    if (summary) return summary;
+    return `[Botões interativos] ${labels}`;
+}
+
+function isValidInteractiveButtons(
+    payload: InteractiveButtonsPayload | undefined
+): payload is InteractiveButtonsPayload {
+    if (!payload?.title?.trim()) return false;
+    if (!Array.isArray(payload.buttons) || payload.buttons.length === 0) return false;
+
+    return payload.buttons.every((button) => {
+        if (!button || typeof button !== 'object') return false;
+        if (!['reply', 'copy', 'url', 'call', 'pix'].includes(button.type)) return false;
+
+        switch (button.type) {
+            case 'reply':
+                return Boolean(button.displayText?.trim()) && Boolean(button.id?.trim());
+            case 'url':
+                return Boolean(button.displayText?.trim()) && Boolean(button.url?.trim());
+            case 'call':
+                return Boolean(button.displayText?.trim()) && Boolean(button.phoneNumber?.trim());
+            case 'copy':
+                return Boolean(button.displayText?.trim()) && Boolean(button.copyCode?.trim());
+            case 'pix':
+                return Boolean(button.key?.trim()) && Boolean(button.keyType?.trim());
+            default:
+                return false;
+        }
+    });
 }
 
 function isValidInteractiveList(list: InteractiveListPayload | undefined): list is InteractiveListPayload {
@@ -779,7 +741,7 @@ async function internalSendMessage(
     messageId?: string, // Opcional: ID da mensagem gerado pelo cliente
     template?: { name: string; language: string; components: any[]; renderedContent?: string }, // New: support for templates
     apiContent?: string // Content to send to API (if different from DB content)
-): Promise<{ success: boolean; error?: string; apiResponse?: any; message?: Message }> {
+): Promise<{ success: boolean; error?: string; apiResponse?: any; providerAccepted?: boolean; message?: Message }> {
     if (!content || !chatId) {
         return { success: false, error: 'Conteúdo e ID do chat são obrigatórios.' };
     }
@@ -800,6 +762,8 @@ async function internalSendMessage(
         }
         chatId = (await resolveCanonicalWhatsappChatId(client, chatId)) || chatId;
 
+        const assignmentScope=await client.query('SELECT workspace_id FROM chats WHERE id=$1',[chatId]);
+        if (assignmentScope.rows[0] && !metadata?.sentBy) await lockWorkspaceAssignments(client,assignmentScope.rows[0].workspace_id);
         // Carrega info básica do chat para atribuição de agente (independente do canal)
         const chatInfoRes = await client.query(`
             SELECT 
@@ -808,6 +772,43 @@ async function internalSendMessage(
                 mc.platform as meta_platform,
                 (SELECT m.instance_name FROM messages m WHERE m.chat_id = c.id AND m.instance_name IS NOT NULL ORDER BY m.created_at DESC LIMIT 1) as last_instance_name,
                 COALESCE(
+                    (
+                        SELECT eai.type
+                        FROM evolution_api_instances eai
+                        WHERE eai.workspace_id = c.workspace_id
+                          AND eai.instance_name = COALESCE(
+                              $2::text,
+                              (
+                                  SELECT m.instance_name
+                                  FROM messages m
+                                  WHERE m.chat_id = c.id
+                                    AND m.instance_name IS NOT NULL
+                                  ORDER BY m.created_at DESC
+                                  LIMIT 1
+                              )
+                          )
+                          AND eai.type IN ('wa_cloud', 'baileys')
+                        LIMIT 1
+                    ),
+                    (
+                        SELECT 'telegram'::text
+                        FROM telegram_bot_instances tbi
+                        WHERE tbi.workspace_id = c.workspace_id
+                          AND tbi.instance_name = COALESCE(
+                              $2::text,
+                              (
+                                  SELECT m.instance_name
+                                  FROM messages m
+                                  WHERE m.chat_id = c.id
+                                    AND m.instance_name IS NOT NULL
+                                  ORDER BY m.created_at DESC
+                                  LIMIT 1
+                              )
+                          )
+                        LIMIT 1
+                    )
+                ) as instance_type,
+                COALESCE(
                     (SELECT m.source_from_api FROM messages m WHERE m.chat_id = c.id AND m.source_from_api IS NOT NULL ORDER BY m.created_at DESC LIMIT 1),
                     (SELECT m.platform::text FROM messages m WHERE m.chat_id = c.id AND m.platform IS NOT NULL ORDER BY m.created_at DESC LIMIT 1),
                     mc.platform::text
@@ -815,15 +816,15 @@ async function internalSendMessage(
             FROM chats c
             JOIN contacts ct ON c.contact_id = ct.id
             LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
-            WHERE c.id = $1
-        `, [chatId]);
+            WHERE c.id = $1 FOR UPDATE OF c
+        `, [chatId, instanceNameParam || null]);
 
         if (chatInfoRes.rowCount === 0) {
             throw new Error('Chat não encontrado.');
         }
 
         const chatInfo = chatInfoRes.rows[0];
-        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, assigned_system_agent_id: currentSystemAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, source_from_api: source, meta_platform } = chatInfo;
+        const { workspace_id: workspaceId, status: chatStatus, agent_id: currentAgentId, assigned_system_agent_id: currentSystemAgentId, phone_number_jid: remoteJid, last_instance_name: lastInstanceName, instance_type: instanceType, source_from_api: source, meta_platform } = chatInfo;
         const billingRes = await client.query(
             'SELECT status FROM billing_info WHERE workspace_id = $1',
             [workspaceId]
@@ -836,27 +837,47 @@ async function internalSendMessage(
                 error: 'O plano deste workspace está vencido ou inativo. Regularize a assinatura para enviar mensagens.',
             };
         }
-        const normalizedSource = (source || '').toString().toLowerCase();
-        const normalizedMetaPlatform = (meta_platform || '').toString().toLowerCase();
-        const isTelegramSource =
-            normalizedSource === 'telegram' ||
-            remoteJid?.startsWith('telegram:') ||
-            /^tg\d+$/i.test((instanceNameParam || lastInstanceName || '').toString());
-        const outboundSourceFromApi =
-            normalizedMetaPlatform === 'instagram' || normalizedSource === 'instagram'
-                ? 'instagram'
-                : normalizedMetaPlatform === 'messenger' || normalizedSource === 'messenger'
-                    ? 'messenger'
-                    : isTelegramSource
-                        ? 'telegram'
-                        : normalizedSource === 'webchat'
-                            ? 'webchat'
-                        : normalizedSource === 'wa_cloud'
-                            ? 'wa_cloud'
-                            : null;
+        const normalizedSource = (source || '').toString().trim().toLowerCase();
+        const outboundSourceFromApi = resolveOutboundMessagePlatform({
+            source,
+            metaPlatform: meta_platform,
+            instanceType,
+            instanceName: instanceNameParam || lastInstanceName,
+            remoteIdentity: remoteJid,
+        }) || normalizedSource || null;
 
         // Emulate source property for downstream logic
-        chatInfo.source = outboundSourceFromApi || source;
+        chatInfo.source = outboundSourceFromApi;
+
+        const nexusDeliveryId = metadata?.nexusDeliveryId?.trim();
+        if (nexusDeliveryId) {
+            await client.query(
+                `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+                ['nexus_message_delivery', nexusDeliveryId]
+            );
+            const existingDelivery = await client.query(
+                `SELECT *
+                 FROM messages
+                 WHERE workspace_id = $1
+                   AND chat_id = $2
+                   AND metadata->>'nexusDeliveryId' = $3
+                 ORDER BY created_at ASC
+                 LIMIT 1`,
+                [workspaceId, chatId, nexusDeliveryId]
+            );
+            if ((existingDelivery.rowCount ?? 0) > 0) {
+                persistedMessage = mapDbMessageToFrontend(existingDelivery.rows[0]);
+                const existingStatus = String(existingDelivery.rows[0].api_message_status || '').toUpperCase();
+                await client.query('COMMIT');
+                return existingStatus === 'FAILED' || existingStatus === 'ERROR'
+                    ? { success: false, error: 'A entrega anterior deste bloco falhou.', message: persistedMessage }
+                    : {
+                        success: true,
+                        providerAccepted: Boolean(existingDelivery.rows[0].message_id_from_api),
+                        message: persistedMessage,
+                    };
+            }
+        }
 
         if (messageId) {
             const existingMessageRes = await client.query(
@@ -887,9 +908,12 @@ async function internalSendMessage(
         const isCloseNotice = metadata?.event === 'close_notice';
 
         if (!currentAgentId && chatStatus !== 'encerrados' && isFromHumanAgent && !isCloseNotice) {
+            const teamScope=await client.query('SELECT team_id FROM chats WHERE id=$1 FOR UPDATE',[chatId]);
+            const assignmentTeam=await resolveAgentTeam(client,workspaceId,senderId,teamScope.rows[0]?.team_id ?? null);
+            await recordDirectAssignment(client,{workspaceId,teamId:assignmentTeam,agentId:senderId,chatId,source:'message_assignment',currentAgentId:null});
             await client.query(
                 `UPDATE chats
-                 SET agent_id = $1,
+                 SET team_id = $3, agent_id = $1,
                      assigned_system_agent_id = NULL,
                      is_autopilot_active = FALSE,
                      copilot_mode = 'off',
@@ -897,7 +921,7 @@ async function internalSendMessage(
                      assigned_at = NOW(),
                      updated_at = clock_timestamp()
                  WHERE id = $2`,
-                [senderId, chatId]
+                [senderId, chatId, assignmentTeam]
             );
             assignmentWorkspaceId = workspaceId;
 
@@ -980,8 +1004,16 @@ async function internalSendMessage(
 
     // --- BLOCO ASSÍNCRONO (FIRE-AND-FORGET) ---
     // Executa fora do fluxo principal de resposta
-    (async () => {
-        if (!persistedMessage || !backgroundTaskData?.messageId) return;
+    const orderedDelivery = metadata?.deliveryGuarantee === 'ordered';
+    const deliveryTask = (async (): Promise<{
+        success: boolean;
+        error?: string;
+        apiResponse?: any;
+        providerAccepted?: boolean;
+    }> => {
+        if (!persistedMessage || !backgroundTaskData?.messageId) {
+            return { success: false, error: 'Mensagem nao persistida para entrega.' };
+        }
 
         try {
             const { chatInfo, instanceName, remoteJid, apiContent, template, messageId } = backgroundTaskData;
@@ -1095,7 +1127,7 @@ async function internalSendMessage(
                 }
 
                 // Valida queue
-                if (shouldEnqueueJob('whatsapp_send')) {
+                if (shouldEnqueueJob('whatsapp_send') && !orderedDelivery) {
                     // Se Queue está ativa, o handler da queue fará o envio.
                     // Apenas enfileiramos.
                     // OBS: Aqui já inserimos a mensagem. Precisamos apenas chamar enqueueJob.
@@ -1120,7 +1152,7 @@ async function internalSendMessage(
                         instanceName,
                     });
                     // Retornamos aqui pois o worker vai atualizar o status depois
-                    return;
+                    return { success: true, providerAccepted: false };
                 }
 
                 // Envio Direto via API
@@ -1154,6 +1186,8 @@ async function internalSendMessage(
                 externalId,
             });
 
+            return { success: true, apiResponse, providerAccepted: true };
+
         } catch (bgError) {
             // Atualiza para FAILED
             const errorMessage = formatMetaSendError(bgError);
@@ -1182,8 +1216,16 @@ async function internalSendMessage(
                     )
                 WHERE id = $3
             `, [errorMessage, JSON.stringify(errorDetails), messageId]);
+            return { success: false, error: errorMessage, providerAccepted: false };
         }
     })();
+
+    if (orderedDelivery) {
+        const delivery = await deliveryTask;
+        return { ...delivery, message: persistedMessage };
+    }
+
+    void deliveryTask;
 
     // Retorna imediatamente com sucesso (Optimistic Server Response)
     return { success: true, message: persistedMessage };
@@ -1193,6 +1235,15 @@ async function internalSendMessage(
 /**
  * Internal function to handle media sending logic.
  */
+type InternalSendMediaOptions = {
+    awaitProvider?: boolean;
+};
+
+type MediaDeliveryOutcome = {
+    success: boolean;
+    error?: string;
+};
+
 async function internalSendMedia(
     chatId: string,
     caption: string,
@@ -1201,6 +1252,7 @@ async function internalSendMedia(
     tabId: string | null,
     metadata?: MessageMetadata,
     instanceNameParam?: string,
+    options: InternalSendMediaOptions = {},
 ): Promise<{ success: boolean; error?: string; messages?: Message[] }> {
     if (!chatId || !mediaFiles || mediaFiles.length === 0) {
         return { success: false, error: 'Dados da mídia inválidos.' };
@@ -1248,12 +1300,15 @@ async function internalSendMedia(
             apiConfig,
             instanceName,
             remoteJid,
-            chatId
+            chatId,
+            workspaceId
         };
 
         // 2. Insert all as PENDING
         for (const file of mediaFiles) {
             const messageId = randomUUID(); // Generate locally to ensure we have it
+            const fileCaption = file.caption ?? caption;
+            const originalRemoteMediaUrl = file.base64?.startsWith('http') ? file.base64 : undefined;
 
             // Infer type for DB
             let dbMessageType: Message['type'] = file.mediatype as any;
@@ -1263,7 +1318,8 @@ async function internalSendMedia(
 
             const dbMetadata: MessageMetadata = {
                 ...(metadata ?? {}),
-                mediaUrl: file.base64?.startsWith('http') ? file.base64 : undefined, // Use URL if provided
+                mediaUrl: originalRemoteMediaUrl,
+                originalMediaUrl: originalRemoteMediaUrl,
                 fileName: file.filename,
                 mimetype: file.mimetype,
                 thumbnail: file.thumbnail,
@@ -1277,7 +1333,7 @@ async function internalSendMedia(
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *`,
                 [
-                    messageId, workspaceId, chatId, dbMessageType, caption, true,
+                    messageId, workspaceId, chatId, dbMessageType, fileCaption, true,
                     null, 'PENDING', instanceName,
                     dbMetadata, true, senderId, tabId
                 ]
@@ -1299,15 +1355,18 @@ async function internalSendMedia(
         client.release();
     }
 
-    // --- Background Block ---
-    (async () => {
-        if (pendingMessages.length === 0) return;
+    const deliverPendingMedia = async (): Promise<MediaDeliveryOutcome> => {
+        if (pendingMessages.length === 0) {
+            return { success: false, error: 'Nenhuma midia pendente para envio.' };
+        }
 
-        const { apiConfig, instanceName, remoteJid } = backgroundData;
+        const { apiConfig, instanceName, remoteJid, workspaceId } = backgroundData;
+        const deliveryErrors: string[] = [];
 
         for (const item of pendingMessages) {
             const { dbMessage, file } = item;
             let sendSucceeded = false;
+            const fileCaption = dbMessage.content || '';
 
             try {
                 let apiResponse: any;
@@ -1322,26 +1381,31 @@ async function internalSendMedia(
 
                 switch (file.mediatype) {
                     case 'image':
-                        apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        apiResponse = await sendImageMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption: fileCaption });
                         break;
                     case 'video':
                         // Video uploads can be slow
-                        apiResponse = await sendVideoMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        apiResponse = await sendVideoMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption: fileCaption });
                         break;
                     case 'document':
-                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption: fileCaption });
                         break;
                     case 'audio':
                         if (file.filename?.startsWith('audio_gravado') || file.mimetype.includes('webm') || file.mimetype.includes('ogg')) {
                             apiResponse = await sendAudioMessage(apiConfig, instanceName, { number: remoteJid, audio: mediaContent, mimetype: file.mimetype, fileName: file.filename });
                             console.log('[INTERNAL_SEND_BG] sendAudioMessage response:', JSON.stringify(apiResponse, null, 2));
                         } else {
-                            apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                            apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption: fileCaption });
                         }
                         break;
                     default:
                         // Should default to document as per DB insert?
-                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption });
+                        apiResponse = await sendDocumentMessage(apiConfig, instanceName, { number: remoteJid, media: mediaContent, mimetype: file.mimetype, filename: file.filename, caption: fileCaption });
+                }
+
+                const providerMessageId = extractRetriedMediaResponseDetails(apiResponse, file.mediatype).messageIdFromApi;
+                if (!providerMessageId) {
+                    throw new Error('A Evolution API nao retornou o identificador da mensagem de midia.');
                 }
 
                 // Update Status to SENT
@@ -1373,10 +1437,41 @@ async function internalSendMedia(
                 // If the API returns a direct URL for the media, we can update it in metadata, but usually we already have our public URL if using S3.
                 // If using base64 pass-through, Evolution might return a URL if it stores it (e.g. WA Cloud).
 
+                // A midia da mensagem precisa sobreviver ao bucket de transferencia.
+                //
+                // `temp-media` e apagado em 5 minutos, entao
+                // gravar essa URL como registro da conversa fazia a midia "expirar".
+                // Quando a Evolution devolve o link do MinIO dela, ele ja e
+                // permanente e basta usar; senao arquivamos nossa propria copia
+                // agora, enquanto o arquivo ainda existe.
+                const uploadedTempUrl = file.base64?.startsWith('http') ? file.base64 : undefined;
+                const originalDocumentUrl = file.mediatype === 'document' && uploadedTempUrl && !isTemporaryMediaUrl(uploadedTempUrl)
+                    ? uploadedTempUrl
+                    : null;
+                // O link do MinIO que a Evolution devolve vem assinado por 7 dias;
+                // guardamos apenas o caminho do objeto, que nao vence.
+                const providerUrl = normalizeStoredMediaUrl(returnedUrl) || null;
+                const permanentFromProvider = providerUrl && !isTemporaryMediaUrl(providerUrl)
+                    ? providerUrl
+                    : null;
+
+                // A URL temporaria normalizada serve somente para transporte.
+                // Para documentos externos (como o PDF do SGP), o historico
+                // continua apontando para a origem fornecida pela integracao.
+                let finalMediaUrl: string | null = originalDocumentUrl || permanentFromProvider;
+                if (!finalMediaUrl && uploadedTempUrl) {
+                    const archived = await archiveOutboundMediaSafely({
+                        workspaceId,
+                        sourceUrl: uploadedTempUrl,
+                        mimetype: returnedMimetype || file.mimetype,
+                    });
+                    finalMediaUrl = archived?.url ?? uploadedTempUrl;
+                }
+
                 // Atualiza status e, se houver nova URL, atualiza o metadata
-                if (returnedUrl) {
+                if (finalMediaUrl) {
                     await db.query(`
-                        UPDATE messages 
+                        UPDATE messages
                         SET api_message_status = 'SENT',
                             message_id_from_api = $1,
                             metadata = jsonb_set(
@@ -1384,20 +1479,21 @@ async function internalSendMedia(
                                 '{mimetype}', $3
                             )
                         WHERE id = $4
-                    `, [apiResponse?.key?.id, JSON.stringify(returnedUrl), JSON.stringify(returnedMimetype || file.mimetype), dbMessage.id]);
+                    `, [providerMessageId, JSON.stringify(finalMediaUrl), JSON.stringify(returnedMimetype || file.mimetype), dbMessage.id]);
                 } else {
                     await db.query(`
-                        UPDATE messages 
+                        UPDATE messages
                         SET api_message_status = 'SENT',
                             message_id_from_api = $1
                         WHERE id = $2
-                    `, [apiResponse?.key?.id, dbMessage.id]);
+                    `, [providerMessageId, dbMessage.id]);
                 }
                 sendSucceeded = true;
 
             } catch (bgError: any) {
                 console.error(`[SEND_MEDIA_BG] Falha ao enviar ${file.filename}:`, bgError);
                 const errorMessage = bgError?.message || 'Erro desconhecido';
+                deliveryErrors.push(`${file.filename}: ${errorMessage}`);
                 const errorDetails = {
                     source: 'dialogy_send_media_background',
                     status: 'FAILED',
@@ -1410,24 +1506,47 @@ async function internalSendMedia(
                     },
                     raw_payload: serializeErrorPayload(bgError),
                 };
-                await db.query(`
-                    UPDATE messages 
-                    SET api_message_status = 'FAILED',
-                        metadata = jsonb_set(
-                            jsonb_set(COALESCE(metadata, '{}'::jsonb), '{send_error}', to_jsonb($1::text), true),
-                            '{send_error_details}',
-                            $2::jsonb,
-                            true
-                        )
-                    WHERE id = $3
-                `, [errorMessage, JSON.stringify(errorDetails), dbMessage.id]);
+                try {
+                    await db.query(`
+                        UPDATE messages
+                        SET api_message_status = 'FAILED',
+                            metadata = jsonb_set(
+                                jsonb_set(COALESCE(metadata, '{}'::jsonb), '{send_error}', to_jsonb($1::text), true),
+                                '{send_error_details}',
+                                $2::jsonb,
+                                true
+                            )
+                        WHERE id = $3
+                    `, [errorMessage, JSON.stringify(errorDetails), dbMessage.id]);
+                } catch (statusError) {
+                    console.error(`[SEND_MEDIA_BG] Falha ao persistir erro de ${file.filename}:`, statusError);
+                }
             } finally {
                 if (sendSucceeded) {
                     await cleanupTempMedia(file);
                 }
             }
         }
-    })();
+
+        return deliveryErrors.length > 0
+            ? { success: false, error: deliveryErrors.join(' | ') }
+            : { success: true };
+    };
+
+    if (options.awaitProvider) {
+        try {
+            const delivery = await deliverPendingMedia();
+            return { ...delivery, messages: pendingMessages.map(p => p.dbMessage) };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Falha ao confirmar envio da midia.';
+            console.error('[SEND_MEDIA_AWAIT] Falha ao confirmar envio:', error);
+            return { success: false, error: errorMessage, messages: pendingMessages.map(p => p.dbMessage) };
+        }
+    }
+
+    void deliverPendingMedia().catch((error) => {
+        console.error('[SEND_MEDIA_BG] Falha inesperada no processamento em background:', error);
+    });
 
     // Return immediately
     return { success: true, messages: pendingMessages.map(p => p.dbMessage) };
@@ -1675,6 +1794,18 @@ export const retryMessageAction = withDebug(
             return { success: false, error: 'Sem permissao para reenviar mensagem.' };
         }
 
+        // A failed template must not bypass validation through the generic text retry path.
+        if ((metadata as MessageMetadata).isTemplate) {
+            try {
+                assertValidTemplateComponents((metadata as MessageMetadata).templateComponents);
+            } catch (error) {
+                if (error instanceof InvalidTemplatePayloadError) {
+                    return { success: false, error: error.message };
+                }
+                throw error;
+            }
+        }
+
         await touchUserPresenceActivity(user.id, messageRow.workspace_id, null, 'retry_message');
 
         const instanceName = messageRow.instance_name || messageRow.last_instance_name;
@@ -1829,7 +1960,8 @@ export const retryMessageAction = withDebug(
                 await client.query(
                     `UPDATE messages
                      SET api_message_status = 'PENDING',
-                         message_id_from_api = NULL
+                         message_id_from_api = NULL,
+                         metadata = COALESCE(metadata, '{}'::jsonb) - 'send_error' - 'send_error_details'
                      WHERE id = $1`,
                     [messageId]
                 );
@@ -1849,7 +1981,18 @@ export const retryMessageAction = withDebug(
                         senderType,
                         tabId: messageRow.sent_by_tab,
                     },
-                    { client }
+                    {
+                        client,
+                        // O jobId padrao e whatsapp_send__<messageId>, e o BullMQ guarda
+                        // os jobs concluidos/falhos (removeOnComplete 1000 / removeOnFail
+                        // 5000). Reenviar com o mesmo id fazia o add() devolver o job
+                        // antigo sem enfileirar nada: a mensagem ficava PENDING para
+                        // sempre e a action ainda respondia success. Cada retry manual
+                        // precisa de um id proprio. O envio duplicado continua barrado
+                        // pelo lock em messages (so sai de PENDING/FAILED com
+                        // message_id_from_api NULL) no handler de whatsapp_send.
+                        jobId: `whatsapp_send__${messageId}__retry__${Date.now()}`,
+                    }
                 );
 
                 await client.query('COMMIT');
@@ -1913,10 +2056,14 @@ export async function sendAutomatedMessageAction(
     message?: Message;
 }> {
     chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
-    content = await withIntelligentAttendantSignature(content, agentId, isSystemAgent);
+    if (!await automatedActorCanAccessChat({ chatId, actorId: agentId, isSystemAgent })) {
+        return { success: false, error: 'Remetente sem acesso a esta conversa.' };
+    }
+    if (metadata?.skipUserSignature !== true) {
+        content = await withIntelligentAttendantSignature(content, agentId, isSystemAgent);
+    }
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
     const shouldAutoCloseMarketing = !!metadata?.isMarketing;
-    const marketingSentAt = shouldAutoCloseMarketing ? new Date() : null;
     let workspaceIdForAutoClose: string | null = null;
 
     // Meta first
@@ -1951,6 +2098,13 @@ export async function sendAutomatedMessageAction(
                     senderUserId: isSystemAgent ? null : agentId,
                     senderSystemAgentId: isSystemAgent ? agentId : null,
                 });
+                if (shouldAutoCloseMarketing) {
+                    try {
+                        await scheduleMarketingAutoClose(chatId, metaCtx.chat.workspace_id, new Date());
+                    } catch (error) {
+                        console.error('[SEND_AUTOMATED_MESSAGE][AUTO_CLOSE] Falha ao agendar auto-encerramento:', error);
+                    }
+                }
                 return { success: true, apiResponse, providerAccepted: true };
             } catch (metaErr) {
                 console.error('[SEND_AUTOMATED_MESSAGE][META]', metaErr);
@@ -1978,9 +2132,10 @@ export async function sendAutomatedMessageAction(
                 const wsRes = await db.query('SELECT workspace_id FROM chats WHERE id = $1', [chatId]);
                 workspaceIdForAutoClose = wsRes.rows[0]?.workspace_id ?? null;
             }
-            if (workspaceIdForAutoClose && marketingSentAt) {
+            if (workspaceIdForAutoClose) {
                 const autoCloseMs = await getMarketingAutoCloseMs(workspaceIdForAutoClose);
-                await scheduleMarketingAutoCloseAsync(chatId, workspaceIdForAutoClose, marketingSentAt, autoCloseMs);
+                const marketingSentAt = result.message?.createdAt ? new Date(result.message.createdAt) : new Date();
+                await scheduleMarketingAutoClose(chatId, workspaceIdForAutoClose, marketingSentAt, autoCloseMs, result.message?.id);
             }
         } catch (err) {
             console.error('[SEND_AUTOMATED_MESSAGE][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
@@ -1998,11 +2153,16 @@ export const sendMediaAction = withDebug(
         mediaFiles: MediaFilePayload[],
         tabId: string | null,
         metadata?: MessageMetadata
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<{ success: boolean; error?: string; messages?: Message[] }> {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Usuario nao autenticado.' };
+        }
+
+        const access = await requireChatAccess(user.id, chatId);
+        if (!access.ok) {
+            return { success: false, error: access.error };
         }
 
         await touchUserPresenceFromChat(user.id, chatId, tabId, 'activity');
@@ -2021,37 +2181,14 @@ export const sendMediaAction = withDebug(
                         if ((chatInfoRes.rowCount ?? 0) > 0) {
                             const { workspace_id: workspaceId, status, agent_id: currentAgentId, assigned_system_agent_id: currentSystemAgentId } = chatInfoRes.rows[0];
                             if (!currentAgentId && status !== 'encerrados') {
-                                await client.query(
-                                    `UPDATE chats
-                                     SET agent_id = $1,
-                                         assigned_system_agent_id = NULL,
-                                         is_autopilot_active = FALSE,
-                                         copilot_mode = 'off',
-                                         status = 'atendimentos',
-                                         assigned_at = NOW(),
-                                         updated_at = clock_timestamp()
-                                     WHERE id = $2`,
-                                    [user.id, chatId]
-                                );
-                                await broadcastHydratedChatUpdate(workspaceId, chatId);
-
-                                const agentRes = await client.query(
-                                    'SELECT full_name, email FROM users WHERE id = $1',
-                                    [user.id]
-                                );
-                                const agentName = agentRes.rows[0]?.full_name || agentRes.rows[0]?.email || 'Agente';
-
-                                await client.query(
-                                    `INSERT INTO messages (
-                                        workspace_id, chat_id, type, content, from_me,
-                                        sender_user_id, created_at, is_read
-                                    ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
-                                    [workspaceId, chatId, currentSystemAgentId ? `Atendimento reassumido por ${agentName}.` : `Atendimento iniciado por ${agentName}.`, user.id]
-                                );
+                                const agentName=user.user_metadata?.full_name || user.email || 'Agente';
+                                await claimQueueChat(workspaceId,chatId,user.id,agentName,true,client);
+                                await broadcastHydratedChatUpdate(workspaceId,chatId);
                             }
                         }
                     } catch (assignErr) {
                         console.error('[SEND_MEDIA][ASSIGN]', assignErr);
+                        throw assignErr;
                     }
 
                     const service = metaCtx.platform === 'instagram'
@@ -2059,10 +2196,11 @@ export const sendMediaAction = withDebug(
                         : new MessengerMessagingService(metaCtx.channel);
 
                     for (const file of mediaFiles) {
+                        const fileCaption = file.caption ?? caption;
                         const apiResponse = await service.sendMessage({
                             recipientId: metaCtx.externalUserId,
                             type: file.mediatype === 'document' ? 'file' : file.mediatype,
-                            text: caption,
+                            text: fileCaption,
                             mediaUrl: file.base64, // assume URL/base64 already handled upstream
                         });
 
@@ -2072,7 +2210,7 @@ export const sendMediaAction = withDebug(
                             contact: metaCtx.contact,
                             message: {
                                 type: file.mediatype === 'document' ? 'document' : file.mediatype,
-                                content: caption,
+                                content: fileCaption,
                                 metadata: { ...metadata, mediaUrl: file.base64, mimetype: file.mimetype, fileName: file.filename },
                                 mediaUrl: file.base64,
                             },
@@ -2124,7 +2262,11 @@ export async function sendAutomatedMediaAction(
     metadata?: MessageMetadata,
 ): Promise<{ success: boolean; error?: string }> {
     chatId = (await resolveCanonicalWhatsappChatId(db, chatId)) || chatId;
-    const baseMetadata = metadata ?? {};
+    if (!await automatedActorCanAccessChat({ chatId, actorId: agentId, isSystemAgent: true })) {
+        return { success: false, error: 'Remetente sem acesso a esta conversa.' };
+    }
+    const attribution = createSystemAgentMessageAttribution(agentId, metadata);
+    const baseMetadata = attribution.metadata;
     // Meta first
     const client = await db.connect();
     try {
@@ -2159,8 +2301,8 @@ export async function sendAutomatedMediaAction(
                     externalChannelId: metaCtx.externalChannelId,
                     rawPayload: { request: { caption, file }, response: apiResponse },
                     fromMe: true,
-                    senderUserId: agentId,
-                    senderSystemAgentId: null,
+                    senderUserId: attribution.senderUserId,
+                    senderSystemAgentId: attribution.senderSystemAgentId,
                 });
 
                 await cleanupTempMedia(file);
@@ -2173,119 +2315,24 @@ export async function sendAutomatedMediaAction(
         client.release();
     }
 
-    return internalSendMedia(chatId, caption, mediaFiles, agentId, null, baseMetadata, instanceName);
+    return internalSendMedia(
+        chatId,
+        caption,
+        mediaFiles,
+        agentId,
+        null,
+        baseMetadata,
+        instanceName,
+        { awaitProvider: true },
+    );
 }
 
 function parseCurrencyStringToCents(value: unknown): number | null {
-    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
-        return value;
-    }
-
-    if (typeof value !== 'string') {
-        return null;
-    }
-
-    const raw = value.trim();
-    if (!raw || /^\{[^}]+\}$/.test(raw)) {
-        return null;
-    }
-
-    let normalized = raw
-        .replace(/[^\d,.-]/g, '')
-        .replace(/(?!^)-/g, '');
-
-    if (!normalized || normalized === '-' || normalized === ',' || normalized === '.') {
-        return null;
-    }
-
-    const commaIndex = normalized.lastIndexOf(',');
-    const dotIndex = normalized.lastIndexOf('.');
-    const decimalSeparator = commaIndex > dotIndex ? ',' : dotIndex >= 0 ? '.' : '';
-
-    if (decimalSeparator) {
-        const separatorIndex = normalized.lastIndexOf(decimalSeparator);
-        const integerPart = normalized.slice(0, separatorIndex).replace(/[,.]/g, '') || '0';
-        const decimalPart = normalized.slice(separatorIndex + 1).replace(/\D/g, '');
-
-        if (decimalPart.length === 0) {
-            normalized = integerPart;
-        } else if (decimalPart.length <= 2) {
-            normalized = `${integerPart}.${decimalPart.padEnd(2, '0')}`;
-        } else {
-            normalized = `${integerPart}${decimalPart}`;
-        }
-    }
-
-    const amount = Number(normalized);
-    if (!Number.isFinite(amount) || amount < 0) {
-        return null;
-    }
-
-    return Math.round(amount * 100);
+    return parseTemplateCurrencyToCents(value);
 }
 
 function normalizeTemplateOrderDetailsAmounts(components: any[]): any[] {
-    if (!Array.isArray(components)) {
-        return components;
-    }
-
-    const clonedComponents = structuredClone(components);
-    const bodyComponent = clonedComponents.find((component: any) => String(component?.type || '').toLowerCase() === 'body');
-    const bodyParameters = Array.isArray(bodyComponent?.parameters) ? bodyComponent.parameters : [];
-    const bodyValueCandidates = [
-        bodyParameters[3]?.text,
-        ...bodyParameters.map((parameter: any) => parameter?.text),
-    ];
-    const inferredCents = bodyValueCandidates
-        .map(parseCurrencyStringToCents)
-        .find((value): value is number => typeof value === 'number');
-
-    const normalizeAmountValue = (amount: any, options: { useInferredFallback?: boolean } = {}) => {
-        if (!amount || typeof amount !== 'object') {
-            return;
-        }
-
-        if (options.useInferredFallback && inferredCents !== undefined) {
-            amount.value = inferredCents;
-            return;
-        }
-
-        const parsedCents = parseCurrencyStringToCents(amount.value);
-        if (parsedCents !== null) {
-            amount.value = parsedCents;
-            return;
-        }
-    };
-
-    for (const component of clonedComponents) {
-        if (String(component?.type || '').toLowerCase() !== 'button') {
-            continue;
-        }
-
-        for (const parameter of component.parameters || []) {
-            const orderDetails = parameter?.action?.order_details;
-            if (!orderDetails || typeof orderDetails !== 'object') {
-                continue;
-            }
-
-            normalizeAmountValue(orderDetails.total_amount);
-            normalizeAmountValue(orderDetails.order?.subtotal);
-            normalizeAmountValue(orderDetails.order?.tax);
-            normalizeAmountValue(orderDetails.order?.shipping);
-            normalizeAmountValue(orderDetails.order?.discount);
-
-            if (Array.isArray(orderDetails.order?.items)) {
-                for (const item of orderDetails.order.items) {
-                    normalizeAmountValue(item?.amount, { useInferredFallback: true });
-                }
-            }
-
-            normalizeAmountValue(orderDetails.total_amount, { useInferredFallback: true });
-            normalizeAmountValue(orderDetails.order?.subtotal, { useInferredFallback: true });
-        }
-    }
-
-    return clonedComponents;
+    return normalizeTemplateOrderDetailsContractAmounts(components);
 }
 
 function renderApprovedTemplateContent(template: any, components: any[]): string | null {
@@ -2354,25 +2401,31 @@ export const sendAgentTemplateAction = withDebug(
             instanceName: string;
             name: string;
             language: string;
-            components: any[];
+            components: unknown;
             renderedContent?: string;
             metadata?: MessageMetadata;
             senderUserId?: string;
         }
-    ): Promise<{ success: boolean; error?: string; apiResponse?: any }> {
+    ): Promise<{ success: boolean; error?: string; apiResponse?: any; statusCode?: number }> {
         const { agentId, workspaceId, numberid, instanceName, name, language, components, renderedContent, metadata, senderUserId } = input;
 
         if (!numberid || !instanceName || !name || !language) {
-            return { success: false, error: 'Campos obrigatórios faltando.' };
+            return { success: false, error: 'Campos obrigatórios faltando ou invalidos.', statusCode: 422 };
         }
 
-        const normalizedComponents = normalizeTemplateOrderDetailsAmounts(components);
-        const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
-        if (!apiConfig) {
-            return { success: false, error: `Configuracao da Evolution API nao encontrada para a instancia ${instanceName}.` };
+        let validationError: InvalidTemplatePayloadError | null = null;
+        let normalizedComponents = Array.isArray(components) ? components : [];
+        try {
+            assertValidTemplateComponents(components);
+            normalizedComponents = normalizeTemplateOrderDetailsAmounts(normalizedComponents);
+        } catch (error) {
+            if (!(error instanceof InvalidTemplatePayloadError)) throw error;
+            validationError = error;
         }
+
+        const apiConfig = validationError ? null : await getEvolutionApiConfig(instanceName, { workspaceId });
         const resolvedRenderedContent = renderedContent?.trim()
-            || await resolveTemplateRenderedContent(apiConfig, instanceName, name, language, normalizedComponents);
+            || (apiConfig ? await resolveTemplateRenderedContent(apiConfig, instanceName, name, language, normalizedComponents) : null);
         const client = await db.connect();
         let messageId: string | null = null;
         let transactionOpen = false;
@@ -2430,9 +2483,10 @@ export const sendAgentTemplateAction = withDebug(
 
             // Build human-readable content preview from components, fallback to template name.
             let content = resolvedRenderedContent || `[Template: ${name}]`;
-            const bodyComponent = normalizedComponents.find((c: any) => c.type === 'body');
-            const bodyText = bodyComponent?.parameters
-                ?.map((p: any) => p.text || p.payload || p.example || '')
+            const bodyComponent = normalizedComponents.find((c: any) => c?.type === 'body');
+            const bodyParameters = Array.isArray(bodyComponent?.parameters) ? bodyComponent.parameters : [];
+            const bodyText = bodyParameters
+                .map((p: any) => p?.text || p?.payload || p?.example || '')
                 .filter(Boolean)
                 .join(' ')
                 .trim();
@@ -2449,12 +2503,22 @@ export const sendAgentTemplateAction = withDebug(
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
                 [
                     messageId, workspaceId, chatId, 'text', content, true,
-                    null, 'PENDING', instanceName,
+                    null, validationError ? 'FAILED' : 'PENDING', instanceName,
                     {
+                        ...(metadata ?? {}),
                         isTemplate: true,
                         templateName: name,
                         templateComponents: normalizedComponents,
-                        ...(metadata ?? {}),
+                        ...(validationError ? {
+                            send_error: validationError.message,
+                            send_error_details: {
+                                source: 'dialogy_template_validation',
+                                status: 'FAILED',
+                                reason: validationError.message,
+                                code: validationError.code,
+                                captured_at: new Date().toISOString(),
+                            },
+                        } : {}),
                     }, true, senderUserId ? null : agentId, senderUserId || null
                 ]
             );
@@ -2462,12 +2526,21 @@ export const sendAgentTemplateAction = withDebug(
             await client.query('COMMIT');
             transactionOpen = false;
 
+            // Invalid payloads are already FAILED, never temporarily PENDING or sent to Evolution.
+            if (validationError) {
+                return { success: false, error: validationError.message, statusCode: validationError.status };
+            }
+            if (!apiConfig) {
+                throw new Error(`Configuracao da Evolution API nao encontrada para a instancia ${instanceName}.`);
+            }
+
             const apiResponse = await sendTemplateMessage(apiConfig, instanceName, {
                 number: fullJid,
                 name,
                 language,
                 components: normalizedComponents
             });
+            const providerMessageId = requireProviderMessageId(apiResponse);
             providerAccepted = true;
 
             try {
@@ -2479,7 +2552,7 @@ export const sendAgentTemplateAction = withDebug(
                              ELSE 'SENT'
                          END
                      WHERE id = $2`,
-                    [apiResponse?.key?.id, messageId]
+                    [providerMessageId, messageId]
                 );
             } catch (trackingError) {
                 console.error('[SEND_AGENT_TEMPLATE_ACTION] Envio aceito, mas falhou ao persistir o status externo:', trackingError);
@@ -2488,7 +2561,7 @@ export const sendAgentTemplateAction = withDebug(
             if (metadata?.isMarketing) {
                 try {
                     const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
-                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
                 } catch (err) {
                     console.error('[SEND_AGENT_TEMPLATE_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
                 }
@@ -2497,17 +2570,50 @@ export const sendAgentTemplateAction = withDebug(
             return { success: true, apiResponse };
 
         } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
             if (transactionOpen) {
                 await client.query('ROLLBACK');
             } else if (messageId && !providerAccepted) {
-                await db.query(
-                    `UPDATE messages SET api_message_status = 'FAILED' WHERE id = $1 AND api_message_status IN ('PENDING', 'SENT')`,
-                    [messageId]
-                );
+                try {
+                    await db.query(
+                        `UPDATE messages
+                         SET api_message_status = 'FAILED',
+                             metadata = jsonb_set(
+                                 jsonb_set(
+                                     COALESCE(metadata, '{}'::jsonb),
+                                     '{send_error}',
+                                     to_jsonb($2::text),
+                                     true
+                                 ),
+                                 '{send_error_details}',
+                                 $3::jsonb,
+                                 true
+                             )
+                         WHERE id = $1
+                           AND api_message_status IN ('PENDING', 'SENT')`,
+                        [
+                            messageId,
+                            errorMessage,
+                            JSON.stringify({
+                                source: 'dialogy_template_send',
+                                status: 'FAILED',
+                                reason: errorMessage,
+                                captured_at: new Date().toISOString(),
+                                raw_payload: serializeErrorPayload(error),
+                            }),
+                        ]
+                    );
+                } catch (trackingError) {
+                    console.error('[SEND_AGENT_TEMPLATE_ACTION] Falha ao persistir erro do envio:', trackingError);
+                }
             }
             console.error('[SEND_AGENT_TEMPLATE_ACTION] Erro:', error);
-            const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
-            return { success: false, error: `Falha ao enviar template: ${errorMessage}` };
+            const statusCode = error instanceof InvalidTemplatePayloadError
+                ? error.status
+                : error instanceof ProviderAcceptanceNotConfirmedError
+                    ? error.status
+                    : undefined;
+            return { success: false, error: `Falha ao enviar template: ${errorMessage}`, statusCode };
         } finally {
             client.release();
         }
@@ -2516,6 +2622,92 @@ export const sendAgentTemplateAction = withDebug(
         contextResolver: (input) => ({ payload: { instanceName: input.instanceName, template: input.name } })
     }
 );
+
+/**
+ * Resolve (ou cria) o chat e o JID de destino de um envio interativo.
+ * Compartilhado por listas e botões; deve rodar dentro de uma transacao aberta.
+ */
+async function resolveInteractiveWhatsappTarget(
+    client: any,
+    params: { workspaceId: string; providedChatId?: string; numberid?: string }
+): Promise<{ chatId: string; fullJid: string }> {
+    const { workspaceId, providedChatId, numberid } = params;
+
+    let chatId = providedChatId
+        ? ((await resolveCanonicalWhatsappChatId(client, providedChatId)) || providedChatId)
+        : providedChatId;
+    let fullJid: string;
+
+    if (chatId) {
+        const chatRes = await client.query(
+            `SELECT ct.phone_number_jid
+             FROM chats c
+             JOIN contacts ct ON ct.id = c.contact_id
+             WHERE c.id = $1 AND c.workspace_id = $2
+             LIMIT 1`,
+            [chatId, workspaceId]
+        );
+
+        if ((chatRes.rowCount ?? 0) === 0) {
+            throw new Error('Chat nao encontrado para o workspace informado.');
+        }
+
+        fullJid = chatRes.rows[0].phone_number_jid;
+        if (!fullJid) {
+            throw new Error('Chat nao possui contato WhatsApp valido.');
+        }
+    } else {
+        await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: numberid! });
+
+        const whatsappContact = await findOrCreateWhatsappContact(client, {
+            workspaceId,
+            phoneOrJid: numberid!,
+            fallbackName: normalizeWhatsappPhoneNumber(numberid!),
+            fallbackPhone: normalizeWhatsappPhoneNumber(numberid!),
+        });
+
+        const contactId = whatsappContact.contact.id;
+        fullJid = whatsappContact.normalizedJid;
+
+        const activeChat = await findWhatsappChatByIdentity(client, {
+            workspaceId,
+            phoneOrJid: numberid!,
+            statuses: ['gerais', 'atendimentos'],
+            preferOpen: true,
+        });
+
+        if (activeChat?.id) {
+            chatId = activeChat.id;
+        } else {
+            const closedChat = await findWhatsappChatByIdentity(client, {
+                workspaceId,
+                phoneOrJid: numberid!,
+                statuses: ['encerrados'],
+            });
+
+            if (closedChat?.id) {
+                chatId = closedChat.id;
+            } else {
+                const newChatId = randomUUID();
+                const protocol = buildChatProtocol(newChatId);
+                const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
+                const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
+                if (!chatLimitStatus.allowed) {
+                    throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
+                }
+                const newChatRes = await client.query(
+                    `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol)
+                     VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4)
+                     RETURNING id`,
+                    [newChatId, workspaceId, contactId, protocol]
+                );
+                chatId = newChatRes.rows[0].id;
+            }
+        }
+    }
+
+    return { chatId: chatId!, fullJid };
+}
 
 export const sendAgentListAction = withDebug(
     'send_agent_list',
@@ -2529,7 +2721,7 @@ export const sendAgentListAction = withDebug(
             list: InteractiveListPayload;
             metadata?: MessageMetadata;
         }
-    ): Promise<{ success: boolean; error?: string; apiResponse?: any; chatId?: string }> {
+    ): Promise<{ success: boolean; error?: string; apiResponse?: any; chatId?: string; providerAccepted?: boolean }> {
         const { agentId, workspaceId, instanceName, chatId: providedChatId, numberid, list, metadata } = input;
 
         if (!instanceName || (!providedChatId && !numberid) || !isValidInteractiveList(list)) {
@@ -2537,79 +2729,34 @@ export const sendAgentListAction = withDebug(
         }
 
         const client = await db.connect();
+        let providerAccepted = false;
         try {
             await client.query('BEGIN');
 
-            let chatId = providedChatId
-                ? ((await resolveCanonicalWhatsappChatId(client, providedChatId)) || providedChatId)
-                : providedChatId;
-            let fullJid: string;
+            const { chatId, fullJid } = await resolveInteractiveWhatsappTarget(client, {
+                workspaceId,
+                providedChatId,
+                numberid,
+            });
 
-            if (chatId) {
-                const chatRes = await client.query(
-                    `SELECT ct.phone_number_jid
-                     FROM chats c
-                     JOIN contacts ct ON ct.id = c.contact_id
-                     WHERE c.id = $1 AND c.workspace_id = $2
-                     LIMIT 1`,
-                    [chatId, workspaceId]
+            const nexusDeliveryId = metadata?.nexusDeliveryId?.trim();
+            if (nexusDeliveryId) {
+                await client.query(
+                    `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+                    ['nexus_message_delivery', nexusDeliveryId]
                 );
-
-                if ((chatRes.rowCount ?? 0) === 0) {
-                    throw new Error('Chat nao encontrado para o workspace informado.');
-                }
-
-                fullJid = chatRes.rows[0].phone_number_jid;
-                if (!fullJid) {
-                    throw new Error('Chat nao possui contato WhatsApp valido.');
-                }
-            } else {
-                await lockWhatsappIdentityTransaction(client, { workspaceId, phoneOrJid: numberid! });
-
-                const whatsappContact = await findOrCreateWhatsappContact(client, {
-                    workspaceId,
-                    phoneOrJid: numberid!,
-                    fallbackName: normalizeWhatsappPhoneNumber(numberid!),
-                    fallbackPhone: normalizeWhatsappPhoneNumber(numberid!),
-                });
-
-                const contactId = whatsappContact.contact.id;
-                fullJid = whatsappContact.normalizedJid;
-
-                const activeChat = await findWhatsappChatByIdentity(client, {
-                    workspaceId,
-                    phoneOrJid: numberid!,
-                    statuses: ['gerais', 'atendimentos'],
-                    preferOpen: true,
-                });
-
-                if (activeChat?.id) {
-                    chatId = activeChat.id;
-                } else {
-                    const closedChat = await findWhatsappChatByIdentity(client, {
-                        workspaceId,
-                        phoneOrJid: numberid!,
-                        statuses: ['encerrados'],
-                    });
-
-                    if (closedChat?.id) {
-                        chatId = closedChat.id;
-                    } else {
-                        const newChatId = randomUUID();
-                        const protocol = buildChatProtocol(newChatId);
-                        const { getMonthlyChatLimitStatus } = await import('@/lib/billing-logic');
-                        const chatLimitStatus = await getMonthlyChatLimitStatus(workspaceId);
-                        if (!chatLimitStatus.allowed) {
-                            throw new Error(`Limite mensal de chats do plano ${chatLimitStatus.plan.toUpperCase()} atingido.`);
-                        }
-                        const newChatRes = await client.query(
-                            `INSERT INTO chats (id, workspace_id, contact_id, status, agent_id, assigned_at, protocol)
-                             VALUES ($1, $2, $3, 'gerais', NULL, NULL, $4)
-                             RETURNING id`,
-                            [newChatId, workspaceId, contactId, protocol]
-                        );
-                        chatId = newChatRes.rows[0].id;
-                    }
+                const existing = await client.query(
+                    `SELECT id
+                     FROM messages
+                     WHERE workspace_id = $1
+                       AND chat_id = $2
+                       AND metadata->>'nexusDeliveryId' = $3
+                     LIMIT 1`,
+                    [workspaceId, chatId, nexusDeliveryId]
+                );
+                if ((existing.rowCount ?? 0) > 0) {
+                    await client.query('COMMIT');
+                    return { success: true, chatId, providerAccepted: true };
                 }
             }
 
@@ -2630,6 +2777,7 @@ export const sendAgentListAction = withDebug(
                 mentionsEveryOne: list.mentionsEveryOne,
                 mentioned: list.mentioned,
             });
+            providerAccepted = true;
 
             const apiMessageId = apiResponse?.key?.id ?? apiResponse?.message_id ?? apiResponse?.id ?? null;
 
@@ -2674,18 +2822,20 @@ export const sendAgentListAction = withDebug(
             if (metadata?.isMarketing && chatId) {
                 try {
                     const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
-                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
                 } catch (err) {
                     console.error('[SEND_AGENT_LIST_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
                 }
             }
 
-            return { success: true, apiResponse, chatId };
+            return { success: true, apiResponse, chatId, providerAccepted: true };
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('[SEND_AGENT_LIST_ACTION] Erro:', error);
             const errorMessage = error instanceof Error ? error.message : 'Ocorreu um erro desconhecido.';
-            return { success: false, error: `Falha ao enviar lista: ${errorMessage}` };
+            return providerAccepted
+                ? { success: true, error: `Lista aceita pelo provedor, mas o rastreamento falhou: ${errorMessage}`, providerAccepted: true }
+                : { success: false, error: `Falha ao enviar lista: ${errorMessage}`, providerAccepted: false };
         } finally {
             client.release();
         }
@@ -2697,6 +2847,156 @@ export const sendAgentListAction = withDebug(
                 hasChatId: Boolean(input.chatId),
                 hasPhoneNumber: Boolean(input.numberid),
                 sections: input.list?.sections?.length ?? 0,
+            }
+        })
+    }
+);
+
+export const sendAgentButtonsAction = withDebug(
+    'send_agent_buttons',
+    async function sendAgentButtonsAction(
+        input: {
+            agentId: string;
+            workspaceId: string;
+            instanceName: string;
+            chatId?: string;
+            numberid?: string;
+            buttons: InteractiveButtonsPayload;
+            metadata?: MessageMetadata;
+        }
+    ): Promise<{ success: boolean; error?: string; apiResponse?: any; chatId?: string; providerAccepted?: boolean }> {
+        const { agentId, workspaceId, instanceName, chatId: providedChatId, numberid, buttons, metadata } = input;
+
+        if (!instanceName || (!providedChatId && !numberid) || !isValidInteractiveButtons(buttons)) {
+            return { success: false, error: 'Campos obrigatorios faltando ou botoes invalidos.' };
+        }
+
+        if (buttons.buttons.length > MAX_INTERACTIVE_REPLY_BUTTONS) {
+            return {
+                success: false,
+                error: `O WhatsApp aceita no maximo ${MAX_INTERACTIVE_REPLY_BUTTONS} botoes por mensagem.`,
+            };
+        }
+
+        const client = await db.connect();
+        let providerAccepted = false;
+        try {
+            await client.query('BEGIN');
+
+            const { chatId, fullJid } = await resolveInteractiveWhatsappTarget(client, {
+                workspaceId,
+                providedChatId,
+                numberid,
+            });
+
+            const nexusDeliveryId = metadata?.nexusDeliveryId?.trim();
+            if (nexusDeliveryId) {
+                await client.query(
+                    `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+                    ['nexus_message_delivery', nexusDeliveryId]
+                );
+                const existing = await client.query(
+                    `SELECT id
+                     FROM messages
+                     WHERE workspace_id = $1
+                       AND chat_id = $2
+                       AND metadata->>'nexusDeliveryId' = $3
+                     LIMIT 1`,
+                    [workspaceId, chatId, nexusDeliveryId]
+                );
+                if ((existing.rowCount ?? 0) > 0) {
+                    await client.query('COMMIT');
+                    return { success: true, chatId, providerAccepted: true };
+                }
+            }
+
+            const apiConfig = await getEvolutionApiConfig(instanceName, { workspaceId });
+            if (!apiConfig) {
+                throw new Error(`Configuracao da Evolution API nao encontrada para a instancia ${instanceName}.`);
+            }
+
+            const apiResponse = await sendButtonsMessage(apiConfig, instanceName, {
+                number: fullJid,
+                title: buttons.title,
+                description: buttons.description,
+                footer: buttons.footer,
+                thumbnailUrl: buttons.thumbnailUrl,
+                buttons: buttons.buttons,
+                delay: buttons.delay,
+                quoted: buttons.quoted,
+                mentionsEveryOne: buttons.mentionsEveryOne,
+                mentioned: buttons.mentioned,
+            });
+            providerAccepted = true;
+
+            const apiMessageId = apiResponse?.key?.id ?? apiResponse?.message_id ?? apiResponse?.id ?? null;
+
+            await client.query(
+                `INSERT INTO messages (
+                    workspace_id, chat_id, type, content, from_me,
+                    message_id_from_api, api_message_status, instance_name,
+                    metadata, is_read, sender_system_agent_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                [
+                    workspaceId,
+                    chatId,
+                    'text',
+                    buildInteractiveButtonsPreview(buttons),
+                    true,
+                    apiMessageId,
+                    'SENT',
+                    instanceName,
+                    {
+                        interactiveType: 'buttons',
+                        interactivePayload: {
+                            kind: 'buttons',
+                            title: buttons.title,
+                            description: buttons.description,
+                            footer: buttons.footer,
+                            thumbnailUrl: buttons.thumbnailUrl,
+                            buttons: buttons.buttons,
+                            delay: buttons.delay,
+                            quoted: buttons.quoted,
+                            mentionsEveryOne: buttons.mentionsEveryOne,
+                            mentioned: buttons.mentioned,
+                        },
+                        ...(metadata ?? {}),
+                    },
+                    true,
+                    agentId,
+                ]
+            );
+
+            await client.query('COMMIT');
+
+            if (metadata?.isMarketing && chatId) {
+                try {
+                    const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
+                } catch (err) {
+                    console.error('[SEND_AGENT_BUTTONS_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
+                }
+            }
+
+            return { success: true, apiResponse, chatId, providerAccepted: true };
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[SEND_AGENT_BUTTONS_ACTION] Erro:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Ocorreu um erro desconhecido.';
+            return providerAccepted
+                ? { success: true, error: `Botoes aceitos pelo provedor, mas o rastreamento falhou: ${errorMessage}`, providerAccepted: true }
+                : { success: false, error: `Falha ao enviar botoes: ${errorMessage}`, providerAccepted: false };
+        } finally {
+            client.release();
+        }
+    },
+    {
+        contextResolver: (input) => ({
+            payload: {
+                instanceName: input.instanceName,
+                hasChatId: Boolean(input.chatId),
+                hasPhoneNumber: Boolean(input.numberid),
+                buttons: input.buttons?.buttons?.length ?? 0,
             }
         })
     }
@@ -2818,6 +3118,7 @@ export const startNewConversation = withDebug(
         const client = await db.connect();
         try {
             await client.query('BEGIN');
+            await lockWorkspaceAssignments(client,workspaceId);
 
             const instanceType = await getMessagingInstanceType(client, workspaceId, instanceName);
             const isCloudInstance = instanceType === 'wa_cloud';
@@ -2919,6 +3220,10 @@ export const startNewConversation = withDebug(
                         [newChatId, workspaceId, contactId, senderId, protocol]
                     );
                     chatId = newChatRes.rows[0].id;
+                    const assignmentTeam=await resolveAgentTeam(client,workspaceId,senderId,null);
+                    await client.query('UPDATE chats SET team_id=$1 WHERE id=$2',[assignmentTeam,chatId]);
+                    await recordDirectAssignment(client,{workspaceId,teamId:assignmentTeam,agentId:senderId,chatId:chatId!,
+                      source:'new_outbound_assignment',currentAgentId:null});
                 }
             }
 
@@ -2998,6 +3303,11 @@ export const forwardMessageAction = withDebug(
             return { success: false, error: 'Usuário não autenticado.' };
         }
 
+        const access = await requireChatAccess(user.id, targetChatId);
+        if (!access.ok) {
+            return { success: false, error: access.error };
+        }
+
         // Determine content and type based on original message
         let content = originalMessage.content;
         const metadata = originalMessage.metadata || {};
@@ -3042,4 +3352,3 @@ export const forwardMessageAction = withDebug(
         contextResolver: (msg, targetId) => ({ payload: { originalMessageId: msg.id, targetChatId: targetId } })
     }
 );
-

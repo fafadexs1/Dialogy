@@ -1,6 +1,6 @@
 import { demoBootstrap } from "@/data/demo";
 import { supabase } from "@/services/supabase";
-import type { ChatMessagesPage, InboxBootstrap, Message, SendMessageInput } from "@/types";
+import type { ChatMessagesPage, ChatPageCursor, ChatsPage, InboxBootstrap, Message, SendMessageInput } from "@/types";
 
 const API_URL = process.env.EXPO_PUBLIC_DIALOGY_API_URL?.replace(/\/$/, "") ?? "";
 const API_MODE = process.env.EXPO_PUBLIC_DIALOGY_MOBILE_API_MODE ?? "api";
@@ -89,13 +89,33 @@ export async function signOut() {
   await supabase.auth.signOut();
 }
 
+export async function loadOlderChats(
+  workspaceId: string,
+  kind: "active" | "closed",
+  cursor: ChatPageCursor,
+): Promise<ChatsPage> {
+  if (API_MODE === "demo") return { chats: [], hasMore: false, nextCursor: null };
+  const params = new URLSearchParams({
+    workspaceId,
+    kind,
+    before: cursor.lastActivityAt,
+    beforeId: cursor.id,
+  });
+  return request<ChatsPage>(`/api/mobile/inbox/chats?${params.toString()}`);
+}
+
+export async function markChatRead(chatId: string): Promise<void> {
+  if (API_MODE === "demo") return;
+  await request<{ success: boolean }>(`/api/mobile/chats/${chatId}/read`, { method: "POST" });
+}
+
 export async function sendMessage(input: SendMessageInput): Promise<Message> {
   try {
     return await request<Message>(`/api/mobile/chats/${input.chatId}/messages`, {
       method: "POST",
       body: JSON.stringify({
         content: input.content,
-        messageId: `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        messageId: input.messageId ?? `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}`
       })
     });
   } catch (error) {

@@ -11,7 +11,7 @@ import type {
   WorkflowNode,
 } from './types';
 import type { ToolRegistry } from './tools';
-import { hashValue, isRecord, stableStringify } from './utils';
+import { hashValue, isRecord, renderTemplate, stableStringify } from './utils';
 import { responseRequestsMoreCustomerInput } from '@/services/autopilot/close-intent';
 import { toolInputSchemaForPrompt } from './tool-arguments';
 
@@ -47,21 +47,30 @@ function buildToolDescription(registry: ToolRegistry) {
 
 export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
   const config = context.config;
+  const templateSource = {
+    ...context.execution.variables,
+    input: context.execution.input,
+    variables: context.execution.variables,
+    context: context.execution.context,
+    sessionId: context.execution.sessionId,
+    conversationId: context.execution.conversationId,
+  };
+  const render = (value: string) => renderTemplate(value, templateSource);
   return [
-    `Você é ${config.name}, um agente especializado em ${config.role}.`,
+    `Você é ${render(config.name)}, um agente especializado em ${render(config.role)}.`,
     `Idioma de atendimento: ${config.language}.`,
     '',
     'PERSONA',
-    config.persona || 'Adote uma comunicação clara, respeitosa e coerente com o papel definido.',
+    config.persona ? render(config.persona) : 'Adote uma comunicação clara, respeitosa e coerente com o papel definido.',
     '',
     'OBJETIVO',
-    config.objective,
+    render(config.objective),
     '',
     'CRITÉRIOS DE CONCLUSÃO',
-    config.completionCriteria.map((item, index) => `${index + 1}. ${item}`).join('\n'),
+    config.completionCriteria.map((item, index) => `${index + 1}. ${render(item)}`).join('\n'),
     '',
     'INSTRUÇÕES',
-    config.instructions.map((item, index) => `${index + 1}. ${item}`).join('\n') || 'Siga o objetivo e os critérios de conclusão.',
+    config.instructions.map((item, index) => `${index + 1}. ${render(item)}`).join('\n') || 'Siga o objetivo e os critérios de conclusão.',
     '',
     'CONTEXTO ATUAL',
     stableStringify({
@@ -88,13 +97,33 @@ export function buildAgentSystemPrompt(context: AgentRuntimeContext): string {
     '3. Use somente as ferramentas listadas e forneça todos os argumentos exigidos.',
     '4. Não repita uma ferramenta com os mesmos argumentos quando o resultado terminal já estiver disponível. Se uma consulta retornar pending, queued, sent, running ou processing, consulte novamente até obter um estado terminal ou atingir o limite.',
     '5. Peça ao usuário apenas informações realmente ausentes.',
-    '6. Só retorne final quando os critérios de conclusão forem atendidos.',
+    '6. Só retorne final quando os critérios de conclusão forem atendidos ou para responder diretamente ao cliente.',
     '7. Nunca afirme que uma ação foi concluída antes da confirmação da ferramenta.',
     '8. Não exponha raciocínio interno, cadeia de pensamento ou análise detalhada.',
     '9. purposeSummary deve explicar brevemente por que a ferramenta é necessária.',
-    '10. Responda exclusivamente no contrato estruturado solicitado.',
+    '10. Responda exclusivamente no contrato estruturado solicitado (type "final" para falar com o cliente, "needs_input" para fazer perguntas/pedir dados ausentes, "tool_call" para ferramentas, "handoff" para transferir).',
     '11. Nunca pergunte qual opção, item, horário, produto, serviço ou alternativa o cliente prefere antes de apresentar as escolhas. Referências como "desses", "dessas", "deles", "delas", "esse" e "qual mais interessou" precisam ter um referente claro na conversa ou na própria resposta.',
     '12. Ao retornar handoff, use summary somente como contexto interno objetivo para a equipe e customerMessage como a mensagem visível ao cliente. Agradeça ou confirme o encaminhamento em customerMessage, nunca apenas em summary.',
+    ...((typeof context.tools?.list === 'function' ? context.tools.list() : Array.isArray(context.tools) ? context.tools : []).some((tool: any) => {
+      const lower = String(tool.name || '').toLowerCase();
+      return (
+        lower.includes('router') ||
+        lower.includes('wifi') ||
+        lower.includes('get_tool_manual') ||
+        lower.includes('configure_wifi') ||
+        lower.includes('reboot_router') ||
+        lower.includes('get_operation_status')
+      );
+    }) ? [
+      '',
+      'DIRETRIZES OPERACIONAIS OBRIGATÓRIAS PARA ROTEADORES (ACS / TR-069):',
+      '1. Consulta Obrigatória a /como-usar: Antes de alterar qualquer configuração de roteador ou em caso de dúvida sobre parâmetros, consulte a ferramenta get_tool_manual para verificar o manual técnico e as regras de segurança.',
+      '2. Zero Plaintext Secrets: NUNCA revele senhas de Wi-Fi ou credenciais em texto claro no chat. Confirme alterações com o usuário antes de aplicá-las.',
+      '3. Diagnóstico Prévio Obrigatório: SEMPRE execute get_router_details para verificar o estado atual antes de executar configure_wifi ou reboot_router.',
+      '4. Configuração Atômica de Wi-Fi: Atualize as bandas 2.4GHz e 5GHz de forma unificada e informe apply_immediately: true.',
+      '5. Justificativa Explícita para Reboot: O reboot exige confirm: true e uma justificativa técnica clara no campo reason. Nunca reinicie sem consentimento do cliente.',
+      '6. Polling de Operações Assíncronas: Quando uma operação retornar operation_id ou status pendente/em andamento, consulte periodicamente com get_operation_status.',
+    ] : []),
   ].join('\n');
 }
 
@@ -579,7 +608,12 @@ export async function executeAgentNode(
       });
     }
 
-    const decision = AgentDecisionSchema.parse(fallbackResult.output);
+    const rawDecision = AgentDecisionSchema.parse(fallbackResult.output);
+    const decision = rawDecision.type === 'response'
+      ? { ...rawDecision, type: 'final' as const }
+      : rawDecision.type === 'question'
+      ? { ...rawDecision, type: 'needs_input' as const }
+      : rawDecision;
     const signature = decisionSignature(decision, context, toolState);
     const stateSignature = hashValue(relevantState(context, toolState));
     decisionHistory.push({ signature, stateSignature });
@@ -632,8 +666,10 @@ export async function executeAgentNode(
 
     if (decision.type === 'final') {
       lastPartialResponse = decision.response;
-      const choiceRequest = presentedChoiceRequest(decision.response, context.memory);
-      if (choiceRequest && responseRequestsMoreCustomerInput(decision.response)) {
+      const presentedChoice = decision.completionStatus === 'partial'
+        ? presentedChoiceRequest(decision.response, context.memory)
+        : null;
+      if (presentedChoice) {
         return {
           status: 'route',
           selectedOutput: 'needs_input',
@@ -641,6 +677,7 @@ export async function executeAgentNode(
             type: 'needs_input',
             question: decision.response,
             missingFields: ['selected_option'],
+            statePatch: decision.statePatch,
           },
           statePatch: decision.statePatch,
           toolCalls,

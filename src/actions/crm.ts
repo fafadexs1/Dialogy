@@ -1,6 +1,8 @@
 
 'use server';
 
+import { randomUUID } from 'node:crypto';
+
 import { db } from '@/lib/db';
 import type { Contact, Tag, User, Activity, CustomFieldDefinition, SelectableOption } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
@@ -24,6 +26,8 @@ import {
     normalizeWhatsappJid as normalizeWhatsappContactJid,
 } from '@/lib/whatsapp/contact-identity';
 import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
+import { scheduleDialogyNexusInternalEvent } from '@/modules/nexus/services/dialogy-event-scheduler';
+import { changedCrmFields } from '@/modules/nexus/services/crm-option-trigger';
 
 
 import { buildCountQuery, buildSegmentQuery, combineSegmentCriteria, CriteriaGroup } from '@/lib/crm-query-builder';
@@ -278,6 +282,7 @@ export const saveContactAction = withDebug(
         }
 
         const id = formData.get('id') as string | null;
+        const contactEventId = randomUUID();
         let ownerId = formData.get('owner_id') as string;
         if (ownerId === 'unassigned') {
             ownerId = ''; // Set to empty string to be saved as NULL
@@ -317,7 +322,7 @@ export const saveContactAction = withDebug(
                      FROM contacts
                      WHERE id = $1
                        AND workspace_id = $2
-                     LIMIT 1`,
+                     LIMIT 1 FOR UPDATE`,
                     [id, workspaceId]
                 );
                 if ((currentContactRes.rowCount || 0) === 0) {
@@ -474,6 +479,28 @@ export const saveContactAction = withDebug(
             }
 
             await client.query('COMMIT');
+
+            scheduleDialogyNexusInternalEvent({
+                workspaceId,
+                eventName: id ? 'contact.updated' : 'contact.created',
+                eventId: contactEventId,
+                payload: {
+                    contactId,
+                    actorUserId: user.id,
+                    changedFields: changedCrmFields(currentFields, updatedContact?.custom_fields || {}),
+                    contact: updatedContact ? {
+                        id: updatedContact.id,
+                        name: updatedContact.name,
+                        email: updatedContact.email,
+                        phoneNumberJid: updatedContact.phone_number_jid,
+                        ownerId: updatedContact.owner_id,
+                        tags: updatedContact.tags,
+                        customFields: updatedContact.custom_fields,
+                    } : { id: contactId },
+                },
+            });
+
+            // Google Ads lead export is an explicit Nexus action, never a side effect of saving CRM.
 
             // Dispatch Automations for custom field changes
             try {

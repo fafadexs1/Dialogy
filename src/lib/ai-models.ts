@@ -70,10 +70,17 @@ export const DEFAULT_AI_MODEL_CATALOG: AiModelCatalogEntry[] = [
     enabled: true,
   },
   {
+    id: 'deepseek/deepseek-flash',
+    label: 'DeepSeek Flash',
+    provider: 'deepseek',
+    description: 'Modelo DeepSeek V4.1 com visao nativa e respostas rapidas via API OpenAI-compatible.',
+    enabled: true,
+  },
+  {
     id: 'deepseek/deepseek-v4-flash',
     label: 'DeepSeek V4 Flash',
     provider: 'deepseek',
-    description: 'Modelo DeepSeek atual para respostas rapidas via API OpenAI-compatible.',
+    description: 'Alias DeepSeek legado para respostas rapidas via API OpenAI-compatible.',
     enabled: true,
   },
   {
@@ -274,4 +281,87 @@ export function getAiModelLabel(
 
 export function getAiModelProviderLabel(provider: AiModelProvider): string {
   return PROVIDER_LABELS[provider];
+}
+
+export const KNOWN_MODEL_ALIASES: Record<string, string> = {
+  'deepseek/deepseek-v4-flash': 'deepseek/deepseek-flash',
+  'deepseek/deepseek-v4-pro': 'deepseek/deepseek-flash',
+  'deepseek-v4-flash': 'deepseek/deepseek-flash',
+  'deepseek-v4-pro': 'deepseek/deepseek-flash',
+  'deepseek-flash': 'deepseek/deepseek-flash',
+  'deepseek-chat': 'deepseek/deepseek-flash',
+  'deepseek/deepseek-chat': 'deepseek/deepseek-flash',
+  'openai/gpt-4o': 'openai/gpt-5.5',
+  'openai/gpt-4o-mini': 'openai/gpt-5.4-mini',
+  'gpt-5.4-mini': 'openai/gpt-5.4-mini',
+  'gpt-5.5': 'openai/gpt-5.5',
+  'gpt-5.3-codex': 'codex/gpt-5.3-codex',
+  'gemini-3.1-flash-lite': 'googleai/gemini-3.1-flash-lite',
+  'gemini-2.5-flash-lite': 'googleai/gemini-2.5-flash-lite',
+  'gemini-2.5-flash': 'googleai/gemini-2.5-flash',
+  'gemini-3.5-flash': 'googleai/gemini-3.5-flash',
+};
+
+export function resolveConfiguredAiModel(
+  requested?: string | null,
+  availableModels: { id: string; provider?: string; credentialProvider?: string }[] = [],
+  fallback?: string | null,
+): string | null {
+  if (!availableModels || availableModels.length === 0) return null;
+
+  const cleanReq = (requested || '').trim();
+  const cleanFallback = (fallback || '').trim();
+
+  // 1. Direct exact match with requested
+  if (cleanReq && availableModels.some((m) => m.id === cleanReq)) {
+    return cleanReq;
+  }
+
+  // 2. Direct alias match for requested
+  if (cleanReq && KNOWN_MODEL_ALIASES[cleanReq]) {
+    const aliased = KNOWN_MODEL_ALIASES[cleanReq];
+    if (availableModels.some((m) => m.id === aliased)) {
+      return aliased;
+    }
+  }
+
+  // 3. Provider-level match for requested
+  if (cleanReq) {
+    const reqProvider = getAiModelRuntimeProvider(cleanReq);
+    if (reqProvider !== 'other') {
+      const match = availableModels.find((m) => {
+        const mProvider = getAiModelRuntimeProvider(m.id);
+        return mProvider === reqProvider || m.provider === reqProvider || m.credentialProvider === reqProvider;
+      });
+      if (match) return match.id;
+    }
+  }
+
+  // 4. Exact match with fallback
+  if (cleanFallback && availableModels.some((m) => m.id === cleanFallback)) {
+    return cleanFallback;
+  }
+
+  // 5. Alias match for fallback
+  if (cleanFallback && KNOWN_MODEL_ALIASES[cleanFallback]) {
+    const aliased = KNOWN_MODEL_ALIASES[cleanFallback];
+    if (availableModels.some((m) => m.id === aliased)) {
+      return aliased;
+    }
+  }
+
+  // 6. Provider-level match for fallback
+  if (cleanFallback) {
+    const fallbackProvider = getAiModelRuntimeProvider(cleanFallback);
+    if (fallbackProvider !== 'other') {
+      const match = availableModels.find((m) => {
+        const mProvider = getAiModelRuntimeProvider(m.id);
+        return mProvider === fallbackProvider || m.provider === fallbackProvider || m.credentialProvider === fallbackProvider;
+      });
+      if (match) return match.id;
+    }
+  }
+
+  // 7. Fallback to first available configured model
+  return availableModels[0]?.id || null;
 }

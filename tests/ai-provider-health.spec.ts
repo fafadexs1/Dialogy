@@ -38,6 +38,14 @@ describe('AI provider health checks', () => {
       model: 'deepseek/deepseek-v4-flash',
       runtimeProvider: 'deepseek',
     });
+
+    expect(normalizeAiProviderHealthModel({
+      provider: 'deepseek',
+      model: 'deepseek-flash',
+    })).toMatchObject({
+      model: 'deepseek/deepseek-flash',
+      runtimeProvider: 'deepseek',
+    });
   });
 
   it('rejects mismatched model ids before making a network call', () => {

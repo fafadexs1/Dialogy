@@ -209,6 +209,29 @@ class CacheService {
         }
     }
 
+    /**
+     * Remove chats antigos do cache. Sem isso a tabela `chats` só crescia: a
+     * limpeza periódica cobria apenas mensagens, então o IndexedDB acumulava
+     * todo chat já visto — e `getChats` reidratava tudo isso no boot.
+     */
+    async clearOldChats(cutoffDate: Date): Promise<number> {
+        try {
+            const cutoffStr = cutoffDate.toISOString();
+            const staleChatIds = await cacheDb.chats
+                .where('updatedAt')
+                .below(cutoffStr)
+                .primaryKeys();
+
+            await cacheDb.chats.bulkDelete(staleChatIds);
+
+            console.log(`[CacheService] Cleared ${staleChatIds.length} old chats`);
+            return staleChatIds.length;
+        } catch (error) {
+            console.error('[CacheService] clearOldChats error:', error);
+            return 0;
+        }
+    }
+
     async clearWorkspace(workspaceId: string): Promise<void> {
         try {
             // Clear all data for a specific workspace

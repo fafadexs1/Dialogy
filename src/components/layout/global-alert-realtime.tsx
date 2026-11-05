@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import {
   GLOBAL_ALERT_BROWSER_CHANNEL,
   GLOBAL_ALERT_BROWSER_STORAGE_KEY,
+  GLOBAL_ALERT_REALTIME_CHANNEL_OPTIONS,
   GLOBAL_ALERT_REALTIME_EVENT,
   GLOBAL_ALERT_REALTIME_TOPIC,
   GlobalAlertSchema,
@@ -74,11 +75,7 @@ export function GlobalAlertRealtime({ initialAlert }: { initialAlert: GlobalAler
       });
 
     const channel = supabase
-      .channel(GLOBAL_ALERT_REALTIME_TOPIC, {
-        config: {
-          private: true,
-        },
-      })
+      .channel(GLOBAL_ALERT_REALTIME_TOPIC, GLOBAL_ALERT_REALTIME_CHANNEL_OPTIONS)
       .on('broadcast', { event: GLOBAL_ALERT_REALTIME_EVENT }, (payload) => {
         const parsed = GlobalAlertSchema.safeParse((payload.payload as { alert?: unknown })?.alert);
         if (parsed.success) {

@@ -1,18 +1,12 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import ffmpeg from 'fluent-ffmpeg';
-// @ts-ignore ffmpeg-static does not expose consistent types across platforms.
-import ffmpegStaticPath from 'ffmpeg-static';
-// @ts-ignore ffprobe-static exports an object containing the executable path.
-import ffprobeStatic from 'ffprobe-static';
-
 import { fetchSafeRemote, readResponseBodyLimited } from '@/lib/security/safe-remote-url';
+import { runFfmpeg as executeFfmpeg } from '@/services/media/ffmpeg';
 
 const MAX_INPUT_BYTES = 32 * 1024 * 1024;
 export const MAX_WHATSAPP_MEDIA_BYTES = 16 * 1024 * 1024;
@@ -24,30 +18,6 @@ export type NormalizedOutboundMedia = {
   mimetype: 'audio/mpeg' | 'video/mp4';
   fileName: string;
 };
-
-function configureFfmpeg() {
-  const isWindows = process.platform === 'win32';
-  const configuredFfmpeg = process.env.FFMPEG_PATH;
-  const configuredFfprobe = process.env.FFPROBE_PATH;
-
-  if (configuredFfmpeg && existsSync(configuredFfmpeg) && (isWindows || !/[\\:]/.test(configuredFfmpeg))) {
-    ffmpeg.setFfmpegPath(configuredFfmpeg);
-  } else if (!isWindows) {
-    ffmpeg.setFfmpegPath('/usr/bin/ffmpeg');
-  } else if (ffmpegStaticPath) {
-    ffmpeg.setFfmpegPath(ffmpegStaticPath);
-  }
-
-  if (configuredFfprobe && existsSync(configuredFfprobe) && (isWindows || !/[\\:]/.test(configuredFfprobe))) {
-    ffmpeg.setFfprobePath(configuredFfprobe);
-  } else if (!isWindows) {
-    ffmpeg.setFfprobePath('/usr/bin/ffprobe');
-  } else if (ffprobeStatic?.path) {
-    ffmpeg.setFfprobePath(ffprobeStatic.path);
-  }
-}
-
-configureFfmpeg();
 
 function cleanMime(mimetype: string | undefined): string {
   return String(mimetype || '').split(';')[0].trim().toLowerCase();
@@ -112,48 +82,25 @@ async function sourceToBuffer(source: string): Promise<Buffer> {
 }
 
 async function runFfmpeg(inputPath: string, outputPath: string, kind: 'audio' | 'video'): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const command = ffmpeg(inputPath);
+  const args = kind === 'audio'
+    ? ['-vn', '-c:a', 'libmp3lame', '-ac', '1', '-ar', '48000', '-b:a', '64k', '-f', 'mp3']
+    : [
+      '-c:v', 'libx264',
+      '-c:a', 'aac',
+      '-b:a', '96k',
+      '-preset', 'veryfast',
+      '-crf', '28',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+      '-f', 'mp4',
+    ];
 
-    if (kind === 'audio') {
-      command
-        .noVideo()
-        .audioCodec('libmp3lame')
-        .audioChannels(1)
-        .audioFrequency(48_000)
-        .audioBitrate('64k')
-        .format('mp3');
-    } else {
-      command
-        .videoCodec('libx264')
-        .audioCodec('aac')
-        .audioBitrate('96k')
-        .outputOptions([
-          '-preset veryfast',
-          '-crf 28',
-          '-pix_fmt yuv420p',
-          '-movflags +faststart',
-          '-vf scale=trunc(iw/2)*2:trunc(ih/2)*2',
-        ])
-        .format('mp4');
-    }
-
-    const timeoutMs = kind === 'audio' ? AUDIO_TIMEOUT_MS : VIDEO_TIMEOUT_MS;
-    const timeout = setTimeout(() => {
-      command.kill('SIGKILL');
-      reject(new Error(`${kind === 'audio' ? 'Audio' : 'Video'} excedeu o tempo limite de conversao.`));
-    }, timeoutMs);
-
-    command
-      .on('end', () => {
-        clearTimeout(timeout);
-        resolve();
-      })
-      .on('error', (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      })
-      .save(outputPath);
+  await executeFfmpeg({
+    inputPath,
+    outputPath,
+    args,
+    timeoutMs: kind === 'audio' ? AUDIO_TIMEOUT_MS : VIDEO_TIMEOUT_MS,
   });
 }
 

@@ -83,6 +83,32 @@ describe('Realtime subscriptions', () => {
     expect(client.removeChannel).toHaveBeenCalledWith(subscription);
   });
 
+  it('requests replay for the interval missed while a tab was suspended', () => {
+    const { client, channel } = createSupabaseMock();
+    const replaySince = 1704110400000;
+
+    subscribeToChatMessages({
+      client: client as any,
+      workspaceId: WORKSPACE_ID,
+      chatId: 'chat-123',
+      replaySince,
+      onMessage: vi.fn(),
+    });
+
+    expect(client.channel).toHaveBeenCalledWith(
+      buildChatMessageChannelName(WORKSPACE_ID, 'chat-123'),
+      {
+        config: {
+          private: true,
+          broadcast: {
+            replay: { since: replaySince, limit: 25 },
+          },
+        },
+      },
+    );
+    expect(channel.subscribe).toHaveBeenCalled();
+  });
+
   it('subscribes to workspace chat updates and supports cleanup', () => {
     const { client, channel, onCalls } = createSupabaseMock();
     const handler = vi.fn();
@@ -171,6 +197,29 @@ describe('Inbox store realtime flow', () => {
     const state = useInboxStore.getState();
     expect(state.messagesByChat[chatB.id].map((m) => m.id)).toEqual(['b-1']);
     expect(state.messagesByChat[chatA.id].map((m) => m.id)).toEqual(['a-1', 'a-2']);
+  });
+
+  it('rejects foreign messages when hydrating or updating a chat thread', () => {
+    const chatA = createChat('chat-A');
+    const chatB = createChat('chat-B');
+    const messageA = createMessage('a-1', chatA.id, '2024-01-01T12:00:00Z');
+    const foreignMessage = createMessage('b-foreign', chatB.id, '2024-01-01T12:01:00Z');
+
+    useInboxStore.getState().setInitialData({
+      chats: [chatA, chatB],
+      selectedChatId: chatA.id,
+      messages: [messageA, foreignMessage],
+      lastSyncChats: null,
+      lastSyncMessageForSelected: messageA.createdAt,
+      oldestMessageDate: messageA.createdAt,
+      oldestMessageId: messageA.id,
+      hasMoreHistory: false,
+      hasMoreChats: false,
+    });
+    useInboxStore.getState().appendMessagesToChat(chatA.id, [foreignMessage]);
+    useInboxStore.getState().prependMessagesToChat(chatA.id, [foreignMessage]);
+
+    expect(useInboxStore.getState().messagesByChat[chatA.id].map((message) => message.id)).toEqual(['a-1']);
   });
 
   it('handles rapid bursts of realtime messages without dropping any', () => {

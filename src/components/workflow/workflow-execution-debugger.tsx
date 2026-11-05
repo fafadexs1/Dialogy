@@ -1,19 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  AlertTriangle,
-  ArrowLeft,
-  Bot,
-  CheckCircle2,
-  Clock3,
-  Database,
-  Loader2,
-  RefreshCw,
-  Send,
-  Wrench,
-  XCircle,
-} from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, CheckCircle2, Clock3, Database, Loader2, RefreshCw, Send, Wrench, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -54,12 +42,12 @@ export type DebugPayload = {
 };
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
-  queued: { label: 'Na fila', className: 'border-slate-500/30 bg-slate-500/10 text-slate-300' },
+  queued: { label: 'Na fila', className: 'border-[var(--wf-border)] bg-slate-500/10 text-[var(--wf-text)]' },
   running: { label: 'Executando', className: 'border-sky-500/30 bg-sky-500/10 text-sky-200' },
   waiting: { label: 'Aguardando', className: 'border-amber-500/30 bg-amber-500/10 text-amber-200' },
   completed: { label: 'Concluído', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' },
   failed: { label: 'Falhou', className: 'border-red-500/30 bg-red-500/10 text-red-200' },
-  cancelled: { label: 'Cancelado', className: 'border-slate-500/30 bg-slate-500/10 text-slate-400' },
+  cancelled: { label: 'Cancelado', className: 'border-[var(--wf-border)] bg-slate-500/10 text-[var(--wf-muted)]' },
 };
 
 function eventIcon(type: string) {
@@ -92,11 +80,11 @@ function elapsedLabel(startedAt: string, eventAt: string) {
 
 function JsonPanel({ title, value }: { title: string; value: unknown }) {
   return (
-    <section className="rounded-xl border border-white/10 bg-[#15181b]">
-      <div className="border-b border-white/[0.08] px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+    <section className="rounded-xl border border-[var(--wf-border)] bg-[var(--wf-panel)]">
+      <div className="border-b border-[var(--wf-border)] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[var(--wf-muted)]">
         {title}
       </div>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-[11px] leading-5 text-slate-300">
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-[var(--wf-text)]">
         {JSON.stringify(value ?? null, null, 2)}
       </pre>
     </section>
@@ -193,7 +181,7 @@ export function WorkflowExecutionDebugger({
 
   if (loading) {
     return (
-      <div className={cn('flex items-center justify-center bg-[#101214] text-slate-400', embedded ? 'h-full min-h-[260px]' : 'min-h-[520px]')}>
+      <div className={cn('flex items-center justify-center bg-[var(--wf-panel)] text-[var(--wf-muted)]', embedded ? 'h-full min-h-[260px]' : 'min-h-[520px]')}>
         <Loader2 className="mr-3 h-5 w-5 animate-spin text-sky-400" />
         Carregando execução
       </div>
@@ -202,11 +190,11 @@ export function WorkflowExecutionDebugger({
 
   if (error || !payload) {
     return (
-      <div className={cn('flex items-center justify-center bg-[#101214] p-8', embedded ? 'h-full min-h-[260px]' : 'min-h-[520px]')}>
+      <div className={cn('flex items-center justify-center bg-[var(--wf-panel)] p-8', embedded ? 'h-full min-h-[260px]' : 'min-h-[520px]')}>
         <div className="max-w-md rounded-2xl border border-red-500/20 bg-red-500/[0.06] p-6 text-center">
           <AlertTriangle className="mx-auto h-6 w-6 text-red-300" />
           <p className="mt-3 text-sm text-red-100">{error || 'Execução indisponível.'}</p>
-          <Button variant="outline" onClick={() => void load()} className="mt-5 border-white/10 bg-[#17191c]">
+          <Button variant="outline" onClick={() => void load()} className="mt-5 border-[var(--wf-border)] bg-[var(--wf-panel)]">
             <RefreshCw className="mr-2 h-4 w-4" />
             Tentar novamente
           </Button>
@@ -216,44 +204,44 @@ export function WorkflowExecutionDebugger({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#101214] text-slate-100">
-      <header className={cn('flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] bg-[#131619]', embedded ? 'px-4 py-2.5' : 'px-6 py-4')}>
+    <div className="flex h-full min-h-0 flex-col bg-[var(--wf-panel)] text-[var(--wf-text)]">
+      <header className={cn('flex flex-wrap items-center justify-between gap-4 border-b border-[var(--wf-border)] bg-[var(--wf-panel)]', embedded ? 'px-4 py-2.5' : 'px-6 py-4')}>
         <div className="flex min-w-0 items-center gap-3">
           {onBack && (
-            <Button variant="ghost" size="icon" onClick={onBack} className="rounded-xl border border-white/10">
+            <Button variant="ghost" size="icon" onClick={onBack} className="rounded-xl border border-[var(--wf-border)]">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           )}
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-400">Depurador de execução</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-sky-400">Depurador de execução</p>
             {!embedded && <h1 className="truncate text-base font-semibold">{payload.execution.workflowId}</h1>}
-            <p className="truncate font-mono text-[10px] text-slate-500">{payload.execution.id}</p>
+            <p className="truncate font-mono text-xs text-[var(--wf-muted)]">{payload.execution.id}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <Badge className={cn('border', statusMeta.className)}>{statusMeta.label}</Badge>
-          <Button variant="ghost" size="icon" onClick={() => void load()} className="rounded-xl text-slate-400">
+          <Button variant="ghost" size="icon" onClick={() => void load()} className="rounded-xl text-[var(--wf-muted)]">
             <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
       </header>
 
-      <div className={cn('grid grid-cols-2 border-b border-white/[0.08] sm:grid-cols-4', embedded ? 'gap-2 px-4 py-2' : 'gap-3 px-6 py-4')}>
+      <div className={cn('grid grid-cols-2 border-b border-[var(--wf-border)] sm:grid-cols-4', embedded ? 'gap-2 px-4 py-2' : 'gap-3 px-6 py-4')}>
         {[
           ['Passos', payload.execution.counters?.totalSteps || 0],
           ['Modelo', payload.execution.counters?.totalModelCalls || 0],
           ['Tools', payload.execution.counters?.totalToolCalls || 0],
           ['Tokens', payload.execution.counters?.totalTokens || 0],
         ].map(([label, value]) => (
-          <div key={String(label)} className={cn('rounded-xl border border-white/10 bg-[#15181b]', embedded ? 'px-3 py-1.5' : 'px-4 py-3')}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-            <p className={cn('font-semibold text-slate-100', embedded ? 'text-sm' : 'mt-1 text-lg')}>{value}</p>
+          <div key={String(label)} className={cn('rounded-xl border border-[var(--wf-border)] bg-[var(--wf-panel)]', embedded ? 'px-3 py-1.5' : 'px-4 py-3')}>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--wf-muted)]">{label}</p>
+            <p className={cn('font-semibold text-[var(--wf-text)]', embedded ? 'text-sm' : 'mt-1 text-lg')}>{value}</p>
           </div>
         ))}
       </div>
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(340px,0.8fr)_minmax(420px,1.2fr)]">
-        <section className="min-h-0 overflow-y-auto border-r border-white/[0.08] p-5">
+        <section className="min-h-0 overflow-y-auto border-r border-[var(--wf-border)] p-5">
           <div className="space-y-2">
             {payload.events.map((event) => {
               const Icon = eventIcon(event.type);
@@ -270,20 +258,20 @@ export function WorkflowExecutionDebugger({
                     'grid w-full grid-cols-[72px_34px_minmax(0,1fr)] items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors',
                     selected
                       ? 'border-sky-500/35 bg-sky-500/[0.08]'
-                      : 'border-white/[0.08] bg-[#15181b] hover:bg-white/[0.04]',
+                      : 'border-[var(--wf-border)] bg-[var(--wf-panel)] hover:bg-white/[0.04]',
                   )}
                 >
-                  <span className="pt-1 font-mono text-[10px] text-slate-500">
+                  <span className="pt-1 font-mono text-xs text-[var(--wf-muted)]">
                     {elapsedLabel(payload.execution.startedAt, event.createdAt)}
                   </span>
                   <span className={cn('flex h-8 w-8 items-center justify-center rounded-lg border', eventTone(event.type))}>
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block truncate text-xs font-medium text-slate-200">
+                    <span className="block truncate text-xs font-medium text-[var(--wf-text)]">
                       {event.safeSummary || event.type}
                     </span>
-                    <span className="mt-1 block truncate font-mono text-[10px] text-slate-500">
+                    <span className="mt-1 block truncate font-mono text-xs text-[var(--wf-muted)]">
                       {event.nodeId || event.toolName || event.type}
                     </span>
                   </span>
@@ -296,15 +284,15 @@ export function WorkflowExecutionDebugger({
         <section className="min-h-0 overflow-y-auto p-5">
           {selectedEvent ? (
             <div className="space-y-4">
-              <div className="rounded-xl border border-white/10 bg-[#15181b] p-4">
+              <div className="rounded-xl border border-[var(--wf-border)] bg-[var(--wf-panel)] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-400">{selectedEvent.type}</p>
-                    <h2 className="mt-1 text-sm font-semibold text-slate-100">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-sky-400">{selectedEvent.type}</p>
+                    <h2 className="mt-1 text-sm font-semibold text-[var(--wf-text)]">
                       {selectedEvent.safeSummary || 'Evento do runtime'}
                     </h2>
                   </div>
-                  <span className="font-mono text-[10px] text-slate-500">#{selectedEvent.sequence}</span>
+                  <span className="font-mono text-xs text-[var(--wf-muted)]">#{selectedEvent.sequence}</span>
                 </div>
               </div>
               <div className="grid gap-4 xl:grid-cols-2">
@@ -323,7 +311,7 @@ export function WorkflowExecutionDebugger({
               </div>
             </div>
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-500">
+            <div className="flex h-full items-center justify-center text-sm text-[var(--wf-muted)]">
               Selecione um evento para inspecionar.
             </div>
           )}

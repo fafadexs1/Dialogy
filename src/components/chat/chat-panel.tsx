@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Paperclip,
-    Send,
+    ArrowUp,
     Smile,
     MoreVertical,
     Bot,
@@ -58,12 +58,13 @@ import {
     SpellCheck2,
     Activity,
     Signature,
-    SlidersHorizontal,
     PanelRightOpen,
 } from 'lucide-react';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import { createClient } from '@/lib/supabase/client';
+import { createUniqueMediaFileName, createUniqueMediaStoragePath } from '@/lib/media-file-name';
 import { type Chat, type Message, type User, Tag, MessageMetadata, Contact, AutopilotConfig, NexusFlowInstance, Shortcut } from '@/lib/types';
+import { isChatInInboxQueueScope } from '@/lib/inbox-pagination';
 import SmartReplies from './smart-replies';
 import ChatSummary from './chat-summary';
 import { Switch } from '../ui/switch';
@@ -85,7 +86,7 @@ import {
     type InboxAiAgent,
 } from '@/actions/copilot';
 import { CopilotSuggestionCard, type CopilotSuggestionView } from './copilot-suggestion-card';
-import { useFormStatus } from 'react-dom';
+
 import { deleteMessageAction } from '@/actions/evolution-api';
 import { sendAutomatedMessageAction, sendMediaAction, sendInternalNoteAction, getMessageStatusBatchAction, retryMessageAction } from '@/actions/messages';
 import { getAutopilotConfig } from '@/actions/autopilot';
@@ -98,7 +99,10 @@ import {
     DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuTrigger,
-    DropdownMenuSeparator
+    DropdownMenuSeparator,
+    DropdownMenuSub,
+    DropdownMenuSubTrigger,
+    DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu';
 import {
     AlertDialog,
@@ -119,6 +123,10 @@ import type { EmojiClickData } from 'emoji-picker-react';
 import ContentEditable from 'react-contenteditable';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AudioRecorder } from './audio-recorder';
+import { ComposerAiMenu } from './composer-ai-menu';
+import { AnimatedComposer } from './animated-composer';
+import { CatalogDialog } from './catalog-dialog';
+import composerStyles from './composer.module.css';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
 import { guardedAssignChat, guardedCloseChat, guardedSendAgentMessage } from '@/actions/chat-guards';
@@ -136,6 +144,7 @@ import { getChatIdentityDisplayValue, resolveChatPlatform } from '@/lib/chat-pla
 import { buildToolExecutionItems, isToolExecutionMessage, ToolExecutionsSheet } from './tool-executions-sheet';
 import { ConversationLearningDialog } from './conversation-learning-dialog';
 import { usePremiumWheelScroller } from '@/hooks/use-premium-wheel-scroller';
+import { ChatTagsBar } from './chat-tags-bar';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
     ssr: false,
@@ -173,7 +182,7 @@ type TextSendJob = {
     startedAt: number;
 };
 
-function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
+export function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange }: { chat: Chat, onActionSuccess: () => void, reasons: Tag[], isOpen?: boolean, onOpenChange?: (open: boolean) => void }) {
     const [internalIsOpen, setInternalIsOpen] = React.useState(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
     const [reasonTagId, setReasonTagId] = React.useState<string | null>(null);
@@ -355,69 +364,7 @@ function CloseChatDialog({ chat, onActionSuccess, reasons, isOpen, onOpenChange 
     )
 }
 
-function SendMessageButton({
-    disabled,
-    isPrimed,
-    feedbackKey,
-    showFeedback,
-}: {
-    disabled?: boolean;
-    isPrimed?: boolean;
-    feedbackKey?: number;
-    showFeedback?: boolean;
-}) {
-    const { pending } = useFormStatus();
-    const isEnabled = !disabled && !pending;
-    const shouldShowFeedback = Boolean(showFeedback && feedbackKey);
 
-    return (
-        <div className="relative">
-            {isEnabled && isPrimed && (
-                <span className="pointer-events-none absolute -inset-1 rounded-full border border-cyan-400/30" />
-            )}
-
-            {shouldShowFeedback && (
-                <span
-                    key={`send-ring-${feedbackKey}`}
-                    className="pointer-events-none absolute inset-0 rounded-full border border-cyan-300/70"
-                />
-            )}
-
-            <Button
-                type="submit"
-                size="icon"
-                className={cn(
-                    "h-9 w-9 rounded-full transition-all duration-200 shrink-0 relative overflow-hidden",
-                    isEnabled
-                        ? "bg-blue-600 text-white hover:bg-blue-500"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                )}
-                disabled={pending || disabled}
-                aria-label="Enviar mensagem"
-            >
-                {pending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                    <span
-                        key={`send-icon-${feedbackKey || 0}`}
-                        className="flex items-center justify-center"
-                    >
-                        <Send className="h-4 w-4" />
-                    </span>
-                )}
-            </Button>
-
-            {shouldShowFeedback && (
-                <span
-                    key={`send-chip-${feedbackKey}`}
-                    className="pointer-events-none absolute -top-5 right-0 text-[10px] font-semibold uppercase tracking-wide text-cyan-300"
-                >
-                    Enviado
-                </span>
-            )}
-        </div>
-    )
-}
 
 export default function ChatPanel({
     chat,
@@ -448,7 +395,9 @@ export default function ChatPanel({
     const emojiPickerTheme = resolvedTheme === 'light' ? 'light' : 'dark';
     const debouncedMessageInput = useDebouncedValue(newMessage, 220);
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
+    const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const chatRef = useRef(chat?.id);
+    const [catalogChatId, setCatalogChatId] = useState<string | null>(null);
     const newMessageRef = useRef(newMessage);
     newMessageRef.current = newMessage;
 
@@ -500,6 +449,7 @@ export default function ChatPanel({
     const retryingMessagesRef = useRef(new Set<string>());
     const [sendFeedbackKey, setSendFeedbackKey] = useState(0);
     const [isSendBurstActive, setIsSendBurstActive] = useState(false);
+    const [isVoiceActive, setIsVoiceActive] = useState(false);
     const sendBurstTimeoutRef = useRef<number | null>(null);
 
     // AI Copilot Suggestion State
@@ -524,7 +474,6 @@ export default function ChatPanel({
     }, [autopilotAgents, autopilotConfig, chat?.autopilot_config_id]);
     const isProtocolScoped = !!(chat as any)?.protocolScoped;
     const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
-    const [showShortcutSuggestions, setShowShortcutSuggestions] = useState(false);
     const [isSpellChecking, setIsSpellChecking] = useState(false);
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -533,7 +482,9 @@ export default function ChatPanel({
     const finishInitialPositionTimerRef = useRef<number | null>(null);
     const initiallyPositionedChatRef = useRef<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileDragDepthRef = useRef(0);
     const contentEditableRef = useRef<any>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const savedRange = useRef<Range | null>(null);
     const userScrolledUpRef = useRef(false);
     const isFetchingHistoryRef = useRef(false);
@@ -551,6 +502,10 @@ export default function ChatPanel({
     }, [canLoadOlder, chat]);
 
     const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+    // Passar a conversa para a IA tira o atendimento do humano; exige confirmação
+    // explícita para não acontecer por um clique errado.
+    const [isAiTakeOverDialogOpen, setIsAiTakeOverDialogOpen] = useState(false);
+    const [isTakingOverWithAi, setIsTakingOverWithAi] = useState(false);
     const [isChatDetailsOpen, setIsChatDetailsOpen] = useState(false);
     const mobileMoreActionsRef = useRef<HTMLButtonElement>(null);
     const desktopMoreActionsRef = useRef<HTMLButtonElement>(null);
@@ -571,7 +526,7 @@ export default function ChatPanel({
         }
         sendBurstTimeoutRef.current = window.setTimeout(() => {
             setIsSendBurstActive(false);
-        }, 460);
+        }, 900);
     }, []);
 
     useEffect(() => {
@@ -667,10 +622,12 @@ export default function ChatPanel({
             return;
         }
 
+        setIsTakingOverWithAi(true);
         const result = await transferChatToIntelligentAgentAction({
             chatId: chat.id,
             systemAgentId: agent.systemAgentId,
         });
+        setIsTakingOverWithAi(false);
 
         if (!result.success) {
             toast({
@@ -681,6 +638,7 @@ export default function ChatPanel({
             return;
         }
 
+        setIsAiTakeOverDialogOpen(false);
         setAiSuggestion(null);
         toast({
             title: `${agent.systemAgentName || agent.name} assumiu a conversa`,
@@ -880,17 +838,25 @@ export default function ChatPanel({
     useEffect(() => {
         if (isProtocolScoped) return;
         if (showFullHistory && chat?.contact?.id && currentUser.activeWorkspaceId) {
+            let cancelled = false;
             setIsLoadingHistory(true);
+            setAllContactMessages([]);
             getContactMessages({
-                contactId: chat.contact.id,
+                contactId: chat.contact?.id || '',
                 workspaceId: currentUser.activeWorkspaceId,
                 limit: 1000
             })
                 .then(res => {
-                    if (res.messages) setAllContactMessages(res.messages);
+                    if (!cancelled && res.messages) setAllContactMessages(res.messages);
                 })
                 .catch(err => console.error('[CHAT_PANEL] Failed to load full history', err))
-                .finally(() => setIsLoadingHistory(false));
+                .finally(() => {
+                    if (!cancelled) setIsLoadingHistory(false);
+                });
+
+            return () => {
+                cancelled = true;
+            };
         }
     }, [showFullHistory, chat?.contact?.id, currentUser.activeWorkspaceId, isProtocolScoped]);
 
@@ -1140,7 +1106,7 @@ export default function ChatPanel({
             const a = document.createElement('a');
             a.href = url;
             const dateStr = new Date().toISOString().split('T')[0];
-            const safeName = chat.contact.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const safeName = (chat.contact?.name || chat.protocol || 'chat').replace(/[^a-z0-9]/gi, '_').toLowerCase();
             a.download = `chat-${safeName}-${dateStr}.html`;
             document.body.appendChild(a);
             a.click();
@@ -1223,17 +1189,15 @@ export default function ChatPanel({
                 mediatype = 'video';
                 thumbnail = await generateVideoThumbnail(file);
             } else if (file.type.startsWith('audio/') || isAudioExt) {
-                mediatype = 'audio' as any;
+                mediatype = 'audio';
             }
 
             const finalMimeType = file.type || (isAudioExt ? 'audio/mpeg' : file.type) || 'application/octet-stream';
 
-            // Generate unique filename for clipboard-pasted images (which have generic names like 'image.png')
-            // Also ensures uniqueness for any file sent in sequence
-            const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-            const fileExtension = ext ? `.${ext}` : '';
-            const baseName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
-            const uniqueFileName = `${baseName}_${uniqueSuffix}${fileExtension}`;
+            // Keep the visible/provider filename unique as well as the Storage path.
+            // This matters when several files have the same browser name (or are
+            // pasted as the generic `image.png`) in the same send operation.
+            const uniqueFileName = createUniqueMediaFileName(file.name);
 
             return {
                 id: `${uniqueFileName}-${file.lastModified}`,
@@ -1254,6 +1218,39 @@ export default function ChatPanel({
         const files = Array.from(event.target.files || []);
         await processFiles(files);
         event.target.value = '';
+    };
+
+    const isFileDrag = (event: React.DragEvent<HTMLElement>) =>
+        Array.from(event.dataTransfer.types).includes('Files');
+
+    const handleComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        fileDragDepthRef.current += 1;
+        setIsDraggingFiles(true);
+    };
+
+    const handleComposerDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setIsDraggingFiles(true);
+    };
+
+    const handleComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isDraggingFiles) return;
+        event.preventDefault();
+        fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+        if (fileDragDepthRef.current === 0) setIsDraggingFiles(false);
+    };
+
+    const handleComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        fileDragDepthRef.current = 0;
+        setIsDraggingFiles(false);
+        const files = Array.from(event.dataTransfer.files);
+        if (files.length > 0) void processFiles(files);
     };
 
     const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -1309,7 +1306,7 @@ export default function ChatPanel({
     const resolvedPlatform = resolveChatPlatform(chat);
     const isMetaPlatform = resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger';
     const contactDisplayValue = getChatIdentityDisplayValue(chat, resolvedPlatform);
-    const headerContactValue = contactDisplayValue || (isMetaPlatform ? '' : chat?.contact.phone || chat?.contact.phone_number_jid || '');
+    const headerContactValue = contactDisplayValue || (isMetaPlatform ? '' : chat?.contact?.phone || chat?.contact?.phone_number_jid || '');
 
     const optimisticPlatform =
         resolvedPlatform === 'instagram' || resolvedPlatform === 'messenger' || resolvedPlatform === 'telegram'
@@ -1530,6 +1527,7 @@ export default function ChatPanel({
             setSkipUserSignature(false);
             setIsInternalNote(false);
             if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+            if (textareaRef.current) textareaRef.current.value = '';
 
             setDraft(chat.id, '');
             enqueueTextSend({
@@ -1559,6 +1557,7 @@ export default function ChatPanel({
         setSkipUserSignature(false);
         setIsInternalNote(false);
         if (contentEditableRef.current) contentEditableRef.current.innerHTML = '';
+        if (textareaRef.current) textareaRef.current.value = '';
         setDraft(chatId, '');
 
         // Generate optimistic messages for all files
@@ -1610,119 +1609,146 @@ export default function ChatPanel({
 
         scrollToLatestMessage();
 
-        // Process in background (Fire-and-forget from UI perspective)
+        // Process in background (Fire-and-forget from UI perspective).
+        // Upload every object with its own path, then submit one server action
+        // for the batch. This avoids racing several send actions against the
+        // same chat while preserving an individual optimistic status per file.
         (async () => {
-            for (let i = 0; i < filesToSend.length; i++) {
-                const mf = filesToSend[i];
-                const optMsg = optimisticMessages[i];
-
-                try {
-                    const extension = mf.name.split('.').pop() || 'dat';
-                    const fileName = Date.now() + '_' + uuidv4() + '.' + extension;
-
-                    // 1. Upload
-                    const { publicUrl, error: uploadError } = await uploadFileToStorage(mf.file, 'temp-media', fileName);
-
-                    if (uploadError || !publicUrl) {
-                        throw new Error(`Falha no upload de ${mf.name}: ${uploadError}`);
+            const markFailed = (index: number, errorMessage: string, notify = true) => {
+                const mf = filesToSend[index];
+                const optMsg = optimisticMessages[index];
+                console.error(`Error sending file ${mf.name}:`, errorMessage);
+                updateMessage(chatId, optMsg.id, {
+                    api_message_status: 'FAILED',
+                    metadata: {
+                        ...optMsg.metadata,
+                        send_error: errorMessage,
+                        send_error_details: {
+                            source: 'client_media_send',
+                            status: 'FAILED',
+                            reason: errorMessage,
+                            captured_at: new Date().toISOString(),
+                        },
                     }
+                });
 
-                    // 2. Send Action (Single File)
-                    const filePayload = [{
-                        base64: publicUrl,
-                        mimetype: mf.type,
-                        filename: mf.name,
-                        mediatype: mf.mediatype,
-                        thumbnail: mf.thumbnail,
-                        deleteAfterSend: true,
-                        storageBucket: 'temp-media',
-                        storagePath: fileName,
-                    }];
+                if (notify) {
+                    toast({
+                        title: 'Erro ao enviar ' + mf.name,
+                        description: errorMessage,
+                        variant: 'destructive'
+                    });
+                }
+            };
 
-                    const currentCaption = i === 0 ? captionForFirst : '';
+            const uploadedMedia: Array<{
+                index: number;
+                file: MediaFileType;
+                storagePath: string;
+                publicUrl: string;
+            }> = [];
 
-                    // Call backend action
-                    const result = await sendMediaAction(chatId, currentCaption, filePayload, tabId);
+            try {
+                for (let i = 0; i < filesToSend.length; i++) {
+                    const mf = filesToSend[i];
+                    const storagePath = createUniqueMediaStoragePath(mf.name);
 
-                    if (result.error) {
-                        throw new Error(result.error);
+                    try {
+                        const { publicUrl, error: uploadError } = await uploadFileToStorage(
+                            mf.file,
+                            'temp-media',
+                            storagePath,
+                        );
+
+                        if (uploadError || !publicUrl) {
+                            throw new Error(uploadError || 'Upload sem URL pública.');
+                        }
+
+                        uploadedMedia.push({ index: i, file: mf, storagePath, publicUrl });
+                    } catch (fileErr) {
+                        const errorMessage = fileErr instanceof Error
+                            ? `Falha no upload de ${mf.name}: ${fileErr.message}`
+                            : `Falha no upload de ${mf.name}.`;
+                        markFailed(i, errorMessage);
                     }
+                }
 
-                    // 3. Success (Replace optimistic message with real one or just update status)
-                    // If backend returns the created message, we replace it.
-                    if ((result as any).messages && (result as any).messages.length > 0) {
-                        const realMsg = (result as any).messages[0];
-                        // Ensure formattedDate is present for UI
-                        const formattedRealMsg = {
+                if (uploadedMedia.length === 0) return;
+
+                const firstUploadedIndex = uploadedMedia[0].index;
+                const mediaPayload = uploadedMedia.map(({ index, file, storagePath, publicUrl }) => ({
+                    base64: publicUrl,
+                    mimetype: file.type,
+                    filename: file.name,
+                    mediatype: file.mediatype,
+                    thumbnail: file.thumbnail,
+                    caption: index === firstUploadedIndex ? captionForFirst : '',
+                    deleteAfterSend: true,
+                    storageBucket: 'temp-media',
+                    storagePath,
+                }));
+
+                const result = await sendMediaAction(chatId, captionForFirst, mediaPayload, tabId);
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                const serverMessages = result.messages || [];
+                uploadedMedia.forEach(({ index }, position) => {
+                    const optMsg = optimisticMessages[index];
+                    const realMsg = serverMessages[position];
+
+                    if (realMsg) {
+                        replaceOptimisticMessage(chatId, optMsg.id, {
                             ...realMsg,
                             sender: optMsg.sender,
-                            formattedDate: formatMessageDate(new Date(realMsg.createdAt), workspaceTimezone)
-                        };
-                        replaceOptimisticMessage(chatId, optMsg.id, formattedRealMsg);
+                            formattedDate: formatMessageDate(new Date(realMsg.createdAt), workspaceTimezone),
+                        });
                     } else {
-                        // Just mark as sent if no object returned (shouldn't happen with current action)
                         updateMessage(chatId, optMsg.id, {
                             api_message_status: 'SENT',
                         });
                     }
-
-                } catch (fileErr: any) {
-                    console.error(`Error sending file ${mf.name}:`, fileErr);
-                    // Mark specific message as FAILED
-                    updateMessage(chatId, optMsg.id, {
-                        api_message_status: 'FAILED',
-                        metadata: {
-                            ...optMsg.metadata,
-                            send_error: fileErr.message || 'Falha no envio.',
-                            send_error_details: {
-                                source: 'client_media_send',
-                                status: 'FAILED',
-                                reason: fileErr.message || 'Falha no envio.',
-                                captured_at: new Date().toISOString(),
-                            },
-                        }
-                    });
-
-                    toast({
-                        title: 'Erro ao enviar ' + mf.name,
-                        description: fileErr.message || 'Falha no envio.',
-                        variant: 'destructive'
-                    });
-                }
+                });
+            } catch (batchErr) {
+                const errorMessage = batchErr instanceof Error ? batchErr.message : 'Falha no envio dos arquivos.';
+                uploadedMedia.forEach(({ index }) => markFailed(index, errorMessage, false));
+                toast({
+                    title: 'Erro ao enviar arquivos',
+                    description: errorMessage,
+                    variant: 'destructive',
+                });
+            } finally {
+                lastSendDraftRef.current = null;
+                onActionSuccess();
+                reportClientMetric('send_message', performance.now() - sendStart, { chatId, media: true });
             }
-
-            // Cleanup logic if needed
-            lastSendDraftRef.current = null;
-            onActionSuccess();
-            reportClientMetric('send_message', performance.now() - sendStart, { chatId, media: true });
-
         })();
     };
 
 
 
     const handleSendAudio = async (audioBlob: Blob, duration: number, mimetype: string) => {
-        if (!chat) return;
+        if (!chat) throw new Error('Conversa indisponível.');
 
         // Determine file extension based on mimetype (WhatsApp prefers ogg)
-        const audioExtension = mimetype.includes('ogg') || mimetype.includes('opus') ? 'ogg' : mimetype.includes('webm') ? 'webm' : 'mp3';
+        const audioExtension = mimetype.includes('ogg') ? 'ogg' : mimetype.includes('webm') ? 'webm' : mimetype.includes('mp4') ? 'm4a' : 'mp3';
 
-        console.log(`[AUDIO_SEND] Received mimetype: ${mimetype}, using extension: ${audioExtension}`);
 
         // 1. Upload to Supabase Storage (Public Bucket)
-        const fileName = `audio_${Date.now()}.${audioExtension}`;
+        const fileName = createUniqueMediaStoragePath(`audio.${audioExtension}`, 'audio-media');
         const { publicUrl, error: uploadError } = await uploadFileToStorage(audioBlob, 'temp-media', fileName);
 
         if (uploadError || !publicUrl) {
-            toast({ title: 'Erro ao fazer upload do áudio', description: uploadError || 'Erro desconhecido', variant: 'destructive' });
-            return;
+            throw new Error(uploadError || 'Não foi possível carregar o áudio.');
         }
 
         // 2. Send Media using the Public URL (instead of Base64)
         // User requested: "leave file in public, send url, then delete file"
         // We pass publicUrl in the 'base64' field because the action expects a string there, 
         // and internal logic handles URLs if they start with http.
-        const audioFilename = `audio_gravado.${audioExtension}`;
+        const audioFilename = createUniqueMediaFileName(`audio_gravado.${audioExtension}`);
 
         const mediaPayload = [{
             base64: publicUrl,
@@ -1735,17 +1761,14 @@ export default function ChatPanel({
             storagePath: fileName
         }];
 
-        console.log('[AUDIO_SEND] Sending media payload:', JSON.stringify(mediaPayload, null, 2));
 
-        const result = await sendMediaAction(chat.id, '', mediaPayload, tabId, { mediaUrl: publicUrl });
+        const result = await sendMediaAction(chat.id, '', mediaPayload, tabId, { mediaUrl: publicUrl, duration });
 
-        console.log('[AUDIO_SEND] Server result:', result);
 
-        if (result.error) {
+        if (!result.success || result.error) {
             console.error('[AUDIO_SEND] Error from server:', result.error);
-            toast({ title: 'Erro ao Enviar Áudio', description: result.error, variant: 'destructive' });
+            throw new Error(result.error || 'O envio não foi confirmado.');
         } else if ((result as any).messages && (result as any).messages.length > 0) {
-            console.log('[AUDIO_SEND] Success, appending messages');
             appendMessagesToChat(chat.id, (result as any).messages);
             triggerSendFeedback();
             scrollToLatestMessage();
@@ -1781,6 +1804,7 @@ export default function ChatPanel({
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+        if (!(e.target instanceof HTMLElement) || !e.target.isContentEditable || e.nativeEvent.isComposing || isVoiceActive) return;
         if (e.key === 'Enter' && (e.ctrlKey || !e.shiftKey)) {
             e.preventDefault();
             handleFormSubmit();
@@ -1821,10 +1845,19 @@ export default function ChatPanel({
             element.innerHTML = html;
         }
 
-        setNewMessage(html);
+        const plain = htmlToWhatsappMarkdown(html);
+        if (textareaRef.current) {
+            textareaRef.current.value = plain;
+            if (focusToEnd) {
+                textareaRef.current.focus();
+                textareaRef.current.setSelectionRange(plain.length, plain.length);
+            }
+        }
+
+        setNewMessage(plain);
 
         if (chat?.id) {
-            setDraft(chat.id, html);
+            setDraft(chat.id, plain);
         }
 
         if (focusToEnd && element) {
@@ -1834,30 +1867,30 @@ export default function ChatPanel({
     }, [chat?.id, moveComposerCaretToEnd, setDraft]);
 
     const syncComposerPlainText = useCallback((text: string, focusToEnd: boolean = false) => {
-        const normalized = text.replace(/\r\n/g, '\n');
-        const html = escapeHtml(normalized).replace(/\n/g, '<br>');
-        syncComposerHtml(html, focusToEnd);
-    }, [escapeHtml, syncComposerHtml]);
-
-    const filteredShortcuts = useMemo(() => {
-        if (!showShortcutSuggestions) return [];
-        const command = debouncedMessageInput.substring(debouncedMessageInput.lastIndexOf('/') + 1).toLowerCase();
-        return shortcuts.filter(s => s.name.toLowerCase().startsWith(command));
-    }, [debouncedMessageInput, shortcuts, showShortcutSuggestions]);
-
-    const handleMessageChange = (e: React.FormEvent<HTMLDivElement>) => {
-        const text = e.currentTarget.innerHTML;
         setNewMessage(text);
-    };
+        if (chat?.id) {
+            setDraft(chat.id, text);
+        }
+        if (textareaRef.current) {
+            textareaRef.current.value = text;
+            if (focusToEnd) {
+                textareaRef.current.focus();
+                textareaRef.current.setSelectionRange(text.length, text.length);
+            }
+        }
+        const element = contentEditableRef.current as HTMLElement | null;
+        if (element) {
+            const normalized = text.replace(/\r\n/g, '\n');
+            const html = escapeHtml(normalized).replace(/\n/g, '<br>');
+            element.innerHTML = html;
+            if (focusToEnd) {
+                element.focus();
+                moveComposerCaretToEnd(element);
+            }
+        }
+    }, [chat?.id, escapeHtml, moveComposerCaretToEnd, setDraft]);
 
-    useEffect(() => {
-        setShowShortcutSuggestions(debouncedMessageInput.includes('/'));
-    }, [debouncedMessageInput]);
 
-    const handleShortcutSelect = (shortcut: Shortcut) => {
-        syncComposerPlainText(shortcut.message, true);
-        setShowShortcutSuggestions(false);
-    };
 
     const handleSpellCheck = async () => {
         const plainText = composerPlainText.trim();
@@ -1892,7 +1925,7 @@ export default function ChatPanel({
 
             if (data.correctedText) {
                 const corrected = data.correctedText;
-                const el = contentEditableRef.current as HTMLElement | null;
+                const el = (textareaRef.current || contentEditableRef.current) as HTMLElement | null;
 
                 // Remove glow, prepare for typewriter
                 if (inputContainer) inputContainer.classList.remove('spellcheck-processing');
@@ -1909,7 +1942,15 @@ export default function ChatPanel({
                 }
 
                 // Clear the text first with a brief pause
-                el.innerText = '';
+                const setComposerElementText = (txt: string) => {
+                    if (el instanceof HTMLTextAreaElement) {
+                        el.value = txt;
+                        setNewMessage(txt);
+                    } else {
+                        el.innerText = txt;
+                    }
+                };
+                setComposerElementText('');
                 syncComposerHtml('');
 
                 // Typewriter effect — character by character
@@ -1919,7 +1960,7 @@ export default function ChatPanel({
                 await new Promise<void>((resolve) => {
                     const typeChar = () => {
                         if (i < corrected.length) {
-                            el.innerText = corrected.substring(0, i + 1);
+                            setComposerElementText(corrected.substring(0, i + 1));
                             i++;
                             setTimeout(typeChar, typeSpeed);
                         } else {
@@ -2025,7 +2066,7 @@ export default function ChatPanel({
     const isChatOpen = chat.status !== 'encerrados';
     const isChatAssignedToMe = (chat.agent?.id || chat.agentId) === currentUser.id;
 
-    const showTextInput = !mediaFiles.length;
+    const showTextInput = !isVoiceActive;
     const showAiTypingOverlay = showTextInput && isAiTyping && isComposerTextEmpty;
     const availableAutopilotAgents = autopilotAgents.length > 0 ? autopilotAgents : autopilotConfig ? [autopilotConfig] : [];
     const selectedAutopilotAgentId =
@@ -2047,20 +2088,41 @@ export default function ChatPanel({
     // over, the AI answers the customer directly and there is nothing to suggest.
     const isCopilotActive = isAiAgentActive && !chat.assigned_system_agent_id;
     const selectedInboxAiAgent = inboxAiAgents.find(agent => agent.id === selectedAutopilotAgentId) || null;
+    const composerAiAgents = availableAutopilotAgents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        avatarUrl: inboxAiAgents.find((inboxAgent) => inboxAgent.id === agent.id)?.systemAgentAvatarUrl || null,
+    }));
     const copilotAgentName = selectedInboxAiAgent?.name || selectedAutopilotAgent?.name || 'IA Dialogy';
     const copilotAgentAvatarUrl = selectedInboxAiAgent?.systemAgentAvatarUrl || null;
+    const isRoboQueue = isChatInInboxQueueScope(chat, 'robo');
+    const isAssignedToSystemAgent = Boolean(
+        chat.assigned_system_agent_id ||
+        chat.assignedSystemAgent?.id ||
+        (isRoboQueue && (chat.autopilot_config_id || autopilotConfig?.id))
+    );
+    const assignedSystemAgentId = chat.assigned_system_agent_id || chat.assignedSystemAgent?.id;
+    const assignedInboxAiAgent = assignedSystemAgentId
+        ? inboxAiAgents.find(agent => agent.id === assignedSystemAgentId || agent.systemAgentId === assignedSystemAgentId)
+        : null;
+    const effectiveAgentName = chat.assignedSystemAgent?.name || assignedInboxAiAgent?.name || copilotAgentName || aiTypingDisplayName || 'IA Dialogy';
+    const effectiveAgentAvatarUrl = chat.assignedSystemAgent?.avatar_url || assignedInboxAiAgent?.systemAgentAvatarUrl || copilotAgentAvatarUrl || null;
     const canAiTakeOverConversation = Boolean(selectedInboxAiAgent?.canTakeOverConversation);
     const headerAssigneeName = chat.agent?.name || chat.assignedSystemAgent?.name || 'Não atribuído';
     const headerStatusLabel = chat.status === 'atendimentos'
         ? 'Em atendimento'
         : chat.status === 'encerrados'
             ? 'Encerrado'
-            : 'Na fila';
+            : isRoboQueue
+                ? 'Robô'
+                : 'Na fila';
     const headerStatusClassName = chat.status === 'atendimentos'
         ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
         : chat.status === 'encerrados'
             ? 'border-slate-200 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300'
-            : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
+            : isRoboQueue
+                ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
+                : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
     const headerPlatformLabel = resolvedPlatform === 'instagram'
         ? 'Instagram'
         : resolvedPlatform === 'messenger'
@@ -2112,14 +2174,14 @@ export default function ChatPanel({
                     )}
                     <div className="relative shrink-0">
                         <Avatar className="h-10 w-10 border border-slate-200 bg-white md:h-11 md:w-11 dark:border-white/10 dark:bg-[#0B0B10]">
-                            <AvatarImage fallbackOnBlank src={chat.contact.avatar_url || undefined} alt={chat.contact.name} data-ai-hint="person" />
-                            <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{chat.contact.name.charAt(0)}</AvatarFallback>
+                            <AvatarImage fallbackOnBlank src={chat.contact?.avatar_url || undefined} alt={chat.contact?.name || chat.protocol || 'Contato'} data-ai-hint="person" />
+                            <AvatarFallback className="bg-slate-100 text-slate-700 font-medium dark:bg-zinc-900 dark:text-white">{((chat.contact?.name || chat.protocol || '?').trim()[0] || '?').toUpperCase()}</AvatarFallback>
                         </Avatar>
                         <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-[#050507]" aria-hidden="true" />
                     </div>
                     <div className="min-w-0 flex-1">
                         <h2 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold text-slate-950 md:text-base dark:text-white">
-                            <span className="min-w-0 truncate">{chat.contact.name}</span>
+                            <span className="min-w-0 truncate">{chat.contact?.name || chat.protocol || 'Sem nome'}</span>
                             <Badge
                                 data-chat-status
                                 variant="secondary"
@@ -2232,6 +2294,31 @@ export default function ChatPanel({
                         />
                     )}
 
+                    <AlertDialog open={isAiTakeOverDialogOpen} onOpenChange={setIsAiTakeOverDialogOpen}>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Deixar a IA assumir esta conversa?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    {selectedInboxAiAgent?.name || 'O agente de IA'} passa a responder {chat.contact?.name || 'o cliente'} diretamente
+                                    e o atendimento sai da sua fila. Para apenas finalizar o atendimento, use &quot;Encerrar Atendimento&quot;.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel disabled={isTakingOverWithAi}>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction
+                                    disabled={isTakingOverWithAi}
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        void handleAiTakeOver();
+                                    }}
+                                >
+                                    {isTakingOverWithAi && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    Sim, passar para a IA
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+
                     {/* MOBILE MENU */}
                     <div className="md:hidden">
                         <DropdownMenu>
@@ -2257,56 +2344,9 @@ export default function ChatPanel({
                                     <FileText className="mr-2 h-4 w-4" />
                                     <span>Salvar conversa</span>
                                 </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={handleLearnFromConversation}>
-                                    <Brain className="mr-2 h-4 w-4" />
-                                    <span>Aprender com esta conversa</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
-                                    <Activity className="mr-2 h-4 w-4" />
-                                    <span>Execuções da IA</span>
-                                    {toolExecutionEntries.length > 0 && (
-                                        <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
-                                            {toolExecutionEntries.length}
-                                        </Badge>
-                                    )}
-                                </DropdownMenuItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={isCopilotActive}
-                                    onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
-                                    onSelect={(event) => event.preventDefault()}
-                                    disabled={isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
-                                    className="items-start py-2"
-                                >
-                                    <div className="min-w-0">
-                                        <p className="text-sm font-medium">Copiloto de IA</p>
-                                        <p className="max-w-[180px] truncate text-[10px] text-muted-foreground">
-                                            {chat.assigned_system_agent_id
-                                                ? 'A IA já está conduzindo esta conversa'
-                                                : selectedAutopilotAgent?.name || 'Nenhum agente configurado'}
-                                        </p>
-                                    </div>
-                                    <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isCopilotActive ? 'Ativo' : 'Inativo'}</span>
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuItem
-                                    disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
-                                    onSelect={() => { void handleRequestSuggestion(); }}
-                                >
-                                    <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                    <span>Sugerir resposta agora</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation}
-                                    onSelect={() => { void handleAiTakeOver(); }}
-                                >
-                                    <Bot className="mr-2 h-4 w-4" />
-                                    <span>Deixar a IA assumir</span>
-                                    {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
-                                </DropdownMenuItem>
-
-
-
+                                {/* Ações de IA vivem no menu "IA" do campo de mensagem.
+                                    Ficavam aqui coladas em "Encerrar Atendimento" e eram
+                                    acionadas por engano no lugar dele. */}
                                 {isChatOpen && isChatAssignedToMe && (
                                     <>
                                         <DropdownMenuSeparator />
@@ -2377,53 +2417,7 @@ export default function ChatPanel({
                                         <FileText className="mr-2 h-4 w-4" />
                                         <span>Salvar conversa</span>
                                     </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Automação e IA</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={handleLearnFromConversation}>
-                                        <Brain className="mr-2 h-4 w-4" />
-                                        <span>Aprender com esta conversa</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => setIsToolExecutionsOpen(true)}>
-                                        <Activity className="mr-2 h-4 w-4" />
-                                        <span>Execuções da IA</span>
-                                        {toolExecutionEntries.length > 0 && (
-                                            <Badge variant="secondary" className="ml-auto h-5 px-1.5 text-[10px]">
-                                                {toolExecutionEntries.length}
-                                            </Badge>
-                                        )}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuCheckboxItem
-                                        checked={isCopilotActive}
-                                        onCheckedChange={(checked) => handleAiSwitchChange(checked === true)}
-                                        onSelect={(event) => event.preventDefault()}
-                                        disabled={isRequestingSuggestion || Boolean(chat.assigned_system_agent_id) || (!isAiAgentActive && !hasAutopilotAvailable)}
-                                        className="items-start py-2"
-                                    >
-                                        <div className="min-w-0">
-                                            <p className="text-sm font-medium">Copiloto de IA</p>
-                                            <p className="max-w-[180px] truncate text-[10px] text-muted-foreground">
-                                                {chat.assigned_system_agent_id
-                                                    ? 'A IA já está conduzindo esta conversa'
-                                                    : selectedAutopilotAgent?.name || 'Nenhum agente configurado'}
-                                            </p>
-                                        </div>
-                                        <span className="ml-auto pt-0.5 text-[10px] font-medium text-muted-foreground">{isCopilotActive ? 'Ativo' : 'Inativo'}</span>
-                                    </DropdownMenuCheckboxItem>
-                                    <DropdownMenuItem
-                                        disabled={!isCopilotActive || isAiTyping || isRequestingSuggestion}
-                                        onSelect={() => { void handleRequestSuggestion(); }}
-                                    >
-                                        <MessageSquareQuote className="mr-2 h-4 w-4" />
-                                        <span>Sugerir resposta agora</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        disabled={Boolean(chat.assigned_system_agent_id) || !canAiTakeOverConversation}
-                                        onSelect={() => { void handleAiTakeOver(); }}
-                                    >
-                                        <Bot className="mr-2 h-4 w-4" />
-                                        <span>Deixar a IA assumir</span>
-                                        {chat.assigned_system_agent_id && <Check className="ml-auto h-4 w-4 text-cyan-500" />}
-                                    </DropdownMenuItem>
+                                    {/* Ações de IA vivem no menu "IA" do campo de mensagem. */}
                                     {isChatOpen && isChatAssignedToMe && (
                                         <>
                                             <DropdownMenuSeparator />
@@ -2444,6 +2438,8 @@ export default function ChatPanel({
 
                 </div>
             </header>
+
+            <ChatTagsBar chat={chat} onUpdate={onActionSuccess} />
 
             {/* Messages Area */}
 
@@ -2504,25 +2500,7 @@ export default function ChatPanel({
                     totalListHeightChanged={settleInitialPositionAtLatest}
                     components={{
                         Header: () => <div className="h-4" aria-hidden="true" />,
-                        Footer: () => (
-                            <div className="min-h-4 px-2 pb-2 md:px-6">
-                                {isAiTyping && (
-                                    <div className="flex items-start gap-3 py-1">
-                                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500">
-                                            <Sparkles className="h-4 w-4" />
-                                        </div>
-                                        <div className="rounded-2xl rounded-tl-sm border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm dark:text-emerald-200">
-                                            <span>{aiTypingDisplayName} está analisando</span>
-                                            <span className="ml-1 inline-flex gap-0.5 align-middle">
-                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
-                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
-                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current" />
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )
+                        Footer: () => <div className="h-4" aria-hidden="true" />,
                     }}
                     itemContent={(index, message) => {
                         const arrayIndex = index - firstItemIndex;
@@ -2561,383 +2539,83 @@ export default function ChatPanel({
 
             {
                 isChatOpen ? (
-                    <footer className="z-20 max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain bg-[#F8F9FB] p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-[clamp(12px,1.8vh,18px)] md:px-[clamp(16px,2.5vw,40px)] md:pb-[calc(clamp(12px,1.8vh,18px)+env(safe-area-inset-bottom))] data-[state=open]:p-0 dark:bg-black/25">
-                        {showShortcutSuggestions && filteredShortcuts.length > 0 && (
-                            <div className="mb-2 p-2 border border-border rounded-xl bg-popover max-h-40 overflow-y-auto">
-                                {filteredShortcuts.map(shortcut => (
-                                    <button
-                                        key={shortcut.id}
-                                        className="w-full text-left p-2 rounded-lg hover:bg-muted text-sm text-foreground transition-colors"
-                                        onClick={() => handleShortcutSelect(shortcut)}
-                                    >
-                                        <span className="font-bold text-primary">/{shortcut.name}</span>
-                                        <span className="text-muted-foreground ml-2 truncate">{shortcut.message}</span>
-                                    </button>
-                                ))}
+                    <footer className="z-20 shrink-0 bg-[#F8F9FB] p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-[clamp(12px,1.8vh,18px)] md:px-[clamp(16px,2.5vw,40px)] md:pb-[calc(clamp(12px,1.8vh,18px)+env(safe-area-inset-bottom))] dark:bg-black/25">
+                        {/* AI Card:
+                            1) In Copilot mode: shows the full draft lifecycle (idle bar, thinking card, suggestion card with actions).
+                            2) In Autonomous Agent mode: shows the thinking card while the AI is preparing a response. */}
+                        {(isCopilotActive || (isAssignedToSystemAgent && isAiTyping)) && (
+                            <div className="mb-2.5">
+                                <CopilotSuggestionCard
+                                    suggestion={isCopilotActive ? aiSuggestion : null}
+                                    isThinking={isAiTyping || (isCopilotActive && isRequestingSuggestion)}
+                                    agentName={effectiveAgentName}
+                                    agentAvatarUrl={effectiveAgentAvatarUrl}
+                                    canRequest={hasAutopilotAvailable}
+                                    onSend={(text) => {
+                                        // Send exactly what the preview showed: one message per block.
+                                        const blocks = aiSuggestion?.blocks?.length ? aiSuggestion.blocks : [text];
+                                        blocks.forEach((block) => { void handleFormSubmit(block); });
+                                        resolveSuggestion('sent');
+                                    }}
+                                    onEdit={(text) => {
+                                        syncComposerPlainText(text, true);
+                                        resolveSuggestion('edited');
+                                    }}
+                                    onRegenerate={handleRequestSuggestion}
+                                    onDismiss={() => resolveSuggestion('dismissed')}
+                                />
                             </div>
                         )}
-                        {mediaFiles.length > 0 && (
-                            <MediaPreview mediaFiles={mediaFiles} setMediaFiles={setMediaFiles} />
-                        )}
-                        {/* {!isAiAgentActive && mediaFiles.length === 0 && !isAiTyping && (chat.messages || []).length > 0 && !(chat.messages![chat.messages!.length - 1].from_me) && (
-                        <SmartReplies
-                            customerMessage={lastCustomerMessage?.content || ''}
-                            chatHistory={(chat.messages || []).map(m => `${m.sender?.name || 'System'}: ${m.content}`).join('\n')}
-                            workspaceId={currentUser.activeWorkspaceId!}
-                            onSelectReply={(reply) => {
-                                setNewMessage(reply);
-                                if (contentEditableRef.current) contentEditableRef.current.innerHTML = reply;
-                            }}
+
+                        <AnimatedComposer
+                            chat={chat}
+                            value={newMessage}
+                            onChange={(text) => setNewMessage(text)}
+                            onSubmit={(textOverride) => handleFormSubmit(textOverride)}
+                            onSendAudio={handleSendAudio}
+                            mediaFiles={mediaFiles}
+                            setMediaFiles={setMediaFiles}
+                            isInternalNote={isInternalNote}
+                            setIsInternalNote={setIsInternalNote}
+                            skipUserSignature={skipUserSignature}
+                            setSkipUserSignature={setSkipUserSignature}
+                            isVoiceActive={isVoiceActive}
+                            setIsVoiceActive={setIsVoiceActive}
+                            shortcuts={shortcuts}
+                            isAiTyping={isAiTyping}
+                            aiTypingDisplayName={effectiveAgentName}
+                            showAiTypingOverlay={showAiTypingOverlay}
+                            isSpellChecking={isSpellChecking}
+                            onSpellCheck={handleSpellCheck}
+                            composerAiAgents={composerAiAgents}
+                            selectedAutopilotAgent={selectedAutopilotAgent}
+                            isCopilotActive={isCopilotActive}
+                            isRequestingSuggestion={isRequestingSuggestion}
+                            isTakingOverWithAi={isTakingOverWithAi}
+                            canAiTakeOverConversation={canAiTakeOverConversation}
+                            onAgentChange={handleAgentChange}
+                            onDisableCopilot={disableCopilot}
+                            onRequestSuggestion={handleRequestSuggestion}
+                            onLearnFromConversation={handleLearnFromConversation}
+                            onOpenToolExecutions={() => setIsToolExecutionsOpen(true)}
+                            onOpenAiTakeOver={() => setIsAiTakeOverDialogOpen(true)}
+                            onOpenCatalog={() => setCatalogChatId(chat.id)}
+                            emojiPickerTheme={emojiPickerTheme as any}
+                            isSendBurstActive={isSendBurstActive}
+                            sendFeedbackKey={sendFeedbackKey}
+                            fileInputRef={fileInputRef}
+                            handleFileChange={handleFileChange}
+                            processFiles={processFiles}
+                            externalTextareaRef={textareaRef}
                         />
-                    )} */}
-
-                        {/* AI Copilot draft: same orchestrator as the Intelligent Attendant,
-                            proposed to the operator instead of sent to the customer. */}
-                        {isCopilotActive && (
-                            <CopilotSuggestionCard
-                                suggestion={aiSuggestion}
-                                isThinking={isAiTyping || isRequestingSuggestion}
-                                agentName={copilotAgentName}
-                                agentAvatarUrl={copilotAgentAvatarUrl}
-                                canRequest={hasAutopilotAvailable}
-                                onSend={(text) => {
-                                    // Send exactly what the preview showed: one message per block.
-                                    const blocks = aiSuggestion?.blocks?.length ? aiSuggestion.blocks : [text];
-                                    blocks.forEach((block) => { void handleFormSubmit(block); });
-                                    resolveSuggestion('sent');
-                                }}
-                                onEdit={(text) => {
-                                    syncComposerPlainText(text, true);
-                                    resolveSuggestion('edited');
-                                }}
-                                onRegenerate={handleRequestSuggestion}
-                                onDismiss={() => resolveSuggestion('dismissed')}
-                            />
+                        {catalogChatId === chat.id && (
+                            <CatalogDialog key={chat.id} chatId={chat.id} contactName={chat.contact?.name || 'cliente'}
+                                open onOpenChange={(open) => { if (!open) setCatalogChatId(null); }}
+                                onSent={(message) => {
+                                    if (message) useInboxStore.getState().appendMessagesToChat(chat.id, [message]);
+                                    onActionSuccess();
+                                }} />
                         )}
-
-                        <div className="space-y-2.5 md:space-y-3">
-                            <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit(); }} onKeyDown={handleKeyDown}>
-                                <input type="hidden" name="chatId" value={chat.id} />
-
-                                <div data-input-container className={cn(
-                                    "relative mx-auto flex w-full max-w-[1600px] flex-col overflow-hidden rounded-[22px] border shadow-[0_10px_35px_-28px_rgba(15,23,42,0.55)] transition-all duration-200",
-                                    isInternalNote
-                                        ? "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-300 dark:border-yellow-700/40"
-                                        : "border-slate-200 bg-white dark:border-white/10 dark:bg-black",
-                                    canSendFromComposer && !isInternalNote && "border-cyan-500/50",
-                                    isSendBurstActive && !isInternalNote && "ring-1 ring-cyan-300/40",
-                                    isAiTyping && !isInternalNote && "ring-1 ring-cyan-400/25"
-                                )}>
-                                    {!isInternalNote && canSendFromComposer && (
-                                        <span className="pointer-events-none absolute left-6 right-6 top-0 h-px bg-cyan-300/60" />
-                                    )}
-
-                                    {isAiTyping && !isInternalNote && (
-                                        <span className="pointer-events-none absolute inset-x-10 top-0 h-px bg-cyan-400" />
-                                    )}
-
-                                    {Boolean(sendFeedbackKey) && (
-                                        <span
-                                            key={`composer-burst-${sendFeedbackKey}`}
-                                            className="pointer-events-none absolute inset-0 rounded-2xl border border-cyan-300/60"
-                                        />
-                                    )}
-
-                                    {isSpellChecking && (
-                                        <div className="px-4 pt-1">
-                                            <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-300">
-                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                Revisando ortografia...
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Text Input Area */}
-                                    <div className="relative min-w-0 px-5 pb-1 pt-4">
-                                        {showTextInput && isComposerTextEmpty && !showAiTypingOverlay && (
-                                            <div className="pointer-events-none absolute inset-0 px-5 pb-1 pt-4 select-none">
-                                                <span className={cn(
-                                                    "text-[15px] leading-relaxed",
-                                                    isInternalNote ? "text-muted-foreground/50" : "text-slate-400 dark:text-zinc-500"
-                                                )}>Digite aqui a sua mensagem...</span>
-                                            </div>
-                                        )}
-                                        {showAiTypingOverlay && (
-                                            <div className="absolute inset-0 z-10 px-4 pt-3 pb-2 pointer-events-none select-none">
-                                                <div className="flex items-center gap-2 text-sm font-medium text-cyan-600 dark:text-cyan-300">
-                                                    <Sparkles className="h-4 w-4" />
-                                                    <span>{aiTypingDisplayName} está escrevendo uma resposta</span>
-                                                    <div className="flex items-center gap-1">
-                                                        {[0, 1, 2].map((dot) => (
-                                                            <span
-                                                                key={`ai-typing-dot-${dot}`}
-                                                                className="h-1.5 w-1.5 rounded-full bg-current"
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <div className="mt-3 space-y-2">
-                                                    {[72, 94, 61].map((width, index) => (
-                                                        <div
-                                                            key={`ai-typing-line-${index}`}
-                                                            className="h-3 rounded-full bg-cyan-300/20"
-                                                            style={{ width: `${width}%` }}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {showTextInput ? (
-                                            <ContentEditable
-                                                innerRef={contentEditableRef as any}
-                                                html={newMessage}
-                                                disabled={isAiTyping}
-                                                onChange={handleMessageChange}
-                                                onPaste={handlePaste}
-                                                className={cn(
-                                                    "max-h-[140px] min-h-[44px] w-full resize-none overflow-y-auto whitespace-pre-wrap border-0 bg-transparent p-0 text-[15px] leading-relaxed focus:outline-none focus:ring-0 scrollbar-hide",
-                                                    isInternalNote ? "text-foreground" : "text-slate-900 caret-slate-900 dark:text-white dark:caret-white",
-                                                    showAiTypingOverlay && "opacity-0"
-                                                )}
-                                                tagName="div"
-                                                onKeyUp={saveCursorPosition}
-                                                onClick={saveCursorPosition}
-                                            />
-                                        ) : null}
-                                    </div>
-
-                                    {/* Bottom Toolbar */}
-                                    <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
-                                        {/* Left Action Buttons */}
-                                        <div className="flex min-w-0 items-center gap-1 overflow-x-auto scrollbar-hide">
-                                            <button
-                                                type="button"
-                                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                onClick={() => fileInputRef.current?.click()}
-                                                disabled={isAiTyping}
-                                                aria-label="Anexar arquivo"
-                                            >
-                                                <Paperclip className="h-4 w-4" />
-                                            </button>
-                                            <input
-                                                type="file"
-                                                ref={fileInputRef}
-                                                onChange={handleFileChange}
-                                                className="hidden"
-                                                multiple
-                                                accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,audio/*"
-                                            />
-
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className={cn(
-                                                            "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
-                                                            isInternalNote || skipUserSignature
-                                                                ? "bg-blue-500/10 text-blue-700 hover:bg-blue-500/15 dark:text-blue-300"
-                                                                : "text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                        )}
-                                                        disabled={isAiTyping}
-                                                        aria-label="Selecionar opções para a próxima mensagem"
-                                                    >
-                                                        <SlidersHorizontal className="h-4 w-4" />
-                                                        <span className="hidden sm:inline">Opções</span>
-                                                        {(isInternalNote || skipUserSignature) && (
-                                                            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold text-white">
-                                                                {Number(isInternalNote) + Number(skipUserSignature)}
-                                                            </span>
-                                                        )}
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" className="w-72">
-                                                    <DropdownMenuLabel>
-                                                        <span className="block text-sm">Próxima mensagem</span>
-                                                        <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">As opções são desativadas após o envio.</span>
-                                                    </DropdownMenuLabel>
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuCheckboxItem
-                                                        checked={isInternalNote}
-                                                        onCheckedChange={(checked) => {
-                                                            const enabled = checked === true;
-                                                            setIsInternalNote(enabled);
-                                                            if (enabled) setSkipUserSignature(false);
-                                                        }}
-                                                        onSelect={(event) => event.preventDefault()}
-                                                    >
-                                                        <StickyNote className="mr-2 h-4 w-4 text-amber-500" />
-                                                        <div>
-                                                            <p className="text-sm font-medium">Nota interna</p>
-                                                            <p className="text-[10px] text-muted-foreground">Visível somente para a equipe</p>
-                                                        </div>
-                                                    </DropdownMenuCheckboxItem>
-                                                    <DropdownMenuCheckboxItem
-                                                        checked={skipUserSignature}
-                                                        disabled={isInternalNote}
-                                                        onCheckedChange={(checked) => {
-                                                            const enabled = checked === true;
-                                                            setSkipUserSignature(enabled);
-                                                            if (enabled) setIsInternalNote(false);
-                                                        }}
-                                                        onSelect={(event) => event.preventDefault()}
-                                                    >
-                                                        <Signature className="mr-2 h-4 w-4 text-violet-500" />
-                                                        <div>
-                                                            <p className="text-sm font-medium">Sem assinatura</p>
-                                                            <p className="text-[10px] text-muted-foreground">Envia sem o nome do atendente</p>
-                                                        </div>
-                                                    </DropdownMenuCheckboxItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-white/10"
-                                                        disabled={isAiTyping}
-                                                    >
-                                                        <MessageSquareQuote className="h-4 w-4" />
-                                                        <span className="hidden sm:inline">Respostas rápidas</span>
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" className="w-80 max-h-96 overflow-y-auto">
-                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Atalhos disponíveis
-                                                    </div>
-                                                    <DropdownMenuSeparator />
-                                                    {shortcuts.length === 0 ? (
-                                                        <DropdownMenuItem disabled>
-                                                            Nenhum atalho encontrado.
-                                                        </DropdownMenuItem>
-                                                    ) : (
-                                                        shortcuts.map(shortcut => (
-                                                            <DropdownMenuItem
-                                                                key={shortcut.id}
-                                                                className="items-start gap-0 px-0 py-0 focus:bg-transparent"
-                                                                onSelect={() => handleShortcutSelect(shortcut)}
-                                                            >
-                                                                <div className="flex w-full flex-col gap-1 rounded-sm px-2 py-2 hover:bg-accent">
-                                                                    <div className="flex items-center justify-between w-full gap-2">
-                                                                        <span className="font-bold text-primary flex items-center gap-2">
-                                                                            /{shortcut.name}
-                                                                            {shortcut.type === 'global' && <Globe className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'team' && <Users className="h-3 w-3 text-muted-foreground" />}
-                                                                            {shortcut.type === 'private' && <Lock className="h-3 w-3 text-muted-foreground" />}
-                                                                        </span>
-                                                                    </div>
-                                                                    <span className="w-full truncate text-xs text-muted-foreground">{shortcut.message}</span>
-                                                                </div>
-                                                            </DropdownMenuItem>
-                                                        ))
-                                                    )}
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className={cn(
-                                                            "flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition-colors hover:bg-muted dark:hover:bg-white/10",
-                                                            isAiAgentActive
-                                                                ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300"
-                                                                : "text-muted-foreground hover:text-foreground"
-                                                        )}
-                                                        aria-label="Configurar IA"
-                                                    >
-                                                        <Sparkles className={cn("h-4 w-4", isAiAgentActive && "text-cyan-500")} />
-                                                        <span>IA</span>
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="start" className="w-72">
-                                                    <div className="px-2 py-2">
-                                                        <div className="flex items-center justify-between gap-3">
-                                                            <div className="flex min-w-0 items-center gap-2">
-                                                                <Sparkles className="h-4 w-4 text-cyan-500" />
-                                                                <div className="min-w-0">
-                                                                    <p className="truncate text-sm font-medium">Copiloto IA</p>
-                                                                    <p className="truncate text-xs text-muted-foreground">
-                                                                        {selectedAutopilotAgent?.name || 'Nenhum agente selecionado'}
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                            <Switch
-                                                                checked={isAiAgentActive}
-                                                                onCheckedChange={handleAiSwitchChange}
-                                                                disabled={isAiTyping || !hasAutopilotAvailable}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <DropdownMenuSeparator />
-                                                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                                                        Agente responsavel
-                                                    </div>
-                                                    {!hasAutopilotAvailable ? (
-                                                        <DropdownMenuItem disabled>
-                                                            Nenhum agente IA configurado.
-                                                        </DropdownMenuItem>
-                                                    ) : (
-                                                        availableAutopilotAgents.map(agent => (
-                                                            <DropdownMenuItem
-                                                                key={agent.id}
-                                                                onSelect={() => handleAgentChange(agent.id)}
-                                                                disabled={isAiTyping}
-                                                                className="gap-2"
-                                                            >
-                                                                <Bot className="h-4 w-4 text-muted-foreground" />
-                                                                <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-                                                                {agent.id === selectedAutopilotAgent?.id && <Check className="h-4 w-4 text-cyan-500" />}
-                                                            </DropdownMenuItem>
-                                                        ))
-                                                    )}
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuItem onSelect={handleSpellCheck} disabled={isSpellChecking || isComposerTextEmpty}>
-                                                        {isSpellChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SpellCheck2 className="mr-2 h-4 w-4" />}
-                                                        Corretor Ortográfico
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted dark:hover:bg-white/10 transition-colors"
-                                                        disabled={isAiTyping}
-                                                        aria-label="Abrir emojis"
-                                                    >
-                                                        <Smile className="h-4 w-4" />
-                                                    </button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0 border-none mb-2 bg-transparent shadow-none">
-                                                    <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme as any} />
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-
-                                        {/* Right: Audio / Send */}
-                                        <div className="flex items-center gap-1.5">
-                                            {!canSendFromComposer ? (
-                                                <div className="animate-in zoom-in duration-150">
-                                                    <AudioRecorder onSend={handleSendAudio} />
-                                                </div>
-                                            ) : (
-                                                <div className="animate-in zoom-in duration-150">
-                                                    <SendMessageButton
-                                                        disabled={isAiTyping}
-                                                        isPrimed={!isAiTyping && canSendFromComposer}
-                                                        feedbackKey={sendFeedbackKey}
-                                                        showFeedback={isSendBurstActive}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </form>
-                            {/* Agent UI removed from here, moving to header */}
-                        </div>
                     </footer>
                 ) : (
                     <footer className="p-4 flex-shrink-0 text-center bg-background border-t border-border">
@@ -2950,4 +2628,3 @@ export default function ChatPanel({
         </div >
     );
 }
-

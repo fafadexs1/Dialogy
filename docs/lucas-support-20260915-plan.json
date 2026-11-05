@@ -1,0 +1,44 @@
+{
+  "apply": true,
+  "workspaceId": "e3b476a1-5de8-4744-80b5-a5d23fe15fab",
+  "agentId": "7d7259ab-a6c3-4057-a9ca-28ddbb15db95",
+  "beforeVersion": 51,
+  "nextVersion": 53,
+  "branches": [
+    "Sem internet ou luz vermelha",
+    "Lentidão e alcance do Wi-Fi",
+    "Quedas e instabilidade",
+    "Um aparelho, aplicativo ou jogo",
+    "Consultar rede Wi-Fi com privacidade",
+    "Confirmar alteração do nome do Wi-Fi",
+    "Confirmar reinício do roteador",
+    "Falar com suporte humano",
+    "Financeiro, comercial ou visita",
+    "Entender o pedido sem repetir"
+  ],
+  "nodes": 29,
+  "tools": [
+    "sgp_fetch_contact_panel_data",
+    "sgp_fetch_contracts",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:list_routers",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:get_router_details",
+    "add_internal_note",
+    "transfer_chat",
+    "close_chat",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:get_wifi_diagnostics",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:list_connected_clients",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:scan_wifi_spectrum",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:configure_wifi",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:get_operation_status",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:reboot_router",
+    "mcp:8171892c-827b-4216-a631-02839d36af85:get_tool_manual"
+  ],
+  "audit": [],
+  "warnings": [],
+  "raquelBeforeHash": "f5c4ce5fa4effed561495b9ad4dbb86e4967debd2e126bf5bf182c489646aea6",
+  "engine": "legacy-autopilot",
+  "limitations": [
+    "Troca de senha segue para Suporte; nenhum segredo é solicitado no chat.",
+    "Configuração não demonstra atendimento real; validar transferência e conversa separadamente."
+  ]
+}

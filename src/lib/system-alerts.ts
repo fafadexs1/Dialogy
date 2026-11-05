@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 export const GLOBAL_ALERT_REALTIME_TOPIC = 'system:global-alert';
 export const GLOBAL_ALERT_REALTIME_EVENT = 'global_alert_changed';
+export const GLOBAL_ALERT_REALTIME_CHANNEL_OPTIONS = {
+    config: {
+        private: true,
+    },
+} as const;
 export const GLOBAL_ALERT_BROWSER_CHANNEL = 'dialogy:global-alert';
 export const GLOBAL_ALERT_BROWSER_STORAGE_KEY = 'dialogy:global-alert:update';
 

@@ -283,17 +283,18 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
 
     return (
         <>
-            <div className="flex flex-col h-full w-full bg-transparent p-4 md:p-6 lg:p-8">
-                <div className="shrink-0 mb-4 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Columns3 className="h-4 w-4" />
-                        <span>{orderedStages.length} etapas no funil</span>
+            <div className="mx-auto flex h-full w-full max-w-[1800px] flex-col bg-transparent px-5 py-6 md:px-8 md:py-8">
+                <div className="mb-6 flex shrink-0 flex-wrap items-end justify-between gap-4">
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-300">Pipeline comercial</p>
+                        <h2 className="mt-1 text-[28px] font-semibold tracking-[-0.045em] text-[#132b20] dark:text-white md:text-[34px]">Funil de oportunidades</h2>
+                        <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-zinc-400"><Columns3 className="h-4 w-4" /> {orderedStages.length} etapas para acompanhar cada avanço.</p>
                     </div>
                     <div className="flex items-center gap-2">
                         <Button
                             variant="outline"
                             size="sm"
-                            className="text-xs gap-1.5"
+                            className="h-10 gap-1.5 rounded-xl border-[#d8e5d8] bg-white px-4 text-xs font-semibold text-[#23402d] shadow-sm hover:bg-[#f4f8f2] dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
                             onClick={() => setStageDialogOpen(true)}
                         >
                             <Plus className="h-3.5 w-3.5" />
@@ -302,7 +303,7 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                         <Button
                             variant="outline"
                             size="sm"
-                            className="text-xs gap-1.5"
+                            className="h-10 gap-1.5 rounded-xl border-[#d8e5d8] bg-white px-4 text-xs font-semibold text-[#23402d] shadow-sm hover:bg-[#f4f8f2] dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
                             onClick={async () => {
                                 if (!user?.activeWorkspaceId) return;
                                 toast({ title: 'Recalculando scores...' });
@@ -323,20 +324,20 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
 
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
                     <DragDropContext onDragEnd={onDragEnd}>
-                        <div className="flex h-full gap-4 min-w-max pb-2">
+                        <div className="flex h-full min-w-max gap-4 pb-2">
                             {orderedStages.map((stage) => {
                             const column = columns[stage.value];
                             if (!column) return null;
                             const stageTotal = dealTotalsByStage[stage.value] || 0;
 
                             return (
-                                <div key={stage.value} className="flex flex-col w-80 h-full rounded-lg bg-muted/50 border border-border/50">
-                                    <div className="sticky top-0 z-10 flex flex-col gap-1 rounded-t-lg border-b border-border/50 bg-card/50 p-3 backdrop-blur-sm">
+                                <div key={stage.value} className="flex h-full w-[300px] flex-col overflow-hidden rounded-[22px] border border-[#dfe8dd] bg-[#eef3ec] dark:border-white/10 dark:bg-[#131c16] md:w-[326px]">
+                                    <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-[#dfe8dd] bg-white/90 px-4 py-4 backdrop-blur-sm dark:border-white/10 dark:bg-[#1a261e]/95">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2">
-                                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stage.color }} />
-                                                <h3 className="font-medium text-sm text-foreground">{stage.label}</h3>
-                                                <Badge variant="secondary" className="text-[10px] h-5 px-1.5 min-w-[1.25rem] justify-center">
+                                                <div className="h-2.5 w-2.5 rounded-full ring-4 ring-slate-100 dark:ring-white/5" style={{ backgroundColor: stage.color }} />
+                                                <h3 className="text-sm font-semibold text-[#1d3628] dark:text-white">{stage.label}</h3>
+                                                <Badge variant="secondary" className="h-5 min-w-[1.25rem] justify-center rounded-full bg-[#eef4ec] px-1.5 text-[10px] text-[#43624b] dark:bg-white/10 dark:text-zinc-200">
                                                     {column.items.length}
                                                 </Badge>
                                             </div>
@@ -358,7 +359,7 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                                             </DropdownMenu>
                                         </div>
                                         {stageTotal > 0 && (
-                                            <div className="flex items-center gap-1 pl-5 text-xs font-medium text-muted-foreground">
+                                            <div className="flex items-center gap-1 pl-5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
                                                 <DollarSign className="h-3 w-3" />
                                                 <span>{formatBRL(stageTotal)}</span>
                                             </div>
@@ -370,9 +371,9 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                                             <div
                                                 {...provided.droppableProps}
                                                 ref={provided.innerRef}
-                                                className={`flex-1 overflow-y-auto p-2 transition-colors ${snapshot.isDraggingOver ? 'bg-accent/20' : ''}`}
+                                                className={`flex-1 overflow-y-auto p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-emerald-100/70 dark:bg-emerald-400/10' : ''}`}
                                             >
-                                                <div className="flex flex-col gap-2">
+                                                <div className="flex flex-col gap-3">
                                                     {column.items.map((contact, index) => {
                                                         const topDeal = topDealByContact[contact.id];
                                                         return (
@@ -383,16 +384,16 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                                                                         {...dragProvided.draggableProps}
                                                                         {...dragProvided.dragHandleProps}
                                                                         onClick={() => onContactClick(contact)}
-                                                                        className={`cursor-pointer border-border/60 bg-card transition-all hover:shadow-md ${dragSnapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20 rotate-1' : ''}`}
+                                                                        className={`cursor-pointer rounded-[17px] border-[#e1e9de] bg-white shadow-[0_9px_24px_-19px_rgba(16,46,25,.5)] transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-[0_15px_30px_-19px_rgba(16,46,25,.5)] dark:border-white/10 dark:bg-[#1d2a21] ${dragSnapshot.isDragging ? 'rotate-1 shadow-xl ring-2 ring-emerald-400/30' : ''}`}
                                                                     >
-                                                                        <CardContent className="space-y-2 p-3">
+                                                                        <CardContent className="space-y-3 p-4">
                                                                             <div className="flex items-start justify-between gap-2">
                                                                                 <div className="flex items-center gap-2 overflow-hidden">
-                                                                                    <Avatar className="h-6 w-6 shrink-0">
+                                                                                    <Avatar className="h-9 w-9 shrink-0 border border-emerald-100 dark:border-white/10">
                                                                                         <AvatarImage src={contact.avatar_url || undefined} />
                                                                                         <AvatarFallback className="text-[10px]">{contact.name.charAt(0)}</AvatarFallback>
                                                                                     </Avatar>
-                                                                                    <span className="truncate text-sm font-medium">{contact.name}</span>
+                                                                                    <span className="truncate text-sm font-semibold text-[#1c3728] dark:text-white">{contact.name}</span>
                                                                                     {contact.lead_score != null && contact.lead_score > 0 ? (
                                                                                         <LeadScoreBadge score={contact.lead_score} size="sm" />
                                                                                     ) : null}
@@ -405,7 +406,7 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                                                                             </div>
 
                                                                             {topDeal ? (
-                                                                                <p className="truncate pl-8 text-[10px] text-muted-foreground">{topDeal.title}</p>
+                                                                                <p className="truncate pl-11 text-[11px] text-slate-500 dark:text-zinc-400">{topDeal.title}</p>
                                                                             ) : null}
 
                                                                             <div className="flex flex-wrap gap-1">
@@ -415,14 +416,14 @@ export default function CrmKanban({ user, onContactClick }: CrmKanbanProps) {
                                                                                     .map((tag) => (
                                                                                         <span
                                                                                             key={tag.id}
-                                                                                            className="rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                                                                            className="rounded-full border border-[#e1e9de] bg-[#f4f7f2] px-2 py-0.5 text-[10px] text-[#496350] dark:border-white/10 dark:bg-white/5 dark:text-zinc-300"
                                                                                         >
                                                                                             {tag.label}
                                                                                         </span>
                                                                                     ))}
                                                                             </div>
 
-                                                                            <div className="flex items-center justify-between border-t border-border/50 pt-1 text-xs text-muted-foreground">
+                                                                            <div className="flex items-center justify-between border-t border-[#edf1eb] pt-3 text-[11px] text-slate-500 dark:border-white/10 dark:text-zinc-400">
                                                                                 <span>{contact.owner?.name || 'Sem dono'}</span>
                                                                                 <span>{contact.last_activity ? format(new Date(contact.last_activity), 'dd/MM', { locale: ptBR }) : '-'}</span>
                                                                             </div>

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 type PrivateS3Config = {
@@ -56,4 +56,26 @@ export async function createPrivateObjectDownloadUrl(key: string, expiresInSecon
   return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
     expiresIn: Math.min(Math.max(expiresInSeconds, 60), 900),
   });
+}
+
+export async function readPrivateObject(key: string, maxBytes: number): Promise<Buffer> {
+  const { bucket, client } = getPrivateS3Config();
+  const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  if (!response.Body) throw new Error('Arquivo indisponível.');
+  if (Number(response.ContentLength || 0) > maxBytes) throw new Error('Arquivo excede o limite permitido.');
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+    size += chunk.byteLength;
+    if (size > maxBytes) {
+      (response.Body as { destroy?: () => void }).destroy?.();
+      throw new Error('Arquivo excede o limite permitido.');
+    }
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+export async function deletePrivateObject(key: string): Promise<void> {
+  const { bucket, client } = getPrivateS3Config();
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }

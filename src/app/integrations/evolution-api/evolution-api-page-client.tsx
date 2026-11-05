@@ -24,6 +24,7 @@ import { useFormStatus } from 'react-dom';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TemplateManager } from './template-manager';
+import { EvolutionWebhookPanel } from './evolution-webhook-panel';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,6 +32,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/use-online-status';
+import workspaceStyles from '@/app/team/team-page.module.css';
+import whatsappStyles from '../whatsapp-api/whatsapp-api-page.module.css';
 
 const META_CONFIG_PLACEHOLDERS = new Set([
     '1234567890123456',
@@ -66,7 +69,7 @@ function getInitialFormData(channelMode: ChannelMode): Partial<EvolutionInstance
 }
 
 
-function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { workspaceId: string, onSuccess: (qrCode?: string) => void, onClose: () => void, channelMode: ChannelMode }) {
+export function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { workspaceId: string, onSuccess: (qrCode?: string, instanceId?: string) => void, onClose: () => void, channelMode: ChannelMode }) {
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string>('');
@@ -85,6 +88,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
 
     // Manual Steps
     const [step, setStep] = useState(1);
+    const [reviewAdvanced, setReviewAdvanced] = useState(false);
     const [useProxy, setUseProxy] = useState(false);
 
     useEffect(() => {
@@ -121,7 +125,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsSubmitting(true);
-        setStatusMessage('Provisionando instância...');
+        setStatusMessage('Preparando sua conexão…');
 
         const payload: EvolutionInstanceCreationPayload = {
             ...formData,
@@ -135,8 +139,8 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
         setStatusMessage('');
 
         if (result.success) {
-            toast({ title: 'Instância Criada!', description: 'Sua instância está sendo provisionada.' });
-            onSuccess(result.qrCode);
+            toast({ title: 'Conexão criada', description: 'Seu número já tem um lugar na Dialogy.' });
+            onSuccess(result.qrCode, result.instanceId);
         } else {
             toast({ title: 'Erro ao Criar Instância', description: result.error, variant: 'destructive' });
         }
@@ -266,7 +270,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
 
                         if (creationResult.success) {
                             toast({ title: 'Conectado!', description: 'WhatsApp Business conectado com sucesso.' });
-                            onSuccess(undefined);
+                            onSuccess(undefined, creationResult.instanceId);
                         } else {
                             toast({ title: 'Erro na Criação', description: creationResult.error, variant: 'destructive' });
                         }
@@ -297,12 +301,12 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
     // --- MANUAL STEPS LOGIC (LEGACY) ---
     const isBaileys = formData.integration === 'WHATSAPP-BAILEYS';
     const isTelegram = formData.integration === 'EVOLUTION';
-    const totalSteps = isBaileys ? 3 : 2;
+    const totalSteps = isBaileys ? (reviewAdvanced ? 3 : 1) : 2;
 
     const STEPS = [
         { id: 1, title: "Essencial" },
-        { id: 2, title: isTelegram ? "Bot" : "Conexao" },
-        ...(isBaileys ? [{ id: 3, title: "Avançado" }] : [])
+        ...(!isBaileys || reviewAdvanced ? [{ id: 2, title: isTelegram ? "Bot" : "Conexão" }] : []),
+        ...(isBaileys && reviewAdvanced ? [{ id: 3, title: 'Avançado' }] : [])
     ];
 
     const nextStep = () => {
@@ -335,6 +339,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
             channel: undefined,
         }));
         setStep(1);
+        setReviewAdvanced(false);
         setManualMode(true);
     };
 
@@ -355,51 +360,27 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
 
     if (!manualMode) {
         return (
-            <div className="py-8 px-4 flex flex-col items-center space-y-8">
-                <div className="text-center space-y-2">
-                    <h2 className="text-2xl font-bold">Conectar WhatsApp</h2>
-                    <p className="text-muted-foreground max-w-md mx-auto">
-                        Escolha entre Cloud API oficial ou conexao via QR Code, ambas gerenciadas pela Evolution API.
-                    </p>
+            <div className={whatsappStyles.connectChoices}>
+                <span className={workspaceStyles.eyebrow}>UM NOVO PONTO DE ENCONTRO</span>
+                <h2>Como você quer se conectar?</h2>
+                <p>Escolha o caminho que faz sentido para seu momento. Nós cuidamos de reunir suas conversas por aqui.</p>
+                <div className={whatsappStyles.connectionOptions}>
+                    <button type="button" onClick={() => startManualConnection('WHATSAPP-BAILEYS')}>
+                        <QrCode size={28} strokeWidth={1.4} />
+                        <strong>Pelo seu celular</strong>
+                        <small>Leia um QR Code e comece a conversar. Mensagens e carrosséis sem a etapa de aprovação. Conexão não oficial.</small>
+                        <span>Conectar com QR Code <ArrowRight size={14} /></span>
+                    </button>
+                    <button type="button" onClick={canStartMetaEmbeddedSignup ? handleMetaLogin : () => startManualConnection('WHATSAPP-BUSINESS')}>
+                        <FaMeta size={31} />
+                        <strong>Com uma conta oficial</strong>
+                        <small>Use sua conta WhatsApp Business na Meta. Crie templates e carrosséis com aprovação oficial.</small>
+                        <span>{canStartMetaEmbeddedSignup ? 'Continuar com a Meta' : 'Usar credenciais da Meta'} <ArrowRight size={14} /></span>
+                    </button>
                 </div>
-
-                <div className="grid w-full max-w-xl grid-cols-1 gap-4">
-                <Card
-                    className={cn(
-                        "border-2 border-blue-100 transition-colors shadow-lg group",
-                        canStartMetaEmbeddedSignup ? "cursor-pointer hover:border-blue-300" : "cursor-not-allowed opacity-70"
-                    )}
-                    onClick={canStartMetaEmbeddedSignup ? handleMetaLogin : undefined}
-                >
-                    <CardHeader className="text-center pb-2">
-                        <div className="mx-auto w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                            <svg className="w-8 h-8 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24" role="img" xmlns="http://www.w3.org/2000/svg"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.791-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
-                        </div>
-                        <CardTitle className="text-xl">WhatsApp Cloud API (Oficial)</CardTitle>
-                        <CardDescription>
-                            {canStartMetaEmbeddedSignup
-                                ? 'Recomendado para empresas'
-                                : 'Configure NEXT_PUBLIC_META_CONFIG_ID com o Config ID real da Meta para habilitar esta conexão.'}
-                        </CardDescription>
-                    </CardHeader>
-                    <CardFooter className="justify-center pt-2 pb-6">
-                        <Button className="bg-[#1877F2] hover:bg-[#1877F2]/90 w-full font-semibold" disabled={!canStartMetaEmbeddedSignup}>
-                            Conectar com Facebook
-                        </Button>
-                    </CardFooter>
-                </Card>
-                </div>
-
-                <div className="relative w-full max-w-md">
-                    <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                    <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Ou</span></div>
-                </div>
-
-                <Button variant="ghost" size="sm" onClick={() => startManualConnection('WHATSAPP-BAILEYS')} className="text-muted-foreground hover:text-foreground">
-                    Conectar manualmente (QRCode / Baileys / Token)
-                </Button>
+                {canStartMetaEmbeddedSignup && <button type="button" className={whatsappStyles.connectManual} onClick={() => startManualConnection('WHATSAPP-BUSINESS')}>Já tenho as credenciais da Meta <ArrowRight size={13} /></button>}
             </div>
-        )
+        );
     }
 
     return (
@@ -407,9 +388,9 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
             <DialogHeader>
                 <div className="flex items-center gap-2">
                     {!isTelegramOnly && (
-                        <Button type="button" variant="ghost" size="icon" onClick={() => setManualMode(false)} className="-ml-2"><ArrowLeft className="h-4 w-4" /></Button>
+                        <Button type="button" variant="ghost" size="icon" aria-label="Voltar às opções de conexão" onClick={() => setManualMode(false)} className="-ml-2"><ArrowLeft className="h-4 w-4" /></Button>
                     )}
-                    <DialogTitle>{isTelegramOnly ? 'Configurar Telegram Bot' : 'Configuração Manual'}</DialogTitle>
+                    <h2>{isTelegramOnly ? 'Configurar Telegram Bot' : 'Conecte seu WhatsApp'}</h2>
                 </div>
                 <div className="flex items-center justify-center pt-2">
                     {STEPS.map((s, index) => (
@@ -431,16 +412,16 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
                 </div>
             </DialogHeader>
 
-            <ScrollArea className="h-[60vh]">
+            <div className="max-h-[52vh] overflow-y-auto">
                 <div className="py-4 px-1 space-y-6">
                     {step === 1 && (
                         <Card>
                             <CardHeader>
-                                <CardTitle className="text-base">{isTelegramOnly ? 'Configurações do Bot' : 'Configurações Essenciais'}</CardTitle>
+                                <CardTitle className="text-base">{isTelegramOnly ? 'Configurações do Bot' : 'Um nome para o seu número'}</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="displayName">{isTelegramOnly ? 'Apelido do Bot (Obrigatório)' : 'Apelido da Instância (Obrigatório)'}</Label>
+                                    <Label htmlFor="displayName">{isTelegramOnly ? 'Apelido do Bot (Obrigatório)' : 'Nome da conexão'}</Label>
                                     <Input
                                         id="displayName"
                                         name="displayName"
@@ -461,10 +442,10 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
                                     <div className="space-y-2">
                                         <Label htmlFor="integrationType">Tipo de Conexão</Label>
                                         <Select name="integration" value={formData.integration} onValueChange={(value) => { setFormData(prev => ({ ...prev, integration: value as "WHATSAPP-BAILEYS" | "WHATSAPP-BUSINESS", channel: undefined })); }}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="WHATSAPP-BAILEYS">WhatsApp (Baileys - Não Oficial)</SelectItem>
-                                                <SelectItem value="WHATSAPP-BUSINESS">WhatsApp Business (Cloud API - Oficial)</SelectItem>
+                                            <SelectTrigger id="integrationType"><SelectValue /></SelectTrigger>
+                                            <SelectContent className={workspaceStyles.surface}>
+                                                <SelectItem value="WHATSAPP-BAILEYS">QR Code · não oficial</SelectItem>
+                                                <SelectItem value="WHATSAPP-BUSINESS">API oficial · Meta</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -472,6 +453,8 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
                             </CardContent>
                         </Card>
                     )}
+
+                    {step === 1 && isBaileys && <div className="flex items-start gap-3 rounded-xl border bg-muted/30 p-4"><Checkbox id="review-advanced" checked={reviewAdvanced} onCheckedChange={checked => setReviewAdvanced(checked === true)} /><div><Label htmlFor="review-advanced">Revisar opções avançadas antes de conectar</Label><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Ajustes de leitura, histórico, chamadas e proxy, se você precisar.</p></div></div>}
 
                     {step === 2 && isBaileys && (
                         <Card>
@@ -633,7 +616,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
                     )}
 
                 </div>
-            </ScrollArea >
+            </div>
             <DialogFooter className="pt-4">
                 {step > 1 && (
                     <Button type="button" variant="ghost" onClick={prevStep}>
@@ -648,7 +631,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
                 ) : (
                     <Button type="submit" disabled={isSubmitting}>
                         {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Criar Instância
+                        {isTelegramOnly ? 'Conectar bot' : 'Conectar número'}
                     </Button>
                 )}
             </DialogFooter>
@@ -656,7 +639,7 @@ function AddInstanceForm({ workspaceId, onSuccess, onClose, channelMode }: { wor
     )
 }
 
-function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance, onSave: () => void }) {
+export function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance, onSave: () => void }) {
     const { toast } = useToast();
     const [isOpen, setIsOpen] = useState(false);
     const [settings, setSettings] = useState<EvolutionInstanceSettings | null>(null);
@@ -712,7 +695,7 @@ function EditInstanceDialog({ instance, onSave }: { instance: EvolutionInstance,
             <DialogTrigger asChild>
                 <DropdownMenuItem onSelect={(e) => e.preventDefault()}><Settings className="mr-2" />Configurações</DropdownMenuItem>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className={cn(workspaceStyles.surface, whatsappStyles.dialog)}>
                 <form onSubmit={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Editar Configurações</DialogTitle>
@@ -946,10 +929,14 @@ function InstanceRow({
     initialInstance,
     onMutate,
     onStatusChange,
+    canManageWebhooks,
+    workspaceId,
 }: {
     initialInstance: Omit<EvolutionInstance, 'status' | 'qrCode'>,
     onMutate: () => void,
     onStatusChange: (instanceId: string, status: EvolutionInstance['status']) => void,
+    canManageWebhooks: boolean,
+    workspaceId: string,
 }) {
     const { toast } = useToast();
     const [instance, setInstance] = useState<EvolutionInstance>({ ...initialInstance, status: 'disconnected' });
@@ -1029,7 +1016,7 @@ function InstanceRow({
         : null;
     const statusLabel = instance.status === 'connected' ? 'Conectada' : instance.status === 'pending' ? 'Pendente' : 'Desconectada';
     const statusDescription = instance.status === 'connected'
-        ? isTelegram ? 'Webhook ativo' : 'Operando normalmente'
+        ? isTelegram ? 'Webhook ativo' : 'Sessão WhatsApp conectada'
         : instance.status === 'pending'
             ? 'Aguardando leitura do QR Code'
             : isTelegram ? 'Webhook pausado' : 'Conexão indisponível';
@@ -1132,6 +1119,10 @@ function InstanceRow({
                 </div>
             </div>
 
+            {!isTelegram && canManageWebhooks && (
+                <EvolutionWebhookPanel instance={initialInstance} workspaceId={workspaceId} />
+            )}
+
             {instance.status === 'pending' && instance.qrCode && !isTelegram && (
                 <div className="flex items-center gap-5 border-t bg-muted/30 px-6 py-4">
                     <Image src={instance.qrCode} alt="QR Code para conectar o WhatsApp" width={112} height={112} />
@@ -1155,6 +1146,7 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
     const [limitStatus, setLimitStatus] = useState<{ reached: boolean, current: number, max: number, plan: string } | null>(null);
     const [instanceSearch, setInstanceSearch] = useState('');
     const [instanceStatuses, setInstanceStatuses] = useState<Record<string, EvolutionInstance['status']>>({});
+    const [canManageWebhooks, setCanManageWebhooks] = useState(false);
     const isTelegramView = channelMode === 'telegram';
 
     const handleStatusChange = useCallback((instanceId: string, status: EvolutionInstance['status']) => {
@@ -1166,6 +1158,7 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
         setLoading(true);
         try {
             const result = await getEvolutionApiInstances(user.activeWorkspaceId);
+            setCanManageWebhooks(result.canManageWebhooks === true);
             if (result.error) {
                 toast({ title: 'Erro ao carregar inst\u00e2ncias', description: result.error, variant: 'destructive' });
                 setInstances([]);
@@ -1325,7 +1318,7 @@ export default function EvolutionApiPage({ channelMode = 'whatsapp' }: { channel
                         <div className="px-6 py-10 text-center text-sm text-muted-foreground">Nenhuma instância corresponde à sua busca.</div>
                     ) : (
                         filteredInstances.map((instance) => (
-                            <InstanceRow key={instance.id} initialInstance={instance} onMutate={fetchData} onStatusChange={handleStatusChange} />
+                            <InstanceRow key={instance.id} initialInstance={instance} onMutate={fetchData} onStatusChange={handleStatusChange} canManageWebhooks={canManageWebhooks} workspaceId={user.activeWorkspaceId!} />
                         ))
                     )}
                 </section>

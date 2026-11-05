@@ -10,20 +10,21 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Settings, Copy, Check, PlusCircle, Trash2, Clock, LogIn, AlertCircle, UploadCloud, Save, Building2, Globe, MessageSquare, Timer, Users, Mail, BrainCircuit } from 'lucide-react';
+import { Loader2, Settings, Copy, Check, PlusCircle, Trash2, Clock, LogIn, UploadCloud, Save, Building2, Globe, MessageSquare, Timer, Users, Mail, BrainCircuit } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHeader, TableRow, TableHead } from '@/components/ui/table';
-import { createWorkspaceInvite, getWorkspaceInvites, revokeWorkspaceInvite, joinWorkspaceAction } from '@/actions/invites';
+import { createWorkspaceInvite, getWorkspaceInvites, revokeWorkspaceInvite } from '@/actions/invites';
+import { AcceptInvitePanel } from '@/components/invites/workspace-invite-center';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettings } from '../settings-context';
 import { timezones } from '@/lib/timezones';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { WorkspaceGifLibrary } from '@/components/team/workspace-gif-library';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const workspaceVerticalOptions = [
@@ -86,37 +87,11 @@ function CopyButton({ text }: { text: string }) {
     )
 }
 
-function JoinWorkspaceForm({ className }: { className?: string }) {
-    const [state, formAction] = useActionState(joinWorkspaceAction, { success: false, error: null });
-    const { pending } = useFormStatus();
-
+function JoinWorkspaceForm({ className, userEmail }: { className?: string; userEmail?: string }) {
     return (
-        <form action={formAction} className={className}>
-            <div className="flex gap-3">
-                <div className="flex-1 space-y-2">
-                    <Label htmlFor="invite-code" className="sr-only">Código de Convite</Label>
-                    <Input
-                        id="invite-code"
-                        name="inviteCode"
-                        placeholder="Insira o código do convite (ex: invites/xyz...)"
-                        required
-                        disabled={pending}
-                        className="h-10"
-                    />
-                </div>
-                <Button type="submit" disabled={pending} className="h-10">
-                    {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4 mr-2" />}
-                    {pending ? '' : 'Entrar'}
-                </Button>
-            </div>
-            {state.error && (
-                <Alert variant="destructive" className="mt-4">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Erro</AlertTitle>
-                    <AlertDescription>{state.error}</AlertDescription>
-                </Alert>
-            )}
-        </form>
+        <div className={className}>
+            <AcceptInvitePanel userEmail={userEmail} />
+        </div>
     );
 }
 
@@ -299,6 +274,7 @@ export default function WorkspaceSettingsPage() {
                 <TabsList className="bg-muted/50 p-1">
                     <TabsTrigger value="general" className="gap-2"><Settings className="h-4 w-4" /> Geral</TabsTrigger>
                     <TabsTrigger value="ai-ops" className="gap-2"><BrainCircuit className="h-4 w-4" /> IA operacional</TabsTrigger>
+                    <TabsTrigger value="gifs" className="gap-2">🎞️ GIFs da equipe</TabsTrigger>
                     <TabsTrigger value="members" className="gap-2"><Users className="h-4 w-4" /> Membros & Convites</TabsTrigger>
                 </TabsList>
 
@@ -485,7 +461,7 @@ export default function WorkspaceSettingsPage() {
                             <CardDescription>Recebeu um código de convite? Use-o para se juntar a outra equipe.</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <JoinWorkspaceForm className="max-w-md" />
+                            <JoinWorkspaceForm className="max-w-xl" userEmail={user.email} />
                         </CardContent>
                     </Card>
                 </TabsContent>
@@ -526,6 +502,8 @@ export default function WorkspaceSettingsPage() {
                         </form>
                     </Card>
                 </TabsContent>
+
+                <TabsContent value="gifs"><WorkspaceGifLibrary key={activeWorkspace.id} workspaceId={activeWorkspace.id} /></TabsContent>
 
                 <TabsContent value="members" className="space-y-6">
                     <Card>

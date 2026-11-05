@@ -4,7 +4,7 @@
 import { db } from '@/lib/db';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
 import { revalidatePath } from 'next/cache';
-import type { Campaign, CampaignChannel, CampaignDetails, CampaignMediaAttachment, CampaignRecipientDetail, CampaignScheduleConfig, CampaignTemplate } from '@/lib/types';
+import type { Campaign, CampaignChannel, CampaignDetails, CampaignInteractivePayload, CampaignMediaAttachment, CampaignRecipientDetail, CampaignScheduleConfig, CampaignTemplate } from '@/lib/types';
 import { sendAgentTemplateAction, sendAutomatedMessageAction } from './messages';
 import { createClient } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
@@ -26,7 +26,9 @@ import {
 import {
     buildCampaignTemplateSendComponents,
     renderCampaignMessage,
+    renderCampaignTemplatePreview,
 } from '@/lib/campaigns/personalization';
+import { MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
 
 export type CampaignDeliveryTarget = {
     channel: CampaignChannel;
@@ -72,6 +74,56 @@ function normalizeCampaignMediaAttachment(
         storageBucket: attachment.storageBucket,
         storagePath: attachment.storagePath,
     };
+}
+
+function normalizeCampaignInteractivePayload(
+    payload?: CampaignInteractivePayload | null
+): CampaignInteractivePayload | null {
+    if (!payload) return null;
+
+    const title = String(payload.title || '').trim();
+    if (!title) return null;
+
+    const description = String(payload.description || '').trim() || undefined;
+    const footer = String(payload.footer || '').trim() || undefined;
+
+    if (payload.kind === 'buttons') {
+        const buttons = (payload.buttons || [])
+            .map((button) => ({
+                type: 'reply' as const,
+                displayText: String(button?.displayText || '').trim().slice(0, 20),
+                id: String(button?.id || '').trim().slice(0, 200),
+            }))
+            .filter((button) => button.displayText.length > 0 && button.id.length > 0);
+
+        if (buttons.length === 0 || buttons.length > MAX_CAMPAIGN_REPLY_BUTTONS) return null;
+
+        return { kind: 'buttons', title, description, footer, buttons };
+    }
+
+    if (payload.kind === 'list') {
+        const buttonText = String(payload.buttonText || '').trim();
+        if (!buttonText) return null;
+
+        const sections = (payload.sections || [])
+            .map((section) => ({
+                title: String(section?.title || '').trim() || 'Opções',
+                rows: (section?.rows || [])
+                    .map((row) => ({
+                        title: String(row?.title || '').trim().slice(0, 24),
+                        description: String(row?.description || '').trim().slice(0, 72) || undefined,
+                        rowId: String(row?.rowId || '').trim().slice(0, 200),
+                    }))
+                    .filter((row) => row.title.length > 0 && row.rowId.length > 0),
+            }))
+            .filter((section) => section.rows.length > 0);
+
+        if (sections.length === 0) return null;
+
+        return { kind: 'list', title, description, footer, buttonText, sections };
+    }
+
+    return null;
 }
 
 function revalidateCampaignsSafely() {
@@ -261,10 +313,11 @@ export async function createCampaign(
     workspaceId: string,
     delivery: CampaignDeliveryTarget | string,
     message: string,
-    contactIdentifiers: { id: string, name: string, phone_number_jid?: string }[],
+    contactIdentifiers: { id: string, name: string, phone_number_jid?: string, csvData?: Record<string, string> }[],
     segmentIds: string[] = [],
     requestedSchedule?: Partial<CampaignScheduleConfig>,
     mediaAttachment?: CampaignMediaAttachment | null,
+    interactivePayload?: CampaignInteractivePayload | null,
 ): Promise<{ campaign: Campaign | null, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -279,6 +332,7 @@ export async function createCampaign(
     const selectedSegmentIds = [...new Set(segmentIds.filter(Boolean))];
     const scheduleConfig = normalizeCampaignScheduleConfig(requestedSchedule);
     const normalizedMediaAttachment = normalizeCampaignMediaAttachment(mediaAttachment);
+    const normalizedInteractivePayload = normalizeCampaignInteractivePayload(interactivePayload);
 
     if (!workspaceId || !destinationId || !message || (contactIdentifiers.length === 0 && selectedSegmentIds.length === 0)) {
         return { campaign: null, error: 'Dados da campanha incompletos.' };
@@ -294,6 +348,18 @@ export async function createCampaign(
     }
     if (normalizedMediaAttachment && target.channel !== 'whatsapp_baileys') {
         return { campaign: null, error: 'Anexos de imagem e audio estao disponiveis apenas para WhatsApp conectado.' };
+    }
+    if (interactivePayload && !normalizedInteractivePayload) {
+        return {
+            campaign: null,
+            error: `Mensagem interativa invalida. Informe um titulo e ate ${MAX_CAMPAIGN_REPLY_BUTTONS} botoes (ou uma lista com opcoes).`,
+        };
+    }
+    if (normalizedInteractivePayload && target.channel !== 'whatsapp_baileys') {
+        return { campaign: null, error: 'Botoes e listas estao disponiveis apenas para WhatsApp conectado.' };
+    }
+    if (normalizedInteractivePayload && normalizedMediaAttachment) {
+        return { campaign: null, error: 'Nao e possivel combinar anexo de midia com botoes ou lista na mesma campanha.' };
     }
     if (!target.channel.startsWith('whatsapp') && contactIdentifiers.some(contact => contact.id.startsWith('csv-'))) {
         return { campaign: null, error: 'A importacao CSV esta disponivel apenas para campanhas de WhatsApp.' };
@@ -352,9 +418,9 @@ export async function createCampaign(
             `INSERT INTO campaigns (
                 workspace_id, created_by_id, name, message, instance_name, status,
                 delivery_channel, destination_id, template_payload, media_payload, schedule_config,
-                scheduled_end_at, started_at
+                scheduled_end_at, interactive_payload, started_at
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                      CASE WHEN $6 = 'sending' THEN NOW() ELSE NULL END)
              RETURNING *`,
             [
@@ -370,6 +436,7 @@ export async function createCampaign(
                 normalizedMediaAttachment ? JSON.stringify(normalizedMediaAttachment) : null,
                 JSON.stringify(scheduleConfig),
                 scheduleConfig.endAt || null,
+                normalizedInteractivePayload ? JSON.stringify(normalizedInteractivePayload) : null,
             ]
         );
         const newCampaign = campaignRes.rows[0];
@@ -383,6 +450,7 @@ export async function createCampaign(
             .filter(c => c.id.startsWith('csv-'));
 
         let allContactIdsForCampaign: string[] = [];
+        const csvDataByContactId = new Map<string, Record<string, string>>();
 
         // Add existing CRM contacts
         if (crmContactIds.length > 0) {
@@ -432,6 +500,15 @@ export async function createCampaign(
             });
             const contactId = resolvedContact.contact.id;
 
+            // Snapshot the import on this campaign recipient, never on the shared CRM contact.
+            if (!csvDataByContactId.has(contactId)) {
+                const data = csvContact.csvData || {};
+                if (typeof data !== 'object' || Array.isArray(data) || Object.values(data).some(value => typeof value !== 'string')) {
+                    throw new Error('Dados das colunas do CSV inválidos. Importe a planilha novamente.');
+                }
+                csvDataByContactId.set(contactId, data);
+            }
+
             allContactIdsForCampaign.push(contactId);
         }
 
@@ -441,7 +518,7 @@ export async function createCampaign(
             throw new Error('As listas e contatos selecionados não possuem destinatários válidos.');
         }
         const eligibleContactsRes = await client.query(
-            `SELECT id
+            `SELECT id, name
              FROM contacts
              WHERE workspace_id = $1
                AND id = ANY($2::uuid[])
@@ -455,6 +532,20 @@ export async function createCampaign(
             throw new Error('Todos os contatos selecionados estao marcados como opt-out.');
         }
 
+        if (target.channel === 'whatsapp_cloud' && target.template?.bodyParameterColumns?.some(Boolean)) {
+            for (const contact of eligibleContactsRes.rows) {
+                try {
+                    buildCampaignTemplateSendComponents(target.template, {
+                        contactName: contact.name,
+                        csvData: csvDataByContactId.get(String(contact.id)),
+                        timeZone: scheduleConfig.timeZone,
+                    });
+                } catch (error) {
+                    throw new Error(`${contact.name}: ${error instanceof Error ? error.message : 'Variáveis do template inválidas.'}`);
+                }
+            }
+        }
+
         const recipientSchedule = buildCampaignRecipientSchedule({
             recipientIds: eligibleContactIds,
             config: scheduleConfig,
@@ -462,11 +553,11 @@ export async function createCampaign(
 
         await client.query(
             `INSERT INTO campaign_recipients (
-                campaign_id, contact_id, status, scheduled_at, max_attempts
+                campaign_id, contact_id, status, scheduled_at, max_attempts, csv_data
              )
-             SELECT $1, schedule.contact_id, schedule.status, schedule.scheduled_at, $5
-             FROM unnest($2::uuid[], $3::text[], $4::timestamptz[])
-               AS schedule(contact_id, status, scheduled_at)
+             SELECT $1, schedule.contact_id, schedule.status, schedule.scheduled_at, $5, schedule.csv_data
+             FROM unnest($2::uuid[], $3::text[], $4::timestamptz[], $6::jsonb[])
+               AS schedule(contact_id, status, scheduled_at, csv_data)
              ON CONFLICT (campaign_id, contact_id) DO NOTHING`,
             [
                 newCampaign.id,
@@ -474,6 +565,7 @@ export async function createCampaign(
                 recipientSchedule.map(item => item.status),
                 recipientSchedule.map(item => item.scheduledAt.toISOString()),
                 scheduleConfig.maxAttempts,
+                recipientSchedule.map(item => JSON.stringify(csvDataByContactId.get(item.recipientId) || {})),
             ]
         );
 
@@ -495,6 +587,7 @@ export async function createCampaign(
                 ...newCampaign,
                 opted_out_count: optedOutCount,
                 media_payload: normalizedMediaAttachment,
+                interactive_payload: normalizedInteractivePayload,
                 schedule_config: scheduleConfig,
             },
         };
@@ -521,7 +614,7 @@ async function startCampaignSending(campaignId: string) {
                     cam.message, cam.instance_name, cam.workspace_id,
                     cam.created_by_id,
                     COALESCE(NULLIF(cam.delivery_channel, ''), 'whatsapp_baileys') as delivery_channel,
-                    cam.destination_id, cam.template_payload, cam.schedule_config
+                    cam.destination_id, cam.template_payload, cam.schedule_config, cr.csv_data
              FROM campaign_recipients cr
              JOIN contacts c ON cr.contact_id = c.id
              JOIN campaigns cam ON cr.campaign_id = cam.id
@@ -592,14 +685,19 @@ async function startCampaignSending(campaignId: string) {
                 }
 
                 const personalizationNow = new Date();
-                const personalizedMessage = renderCampaignMessage(recipient.message, {
+                const personalizationContext = {
                     contactName: recipient.contact_name,
+                    csvData: recipient.csv_data,
                     now: personalizationNow,
                     timeZone: recipient.schedule_config?.timeZone,
-                });
+                };
+                const personalizedMessage = channel === 'whatsapp_cloud' && recipient.template_payload
+                    ? renderCampaignTemplatePreview(recipient.template_payload, personalizationContext)
+                    : renderCampaignMessage(recipient.message, personalizationContext);
 
                 const campaignSenderId = recipient.created_by_id;
                 const campaignMetadata = {
+                    isMarketing: true,
                     campaignId,
                     campaignRecipientId: recipient.recipient_id,
                 };
@@ -614,6 +712,7 @@ async function startCampaignSending(campaignId: string) {
                         language: recipient.template_payload.language,
                         components: buildCampaignTemplateSendComponents(recipient.template_payload, {
                             contactName: recipient.contact_name,
+                            csvData: recipient.csv_data,
                             campaignMessage: recipient.message,
                             now: personalizationNow,
                             timeZone: recipient.schedule_config?.timeZone,

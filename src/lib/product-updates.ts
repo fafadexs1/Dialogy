@@ -54,8 +54,17 @@ export type ProductUpdateFeedItem = {
     mine: ProductUpdateReaction | null;
   };
   commentsCount: number;
+  viewsCount?: number;
   isDemo?: boolean;
   demoComments?: ProductUpdateComment[];
+};
+
+export type PostViewer = {
+  id: string;
+  name: string;
+  email?: string;
+  avatarUrl: string | null;
+  viewedAt: string;
 };
 
 export type ProductUpdateComment = {
@@ -69,7 +78,9 @@ export type ProductUpdateComment = {
     id: string;
     name: string;
     avatarUrl: string | null;
+    isSuperAdmin?: boolean;
     workspaceName: string | null;
+    workspaceAvatarUrl?: string | null;
   };
 };
 

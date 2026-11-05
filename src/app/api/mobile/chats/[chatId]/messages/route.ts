@@ -78,18 +78,22 @@ export async function GET(request: NextRequest, { params }: Params) {
         FROM contacts c
         JOIN target_chat tc ON tc.workspace_id = c.workspace_id
         WHERE c.id = tc.contact_id
-           OR (
-             tc.phone_canonical IS NOT NULL
-             AND c.phone_canonical IS NOT NULL
-             AND c.phone_canonical = tc.phone_canonical
-           )
+        UNION
+        SELECT c.id
+        FROM contacts c
+        JOIN target_chat tc ON tc.workspace_id = c.workspace_id
+        WHERE tc.phone_canonical IS NOT NULL
+          AND c.phone_canonical IS NOT NULL
+          AND c.phone_canonical = tc.phone_canonical
       ),
       matching_chats AS (
+        SELECT tc.id
+        FROM target_chat tc
+        UNION
         SELECT c.id
         FROM chats c
         JOIN target_chat tc ON tc.workspace_id = c.workspace_id
-        WHERE c.id = tc.id
-           OR c.contact_id IN (SELECT id FROM matching_contacts)
+        WHERE c.contact_id IN (SELECT id FROM matching_contacts)
       )
       SELECT
         m.id,

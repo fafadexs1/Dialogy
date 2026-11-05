@@ -89,7 +89,6 @@ function addAgentBranch(input: {
   modelId: string;
   memoryId: string;
   guardrailId: string;
-  errorHandlerId: string;
 }) {
   const { definition, prefix, x, y } = input;
   const agent = addNode(definition, 'ai.agent', `${prefix}_agent`, input.title, { x, y }, {
@@ -131,16 +130,15 @@ function addAgentBranch(input: {
     channel: 'source',
     idempotent: true,
   });
-  const handoff = addNode(definition, 'output.handoff', `${prefix}_handoff`, 'Transferir para humano', { x: x + 280, y: y + 320 }, {
-    teamId: '',
-    reason: '{{current.reason}}',
-    requireConfirmation: true,
-    permissionScope: 'automations:execute_handoff',
+  const handoff = addNode(definition, 'output.respond', `${prefix}_handoff`, 'Transferência ainda não configurada', { x: x + 280, y: y + 320 }, {
+    message: 'Não consegui encaminhar automaticamente agora porque a equipe de destino ainda não foi configurada.',
+    channel: 'source',
+    idempotent: true,
   });
   const respondEnd = addNode(definition, 'output.end', `${prefix}_respond_end`, 'Finalizar resposta', { x: x + 560, y: y - 100 });
   const askEnd = addNode(definition, 'output.end', `${prefix}_ask_end`, 'Finalizar pergunta', { x: x + 560, y: y + 40 });
   const limitEnd = addNode(definition, 'output.end', `${prefix}_limit_end`, 'Finalizar limite', { x: x + 560, y: y + 180 });
-  const handoffEnd = addNode(definition, 'output.end', `${prefix}_handoff_end`, 'Finalizar transferência', { x: x + 560, y: y + 320 });
+  const handoffEnd = addNode(definition, 'output.end', `${prefix}_handoff_end`, 'Finalizar sem transferência', { x: x + 560, y: y + 320 });
 
   definition.connections.push(
     link(`${prefix}_main`, input.mainSource.nodeId, input.mainSource.portId, agent.id, 'main'),
@@ -152,15 +150,10 @@ function addAgentBranch(input: {
     link(`${prefix}_needs_input`, agent.id, 'needs_input', ask.id, 'main'),
     link(`${prefix}_limit_reached`, agent.id, 'limit_reached', limit.id, 'main'),
     link(`${prefix}_handoff_route`, agent.id, 'handoff', handoff.id, 'main'),
-    link(`${prefix}_agent_error`, agent.id, 'error', input.errorHandlerId, 'error', 'error'),
     link(`${prefix}_respond_done`, respond.id, 'success', respondEnd.id, 'main'),
     link(`${prefix}_ask_done`, ask.id, 'success', askEnd.id, 'main'),
     link(`${prefix}_limit_done`, limit.id, 'success', limitEnd.id, 'main'),
-    link(`${prefix}_handoff_done`, handoff.id, 'completed', handoffEnd.id, 'main'),
-    link(`${prefix}_respond_error`, respond.id, 'error', input.errorHandlerId, 'error', 'error'),
-    link(`${prefix}_ask_error`, ask.id, 'error', input.errorHandlerId, 'error', 'error'),
-    link(`${prefix}_limit_error`, limit.id, 'error', input.errorHandlerId, 'error', 'error'),
-    link(`${prefix}_handoff_error`, handoff.id, 'error', input.errorHandlerId, 'error', 'error'),
+    link(`${prefix}_handoff_done`, handoff.id, 'success', handoffEnd.id, 'main'),
   );
 }
 
@@ -172,11 +165,7 @@ function addSharedCapabilities(definition: WorkflowDefinition, input: CreateNati
     checks: ['no_secret_exposure', 'no_unconfirmed_tool_success'],
     onViolation: 'route_to_error',
   });
-  const errorHandler = addNode(definition, 'error.handler', 'workflow_error', 'Tratador de erro', { x: 1120, y: 620 }, {
-    mode: 'fail',
-    publicMessage: 'Não foi possível concluir esta etapa com segurança.',
-  });
-  return { model, memory, guardrail, errorHandler };
+  return { model, memory, guardrail };
 }
 
 function createSingleAgentTemplate(input: CreateNativeWorkflowTemplateInput) {
@@ -197,7 +186,6 @@ function createSingleAgentTemplate(input: CreateNativeWorkflowTemplateInput) {
     modelId: shared.model.id,
     memoryId: shared.memory.id,
     guardrailId: shared.guardrail.id,
-    errorHandlerId: shared.errorHandler.id,
   });
   return WorkflowDefinitionSchema.parse(definition);
 }
@@ -236,11 +224,8 @@ function createRoutedTeamTemplate(input: CreateNativeWorkflowTemplateInput) {
     link('router_model', shared.model.id, 'model', router.id, 'model', 'model'),
     link('router_low', router.id, 'low_confidence', lowConfidence.id, 'main'),
     link('router_default_route', router.id, 'default', defaultResponse.id, 'main'),
-    link('router_error_route', router.id, 'error', shared.errorHandler.id, 'error', 'error'),
     link('router_low_done', lowConfidence.id, 'success', lowEnd.id, 'main'),
     link('router_default_done', defaultResponse.id, 'success', defaultEnd.id, 'main'),
-    link('router_low_error', lowConfidence.id, 'error', shared.errorHandler.id, 'error', 'error'),
-    link('router_default_error', defaultResponse.id, 'error', shared.errorHandler.id, 'error', 'error'),
   );
   addAgentBranch({
     definition,
@@ -256,7 +241,6 @@ function createRoutedTeamTemplate(input: CreateNativeWorkflowTemplateInput) {
     modelId: shared.model.id,
     memoryId: shared.memory.id,
     guardrailId: shared.guardrail.id,
-    errorHandlerId: shared.errorHandler.id,
   });
   addAgentBranch({
     definition,
@@ -272,7 +256,6 @@ function createRoutedTeamTemplate(input: CreateNativeWorkflowTemplateInput) {
     modelId: shared.model.id,
     memoryId: shared.memory.id,
     guardrailId: shared.guardrail.id,
-    errorHandlerId: shared.errorHandler.id,
   });
   return WorkflowDefinitionSchema.parse(definition);
 }

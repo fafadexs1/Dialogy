@@ -3,10 +3,11 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentListAction } from '@/actions/messages';
-import { normalizeAgentListPayload } from '@/lib/sgp-payloads';
+import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentListAction, sendAgentButtonsAction } from '@/actions/messages';
+import { normalizeAgentListPayload, normalizeAgentButtonsPayload } from '@/lib/sgp-payloads';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
+import { chatBelongsToWorkspace } from '@/lib/security/system-agent-access';
 import {
   findOrCreateWhatsappContact,
   findWhatsappChatByIdentity,
@@ -21,10 +22,11 @@ interface MediaFilePayload {
 }
 
 interface AgentMessagePayload {
-  type?: 'text' | 'list';
+  type?: 'text' | 'list' | 'buttons';
   chatId?: string;
   phoneNumber?: string; // JID format, e.g., 5511999998888@s.whatsapp.net
   content?: string; // Caption for media, or content for text
+  skipUserSignature?: boolean;
   media?: MediaFilePayload[];
   instance?: string; // Specific instance name (e.g., "zap1")
   list?: {
@@ -41,6 +43,22 @@ interface AgentMessagePayload {
       }>;
     }>;
   };
+  buttons?: Array<{
+    type: 'reply' | 'copy' | 'url' | 'call' | 'pix';
+    displayText?: string;
+    id?: string;
+    url?: string;
+    copyCode?: string;
+    phoneNumber?: string;
+    currency?: string;
+    name?: string;
+    keyType?: 'phone' | 'email' | 'cpf' | 'cnpj' | 'random';
+    key?: string;
+  }>;
+  title?: string;
+  description?: string;
+  footer?: string;
+  thumbnailUrl?: string;
 }
 
 /**
@@ -142,6 +160,7 @@ export async function POST(request: Request) {
       ...body,
       list,
     });
+    const buttonsPayload = normalizeAgentButtonsPayload(body);
     const isMarketing = agent.type === 'marketing';
     const marketingMetadata = isMarketing
       ? {
@@ -150,12 +169,15 @@ export async function POST(request: Request) {
           marketingTargetSystemAgentId: agent.handoff_system_agent_id || null,
         }
       : {};
+    const automatedMetadata = body.skipUserSignature === true
+      ? { ...marketingMetadata, skipUserSignature: true }
+      : marketingMetadata;
 
     if (!chatId && !phoneNumber) {
       return NextResponse.json({ error: 'Either chatId or phoneNumber is required.' }, { status: 400 });
     }
 
-    if (type !== 'list' && !content && (!media || media.length === 0)) {
+    if (type !== 'list' && type !== 'buttons' && !content && (!media || media.length === 0)) {
       return NextResponse.json({ error: 'Either content or media must be provided.' }, { status: 400 });
     }
 
@@ -167,6 +189,9 @@ export async function POST(request: Request) {
     if (!chatId) {
       // This should theoretically not be reached if the above logic is correct
       return NextResponse.json({ error: 'Could not determine the target chat.' }, { status: 400 });
+    }
+    if (!await chatBelongsToWorkspace(chatId, agent.workspace_id)) {
+      return NextResponse.json({ error: 'Chat not found in the agent workspace.' }, { status: 404 });
     }
 
     if (type === 'list') {
@@ -199,15 +224,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: result.error || 'Failed to send list.' }, { status: 500 });
     }
 
+    if (type === 'buttons') {
+      if (!buttonsPayload) {
+        return NextResponse.json({ error: 'Buttons payload is required for type "buttons".' }, { status: 400 });
+      }
+      if (!instance) {
+        return NextResponse.json({ error: 'instance is required for sending buttons.' }, { status: 400 });
+      }
+
+      const result = await sendAgentButtonsAction({
+        agentId: agent.id,
+        workspaceId: agent.workspace_id,
+        instanceName: instance,
+        chatId,
+        numberid: phoneNumber,
+        buttons: buttonsPayload,
+        metadata: marketingMetadata as any,
+      });
+
+      if (result.success) {
+        return NextResponse.json({
+          success: true,
+          message: 'Buttons sent successfully.',
+          chatId: result.chatId,
+          apiResponse: result.apiResponse,
+        });
+      }
+
+      return NextResponse.json({ success: false, error: result.error || 'Failed to send buttons.' }, { status: 500 });
+    }
+
     let result: { success: boolean; error?: string };
 
     // If media is present, send it. Content will be used as caption.
     if (media && media.length > 0) {
-      result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, marketingMetadata as any);
+      result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, automatedMetadata as any);
     }
     // Otherwise, send a text message.
     else {
-      result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, marketingMetadata as any);
+      result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, automatedMetadata as any);
     }
 
 

@@ -1,5 +1,7 @@
+import { requestPlatformJson } from '@/services/ai/platform-json';
+import { runPlatformModel } from '@/services/ai/platform-model-client';
 import { genkit } from 'genkit';
-import { googleAI } from '@genkit-ai/googleai';
+import { googleAI } from '@genkit-ai/google-genai';
 import { z } from 'zod';
 
 import { ai } from '@/ai/genkit';
@@ -7,8 +9,8 @@ import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import type { KnowledgeBaseDocument } from '@/lib/types';
 import { isLmStudioModel } from '@/services/ai/lm-studio';
 import { requestLmStudioJson } from '@/services/ai/lm-studio-client';
-import { isOpenAiCompatibleModel, requestOpenAiCompatibleJson } from '@/services/ai/openai-compatible';
-import { runAiModelWithFallback, type AiModelKeyCandidate } from '@/services/ai/model-client';
+import { isOpenAiCompatibleModel } from '@/services/ai/openai-compatible';
+import {  type AiModelKeyCandidate } from '@/services/ai/model-client';
 import { toCanonicalKnowledgeMarkdown } from '@/services/rag/knowledge-document';
 
 const KnowledgeDocumentRewriteSchema = z.object({
@@ -117,6 +119,7 @@ const rewriteFallbackModels = [
 ];
 
 export async function improveKnowledgeDocumentForRag(input: {
+  workspaceId?: string;
   document: KnowledgeBaseDocument;
   model: string;
   apiKey?: string;
@@ -151,8 +154,8 @@ export async function improveKnowledgeDocumentForRag(input: {
     if (isLmStudioModel(model)) {
       return requestLmStudioJson({ model, ...common });
     }
-    if (isOpenAiCompatibleModel(model)) {
-      return requestOpenAiCompatibleJson({ model, apiKey, ...common });
+    if (!isLmStudioModel(model)) {
+      return requestPlatformJson({ model, apiKey, ...common });
     }
 
     const defaultKey = process.env.GOOGLE_GENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
@@ -167,7 +170,8 @@ export async function improveKnowledgeDocumentForRag(input: {
   const fallbackKeys = input.apiKeyCandidates?.length
     ? input.apiKeyCandidates
     : [{ source: 'explicit', key: input.apiKey || '', provider: undefined }];
-  const run = await runAiModelWithFallback({
+  const run = await runPlatformModel({
+    workspaceId: input.workspaceId,
     label: 'knowledgeDocumentRewrite',
     modelCandidates: [input.model, ...rewriteFallbackModels],
     apiKeyCandidates: fallbackKeys,

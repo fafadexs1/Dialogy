@@ -1,3 +1,4 @@
+import { maskDeclaredWorkflowData } from './sensitive-data';
 import type { WorkflowPersistence } from './persistence';
 import type { WorkflowEvent } from './types';
 import { createId, isRecord } from './utils';
@@ -12,7 +13,7 @@ export function redactWorkflowValue(value: unknown, key = '', visited = new Set<
   visited.add(value);
   if (Array.isArray(value)) return value.map((item) => redactWorkflowValue(item, key, visited));
   return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
+    Object.entries(maskDeclaredWorkflowData(value as Record<string, unknown>))
       .map(([childKey, child]) => [childKey, redactWorkflowValue(child, childKey, visited)]),
   );
 }

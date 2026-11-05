@@ -276,9 +276,23 @@ export function formatCustomerFacingAiResponse(
   response: string,
   maxChars = DEFAULT_MAX_CUSTOMER_RESPONSE_CHARS
 ): string {
-  const protectedUrls = protectUrls(expandCompactPlanCatalog(stripIsolatedStructuredDelimiters(response)));
+  // Payment artifacts are opaque data, never prose. Protect them before date,
+  // whitespace and sentence normalization, including on a second formatting pass.
+  const artifacts: string[] = [];
+  const protectedPayments = response.replace(
+    /\b000201[^\s]+|\b\d{5}\.\d{5}\s+\d{5}\.\d{6}\s+\d{5}\.\d{6}\s+\d\s+\d{14}\b|\b\d{11,12}(?:[ -]\d{11,12}){3}\b|\b\d{44,48}\b/g,
+    (artifact) => `PAYMENTTOKEN${artifacts.push(artifact) - 1}END`,
+  );
+  const protectedUrls = protectUrls(expandCompactPlanCatalog(stripIsolatedStructuredDelimiters(protectedPayments)));
   const normalized = repairDanglingLineBreaks(normalizeWhitespace(formatIsoDatesForCustomer(protectedUrls.value)));
   if (!normalized) return '';
+
+  // A paragraph/character cap must never silently remove a boleto, PIX or link.
+  // The sender splits complete sections into delivery blocks afterwards.
+  if (artifacts.length > 0 || protectedUrls.urls.length > 0) {
+    return restoreUrls(normalized, protectedUrls.urls)
+      .replace(/\bPAYMENTTOKEN(\d+)END\b/g, (_, index) => artifacts[Number(index)] || '');
+  }
 
   const isCatalog = isStructuredCatalogResponse(normalized) || isPlanOfferResponse(normalized);
   const effectiveMaxChars =

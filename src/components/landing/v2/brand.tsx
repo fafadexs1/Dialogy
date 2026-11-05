@@ -1,4 +1,5 @@
 import * as React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
@@ -83,22 +84,28 @@ export function DialogyMark({ className }: { className?: string }) {
 
 export function DialogyLogo({
     className,
+    imageClassName,
     tone = 'ink',
+    width = 135,
+    height = 36,
 }: {
     className?: string;
+    imageClassName?: string;
     tone?: 'ink' | 'light';
+    width?: number;
+    height?: number;
 }) {
+    const isLight = tone === 'light';
     return (
-        <span className={cn('inline-flex items-center gap-2', className)}>
-            <DialogyMark className={cn('h-7 w-7', tone === 'ink' ? 'text-slate-900' : 'text-white')} />
-            <span
-                className={cn(
-                    'text-[1.35rem] font-extrabold tracking-tight',
-                    tone === 'ink' ? 'text-slate-900' : 'text-white',
-                )}
-            >
-                Dialogy
-            </span>
+        <span className={cn('inline-flex items-center', className)}>
+            <Image
+                src={isLight ? '/logo-white.png' : '/logo-dark.png'}
+                alt="Dialogy"
+                width={width}
+                height={height}
+                priority
+                className={cn('h-8 sm:h-9 w-auto object-contain', imageClassName)}
+            />
         </span>
     );
 }

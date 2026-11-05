@@ -1,28 +1,26 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import Image from 'next/image';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, Tag as TagIcon, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { ArrowRightLeft, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
+import { badgeColorStyle } from '@/lib/color-contrast';
 import { resolveClientMediaUrl } from '@/lib/storage-url';
 import { Virtuoso } from 'react-virtuoso';
 import { useInboxStore } from '@/hooks/use-inbox-store';
-import { getInitialChatsData } from '@/actions/chats';
+import { getInboxChatsSnapshotAction } from '@/actions/chats';
+import { transferChatsBulkAction } from '@/actions/bulk-transfer';
 import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance, type TelegramBotInstance, type Team, type AutopilotConfig } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
-import { TagSelectionDialog } from './tag-selection-dialog';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -59,9 +57,13 @@ import { Separator } from '@/components/ui/separator';
 import { getTeams } from '@/actions/teams';
 import { getWorkspaceUsers } from '@/actions/crm';
 import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
-import { isMarketingMessage, matchesChatTeamFilter, shouldKeepMarketingOnlyChatVisible } from './chat-list-visibility';
+import { isMarketingMessage, matchesChatTeamFilter, matchesInboxMarketingFilter } from './chat-list-visibility';
+import { isChatVisibleForOwnership, isOwnershipScopedChat } from '@/lib/inbox-ownership';
+import { formatInboxCount, getInboxPaginationScope, hasMoreChatsInScope, isChatInInboxQueueScope, isInboxAssignmentFilterTab, resolveInboxStatusFilterForTab, scopeInboxListFilters, type InboxListFilters } from '@/lib/inbox-pagination';
+import { sanitizeNationalPhoneInput } from '@/lib/phone-input';
 
 import { SearchDetailsDialog } from './search-details-dialog';
+import { QuickTagPopover } from './quick-tag-popover';
 import { InboxSearchInput } from './inbox-search-input';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { usePremiumWheelScroller } from '@/hooks/use-premium-wheel-scroller';
@@ -354,7 +356,10 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                     isRecipientValid ? "border-emerald-400 focus-within:ring-emerald-500/15 dark:border-emerald-500/60" : "border-slate-200 focus-within:border-blue-500 focus-within:ring-blue-500/15 dark:border-white/10"
                   )}>
                     {!isTelegram && (
-                      <Select value={countryCode} onValueChange={setCountryCode}>
+                      <Select value={countryCode} onValueChange={(value) => {
+                        setCountryCode(value);
+                        setPhoneNumber(current => sanitizeNationalPhoneInput(current, value));
+                      }}>
                         <SelectTrigger aria-label="Código do país" className="h-12 w-[92px] shrink-0 rounded-none border-0 border-r border-slate-200 bg-slate-50 px-2 shadow-none focus:ring-0 dark:border-white/10 dark:bg-white/[0.04]"><SelectValue /></SelectTrigger>
                         <SelectContent className="rounded-xl">
                           <SelectItem value="55">BR +55</SelectItem>
@@ -374,8 +379,8 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                       placeholder={isTelegram ? '123456789' : '11 99999 8888'}
                       required
                       value={phoneNumber}
-                      onChange={(event) => setPhoneNumber(isTelegram ? event.target.value : event.target.value.replace(/\D/g, '').slice(0, 13))}
-                      className="h-12 flex-1 rounded-none border-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0"
+                      onChange={(event) => setPhoneNumber(isTelegram ? event.target.value : sanitizeNationalPhoneInput(event.target.value, countryCode))}
+                      className="h-12 min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 text-[14px] font-medium tracking-tight tabular-nums shadow-none focus-visible:ring-0"
                     />
                     <AnimatePresence initial={false}>
                       {isRecipientValid && (
@@ -419,7 +424,7 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <Input value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Buscar por nome" aria-label="Buscar template aprovado" className="h-10 rounded-xl border-slate-200 bg-white pl-9 shadow-none dark:border-white/10 dark:bg-white/[0.03]" />
                       </div>
-                      <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
+                      <div className="max-h-[min(58dvh,560px)] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
                         {loadingTemplates ? (
                           <div className="flex min-h-36 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Carregando templates...</div>
                         ) : filteredTemplates.length === 0 ? (
@@ -527,37 +532,6 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     </Dialog>
   );
 }
-
-interface AgentTooltipContentProps {
-  agent: OnlineAgent;
-}
-
-const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
-  const [onlineSince, setOnlineSince] = React.useState('');
-
-  React.useEffect(() => {
-    if (agent.joined_at) {
-      const updateOnlineTime = () => {
-        const distance = formatDistanceToNow(new Date(agent.joined_at), { addSuffix: true, locale: ptBR });
-        setOnlineSince(distance);
-      };
-      updateOnlineTime();
-      const interval = setInterval(updateOnlineTime, 60000);
-      return () => clearInterval(interval);
-    }
-  }, [agent.joined_at]);
-
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="font-semibold">{agent.user.name}</p>
-      {onlineSince ? (
-        <p className="text-xs text-muted-foreground">Online {onlineSince}</p>
-      ) : (
-        <p className="text-xs text-muted-foreground">Carregando...</p>
-      )}
-    </div>
-  );
-};
 
 interface LastMessagePreviewProps {
   message: Message;
@@ -740,20 +714,41 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
   const draftPreview = useMemo(() => getDraftPreviewText(draft || ''), [draft]);
   const hasDraft = draftPreview.length > 0;
   const lastMessage = visibleMessages[visibleMessages.length - 1] || chat.messages?.[chat.messages.length - 1];
-  const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const canQuickClose = chat.status !== 'atendimentos' && chat.status !== 'encerrados';
   const canAssign = chat.status === 'gerais';
-  const canTag = false;
   const isAssignedToIntelligentAgent = chat.assignedSystemAgent?.type === 'intelligent_attendant';
-  const statusLabel = chat.status === 'encerrados' ? 'Fechado' : chat.status === 'atendimentos' ? 'Em atendimento' : 'Fila';
-  const statusTone = chat.status === 'encerrados'
+  const isActuallyAttending = chat.status === 'atendimentos' || Boolean(chat.agentId || (chat as any).agent_id || chat.agent?.id);
+  const isActuallyClosed = chat.status === 'encerrados';
+  const isActuallyQueue = Boolean(chat.tag?.trim() || (chat as any).team_id || chat.teamName?.trim());
+  const statusLabel = isActuallyClosed
+    ? 'Fechado'
+    : isActuallyAttending
+      ? 'Em atendimento'
+      : isActuallyQueue
+        ? 'Fila'
+        : 'Robô';
+  const statusTone = isActuallyClosed
     ? 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-zinc-300'
-    : chat.status === 'atendimentos'
+    : isActuallyAttending
       ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
-      : 'border-blue-100 bg-blue-50 text-blue-700';
+      : isActuallyQueue
+        ? 'border-blue-100 bg-blue-50 text-blue-700'
+        : 'border-purple-100 bg-purple-50 text-purple-700 dark:border-purple-900/30 dark:bg-purple-950/20 dark:text-purple-300';
   const hasTag = Boolean(chat.tag);
   const tagLabel = hasTag ? chat.tag : 'Sem tag';
+  // Sem cor utilizavel o chip cai para o estilo neutro do tema. Antes o fundo
+  // caia para branco a 10% com texto branco: no tema claro a etiqueta
+  // simplesmente sumia.
+  const teamBadgeStyle = useMemo(() => badgeColorStyle(chat.teamColor), [chat.teamColor]);
+  const tagBadgeStyle = useMemo(
+    () => (hasTag ? badgeColorStyle(chat.color) : null),
+    [hasTag, chat.color]
+  );
+  const classificationTags = (chat.tags || []).filter(
+    (classificationTag) => !chat.team_id || !classificationTag.team_ids?.includes(chat.team_id)
+  );
+  const classificationTitle = classificationTags.map((tag) => tag.label).join(', ');
   const unreadCount = chat.unreadCount ?? 0;
   const hasUnread = unreadCount > 0;
 
@@ -861,7 +856,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
       onClick={handleSelect}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onDoubleClick={() => setIsTagDialogOpen(true)}
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="option"
@@ -892,14 +886,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
           {isSelectedForForwarding && <Check className="h-3 w-3 text-primary-foreground" />}
         </div>
       )}
-
-      <TagSelectionDialog
-        isOpen={isTagDialogOpen}
-        setIsOpen={setIsTagDialogOpen}
-        chat={chat}
-        onUpdate={onUpdate}
-        user={currentUser}
-      />
 
       <div className="relative mt-0.5 flex-shrink-0">
         <Avatar className={cn(
@@ -961,6 +947,35 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </Tooltip>
           </TooltipProvider>
         )}
+        {chat.adAttribution && !isMarketingChat && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="absolute -left-1 -top-1 flex h-[17px] w-[17px] items-center justify-center rounded-full border-2 border-card bg-white shadow-sm dark:bg-zinc-900">
+                  <Image
+                    src="/icons/google-ads.svg"
+                    alt=""
+                    width={9}
+                    height={9}
+                    className="h-[9px] w-[9px]"
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="bg-popover border-border text-popover-foreground">
+                <p className="font-medium">Veio de anúncio do Google Ads</p>
+                {chat.adAttribution.campaign && <p>Campanha: {chat.adAttribution.campaign}</p>}
+                {!chat.adAttribution.campaign && chat.adAttribution.campaignId && (
+                  <p>Campanha: {chat.adAttribution.campaignId}</p>
+                )}
+                <p className="text-muted-foreground">
+                  {chat.adAttribution.confidence === 'deterministic'
+                    ? 'Confirmado pelo código de rastreio'
+                    : 'Inferido pelo clique recente'}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -972,8 +987,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                 chat.status === 'encerrados' ? "bg-slate-500" : chat.status === 'atendimentos' ? "bg-emerald-400" : "bg-blue-400",
                 hasUnread && "bg-blue-500"
               )} />
-              <p className={cn("max-w-[78%] truncate whitespace-nowrap text-[13.5px] font-semibold tracking-tight text-slate-900 dark:text-zinc-100 min-[1280px]:max-w-[64%]", hasUnread && "font-bold")} title={chat.contact?.name}>
-                {chat.contact?.name || 'Carregando...'}
+              <p className={cn("max-w-[78%] truncate whitespace-nowrap text-[13.5px] font-semibold tracking-tight text-slate-900 dark:text-zinc-100 min-[1280px]:max-w-[64%]", hasUnread && "font-bold")} title={chat.contact?.name || chat.protocol || undefined}>
+                {chat.contact?.name || chat.protocol || 'Sem nome'}
               </p>
               <Badge className={cn("hidden flex-shrink-0 border px-1.5 py-0 text-[8px] font-semibold uppercase tracking-wide min-[1280px]:inline-flex", statusTone)}>
                   {statusLabel}
@@ -987,7 +1002,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </div>
           </div>
           <div className="flex flex-shrink-0 flex-nowrap items-center justify-end gap-1.5">
-            {(canAssign || canTag || canQuickClose) && !isForwarding && !isBulkMode && (
+            {(canAssign || canQuickClose) && !isForwarding && !isBulkMode && (
             <div className="absolute right-2 top-2 z-20 flex flex-nowrap items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-white/10 dark:bg-zinc-950">
               {canAssign && (
                 <TooltipProvider>
@@ -1004,24 +1019,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Assumir</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-              {canTag && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        aria-label="Etiquetar conversa"
-                        onClick={(e) => { e.stopPropagation(); setIsTagDialogOpen(true); }}
-                      >
-                        <TagIcon className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Aplicar tag</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               )}
@@ -1077,12 +1074,11 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
         <div className="flex min-h-[15px] flex-nowrap items-center gap-1.5 overflow-hidden">
           {chat.status === 'atendimentos' && chat.teamName ? (
             <Badge
-              style={{
-                backgroundColor: chat.teamColor || 'rgba(255,255,255,0.1)',
-                color: chat.teamColor ? (chat.teamColor.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
-                borderColor: chat.teamColor ? chat.teamColor : 'rgba(255,255,255,0.2)'
-              }}
-              className="flex max-w-[55%] flex-shrink items-center gap-1 truncate border px-1.5 py-0 text-[9px] font-medium shadow-sm"
+              style={teamBadgeStyle ?? undefined}
+              className={cn(
+                "flex max-w-[55%] flex-shrink items-center gap-1 truncate border px-1.5 py-0 text-[9px] font-medium",
+                teamBadgeStyle ? "shadow-sm" : NEUTRAL_BADGE_CLASS
+              )}
               title={chat.teamName}
             >
               <Users className="h-3 w-3" />
@@ -1090,14 +1086,10 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
             </Badge>
           ) : (
             <Badge
-              style={hasTag ? {
-                backgroundColor: chat.color || 'rgba(255,255,255,0.1)',
-                color: chat.color ? (chat.color.toLowerCase().startsWith('#fff') ? '#000' : '#fff') : '#fff',
-                borderColor: chat.color ? chat.color : 'rgba(255,255,255,0.2)'
-              } : undefined}
+              style={tagBadgeStyle ?? undefined}
               className={cn(
                 "max-w-[55%] flex-shrink truncate border px-1.5 py-0 text-[9px]",
-                hasTag ? "shadow-sm" : "border-border/70 bg-muted/40 text-muted-foreground"
+                tagBadgeStyle ? "shadow-sm" : NEUTRAL_BADGE_CLASS
               )}
               title={hasTag ? chat.tag : 'Sem tag'}
             >
@@ -1112,6 +1104,38 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onSelect,
               <Megaphone className="h-3 w-3" />
               Marketing
             </Badge>
+          )}
+          {classificationTags.length > 0 && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="flex min-w-0 items-center gap-1"
+                    aria-label={`${classificationTags.length} etiquetas: ${classificationTitle}`}
+                  >
+                    {classificationTags.slice(0, 2).map((tag) => (
+                      <span
+                        key={tag.id}
+                        className="flex h-[18px] max-w-[78px] shrink items-center gap-1 truncate rounded-full border px-1.5 text-[9px] font-medium text-slate-600 dark:text-zinc-300"
+                        style={{ borderColor: `${tag.color}30`, backgroundColor: `${tag.color}0d` }}
+                      >
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
+                        <span className="truncate">{tag.label}</span>
+                      </span>
+                    ))}
+                    {classificationTags.length > 2 && (
+                      <span className="flex h-[18px] shrink-0 items-center rounded-md bg-slate-100 px-1.5 text-[9px] font-semibold text-slate-500 dark:bg-white/[0.06] dark:text-zinc-400">
+                        +{classificationTags.length - 2}
+                      </span>
+                    )}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{classificationTitle}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {chat.status !== 'encerrados' && !isForwarding && !isBulkMode && (
+            <QuickTagPopover chat={chat} onUpdate={onUpdate} />
           )}
         </div>
 
@@ -1183,6 +1207,8 @@ const getChatPriorityGroup = (chat: Chat, now = Date.now()): ChatPriorityGroupId
   return 'recent';
 };
 
+const NEUTRAL_BADGE_CLASS = 'border-border/70 bg-muted/40 text-muted-foreground';
+
 const getChatItemKey = (_index: number, chat: Chat) => chat.id;
 
 const MemoizedChatListItem = React.memo(ChatListItem);
@@ -1193,6 +1219,7 @@ interface ChatListProps {
   setSelectedChat: (chat: Chat | null) => void;
   currentUser: User;
   onUpdate: () => void;
+  ownershipFilter?: 'mine' | 'everyone';
   onOwnershipFilterChange?: (filter: 'mine' | 'everyone') => void;
   isForwarding?: boolean;
   selectedForwardingChatIds?: Set<string>;
@@ -1202,7 +1229,7 @@ interface ChatListProps {
   onCancelForward?: () => void;
   onPrefetch?: (chatId: string) => void;
   className?: string;
-  loadMore?: (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => void;
+  loadMore?: (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone', filters?: InboxListFilters }) => void;
   hasMore?: boolean;
   isLoadingMore?: boolean;
   bottomPadding?: number;
@@ -1211,9 +1238,10 @@ interface ChatListProps {
 type ChatListTabId = 'robo' | 'gerais' | 'atendimentos' | 'encerrados';
 
 
-export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onSelectAllForwarding, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
+export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, ownershipFilter: controlledOwnershipFilter, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onSelectAllForwarding, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
+  const [moreAgentsOpen, setMoreAgentsOpen] = useState(false);
   const visibleOnlineAgents = useMemo(
     () => onlineAgents.slice(0, MAX_VISIBLE_ONLINE_AGENTS),
     [onlineAgents]
@@ -1228,12 +1256,26 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ChatListTabId>('gerais');
   const [priorityNow, setPriorityNow] = useState(() => Date.now());
-  const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
+  const [uncontrolledOwnershipFilter, setUncontrolledOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
+  const ownershipFilter = controlledOwnershipFilter ?? uncontrolledOwnershipFilter;
+  const updateOwnershipFilter = useCallback((next: 'mine' | 'everyone') => {
+    if (controlledOwnershipFilter === undefined) {
+      setUncontrolledOwnershipFilter(next);
+    }
+    onOwnershipFilterChange?.(next);
+  }, [controlledOwnershipFilter, onOwnershipFilterChange]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [showMarketing, setShowMarketing] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
+
+  const selectInboxTab = useCallback((tab: ChatListTabId) => {
+    setActiveTab(tab);
+    // A aba já define o status principal. Não deixe um filtro global
+    // contraditório tornar a aba recém-selecionada vazia.
+    setStatusFilter((current) => resolveInboxStatusFilterForTab(tab, current));
+  }, []);
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
@@ -1247,17 +1289,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const [responsibleSearchTerm, setResponsibleSearchTerm] = useState('');
 
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
-  const appendChats = useInboxStore((state) => state.appendChats);
-  const setInitialData = useInboxStore((state) => state.setInitialData);
+  const inboxCounts = useInboxStore((state) => state.inboxCounts);
+  const chatPagination = useInboxStore((state) => state.chatPagination);
+  const replaceChatsForStatus = useInboxStore((state) => state.replaceChatsForStatus);
+  const replaceChatsForQueueScope = useInboxStore((state) => state.replaceChatsForQueueScope);
+  const setInboxCounts = useInboxStore((state) => state.setInboxCounts);
+  const setChatPagination = useInboxStore((state) => state.setChatPagination);
 
-  const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
-
-  const isFirstRun = React.useRef(true);
-  const ownershipRequestSeqRef = React.useRef(0);
+  const filterRequestSeqRef = React.useRef(0);
 
   const [isBulkMode, setIsBulkMode] = useState(false);
-  const [bulkAction, setBulkAction] = useState<'close' | 'agent' | null>(null);
+  const [bulkAction, setBulkAction] = useState<'close' | 'agent' | 'transfer' | null>(null);
   const [selectedBulkChats, setSelectedBulkChats] = useState<Set<string>>(new Set());
+  const [bulkTransferOpen, setBulkTransferOpen] = useState(false);
+  const [bulkTransferType, setBulkTransferType] = useState<'agent' | 'team'>('agent');
+  const [bulkTransferTarget, setBulkTransferTarget] = useState('');
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
@@ -1296,7 +1342,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   // Assign Confirmation State
   const [chatToAssign, setChatToAssign] = useState<Chat | null>(null);
 
-  const toggleBulkMode = (action: 'close' | 'agent' = 'close') => {
+  const toggleBulkMode = (action: 'close' | 'agent' | 'transfer' = 'close') => {
     if (isBulkMode && bulkAction === action) {
       setIsBulkMode(false);
       setBulkAction(null);
@@ -1333,24 +1379,24 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
 
   const toggleTeamSelection = useCallback((teamId: string) => {
     if (ownershipFilter !== 'everyone') {
-      setOwnershipFilter('everyone');
+      updateOwnershipFilter('everyone');
     }
     setTeamFilter((prev) => {
       return prev.includes(teamId)
         ? prev.filter((id) => id !== teamId)
         : [...prev, teamId];
     });
-  }, [ownershipFilter]);
+  }, [ownershipFilter, updateOwnershipFilter]);
 
   const selectResponsible = useCallback((userId: string | null) => {
     setResponsibleFilter(userId);
     if (userId) {
       setShowUnassignedOnly(false);
-      if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
+      if (ownershipFilter !== 'everyone') updateOwnershipFilter('everyone');
     }
     setIsResponsibleFilterOpen(false);
     setResponsibleSearchTerm('');
-  }, [ownershipFilter]);
+  }, [ownershipFilter, updateOwnershipFilter]);
 
   const clearAdvancedFilters = useCallback(() => {
     setTeamFilter([]);
@@ -1390,6 +1436,31 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
 
     setIsBulkSubmitting(false);
+  };
+
+  const bulkTransferIntentRef = useRef<{signature:string; payload:Parameters<typeof transferChatsBulkAction>[0]} | null>(null);
+  const handleBulkTransfer = async () => {
+    if (!currentUser.activeWorkspaceId || !bulkTransferTarget || selectedBulkChats.size === 0 || (bulkTransferType === 'agent' && isOffline)) return;
+    if (selectedBulkChats.size > 100) { toast({ title: 'Selecione até 100 conversas por vez', variant: 'destructive' }); return; }
+    setIsBulkSubmitting(true);
+    try {
+      const signature=JSON.stringify([currentUser.activeWorkspaceId,[...selectedBulkChats].sort(),bulkTransferType,bulkTransferTarget]);
+      if (bulkTransferIntentRef.current?.signature!==signature) bulkTransferIntentRef.current={signature,payload:{
+        workspaceId:currentUser.activeWorkspaceId,chatIds:[...selectedBulkChats],destination:{type:bulkTransferType,id:bulkTransferTarget},
+        operationId:crypto.randomUUID(),expectedStates:Object.fromEntries([...selectedBulkChats].map(id=>{
+          const selected=chats.find(chat=>chat.id===id);
+          return [id,{agentId:selected?.agentId ?? selected?.agent?.id ?? null,teamId:selected?.team_id ?? null,systemAgentId:selected?.assigned_system_agent_id ?? null}];
+        })),
+      }};
+      const result = await transferChatsBulkAction(bulkTransferIntentRef.current.payload);
+      if (!result.success) { toast({ title: 'Não foi possível transferir', description: result.error, variant: 'destructive' }); return; }
+      setSelectedBulkChats(new Set(result.failed.map(item => item.id)));
+      setBulkTransferOpen(false);
+      if (!result.failed.length) { setIsBulkMode(false); setBulkAction(null); }
+      toast({ title: `${result.transferred.length} conversa(s) transferida(s)`, description: result.failed.length ? `${result.failed.length} não transferida(s): ${result.failed[0].error}` : 'As conversas foram encaminhadas ao destino escolhido.', variant: result.failed.length ? 'destructive' : 'default' });
+      onUpdate();
+    } catch { toast({ title: 'Não foi possível confirmar o lote', description: 'Atualize a lista antes de tentar novamente.', variant: 'destructive' }); }
+    finally { setIsBulkSubmitting(false); }
   };
 
   const handleBulkAgentToggle = async () => {
@@ -1438,7 +1509,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     const result = await guardedAssignChat(chatToAssign.id);
 
     if (result.success) {
-      toast({ title: 'Assumiu atendimento', description: `${chatToAssign.contact.name} agora está com você.` });
+      toast({ title: 'Assumiu atendimento', description: `${chatToAssign.contact?.name || chatToAssign.protocol || 'O contato'} agora está com você.` });
       if ((result as any).chat) {
         useInboxStore.getState().upsertChats([(result as any).chat]);
       }
@@ -1448,12 +1519,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
     setChatToAssign(null);
   };
-
-  const selectedChatIdRef = React.useRef(selectedChat?.id);
-
-  useEffect(() => {
-    selectedChatIdRef.current = selectedChat?.id;
-  }, [selectedChat?.id]);
 
   useEffect(() => {
     if (currentUser.activeWorkspaceId) {
@@ -1487,51 +1552,72 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
   }, [currentUser.activeWorkspaceId]);
 
-  useEffect(() => {
-    if (isFirstRun.current) {
-      isFirstRun.current = false;
-      return;
-    }
+  const activeStatus: Chat['status'] = activeTab === 'encerrados'
+    ? 'encerrados'
+    : activeTab === 'atendimentos'
+      ? 'atendimentos'
+      : 'gerais';
+  const serverFilters = useMemo<InboxListFilters>(() => scopeInboxListFilters(activeTab, {
+    teamIds: teamFilter,
+    responsibleId: responsibleFilter,
+    onlyUnread,
+    unassignedOnly: showUnassignedOnly,
+    includeMarketing: showMarketing,
+  }), [activeTab, onlyUnread, responsibleFilter, showMarketing, showUnassignedOnly, teamFilter]);
 
+  useEffect(() => {
     const fetchFilteredChats = async () => {
       if (!currentUser.activeWorkspaceId) return;
-      const requestSeq = ++ownershipRequestSeqRef.current;
+      const requestSeq = ++filterRequestSeqRef.current;
       setIsFiltering(true);
       try {
-        const data = await getInitialChatsData({
+        const data = await getInboxChatsSnapshotAction({
           workspaceId: currentUser.activeWorkspaceId,
-          selectedChatId: selectedChatIdRef.current || null,
-          ownership: ownershipFilter
+          status: activeStatus,
+          ownership: ownershipFilter,
+          filters: serverFilters,
         });
 
-        if (requestSeq !== ownershipRequestSeqRef.current) {
+        if (requestSeq !== filterRequestSeqRef.current) {
           return;
         }
 
-        if (data.error) {
+        if (!data.success) {
           toast({ title: 'Erro ao filtrar', description: data.error, variant: 'destructive' });
         } else {
-          setInitialData(data);
+          if (activeStatus === 'gerais' && serverFilters.queueScope) {
+            replaceChatsForQueueScope(serverFilters.queueScope, data.chats);
+          } else {
+            replaceChatsForStatus(activeStatus, data.chats);
+          }
+          if (data.counts) setInboxCounts(data.counts);
+          if (data.pagination) setChatPagination(activeTab, data.pagination);
         }
       } catch (err) {
-        if (requestSeq !== ownershipRequestSeqRef.current) {
+        if (requestSeq !== filterRequestSeqRef.current) {
           return;
         }
         console.error(err);
         toast({ title: 'Erro ao filtrar', description: 'Falha ao buscar conversas.', variant: 'destructive' });
       } finally {
-        if (requestSeq === ownershipRequestSeqRef.current) {
+        if (requestSeq === filterRequestSeqRef.current) {
           setIsFiltering(false);
         }
       }
     };
 
     fetchFilteredChats();
-  }, [ownershipFilter, currentUser.activeWorkspaceId, setInitialData]);
-
-  useEffect(() => {
-    onOwnershipFilterChange?.(ownershipFilter);
-  }, [ownershipFilter, onOwnershipFilterChange]);
+  }, [
+    activeStatus,
+    activeTab,
+    currentUser.activeWorkspaceId,
+    ownershipFilter,
+    replaceChatsForQueueScope,
+    replaceChatsForStatus,
+    serverFilters,
+    setChatPagination,
+    setInboxCounts,
+  ]);
 
   const sortedChats = useMemo(() => {
     const sorted = [...chats].sort((a, b) => {
@@ -1542,11 +1628,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       return timeB - timeA;
     });
 
-    const queueChats = sorted.filter((c) => c.status === 'gerais');
-    const robo = queueChats.filter((c) => !c.tag?.trim());
-    const fila = queueChats.filter((c) => Boolean(c.tag?.trim()));
-    const atendimentos = sorted.filter((c) => c.status === 'atendimentos');
     const encerrados = sorted.filter((c) => c.status === 'encerrados');
+    const atendimentos = sorted.filter((c) => c.status === 'atendimentos' || (c.status !== 'encerrados' && Boolean(c.agentId || (c as any).agent_id || c.agent?.id)));
+    const queueChats = sorted.filter((c) => c.status === 'gerais' && !atendimentos.includes(c) && !encerrados.includes(c));
+    const robo = queueChats.filter((c) => isChatInInboxQueueScope(c, 'robo'));
+    const fila = queueChats.filter((c) => isChatInInboxQueueScope(c, 'fila'));
 
     return { robo, fila, atendimentos, encerrados };
   }, [chats]);
@@ -1562,24 +1648,15 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     const query = debouncedSearchTerm.trim().toLocaleLowerCase('pt-BR');
 
     const matchesControls = (chat: Chat) => {
+      if (!matchesInboxMarketingFilter(chat, showMarketing)) return false;
       const messages = chat.messages || [];
-      let hasVisibleMessage = false;
       let matchesMessageContent = false;
 
       for (const message of messages) {
         if (!showMarketing && isMarketingMessage(message)) continue;
-        hasVisibleMessage = true;
         if (query && !matchesMessageContent && (message.content || '').toLocaleLowerCase('pt-BR').includes(query)) {
           matchesMessageContent = true;
         }
-      }
-
-      if (
-        !showMarketing &&
-        !hasVisibleMessage &&
-        !shouldKeepMarketingOnlyChatVisible(chat, selectedChat?.id)
-      ) {
-        return false;
       }
 
       const matchesStatus =
@@ -1590,28 +1667,28 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       const chatSystemAgentId = chat.assigned_system_agent_id || chat.assignedSystemAgent?.id;
       const matchesTeam = matchesChatTeamFilter(chat, teams, teamFilter);
 
-      const matchesOwner =
-        responsibleFilter
-          ? chatAgentId === responsibleFilter
-          : ownershipFilter === 'everyone' ||
-            chatAgentId === currentUser.id ||
-            chat.status === 'gerais';
+      const matchesOwner = responsibleFilter && isOwnershipScopedChat(chat)
+        ? chatAgentId === responsibleFilter
+        : isChatVisibleForOwnership(chat, ownershipFilter, currentUser.id);
 
       const matchesUnread = !onlyUnread || (chat.unreadCount ?? 0) > 0;
-      const matchesUnassigned = !showUnassignedOnly || (!chat.agent && !chatSystemAgentId);
+      const matchesUnassigned = !showUnassignedOnly || (!chatAgentId && !chatSystemAgentId);
+      const matchesAssignmentFilters = !isOwnershipScopedChat(chat)
+        || (matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned);
       let matchesSearch = true;
 
       if (query) {
         const protocol = chat.protocol || buildChatProtocol(chat.id);
         matchesSearch =
-          (chat.contact.name || '').toLocaleLowerCase('pt-BR').includes(query) ||
-          (chat.contact.phone || '').includes(query) ||
+          (chat.contact?.name || '').toLocaleLowerCase('pt-BR').includes(query) ||
+          (chat.contact?.phone || '').includes(query) ||
+          (chat.contact?.phone_number_jid || '').includes(query) ||
           (protocol || '').toLocaleLowerCase('pt-BR').includes(query) ||
           (chat.id || '').toLocaleLowerCase('pt-BR').includes(query) ||
           matchesMessageContent;
       }
 
-      return matchesStatus && matchesOwner && matchesTeam && matchesUnread && matchesUnassigned && matchesSearch;
+      return matchesAssignmentFilters && matchesSearch;
     };
 
     return {
@@ -1626,7 +1703,6 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     onlyUnread,
     ownershipFilter,
     responsibleFilter,
-    selectedChat?.id,
     showMarketing,
     showUnassignedOnly,
     sortedChats,
@@ -1636,12 +1712,39 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   ]);
 
   const filteredChats = filteredChatsByTab[activeTab];
-  const tabCounts = useMemo(() => ({
+  const isOwnershipFilterVisible = isInboxAssignmentFilterTab(activeTab);
+  const loadedTabCounts = useMemo(() => ({
     robo: filteredChatsByTab.robo.length,
     gerais: filteredChatsByTab.gerais.length,
     atendimentos: filteredChatsByTab.atendimentos.length,
     encerrados: filteredChatsByTab.encerrados.length,
   }), [filteredChatsByTab]);
+
+  const hasClientOnlyCountFilters = Boolean(debouncedSearchTerm.trim());
+  const tabCounts = useMemo(() => {
+    if (!inboxCounts || hasClientOnlyCountFilters) return loadedTabCounts;
+
+    const counts = {
+      robo: inboxCounts.robo,
+      gerais: inboxCounts.gerais,
+      atendimentos: inboxCounts.atendimentos,
+      encerrados: inboxCounts.encerrados,
+    };
+
+    if (statusFilter === 'open') counts.encerrados = 0;
+    if (statusFilter === 'closed') {
+      counts.robo = 0;
+      counts.gerais = 0;
+      counts.atendimentos = 0;
+    }
+
+    return counts;
+  }, [
+    hasClientOnlyCountFilters,
+    inboxCounts,
+    loadedTabCounts,
+    statusFilter,
+  ]);
 
   const { groupedChats, priorityGroupCounts } = useMemo(() => {
     const buckets: Record<ChatPriorityGroupId, Chat[]> = {
@@ -1706,19 +1809,34 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     [teamFilter, teams]
   );
 
-  const advancedFilterCount = teamFilter.length
-    + (responsibleFilter ? 1 : 0)
-    + (statusFilter !== 'all' ? 1 : 0)
-    + (showUnassignedOnly ? 1 : 0)
-    + (showMarketing ? 1 : 0);
+  const advancedFilterCount = isOwnershipFilterVisible
+    ? teamFilter.length
+      + (responsibleFilter ? 1 : 0)
+      + (statusFilter !== 'all' ? 1 : 0)
+      + (showUnassignedOnly ? 1 : 0)
+      + (showMarketing ? 1 : 0)
+    : (showMarketing ? 1 : 0);
 
-  const canLoadMore = Boolean(loadMore) && !isLoadingMore && (hasMore ?? hasMoreChats);
+  const paginationCounts = inboxCounts ?? loadedTabCounts;
+  const paginationScope = getInboxPaginationScope(activeTab, paginationCounts);
+  const loadedInPaginationScope = loadedTabCounts[activeTab];
+  const canLoadMore = Boolean(loadMore) && !isLoadingMore && !isFiltering && (
+    inboxCounts
+      ? hasMoreChatsInScope({
+        loaded: loadedInPaginationScope,
+        total: paginationScope.total,
+        paginationHasMore: chatPagination[paginationScope.tab].hasMore,
+      })
+      : (hasMore ?? hasMoreChats)
+  );
   const handleEndReached = useCallback(() => {
     if (!canLoadMore) return;
-    if (activeTab !== 'encerrados') return;
-    if (filteredChats.length === 0) return;
-    loadMore?.({ statuses: ['encerrados'], ownership: ownershipFilter });
-  }, [activeTab, canLoadMore, filteredChats.length, loadMore, ownershipFilter]);
+    loadMore?.({
+      statuses: [paginationScope.status],
+      ownership: ownershipFilter,
+      filters: serverFilters,
+    });
+  }, [canLoadMore, loadMore, ownershipFilter, paginationScope.status, serverFilters]);
 
   const virtuosoComponents = useMemo(() => ({
     Header: () => <div className="h-1" />,
@@ -1830,6 +1948,15 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
+                      <Button variant={isBulkMode && bulkAction === 'transfer' ? 'secondary' : 'ghost'} size="icon" aria-label={isBulkMode && bulkAction === 'transfer' ? 'Sair da seleção de transferência' : 'Transferir em lote'} className={cn('h-7 w-7 text-muted-foreground hover:bg-muted hover:text-foreground', isBulkMode && bulkAction === 'transfer' && 'bg-emerald-500/15 text-emerald-700')} onClick={() => toggleBulkMode('transfer')}><ArrowRightLeft className="h-[15px] w-[15px]" /></Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Transferir em lote</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
                         variant={isBulkMode && bulkAction === 'agent' ? "secondary" : "ghost"}
                         size="icon"
@@ -1864,38 +1991,90 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             )}
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/[0.05]" role="tablist" aria-label="Status das conversas">
+        {/* Unified 1-Row Pipeline Navigation with Icons — Intuitive, High-contrast, Spring Animated */}
+        <div
+          className="relative flex h-10 w-full items-center rounded-xl bg-slate-100/90 p-1 dark:bg-white/[0.05] border border-slate-200/60 dark:border-white/[0.06]"
+          role="tablist"
+          aria-label="Status das conversas"
+        >
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            const filteredCount = tabCounts[tab.id];
+            const loadedCount = loadedTabCounts[tab.id];
+            const totalCount = tabCounts[tab.id];
+            const countDescription = loadedCount === totalCount
+              ? `${loadedCount.toLocaleString('pt-BR')} conversas carregadas`
+              : `${loadedCount.toLocaleString('pt-BR')} de ${totalCount.toLocaleString('pt-BR')} conversas carregadas`;
+            const isActive = activeTab === tab.id;
 
             return (
-              <button
+              <motion.button
                 key={tab.id}
                 type="button"
                 role="tab"
-                aria-selected={activeTab === tab.id}
-                aria-label={`${tab.label}: ${filteredCount} conversas`}
-                onClick={() => setActiveTab(tab.id)}
+                aria-selected={isActive}
+                aria-label={`${tab.label}: ${countDescription}`}
+                onClick={() => selectInboxTab(tab.id)}
+                layout
+                whileTap={{ scale: 0.97 }}
+                transition={{
+                  layout: { type: "spring", stiffness: 450, damping: 35 },
+                }}
+                title={countDescription}
                 className={cn(
-                  "relative flex h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-semibold transition-[background-color,color,box-shadow,transform] duration-200 active:scale-[0.97] motion-reduce:transform-none motion-reduce:transition-none",
-                  activeTab === tab.id
-                    ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-white/10 dark:text-blue-300 dark:ring-white/10"
-                    : "text-slate-500 hover:bg-white/70 hover:text-slate-800 dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-zinc-100"
+                  "relative z-10 flex h-full items-center justify-center gap-1.5 rounded-lg text-xs outline-none select-none transition-colors duration-150",
+                  isActive
+                    ? "flex-initial shrink-0 px-3 text-white font-bold"
+                    : "flex-1 min-w-0 px-2 text-slate-500 hover:bg-slate-200/50 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-white/[0.04] dark:hover:text-white font-medium"
                 )}
               >
-                <Icon className="hidden h-3 w-3 flex-shrink-0 min-[1400px]:block" />
-                <span className="truncate min-[1400px]:hidden">{tab.shortLabel}</span>
-                <span className="hidden truncate min-[1400px]:inline">{tab.label}</span>
-                {filteredCount > 0 && (
-                  <span className={cn(
-                    "flex min-w-[16px] flex-shrink-0 items-center justify-center rounded-full px-1 text-[8px] leading-4",
-                    activeTab === tab.id ? "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" : "bg-slate-200 text-slate-600 dark:bg-white/[0.08] dark:text-zinc-400"
-                  )}>
-                    {filteredCount > 99 ? '99+' : filteredCount}
-                  </span>
+                {/* High-contrast sliding active pill with spring physics */}
+                {isActive && (
+                  <motion.div
+                    layoutId="inbox-unified-tab-pill"
+                    className="absolute inset-0 rounded-lg bg-slate-950 shadow-md shadow-slate-950/20 dark:bg-blue-600 dark:shadow-lg dark:shadow-blue-500/30"
+                    transition={{ type: "spring", stiffness: 450, damping: 35 }}
+                  />
                 )}
-              </button>
+
+                {/* Icon */}
+                <Icon
+                  className={cn(
+                    "relative z-10 h-3.5 w-3.5 shrink-0 stroke-[1.9] transition-colors",
+                    isActive
+                      ? "text-white"
+                      : "text-slate-500 dark:text-zinc-400"
+                  )}
+                  aria-hidden="true"
+                />
+
+                {/* Label: Only shown when active, expands smoothly */}
+                <AnimatePresence initial={false}>
+                  {isActive ? (
+                    <motion.span
+                      initial={{ opacity: 0, width: 0 }}
+                      animate={{ opacity: 1, width: "auto" }}
+                      exit={{ opacity: 0, width: 0 }}
+                      transition={{ duration: 0.18, ease: "easeInOut" }}
+                      className="relative z-10 overflow-hidden whitespace-nowrap tracking-tight text-[11px] font-bold min-[1400px]:text-xs"
+                    >
+                      {tab.label}
+                    </motion.span>
+                  ) : null}
+                </AnimatePresence>
+
+                {/* Metric Badge */}
+                <span
+                  className={cn(
+                    "relative z-10 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums leading-none transition-colors",
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-200/80 text-slate-700 dark:bg-white/10 dark:text-zinc-300"
+                  )}
+                  title={countDescription}
+                >
+                  {formatInboxCount(loadedCount)}
+                </span>
+              </motion.button>
             );
           })}
         </div>
@@ -1949,7 +2128,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       </div>
                       <div>
                         <p className="text-sm font-bold tracking-tight">Visão inteligente</p>
-                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-zinc-400">Combine filtros em qualquer fila da Inbox.</p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-zinc-400">{isOwnershipFilterVisible ? 'Personalize as conversas exibidas.' : 'Escolha se deseja incluir campanhas na lista.'}</p>
                       </div>
                     </div>
                     {advancedFilterCount > 0 && (
@@ -1960,11 +2139,12 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     )}
                   </div>
 
+                  {isOwnershipFilterVisible && <>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <Label className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Equipes</Label>
-                        <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">Uma ou várias, em todas as filas.</p>
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">Uma ou várias, somente nos atendimentos.</p>
                       </div>
                       <div className="flex items-center gap-2">
                         {teamFilter.length > 0 && (
@@ -2174,8 +2354,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       ))}
                     </div>
                   </div>
+                  </>}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
+                    {isOwnershipFilterVisible && <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium text-foreground">Somente sem responsável</p>
                         <p className="text-xs text-muted-foreground">Conversas que ainda precisam de atribuição</p>
@@ -2188,11 +2369,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         }}
                         className="data-[state=checked]:bg-blue-600"
                       />
-                    </div>
+                    </div>}
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
-                        <p className="text-xs text-muted-foreground">Oculta mensagens de marketing no preview</p>
+                        <p className="text-xs text-muted-foreground">Inclui campanhas sem resposta na Fila e no Robô</p>
                       </div>
                       <Switch checked={showMarketing} onCheckedChange={setShowMarketing} className="data-[state=checked]:bg-blue-600" />
                     </div>
@@ -2201,7 +2382,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               </Popover>
             )}
           />
-          {selectedResponsible && (
+          {isOwnershipFilterVisible && selectedResponsible && (
             <div className="pt-2">
               <button
                 type="button"
@@ -2219,48 +2400,53 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             </div>
           )}
           {/* Quick Filter Chips */}
+          {isOwnershipFilterVisible && (
           <div className="flex flex-nowrap items-center gap-1.5 pt-2">
-            <Badge
-              variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
-              className={cn(
-                "order-2 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
-                ownershipFilter === 'mine'
-                  ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
-                  : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
-              )}
-              onClick={() => {
-                setResponsibleFilter(null);
-                if (ownershipFilter !== 'mine') setOwnershipFilter('mine');
-              }}
-            >
-              <span className="flex w-full items-center justify-center px-2">
-                <span className="inline-flex max-w-full items-center justify-center gap-1">
-                  {isFiltering && ownershipFilter === 'mine' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
-                  <span className="block truncate text-center">Atribuídos a mim</span>
-                </span>
-              </span>
-            </Badge>
-            <Badge
-              variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
-              className={cn(
-                "order-1 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
-                ownershipFilter === 'everyone'
-                  ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
-                  : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
-              )}
-              onClick={() => {
-                setResponsibleFilter(null);
-                if (ownershipFilter !== 'everyone') setOwnershipFilter('everyone');
-              }}
-            >
-              <span className="flex w-full items-center justify-center px-2">
-                <span className="inline-flex max-w-full items-center justify-center gap-1">
-                  {isFiltering && ownershipFilter === 'everyone' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
-                  <span className="block truncate text-center">Todos</span>
-                </span>
-              </span>
-            </Badge>
-            <div className="order-3 h-4 w-px bg-slate-200 dark:bg-white/10" />
+            {isOwnershipFilterVisible && (
+              <>
+                <Badge
+                  variant={ownershipFilter === 'mine' ? 'default' : 'outline'}
+                  className={cn(
+                    "order-2 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
+                    ownershipFilter === 'mine'
+                      ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
+                  )}
+                  onClick={() => {
+                    setResponsibleFilter(null);
+                    if (ownershipFilter !== 'mine') updateOwnershipFilter('mine');
+                  }}
+                >
+                  <span className="flex w-full items-center justify-center px-2">
+                    <span className="inline-flex max-w-full items-center justify-center gap-1">
+                      {isFiltering && ownershipFilter === 'mine' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
+                      <span className="block truncate text-center">Atribuídos a mim</span>
+                    </span>
+                  </span>
+                </Badge>
+                <Badge
+                  variant={ownershipFilter === 'everyone' ? 'default' : 'outline'}
+                  className={cn(
+                    "order-1 flex h-8 min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-transparent px-2 text-[10.5px] font-semibold leading-none whitespace-nowrap transition-[background-color,color,transform] duration-150 active:scale-[0.96] motion-reduce:transform-none motion-reduce:transition-none",
+                    ownershipFilter === 'everyone'
+                      ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/[0.09]"
+                  )}
+                  onClick={() => {
+                    setResponsibleFilter(null);
+                    if (ownershipFilter !== 'everyone') updateOwnershipFilter('everyone');
+                  }}
+                >
+                  <span className="flex w-full items-center justify-center px-2">
+                    <span className="inline-flex max-w-full items-center justify-center gap-1">
+                      {isFiltering && ownershipFilter === 'everyone' ? <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" /> : null}
+                      <span className="block truncate text-center">Todos</span>
+                    </span>
+                  </span>
+                </Badge>
+                <div className="order-3 h-4 w-px bg-slate-200 dark:bg-white/10" />
+              </>
+            )}
             <Badge
               variant={onlyUnread ? 'default' : 'outline'}
               className={cn(
@@ -2288,6 +2474,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
               Sem responsável
             </Badge>
           </div>
+          )}
         </div>
       </div>
 
@@ -2300,149 +2487,57 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         onSelectChat={setSelectedChat}
       />
 
-      <div className="flex flex-shrink-0 items-center gap-3 border-b border-slate-100 bg-white px-4 py-2 dark:border-white/10 dark:bg-[#050507]">
-        <h3 className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-          Online ({onlineAgents.length})
-          {isOffline && (
-            <Badge variant="destructive" className="h-4 text-[10px] px-1">
-              Offline - Reconectando...
-            </Badge>
-          )}
-        </h3>
-          <div className={cn("flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 overflow-x-hidden overflow-y-visible py-0.5 transition-opacity duration-300", isOffline ? "opacity-50 grayscale pointer-events-none" : "opacity-100")}>
-            {onlineAgents.length === 0 ? (
-              <div className="flex gap-2">
-                <Skeleton className="h-7 w-7 rounded-full" />
-                <Skeleton className="h-7 w-7 rounded-full" />
-                <Skeleton className="h-7 w-7 rounded-full" />
-              </div>
-            ) : (
-              visibleOnlineAgents.map((agent) => (
-                <HoverCard key={agent.user.id}>
-                  <HoverCardTrigger asChild>
-                    <div
-                      className="relative shrink-0 cursor-pointer transition-transform duration-150 hover:-translate-y-0.5 active:scale-90 motion-reduce:transform-none motion-reduce:transition-none"
-                      onClick={() => setSelectedAgent(agent.user)}
-                    >
-                      <Avatar className="h-7 w-7 border border-emerald-400">
-                        <AvatarImage fallbackOnBlank src={agent.user.avatar} className="object-cover" />
-                        <AvatarFallback className="bg-emerald-900 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
-                      </Avatar>
-                      <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#22C05C] border border-background"></span>
-                    </div>
-                  </HoverCardTrigger>
-                  <HoverCardContent className="w-80 p-0 border-border bg-popover text-popover-foreground shadow-2xl rounded-xl overflow-hidden">
-                    <div className="relative h-20 bg-gradient-to-r from-green-600/20 to-emerald-900/20 p-4">
-                      <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] opacity-10" />
-                      <div className="flex items-center gap-3 relative z-10">
-                        <Avatar className="h-12 w-12 border-2 border-white/10 shadow-lg">
-                          <AvatarImage fallbackOnBlank src={agent.user.avatar} />
-                          <AvatarFallback className="bg-green-700 text-white font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-bold text-lg leading-tight">{agent.user.name}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                            Online agora
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="p-4 space-y-3">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Cargo</span>
-                        {agent.user.is_superadmin ? (
-                          <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">Admin</Badge>
-                        ) : (agent.user.role?.name === 'Owner' || agent.user.role?.name === 'Proprietário') ? (
-                          <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">Proprietário</Badge>
-                        ) : (
-                          <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
-                            {agent.user.team || agent.user.role?.name || 'Agente'}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Equipe</span>
-                        <span className="font-medium text-foreground">{agent.user.team || 'Geral'}</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white font-medium"
-                        onClick={() => {
-                          setSelectedAgent(agent.user);
-                        }}
-                      >
-                        <UserCheck className="w-4 h-4 mr-2" />
-                        Ver Perfil / Transferir
-                      </Button>
-                    </div>
-                  </HoverCardContent>
-                </HoverCard>
-              ))
-            )}
-            {hiddenOnlineAgents.length > 0 && (
-              <HoverCard openDelay={120}>
-                <HoverCardTrigger asChild>
-                  <button
-                    type="button"
-                    className="h-7 w-7 min-w-7 flex-shrink-0 rounded-full border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:border-white/10 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
-                    aria-label={`Mostrar ${hiddenOnlineAgents.length} agentes online adicionais`}
-                  >
-                    +{hiddenOnlineAgents.length}
+      <div className="flex h-[45px] flex-shrink-0 items-center gap-2.5 border-b border-zinc-100 bg-white px-4 dark:border-white/10 dark:bg-[#050507]">
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[.13em] text-zinc-500 dark:text-zinc-400">{isOffline ? 'Reconectando' : 'Online'}</span>
+          <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-zinc-500 dark:bg-white/10 dark:text-zinc-300">{onlineAgents.length}</span>
+        </div>
+        <div className={cn('flex min-w-0 flex-1 items-center justify-end gap-1.5', isOffline && 'opacity-60')}>
+          {!isOffline && onlineAgents.length === 0 && <span className="truncate text-[11px] text-zinc-400 dark:text-zinc-500">Ninguém por aqui agora</span>}
+          <TooltipProvider delayDuration={250}>
+            {visibleOnlineAgents.map((agent) => (
+              <Tooltip key={agent.user.id}>
+                <TooltipTrigger asChild>
+                  <button type="button" disabled={isOffline} aria-label={`Ver perfil de ${agent.user.name}`} onClick={() => setSelectedAgent(agent.user)} className="group relative shrink-0 rounded-full outline-none transition-transform duration-200 hover:-translate-y-0.5 hover:scale-110 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+                    <Avatar className="h-7 w-7 border-2 border-white shadow-[0_2px_8px_rgba(0,0,0,.12)] ring-1 ring-zinc-200 dark:border-[#050507] dark:ring-white/20"><AvatarImage fallbackOnBlank src={agent.user.avatar || agent.user.avatar_url} alt="" className="object-cover" /><AvatarFallback className="bg-zinc-700 text-[10px] font-bold text-white">{agent.user.name.charAt(0).toUpperCase()}</AvatarFallback></Avatar>
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 dark:border-[#050507]" />
                   </button>
-                </HoverCardTrigger>
-                <HoverCardContent align="end" className="w-64 border-border bg-popover text-popover-foreground">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Outros agentes online
-                  </p>
-                  <div className="mt-2 max-h-56 overflow-y-auto space-y-1">
-                    {hiddenOnlineAgents.map((agent) => (
-                      <button
-                        key={`extra-online-${agent.user.id}`}
-                        type="button"
-                        className="w-full rounded-md px-2 py-1.5 hover:bg-muted text-left flex items-center gap-2"
-                        onClick={() => setSelectedAgent(agent.user)}
-                      >
-                        <Avatar className="h-7 w-7 border border-border shrink-0">
-                          <AvatarImage fallbackOnBlank src={agent.user.avatar} />
-                          <AvatarFallback className="text-[10px]">{agent.user.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{agent.user.name}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{agent.user.team || agent.user.role?.name || 'Agente'}</p>
-                        </div>
-                        <span className="h-2 w-2 rounded-full bg-[#22C05C] shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            )}
-            {onlineAgents.length === 0 && (
-              <p className="text-xs text-muted-foreground italic sr-only">Nenhum agente online</p>
-            )}
-          </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p className="font-medium">{agent.user.name}</p><p className="text-xs opacity-70">{agent.user.team || agent.user.role?.name || 'Pessoa da equipe'} · Online</p></TooltipContent>
+              </Tooltip>
+            ))}
+          </TooltipProvider>
+          {hiddenOnlineAgents.length > 0 && (
+            <Popover open={moreAgentsOpen} onOpenChange={setMoreAgentsOpen}>
+              <PopoverTrigger asChild><button type="button" disabled={isOffline} aria-label={`Mostrar mais ${hiddenOnlineAgents.length} pessoas online`} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-[10px] font-bold text-zinc-500 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300">+{hiddenOnlineAgents.length}</button></PopoverTrigger>
+              <PopoverContent align="end" className="w-64 rounded-2xl border-zinc-200 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-[#171719]">
+                <p className="px-1 text-[10px] font-bold uppercase tracking-[.15em] text-zinc-400">Mais pessoas online</p>
+                <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{hiddenOnlineAgents.map((agent) => <button key={agent.user.id} type="button" onClick={() => { setMoreAgentsOpen(false); setSelectedAgent(agent.user); }} className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:hover:bg-white/5"><Avatar className="h-8 w-8 shrink-0"><AvatarImage fallbackOnBlank src={agent.user.avatar || agent.user.avatar_url} alt="" /><AvatarFallback className="bg-zinc-700 text-xs text-white">{agent.user.name.charAt(0).toUpperCase()}</AvatarFallback></Avatar><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{agent.user.name}</span><span className="block truncate text-[11px] text-zinc-400">{agent.user.team || agent.user.role?.name || 'Pessoa da equipe'}</span></span><span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /></button>)}</div>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
       </div>
 
       <AgentProfileSheet
         member={selectedAgent}
         isOpen={!!selectedAgent}
         onClose={() => setSelectedAgent(null)}
-        isOnline={true}
+        isOnline={!isOffline && onlineAgents.some((agent) => agent.user.id === selectedAgent?.id)}
+        joinedAt={onlineAgents.find((agent) => agent.user.id === selectedAgent?.id)?.joined_at}
       />
-
 
 
       {
         isBulkMode && (
           <div className={cn(
             "p-2 border-b border-border flex items-center justify-between animate-in slide-in-from-top-2",
-            bulkAction === 'agent' ? "bg-blue-500/10" : "bg-red-500/10"
+            bulkAction === 'agent' ? "bg-blue-500/10" : bulkAction === 'transfer' ? "bg-emerald-500/10" : "bg-red-500/10"
           )}>
             <div className="flex items-center gap-2 px-2">
               <p className={cn(
                 "text-sm font-medium",
-                bulkAction === 'agent' ? "text-blue-800" : "text-red-800"
+                bulkAction === 'agent' ? "text-blue-800" : bulkAction === 'transfer' ? "text-emerald-800 dark:text-emerald-200" : "text-red-800"
               )}>
                 {selectedBulkChats.size} selecionado(s)
               </p>
@@ -2452,7 +2547,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             </div>
             
             <div className="flex items-center gap-2">
-              {bulkAction === 'agent' ? (
+              {bulkAction === 'transfer' ? (
+                <Button size="sm" className="h-8" disabled={selectedBulkChats.size === 0 || isBulkSubmitting} onClick={() => { setBulkTransferTarget(''); setBulkTransferOpen(true); }}>Transferir</Button>
+              ) : bulkAction === 'agent' ? (
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2 px-2 border-r border-border mr-2">
                     <p className="text-xs font-semibold text-blue-800 uppercase tracking-wider">
@@ -2507,6 +2604,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </div>
         )
       }
+
+      <Dialog open={bulkTransferOpen} onOpenChange={open => { if (!isBulkSubmitting) setBulkTransferOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Transferir {selectedBulkChats.size} conversa(s)</DialogTitle><DialogDescription>Escolha uma pessoa online ou uma equipe. A distribuição respeita as regras e a disponibilidade do destino.</DialogDescription></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-2"><Button type="button" variant={bulkTransferType === 'agent' ? 'default' : 'outline'} onClick={() => { setBulkTransferType('agent'); setBulkTransferTarget(''); }}>Pessoa</Button><Button type="button" variant={bulkTransferType === 'team' ? 'default' : 'outline'} onClick={() => { setBulkTransferType('team'); setBulkTransferTarget(''); }}>Equipe</Button></div>
+            <Label htmlFor="bulk-transfer-target">Destino</Label>
+            <Select value={bulkTransferTarget} onValueChange={setBulkTransferTarget}><SelectTrigger id="bulk-transfer-target"><SelectValue placeholder={bulkTransferType === 'agent' ? 'Selecione uma pessoa online' : 'Selecione uma equipe'} /></SelectTrigger><SelectContent>{bulkTransferType === 'agent' ? onlineAgents.filter(agent => agent.user.id !== currentUser.id).map(agent => <SelectItem key={agent.user.id} value={agent.user.id}>{agent.user.name}</SelectItem>) : teams.map(team => <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>)}</SelectContent></Select>
+            {bulkTransferType === 'agent' && isOffline && <p className="text-xs text-muted-foreground">A presença está reconectando. Aguarde para escolher uma pessoa.</p>}
+            {bulkTransferType === 'agent' && !isOffline && !onlineAgents.some(agent => agent.user.id !== currentUser.id) && <p className="text-xs text-muted-foreground">Nenhuma outra pessoa online no momento.</p>}
+            <p className="text-xs text-muted-foreground">Até 100 conversas por lote. Se alguma falhar, ela continuará selecionada.</p>
+          </div>
+          <DialogFooter><Button variant="outline" disabled={isBulkSubmitting} onClick={() => setBulkTransferOpen(false)}>Cancelar</Button><Button disabled={!bulkTransferTarget || isBulkSubmitting || selectedBulkChats.size > 100 || (bulkTransferType === 'agent' && isOffline)} onClick={handleBulkTransfer}>{isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirmar transferência</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
         {filteredChats.length > 0 ? (
@@ -2709,7 +2821,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           <AlertDialogHeader>
             <AlertDialogTitle>Assumir este atendimento?</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              Você será definido como o responsável pela conversa com <strong>{chatToAssign?.contact.name}</strong>.
+              Você será definido como o responsável pela conversa com <strong>{chatToAssign?.contact?.name || chatToAssign?.protocol || 'este cliente'}</strong>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

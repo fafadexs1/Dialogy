@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { getMonthlyChatLimitStatus } from '@/lib/billing-logic';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { processAutopilotForChat } from '@/services/autopilot-service';
+import { dispatchNexusChatMessage } from '@/modules/nexus/services/chat-adapters';
 import { createWebchatSessionToken, hashWebchatSessionToken } from './session-token';
 import { isWebchatOriginAllowed, normalizeWebchatOrigin } from './origin';
 
@@ -80,7 +81,7 @@ export async function authenticatePublicSession(sessionId: string, token: string
 
 async function ensureConversation(session: any) {
   if (session.chat_id && session.contact_id) {
-    const existing = await db.query('SELECT * FROM chats WHERE id = $1 AND status <> \'encerrados\' LIMIT 1', [session.chat_id]);
+    const existing = await db.query('SELECT * FROM chats WHERE id = $1 LIMIT 1', [session.chat_id]);
     if (existing.rows[0]) return { contactId: session.contact_id, chat: existing.rows[0], createdContact: false };
   }
   const client = await db.connect();
@@ -104,7 +105,7 @@ async function ensureConversation(session: any) {
     }
     const contact = contactRes.rows[0];
     let chatRes = await client.query(
-      `SELECT * FROM chats WHERE workspace_id=$1 AND contact_id=$2 AND status <> 'encerrados' ORDER BY created_at DESC LIMIT 1`,
+      `SELECT * FROM chats WHERE workspace_id=$1 AND contact_id=$2 ORDER BY created_at DESC LIMIT 1`,
       [session.workspace_id, contact.id],
     );
     if (!chatRes.rows[0]) {
@@ -146,6 +147,24 @@ export async function addPublicMessage(session: any, content: string) {
   );
   if (Number(recent.rows[0]?.total || 0) >= 20) throw new Error('rate_limited');
   const conversation = await ensureConversation(session);
+  if (conversation.chat.status === 'encerrados') {
+    const reopened = await db.query(
+      `UPDATE chats
+       SET status = 'gerais',
+           closed_at = NULL,
+           agent_id = NULL,
+           assigned_system_agent_id = NULL,
+           assigned_at = NULL,
+           is_autopilot_active = FALSE,
+           copilot_mode = 'off',
+           updated_at = clock_timestamp()
+       WHERE id = $1
+         AND status = 'encerrados'
+       RETURNING *`,
+      [conversation.chat.id]
+    );
+    if (reopened.rows[0]) conversation.chat = reopened.rows[0];
+  }
   const messageId = randomUUID();
   const messageRes = await db.query(
     `INSERT INTO messages (id,workspace_id,chat_id,type,content,from_me,is_read,api_message_status,instance_name,source_from_api,metadata,created_at)
@@ -165,7 +184,21 @@ export async function addPublicMessage(session: any, content: string) {
       data: { name: session.visitor_name || 'Visitante do site', email: session.visitor_email },
     })).catch((error) => console.error('[WEBCHAT_AUTOMATION]', error));
   }
-  if (conversation.chat.is_autopilot_active && clean) {
+  const nexus = conversation.chat.status !== 'encerrados' && clean
+    ? await dispatchNexusChatMessage({
+      workspaceId: session.workspace_id,
+      chatId: conversation.chat.id,
+      message: clean,
+      sourceMessageId: messageId,
+      instanceName: session.widget_name,
+      platform: 'webchat',
+      messageType: 'text',
+    }).catch((error) => {
+      console.error('[WEBCHAT_NEXUS]', error);
+      return { handled: false };
+    })
+    : { handled: false };
+  if (conversation.chat.status !== 'encerrados' && conversation.chat.is_autopilot_active && clean && !nexus.handled) {
     const chatForAutopilot = {
       id: conversation.chat.id, workspace_id: session.workspace_id, status: conversation.chat.status,
       contact: { id: conversation.contactId, workspace_id: session.workspace_id, name: session.visitor_name || 'Visitante do site' },
@@ -179,24 +212,35 @@ export async function addPublicMessage(session: any, content: string) {
 
 export async function listPublicMessages(session: any, after?: string | null) {
   if (!session.chat_id) return [];
-  const values: unknown[] = [session.chat_id, session.id];
-  let afterClause = '';
-  if (after) {
-    values.push(after);
-    afterClause = `AND m.created_at > $${values.length}::timestamptz`;
-  }
-  const result = await db.query(
-    `SELECT m.id,m.type,m.content,m.from_me,m.api_message_status,m.created_at
-     FROM messages m WHERE m.chat_id=$1
-       AND COALESCE((m.metadata->>'isInternalNote')::boolean,FALSE)=FALSE
-       AND (m.from_me=TRUE OR m.metadata->>'webchatSessionId'=$2)
-       ${afterClause} ORDER BY m.created_at ASC LIMIT 200`,
-    values,
-  );
+  const result = after
+    ? await db.query(
+        `SELECT m.id,m.type,m.content,m.from_me,m.api_message_status,m.created_at
+           FROM messages m
+          WHERE m.chat_id=$1
+            AND COALESCE((m.metadata->>'isInternalNote')::boolean,FALSE)=FALSE
+            AND (m.from_me=TRUE OR m.metadata->>'webchatSessionId'=$2)
+            AND m.created_at > $3::timestamptz
+          ORDER BY m.created_at ASC, m.id ASC
+          LIMIT 200`,
+        [session.chat_id, session.id, after],
+      )
+    : await db.query(
+        `SELECT recent.id,recent.type,recent.content,recent.from_me,recent.api_message_status,recent.created_at
+           FROM (
+             SELECT m.id,m.type,m.content,m.from_me,m.api_message_status,m.created_at
+               FROM messages m
+              WHERE m.chat_id=$1
+                AND COALESCE((m.metadata->>'isInternalNote')::boolean,FALSE)=FALSE
+                AND (m.from_me=TRUE OR m.metadata->>'webchatSessionId'=$2)
+              ORDER BY m.created_at DESC, m.id DESC
+              LIMIT 200
+           ) recent
+          ORDER BY recent.created_at ASC, recent.id ASC`,
+        [session.chat_id, session.id],
+      );
   await db.query('UPDATE webchat_sessions SET last_seen_at=NOW() WHERE id=$1', [session.id]);
   return result.rows.map((row) => ({
     id: row.id, type: row.type, content: row.content || '', fromMe: Boolean(row.from_me),
     status: row.api_message_status, createdAt: new Date(row.created_at).toISOString(),
   }));
 }
-

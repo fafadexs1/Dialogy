@@ -70,7 +70,8 @@ export async function getProductUpdatesFeed(userId: string): Promise<ProductUpda
       COALESCE(reaction_counts.likes, 0)::int AS likes,
       COALESCE(reaction_counts.dislikes, 0)::int AS dislikes,
       mine.reaction AS my_reaction,
-      COALESCE(comment_counts.total, 0)::int AS comments_count
+      COALESCE(comment_counts.total, 0)::int AS comments_count,
+      COALESCE(view_counts.total, 0)::int AS views_count
     FROM public.product_updates pu
     LEFT JOIN public.users author ON author.id = pu.author_id
     LEFT JOIN public.workspaces author_workspace ON author_workspace.id = author.last_active_workspace_id
@@ -88,6 +89,11 @@ export async function getProductUpdatesFeed(userId: string): Promise<ProductUpda
       FROM public.product_update_comments puc
       WHERE puc.update_id = pu.id AND puc.deleted_at IS NULL
     ) comment_counts ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COUNT(DISTINCT pur.user_id)::int AS total
+      FROM public.product_update_reads pur
+      WHERE pur.update_id = pu.id
+    ) view_counts ON TRUE
     WHERE pu.is_published = TRUE AND pu.published_at <= NOW()
     ORDER BY pu.published_at DESC, pu.created_at DESC
   `, [userId]);
@@ -163,6 +169,7 @@ export async function getProductUpdatesFeed(userId: string): Promise<ProductUpda
       mine: row.my_reaction === 'like' || row.my_reaction === 'dislike' ? row.my_reaction : null,
     },
     commentsCount: row.comments_count,
+    viewsCount: row.views_count,
   }));
 }
 
@@ -257,7 +264,9 @@ export async function getProductUpdateCommentsAction(updateId: string): Promise<
         puc.created_at,
         u.full_name,
         u.avatar_url,
-        w.name AS workspace_name
+        u.is_superadmin,
+        w.name AS workspace_name,
+        w.avatar_url AS workspace_avatar_url
       FROM public.product_update_comments puc
       JOIN public.product_updates pu ON pu.id = puc.update_id
       JOIN public.users u ON u.id = puc.user_id
@@ -283,7 +292,9 @@ export async function getProductUpdateCommentsAction(updateId: string): Promise<
           id: row.user_id,
           name: row.full_name,
           avatarUrl: row.avatar_url,
+          isSuperAdmin: Boolean(row.is_superadmin),
           workspaceName: row.workspace_name,
+          workspaceAvatarUrl: row.workspace_avatar_url,
         },
       })),
     };
@@ -385,7 +396,9 @@ export async function addProductUpdateCommentAction(updateId: string, content: s
         inserted.*,
         u.full_name,
         u.avatar_url,
-        w.name AS workspace_name
+        u.is_superadmin,
+        w.name AS workspace_name,
+        w.avatar_url AS workspace_avatar_url
       FROM inserted
       JOIN public.users u ON u.id = inserted.user_id
       LEFT JOIN public.workspaces w ON w.id = u.last_active_workspace_id
@@ -409,7 +422,9 @@ export async function addProductUpdateCommentAction(updateId: string, content: s
           id: userId,
           name: row.full_name,
           avatarUrl: row.avatar_url,
+          isSuperAdmin: Boolean(row.is_superadmin),
           workspaceName: row.workspace_name,
+          workspaceAvatarUrl: row.workspace_avatar_url,
         },
       },
     };
@@ -496,5 +511,26 @@ export async function markProductUpdateReadAction(updateId: string): Promise<voi
     `, [updateId, userId]);
   } catch (error) {
     console.error('[PRODUCT_UPDATES] Failed to mark announcement as read:', error);
+  }
+}
+
+export async function getHasUnreadProductUpdatesAction(): Promise<boolean> {
+  const userId = await authenticatedUserId();
+  if (!userId) return false;
+  try {
+    const result = await db.query(`
+      SELECT 1
+      FROM public.product_updates pu
+      LEFT JOIN public.product_update_reads pur
+        ON pur.update_id = pu.id AND pur.user_id = $1
+      WHERE pu.is_published = TRUE
+        AND pu.published_at <= NOW()
+        AND pur.update_id IS NULL
+      LIMIT 1
+    `, [userId]);
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('[PRODUCT_UPDATES] Failed to check unread:', error);
+    return false;
   }
 }

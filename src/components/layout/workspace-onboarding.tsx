@@ -12,8 +12,8 @@ import type { User } from '@/lib/types';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { joinWorkspaceAction } from '@/actions/invites';
 import { useRouter } from 'next/navigation';
+import { AcceptInvitePanel } from '@/components/invites/workspace-invite-center';
 
 
 function CreateWorkspaceForm() {
@@ -67,45 +67,19 @@ function CreateWorkspaceForm() {
     )
 }
 
-function JoinWorkspaceForm() {
-    const [state, formAction] = useActionState(joinWorkspaceAction, { success: false, error: null });
-    const { pending } = useFormStatus();
-    
+function JoinWorkspaceForm({ user }: { user: User }) {
     return (
-        <form action={formAction}>
+        <>
             <CardHeader>
                 <CardTitle>Entrar em um Workspace</CardTitle>
                 <CardDescription>
-                    Insira o código de convite que você recebeu para se juntar a uma equipe existente.
+                    Cole o link ou código de convite. Você verá os detalhes da equipe antes de entrar.
                 </CardDescription>
             </CardHeader>
             <CardContent>
-                <div className="space-y-2">
-                    <Label htmlFor="invite-code">Código de Convite</Label>
-                    <Input
-                        id="invite-code"
-                        name="inviteCode"
-                        placeholder="Ex: ABC-123"
-                        required
-                        autoFocus
-                        disabled={pending}
-                    />
-                </div>
-                 {state.error && (
-                    <Alert variant="destructive" className="mt-4">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertTitle>Erro ao entrar no workspace</AlertTitle>
-                        <AlertDescription>{state.error}</AlertDescription>
-                    </Alert>
-                )}
+                <AcceptInvitePanel userEmail={user.email} />
             </CardContent>
-            <CardFooter>
-                 <Button type="submit" className="w-full" disabled={pending}>
-                    {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {pending ? 'Verificando...' : 'Entrar no Workspace'}
-                </Button>
-            </CardFooter>
-        </form>
+        </>
     )
 }
 
@@ -131,7 +105,7 @@ export function WorkspaceOnboarding({ user }: { user: User }) {
             </TabsContent>
             <TabsContent value="join">
                 <Card>
-                    <JoinWorkspaceForm />
+                    <JoinWorkspaceForm user={user} />
                 </Card>
             </TabsContent>
         </Tabs>

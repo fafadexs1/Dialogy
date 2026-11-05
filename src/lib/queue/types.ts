@@ -1,4 +1,5 @@
 export type QueueJobType =
+  | 'nexus_workflow'
   | 'evolution_webhook_process'
   | 'whatsapp_send'
   | 'webhook_outbound'
@@ -8,6 +9,7 @@ export type QueueJobType =
   | 'ai_autopilot_process'
   | 'ai_autopilot_learning_cycle'
   | 'ai_case_memory_refresh'
+  | 'nexus_internal_event'
   | 'analytics_event'
   | 'notification_send'
   | 'ai_task';
@@ -57,6 +59,7 @@ export type MarketingAutoClosePayload = {
   chatId: string;
   workspaceId: string;
   marketingSentAt: string;
+  marketingMessageId?: string;
   autoCloseMs: number;
 };
 
@@ -83,6 +86,7 @@ export type AiAutopilotProcessPayload = {
   messageId: string;
   lastMessageContent?: string;
   instanceName: string;
+  suggestionRequest?: { agentId: string };
 };
 
 export type AiCaseMemoryRefreshPayload = {
@@ -109,7 +113,22 @@ export type AiTaskPayload = {
   payload?: Record<string, unknown>;
 };
 
+export type NexusInternalEventPayload = {
+  workspaceId: string;
+  eventName: string;
+  eventId: string;
+  payload?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+  variables?: Record<string, unknown>;
+  sessionId?: string;
+  conversationId?: string;
+  chatId?: string;
+  instanceName?: string;
+  eventChain?: string[];
+};
+
 export type QueueJobPayload =
+  | { workspaceId: string; automationJobId: string }
   | EvolutionWebhookProcessPayload
   | WhatsappSendPayload
   | WebhookOutboundPayload
@@ -119,6 +138,7 @@ export type QueueJobPayload =
   | AiAutopilotProcessPayload
   | AiAutopilotLearningCyclePayload
   | AiCaseMemoryRefreshPayload
+  | NexusInternalEventPayload
   | AnalyticsEventPayload
   | NotificationPayload
   | AiTaskPayload;

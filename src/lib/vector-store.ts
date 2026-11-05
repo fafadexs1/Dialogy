@@ -134,6 +134,100 @@ export const VectorStore = {
         );
     },
 
+    /**
+     * Remove embeddings de documentos que nao existem mais na configuracao.
+     *
+     * A sincronizacao por diff (previousDocs x nextDocs) so consegue apagar o
+     * que ela sabe que existiu. Quando um documento sai da lista sem que a
+     * exclusao acontecca — salvamento vindo de um cliente defasado, DELETE que
+     * falhou, reenvio do mesmo arquivo gerando id novo — o id antigo nunca mais
+     * aparece em `previousDocs`, e os embeddings ficam orfaos para sempre.
+     *
+     * Isto aqui compara contra o estado real da tabela em vez de contra um
+     * evento, entao se cura sozinho: qualquer orfao acumulado no passado cai no
+     * proximo salvamento.
+     *
+     * Devolve quantas linhas foram removidas.
+     */
+    async deleteEmbeddingsNotIn(input: {
+        workspaceId: string;
+        autopilotConfigId: string | null;
+        keepDocumentIds: string[];
+    }): Promise<number> {
+        if (!input.workspaceId?.trim()) {
+            throw new Error('workspaceId is required to reconcile document embeddings.');
+        }
+
+        const params: Array<string | string[]> = [input.workspaceId, input.keepDocumentIds];
+        const filters = [
+            'workspace_id = $1',
+            // Comparacao em texto: os ids vem de JSON e nem todo valor historico
+            // e um uuid valido — o cast direto abortaria a limpeza inteira.
+            'NOT (document_id::text = ANY($2::text[]))',
+        ];
+
+        if (input.autopilotConfigId === null) {
+            filters.push('autopilot_config_id IS NULL');
+        } else {
+            params.push(input.autopilotConfigId);
+            filters.push(`autopilot_config_id = $${params.length}`);
+        }
+
+        const { rowCount } = await db.query(
+            `DELETE FROM embeddings_documents WHERE ${filters.join(' AND ')}`,
+            params,
+        );
+
+        return rowCount ?? 0;
+    },
+
+    /**
+     * Dos ids informados, quais nao tem nenhum embedding.
+     *
+     * Contraparte de deleteEmbeddingsNotIn. A sincronizacao reindexa apenas o
+     * que mudou desde o ultimo salvamento, entao um documento adicionado
+     * enquanto a ingestao estava indisponivel — fila parada, worker fora,
+     * erro no INSERT — nunca mais e retentado: no proximo salvamento ele
+     * conta como inalterado.
+     *
+     * Auditoria de 26/07/2026: 51 dos 76 documentos da base nunca foram
+     * indexados. Todos com conteudo, invisiveis para a busca semantica.
+     */
+    async listDocumentIdsWithoutEmbeddings(input: {
+        workspaceId: string;
+        autopilotConfigId: string | null;
+        documentIds: string[];
+    }): Promise<string[]> {
+        if (!input.workspaceId?.trim()) {
+            throw new Error('workspaceId is required to check document embeddings.');
+        }
+        if (input.documentIds.length === 0) return [];
+
+        const params: Array<string | string[]> = [input.documentIds, input.workspaceId];
+        const filtros = [
+            'e.document_id::text = alvo.id',
+            'e.workspace_id = $2',
+        ];
+
+        if (input.autopilotConfigId === null) {
+            filtros.push('e.autopilot_config_id IS NULL');
+        } else {
+            params.push(input.autopilotConfigId);
+            filtros.push(`e.autopilot_config_id = $${params.length}`);
+        }
+
+        const { rows } = await db.query(
+            `SELECT alvo.id
+             FROM unnest($1::text[]) AS alvo(id)
+             WHERE NOT EXISTS (
+               SELECT 1 FROM embeddings_documents e WHERE ${filtros.join(' AND ')}
+             )`,
+            params,
+        );
+
+        return rows.map((row) => String(row.id));
+    },
+
     async addDocumentEmbedding(input: AddDocumentEmbeddingInput) {
         assertDocumentVectorDimensions(input.vector);
         const vectorStr = toVectorString(input.vector);

@@ -2,6 +2,7 @@
 
 import { HTMLInputTypeAttribute } from "react";
 import type { WorkflowDefinition } from '@/services/workflow-runtime/types';
+import type { WhatsappCatalog } from '@/lib/whatsapp/catalog';
 
 export type InterfaceTheme = 'light' | 'dark' | 'system';
 
@@ -18,15 +19,6 @@ export type Workspace = {
   isOwner?: boolean;
   plan?: string;
   vertical?: string | null;
-  nexus_settings?: {
-    mode?: 'workspace_managed' | 'existing_account';
-    email?: string;
-    username?: string;
-    autoProvisioned?: boolean;
-    nexusUserId?: string;
-    createdAt?: string;
-    updatedAt?: string;
-  }; // Shared NexusFlow credentials per workspace
 }
 
 export type Permission = {
@@ -171,6 +163,11 @@ export type MessageSender = Partial<User> & { type?: 'user' | 'contact' | 'syste
 
 
 export type MessageMetadata = {
+  whatsappUserId?: string;
+  whatsappParentUserId?: string;
+  whatsappUsername?: string;
+  studioOperationId?: string;
+  studioPresentedProduct?: { productId: string | number; caption: string };
   sharedContactName?: string;
   sharedContactPhones?: string[];
   sharedContactVcard?: string;
@@ -183,6 +180,8 @@ export type MessageMetadata = {
   }>;
   mediaUrl?: string;
   originalMediaUrl?: string;
+  signedMediaUrl?: string;
+  base64?: string;
   originalThumbnailUrl?: string;
   mimetype?: string;
   fileName?: string;
@@ -223,9 +222,21 @@ export type MessageMetadata = {
   autopilotResponseDeliveryKey?: string;
   autopilotResponseBlockIndex?: number;
   autopilotResponseBlockCount?: number;
+  /** Stable key used by the native workflow runtime to prevent duplicate delivery. */
+  nexusDeliveryId?: string;
+  /** Forces the workflow to wait until the channel provider accepts this message. */
+  deliveryGuarantee?: 'best_effort' | 'ordered';
+  nexusExecutionId?: string;
+  nexusNodeId?: string;
+  /** Records the exceptional text fallback when the provider rejects an interactive list. */
+  nexusInteractiveFallback?: boolean;
+  nexusInteractiveError?: string;
+  /** Provider-level identifier for a selected interactive option. */
+  interactiveSelectionId?: string;
   customerMessage?: string;
   analysisKind?: 'transcription' | 'visual_summary' | 'video_summary' | 'media_summary' | 'routing_context';
   sourceMessageId?: string;
+  sourceChatId?: string;
   sourceType?: 'text' | 'audio' | 'image' | 'video' | 'document' | 'location' | 'system';
   event?: string;
   from_agent_id?: string;
@@ -299,8 +310,8 @@ export type MessageMetadata = {
   packId?: string;
   buyerId?: string;
   questionId?: string;
-  interactiveType?: 'list';
-  interactivePayload?: {
+  interactiveType?: 'list' | 'buttons' | 'carousel';
+  interactivePayload?: ({ kind: 'carousel' } & WhatsappCatalog) | {
     kind: 'list';
     title?: string;
     description?: string;
@@ -313,6 +324,33 @@ export type MessageMetadata = {
         description?: string;
         rowId: string;
       }>;
+    }>;
+    delay?: number;
+    quoted?: {
+      key?: {
+        id?: string;
+      };
+      message?: Record<string, any>;
+    };
+    mentionsEveryOne?: boolean;
+    mentioned?: string[];
+  } | {
+    kind: 'buttons';
+    title: string;
+    description?: string;
+    footer?: string;
+    thumbnailUrl?: string;
+    buttons: Array<{
+      type: 'reply' | 'copy' | 'url' | 'call' | 'pix';
+      displayText?: string;
+      id?: string;
+      url?: string;
+      copyCode?: string;
+      phoneNumber?: string;
+      currency?: string;
+      name?: string;
+      keyType?: 'phone' | 'email' | 'cpf' | 'cnpj' | 'random';
+      key?: string;
     }>;
     delay?: number;
     quoted?: {
@@ -379,6 +417,8 @@ export type Chat = {
   status: 'atendimentos' | 'gerais' | 'encerrados';
   workspace_id: string;
   assigned_at?: string;
+  closed_at?: string | null;
+  closedAt?: string | null;
   source?: string;
   team_id?: string;
   instance_name?: string;
@@ -388,6 +428,8 @@ export type Chat = {
   teamColor?: string;
   tag?: string;
   color?: string;
+  /** Etiquetas de classificação. `tag`/`color` continuam temporariamente como marcador legado de fila. */
+  tags?: Tag[];
   is_autopilot_active?: boolean;
   autopilot_config_id?: string | null;
   copilot_mode?: 'off' | 'auto' | 'suggest';
@@ -397,6 +439,14 @@ export type Chat = {
   relatedContactThread?: boolean;
   relatedContactIds?: string[];
   relatedChatIds?: string[];
+  /** Preenchido quando o contato chegou por um anuncio rastreado. */
+  adAttribution?: {
+    source: string;
+    campaign?: string;
+    campaignId?: string;
+    /** 'deterministic' veio do codigo na mensagem; 'probabilistic' veio do clique recente. */
+    confidence: string;
+  };
 };
 
 export type InternalChannel = {
@@ -605,7 +655,16 @@ export interface AutopilotRagHealth {
   configuredDocuments: number;
   indexedDocuments: number;
   indexedChunks: number;
+  /** Nao indexados por qualquer motivo — inclui os bloqueados abaixo. */
   missingDocuments: number;
+  /**
+   * Subconjunto de missingDocuments recusado de proposito pela ingestao por
+   * parecer transcricao bruta de conversa. Nao e defeito: indexar historico de
+   * um cliente faria a IA repetir dados dele ao responder outro. O caminho e
+   * reescrever como orientacao reutilizavel, com resumo e resposta sugerida.
+   */
+  blockedAsRawConversation: number;
+  blockedDocumentNames: string[];
   quarantinedDocuments: number;
   staleDocuments: number;
   wrongDimensionChunks: number;
@@ -775,6 +834,7 @@ export interface AutopilotConfig {
   workflow_builder_mode?: 'legacy' | 'native_v2' | null;
   active_workflow_id?: string | null;
   active_workflow_version?: string | null;
+  agent_domain_pack_id?: string | null;
   workflow_definition?: WorkflowDefinition | null;
   tool_mode?: "deny" | "on_demand" | "required";
   created_at: string;
@@ -876,7 +936,9 @@ export interface EvolutionInstance {
   type: 'baileys' | 'wa_cloud' | 'telegram' | 'mercadolivre';
   cluster_id: string;
   qrCode?: string;
-  webhook_url?: string;
+  webhook_url?: string | null;
+  webhook_needs_sync?: boolean;
+  webhook_configuration_error?: string;
   business_name?: string | null;
   waba_name?: string | null;
   display_phone_number?: string | null;
@@ -971,6 +1033,7 @@ export interface EvolutionInstanceCreationPayload {
 
   // Webhook
   webhook?: {
+    enabled?: boolean;
     url?: string;
     byEvents?: boolean;
     base64?: boolean;
@@ -1082,6 +1145,10 @@ export interface CampaignTemplate {
   name: string;
   language: string;
   components: any[];
+  bodyParameterValues?: string[];
+  bodyParameterNames?: string[];
+  /** CSV column for each body parameter; bodyParameterValues supplies its optional fallback. */
+  bodyParameterColumns?: (string | null)[];
 }
 
 export type CampaignMediaType = 'image' | 'audio';
@@ -1093,6 +1160,36 @@ export interface CampaignMediaAttachment {
   filename: string;
   storageBucket?: string;
   storagePath?: string;
+}
+
+export type CampaignInteractiveKind = 'buttons' | 'list';
+
+export interface CampaignInteractiveButton {
+  /** Somente respostas rápidas por enquanto; o id volta no webhook de resposta. */
+  type: 'reply';
+  displayText: string;
+  id: string;
+}
+
+export interface CampaignInteractiveListRow {
+  title: string;
+  description?: string;
+  rowId: string;
+}
+
+export interface CampaignInteractivePayload {
+  kind: CampaignInteractiveKind;
+  title: string;
+  description?: string;
+  footer?: string;
+  /** kind = 'buttons' */
+  buttons?: CampaignInteractiveButton[];
+  /** kind = 'list' */
+  buttonText?: string;
+  sections?: Array<{
+    title: string;
+    rows: CampaignInteractiveListRow[];
+  }>;
 }
 
 export type CampaignIntervalMode = 'fixed' | 'variable';
@@ -1126,6 +1223,7 @@ export interface Campaign {
   destination_id?: string | null;
   template_payload?: CampaignTemplate | null;
   media_payload?: CampaignMediaAttachment | null;
+  interactive_payload?: CampaignInteractivePayload | null;
   created_at: string;
   started_at?: string;
   completed_at?: string;
@@ -1211,6 +1309,8 @@ export interface PlanIntegration extends Integration {
 }
 
 export interface Plan {
+  scope?: 'public' | 'custom';
+  workspace_ids?: string[];
   id: string;
   slug?: string;
   name: string;

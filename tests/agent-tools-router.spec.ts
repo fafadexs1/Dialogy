@@ -76,16 +76,24 @@ describe('agent tools deterministic router', () => {
     });
   });
 
-  it('routes human handoff requests to a matching domain team', () => {
+  it('routes human handoff requests using workspace-defined domain keywords', () => {
     const result = routeDeterministicAgentTools({
-      customerMessage: 'Quero falar com um atendente, minha internet caiu e o roteador esta com LOS.',
-      availableTeams: teams,
+      customerMessage: 'Quero falar com um atendente para reagendar minha consulta.',
+      availableTeams: [{
+        id: 'team-scheduling',
+        name: 'Agenda',
+        routingConfig: {
+          enabled: true,
+          autoTransfer: true,
+          keywords: ['reagendar', 'consulta'],
+        },
+      }, ...teams],
     });
 
-    expect(result.matchedReason).toContain('suporte');
+    expect(result.matchedReason).toContain('Agenda');
     expect(result.actions[1]).toMatchObject({
       type: 'transfer_chat',
-      payload: { teamId: 'team-support' },
+      payload: { teamId: 'team-scheduling' },
     });
   });
 

@@ -31,6 +31,7 @@ yarn-error.log*
 # generated runtime/storage artifacts
 public/sw.js
 public/workbox-*.js
+src/generated/prisma
 *.sqlite
 *.sqlite3
 *.db
@@ -39,6 +40,7 @@ stripe.exe
 
 # misc
 .DS_Store
+.eslintcache
 *.pem
 
 # vercel
@@ -71,3 +73,6 @@ mobile/tmp
 # git
 .git
 .gitignore
+
+# Gold-dataset exports hold masked customer conversations; never commit them.
+/.gold-dataset/

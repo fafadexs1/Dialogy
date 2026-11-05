@@ -1,0 +1,4350 @@
+{
+  "id": "nexus:77bc3879-e0eb-584f-b1bb-4ca1e640ab52",
+  "workspaceId": "e3b476a1-5de8-4744-80b5-a5d23fe15fab",
+  "name": "Fluxo Velpro Final",
+  "version": "draft",
+  "status": "draft",
+  "nodes": [
+    {
+      "id": "velpro_trigger",
+      "type": "trigger.received_message",
+      "name": "Mensagem recebida · Velpro",
+      "position": {
+        "x": 80,
+        "y": 176
+      },
+      "config": {
+        "pattern": "",
+        "keywords": [],
+        "matchMode": "all",
+        "platforms": [
+          "whatsapp",
+          "webchat",
+          "messenger",
+          "instagram",
+          "telegram"
+        ],
+        "startPolicy": "unassigned_only",
+        "messageTypes": [
+          "text"
+        ],
+        "caseSensitive": false,
+        "defaultOutput": "message",
+        "instanceNames": [
+          "zap1"
+        ],
+        "continueMatching": true,
+        "sessionTimeoutMs": 86400000,
+        "keywordThresholds": {}
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "message",
+          "label": "Mensagem",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_context",
+      "type": "data.set",
+      "name": "Preparar contexto Velpro",
+      "position": {
+        "x": 400,
+        "y": 176
+      },
+      "config": {
+        "assignments": {
+          "id_chat": "{{conversationId}}",
+          "id_estavel": "{{context.contactPhone}}",
+          "id_conversa": "{{conversationId}}",
+          "nome_usuario": "{{context.contactName}}",
+          "mensagem_usuario": "{{input.message}}"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_welcome",
+      "type": "output.respond",
+      "name": "Boas-vindas Velpro",
+      "position": {
+        "x": 720,
+        "y": 176
+      },
+      "config": {
+        "channel": "source",
+        "message": "Olá, sou o assistente virtual da *Velpro Telecom.* Seja bem-vindo!",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_main_menu",
+      "type": "interaction.options",
+      "name": "Menu principal Velpro",
+      "position": {
+        "x": 1072,
+        "y": 176
+      },
+      "config": {
+        "footer": "",
+        "prompt": "Digite a opção desejada: ✨",
+        "options": [
+          {
+            "id": "subscribe",
+            "label": "🚀 Assinar Internet",
+            "value": "🚀 Assinar Internet"
+          },
+          {
+            "id": "address_transfer",
+            "label": "🔄Transferência de Endereço",
+            "value": "🔄Transferência de Endereço"
+          },
+          {
+            "id": "support",
+            "label": "🛠 Suporte Técnico",
+            "value": "🛠 Suporte Técnico"
+          },
+          {
+            "id": "finance",
+            "label": "💰 Financeiro",
+            "value": "💰 Financeiro"
+          },
+          {
+            "id": "close",
+            "label": "❌ Encerrar Atendimento",
+            "value": "❌ Encerrar Atendimento"
+          }
+        ],
+        "outputKey": "escolha_usuario",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "intelligentMatching": false,
+        "customFallbackRoutes": false,
+        "invalidOptionMessage": "Opção inválida. Escolha uma das opções abaixo.",
+        "intelligentMinimumConfidence": 0.65
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "subscribe",
+          "label": "🚀 Assinar Internet",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "address_transfer",
+          "label": "🔄Transferência de Endereço",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "support",
+          "label": "🛠 Suporte Técnico",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "finance",
+          "label": "💰 Financeiro",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "close",
+          "label": "❌ Encerrar Atendimento",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "default",
+          "label": "Não reconhecida",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_session_expired",
+      "type": "output.respond",
+      "name": "Avisar sessão expirada",
+      "position": {
+        "x": 3904,
+        "y": 992
+      },
+      "config": {
+        "channel": "source",
+        "message": "O tempo desta etapa expirou. Envie uma nova mensagem para iniciar novamente.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_session_expired_end",
+      "type": "output.end",
+      "name": "Finalizar sessão expirada",
+      "position": {
+        "x": 4400,
+        "y": 816
+      },
+      "config": {
+        "output": {
+          "outcome": "session_expired"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_retry_exhausted",
+      "type": "output.respond",
+      "name": "Limite de tentativas",
+      "position": {
+        "x": 4112,
+        "y": -448
+      },
+      "config": {
+        "channel": "source",
+        "message": "Não consegui confirmar uma opção após algumas tentativas. Envie uma nova mensagem para recomeçar.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_retry_end",
+      "type": "output.end",
+      "name": "Finalizar tentativas",
+      "position": {
+        "x": 4528,
+        "y": -400
+      },
+      "config": {
+        "output": {
+          "outcome": "retry_limit"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_close_notice",
+      "type": "output.respond",
+      "name": "Avisar encerramento",
+      "position": {
+        "x": 5504,
+        "y": 1200
+      },
+      "config": {
+        "channel": "source",
+        "message": "*Atendimento encerrado automaticamente pelo sistema!*",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_close_chat",
+      "type": "output.close_conversation",
+      "name": "Encerrar atendimento Velpro",
+      "position": {
+        "x": 5872,
+        "y": 1216
+      },
+      "config": {
+        "notes": "Executou uma ação automatizada ou escolheu encerrar o atendimento.",
+        "reason": "Atendimento concluído pelo Fluxo Velpro Final.",
+        "closePolicy": "deterministic_route",
+        "reasonTagId": "5a064503-1cca-4c42-983b-1556255061b1",
+        "permissionScope": "conversation:close",
+        "sendCloseMessage": false
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "completed",
+          "label": "Encerrado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_close_end",
+      "type": "output.end",
+      "name": "Atendimento encerrado",
+      "position": {
+        "x": 6192,
+        "y": 1216
+      },
+      "config": {
+        "output": {
+          "outcome": "closed"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_referral_menu",
+      "type": "interaction.options",
+      "name": "Como conheceu a Velpro",
+      "position": {
+        "x": 1408,
+        "y": -400
+      },
+      "config": {
+        "footer": "",
+        "prompt": "Antes de continuarmos, como conheceu a empresa?",
+        "options": [
+          {
+            "id": "referral_1",
+            "label": "Google / Pesquisa no Google",
+            "value": "Google / Pesquisa no Google"
+          },
+          {
+            "id": "referral_2",
+            "label": "Instagram",
+            "value": "Instagram"
+          },
+          {
+            "id": "referral_3",
+            "label": "Facebook",
+            "value": "Facebook"
+          },
+          {
+            "id": "referral_4",
+            "label": "Indicação de amigo ou cliente",
+            "value": "Indicação de amigo ou cliente"
+          },
+          {
+            "id": "referral_5",
+            "label": "Outdoor / Anúncio físico",
+            "value": "Outdoor / Anúncio físico"
+          },
+          {
+            "id": "referral_6",
+            "label": "Vendedor / Representante",
+            "value": "Vendedor / Representante"
+          },
+          {
+            "id": "referral_7",
+            "label": "Outros (Panfleto, etc)",
+            "value": "Outros (Panfleto, etc)"
+          }
+        ],
+        "outputKey": "origem_cliente",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "intelligentMatching": false,
+        "customFallbackRoutes": false,
+        "invalidOptionMessage": "Opção inválida. Escolha uma das opções abaixo.",
+        "intelligentMinimumConfidence": 0.65
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "default",
+          "label": "Não reconhecida",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "referral_1",
+          "label": "Google / Pesquisa no Google",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "referral_2",
+          "label": "Instagram",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "referral_3",
+          "label": "Facebook",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "referral_4",
+          "label": "Indicação de amigo ou cliente",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "referral_5",
+          "label": "Outdoor / Anúncio físico",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "referral_6",
+          "label": "Vendedor / Representante",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "referral_7",
+          "label": "Outros (Panfleto, etc)",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_availability",
+      "type": "dialogy.team_availability",
+      "name": "Expediente comercial",
+      "position": {
+        "x": 2160,
+        "y": -336
+      },
+      "config": {
+        "teamId": "b3b71514-098f-49fa-b922-f38a40065ef6",
+        "outputKey": "commercialAvailability",
+        "permissionScope": "teams:read"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "open",
+          "label": "Aberto",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "closed",
+          "label": "Fechado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_open_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar comercial aberto",
+      "position": {
+        "x": 2496,
+        "y": -784
+      },
+      "config": {
+        "tagId": "8fa25b50-165f-4e88-ab96-82f1c8d7debd",
+        "outputKey": "velpro_commercial_open_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_closed_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar comercial fora de horário",
+      "position": {
+        "x": 2512,
+        "y": -544
+      },
+      "config": {
+        "tagId": "8fa25b50-165f-4e88-ab96-82f1c8d7debd",
+        "outputKey": "velpro_commercial_closed_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_message",
+      "type": "output.respond",
+      "name": "Preparar transferência comercial",
+      "position": {
+        "x": 2880,
+        "y": -816
+      },
+      "config": {
+        "channel": "source",
+        "message": "👩🏽‍💻 Vi que você tem interesse em contratar nossos serviços 🚀\nVou te conectar agora com um especialista para te explicar tudo direitinho.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_handoff",
+      "type": "output.handoff",
+      "name": "Transferir para Comercial",
+      "position": {
+        "x": 3264,
+        "y": -1056
+      },
+      "config": {
+        "reason": "Atendimento comercial. {{sgpIdentification.summary}}",
+        "teamId": "b3b71514-098f-49fa-b922-f38a40065ef6",
+        "agentId": "",
+        "persistReason": true,
+        "systemAgentId": "",
+        "destinationType": "human",
+        "permissionScope": "conversation:handoff",
+        "confirmationPath": "",
+        "requireConfirmation": false
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "completed",
+          "label": "Transferido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_end",
+      "type": "output.end",
+      "name": "Finalizar transferência comercial",
+      "position": {
+        "x": 3664,
+        "y": -1040
+      },
+      "config": {
+        "output": {
+          "outcome": "commercial_handoff"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_support_availability",
+      "type": "dialogy.team_availability",
+      "name": "Expediente do suporte",
+      "position": {
+        "x": 1632,
+        "y": 224
+      },
+      "config": {
+        "teamId": "b9a74d62-7f65-46c1-a5ae-4887fde9926e",
+        "outputKey": "supportAvailability",
+        "permissionScope": "teams:read"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "open",
+          "label": "Aberto",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "closed",
+          "label": "Fechado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_open_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar suporte aberto",
+      "position": {
+        "x": 2096,
+        "y": 208
+      },
+      "config": {
+        "tagId": "f1edc42b-5d86-4b43-b70b-358a78b83aab",
+        "outputKey": "velpro_support_open_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_closed_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar suporte fechado",
+      "position": {
+        "x": 2096,
+        "y": 352
+      },
+      "config": {
+        "tagId": "f1edc42b-5d86-4b43-b70b-358a78b83aab",
+        "outputKey": "velpro_support_closed_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_closed_message",
+      "type": "output.respond",
+      "name": "Informar horário do suporte",
+      "position": {
+        "x": 2512,
+        "y": 384
+      },
+      "config": {
+        "channel": "source",
+        "message": "Nosso expediente de suporte técnico se encerrou por hoje. Nosso horário de atendimento é de segunda a sexta-feira, das 8h às 20h, aos sábados das 8h às 18h, e aos domingos e feriados, das 8h às 12h. Pedimos desculpas por qualquer inconveniente.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_closed_end",
+      "type": "output.end",
+      "name": "Finalizar suporte fechado",
+      "position": {
+        "x": 2912,
+        "y": 416
+      },
+      "config": {
+        "output": {
+          "outcome": "support_closed"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_support_menu",
+      "type": "interaction.options",
+      "name": "Menu de suporte",
+      "position": {
+        "x": 2512,
+        "y": 192
+      },
+      "config": {
+        "footer": "",
+        "prompt": "👩🏽‍💻 Qual dos assuntos abaixo mais se aproxima do seu pedido?",
+        "options": [
+          {
+            "id": "signal_problem",
+            "label": "Problemas de sinal",
+            "value": "Problemas de sinal"
+          },
+          {
+            "id": "billing",
+            "label": "Boleto/Pagamento",
+            "value": "Boleto/Pagamento"
+          },
+          {
+            "id": "unlock",
+            "label": "Desbloquear Internet",
+            "value": "Desbloquear Internet"
+          }
+        ],
+        "outputKey": "escolha_usuario_1",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "intelligentMatching": false,
+        "customFallbackRoutes": false,
+        "invalidOptionMessage": "Opção inválida. Escolha uma das opções abaixo.",
+        "intelligentMinimumConfidence": 0.65
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "default",
+          "label": "Não reconhecida",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "signal_problem",
+          "label": "Problemas de sinal",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "billing",
+          "label": "Boleto/Pagamento",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "unlock",
+          "label": "Desbloquear Internet",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_handoff_message",
+      "type": "output.respond",
+      "name": "Preparar transferência ao suporte",
+      "position": {
+        "x": 3120,
+        "y": 144
+      },
+      "config": {
+        "channel": "source",
+        "message": "👩🏽‍💻 Sem problemas, parece que você está tendo um problema um pouco mais complicado, neste caso vou te encaminhar para o nosso atendimento humano agora mesmo!",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_handoff",
+      "type": "output.handoff",
+      "name": "Transferir para Suporte",
+      "position": {
+        "x": 3552,
+        "y": 176
+      },
+      "config": {
+        "reason": "Solicitação de suporte técnico. {{sgpIdentification.summary}}",
+        "teamId": "b9a74d62-7f65-46c1-a5ae-4887fde9926e",
+        "agentId": "",
+        "systemAgentId": "",
+        "destinationType": "human",
+        "permissionScope": "conversation:handoff",
+        "confirmationPath": "",
+        "requireConfirmation": false,
+        "persistReason": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "completed",
+          "label": "Transferido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_menu",
+      "type": "interaction.options",
+      "name": "Menu financeiro",
+      "position": {
+        "x": 2240,
+        "y": 1152
+      },
+      "config": {
+        "footer": "",
+        "prompt": "Escolha uma opção:",
+        "options": [
+          {
+            "id": "second_copy",
+            "label": "📄2° Via Fatura",
+            "value": "📄2° Via Fatura"
+          },
+          {
+            "id": "negotiate",
+            "label": "💸Negociar dívida",
+            "value": "💸Negociar dívida"
+          },
+          {
+            "id": "report_payment",
+            "label": "💰Informar Pagamento",
+            "value": "💰Informar Pagamento"
+          },
+          {
+            "id": "other_finance",
+            "label": "❓Outros Assuntos",
+            "value": "❓Outros Assuntos"
+          },
+          {
+            "id": "payment_promise",
+            "label": "🔓Desbloqueio de confiança",
+            "value": "🔓Desbloqueio de confiança"
+          },
+          {
+            "id": "back",
+            "label": "↩️Voltar",
+            "value": "↩️Voltar"
+          }
+        ],
+        "outputKey": "escolha_usuario_2",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "intelligentMatching": false,
+        "customFallbackRoutes": false,
+        "invalidOptionMessage": "Opção inválida. Escolha uma das opções abaixo.",
+        "intelligentMinimumConfidence": 0.65
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "default",
+          "label": "Não reconhecida",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "second_copy",
+          "label": "📄2° Via Fatura",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "negotiate",
+          "label": "💸Negociar dívida",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "report_payment",
+          "label": "💰Informar Pagamento",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "other_finance",
+          "label": "❓Outros Assuntos",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "payment_promise",
+          "label": "🔓Desbloqueio de confiança",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "back",
+          "label": "↩️Voltar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_back_to_main_loop",
+      "type": "logic.loop",
+      "name": "Voltar ao menu principal",
+      "position": {
+        "x": 3536,
+        "y": 1696
+      },
+      "config": {
+        "exitCondition": "false",
+        "maxIterations": 5,
+        "totalTimeoutMs": 86400000
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "iterate",
+          "label": "Iterar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "done",
+          "label": "Concluído",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "limit_reached",
+          "label": "Limite atingido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_availability",
+      "type": "dialogy.team_availability",
+      "name": "Expediente financeiro",
+      "position": {
+        "x": 4752,
+        "y": 784
+      },
+      "config": {
+        "teamId": "e4991d0b-917c-42e7-8cde-014b0bdf5bb8",
+        "outputKey": "financeAvailability",
+        "permissionScope": "teams:read"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "open",
+          "label": "Aberto",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "closed",
+          "label": "Fechado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_open_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar financeiro aberto",
+      "position": {
+        "x": 5072,
+        "y": 736
+      },
+      "config": {
+        "tagId": "58ef50bc-f95e-4fa2-b060-1571cb173e48",
+        "outputKey": "velpro_finance_open_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_closed_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar financeiro fechado",
+      "position": {
+        "x": 5104,
+        "y": 880
+      },
+      "config": {
+        "tagId": "58ef50bc-f95e-4fa2-b060-1571cb173e48",
+        "outputKey": "velpro_finance_closed_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_handoff_message",
+      "type": "output.respond",
+      "name": "Preparar transferência financeira",
+      "position": {
+        "x": 5440,
+        "y": 640
+      },
+      "config": {
+        "channel": "source",
+        "message": "🎆 Só um instantinho! ✨\n\nEstamos preparando tudo para te conectar com um de nossos atendentes.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_handoff",
+      "type": "output.handoff",
+      "name": "Transferir para Financeiro",
+      "position": {
+        "x": 5824,
+        "y": 640
+      },
+      "config": {
+        "reason": "Solicitação financeira. {{sgpIdentification.summary}}",
+        "teamId": "e4991d0b-917c-42e7-8cde-014b0bdf5bb8",
+        "agentId": "",
+        "persistReason": true,
+        "systemAgentId": "",
+        "destinationType": "human",
+        "permissionScope": "conversation:handoff",
+        "confirmationPath": "",
+        "requireConfirmation": false
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "completed",
+          "label": "Transferido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_handoff_end",
+      "type": "output.end",
+      "name": "Finalizar transferência financeira",
+      "position": {
+        "x": 6240,
+        "y": 672
+      },
+      "config": {
+        "output": {
+          "outcome": "finance_handoff"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_finance_closed_message",
+      "type": "output.respond",
+      "name": "Informar horário financeiro",
+      "position": {
+        "x": 5440,
+        "y": 864
+      },
+      "config": {
+        "channel": "source",
+        "message": "Infelizmente, o setor financeiro já se encerrou hoje. Nosso horário de atendimento do setor financeiro é de segunda a sábado, das 8h às 18h. Domingos e feriados não temos expediente no financeiro.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_closed_end",
+      "type": "output.end",
+      "name": "Finalizar financeiro fechado",
+      "position": {
+        "x": 5840,
+        "y": 896
+      },
+      "config": {
+        "output": {
+          "outcome": "finance_closed"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_second_copy_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar segunda via",
+      "position": {
+        "x": 2976,
+        "y": 1120
+      },
+      "config": {
+        "tagId": "4645b98b-014e-4ee8-8380-750ebb91089a",
+        "outputKey": "velpro_second_copy_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_second_copy_cpf",
+      "type": "interaction.input",
+      "name": "Pedir CPF para segunda via",
+      "position": {
+        "x": 3376,
+        "y": 1104
+      },
+      "config": {
+        "prompt": "Digite o CPF do titular",
+        "outputKey": "cpf_segunda_via",
+        "timeoutMs": 86400000,
+        "validation": "cpf",
+        "customRegex": "",
+        "invalidInputMessage": "Não consegui validar essa resposta. Tente novamente."
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "resumed",
+          "label": "Respondido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_sgp_second_copy",
+      "type": "dialogy.sgp_second_copy",
+      "name": "Segunda via nativa SGP",
+      "position": {
+        "x": 3904,
+        "y": 1168
+      },
+      "config": {
+        "cpfCnpj": "{{cpf_segunda_via}}",
+        "outputKey": "sgpSecondCopy",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "permissionScope": "sgp:read",
+        "pixTemplateName": "",
+        "boletoTemplateName": "",
+        "pixTemplateInstance": "",
+        "pixTemplateLanguage": "pt_BR",
+        "boletoTemplateInstance": "",
+        "boletoTemplateLanguage": "pt_BR",
+        "pixTemplateBodyParameter": 1,
+        "boletoTemplateBodyParameter": 1,
+        "pixTemplateBodyParameterCount": 1,
+        "boletoTemplateBodyParameterCount": 1
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_second_copy_success",
+      "type": "output.respond",
+      "name": "Concluir segunda via",
+      "position": {
+        "x": 4336,
+        "y": 1120
+      },
+      "config": {
+        "channel": "source",
+        "message": "Qualquer dúvida, pode nos chamar novamente!",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_payment_promise_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar desbloqueio",
+      "position": {
+        "x": 2976,
+        "y": 1280
+      },
+      "config": {
+        "tagId": "58ef50bc-f95e-4fa2-b060-1571cb173e48",
+        "outputKey": "velpro_payment_promise_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_payment_promise_cpf",
+      "type": "interaction.input",
+      "name": "Pedir CPF para desbloqueio",
+      "position": {
+        "x": 3376,
+        "y": 1296
+      },
+      "config": {
+        "prompt": "Digite o CPF do titular",
+        "outputKey": "cpf_promessa",
+        "timeoutMs": 86400000,
+        "validation": "cpf",
+        "customRegex": "",
+        "invalidInputMessage": "Não consegui validar essa resposta. Tente novamente."
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "resumed",
+          "label": "Respondido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_payment_promise_date",
+      "type": "data.code",
+      "name": "Calcular data da promessa",
+      "position": {
+        "x": 3904,
+        "y": 1312
+      },
+      "config": {
+        "source": "const today = new Date();\nconst target = new Date(today.getTime() + (4 * 24 * 60 * 60 * 1000));\nconst parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(target);\nconst values = Object.fromEntries(parts.map((part) => [part.type, part.value]));\nreturn { value: `${values.year}-${values.month}-${values.day}` };",
+        "language": "javascript",
+        "outputKey": "promise_date",
+        "inputSchema": {},
+        "outputSchema": {},
+        "memoryLimitMb": 64,
+        "allowedResources": []
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ],
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "initialDelayMs": 0,
+        "backoffMultiplier": 2,
+        "maxDelayMs": 30000,
+        "retryableErrorCodes": []
+      },
+      "timeoutMs": 5000
+    },
+    {
+      "id": "velpro_sgp_payment_promise",
+      "type": "dialogy.sgp_payment_promise",
+      "name": "Promessa de pagamento nativa SGP",
+      "position": {
+        "x": 4256,
+        "y": 1280
+      },
+      "config": {
+        "cpfCnpj": "{{cpf_promessa}}",
+        "sendSms": true,
+        "outputKey": "sgpPaymentPromise",
+        "timeoutMs": 86400000,
+        "promiseDate": "{{promise_date.value}}",
+        "deliveryMode": "list",
+        "permissionScope": "sgp:write"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "status-0",
+          "label": "Não bloqueado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "status-1",
+          "label": "Liberado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "status-2",
+          "label": "Financeiro",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "limit-reached",
+          "label": "Limite atingido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_payment_promise_failure",
+      "type": "output.respond",
+      "name": "Falha no desbloqueio",
+      "position": {
+        "x": 4576,
+        "y": 1232
+      },
+      "config": {
+        "channel": "source",
+        "message": "Infelizmente não foi possível, entre em contato com o setor financeiro!",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_payment_promise_retry",
+      "type": "interaction.options",
+      "name": "Tentar desbloqueio novamente",
+      "position": {
+        "x": 4928,
+        "y": 1248
+      },
+      "config": {
+        "footer": "",
+        "prompt": "Não encontramos nenhum contrato neste, o que deseja fazer?",
+        "options": [
+          {
+            "id": "try_again",
+            "label": "Tentar novamente",
+            "value": "Tentar novamente"
+          },
+          {
+            "id": "finish",
+            "label": "Encerrar Atendimento",
+            "value": "Encerrar Atendimento"
+          }
+        ],
+        "outputKey": "promessa_retry",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "intelligentMatching": false,
+        "customFallbackRoutes": false,
+        "invalidOptionMessage": "Opção inválida. Escolha uma das opções abaixo.",
+        "intelligentMinimumConfidence": 0.65
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "default",
+          "label": "Não reconhecida",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "try_again",
+          "label": "Tentar novamente",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "finish",
+          "label": "Encerrar Atendimento",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_payment_promise_loop",
+      "type": "logic.loop",
+      "name": "Repetir desbloqueio",
+      "position": {
+        "x": 5536,
+        "y": 1392
+      },
+      "config": {
+        "exitCondition": "false",
+        "maxIterations": 3,
+        "totalTimeoutMs": 86400000
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "iterate",
+          "label": "Iterar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "done",
+          "label": "Concluído",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "limit_reached",
+          "label": "Limite atingido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "output_respond_6f9f2bcb-ffa4-46ab-829e-ee0d0febda05",
+      "type": "output.respond",
+      "name": "Responder",
+      "position": {
+        "x": 2960,
+        "y": -496
+      },
+      "config": {
+        "channel": "source",
+        "message": "Infelizmente o setor comercial está indisponível (encerrou-se as 18h00), pedimos que retorne o contato amanhã entre 08h00. Retornamos o seu contato para a fila de espera.",
+        "idempotent": true,
+        "customErrorRoute": false
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "output_end_f14b284c-82fe-41c9-a6af-2efcb499f5ea",
+      "type": "output.end",
+      "name": "Finalizar",
+      "position": {
+        "x": 3408,
+        "y": -448
+      },
+      "config": {
+        "output": {}
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "output_end_8a180608-b371-4a2a-80af-a3ecdc218ddf",
+      "type": "output.end",
+      "name": "Finalizar",
+      "position": {
+        "x": 4048,
+        "y": 192
+      },
+      "config": {
+        "output": {}
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_commercial_identify",
+      "type": "dialogy.sgp_identify_customer",
+      "name": "Identificar cliente · Comercial",
+      "position": {
+        "x": 1680,
+        "y": -680
+      },
+      "config": {
+        "outputKey": "sgpIdentification",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "permissionScope": "sgp:read",
+        "allowNewCustomer": true,
+        "saveDocumentIfEmpty": true,
+        "customErrorRoute": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "selected",
+          "label": "Contrato selecionado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "new_customer",
+          "label": "Novo cliente",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "cancelled",
+          "label": "Voltar / expirou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_sgp_unavailable",
+      "type": "output.respond",
+      "name": "SGP indisponível · Comercial",
+      "position": {
+        "x": 1960,
+        "y": -500
+      },
+      "config": {
+        "channel": "source",
+        "message": "Não consegui consultar seu cadastro agora. Vou seguir com o atendimento para a equipe conferir seus dados.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_commercial_sgp_recovery",
+      "type": "error.handler",
+      "name": "Recuperar consulta · Comercial",
+      "position": {
+        "x": 1680,
+        "y": -500
+      },
+      "config": {
+        "mode": "recover",
+        "publicMessage": "Não foi possível concluir esta etapa."
+      },
+      "inputPorts": [
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "input",
+          "connectionType": "error",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "recovered",
+          "label": "Recuperado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "failed",
+          "label": "Falhou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_identify",
+      "type": "dialogy.sgp_identify_customer",
+      "name": "Identificar cliente · Financeiro",
+      "position": {
+        "x": 2800,
+        "y": 480
+      },
+      "config": {
+        "outputKey": "sgpIdentification",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "permissionScope": "sgp:read",
+        "allowNewCustomer": false,
+        "saveDocumentIfEmpty": true,
+        "customErrorRoute": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "selected",
+          "label": "Contrato selecionado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "new_customer",
+          "label": "Novo cliente",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "cancelled",
+          "label": "Voltar / expirou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_sgp_unavailable",
+      "type": "output.respond",
+      "name": "SGP indisponível · Financeiro",
+      "position": {
+        "x": 3080,
+        "y": 660
+      },
+      "config": {
+        "channel": "source",
+        "message": "Não consegui consultar seu cadastro agora. Vou seguir com o atendimento para a equipe conferir seus dados.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_finance_sgp_recovery",
+      "type": "error.handler",
+      "name": "Recuperar consulta · Financeiro",
+      "position": {
+        "x": 2800,
+        "y": 660
+      },
+      "config": {
+        "mode": "recover",
+        "publicMessage": "Não foi possível concluir esta etapa."
+      },
+      "inputPorts": [
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "input",
+          "connectionType": "error",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "recovered",
+          "label": "Recuperado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "failed",
+          "label": "Falhou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_availability",
+      "type": "dialogy.team_availability",
+      "name": "Expediente · Transferência de endereço",
+      "position": {
+        "x": 2800,
+        "y": -1400
+      },
+      "config": {
+        "teamId": "b3b71514-098f-49fa-b922-f38a40065ef6",
+        "outputKey": "addressAvailability",
+        "permissionScope": "teams:read"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "open",
+          "label": "Aberto",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "closed",
+          "label": "Fechado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_new_address",
+      "type": "interaction.input",
+      "name": "Novo endereço de instalação",
+      "position": {
+        "x": 2520,
+        "y": -1400
+      },
+      "config": {
+        "prompt": "Qual é o novo endereço de instalação? Informe rua, número, bairro e cidade. Se ainda não souber, pode responder “não sei”.",
+        "outputKey": "novo_endereco",
+        "timeoutMs": 86400000,
+        "validation": "text",
+        "customRegex": "",
+        "invalidInputMessage": "Não consegui validar essa resposta. Tente novamente."
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "resumed",
+          "label": "Respondido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "expired",
+          "label": "Expirado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_identify",
+      "type": "dialogy.sgp_identify_customer",
+      "name": "Identificar cliente · Transferência de endereço",
+      "position": {
+        "x": 2240,
+        "y": -1400
+      },
+      "config": {
+        "outputKey": "sgpIdentification",
+        "timeoutMs": 86400000,
+        "deliveryMode": "list",
+        "permissionScope": "sgp:read",
+        "allowNewCustomer": false,
+        "saveDocumentIfEmpty": true,
+        "customErrorRoute": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "selected",
+          "label": "Contrato selecionado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "new_customer",
+          "label": "Novo cliente",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "cancelled",
+          "label": "Voltar / expirou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_sgp_unavailable",
+      "type": "output.respond",
+      "name": "SGP indisponível · Transferência de endereço",
+      "position": {
+        "x": 2520,
+        "y": -1220
+      },
+      "config": {
+        "channel": "source",
+        "message": "Não consegui consultar seu cadastro agora. Vou seguir com o atendimento para a equipe conferir seus dados.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_sgp_recovery",
+      "type": "error.handler",
+      "name": "Recuperar consulta · Transferência de endereço",
+      "position": {
+        "x": 2240,
+        "y": -1220
+      },
+      "config": {
+        "mode": "recover",
+        "publicMessage": "Não foi possível concluir esta etapa."
+      },
+      "inputPorts": [
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "input",
+          "connectionType": "error",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "recovered",
+          "label": "Recuperado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "failed",
+          "label": "Falhou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_tag",
+      "type": "dialogy.chat_tag",
+      "name": "Etiquetar transferência de endereço",
+      "position": {
+        "x": 3080,
+        "y": -1500
+      },
+      "config": {
+        "tagId": "8fa25b50-165f-4e88-ab96-82f1c8d7debd",
+        "outputKey": "velpro_commercial_open_tagResult",
+        "permissionScope": "chats:tag"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_message",
+      "type": "output.respond",
+      "name": "Encaminhar transferência de endereço",
+      "position": {
+        "x": 3360,
+        "y": -1500
+      },
+      "config": {
+        "channel": "source",
+        "message": "Vou encaminhar sua solicitação de transferência de endereço ao Comercial, que verificará a disponibilidade e as condições para a mudança.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_handoff",
+      "type": "output.handoff",
+      "name": "Transferência de endereço · Comercial",
+      "position": {
+        "x": 3640,
+        "y": -1500
+      },
+      "config": {
+        "reason": "Transferência de endereço. {{sgpIdentification.summary}}. Novo endereço informado: {{novo_endereco}}",
+        "teamId": "b3b71514-098f-49fa-b922-f38a40065ef6",
+        "agentId": "",
+        "persistReason": true,
+        "systemAgentId": "",
+        "destinationType": "human",
+        "permissionScope": "conversation:handoff",
+        "confirmationPath": "",
+        "requireConfirmation": false
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "completed",
+          "label": "Transferido",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_address_end",
+      "type": "output.end",
+      "name": "Finalizar encaminhamento de mudança",
+      "position": {
+        "x": 3920,
+        "y": -1500
+      },
+      "config": {
+        "output": {
+          "outcome": "address_transfer_handoff"
+        }
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": []
+    },
+    {
+      "id": "velpro_support_identify",
+      "type": "dialogy.sgp_identify_customer",
+      "name": "Identificar contrato · Suporte",
+      "position": {
+        "x": 1400,
+        "y": -40
+      },
+      "config": {
+        "allowNewCustomer": false,
+        "saveDocumentIfEmpty": true,
+        "deliveryMode": "list",
+        "timeoutMs": 86400000,
+        "outputKey": "sgpIdentification",
+        "permissionScope": "sgp:read",
+        "customErrorRoute": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "selected",
+          "label": "Contrato selecionado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "new_customer",
+          "label": "Novo cliente",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "cancelled",
+          "label": "Voltar / expirou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_contract_route",
+      "type": "logic.switch",
+      "name": "Situação do contrato selecionado",
+      "position": {
+        "x": 1680,
+        "y": -40
+      },
+      "config": {
+        "value": "{{sgpIdentification.statusTone}}",
+        "cases": [
+          {
+            "value": "active",
+            "operator": "equals",
+            "output": "active"
+          },
+          {
+            "value": "suspended",
+            "operator": "equals",
+            "output": "finance"
+          },
+          {
+            "value": "cancelled",
+            "operator": "equals",
+            "output": "finance"
+          }
+        ],
+        "defaultOutput": "default"
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "default",
+          "label": "Padrão",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "active",
+          "label": "Ativo · Suporte",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "finance",
+          "label": "Suspenso ou cancelado · Financeiro",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_finance_notice",
+      "type": "output.respond",
+      "name": "Informar encaminhamento ao Financeiro",
+      "position": {
+        "x": 1960,
+        "y": -180
+      },
+      "config": {
+        "channel": "source",
+        "message": "O contrato {{sgpIdentification.contractId}} está {{sgpIdentification.statusLabel}} no cadastro. Vou direcionar seu atendimento ao Financeiro para verificar a situação.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_sgp_recovery",
+      "type": "error.handler",
+      "name": "Recuperar consulta · Suporte",
+      "position": {
+        "x": 1400,
+        "y": 180
+      },
+      "config": {
+        "mode": "recover",
+        "publicMessage": "Não foi possível concluir esta etapa."
+      },
+      "inputPorts": [
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "input",
+          "connectionType": "error",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "recovered",
+          "label": "Recuperado",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "failed",
+          "label": "Falhou",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "velpro_support_sgp_unavailable",
+      "type": "output.respond",
+      "name": "Conferência manual · Suporte",
+      "position": {
+        "x": 1680,
+        "y": 180
+      },
+      "config": {
+        "channel": "source",
+        "message": "Não consegui confirmar a situação do contrato. Vou seguir com o Suporte para a equipe conferir seus dados.",
+        "idempotent": true
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "id": "success",
+          "label": "Continuar",
+          "direction": "output",
+          "connectionType": "main",
+          "required": false,
+          "multiple": false
+        },
+        {
+          "id": "error",
+          "label": "Erro",
+          "direction": "output",
+          "connectionType": "error",
+          "required": false,
+          "multiple": false
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "velpro_edge_001",
+      "sourceNodeId": "velpro_session_expired",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_session_expired_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_002",
+      "sourceNodeId": "velpro_retry_exhausted",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_retry_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_003",
+      "sourceNodeId": "velpro_close_notice",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_close_chat",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_004",
+      "sourceNodeId": "velpro_close_chat",
+      "sourcePortId": "completed",
+      "targetNodeId": "velpro_close_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_005",
+      "sourceNodeId": "velpro_main_menu",
+      "sourcePortId": "close",
+      "targetNodeId": "velpro_close_notice",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_006",
+      "sourceNodeId": "velpro_main_menu",
+      "sourcePortId": "subscribe",
+      "targetNodeId": "velpro_referral_menu",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_007",
+      "sourceNodeId": "velpro_referral_menu",
+      "sourcePortId": "referral_1",
+      "targetNodeId": "velpro_commercial_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_008",
+      "sourceNodeId": "velpro_referral_menu",
+      "sourcePortId": "referral_2",
+      "targetNodeId": "velpro_commercial_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_009",
+      "sourceNodeId": "velpro_referral_menu",
+      "sourcePortId": "referral_3",
+      "targetNodeId": "velpro_commercial_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_010",
+      "sourceNodeId": "velpro_referral_menu",
+      "sourcePortId": "referral_4",
+      "targetNodeId": "velpro_commercial_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_011",
+      "sourceNodeId": "velpro_referral_menu",
+      "sourcePortId": "referral_5",
+      "targetNodeId": "velpro_commercial_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_012",
+      "sourceNodeId": "velpro_referral_menu",
+      "sourcePortId": "referral_6",
+      "targetNodeId": "velpro_commercial_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_013",
+      "sourceNodeId": "velpro_referral_menu",
+      "sourcePortId": "referral_7",
+      "targetNodeId": "velpro_commercial_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_014",
+      "sourceNodeId": "velpro_main_menu",
+      "sourcePortId": "address_transfer",
+      "targetNodeId": "velpro_address_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_015",
+      "sourceNodeId": "velpro_commercial_availability",
+      "sourcePortId": "open",
+      "targetNodeId": "velpro_commercial_open_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_016",
+      "sourceNodeId": "velpro_commercial_availability",
+      "sourcePortId": "closed",
+      "targetNodeId": "velpro_commercial_closed_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_017",
+      "sourceNodeId": "velpro_commercial_open_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_commercial_message",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_018",
+      "sourceNodeId": "velpro_commercial_message",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_commercial_handoff",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_019",
+      "sourceNodeId": "velpro_commercial_handoff",
+      "sourcePortId": "completed",
+      "targetNodeId": "velpro_commercial_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_037",
+      "sourceNodeId": "velpro_main_menu",
+      "sourcePortId": "support",
+      "targetNodeId": "velpro_support_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_038",
+      "sourceNodeId": "velpro_support_availability",
+      "sourcePortId": "open",
+      "targetNodeId": "velpro_support_open_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_039",
+      "sourceNodeId": "velpro_support_availability",
+      "sourcePortId": "closed",
+      "targetNodeId": "velpro_support_closed_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_040",
+      "sourceNodeId": "velpro_support_closed_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_support_closed_message",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_041",
+      "sourceNodeId": "velpro_support_closed_message",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_support_closed_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_042",
+      "sourceNodeId": "velpro_support_open_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_support_menu",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_043",
+      "sourceNodeId": "velpro_support_menu",
+      "sourcePortId": "signal_problem",
+      "targetNodeId": "velpro_support_handoff_message",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_044",
+      "sourceNodeId": "velpro_support_handoff_message",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_support_handoff",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_046",
+      "sourceNodeId": "velpro_main_menu",
+      "sourcePortId": "finance",
+      "targetNodeId": "velpro_finance_menu",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_047",
+      "sourceNodeId": "velpro_support_menu",
+      "sourcePortId": "billing",
+      "targetNodeId": "velpro_finance_menu",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_048",
+      "sourceNodeId": "velpro_support_menu",
+      "sourcePortId": "unlock",
+      "targetNodeId": "velpro_finance_menu",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_049",
+      "sourceNodeId": "velpro_finance_menu",
+      "sourcePortId": "back",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_050",
+      "sourceNodeId": "velpro_back_to_main_loop",
+      "sourcePortId": "iterate",
+      "targetNodeId": "velpro_main_menu",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_051",
+      "sourceNodeId": "velpro_back_to_main_loop",
+      "sourcePortId": "done",
+      "targetNodeId": "velpro_retry_exhausted",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_052",
+      "sourceNodeId": "velpro_back_to_main_loop",
+      "sourcePortId": "limit_reached",
+      "targetNodeId": "velpro_retry_exhausted",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_053",
+      "sourceNodeId": "velpro_finance_menu",
+      "sourcePortId": "negotiate",
+      "targetNodeId": "velpro_finance_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_054",
+      "sourceNodeId": "velpro_finance_menu",
+      "sourcePortId": "report_payment",
+      "targetNodeId": "velpro_finance_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_055",
+      "sourceNodeId": "velpro_finance_menu",
+      "sourcePortId": "other_finance",
+      "targetNodeId": "velpro_finance_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_056",
+      "sourceNodeId": "velpro_finance_availability",
+      "sourcePortId": "open",
+      "targetNodeId": "velpro_finance_open_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_057",
+      "sourceNodeId": "velpro_finance_availability",
+      "sourcePortId": "closed",
+      "targetNodeId": "velpro_finance_closed_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_058",
+      "sourceNodeId": "velpro_finance_open_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_finance_handoff_message",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_059",
+      "sourceNodeId": "velpro_finance_handoff_message",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_finance_handoff",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_060",
+      "sourceNodeId": "velpro_finance_handoff",
+      "sourcePortId": "completed",
+      "targetNodeId": "velpro_finance_handoff_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_061",
+      "sourceNodeId": "velpro_finance_closed_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_finance_closed_message",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_062",
+      "sourceNodeId": "velpro_finance_closed_message",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_finance_closed_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_063",
+      "sourceNodeId": "velpro_finance_menu",
+      "sourcePortId": "second_copy",
+      "targetNodeId": "velpro_second_copy_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_064",
+      "sourceNodeId": "velpro_second_copy_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_second_copy_cpf",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_065",
+      "sourceNodeId": "velpro_second_copy_cpf",
+      "sourcePortId": "resumed",
+      "targetNodeId": "velpro_sgp_second_copy",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_066",
+      "sourceNodeId": "velpro_second_copy_cpf",
+      "sourcePortId": "expired",
+      "targetNodeId": "velpro_session_expired",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_067",
+      "sourceNodeId": "velpro_sgp_second_copy",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_second_copy_success",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_068",
+      "sourceNodeId": "velpro_second_copy_success",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_close_notice",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_069",
+      "sourceNodeId": "velpro_finance_menu",
+      "sourcePortId": "payment_promise",
+      "targetNodeId": "velpro_payment_promise_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_070",
+      "sourceNodeId": "velpro_payment_promise_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_payment_promise_cpf",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_071",
+      "sourceNodeId": "velpro_payment_promise_cpf",
+      "sourcePortId": "resumed",
+      "targetNodeId": "velpro_payment_promise_date",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_072",
+      "sourceNodeId": "velpro_payment_promise_cpf",
+      "sourcePortId": "expired",
+      "targetNodeId": "velpro_session_expired",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_073",
+      "sourceNodeId": "velpro_payment_promise_date",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_sgp_payment_promise",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_074",
+      "sourceNodeId": "velpro_sgp_payment_promise",
+      "sourcePortId": "status-0",
+      "targetNodeId": "velpro_close_notice",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_075",
+      "sourceNodeId": "velpro_sgp_payment_promise",
+      "sourcePortId": "status-1",
+      "targetNodeId": "velpro_close_notice",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_076",
+      "sourceNodeId": "velpro_sgp_payment_promise",
+      "sourcePortId": "status-2",
+      "targetNodeId": "velpro_payment_promise_failure",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_077",
+      "sourceNodeId": "velpro_sgp_payment_promise",
+      "sourcePortId": "limit-reached",
+      "targetNodeId": "velpro_finance_identify",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_078",
+      "sourceNodeId": "velpro_payment_promise_failure",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_payment_promise_retry",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_079",
+      "sourceNodeId": "velpro_payment_promise_retry",
+      "sourcePortId": "try_again",
+      "targetNodeId": "velpro_payment_promise_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_080",
+      "sourceNodeId": "velpro_payment_promise_retry",
+      "sourcePortId": "finish",
+      "targetNodeId": "velpro_close_notice",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_081",
+      "sourceNodeId": "velpro_payment_promise_loop",
+      "sourcePortId": "iterate",
+      "targetNodeId": "velpro_payment_promise_cpf",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_082",
+      "sourceNodeId": "velpro_payment_promise_loop",
+      "sourcePortId": "done",
+      "targetNodeId": "velpro_retry_exhausted",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_083",
+      "sourceNodeId": "velpro_payment_promise_loop",
+      "sourcePortId": "limit_reached",
+      "targetNodeId": "velpro_retry_exhausted",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_084",
+      "sourceNodeId": "velpro_trigger",
+      "sourcePortId": "message",
+      "targetNodeId": "velpro_context",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_085",
+      "sourceNodeId": "velpro_context",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_welcome",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "velpro_edge_086",
+      "sourceNodeId": "velpro_welcome",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_main_menu",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "conn_889b8ef2-a515-457b-b62b-42c0c3cabb9b",
+      "sourceNodeId": "velpro_commercial_closed_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "output_respond_6f9f2bcb-ffa4-46ab-829e-ee0d0febda05",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "conn_8d3bf765-c49b-43a0-ae44-5320fce48bb7",
+      "sourceNodeId": "output_respond_6f9f2bcb-ffa4-46ab-829e-ee0d0febda05",
+      "sourcePortId": "success",
+      "targetNodeId": "output_end_f14b284c-82fe-41c9-a6af-2efcb499f5ea",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "conn_c9cb91f3-8942-4d2b-8e19-b9f7fca0833a",
+      "sourceNodeId": "velpro_support_handoff",
+      "sourcePortId": "completed",
+      "targetNodeId": "output_end_8a180608-b371-4a2a-80af-a3ecdc218ddf",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_commercial_identify_selected",
+      "sourceNodeId": "velpro_commercial_identify",
+      "sourcePortId": "selected",
+      "targetNodeId": "velpro_commercial_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_commercial_identify_new_customer",
+      "sourceNodeId": "velpro_commercial_identify",
+      "sourcePortId": "new_customer",
+      "targetNodeId": "velpro_commercial_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_commercial_identify_cancelled",
+      "sourceNodeId": "velpro_commercial_identify",
+      "sourcePortId": "cancelled",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_commercial_identify_error",
+      "sourceNodeId": "velpro_commercial_identify",
+      "sourcePortId": "error",
+      "targetNodeId": "velpro_commercial_sgp_recovery",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "identify_velpro_commercial_sgp_recovery_recovered",
+      "sourceNodeId": "velpro_commercial_sgp_recovery",
+      "sourcePortId": "recovered",
+      "targetNodeId": "velpro_commercial_sgp_unavailable",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_commercial_sgp_unavailable_success",
+      "sourceNodeId": "velpro_commercial_sgp_unavailable",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_commercial_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_finance_identify_selected",
+      "sourceNodeId": "velpro_finance_identify",
+      "sourcePortId": "selected",
+      "targetNodeId": "velpro_finance_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_finance_identify_new_customer",
+      "sourceNodeId": "velpro_finance_identify",
+      "sourcePortId": "new_customer",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_finance_identify_cancelled",
+      "sourceNodeId": "velpro_finance_identify",
+      "sourcePortId": "cancelled",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_finance_identify_error",
+      "sourceNodeId": "velpro_finance_identify",
+      "sourcePortId": "error",
+      "targetNodeId": "velpro_finance_sgp_recovery",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "identify_velpro_finance_sgp_recovery_recovered",
+      "sourceNodeId": "velpro_finance_sgp_recovery",
+      "sourcePortId": "recovered",
+      "targetNodeId": "velpro_finance_sgp_unavailable",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_finance_sgp_unavailable_success",
+      "sourceNodeId": "velpro_finance_sgp_unavailable",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_finance_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_new_address_resumed",
+      "sourceNodeId": "velpro_address_new_address",
+      "sourcePortId": "resumed",
+      "targetNodeId": "velpro_address_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_new_address_expired",
+      "sourceNodeId": "velpro_address_new_address",
+      "sourcePortId": "expired",
+      "targetNodeId": "velpro_session_expired",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_identify_selected",
+      "sourceNodeId": "velpro_address_identify",
+      "sourcePortId": "selected",
+      "targetNodeId": "velpro_address_new_address",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_identify_new_customer",
+      "sourceNodeId": "velpro_address_identify",
+      "sourcePortId": "new_customer",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_identify_cancelled",
+      "sourceNodeId": "velpro_address_identify",
+      "sourcePortId": "cancelled",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_identify_error",
+      "sourceNodeId": "velpro_address_identify",
+      "sourcePortId": "error",
+      "targetNodeId": "velpro_address_sgp_recovery",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "identify_velpro_address_sgp_recovery_recovered",
+      "sourceNodeId": "velpro_address_sgp_recovery",
+      "sourcePortId": "recovered",
+      "targetNodeId": "velpro_address_sgp_unavailable",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_sgp_unavailable_success",
+      "sourceNodeId": "velpro_address_sgp_unavailable",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_address_new_address",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_availability_open",
+      "sourceNodeId": "velpro_address_availability",
+      "sourcePortId": "open",
+      "targetNodeId": "velpro_address_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_tag_success",
+      "sourceNodeId": "velpro_address_tag",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_address_message",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_message_success",
+      "sourceNodeId": "velpro_address_message",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_address_handoff",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_handoff_completed",
+      "sourceNodeId": "velpro_address_handoff",
+      "sourcePortId": "completed",
+      "targetNodeId": "velpro_address_end",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "identify_velpro_address_availability_closed",
+      "sourceNodeId": "velpro_address_availability",
+      "sourcePortId": "closed",
+      "targetNodeId": "velpro_commercial_closed_tag",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_identify_selected",
+      "sourceNodeId": "velpro_support_identify",
+      "sourcePortId": "selected",
+      "targetNodeId": "velpro_support_contract_route",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_identify_new_customer",
+      "sourceNodeId": "velpro_support_identify",
+      "sourcePortId": "new_customer",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_identify_cancelled",
+      "sourceNodeId": "velpro_support_identify",
+      "sourcePortId": "cancelled",
+      "targetNodeId": "velpro_back_to_main_loop",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_identify_error",
+      "sourceNodeId": "velpro_support_identify",
+      "sourcePortId": "error",
+      "targetNodeId": "velpro_support_sgp_recovery",
+      "targetPortId": "error",
+      "connectionType": "error"
+    },
+    {
+      "id": "support_identify_velpro_support_sgp_recovery_recovered",
+      "sourceNodeId": "velpro_support_sgp_recovery",
+      "sourcePortId": "recovered",
+      "targetNodeId": "velpro_support_sgp_unavailable",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_contract_route_active",
+      "sourceNodeId": "velpro_support_contract_route",
+      "sourcePortId": "active",
+      "targetNodeId": "velpro_support_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_contract_route_finance",
+      "sourceNodeId": "velpro_support_contract_route",
+      "sourcePortId": "finance",
+      "targetNodeId": "velpro_support_finance_notice",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_contract_route_default",
+      "sourceNodeId": "velpro_support_contract_route",
+      "sourcePortId": "default",
+      "targetNodeId": "velpro_support_sgp_unavailable",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_finance_notice_success",
+      "sourceNodeId": "velpro_support_finance_notice",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_finance_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    },
+    {
+      "id": "support_identify_velpro_support_sgp_unavailable_success",
+      "sourceNodeId": "velpro_support_sgp_unavailable",
+      "sourcePortId": "success",
+      "targetNodeId": "velpro_support_availability",
+      "targetPortId": "main",
+      "connectionType": "main"
+    }
+  ],
+  "settings": {
+    "executionTimeoutMs": 86400000,
+    "maxSteps": 500,
+    "maxModelCalls": 40,
+    "maxToolCalls": 20,
+    "maxAgentTurnsPerNode": 12,
+    "maxRepeatedDecisionSignatures": 2,
+    "maxTotalInputTokens": 160000,
+    "maxTotalOutputTokens": 30000,
+    "concurrencyLimit": 1
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "message": {
+        "type": "string"
+      },
+      "customerMessage": {
+        "type": "string"
+      },
+      "sourceMessageId": {
+        "type": "string"
+      }
+    },
+    "additionalProperties": true
+  },
+  "metadata": {
+    "kind": "standalone",
+    "editor": "nexus",
+    "source": "nexusflow_legacy_import",
+    "profile": "velpro-final-native-v1",
+    "priority": 100,
+    "aiRuntime": "dialogy_native",
+    "sourceName": "Fluxo Velpro Final",
+    "sourceSha256": "31d1bba01b19f5ee7ab316ecb08ea77366d77660c429069c6739a4c24bb1dbd0",
+    "sourceVersion": "1.0",
+    "primaryAgentId": "velpro_raquel_agent",
+    "raquelConfigId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+    "credentialReady": true,
+    "legacyNodeCount": 71,
+    "nexusWorkflowId": "77bc3879-e0eb-584f-b1bb-4ca1e640ab52",
+    "prunedLegacyNodeIds": [
+      "a7a9d87a-b148-42e9-896e-6b96ad0399a0",
+      "eb69168d-2b65-4a55-bbf8-0892e271ec83",
+      "70580637-dcda-4e48-b85f-23380be38e45"
+    ],
+    "senderSystemAgentId": "5ad2ea69-47e4-4ee9-bb33-584eef145480",
+    "legacyConnectionCount": 85,
+    "velproIdentificationVersion": 3
+  },
+  "createdAt": "2026-08-26T17:16:15.026Z",
+  "updatedAt": "2026-09-08T15:29:20.345Z"
+}

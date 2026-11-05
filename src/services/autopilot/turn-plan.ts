@@ -244,14 +244,6 @@ const ORDER_STATUS_TOOL_PATTERNS = [
   /\b(status|rastre|tracking|pedido|order|protocolo|solicitacao|solicitacao|ticket|chamado|entrega|shipment)\b/i,
 ];
 
-const GENERIC_EXTERNAL_LOOKUP_PATTERNS = [
-  /\b(catalog|catalogo|cat[aá]logo|cardapio|card[aá]pio|list_products|products|produtos|services|servicos|servi[cç]os|plans|planos|menu)\b/i,
-  /\b(price|pricing|preco|pre[cç]o|valor|quote|cotacao|cota[cç][aã]o|orcamento|or[cç]amento)\b/i,
-  /\b(availability|available|disponibilidade|disponivel|dispon[ií]vel|stock|estoque|slots|agenda|calendar|appointment|agendamento|horario|hor[aá]rio|vaga)\b/i,
-  /\b(document|documento|contract|contrato|invoice|nota fiscal|comprovante|declaracao|declara[cç][aã]o)\b/i,
-  /\b(search|lookup|consulta|consultar|verificar|buscar|checar|conferir)\b/i,
-];
-
 const GENERIC_EXTERNAL_ACTION_PATTERNS = [
   /\b(create|book|schedule|reserve|appointment|agenda|agendamento|agendar|marcar|reservar|contratar|comprar|pedido)\b/i,
   /\b(update|change|edit|reschedule|alterar|atualizar|trocar|mudar|remarcar)\b/i,

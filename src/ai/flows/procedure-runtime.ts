@@ -1,4 +1,4 @@
-'use server';
+import 'server-only';
 
 /**
  * Slim AI flow for Procedure Runtime.
@@ -8,14 +8,16 @@
  * active procedure state, compact tool results, and recent chat context.
  */
 
+import { runPlatformModel } from '@/services/ai/platform-model-client';
+import { platformModel } from '@/services/ai/platform-config';
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
 import { formatCustomerFacingAiResponse } from '@/lib/ai-response-format';
+import { StudioCollectionPlanSchema } from '@/services/agent-studio/collection-planner';
 import { logAutopilotUsage } from '@/actions/autopilot';
 import {
   assertAiModelOutput,
-  runAiModelWithFallback,
   type AiModelKeyCandidate,
 } from '@/services/ai/model-client';
 import {
@@ -43,8 +45,9 @@ const ProcedureRuntimeInputSchema = z.object({
   config: z.any(),
   workspaceGeminiApiKey: z.string().optional(),
   chatId: z.string(),
-  mode: z.enum(['decision', 'response']),
+  mode: z.enum(['decision', 'response', 'collection_plan']),
   model: z.string().optional(),
+  fixedModel: z.boolean().optional(),
   customerMessage: z.string(),
   chatHistory: z.string().optional(),
   persona: z.string().optional(),
@@ -65,6 +68,7 @@ const ProcedureRuntimeInputSchema = z.object({
 });
 
 const ProcedureRuntimeOutputSchema = z.object({
+  collectionPlan: StudioCollectionPlanSchema.optional(),
   decision: z.string().optional().nullable(),
   response: z.string().optional().nullable(),
 });
@@ -84,11 +88,14 @@ TAREFA: {{mode}}
 Regras obrigatorias:
 - Se TAREFA for "decision", retorne apenas o campo JSON "decision" com uma das opcoes permitidas exatamente como escrita.
 - Se TAREFA for "response", retorne apenas o campo JSON "response" com uma resposta curta, natural e objetiva para WhatsApp.
+- Se TAREFA for "collection_plan", retorne apenas "collectionPlan" com o plano estruturado; não escreva response nem decision. A ordem das perguntas é decidida pelo objetivo, não pela posição dos campos.
 - Se uma ferramenta falhou ou nao retornou sucesso, nao diga que a consulta/acao foi feita com sucesso.
 - Se faltar dado essencial, peca esse dado de forma direta.
-- Nunca prescreva ou calcule dosagem de medicamento. Se o cliente pedir dose, gotas, ml ou mg, diga que nao pode orientar dosagem por seguranca e siga a triagem.
-- Nunca peca peso com a finalidade de calcular dose de remedio.
-- Nunca cite SAMU, ambulancia, 192, 193 ou 911. Em urgencia, use apenas "pronto atendimento fisico", "pronto-socorro fisico" ou "unidade de saude mais proxima".
+- Respeite escolhas, recusas e correcoes presentes no historico; nao reinicie descoberta ou recomendacao quando o cliente ja escolheu uma alternativa.
+- Nao repita catalogos, listas, instrucoes ou perguntas que ja foram enviados, salvo se o cliente pedir explicitamente para repetir.
+- "Nao precisa", "deixa pra la" e equivalentes interrompem a etapa atual; nunca trate essas frases como valor invalido de um campo.
+- Nunca altere identificadores, numeros, precos ou contatos presentes nas fontes. Nao deduza especialidade ou setor pelo nome de uma pessoa.
+- Regras especificas do negocio pertencem ao procedimento e as fontes autorizadas. Nao imponha triagem ou perguntas de outro setor.
 - Nao solicite actions. O executor ja cuida de ferramentas.
 
 Persona curta:
@@ -135,7 +142,7 @@ Politica de escalonamento:
 {{#if escalationPolicy}}
 {{{escalationPolicy}}}
 {{else}}
-Se nao houver seguranca, diga que vai envolver um atendente humano.
+Se nao houver seguranca, ofereca ajuda de um atendente humano. Nunca anuncie uma transferencia ou outra acao como iniciada ou concluida sem um resultado confirmado do sistema.
 {{/if}}
 
 Mensagem atual do cliente:
@@ -156,125 +163,6 @@ const PROCEDURE_MODEL_FALLBACKS = [
   'googleai/gemini-2.5-pro',
 ];
 
-function normalizeRuntimeText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
-function asksMedicationDosage(value: string): boolean {
-  const text = normalizeRuntimeText(value);
-  return (
-    /\b(quant[ao]s?|dose|dosagem|gotas?|gotinha|ml|mg)\b/.test(text) &&
-    /\b(dipirona|paracetamol|ibuprofeno|remedio|medicamento|antitermico|antiinflamatorio|antibiotico|dar|dou|posso dar)\b/.test(text)
-  );
-}
-
-function responseStillHandlesMedicationDosageSafely(response: string): boolean {
-  const text = normalizeRuntimeText(response);
-  return (
-    /\b(nao posso|nao consigo|nao devo|nao e seguro|por seguranca)\b/.test(text) &&
-    /\b(dosagem|dose|medicamento|remedio|gotas?)\b/.test(text)
-  );
-}
-
-function sanitizeProcedureRuntimeResponse(response: string, input: ProcedureRuntimeInput): string {
-  let sanitized = response
-    .replace(/\bSAMU\b/gi, 'pronto atendimento fisico')
-    .replace(/\bambul[aâ]ncia\b/gi, 'pronto atendimento fisico')
-    .replace(/\b(?:192|193|911)\b/g, 'pronto atendimento fisico');
-
-  const normalized = normalizeRuntimeText(sanitized);
-  const unsafeDosageContinuation = asksMedicationDosage(input.customerMessage) && (
-    !responseStillHandlesMedicationDosageSafely(sanitized) ||
-    /\b(peso|kg|quilo)\b.*\b(dose|dosagem|gotas?|ml|mg)\b/.test(normalized) ||
-    /\b(dose|dosagem|gotas?|ml|mg)\b.*\b(peso|kg|quilo)\b/.test(normalized)
-  );
-
-  if (unsafeDosageContinuation) {
-    sanitized = [
-      'Nao posso orientar dosagem de medicamento por aqui por seguranca.',
-      'A dose correta depende de avaliacao medica e dados clinicos da crianca.',
-      'Para seguir com seguranca, qual e a idade da crianca e ha quanto tempo a febre comecou?',
-    ].join(' ');
-  }
-
-  sanitized = repairPediatricSchedulingFallback(sanitized, input);
-
-  return sanitized;
-}
-
-function isPediatricProcedure(input: ProcedureRuntimeInput): boolean {
-  const text = normalizeRuntimeText([
-    input.config?.name,
-    input.procedure?.name,
-    input.procedure?.stepLabel,
-    input.persona,
-    input.procedure?.prompt,
-  ].filter(Boolean).join(' '));
-  return /\b(roberta|pediatr|crianca|crianca|filh[ao]|bebe)\b/.test(text);
-}
-
-function looksLikeGenericSchedulingPrompt(response: string): boolean {
-  const text = normalizeRuntimeText(response);
-  return /^para continuar me informe (?:data e horario|horario|data)\.?$/.test(text) ||
-    /\bme informe (?:data e horario|horario|data)\b/.test(text) && text.length <= 90 ||
-    /\b(nao consigo consultar|verificar disponibilidade|consultar disponibilidade|vou encaminhar|vou envolver|atendente humano|equipe pediatras|equipe responsavel)\b/.test(text);
-}
-
-function hasSchedulingPreference(text: string): boolean {
-  return /\b(prefiro|pode ser|quero|manha|tarde|noite|hoje|amanha|cedo|rotina|eletiv|urgente|horario|periodo)\b/.test(text);
-}
-
-function inferPediatricScheduleClass(text: string): 'azul' | 'amarelo' | null {
-  const hasBlueSignal = (
-    /\b(sem febre|nao tem febre|temperatura normal)\b/.test(text) &&
-    /\b(respiracao normal|sem cansaco|nao esta cansad[ao]|sem falta de ar)\b/.test(text) &&
-    /\b(ativa|ativo|brincando|comeu|comendo|alimenta|urinando normal|urinou normal|urina normal)\b/.test(text)
-  ) || (
-    /\b(tosse leve|coriza clara|espirrando|espirros)\b/.test(text) &&
-    /\b(sem febre|respiracao normal|ativa|ativo|brincando)\b/.test(text)
-  );
-  if (hasBlueSignal) return 'azul';
-
-  const hasYellowSignal = (
-    /\b(38\s*[5-9]|39|40|41|42)\b/.test(text) &&
-    /\b(36|48|anteontem|dois dias|2 dias|persistente)\b/.test(text)
-  ) || (
-    /\b(vomitou|vomito|vomitos|diarreia)\b/.test(text) &&
-    /\b(aceita agua|aceitando agua|pequenos goles|urinou|fez xixi|sem olhos fundos|nao tem boca seca)\b/.test(text)
-  );
-  if (hasYellowSignal) return 'amarelo';
-
-  return null;
-}
-
-function repairPediatricSchedulingFallback(response: string, input: ProcedureRuntimeInput): string {
-  if (!isPediatricProcedure(input) || !looksLikeGenericSchedulingPrompt(response)) return response;
-
-  const conversation = normalizeRuntimeText([
-    input.chatHistory,
-    input.customerMessage,
-  ].filter(Boolean).join('\n'));
-
-  if (/\b(agendar|agendamento|marcar consulta|marcar)\b/.test(conversation) && !/\b(febre|tosse|coriza|vomit|diarreia|respir|dor|sintoma)\b/.test(conversation)) {
-    return 'Compreendo a pressa, mas preciso fazer uma triagem curta para direcionar com seguranca. A consulta e para uma crianca? Qual e a idade e o motivo principal do atendimento?';
-  }
-
-  if (!hasSchedulingPreference(conversation)) return response;
-
-  const scheduleClass = inferPediatricScheduleClass(conversation);
-  if (scheduleClass === 'azul') {
-    return 'Perfeito. Pelo que voce informou, o quadro segue como leve, entao vamos continuar com o agendamento de uma consulta eletiva/de rotina. Para concluir, qual dia fica melhor?';
-  }
-
-  if (scheduleClass === 'amarelo') {
-    return 'Perfeito. Pelo que voce informou, o caso precisa de consulta urgente, idealmente hoje ou no maximo amanha. Para concluir, qual horario especifico fica melhor?';
-  }
-
-  return response;
-}
 
 function getModelCandidates(model?: string): string[] {
   if (isLmStudioModel(model)) {
@@ -290,14 +178,15 @@ function getModelCandidates(model?: string): string[] {
 function definePromptForCandidate(input: {
   apiKey: string;
   model: string;
+  outputKind?: 'procedure' | 'collection_plan';
   lmStudioConfig?: Awaited<ReturnType<typeof getGlobalLmStudioConfig>>;
 }) {
   if (isLmStudioModel(input.model)) {
-    return defineLmStudioPrompt(promptConfig, input.model, input.lmStudioConfig || { baseUrl: '', apiToken: '' }, 'procedure');
+    return defineLmStudioPrompt(promptConfig, input.model, input.lmStudioConfig || { baseUrl: '', apiToken: '' }, input.outputKind || 'procedure');
   }
 
   if (isOpenAiCompatibleModel(input.model)) {
-    return defineOpenAiCompatiblePrompt(promptConfig, input.model, input.apiKey, 'procedure');
+    return defineOpenAiCompatiblePrompt(promptConfig, input.model, input.apiKey, input.outputKind || 'procedure');
   }
 
   const defaultEnvKey = getDefaultGeminiEnvKey();
@@ -306,7 +195,7 @@ function definePromptForCandidate(input: {
   }
 
   const { genkit } = require('genkit');
-  const { googleAI } = require('@genkit-ai/googleai');
+  const { googleAI } = require('@genkit-ai/google-genai');
 
   const dynamicAi = genkit({
     plugins: [googleAI({ apiKey: input.apiKey })],
@@ -323,7 +212,7 @@ const procedureRuntimeFlow = ai.defineFlow(
     outputSchema: ProcedureRuntimeOutputSchema,
   },
   async (input) => {
-    const model = input.model || DEFAULT_AUTOPILOT_MODEL;
+    const model = (await platformModel()).id;
     const lmStudioConfig = isLmStudioModel(model) ? await getGlobalLmStudioConfig() : null;
     const apiKeyCandidates: AiModelKeyCandidate[] = isLmStudioModel(model)
       ? [{ source: 'lmstudio-superadmin', key: lmStudioConfig?.apiToken || 'lm-studio', provider: 'lmstudio' }]
@@ -338,9 +227,11 @@ const procedureRuntimeFlow = ai.defineFlow(
     }
 
     try {
-      const promptRun = await runAiModelWithFallback({
+      const promptRun = await runPlatformModel({
+        workspaceId: input.config?.workspace_id,
+        inputTokenBudget: Buffer.byteLength(JSON.stringify(input), 'utf8') + 8192,
         label: 'procedureRuntimeSlimFlow',
-        modelCandidates: getModelCandidates(input.model),
+        modelCandidates: input.fixedModel ? [model] : getModelCandidates(input.model),
         apiKeyCandidates,
         maxAttemptsPerCandidate: Number.parseInt(process.env.AI_MODEL_MAX_ATTEMPTS || '', 10) || 2,
         retryBaseDelayMs: Number.parseInt(process.env.AI_MODEL_RETRY_BASE_DELAY_MS || '', 10) || 250,
@@ -349,6 +240,7 @@ const procedureRuntimeFlow = ai.defineFlow(
           const effectivePrompt = definePromptForCandidate({
             apiKey: context.apiKey,
             model: context.model,
+            outputKind: input.mode === 'collection_plan' ? 'collection_plan' : 'procedure',
             lmStudioConfig: lmStudioConfig || undefined,
           });
           const result = await effectivePrompt(input, { model: context.model });
@@ -403,10 +295,13 @@ const procedureRuntimeFlow = ai.defineFlow(
         });
       }
 
+      if (input.mode === 'collection_plan') {
+        const plan = StudioCollectionPlanSchema.safeParse(output.collectionPlan);
+        return plan.success ? { collectionPlan: plan.data } : {};
+      }
       if (input.mode === 'response' && output.response?.trim()) {
-        const sanitizedResponse = sanitizeProcedureRuntimeResponse(output.response.trim(), input);
         return {
-          response: formatCustomerFacingAiResponse(sanitizedResponse),
+          response: formatCustomerFacingAiResponse(output.response.trim()),
         };
       }
 

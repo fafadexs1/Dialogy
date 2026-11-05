@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { isValidBrazilianDocument, normalizeBrazilianDocument } from '@/lib/brazilian-document';
 import { buildSGPContactPanelData, getContractId, getPrimaryService, normalizeText } from '@/plugins/sgp/contact-panel-data';
 import type { SGPGlobalConfig, SGPUserConfig } from '@/plugins/sgp/types';
 import { enrichSupportContractsWithLiveRadius } from '@/plugins/sgp/radius-session';
@@ -9,6 +10,27 @@ type SgpToolContext = {
   user: SGPUserConfig;
   cpf: string;
 };
+
+export type SgpRuntimeTarget = {
+  workspaceId: string;
+  chatId: string;
+  contactId?: string | null;
+  /**
+   * Identificador informado durante uma jornada determinística (por exemplo,
+   * o CPF digitado no Nexus). Quando presente ele deve prevalecer sobre o
+   * campo CRM, que pode ainda não estar preenchido para contatos novos.
+   */
+  customerIdentifier?: string | null;
+};
+
+type SupportedSgpToolAction = Extract<AgentToolAction, {
+  type:
+    | 'sgp_fetch_contracts'
+    | 'sgp_fetch_contact_panel_data'
+    | 'sgp_generate_invoice_pix'
+    | 'sgp_create_payment_promise'
+    | 'sgp_open_support_ticket'
+}>;
 
 function createRequestInit(token: string, body: unknown): RequestInit {
   return {
@@ -72,18 +94,18 @@ function parseMaybeJson(raw: string): unknown {
   }
 }
 
-async function resolveContactId(context: AgentToolRuntimeContext): Promise<string | null> {
-  if (context.contact?.id) return context.contact.id;
+async function resolveContactId(target: SgpRuntimeTarget): Promise<string | null> {
+  if (target.contactId) return target.contactId;
   const { rows } = await db.query(
     'SELECT contact_id FROM public.chats WHERE id = $1 AND workspace_id = $2 LIMIT 1',
-    [context.chat.id, context.workspaceId]
+    [target.chatId, target.workspaceId]
   );
   return rows[0]?.contact_id || null;
 }
 
-async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
+async function loadSgpContext(target: SgpRuntimeTarget, validateDocument = false): Promise<
   | { success: true; data: SgpToolContext }
-  | { success: false; error: string }
+  | { success: false; error: string; code?: string }
 > {
   const { rows: integrationRows } = await db.query(
     `SELECT provider, config
@@ -92,7 +114,7 @@ async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
        AND is_active = true
        AND (provider = 'sgp' OR provider LIKE 'sgp_user_%')
      ORDER BY CASE WHEN provider = 'sgp' THEN 0 ELSE 1 END, updated_at DESC`,
-    [context.workspaceId]
+    [target.workspaceId]
   );
 
   const global = integrationRows.find((row) => row.provider === 'sgp')?.config as SGPGlobalConfig | undefined;
@@ -106,7 +128,7 @@ async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
     return { success: false, error: 'Nenhuma credencial de usuario SGP ativa encontrada para o workspace.' };
   }
 
-  const contactId = await resolveContactId(context);
+  const contactId = await resolveContactId(target);
   if (!contactId) {
     return { success: false, error: 'Contato do chat nao encontrado.' };
   }
@@ -119,24 +141,34 @@ async function loadSgpContext(context: AgentToolRuntimeContext): Promise<
     [contactId, global.cpfFieldId]
   );
 
-  const cpf = String(cpfRows[0]?.value || '').trim();
+  const normalize = validateDocument ? (value: unknown) => normalizeBrazilianDocument(String(value ?? '')) : onlyDigits;
+  const explicitIdentifier = normalize(target.customerIdentifier);
+  if (explicitIdentifier && ![11, 14].includes(explicitIdentifier.length)) {
+    return { success: false, error: 'O CPF/CNPJ informado precisa conter 11 ou 14 dígitos.' };
+  }
+
+  const crmIdentifier = normalize(cpfRows[0]?.value);
+  const cpf = explicitIdentifier || crmIdentifier;
   if (!cpf) {
-    return { success: false, error: `CPF/CNPJ nao encontrado no campo CRM mapeado (${global.cpfFieldId}).` };
+    return { success: false, code: 'SGP_IDENTIFIER_MISSING', error: `CPF/CNPJ nao encontrado no campo CRM mapeado (${global.cpfFieldId}).` };
+  }
+  if (validateDocument && !isValidBrazilianDocument(cpf)) {
+    return { success: false, code: 'SGP_IDENTIFIER_INVALID', error: 'CPF/CNPJ inválido.' };
   }
 
   return { success: true, data: { global, user: sgpUser, cpf } };
 }
 
-async function fetchSgpClients(sgp: SgpToolContext) {
+async function fetchSgpClients(sgp: SgpToolContext, allowEmpty = false) {
   const response = await fetch(
     `${sgp.global.baseUrl}/api/ura/clientes/`,
-    createRequestInit(
+    { ...createRequestInit(
       sgp.user.token!,
       withApplicationCredentials(sgp.global, {
         cpfcnpj: sgp.cpf,
         exibir_conexao: 1,
       })
-    )
+    ), signal: AbortSignal.timeout(25_000) }
   );
 
   const raw = await response.text();
@@ -145,11 +177,73 @@ async function fetchSgpClients(sgp: SgpToolContext) {
   }
 
   const data = raw ? JSON.parse(raw) : {};
+  if (allowEmpty && Array.isArray(data?.clientes) && data.clientes.length === 0) return [];
   if (!Array.isArray(data?.clientes) || data.clientes.length === 0) {
     throw new Error('Nenhum cliente encontrado no SGP para este CPF/CNPJ.');
   }
 
   return data.clientes;
+}
+
+export type SgpIdentificationContract = {
+  id: string;
+  statusTone?: 'active' | 'suspended' | 'cancelled' | 'unknown';
+  statusLabel: string;
+  addressLabel: string;
+  planDescription: string;
+  ip?: string | null;
+  mac?: string | null;
+  login?: string | null;
+};
+
+export type SgpIdentificationResult =
+  | { status: 'found'; cpfCnpj: string; contracts: SgpIdentificationContract[] }
+  | { status: 'missing-identifier' }
+  | { status: 'invalid-identifier' }
+  | { status: 'not-found' }
+  | { status: 'unavailable' };
+
+/** Read-only identification for a deterministic flow; never changes the CRM CPF. */
+export async function lookupSgpCustomerContracts(target: SgpRuntimeTarget): Promise<SgpIdentificationResult> {
+  try {
+    // Resolve identity from this conversation, never from a supplied contact ID.
+    const context = await loadSgpContext({
+      workspaceId: target.workspaceId,
+      chatId: target.chatId,
+      customerIdentifier: target.customerIdentifier,
+    }, true);
+    if (!context.success) return { status: context.code === 'SGP_IDENTIFIER_MISSING' ? 'missing-identifier' : context.code === 'SGP_IDENTIFIER_INVALID' ? 'invalid-identifier' : 'unavailable' };
+    const clients = await fetchSgpClients(context.data, true);
+    if (clients.length === 0) return { status: 'not-found' };
+    let supportContracts: any[] = [];
+    try {
+      const rawSupportContracts = await fetchSupportContracts(context.data);
+      const validatedSupportContracts = filterSupportContractsToValidatedClients(clients, rawSupportContracts);
+      supportContracts = await enrichSupportContractsWithLiveRadius({
+        global: context.data.global,
+        user: context.data.user,
+        contracts: validatedSupportContracts,
+      });
+    } catch (supportErr) {
+      console.warn('[SGP] Falha ao enriquecer contratos com suporte/radius:', supportErr);
+    }
+    const panel = buildSGPContactPanelData(clients, supportContracts);
+    if (!panel) return { status: 'unavailable' };
+    // The selection fields and live connection coordinates leave this boundary, excluding invoices and credentials.
+    const contracts = panel.contracts.map(contract => ({
+      id: contract.id,
+      statusTone: contract.statusTone,
+      statusLabel: contract.statusLabel || 'Sem status',
+      addressLabel: contract.addressLabel || '',
+      planDescription: contract.planDescription || '',
+      ip: contract.ip || null,
+      mac: contract.mac || null,
+      login: contract.login || null,
+    }));
+    return { status: 'found', cpfCnpj: context.data.cpf, contracts };
+  } catch {
+    return { status: 'unavailable' };
+  }
 }
 
 async function fetchSupportContracts(sgp: SgpToolContext, contractId?: string | null) {
@@ -182,16 +276,9 @@ async function fetchSupportContracts(sgp: SgpToolContext, contractId?: string | 
         : [];
 }
 
-export async function runSgpTool(
-  context: AgentToolRuntimeContext,
-  action: Extract<AgentToolAction, {
-    type:
-      | 'sgp_fetch_contracts'
-      | 'sgp_fetch_contact_panel_data'
-      | 'sgp_generate_invoice_pix'
-      | 'sgp_create_payment_promise'
-      | 'sgp_open_support_ticket'
-  }>
+export async function runSgpWorkspaceTool(
+  target: SgpRuntimeTarget,
+  action: SupportedSgpToolAction,
 ): Promise<AgentToolExecutionResult> {
   if (action.type === 'sgp_open_support_ticket') {
     return {
@@ -202,7 +289,12 @@ export async function runSgpTool(
     };
   }
 
-  const sgpContext = await loadSgpContext(context);
+  const requestedCustomerIdentifier = action.type === 'sgp_fetch_contact_panel_data'
+    ? onlyDigits(action.payload?.customerIdentifier)
+    : '';
+  // Somente o chamador server-side pode definir a identidade alternativa no
+  // target. Um argumento produzido pela IA continua sujeito ao CPF do CRM.
+  const sgpContext = await loadSgpContext(target);
   if (!sgpContext.success) {
     return {
       toolName: action.type,
@@ -214,9 +306,6 @@ export async function runSgpTool(
 
   try {
     const sgp = sgpContext.data;
-    const requestedCustomerIdentifier = action.type === 'sgp_fetch_contact_panel_data'
-      ? onlyDigits(action.payload?.customerIdentifier)
-      : '';
     if (
       requestedCustomerIdentifier
       && requestedCustomerIdentifier !== onlyDigits(sgp.cpf)
@@ -225,7 +314,7 @@ export async function runSgpTool(
         toolName: action.type,
         status: 'rejected',
         input: action,
-        error: 'O CPF/CNPJ informado nao corresponde ao identificador cadastrado neste contato.',
+        error: 'O CPF/CNPJ informado nao corresponde ao identificador autorizado para este atendimento.',
       };
     }
 
@@ -334,4 +423,15 @@ export async function runSgpTool(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export async function runSgpTool(
+  context: AgentToolRuntimeContext,
+  action: SupportedSgpToolAction,
+): Promise<AgentToolExecutionResult> {
+  return runSgpWorkspaceTool({
+    workspaceId: context.workspaceId,
+    chatId: context.chat.id,
+    contactId: context.contact?.id || null,
+  }, action);
 }

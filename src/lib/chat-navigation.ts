@@ -1,6 +1,10 @@
 /**
- * Atualiza o pathname do chat selecionado sem disparar uma navegação do Next.js.
- * Mantemos a lógica isolada para evitar regressões quando a tela principal é editada.
+ * Atualiza o pathname do chat selecionado sem recarregar a página.
+ *
+ * O App Router intercepta `window.history.replaceState` para manter o pathname e
+ * o estado interno da rota sincronizados. Não devemos chamar o método do
+ * prototype diretamente: isso pula a integração do Next.js e remove os dados
+ * privados usados nas próximas navegações/revalidações.
  */
 export function replaceChatPath(chatId?: string | null) {
   if (typeof window === 'undefined') return;
@@ -19,12 +23,13 @@ export function replaceChatPath(chatId?: string | null) {
   const hash = window.location.hash || '';
   const nextUrl = `${nextPathname}${search}${hash}`;
 
-  const historyProto = Object.getPrototypeOf(window.history);
-  const nativeReplaceState = historyProto?.replaceState?.bind(window.history);
+  window.history.replaceState(null, '', nextUrl);
+}
 
-  if (nativeReplaceState) {
-    nativeReplaceState({ chatId }, '', nextUrl);
-  } else {
-    window.history.replaceState({ chatId }, '', nextUrl);
-  }
+export function resolveHydratedChatSelection(
+  serverSelectedChatId: string | null,
+  clientSelectedChatId: string | null,
+  preserveClientSelection: boolean,
+) {
+  return preserveClientSelection ? clientSelectedChatId : serverSelectedChatId;
 }

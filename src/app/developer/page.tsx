@@ -159,9 +159,9 @@ export default function DeveloperPage() {
                             <div className="overflow-x-auto p-6">
                                 <pre className="text-sm leading-relaxed">
                                     <span className="text-purple-400">const</span> <span className="text-blue-400">dialogy</span> = <span className="text-purple-400">require</span>(<span className="text-green-400">'dialogy-node'</span>);{'\n\n'}
-                                    <span className="text-white/50">// Inicializar cliente</span>{'\n'}
+                                    <span className="text-white/50">{'// Inicializar cliente'}</span>{'\n'}
                                     <span className="text-purple-400">const</span> client = <span className="text-purple-400">new</span> <span className="text-yellow-400">Client</span>(process.env.API_KEY);{'\n\n'}
-                                    <span className="text-white/50">// Enviar uma mensagem de texto</span>{'\n'}
+                                    <span className="text-white/50">{'// Enviar uma mensagem de texto'}</span>{'\n'}
                                     <span className="text-purple-400">await</span> client.messages.<span className="text-blue-400">create</span>({'\n'}
                                     {'  '}to: <span className="text-green-400">'+1234567890'</span>,{'\n'}
                                     {'  '}text: <span className="text-green-400">'Ola mundo!'</span>{'\n'}

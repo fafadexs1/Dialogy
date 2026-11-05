@@ -6,14 +6,14 @@ import {
   isRetryableMediaMessageType,
 } from '@/services/messages/retry-media';
 import {
-  RETRY_MEDIA_RETENTION_DAYS,
+  RETRY_MEDIA_RETENTION_MINUTES,
   RETRY_MEDIA_RETENTION_MS,
 } from '@/services/messages/temp-media-retention';
 
 describe('retry media messages', () => {
-  it('keeps temporary media available for one day before cleanup', () => {
-    expect(RETRY_MEDIA_RETENTION_DAYS).toBe(1);
-    expect(RETRY_MEDIA_RETENTION_MS).toBe(24 * 60 * 60 * 1000);
+  it('keeps temporary media available for five minutes before cleanup', () => {
+    expect(RETRY_MEDIA_RETENTION_MINUTES).toBe(5);
+    expect(RETRY_MEDIA_RETENTION_MS).toBe(5 * 60 * 1000);
   });
 
   it('builds a retry payload for audio and video messages', () => {

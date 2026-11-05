@@ -116,6 +116,7 @@ export const NodeExecutionStatusSchema = z.enum([
 
 export const NodeExecutionResultSchema = z.object({
   status: NodeExecutionStatusSchema,
+  sensitiveData: z.object({ inputPaths: z.array(z.string()).max(100).default([]), initialInputPaths: z.array(z.string()).max(100).default([]), variablePaths: z.array(z.string()).max(100).default([]) }).optional(),
   output: JsonRecordSchema.optional(),
   statePatch: JsonRecordSchema.optional(),
   selectedOutput: z.string().min(1).optional(),
@@ -126,7 +127,7 @@ export const NodeExecutionResultSchema = z.object({
   resumeToken: z.string().min(1).optional(),
   retryAfterMs: z.number().int().nonnegative().optional(),
   error: z.object({
-    code: z.string().min(1),
+    code: z.coerce.string().min(1),
     message: z.string(),
     retryable: z.boolean(),
     details: JsonRecordSchema.optional(),
@@ -227,6 +228,7 @@ export const WorkflowExecutionSchema = z.object({
 export const AgentNodeConfigSchema = z.object({
   name: z.string().min(1),
   role: z.string().min(1),
+  useSelectedSystemAgent: z.boolean().default(true),
   persona: z.string().default(''),
   language: z.string().min(2).default('pt-BR'),
   objective: z.string().min(1),
@@ -264,6 +266,14 @@ const AgentFinalDecisionSchema = z.object({
   completionStatus: z.enum(['completed', 'partial']),
 });
 
+const AgentResponseDecisionSchema = z.object({
+  type: z.literal('response'),
+  response: z.string(),
+  statePatch: JsonRecordSchema.optional(),
+  structuredOutput: JsonRecordSchema.optional(),
+  completionStatus: z.enum(['completed', 'partial']).default('completed'),
+});
+
 const AgentToolCallDecisionSchema = z.object({
   type: z.literal('tool_call'),
   toolName: z.string().min(1),
@@ -280,6 +290,12 @@ const AgentNeedsInputDecisionSchema = z.object({
   missingFields: z.array(z.string().min(1)),
 });
 
+const AgentQuestionDecisionSchema = z.object({
+  type: z.literal('question'),
+  question: z.string().min(1),
+  missingFields: z.array(z.string().min(1)).default([]),
+});
+
 const AgentHandoffDecisionSchema = z.object({
   type: z.literal('handoff'),
   reason: z.string().min(1),
@@ -289,8 +305,10 @@ const AgentHandoffDecisionSchema = z.object({
 
 export const AgentDecisionSchema = z.discriminatedUnion('type', [
   AgentFinalDecisionSchema,
+  AgentResponseDecisionSchema,
   AgentToolCallDecisionSchema,
   AgentNeedsInputDecisionSchema,
+  AgentQuestionDecisionSchema,
   AgentHandoffDecisionSchema,
 ]);
 

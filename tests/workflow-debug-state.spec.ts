@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { deriveWorkflowDebugNodeStates } from '@/components/workflow/workflow-debug-state';
+import { confirmedWorkflowExecutionEdges, deriveWorkflowDebugNodeStates } from '@/components/workflow/workflow-debug-state';
 
 describe('workflow canvas debugger state projection', () => {
+  it('distinguishes started, retrying, explicitly skipped and interrupted operations', () => {
+    expect(deriveWorkflowDebugNodeStates({ status: 'cancelled', currentNodeId: 'active', nodeResults: { skip: { status: 'skipped' } } }, [
+      { sequence: 3, type: 'node.started', nodeId: 'active' },
+      { sequence: 1, type: 'node.completed', nodeId: 'done' },
+      { sequence: 2, type: 'node.retrying', nodeId: 'retry' },
+    ])).toEqual({ active: 'cancelled', done: 'completed', retry: 'retrying', skip: 'skipped' });
+    expect(deriveWorkflowDebugNodeStates({ status: 'cancelled', currentNodeId: 'done' }, [{ sequence: 1, type: 'node.completed', nodeId: 'done' }])).toEqual({ done: 'completed' });
+  });
+
+  it('does not infer successful routes or skipped branches without execution evidence', () => {
+    const edges = [{ id: 'yes', sourceNodeId: 'if', sourcePortId: 'true', targetNodeId: 'yes' }, { id: 'no', sourceNodeId: 'if', sourcePortId: 'false', targetNodeId: 'no' }];
+    expect(confirmedWorkflowExecutionEdges({ status: 'running', executionPath: [{ nodeId: 'if' }, { nodeId: 'yes' }] }, edges)).toEqual(new Set());
+    expect(confirmedWorkflowExecutionEdges({ status: 'running', executionPath: [{ nodeId: 'if', selectedOutput: 'true' }, { nodeId: 'yes' }] }, edges)).toEqual(new Set(['yes']));
+    expect(deriveWorkflowDebugNodeStates({ status: 'completed' }, [])).toEqual({});
+  });
   it('projects the latest operational state for each node', () => {
     expect(deriveWorkflowDebugNodeStates(
       { status: 'running', currentNodeId: 'agent' },

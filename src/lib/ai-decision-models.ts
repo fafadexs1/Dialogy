@@ -1,8 +1,29 @@
 import { DEFAULT_AUTOPILOT_MODEL } from '@/lib/ai-models';
+import { z } from 'zod';
+
+const decisionSettingsSchema = z.object({ model: z.string().trim().min(1), timeoutMs: z.number().int().min(500).max(15000) });
+export const AiDecisionModelConfigSchema = z.object({
+  toolIntentGate: decisionSettingsSchema,
+  intentClassifier: decisionSettingsSchema,
+  workflowClassifier: decisionSettingsSchema,
+  fieldExtractor: decisionSettingsSchema,
+});
+
+export function assertDecisionModelsAvailable(config: AiDecisionModelConfig, models: Array<{id:string;enabled:boolean}>) {
+  for (const role of AI_DECISION_MODEL_ROLES) {
+    if (!models.some(model => model.id === config[role.id].model && model.enabled)) {
+      throw new Error(`O modelo de ${role.label} precisa estar cadastrado e ativo. Altere a etapa antes de desativar o modelo.`);
+    }
+  }
+}
 
 export const SYSTEM_AI_DECISION_MODELS_KEY = 'ai_decision_model_config';
 
-export type AiDecisionModelRole = 'toolIntentGate' | 'intentClassifier' | 'workflowClassifier';
+export type AiDecisionModelRole =
+  | 'toolIntentGate'
+  | 'intentClassifier'
+  | 'workflowClassifier'
+  | 'fieldExtractor';
 
 export type AiDecisionModelSettings = {
   model: string;
@@ -35,6 +56,12 @@ export const AI_DECISION_MODEL_ROLES: Array<{
     description: 'Decide consultas operacionais opcionais antes da resposta.',
     defaultTimeoutMs: 1800,
   },
+  {
+    id: 'fieldExtractor',
+    label: 'Field Extractor',
+    description: 'Le a resposta do cliente e extrai os campos de coleta que as regras deterministicas nao conseguiram identificar.',
+    defaultTimeoutMs: 2500,
+  },
 ];
 
 export const DEFAULT_AI_DECISION_MODEL_CONFIG: AiDecisionModelConfig = {
@@ -49,6 +76,10 @@ export const DEFAULT_AI_DECISION_MODEL_CONFIG: AiDecisionModelConfig = {
   workflowClassifier: {
     model: DEFAULT_AUTOPILOT_MODEL,
     timeoutMs: 1800,
+  },
+  fieldExtractor: {
+    model: DEFAULT_AUTOPILOT_MODEL,
+    timeoutMs: 2500,
   },
 };
 
@@ -93,6 +124,7 @@ export function parseAiDecisionModelConfig(
       toolIntentGate: normalizeRoleSettings(parsed.toolIntentGate, fallback.toolIntentGate),
       intentClassifier: normalizeRoleSettings(parsed.intentClassifier, fallback.intentClassifier),
       workflowClassifier: normalizeRoleSettings(parsed.workflowClassifier, fallback.workflowClassifier),
+      fieldExtractor: normalizeRoleSettings(parsed.fieldExtractor, fallback.fieldExtractor),
     };
   } catch {
     return fallback;
@@ -104,6 +136,6 @@ export function serializeAiDecisionModelConfig(config: AiDecisionModelConfig): s
     toolIntentGate: normalizeRoleSettings(config.toolIntentGate, DEFAULT_AI_DECISION_MODEL_CONFIG.toolIntentGate),
     intentClassifier: normalizeRoleSettings(config.intentClassifier, DEFAULT_AI_DECISION_MODEL_CONFIG.intentClassifier),
     workflowClassifier: normalizeRoleSettings(config.workflowClassifier, DEFAULT_AI_DECISION_MODEL_CONFIG.workflowClassifier),
+    fieldExtractor: normalizeRoleSettings(config.fieldExtractor, DEFAULT_AI_DECISION_MODEL_CONFIG.fieldExtractor),
   }, null, 2);
 }
-

@@ -231,7 +231,7 @@ const PROFISSIONAL_LIMITS: PlanLimits = {
     knowledge_docs: 5,
     ai_copilot: false,
     ai_byok: true,
-    ai_model_selection: true,
+    ai_model_selection: false,
     case_memory: false,
     private_agents: false,
 
@@ -311,7 +311,7 @@ const OPERACAO_LIMITS: PlanLimits = {
     knowledge_docs: 50,
     ai_copilot: true,
     ai_byok: true,
-    ai_model_selection: true,
+    ai_model_selection: false,
     case_memory: true,
     private_agents: true,
 
@@ -391,7 +391,7 @@ const ENTERPRISE_LIMITS: PlanLimits = {
     knowledge_docs: UNLIMITED,
     ai_copilot: true,
     ai_byok: true,
-    ai_model_selection: true,
+    ai_model_selection: false,
     case_memory: true,
     private_agents: true,
 

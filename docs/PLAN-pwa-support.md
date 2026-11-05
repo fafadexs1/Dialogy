@@ -17,7 +17,7 @@ The user wants to enable PWA capabilities for the Dialogy chat application. This
 
 ## 2. Technical Strategy
 
-We will use `@ducanh2912/next-pwa` (a modern fork of `next-pwa`) or standard `next-pwa` depending on compatibility with Next.js 16 + Turbopack. Given Next.js 16, manual SW setup or a lighter wrapper might be safer, but `@ducanh2912/next-pwa` is the current standard for App Router.
+The PWA uses the Web App Manifest plus a small static service worker. This keeps the app compatible with Next.js 16/Turbopack and deliberately leaves authenticated navigation, RSC payloads, API calls, and Next build assets network-only.
 
 ### Tech Stack Additions
 - `manifest.json`: Web App Manifest standard.
@@ -31,23 +31,23 @@ We will use `@ducanh2912/next-pwa` (a modern fork of `next-pwa`) or standard `ne
 ### Phase 1: Assets & Manifest
 **Goal**: Make the browser recognize the app as installable.
 
-- [ ] **Generate Icons**:
+- [x] **Generate Icons**:
   - `public/icons/icon-192x192.png`
   - `public/icons/icon-512x512.png`
   - `public/apple-icon.png` (for iOS)
-- [ ] **Create Manifest**:
+- [x] **Create Manifest**:
   - `public/manifest.json` with name, colors, and display modes.
-- [ ] **Update Metadata**:
+- [x] **Update Metadata**:
   - Add `viewport` (disable zoom on inputs for iOS) and `theme-color` in `layout.tsx` or `manifest`.
 
 ### Phase 2: Service Worker Configuration
 **Goal**: Enable caching and offline capabilities.
 
-- [ ] **Install Dependency**: `npm install @ducanh2912/next-pwa`
-- [ ] **Configure Next.js**:
-  - Update `next.config.js` to wrap the config with `withPWA`.
-  - Exclude admin/API routes from aggressive caching to prevent stale data issues.
-- [ ] **Git Ignore**: Add `public/sw.js` and `public/workbox-*.js` to `.gitignore`.
+- [x] **Configure Service Worker**:
+  - Keep the worker in `public/sw.js` so it is served unchanged by Next.js and Turbopack.
+  - Cache only the manifest, icons, and same-origin static media; leave authenticated/API/Next routes network-only.
+- [x] **Register in the App**: `src/components/pwa/service-worker-registration.tsx` registers production workers and can enable local verification with `npm run dev:pwa`.
+- [x] **Git Ignore**: Generated Workbox assets remain ignored; the checked-in worker is the maintained source.
 
 ### Phase 3: Registration & UX
 **Goal**: Handle usage experience.
@@ -69,16 +69,16 @@ We will use `@ducanh2912/next-pwa` (a modern fork of `next-pwa`) or standard `ne
 
 | Risk | Mitigation |
 |------|------------|
-| **Stale Data** | Configure SW `runtimeCaching` to `NetworkFirst` for API routes (`/api/*`). |
-| **Next.js 16 Limits** | If `next-pwa` fails with Turbopack, implement a simple custom `sw.js` using Workbox CDN. |
+| **Stale Data** | API, RSC, navigation, and Next build assets are deliberately network-only. |
+| **Next.js 16 Limits** | The worker is static and does not add a Webpack plugin to the Next.js configuration. |
 | **iOS Caching** | iOS usually has stricter PWA limits; ensure `apple-mobile-web-app-capable` meta tags are present. |
 
 ---
 
 ## 5. Next Steps for Implementation
 
-1. **Approve Plan**: Confirm this structure implies the scope you want.
-2. **Execute**: Run `/create` or start with Phase 1 (Assets).
+1. **Verify**: Run the production build and a Lighthouse PWA audit.
+2. **Manual Test**: Install on a mobile simulator or actual device.
 
 **Files to be created:**
 - `public/manifest.json`

@@ -26,17 +26,15 @@ export async function sendDocumentMessage(
     instanceName: string,
     payload: DocumentPayload
 ) {
-    let mediaUrl = payload.media;
+    const uploaded = await uploadTempMedia({
+        media: payload.media,
+        mimetype: payload.mimetype,
+        fileName: payload.filename,
+    });
+    const mediaUrl = uploaded.publicUrl;
 
-    // Se não for URL (assumindo base64), faz upload para gerar link
-    if (!payload.media.startsWith('http')) {
-        const result = await uploadTempMedia({
-            media: payload.media,
-            mimetype: payload.mimetype,
-            fileName: payload.filename,
-        });
-        mediaUrl = result.publicUrl;
-    }
+    // URLs externas também passam pelo storage temporário. Isso preserva a
+    // extensão do arquivo para adaptadores que inferem o MIME pela URL.
 
     const apiPayload = {
         number: payload.number,

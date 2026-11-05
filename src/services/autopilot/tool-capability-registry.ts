@@ -25,9 +25,16 @@ export type ToolCapabilityRisk = 'low' | 'medium' | 'high';
 export type ToolCapability = {
   name: string;
   capability: string;
+  version: string;
   description: string;
   riskLevel: ToolCapabilityRisk;
   sideEffect: 'none' | 'low' | 'medium' | 'high';
+  idempotent: boolean;
+  timeoutMs: number;
+  maxAttempts: number;
+  permissions: string[];
+  preconditions: string[];
+  postconditions: string[];
   requiredSlots: AutopilotSlotName[];
   allowedGoals: UniversalAutopilotIntent[];
   forbiddenGoals: UniversalAutopilotIntent[];
@@ -102,9 +109,20 @@ export function toolCapabilityFromCatalogItem(
   return {
     name: tool.name,
     capability: capabilityName(tool.name),
+    version: tool.version,
     description: tool.description,
     riskLevel: sensitiveMcp ? 'high' : tool.riskLevel,
     sideEffect: sensitiveMcp ? 'high' : tool.sideEffect,
+    idempotent: tool.idempotent,
+    timeoutMs: tool.timeoutMs,
+    maxAttempts: tool.maxAttempts,
+    permissions: [
+      tool.class === 'read_only' || tool.class === 'retrieval' || tool.class === 'compute_only'
+        ? 'agent.tools.read'
+        : 'agent.tools.execute',
+    ],
+    preconditions: tool.requiredSlots.map((slot) => `slot:${slot}`),
+    postconditions: tool.sideEffect === 'none' ? [] : [`tool:${tool.name}:succeeded`],
     requiredSlots: tool.requiredSlots,
     allowedGoals: tool.allowedIntents,
     forbiddenGoals: [],

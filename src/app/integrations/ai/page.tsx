@@ -1,5 +1,5 @@
-import { AiModelCredentialsPage } from '@/components/integrations/ai-model-credentials-page';
+import { redirect } from 'next/navigation';
 
 export default function AiIntegrationPage() {
-  return <AiModelCredentialsPage />;
+  redirect('/settings/billing');
 }

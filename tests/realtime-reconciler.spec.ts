@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getWorkspaceMessageDisposition,
+  hasCompleteRealtimeChatPresentation,
   parseVisibleIdSet,
   reconcileRealtimeChatAssignment,
   reconcileRealtimeChatPresentation,
@@ -38,6 +40,24 @@ describe('realtime reconciler', () => {
     expect(payload.commit_timestamp).toBe('2024-01-01T10:00:00Z');
   });
 
+  it('detects chat payloads that include the complete team presentation', () => {
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: 'Financeiro',
+      team_color: '#dc143c',
+    })).toBe(true);
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: 'Financeiro',
+    })).toBe(false);
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: 'Financeiro',
+      team_color: null,
+    })).toBe(false);
+    expect(hasCompleteRealtimeChatPresentation({
+      team_name: null,
+      team_color: null,
+    })).toBe(true);
+  });
+
   it('filters chat updates by visible chat id when a visible set exists', () => {
     const visible = parseVisibleIdSet('chat-1,chat-2');
     const visiblePayload = toPostgresChangesPayload(broadcastPayload({ id: 'chat-1' }));
@@ -54,6 +74,24 @@ describe('realtime reconciler', () => {
 
     expect(shouldDeliverMessagePayload(visiblePayload, visible)).toBe(true);
     expect(shouldDeliverMessagePayload(hiddenPayload, visible)).toBe(false);
+  });
+
+  it('reconciles the list when a message belongs to a chat not loaded yet', () => {
+    const visible = parseVisibleIdSet('chat-1,chat-2');
+    const newCustomerPayload = toPostgresChangesPayload(
+      broadcastPayload({ id: 'msg-new', chat_id: 'chat-new' }),
+    );
+
+    expect(getWorkspaceMessageDisposition(newCustomerPayload, visible, 'chat-1')).toBe('reconcile-list');
+  });
+
+  it('does not duplicate the selected thread through the workspace channel', () => {
+    const visible = parseVisibleIdSet('chat-1,chat-2');
+    const selectedPayload = toPostgresChangesPayload(
+      broadcastPayload({ id: 'msg-selected', chat_id: 'chat-1' }),
+    );
+
+    expect(getWorkspaceMessageDisposition(selectedPayload, visible, 'chat-1')).toBe('ignore-selected');
   });
 
   it('replaces a stale human agent with the hydrated transfer target', () => {

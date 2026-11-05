@@ -398,6 +398,15 @@ describe('agent tool execution policy', () => {
     expect(result).toEqual({ allowed: true, riskLevel: 'medium' });
   });
 
+  it('allows a human handoff after an independent lookup fails', async () => {
+    const result = await evaluateAgentToolPolicy({
+      context: { ...context, customerMessage: 'Pode me transferir para um humano' },
+      action: { type: 'transfer_chat', payload: { teamId: 'team-1' } },
+      previousResults: [{ toolName: 'sgp_fetch_contracts', status: 'error', input: { type: 'sgp_fetch_contracts' }, error: 'timeout' }],
+    });
+    expect(result).toEqual({ allowed: true, riskLevel: 'medium' });
+  });
+
   it('blocks payment promises outside a financial request before asking for confirmation', async () => {
     const result = await evaluateAgentToolPolicy({
       context,

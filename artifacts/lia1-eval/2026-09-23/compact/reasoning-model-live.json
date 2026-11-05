@@ -1,0 +1,248 @@
+{
+  "at": "2026-09-23T13:40:51.817Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "7cf156f3-ecec-4a41-bf6f-9225765699e5",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [
+    {
+      "scenario": "commercial-eligibility",
+      "response": "Consultei a elegibilidade desta oferta para o seu contrato e o resultado foi: \"Esta oferta não está disponível para este contrato.\"\n\nOu seja, no momento não é possível contratá-la. Se quiser, posso verificar outra oferta ou, se você tiver informações novas sobre o contrato, faço uma nova consulta.",
+      "ms": 5882,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "req-offer-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Verificar se o cliente pode contratar a oferta e informar o resultado.",
+            "status": "resolved",
+            "memoryRequestId": "synthetic-eligibility-session:req-offer-1",
+            "values": {},
+            "integrationValues": {
+              "eligible": false
+            },
+            "choiceLabels": {},
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-eligibility-session:feb8ddb0a5d6e01605c9ee929f99a85e93564ab69894a54e6430a0b74a069408:read-0",
+            "requestId": "req-offer-1",
+            "memoryRequestId": "synthetic-eligibility-session:req-offer-1",
+            "capabilityId": "offer:eligibility",
+            "title": "Consultar elegibilidade",
+            "signature": "feb8ddb0a5d6e01605c9ee929f99a85e93564ab69894a54e6430a0b74a069408",
+            "status": "succeeded",
+            "readOnly": true,
+            "attemptMessageId": "synthetic-eligibility",
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-23T13:40:48.859Z",
+            "failureCategory": "business_negative"
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-eligibility",
+          "durationMs": 5833,
+          "modelDecisions": 2,
+          "toolCalls": 1,
+          "activeRequests": 0,
+          "pausedRequests": 0,
+          "resolvedRequests": 1,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-flash",
+              "stage": "decision",
+              "calls": 2,
+              "inputTokens": 7388,
+              "outputTokens": 864,
+              "totalTokens": 8252
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-eligibility",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 7388,
+          "outputTokens": 864,
+          "totalTokens": 8252
+        }
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "req-offer-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Verificar se o cliente pode contratar a oferta e informar o resultado.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "req-offer-1",
+          "capabilityId": "offer:eligibility",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente pediu para conferir a disponibilidade da oferta; a consulta de elegibilidade é leitura e não exige confirmação, sendo o próximo passo necessário antes de responder."
+        }
+      },
+      "ms": 2796
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-eligibility-session:feb8ddb0a5d6e01605c9ee929f99a85e93564ab69894a54e6430a0b74a069408:read-0",
+            "requestId": "req-offer-1",
+            "memoryRequestId": "synthetic-eligibility-session:req-offer-1",
+            "capabilityId": "offer:eligibility",
+            "title": "Consultar elegibilidade",
+            "signature": "feb8ddb0a5d6e01605c9ee929f99a85e93564ab69894a54e6430a0b74a069408",
+            "status": "succeeded",
+            "readOnly": true,
+            "attemptMessageId": "synthetic-eligibility",
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-23T13:40:48.859Z",
+            "failureCategory": "business_negative"
+          },
+          "category": "business_negative",
+          "result": "business_negative",
+          "detail": "A consulta funcionou, mas o retorno de negócio foi negativo. Avalie outra capacidade publicada ou explique o resultado; não repita a mesma consulta sem dado novo."
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "req-offer-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Verificar se o cliente pode contratar a oferta e informar o resultado.",
+            "status": "resolved"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "req-offer-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Consultei a elegibilidade desta oferta para o seu contrato e o resultado foi: \"Esta oferta não está disponível para este contrato.\"\n\nOu seja, no momento não é possível contratá-la. Se quiser, posso verificar outra oferta ou, se você tiver informações novas sobre o contrato, faço uma nova consulta.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "A consulta de elegibilidade (offer:eligibility) foi executada com sucesso e retornou eligible=false, caracterizando resultado de negócio negativo. A ativação depende da elegibilidade e está bloqueada. Respondo ao cliente com o texto publicado correspondente, sem repetir a mesma consulta sem dado novo."
+        }
+      },
+      "ms": 2885
+    }
+  ],
+  "usage": [
+    {
+      "configId": "3b3339a1-a81f-49ac-bde9-963e7e648a30",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-flash",
+      "inputTokens": 3265,
+      "outputTokens": 334,
+      "totalTokens": 3599,
+      "ruleName": "decision",
+      "chatId": "synthetic-reasoning",
+      "status": "charged",
+      "metadata": {
+        "releaseId": "7cf156f3-ecec-4a41-bf6f-9225765699e5",
+        "sessionId": "synthetic-eligibility-session",
+        "messageId": "synthetic-eligibility",
+        "publishedModelMismatch": true,
+        "decisionIndex": 1,
+        "contextMode": "compact",
+        "contextFrame": "snapshot",
+        "promptChars": 1250,
+        "contextSizes": {
+          "objective": 94,
+          "message": 72,
+          "messageId": 23,
+          "suggestionOnly": 5,
+          "mediaAnalysis": 0,
+          "supportAvailable": 5,
+          "historicalOperationsAvailable": 4,
+          "executionBudget": 108,
+          "requests": 2,
+          "operations": 2,
+          "pendingAction": 4,
+          "procedures": 469,
+          "capabilities": 2,
+          "choices": 2,
+          "hasOlderMemory": 5,
+          "hasOlderHistory": 5,
+          "recentMessages": 137,
+          "observations": 2,
+          "finalDecisionOnly": 5
+        },
+        "priorOutcome": null,
+        "priorFailureCategory": null
+      }
+    },
+    {
+      "configId": "3b3339a1-a81f-49ac-bde9-963e7e648a30",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-flash",
+      "inputTokens": 4123,
+      "outputTokens": 530,
+      "totalTokens": 4653,
+      "ruleName": "decision",
+      "chatId": "synthetic-reasoning",
+      "status": "charged",
+      "metadata": {
+        "releaseId": "7cf156f3-ecec-4a41-bf6f-9225765699e5",
+        "sessionId": "synthetic-eligibility-session",
+        "messageId": "synthetic-eligibility",
+        "publishedModelMismatch": true,
+        "decisionIndex": 2,
+        "contextMode": "compact",
+        "contextFrame": "snapshot",
+        "promptChars": 4166,
+        "contextSizes": {
+          "objective": 94,
+          "message": 72,
+          "messageId": 23,
+          "suggestionOnly": 5,
+          "mediaAnalysis": 0,
+          "supportAvailable": 5,
+          "historicalOperationsAvailable": 4,
+          "executionBudget": 108,
+          "requests": 488,
+          "operations": 402,
+          "pendingAction": 4,
+          "procedures": 469,
+          "capabilities": 684,
+          "choices": 564,
+          "hasOlderMemory": 5,
+          "hasOlderHistory": 5,
+          "recentMessages": 137,
+          "observations": 788,
+          "finalDecisionOnly": 5
+        },
+        "priorOutcome": "business_negative",
+        "priorFailureCategory": "business_negative"
+      }
+    }
+  ]
+}

@@ -50,8 +50,12 @@ export function ChatScreen() {
     const content = draft.trim();
     if (!chat || !content) return;
     setDraft("");
-    await sendMessage({ chatId: chat.id, content });
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    try {
+      await sendMessage({ chatId: chat.id, content });
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    } catch {
+      setDraft((current) => current.trim() ? current : content);
+    }
   }
 
   const renderMessage = useCallback(

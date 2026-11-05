@@ -1,14 +1,23 @@
 import { db } from '@/lib/db';
-import { getSupabaseAdmin } from '@/lib/supabase';
+import { buildChatTeamLateralSql } from '@/lib/chat-team-resolution';
+import { broadcastRealtimeEvent } from '@/lib/realtime/broadcast';
 
 export async function broadcastChatUpdate(
   workspaceId: string,
   chatId: string,
   updatedFields: Record<string, unknown>,
 ) {
+  // Se o update não traz o status do chat, faz o broadcast hidratado completo
+  // para garantir que clientes Realtime nunca recebam um payload esquelético
+  // com status indefinido que caia no fallback incorreto.
+  if (!updatedFields.status) {
+    await broadcastHydratedChatUpdate(workspaceId, chatId);
+    return;
+  }
+
   try {
     const topic = `workspace:${workspaceId}:chats`;
-    await getSupabaseAdmin().channel(topic).httpSend('UPDATE', {
+    await broadcastRealtimeEvent(topic, 'UPDATE', {
         id: chatId,
         schema: 'public',
         table: 'chats',
@@ -31,6 +40,8 @@ export async function broadcastHydratedChatUpdate(workspaceId: string, chatId: s
     const { rows } = await db.query(
       `SELECT
         c.status,
+        c.contact_id,
+        c.protocol,
         c.agent_id,
         c.assigned_system_agent_id,
         c.is_autopilot_active,
@@ -42,26 +53,21 @@ export async function broadcastHydratedChatUpdate(workspaceId: string, chatId: s
         c.color,
         u.full_name AS agent_name,
         u.avatar_url AS agent_avatar_url,
-        COALESCE(system_team.id, human_team.id) AS team_id,
-        COALESCE(system_team.name, human_team.name) AS team_name,
-        COALESCE(system_team.color, human_team.color) AS team_color,
+        t.id AS team_id,
+        t.name AS team_name,
+        t.color AS team_color,
         sa.name AS assigned_system_agent_name,
         sa.avatar_url AS assigned_system_agent_avatar_url,
-        sa.type AS assigned_system_agent_type
+        sa.type AS assigned_system_agent_type,
+        ct.name AS contact_name,
+        ct.phone AS contact_phone,
+        ct.phone_number_jid AS contact_phone_number_jid,
+        ct.avatar_url AS contact_avatar_url
      FROM chats c
+     LEFT JOIN contacts ct ON ct.id = c.contact_id
      LEFT JOIN users u ON u.id = c.agent_id
      LEFT JOIN system_agents sa ON sa.id = c.assigned_system_agent_id
-     LEFT JOIN LATERAL (
-       SELECT t.id, t.name, t.color
-       FROM team_members tm
-       JOIN teams t ON t.id = tm.team_id AND t.workspace_id = c.workspace_id
-       WHERE tm.user_id = c.agent_id
-       ORDER BY t.name ASC, t.id ASC
-       LIMIT 1
-     ) human_team ON TRUE
-     LEFT JOIN teams system_team
-       ON system_team.id = sa.team_id
-      AND system_team.workspace_id = c.workspace_id
+     ${buildChatTeamLateralSql({ chatAlias: 'c' })}
      WHERE c.id = $1 AND c.workspace_id = $2
      LIMIT 1`,
       [chatId, workspaceId],

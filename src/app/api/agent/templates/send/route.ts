@@ -7,7 +7,7 @@ interface TemplatePayload {
     instanceName: string;
     name: string;
     language: string;
-    components: any[];
+    components: unknown;
     renderedContent?: string;
 }
 
@@ -32,8 +32,8 @@ export async function POST(request: Request) {
         const body: TemplatePayload = await request.json();
         const { numberid, instanceName, name, language, components, renderedContent } = body;
 
-        if (!numberid || !instanceName || !name || !language || !components) {
-            return NextResponse.json({ error: 'Missing required fields: numberid, instanceName, name, language, components.' }, { status: 400 });
+        if (!numberid || !instanceName || !name || !language) {
+            return NextResponse.json({ error: 'Missing required fields: numberid, instanceName, name, language.' }, { status: 400 });
         }
 
         const metadata = agent.type === 'marketing' ? {
@@ -42,6 +42,7 @@ export async function POST(request: Request) {
             marketingTargetSystemAgentId: agent.handoff_system_agent_id || null,
         } : {};
 
+        // The action records invalid components as a failed attempt in the conversation.
         const result = await sendAgentTemplateAction({
             agentId: agent.id,
             workspaceId: agent.workspace_id,
@@ -57,7 +58,10 @@ export async function POST(request: Request) {
         if (result.success) {
             return NextResponse.json({ success: true, message: 'Template sent successfully.', apiResponse: result.apiResponse });
         } else {
-            return NextResponse.json({ success: false, error: result.error || 'Failed to send template.' }, { status: 500 });
+            return NextResponse.json(
+                { success: false, error: result.error || 'Failed to send template.' },
+                { status: result.statusCode ?? 500 }
+            );
         }
 
     } catch (error: any) {

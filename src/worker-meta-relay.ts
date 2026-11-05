@@ -1,7 +1,6 @@
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   require('dotenv').config();
-} catch (err) {
+} catch {
   // dotenv is not present in production docker images as env vars are injected by the environment
 }
 
@@ -10,20 +9,22 @@ import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import { currentDialogySigningKey } from '@/services/meta/dialogy-hmac';
 import { buildEvolutionRelayRequest } from '@/services/meta/evolution-relay-contract';
+import { resolveEvolutionRelayInstanceId } from '@/services/meta/evolution-relay-instance';
 import { decryptPayload } from '@/services/meta/meta-payload-crypto';
+import { RelayCapacity } from '@/services/meta/relay-capacity';
 import { processPersistedEvolutionWebhookEvent } from '@/services/whatsapp/evolution-webhook-handler';
 
 const workerId = `meta-relay-${randomUUID()}`;
 const leaseMs = Number(process.env.META_RELAY_LEASE_MS || 120_000);
 const concurrency = Math.max(1, Number(process.env.META_RELAY_CONCURRENCY || 5));
-let active = 0;
+const capacity = new RelayCapacity(concurrency);
 let stopping = false;
 
 function retryableStatus(status: number) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-async function claimDeliveries() {
+async function claimDeliveries(limit: number) {
   return db.query(
     `UPDATE public.meta_whatsapp_deliveries
      SET status = 'delivering',
@@ -42,7 +43,7 @@ async function claimDeliveries() {
        FOR UPDATE SKIP LOCKED
      )
      RETURNING *`,
-    [workerId, leaseMs, Math.max(0, concurrency - active)],
+    [workerId, leaseMs, limit],
   );
 }
 
@@ -87,7 +88,7 @@ async function processDelivery(delivery: Record<string, unknown>) {
       return;
     }
     const clusterResult = await db.query(
-      'SELECT api_url FROM public.whatsapp_clusters WHERE id = $1',
+      'SELECT api_url, api_key FROM public.whatsapp_clusters WHERE id = $1',
       [delivery.cluster_id],
     );
     if (clusterResult.rowCount !== 1) {
@@ -95,22 +96,32 @@ async function processDelivery(delivery: Record<string, unknown>) {
       return;
     }
     let instanceName: string | null = null;
+    let providerInstanceId: string | null = null;
     if (delivery.instance_id) {
       const instanceResult = await db.query(
-        'SELECT instance_name FROM public.evolution_api_instances WHERE id = $1',
-        [delivery.instance_id],
+        `SELECT instance_name FROM public.evolution_api_instances
+         WHERE id = $1 AND workspace_id = $2 AND cluster_id = $3
+           AND phone_number_id = $4 AND waba_id = $5`,
+        [delivery.instance_id, delivery.workspace_id, delivery.cluster_id, delivery.phone_number_id, delivery.waba_id],
       );
       if (instanceResult.rowCount !== 1) {
         await quarantine(deliveryId, { reason: 'instance_not_found' });
         return;
       }
       instanceName = instanceResult.rows[0].instance_name;
+      providerInstanceId = await resolveEvolutionRelayInstanceId({
+        apiUrl: String(clusterResult.rows[0].api_url),
+        apiKey: String(clusterResult.rows[0].api_key || ''),
+        instanceName: String(instanceName),
+        phoneNumberId: String(delivery.phone_number_id || ''),
+        wabaId: String(delivery.waba_id || ''),
+      });
     }
 
     const payload = JSON.parse(decryptPayload(String(delivery.encrypted_payload))) as Record<string, unknown>;
     const timestamp = new Date().toISOString();
     const { keyId, secret } = currentDialogySigningKey();
-    const relayRequest = buildEvolutionRelayRequest({ delivery, instanceName, payload, timestamp, keyId, secret });
+    const relayRequest = buildEvolutionRelayRequest({ delivery, instanceName, providerInstanceId, payload, timestamp, keyId, secret });
     const response = await fetch(
       `${String(clusterResult.rows[0].api_url).replace(/\/$/, '')}/internal/webhooks/dialogy/meta`,
       {
@@ -146,12 +157,32 @@ async function processDelivery(delivery: Record<string, unknown>) {
 }
 
 export async function runMetaRelayBatch() {
-  if (stopping || active >= concurrency) return;
-  const claimed = await claimDeliveries();
-  for (const delivery of claimed.rows) {
-    active += 1;
-    void processDelivery(delivery).finally(() => { active -= 1; });
+  if (stopping) return;
+  const available = capacity.beginClaim();
+  if (available === 0) return;
+  try {
+    const claimed = await claimDeliveries(available);
+    for (const delivery of claimed.rows) {
+      capacity.startDelivery();
+      void processDelivery(delivery)
+        .catch((error) => {
+          console.error(
+            '[META_RELAY] delivery processing failed',
+            delivery.id,
+            error instanceof Error ? error.message : 'unknown_error',
+          );
+        })
+        .finally(() => capacity.finishDelivery());
+    }
+  } finally {
+    capacity.finishClaim();
   }
+}
+
+function runScheduledTask(label: string, task: () => Promise<unknown>): void {
+  void task().catch((error) => {
+    console.error(`[META_RELAY] ${label} failed`, error instanceof Error ? error.message : 'unknown_error');
+  });
 }
 
 export async function reconcileEvolutionInbox() {
@@ -199,16 +230,16 @@ export async function enforceMetaRetention() {
 async function daemon() {
   currentDialogySigningKey();
   console.log(`[META_RELAY] worker ${workerId} started`);
-  const relayTimer = setInterval(() => void runMetaRelayBatch(), 1000);
-  const inboxTimer = setInterval(() => void reconcileEvolutionInbox(), 15_000);
-  const retentionTimer = setInterval(() => void enforceMetaRetention(), 6 * 60 * 60 * 1000);
+  const relayTimer = setInterval(() => runScheduledTask('relay batch', runMetaRelayBatch), 1000);
+  const inboxTimer = setInterval(() => runScheduledTask('inbox reconciliation', reconcileEvolutionInbox), 15_000);
+  const retentionTimer = setInterval(() => runScheduledTask('retention enforcement', enforceMetaRetention), 6 * 60 * 60 * 1000);
   const shutdown = async () => {
     stopping = true;
     clearInterval(relayTimer);
     clearInterval(inboxTimer);
     clearInterval(retentionTimer);
     const deadline = Date.now() + 30_000;
-    while (active > 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
+    while (capacity.activeCount > 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
     await db.end();
     process.exit(0);
   };

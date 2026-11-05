@@ -1,0 +1,19 @@
+'use client';
+import { useCallback, useEffect, useState } from 'react';
+import { Clock3, Loader2, Save } from 'lucide-react';
+import { getPersonalInactivitySettings, savePersonalInactivitySettings } from '@/actions/agent-inactivity';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { toast } from '@/hooks/use-toast';
+
+export function PersonalInactivitySettings() {
+  const [enabled,setEnabled]=useState(false); const [minutes,setMinutes]=useState('30'); const [message,setMessage]=useState(''); const [loading,setLoading]=useState(true); const [busy,setBusy]=useState(false); const [loaded,setLoaded]=useState(false); const [error,setError]=useState('');
+  const load=useCallback(async()=>{setLoading(true);setLoaded(false);setError('');try{const value=await getPersonalInactivitySettings();setEnabled(value.minutes>0);setMinutes(String(value.minutes||30));setMessage(value.message);setLoaded(true);}catch{setError('Não foi possível carregar suas configurações.');}finally{setLoading(false);}},[]);
+  useEffect(()=>{void load();},[load]);
+  async function save(){const value=Number(minutes);if(enabled&&(!Number.isInteger(value)||value<1||value>43200)){setError('Informe entre 1 e 43.200 minutos.');return;}setBusy(true);setError('');try{await savePersonalInactivitySettings({minutes:enabled?value:0,message});toast({title:'Preferências de inatividade salvas.'});}catch{setError('Não foi possível salvar. Tente novamente.');}finally{setBusy(false);}}
+  return <Card><CardHeader><CardTitle className="flex items-center gap-2"><Clock3 className="h-5 w-5" />Meus atendimentos e inatividade</CardTitle><CardDescription>Escolha o que acontece com as conversas atribuídas a você neste workspace.</CardDescription></CardHeader><CardContent className="space-y-5">{loading?<p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</p>:loaded?<><div className="flex items-center justify-between gap-4 rounded-xl border p-4"><div><Label htmlFor="personal-inactivity">Encerrar automaticamente</Label><p className="mt-1 text-xs text-muted-foreground">Quando desativado, suas conversas permanecem abertas.</p></div><Switch id="personal-inactivity" checked={enabled} onCheckedChange={setEnabled} /></div>{enabled&&<><div className="space-y-2"><Label htmlFor="personal-inactivity-minutes">Tempo sem atividade (minutos)</Label><Input id="personal-inactivity-minutes" type="number" min={1} max={43200} value={minutes} onChange={e=>setMinutes(e.target.value)} /><p className="text-xs text-muted-foreground">Uma nova mensagem reinicia a contagem.</p></div><div className="space-y-2"><Label htmlFor="personal-inactivity-message">Mensagem antes de encerrar <span className="font-normal text-muted-foreground">(opcional)</span></Label><Textarea id="personal-inactivity-message" maxLength={4096} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Ex.: Vou encerrar por enquanto. Quando precisar, é só chamar!" /><p className="text-xs text-muted-foreground">Enviada no momento do encerramento. Se o envio não for confirmado, a conversa permanece aberta.</p></div></>}{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}<Button type="button" disabled={busy} onClick={save}>{busy?<Loader2 className="h-4 w-4 animate-spin" />:<Save className="h-4 w-4" />}Salvar preferência</Button></>:null}{error&&loading&&<p role="alert" className="text-sm text-destructive">{error}</p>}{error&&!loading&&!loaded&&<><p role="alert" className="text-sm text-destructive">{error}</p><Button type="button" variant="ghost" onClick={load}>Recarregar</Button></>}</CardContent></Card>;
+}

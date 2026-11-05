@@ -2,26 +2,27 @@
 import { v4 as uuidv4 } from 'uuid';
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import ChatList from '../chat/chat-list';
+import { MobileChatList } from '../chat/mobile/mobile-chat-list';
 import ChatPanel from '../chat/chat-panel';
 import MobileContactPanel from '../chat/mobile-contact-panel';
+import { MobileChatView } from '../chat/mobile/mobile-chat-view';
 import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
-import { getInitialChatsData, syncInboxData, getChatMessagesWindow } from '@/actions/chats';
+import { getInitialChatsData, syncInboxData, getChatMessagesWindow, loadOlderChatsAction } from '@/actions/chats';
 import type { InitialChatsPayload } from '@/actions/chats';
+import { getInboxPaginationTab, isChatInInboxQueueScope, type InboxListFilters } from '@/lib/inbox-pagination';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
-import { AlertCircle, RefreshCw, MessageSquare, Users, Settings, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, MessageSquare, CheckCircle2 } from 'lucide-react';
 import { cn, formatMessageDate } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { Switch } from '../ui/switch';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
-import { replaceChatPath } from '@/lib/chat-navigation';
+import { replaceChatPath, resolveHydratedChatSelection } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { usePresence } from '@/hooks/use-online-status';
@@ -31,8 +32,15 @@ import { useRealtimeSubscriptions } from '@/hooks/use-realtime-subscriptions';
 import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
-import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
-import { reconcileRealtimeChatAssignment, reconcileRealtimeChatPresentation } from '@/lib/realtime/realtime-reconciler';
+import {
+  isChatVisibleForOwnership,
+  shouldClearSelectedChatOnOwnershipChange,
+} from '@/lib/inbox-ownership';
+import {
+  hasCompleteRealtimeChatPresentation,
+  reconcileRealtimeChatAssignment,
+  reconcileRealtimeChatPresentation,
+} from '@/lib/realtime/realtime-reconciler';
 import { shouldMarkChatAsRead } from '@/lib/inbox-read-state';
 import { persistChatRead } from '@/lib/inbox-mark-as-read';
 import { inboxDebug } from '@/lib/inbox-debug';
@@ -226,17 +234,19 @@ export default function MobileChatLayout({
   initialUser,
   chatId: initialChatId,
   initialData,
+  preserveClientState = false,
 }: {
   initialUser: User | null;
   chatId: string | null;
   initialData?: InitialChatsPayload | null;
+  preserveClientState?: boolean;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'chats' | 'crm' | 'settings'>('chats');
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [ownershipFilter, setOwnershipFilter] = useState<'mine' | 'everyone'>('mine');
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMoreChats, setIsLoadingMoreChats] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [broadcastChannel, setBroadcastChannel] = useState<BroadcastChannel | null>(null);
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>(FALLBACK_TIMEZONE);
@@ -266,6 +276,9 @@ export default function MobileChatLayout({
   const markChatAsReadInStore = useInboxStore((state) => state.markChatAsRead);
   const incrementUnread = useInboxStore((state) => state.incrementUnread);
   const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
+  const appendChats = useInboxStore((state) => state.appendChats);
+  const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
+  const setChatPagination = useInboxStore((state) => state.setChatPagination);
   const removeChat = useInboxStore((state) => state.removeChat);
   const { isOffline } = usePresence();
 
@@ -285,7 +298,7 @@ export default function MobileChatLayout({
   const messagesListChatIdsCsv = useMemo(() => {
     if (!initialUser?.id || ownershipFilter !== 'mine') return '';
     const ids = chats
-      .filter((chat) => chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id)
+      .filter((chat) => isChatVisibleForOwnership(chat, 'mine', initialUser.id))
       .map((chat) => chat.id)
       .sort();
     return ids.join(',');
@@ -295,7 +308,7 @@ export default function MobileChatLayout({
     if (!initialUser?.id || ownershipFilter !== 'mine') return '';
     const ids = new Set<string>();
     chats.forEach((chat) => {
-      if (chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id) {
+      if (isChatVisibleForOwnership(chat, 'mine', initialUser.id)) {
         ids.add(chat.id);
       }
     });
@@ -305,23 +318,12 @@ export default function MobileChatLayout({
     return Array.from(ids).sort().join(',');
   }, [chats, initialUser?.id, ownershipFilter, selectedChatId]);
 
-  const headerTitle = activeTab === 'chats'
-    ? 'Inbox'
-    : activeTab === 'crm'
-      ? 'CRM'
-      : 'Preferencias';
-
-  const headerSubtitle = activeTab === 'chats'
-    ? 'Conversas em tempo real'
-    : activeTab === 'crm'
-      ? 'Contatos, funil e segmentacao'
-      : 'Conta, atalhos e acessos';
-
   const handleBoundaryError = useCallback((error: Error) => {
     console.error('[INBOX_UI_ERROR]', error);
   }, []);
 
   const selectedChatIdRef = useRef<string | null>(initialData?.selectedChatId ?? initialChatId);
+  const hasUserSelectedChatRef = useRef(false);
   const audioRefs = useRef<{ queue: HTMLAudioElement | null; attending: HTMLAudioElement | null }>({
     queue: null,
     attending: null,
@@ -335,13 +337,51 @@ export default function MobileChatLayout({
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
   const messageWindowLoadsInFlightRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
+  const pendingChatPresentationHydrationRef = useRef<Set<string>>(new Set());
+  const hydratedChatPresentationRef = useRef<Set<string>>(new Set());
   const deltaSyncInFlightRef = useRef<Promise<void> | null>(null);
   const deltaSyncQueuedRef = useRef(false);
   const lastDeltaSyncCompletedAtRef = useRef(0);
   const realtimeHealthyRef = useRef(false);
+  const deltaSyncDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleDebouncedDeltaSync = useCallback(() => {
+    if (deltaSyncDebounceTimerRef.current) return;
+    deltaSyncDebounceTimerRef.current = setTimeout(() => {
+      deltaSyncDebounceTimerRef.current = null;
+      void runDeltaSyncRef.current?.();
+    }, 400);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deltaSyncDebounceTimerRef.current) {
+        clearTimeout(deltaSyncDebounceTimerRef.current);
+        deltaSyncDebounceTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const isHydratedRef = useRef(false);
   const [retryCount, setRetryCount] = useState(0);
+
+  const requestRealtimeChatPresentationHydration = useCallback((chatId: string) => {
+    if (
+      hydratedChatPresentationRef.current.has(chatId) ||
+      pendingChatPresentationHydrationRef.current.has(chatId)
+    ) {
+      return;
+    }
+
+    const sync = runDeltaSyncRef.current;
+    if (!sync) return;
+
+    pendingChatPresentationHydrationRef.current.add(chatId);
+    void sync().finally(() => {
+      pendingChatPresentationHydrationRef.current.delete(chatId);
+      hydratedChatPresentationRef.current.add(chatId);
+    });
+  }, []);
 
 
 
@@ -356,11 +396,12 @@ export default function MobileChatLayout({
         state.reset();
         inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
       } else {
+        if (preserveClientState) selectedChatIdRef.current = state.selectedChatId;
         inboxDebug('[NOTIFICATION] Layout mounted. Preserving existing store state.');
       }
       isHydratedRef.current = true;
     }
-  }, []);
+  }, [preserveClientState]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -415,6 +456,8 @@ export default function MobileChatLayout({
   }, []);
 
   const handleBackToList = useCallback(() => {
+    hasUserSelectedChatRef.current = true;
+    selectedChatIdRef.current = null;
     setSelectedChatId(null);
     updateSelectedChatPath(null);
     setShowFullHistory(false);
@@ -642,6 +685,7 @@ export default function MobileChatLayout({
     const isQueueMessage = messageChat?.status === 'gerais';
     const isAttendingMessage = messageChat?.status === 'atendimentos';
     const isOwnAttending = isAttendingMessage && messageChat?.agent?.id === initialUser?.id;
+    const shouldHydrateChatPresentation = isAttendingMessage && (!messageChat?.teamName || !messageChat?.teamColor);
     const currentSelectedChatId = snapshot.selectedChatId;
 
     appendMessagesToChat(message.chat_id, [message], message.updatedAt);
@@ -659,8 +703,8 @@ export default function MobileChatLayout({
       snapshot.markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
     }
 
-    if (!messageChat && runDeltaSyncRef.current) {
-      runDeltaSyncRef.current();
+    if (!messageChat || shouldHydrateChatPresentation) {
+      requestRealtimeChatPresentationHydration(message.chat_id);
     }
 
     if (!message.from_me) {
@@ -678,21 +722,21 @@ export default function MobileChatLayout({
         }
       }
     }
-  }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
+  }, [appendMessagesToChat, incrementUnread, initialUser?.id, mapRealtimePayload, playNotificationSound, removeMessagesForChat, requestRealtimeChatPresentationHydration]);
 
   const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
     try {
       const state = useInboxStore.getState();
       const activeChat = state.chats.find((candidate) => candidate.id === chatId);
-      const chatOnly = !!(activeChat as any)?.protocolScoped;
+      const replaceMessageWindow = !!(activeChat as any)?.protocolScoped;
       const result = await getChatMessagesWindow({
         chatId,
         before: beforeDate ?? undefined,
         beforeId: beforeId ?? undefined,
         limit: 50,
         timezone: workspaceTimezone,
-        chatOnly,
+        chatOnly: replaceMessageWindow,
       });
       if (beforeDate) {
         prependMessagesToChat(chatId, result.messages, result.oldestMessageDate, result.oldestMessageId, result.hasMoreHistory);
@@ -704,7 +748,7 @@ export default function MobileChatLayout({
           result.oldestMessageDate,
           result.oldestMessageId,
           result.hasMoreHistory,
-          chatOnly
+          replaceMessageWindow
         );
       }
       if (result.contact) {
@@ -728,6 +772,58 @@ export default function MobileChatLayout({
     if (!beforeDate) return;
     await loadChatMessages(selectedChatId, beforeDate, beforeId ?? undefined);
   }, [loadChatMessages, oldestLoadedMessageDate, oldestLoadedMessageId, selectedChatId]);
+
+  const handleLoadMoreChats = useCallback(async (options?: {
+    statuses?: Chat['status'][];
+    ownership?: 'mine' | 'everyone';
+    filters?: InboxListFilters;
+  }) => {
+    if (isLoadingMoreChats || !initialUser?.activeWorkspaceId) return;
+
+    const { statuses = ['gerais', 'atendimentos'], ownership = 'mine', filters } = options || {};
+    const state = useInboxStore.getState();
+    const currentChats = state.chats;
+    const status = statuses.length === 1 ? statuses[0] : null;
+    const paginationTab = status ? getInboxPaginationTab(status, filters?.queueScope) : null;
+    const storedPage = paginationTab ? state.chatPagination[paginationTab] : null;
+    if (storedPage && (!storedPage.hasMore || !storedPage.cursor)) return;
+    const filteredChats = currentChats.filter((chat) => {
+      if (!statuses.includes(chat.status)) return false;
+      if (filters?.queueScope && !isChatInInboxQueueScope(chat, filters.queueScope)) return false;
+      return isChatVisibleForOwnership(chat, ownership, initialUser.id);
+    });
+    const lastChat = filteredChats.at(-1);
+    const cursor = storedPage?.cursor || (lastChat?.updatedAt
+      ? { lastActivityAt: lastChat.updatedAt, id: lastChat.id }
+      : null);
+    if (!cursor) return;
+
+    setIsLoadingMoreChats(true);
+    try {
+      const result = await loadOlderChatsAction(
+        initialUser.activeWorkspaceId,
+        cursor.lastActivityAt,
+        cursor.id,
+        statuses,
+        ownership,
+        filters,
+      );
+      if (result.success && result.chats) {
+        if (result.chats.length > 0) appendChats(result.chats);
+        if (paginationTab) {
+          setChatPagination(paginationTab, {
+            hasMore: result.hasMoreChats ?? false,
+            cursor: result.nextCursor ?? null,
+          });
+        }
+      }
+      if (!result.success && result.error) console.error('[LOAD_MORE_CHATS_MOBILE] Error:', result.error);
+    } catch (error) {
+      console.error('[LOAD_MORE_CHATS_MOBILE] Exception:', error);
+    } finally {
+      setIsLoadingMoreChats(false);
+    }
+  }, [appendChats, initialUser, isLoadingMoreChats, setChatPagination]);
 
   const ensureMessagesForChat = useCallback(async (chatId: string, options?: { force?: boolean }) => {
     const force = options?.force ?? false;
@@ -772,6 +868,8 @@ export default function MobileChatLayout({
   }, [selectedChatId, ensureMessagesForChat, hasLoadedSelectedMessageWindow]);
 
   const handleSetSelectedChat = useCallback((chat: Chat | null) => {
+    hasUserSelectedChatRef.current = true;
+
     if (!chat) {
       selectedChatIdRef.current = null;
       setSelectedChatId(null);
@@ -781,7 +879,8 @@ export default function MobileChatLayout({
     }
 
     const isFirstActivation = !activatedChatIdsRef.current.has(chat.id);
-    if (selectedChatIdRef.current === chat.id) {
+    if (selectedChatId === chat.id && selectedChatIdRef.current === chat.id) {
+      updateSelectedChatPath(chat.id);
       if (isFirstActivation) {
         activatedChatIdsRef.current.add(chat.id);
         void ensureMessagesForChat(chat.id, { force: true });
@@ -794,7 +893,20 @@ export default function MobileChatLayout({
     updateSelectedChatPath(chat.id);
     activatedChatIdsRef.current.add(chat.id);
     void ensureMessagesForChat(chat.id, { force: isFirstActivation });
-  }, [ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
+  }, [selectedChatId, ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath]);
+
+  const handleOwnershipFilterChange = useCallback((nextOwnership: 'mine' | 'everyone') => {
+    setOwnershipFilter(nextOwnership);
+    if (nextOwnership !== 'mine') return;
+
+    const currentSelectedChatId = selectedChatIdRef.current ?? selectedChatId;
+    if (!currentSelectedChatId) return;
+
+    const currentSelectedChat = useInboxStore.getState().chats.find((chat) => chat.id === currentSelectedChatId);
+    if (shouldClearSelectedChatOnOwnershipChange(currentSelectedChat, nextOwnership, initialUser?.id)) {
+      handleSetSelectedChat(null);
+    }
+  }, [handleSetSelectedChat, initialUser?.id, selectedChatId]);
 
   const jumpChatByOffset = useCallback((delta: number) => {
     if (!chats.length) return;
@@ -852,6 +964,8 @@ export default function MobileChatLayout({
         oldestMessageId: result.oldestMessageId,
         hasMoreHistory: result.hasMoreHistory,
         hasMoreChats: result.hasMoreChats,
+        inboxCounts: result.inboxCounts,
+        chatPagination: result.statusPagination,
       });
       if (result.selectedChatId) {
         selectedChatIdRef.current = result.selectedChatId;
@@ -948,10 +1062,10 @@ export default function MobileChatLayout({
         // Wrap state updates in startTransition to keep UI fluid (high refresh rate feel)
         React.startTransition(() => {
           const visibleDeltaChats = result.deltaChats.filter((chat) =>
-            isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId)
+          isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id)
           );
           const hiddenDeltaChatIds = result.deltaChats
-            .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId))
+            .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id))
             .map((chat) => chat.id)
             .filter((chatId) => chatId !== snapshot.selectedChatId);
 
@@ -1115,15 +1229,28 @@ export default function MobileChatLayout({
   useEffect(() => {
     if (!initialUser?.activeWorkspaceId) return;
 
+    const handleResume = () => {
+      if (document.visibilityState !== 'visible') return;
+      void runDeltaSync({ force: true });
+      markSelectedChatAsRead();
+    };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        runDeltaSync({ force: true });
-        markSelectedChatAsRead();
+        handleResume();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleResume);
+    window.addEventListener('pageshow', handleResume);
+    window.addEventListener('online', handleResume);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleResume);
+      window.removeEventListener('pageshow', handleResume);
+      window.removeEventListener('online', handleResume);
+    };
   }, [initialUser?.activeWorkspaceId, runDeltaSync, markSelectedChatAsRead]);
 
   // Polling mechanism
@@ -1228,7 +1355,35 @@ export default function MobileChatLayout({
 
     const snapshot = useInboxStore.getState();
     const existingChat = snapshot.chats.find((chat) => chat.id === newChatData.id);
-    const incomingStatus = newChatData.status || existingChat?.status || 'gerais';
+
+    // Se o payload não traz status e o chat não existe no store, nunca inventar
+    // um chat fantasma com status 'gerais' que possa vazar para o robô/fila.
+    if (!newChatData.status && !existingChat) {
+      scheduleDebouncedDeltaSync();
+      return;
+    }
+
+    const incomingStatus = newChatData.status || existingChat?.status;
+    if (!incomingStatus) {
+      scheduleDebouncedDeltaSync();
+      return;
+    }
+
+    const hasHydratedPresentation = hasCompleteRealtimeChatPresentation(newChatData);
+    const teamAssignmentChanged = hasRecordKey(newChatData, 'team_id')
+      && newChatData.team_id !== existingChat?.team_id;
+
+    if (hasHydratedPresentation) {
+      hydratedChatPresentationRef.current.add(newChatData.id);
+    } else if (teamAssignmentChanged) {
+      hydratedChatPresentationRef.current.delete(newChatData.id);
+    }
+
+    const statusChanged = Boolean(existingChat?.status && incomingStatus !== existingChat.status);
+    if (statusChanged) {
+      scheduleDebouncedDeltaSync();
+    }
+
     const shouldKeepVisible = isChatVisibleForOwnership(
       {
         id: newChatData.id,
@@ -1237,14 +1392,19 @@ export default function MobileChatLayout({
       },
       ownershipFilter,
       initialUser?.id,
-      snapshot.selectedChatId
     );
 
     if (!shouldKeepVisible) {
       if (existingChat && snapshot.selectedChatId !== newChatData.id) {
         removeChat(newChatData.id);
+        scheduleDebouncedDeltaSync();
       }
-      return;
+      if (snapshot.selectedChatId !== newChatData.id) {
+        return;
+      }
+      // If the chat is currently selected, do not return early or remove it.
+      // Continue below so optimisticUpdate applies status and assignments
+      // to useInboxStore for the active view.
     }
 
     const contactId: string | null = newChatData.contact_id ?? existingChat?.contact?.id ?? null;
@@ -1342,32 +1502,44 @@ export default function MobileChatLayout({
         : (existingChat?.messages || []),
     };
 
-    if (!optimisticUpdate.contact && contactId) {
-      optimisticUpdate.contact = {
-        id: contactId,
-        name: 'Novo Contato...',
-        workspace_id: optimisticUpdate.workspace_id || initialUser?.activeWorkspaceId || '',
-        avatar_url: undefined,
-        phone: '',
-      } as Contact;
-      void fetchContactById(contactId);
+    const resolvedContactId = contactId || newChatData.contact_id || existingChat?.contact?.id || null;
+    const broadcastContact: Contact | undefined = (newChatData.contact_name || newChatData.contact_phone || newChatData.contact_phone_number_jid || resolvedContactId) ? {
+      id: resolvedContactId || `temp-contact-${newChatData.id}`,
+      name: newChatData.contact_name || existingChat?.contact?.name || newChatData.protocol || 'Novo Contato...',
+      phone: newChatData.contact_phone || existingChat?.contact?.phone || '',
+      phone_number_jid: newChatData.contact_phone_number_jid || existingChat?.contact?.phone_number_jid || '',
+      avatar_url: newChatData.contact_avatar_url || existingChat?.contact?.avatar_url || undefined,
+      workspace_id: optimisticUpdate.workspace_id || initialUser?.activeWorkspaceId || '',
+    } as Contact : undefined;
+
+    optimisticUpdate.contact = existingChat?.contact || broadcastContact;
+
+    if (resolvedContactId && (!optimisticUpdate.contact || optimisticUpdate.contact.name === 'Novo Contato...')) {
+      void fetchContactById(resolvedContactId);
     }
 
     snapshot.upsertChats([optimisticUpdate as Chat]);
-  }, [fetchContactById, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, workspaceTimezone]);
+
+    const shouldHydratePresentation =
+      incomingStatus === 'atendimentos' &&
+      !hasHydratedPresentation &&
+      !hydratedChatPresentationRef.current.has(newChatData.id) &&
+      (!existingChat?.teamName || !existingChat?.teamColor);
+
+    if (shouldHydratePresentation) {
+      requestRealtimeChatPresentationHydration(newChatData.id);
+    }
+  }, [fetchContactById, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, requestRealtimeChatPresentationHydration, scheduleDebouncedDeltaSync, workspaceTimezone]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
     if (status === 'SUBSCRIBED') {
-      if (realtimeHealthyRef.current) {
-        clearRecoverySync();
-      } else {
-        scheduleRecoverySync(`${type}:subscribed-waiting-peer`);
-      }
+      clearRecoverySync();
       return;
     }
 
-    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+    // Only recover if an actual network error or timeout occurs on the global channel
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
       console.warn(`[REALTIME] Connection lost (${status}). Running delta sync recovery.`);
       scheduleRecoverySync(`${type}:${status}`);
     }
@@ -1383,6 +1555,10 @@ export default function MobileChatLayout({
     updateChatContact(contact);
   }, [initialUser?.activeWorkspaceId, updateChatContact]);
 
+  const handleRealtimeMessageOutsideList = useCallback(() => {
+    void runDeltaSyncRef.current?.();
+  }, []);
+
   // Use centralized Realtime hook
   const { isChatsConnected, isMessagesConnected } = useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
@@ -1391,6 +1567,7 @@ export default function MobileChatLayout({
     messagesListChatIdsCsv: ownershipFilter === 'mine' ? messagesListChatIdsCsv : undefined,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
+    onMessageOutsideList: handleRealtimeMessageOutsideList,
     onContactUpdate: handleRealtimeContactUpdate,
     onStatusChange: handleRealtimeStatusChange,
   });
@@ -1398,13 +1575,25 @@ export default function MobileChatLayout({
   realtimeHealthyRef.current = isRealtimeHealthy;
 
   useEffect(() => {
+    if (preserveClientState) {
+      selectedChatIdRef.current = useInboxStore.getState().selectedChatId;
+      hasUserSelectedChatRef.current = true;
+      isHydratedRef.current = true;
+      setIsLoading(false);
+      return;
+    }
     if (initialData) {
       // FIX: Prevent overwriting client-side state with stale/empty server selection during revalidation.
       const clientHasSelection = !!selectedChatIdRef.current;
       const serverClearedSelection = initialData.selectedChatId === null;
-      const shouldPreserveSelection = isHydratedRef.current && clientHasSelection && serverClearedSelection;
+      const shouldPreserveSelection = hasUserSelectedChatRef.current
+        || (isHydratedRef.current && clientHasSelection && serverClearedSelection);
 
-      let effectiveSelectedChatId = initialData.selectedChatId;
+      let effectiveSelectedChatId = resolveHydratedChatSelection(
+        initialData.selectedChatId,
+        selectedChatIdRef.current,
+        shouldPreserveSelection,
+      );
       let effectiveChats = initialData.chats;
 
       if (shouldPreserveSelection) {
@@ -1440,6 +1629,8 @@ export default function MobileChatLayout({
         oldestMessageId: initialData.oldestMessageId,
         hasMoreHistory: initialData.hasMoreHistory,
         hasMoreChats: initialData.hasMoreChats,
+        inboxCounts: initialData.inboxCounts,
+        chatPagination: initialData.statusPagination,
       });
       setFetchError(initialData.error ?? null);
       setSelectedChatId(effectiveSelectedChatId);
@@ -1459,13 +1650,15 @@ export default function MobileChatLayout({
       isHydratedRef.current = true;
       setIsLoading(false);
     }
-  }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
+  }, [initialData, initialUser, initializeInbox, preserveClientState, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
-    if (selectedChatId) {
-      selectedChatIdRef.current = selectedChatId;
+    selectedChatIdRef.current = selectedChatId;
+
+    if (hasUserSelectedChatRef.current) {
+      updateSelectedChatPath(selectedChatId);
     }
-  }, [selectedChatId]);
+  }, [selectedChatId, updateSelectedChatPath]);
 
   if (!initialUser) {
     return <LoadingSkeleton />;
@@ -1509,11 +1702,6 @@ export default function MobileChatLayout({
     };
   })() : null;
 
-  const mobileTabs = [
-    { id: 'chats' as const, label: 'Conversas', icon: MessageSquare, badge: mobileStats.unread },
-    { id: 'crm' as const, label: 'Contatos', icon: Users },
-    { id: 'settings' as const, label: 'Ajustes', icon: Settings },
-  ];
 
 
 
@@ -1522,226 +1710,79 @@ export default function MobileChatLayout({
     return (
       <div
         className={cn(
-          'mobile-app-shell relative z-50 flex h-full min-h-0 w-full flex-col overflow-hidden',
+          'mobile-chat-screen relative z-50 flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-background',
           highContrast ? 'contrast-125 saturate-150' : ''
         )}
         dir={isRTL ? 'rtl' : 'ltr'}
       >
-        <div className="relative z-10 flex h-full flex-col">
-          <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
-            <ChatPanel
-              key={selectedChat?.id}
+        <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
+          {enrichedSelectedChat ? (
+            <MobileChatView
+              key={enrichedSelectedChat.id}
               chat={enrichedSelectedChat}
               currentUser={initialUser}
               onBack={handleBackToList}
               onActionSuccess={handleDataMutation}
               closeReasons={closeReasons}
-              showFullHistory={showFullHistory}
-              setShowFullHistory={setShowFullHistory}
-              tabId={tabIdRef.current}
-              onLoadOlderMessages={loadOlderMessages}
-              canLoadOlder={hasLoadedSelectedMessageWindow && hasMoreHistory}
-              isLoadingInitialMessages={Boolean(enrichedSelectedChat && !hasLoadedSelectedMessageWindow && !(enrichedSelectedChat as any)?.protocolScoped)}
               workspaceTimezone={workspaceTimezone}
-              onToggleContactPanel={() => setIsContactPanelOpen(!isContactPanelOpen)}
-              onForwardMessage={handleForwardMessage}
-              highContrast={highContrast}
-              onToggleHighContrast={() => setHighContrast((v) => !v)}
-              isRTL={isRTL}
-              onToggleRTL={() => setIsRTL((v) => !v)}
+              renderContactSheet={({ isOpen, onClose, chat }) => (
+                <MobileContactPanel
+                  isOpen={isOpen}
+                  onClose={onClose}
+                  chat={chat}
+                  currentUser={initialUser}
+                  onTransferSuccess={handleDataMutation}
+                  onContactUpdate={handleDataMutation}
+                />
+              )}
             />
-          </ErrorBoundary>
-          <MobileContactPanel
-            isOpen={isContactPanelOpen}
-            onClose={() => setIsContactPanelOpen(false)}
-            chat={enrichedSelectedChat}
-            currentUser={initialUser}
-            onTransferSuccess={handleDataMutation}
-            onContactUpdate={handleDataMutation}
-          />
-          <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
-          <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
-        </div>
+          ) : (
+            <ThreadSkeleton />
+          )}
+        </ErrorBoundary>
+        <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
+        <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
       </div>
     );
   }
 
-  // APP SHELL MODE (Bottom Navigation)
+  // List Mode (Clean mobile messaging list without legacy tabs)
   return (
     <div
       className={cn(
-        'mobile-app-shell relative z-40 flex h-full min-h-0 w-full flex-col overflow-hidden',
+        'mobile-chat-screen relative z-40 flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-background',
         highContrast ? 'contrast-125 saturate-150' : ''
       )}
       dir={isRTL ? 'rtl' : 'ltr'}
     >
-      <div className="relative z-10 flex h-full flex-col">
-        {/* Header removed per user request */}
+      <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
+        <MobileChatList
+          chats={chats}
+          selectedChatId={selectedChatId}
+          onSelectChat={(chatId) => {
+            const nextChat = chats.find((c) => c.id === chatId);
+            if (nextChat) {
+              handleSetSelectedChat(nextChat);
+            }
+          }}
+          currentUser={initialUser}
+          ownershipFilter={ownershipFilter}
+          onOwnershipFilterChange={handleOwnershipFilterChange}
+          onLoadMore={handleLoadMoreChats}
+          hasMore={hasMoreChats}
+          isLoadingMore={isLoadingMoreChats}
+        />
+      </ErrorBoundary>
 
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-hidden relative w-full">
-          {activeTab === 'chats' && (
-            <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
-              <div className="w-full h-full border-r-0 bg-background">
-                <ChatList
-                  chats={chats}
-                  selectedChat={enrichedSelectedChat}
-                  setSelectedChat={handleSetSelectedChat}
-                  currentUser={initialUser}
-                  onUpdate={handleDataMutation}
-                  onOwnershipFilterChange={setOwnershipFilter}
-                  isForwarding={isForwarding}
-                  selectedForwardingChatIds={selectedForwardingChatIds}
-                  onToggleForwardSelection={handleToggleForwardSelection}
-                  onSelectAllForwarding={handleSelectAllForwarding}
-                  onConfirmForward={handleConfirmForward}
-                  onCancelForward={handleCancelForward}
-                  onPrefetch={prefetchChat}
-                  className="w-full h-full"
-                  bottomPadding={100}
-                />
-              </div>
-            </ErrorBoundary>
-          )}
-          {activeTab === 'crm' && (
-            <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
-              <div className="rounded-3xl border border-border bg-background p-5">
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-blue-500/15 text-blue-500 flex items-center justify-center">
-                    <Users className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-foreground">CRM Mobile</h3>
-                    <p className="text-xs text-muted-foreground">Gerencie contatos, segmentos e funil direto do celular.</p>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-3">
-                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Segmentos inteligentes</p>
-                      <p className="text-xs text-muted-foreground">Crie grupos automaticos com filtros rapidos.</p>
-                    </div>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Pipeline visual</p>
-                      <p className="text-xs text-muted-foreground">Acompanhe cada etapa sem sair do chat.</p>
-                    </div>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Insights rapidos</p>
-                      <p className="text-xs text-muted-foreground">Veja notas, tags e historico em segundos.</p>
-                    </div>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Em breve</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          {activeTab === 'settings' && (
-            <div className="h-full w-full overflow-y-auto px-4 pb-6 animate-in fade-in duration-500">
-              <div className="rounded-3xl border border-border bg-background p-5">
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-muted/60 text-foreground flex items-center justify-center">
-                    <Settings className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-foreground">Configuracoes</h3>
-                    <p className="text-xs text-muted-foreground">Ajustes rapidos para um uso mais confortavel.</p>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-3">
-                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">Alto contraste</p>
-                    <p className="text-xs text-muted-foreground">Melhor legibilidade em ambientes claros.</p>
-                  </div>
-                  <Switch checked={highContrast} onCheckedChange={(checked) => setHighContrast(checked)} />
-                </div>
-                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">Direcao RTL</p>
-                    <p className="text-xs text-muted-foreground">Inverta o layout para idiomas RTL.</p>
-                  </div>
-                  <Switch checked={isRTL} onCheckedChange={(checked) => setIsRTL(checked)} />
-                </div>
-                <div className="rounded-2xl border border-border/60 bg-background/52 p-4 shadow-sm flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">Som de notificacao</p>
-                    <p className="text-xs text-muted-foreground">Ative o audio para alertas no mobile.</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      if (needsAudioUnlock) {
-                        unlockAudio();
-                        return;
-                      }
-                      playNotificationSound('queue');
-                    }}
-                  >
-                    {needsAudioUnlock ? 'Ativar' : 'Testar'}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+      {/* Audio logic */}
+      {needsAudioUnlock && (
+        <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground shadow-md">
+          <span>Habilite</span>
+          <Button size="sm" variant="secondary" onClick={unlockAudio}>Som</Button>
         </div>
-
-        {/* Bottom Navigation Bar */}
-        <div className="px-6 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-1 fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-          <div className="mx-auto grid max-w-[280px] grid-cols-3 gap-1 rounded-2xl border border-border bg-background p-1 pointer-events-auto">
-            {mobileTabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              const Icon = tab.icon;
-              const badge = tab.badge;
-
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={cn(
-                    'relative flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[9px] font-medium transition-all duration-300',
-                    isActive
-                      ? 'bg-blue-600/10 text-blue-700 shadow-sm ring-1 ring-blue-200'
-                      : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground'
-                  )}
-                >
-                  <Icon className={cn("h-4 w-4 transition-transform duration-300", isActive ? "scale-110" : "scale-100")} />
-                  <span className={cn("tracking-wide leading-none", isActive ? "font-semibold" : "font-normal")}>{tab.label}</span>
-                  {badge ? (
-                    <span className="absolute right-3 top-1.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-blue-600 px-0.5 text-[8px] font-bold text-white ring-2 ring-background">
-                      {badge > 99 ? '99+' : badge}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Audio logic kept */}
-        {needsAudioUnlock && (
-          <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] right-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground">
-            <span>Habilite</span>
-            <Button size="sm" variant="secondary" onClick={unlockAudio}>Som</Button>
-          </div>
-        )}
-        <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
-        <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
-      </div>
+      )}
+      <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
+      <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
     </div>
   );
 }

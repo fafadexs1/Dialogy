@@ -1,0 +1,87 @@
+{
+  "evaluation": "production-runtime-continuity",
+  "scenario": "fresh",
+  "model": "deepseek/deepseek-v4-flash",
+  "releaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "trace": [
+    {
+      "decision": "turn_question"
+    },
+    {
+      "decision": "82c3d2b9-403e-4614-bff5-6bac5125dbaa"
+    },
+    {
+      "customer": "Quais planos vocês tem?",
+      "response": "Temos estas opções:\n\n🌐 500 MEGA · somente internet · Wi-Fi 5\nR$ 99,90/mês com pontualidade · R$ 109,90 valor normal\n\n📺 600 MEGA · 60 canais · Wi-Fi 5\nR$ 109,90/mês com pontualidade · R$ 119,90 valor normal\n\n📺 800 MEGA · 75 canais · Wi-Fi 5\nR$ 125,90/mês com pontualidade · R$ 135,90 valor normal\n\n🚀 1000 MEGA · 100 canais · Wi-Fi 6\nR$ 149,90/mês com pontualidade · R$ 159,90 valor normal\n\nGrade de canais: https://velpro.net.br/tv\n\nSe quiser, diga “me ajude a escolher” e faço uma recomendação rápida para o seu perfil.\n\nEssas informações ajudaram? Se quiser contratar ou consultar cobertura, pode me dizer agora.",
+      "phase": "conclude",
+      "pending": null,
+      "values": {}
+    },
+    {
+      "decision": "turn_question"
+    },
+    {
+      "customer": "Esse de 500 MEGA é bom?",
+      "response": "O plano de 500 MEGA é ótimo para uma rotina leve: redes sociais, navegação, estudos e poucos usuários que não precisam de TV. Se o seu uso for nesse nível, ele atende bem com um bom custo-benefício.",
+      "phase": "conclude",
+      "pending": null,
+      "values": {}
+    },
+    {
+      "decision": "turn_question"
+    },
+    {
+      "customer": "Não sei. Esse de 1000 é melhor?",
+      "response": "Sim, o 1000 MEGA é melhor em desempenho: Wi-Fi 6, 100 canais e ideal para jogos online, streaming intenso, muitos dispositivos ou criação de conteúdo. Se você prioriza a máxima velocidade e suporte a várias telas ao mesmo tempo, ele é a escolha certa.\n\nQuer que eu te ajude a comparar com o seu uso?",
+      "phase": "conclude",
+      "pending": null,
+      "values": {}
+    },
+    {
+      "decision": "turn_answer"
+    },
+    {
+      "decision": "dd3b5da5-e2a1-4424-95d7-be129706fc01"
+    },
+    {
+      "recovery": {
+        "collectionPlan": {
+          "intent": "contribute",
+          "observations": [
+            {
+              "fieldKey": "preferred_contact_period",
+              "status": "provided",
+              "value": "1000",
+              "evidence": "Acho que fico com o de 1000 que eu trabalho home office."
+            }
+          ],
+          "deferFields": [],
+          "nextFieldKey": null
+        }
+      }
+    },
+    {
+      "decision": "field_0"
+    },
+    {
+      "customer": "Acho que fico com o de 1000 que eu trabalho home office.",
+      "response": "Ótima escolha! Vou pedir somente os dados necessários para a equipe confirmar cobertura e continuar a contratação. Não solicitarei CPF nem pagamento por aqui.\n\nQual é o seu nome completo?",
+      "phase": "resolve",
+      "pending": "lead_name",
+      "values": {
+        "selected_plan": "1000 MEGA + 100 canais + Wi-Fi 6 — R$ 149,90 com pontualidade / R$ 159,90 normal"
+      }
+    },
+    {
+      "customer": "Meu nome é Ana de Sousa.",
+      "response": "Confirma que Telefone para contato foi informado corretamente?",
+      "phase": "resolve",
+      "pending": null,
+      "values": {
+        "selected_plan": "1000 MEGA + 100 canais + Wi-Fi 6 — R$ 149,90 com pontualidade / R$ 159,90 normal",
+        "lead_name": "Ana de Sousa",
+        "lead_phone": "5561999999999"
+      }
+    }
+  ]
+}

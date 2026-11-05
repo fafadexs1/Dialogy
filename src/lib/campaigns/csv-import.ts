@@ -1,4 +1,5 @@
 import Papa from 'papaparse';
+import { normalizeCampaignPhoneNumbers } from './import-phones';
 
 export type CampaignCsvContact = {
   id: string;
@@ -6,6 +7,7 @@ export type CampaignCsvContact = {
   phone: string;
   phone_number_jid: string;
   sourceRow: number;
+  csvData: Record<string, string>;
 };
 
 export type CampaignCsvImportResult = {
@@ -13,177 +15,129 @@ export type CampaignCsvImportResult = {
   invalidRows: number;
   duplicateRows: number;
   errors: string[];
+  columns: string[];
+  totalRows: number;
+  expandedRows: number;
+  headerRow: number | null;
+  sheetName?: string;
 };
 
-const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
+export type CampaignImportCell = string | number | boolean | Date | null | undefined;
 
 function normalizeHeader(value: string): string {
-  const normalized = String(value || '')
-    .replace(/^\uFEFF/, '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-
-  if (['nome', 'name', 'cliente', 'contato', 'contact', 'pessoa', 'lead'].includes(normalized)) {
-    return 'name';
-  }
-  if (
-    [
-      'telefone',
-      'phone',
-      'celular',
-      'whatsapp',
-      'numero',
-      'number',
-      'fone',
-      'mobile',
-      'phone_number',
-      'telefone_whatsapp',
-      'numero_whatsapp',
-    ].includes(normalized)
-  ) {
-    return 'phone';
-  }
-
-  return normalized;
+  return value.replace(/^\uFEFF/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-function extractDigits(value: string): string {
-  return String(value || '')
-    .trim()
-    .replace(/@.*$/, '')
-    .replace(/\D/g, '');
+function isNameHeader(value: string): boolean {
+  return ['nome', 'name', 'cliente', 'nome_cliente', 'nome_do_cliente', 'razao_social', 'contato', 'contact', 'pessoa', 'lead']
+    .includes(normalizeHeader(value));
 }
 
-function normalizeWhatsappJid(value: string): { phone: string; jid: string } | null {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-
-  let digits = extractDigits(raw);
-  if (digits.startsWith('00')) {
-    digits = digits.slice(2);
-  }
-
-  if (!raw.startsWith('+') && !raw.includes('@') && (digits.length === 10 || digits.length === 11)) {
-    digits = `55${digits}`;
-  }
-
-  if (digits.length < 8) {
-    return null;
-  }
-
-  return {
-    phone: digits,
-    jid: `${digits}${WHATSAPP_JID_SUFFIX}`,
-  };
+function isPhoneHeader(value: string): boolean {
+  const header = normalizeHeader(value);
+  return ['numero', 'number', 'phone_number', 'numero_whatsapp'].includes(header)
+    || /^(?:telefone|telefones|phone|celular|celulares|whatsapp|fone|fones|mobile)(?:_|$)/.test(header);
 }
 
-function buildContact(params: {
-  name?: unknown;
-  phone?: unknown;
-  rowIndex: number;
-}): CampaignCsvContact | null {
-  const normalized = normalizeWhatsappJid(String(params.phone ?? ''));
-  if (!normalized) return null;
-
-  const name = String(params.name ?? '').trim() || `Contato ${normalized.phone}`;
-
-  return {
-    id: `row-${params.rowIndex}-${normalized.phone}`,
-    name,
-    phone: normalized.phone,
-    phone_number_jid: normalized.jid,
-    sourceRow: params.rowIndex,
-  };
+function cellText(value: CampaignImportCell, header = ''): string {
+  if (value == null) return '';
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(value);
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return '';
+    if (/^(?:valor|saldo|multa|juros|desconto|total)(?:_|$)/.test(normalizeHeader(header))) {
+      return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+    }
+    return String(Number(value.toPrecision(15)));
+  }
+  return String(value);
 }
 
-function parseHeaderRows(csvText: string): CampaignCsvContact[] {
-  const parsed = Papa.parse<Record<string, unknown>>(csvText, {
-    header: true,
-    skipEmptyLines: 'greedy',
-    transformHeader: normalizeHeader,
+function emptyResult(error?: string): CampaignCsvImportResult {
+  return { contacts: [], invalidRows: 0, duplicateRows: 0, errors: error ? [error] : [], columns: [], totalRows: 0, expandedRows: 0, headerRow: null };
+}
+
+function uniqueHeaders(row: CampaignImportCell[]): string[] {
+  const used = new Set<string>();
+  return row.map((cell, index) => {
+    const label = cellText(cell).replace(/^\uFEFF/, '').trim() || `Coluna ${index + 1}`;
+    let key = label;
+    let suffix = 2;
+    while (used.has(key)) key = `${label} (${suffix++})`;
+    used.add(key);
+    return key;
   });
-
-  const fields = new Set((parsed.meta.fields || []).map(normalizeHeader));
-  if (!fields.has('phone')) {
-    return [];
-  }
-
-  return parsed.data
-    .map((row, index) =>
-      buildContact({
-        name: row.name,
-        phone: row.phone,
-        rowIndex: index + 2,
-      })
-    )
-    .filter((contact): contact is CampaignCsvContact => Boolean(contact));
 }
 
-function parseHeaderlessRows(csvText: string): CampaignCsvContact[] {
-  const parsed = Papa.parse<string[]>(csvText, {
-    header: false,
-    skipEmptyLines: 'greedy',
-  });
+/** Shared normalization for simple CSVs and Excel reports with titles/totals before the table. */
+export function parseCampaignContactRows(rows: CampaignImportCell[][]): CampaignCsvImportResult {
+  const result = emptyResult();
+  const firstDataIndex = rows.findIndex(row => row.some(cell => cellText(cell).trim()));
+  if (firstDataIndex < 0) return emptyResult('A planilha está vazia.');
 
-  return parsed.data
-    .map((row, index) => {
-      const cells = row.map(cell => String(cell || '').trim()).filter(Boolean);
-      const phoneCell = cells.find(cell => Boolean(normalizeWhatsappJid(cell)));
-      if (!phoneCell) return null;
+  const headerIndex = rows.findIndex(row => row.some(cell => isPhoneHeader(cellText(cell)))
+    && (row.some(cell => isNameHeader(cellText(cell))) || row === rows[firstDataIndex]));
+  const hasHeader = headerIndex >= 0;
+  const columns = hasHeader ? uniqueHeaders(rows[headerIndex]) : [];
+  const phoneIndexes = hasHeader ? columns.flatMap((column, index) => isPhoneHeader(column) ? [index] : []) : [];
+  const nameIndex = hasHeader ? columns.findIndex(isNameHeader) : -1;
+  const byJid = new Map<string, CampaignCsvContact>();
+  result.columns = columns;
+  result.headerRow = hasHeader ? headerIndex + 1 : null;
 
-      const nameCell = cells.find(cell => cell !== phoneCell && !normalizeWhatsappJid(cell));
-      return buildContact({
-        name: nameCell,
-        phone: phoneCell,
-        rowIndex: index + 1,
+  for (let rowIndex = hasHeader ? headerIndex + 1 : 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex];
+    if (!row.some(cell => cellText(cell).trim())) continue;
+    result.totalRows++;
+    let name = nameIndex >= 0 ? cellText(row[nameIndex]).trim() : '';
+    let numbers: string[] = [];
+    if (hasHeader) {
+      numbers = phoneIndexes.flatMap(index => normalizeCampaignPhoneNumbers(cellText(row[index])));
+    } else {
+      // Infer only a name/phone pair. Never treat CPF, contract or invoice numbers
+      // in an unrecognized multi-column report as destinations.
+      const cells = row.map(cell => cellText(cell).trim()).filter(Boolean);
+      if (cells.length <= 2) {
+        const phoneCell = cells.find(cell => normalizeCampaignPhoneNumbers(cell).length > 0);
+        numbers = phoneCell ? normalizeCampaignPhoneNumbers(phoneCell) : [];
+        name = cells.find(cell => cell !== phoneCell) || '';
+      }
+    }
+    numbers = [...new Set(numbers)];
+    if (numbers.length === 0) { result.invalidRows++; continue; }
+    if (numbers.length > 1) result.expandedRows++;
+
+    const dataColumns = hasHeader ? columns : row.map((_, index) => `Coluna ${index + 1}`);
+    const csvData = Object.fromEntries(dataColumns.map((column, index) => [column, cellText(row[index], column)]));
+    if (!hasHeader && result.columns.length === 0) result.columns = dataColumns;
+    for (const phone of numbers) {
+      const jid = `${phone}@s.whatsapp.net`;
+      if (byJid.has(jid)) { result.duplicateRows++; continue; }
+      byJid.set(jid, {
+        id: `row-${rowIndex + 1}-${phone}`, name: name || `Contato ${phone}`,
+        phone, phone_number_jid: jid, sourceRow: rowIndex + 1, csvData: { ...csvData },
       });
-    })
-    .filter((contact): contact is CampaignCsvContact => Boolean(contact));
+    }
+  }
+  result.contacts = [...byJid.values()];
+  if (result.contacts.length === 0) result.errors.push('Nenhum telefone válido foi encontrado. Confira as colunas de nome e telefone, incluindo o DDD.');
+  return result;
 }
 
 export function parseCampaignContactsCsv(csvText: string): CampaignCsvImportResult {
-  const text = String(csvText || '').replace(/^\uFEFF/, '').trim();
-  if (!text) {
-    return {
-      contacts: [],
-      invalidRows: 0,
-      duplicateRows: 0,
-      errors: ['O arquivo CSV esta vazio.'],
-    };
+  const text = String(csvText || '').replace(/^\uFEFF/, '');
+  if (!text.trim()) return emptyResult('O arquivo CSV está vazio.');
+  // A report's summary has irregular widths, which can fool Papa's delimiter
+  // heuristic. Prefer a delimiter that exposes a recognizable name/phone header.
+  const delimiter = [',', ';', '\t', '|'].find(candidate => {
+    const preview = Papa.parse<string[]>(text, { delimiter: candidate, header: false, preview: 100 });
+    return preview.data.some(row => row.some(isNameHeader) && row.some(isPhoneHeader));
+  });
+  const parsed = Papa.parse<string[]>(text, { ...(delimiter ? { delimiter } : {}), header: false, skipEmptyLines: false });
+  if (parsed.errors.some(error => error.code !== 'UndetectableDelimiter')) {
+    return emptyResult('Não foi possível interpretar o CSV. Confira o separador e as aspas das células.');
   }
-
-  const allRows = Papa.parse<string[]>(text, {
-    header: false,
-    skipEmptyLines: 'greedy',
-  }).data;
-  const totalRows = allRows.length;
-
-  const parsedContacts = parseHeaderRows(text);
-  const contactsFromBestStrategy = parsedContacts.length > 0 ? parsedContacts : parseHeaderlessRows(text);
-  const byJid = new Map<string, CampaignCsvContact>();
-  let duplicateRows = 0;
-
-  for (const contact of contactsFromBestStrategy) {
-    if (byJid.has(contact.phone_number_jid)) {
-      duplicateRows += 1;
-      continue;
-    }
-    byJid.set(contact.phone_number_jid, contact);
-  }
-
-  const contacts = [...byJid.values()];
-  const hasHeader = parsedContacts.length > 0;
-  const dataRowCount = Math.max(0, totalRows - (hasHeader ? 1 : 0));
-  const invalidRows = Math.max(0, dataRowCount - contacts.length - duplicateRows);
-
-  return {
-    contacts,
-    invalidRows,
-    duplicateRows,
-    errors: contacts.length === 0 ? ['Nenhum telefone valido foi encontrado no CSV.'] : [],
-  };
+  return parseCampaignContactRows(parsed.data);
 }

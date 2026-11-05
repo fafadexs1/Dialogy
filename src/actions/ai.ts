@@ -66,7 +66,7 @@ export async function generateChatSummaryAction(chatId: string) {
             return `${sender}: ${text}`;
         }).join('\n');
 
-        const summaryText = await generateSummary(conversationText, apiKey || undefined, aiModel || undefined);
+        const summaryText = await generateSummary(conversationText, undefined, undefined, workspaceId);
 
         return { success: true, summary: summaryText };
 

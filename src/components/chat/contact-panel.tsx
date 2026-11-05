@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { type Chat, type User, type Team, type Contact, type Deal, EvolutionInstance, type TelegramBotInstance, CustomFieldDefinition, type SystemAgent } from '@/lib/types';
 import {
     Mail,
@@ -60,6 +60,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePresence } from '@/hooks/use-online-status';
 import { getTeamsWithOnlineMembers } from '@/actions/teams';
+import {
+    describeTeamUnavailability,
+    shortTeamAvailabilityLabel,
+} from '@/services/chat-distribution/team-availability';
 import { getWorkspaceUsers, getCustomFieldDefinitions } from '@/actions/crm';
 import { getDealsByContact } from '@/actions/deals';
 import { transferChatAction, transferChatToIntelligentAgentAction, getContactProtocolsAction, searchChatsAndContacts } from '@/actions/chats';
@@ -135,12 +139,16 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
 
     }, [isDialogOpen, currentUser?.activeWorkspaceId]);
 
+    const transferIntentRef = useRef<{signature:string; payload:Parameters<typeof transferChatAction>[0]} | null>(null);
     const handleTransfer = async (target: { teamId?: string; agentId?: string }) => {
         setIsTransferring(true);
-        const result = await transferChatAction({
-            chatId: chat.id,
-            ...target
-        });
+        try {
+        const signature = JSON.stringify([chat.id,target,chat.agentId,chat.team_id,chat.assigned_at]);
+        if (transferIntentRef.current?.signature !== signature) transferIntentRef.current = {signature,payload:{
+            chatId:chat.id,...target,operationId:crypto.randomUUID(),expectedAgentId:chat.agentId ?? chat.agent?.id ?? null,
+            expectedTeamId:chat.team_id ?? null,expectedSystemAgentId:chat.assigned_system_agent_id ?? null,
+        }};
+        const result = await transferChatAction(transferIntentRef.current.payload);
 
         if (result.error) {
             toast({ title: "Erro ao transferir", description: result.error, variant: 'destructive' });
@@ -150,10 +158,15 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
                 useInboxStore.getState().upsertChats([result.chat]);
             }
             toast({ title: "Atendimento transferido!" });
+            transferIntentRef.current = null;
             onTransferSuccess();
             setIsDialogOpen(false);
         }
-        setIsTransferring(false);
+        } catch {
+            toast({title:'Não foi possível confirmar a transferência',description:'Atualize a lista antes de tentar novamente.',variant:'destructive'});
+        } finally {
+            setIsTransferring(false);
+        }
     }
 
     const handleTransferToAi = async (systemAgentId: string) => {
@@ -233,21 +246,33 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
                         <ScrollArea className="h-64">
                             <div className="p-1 space-y-2">
                                 {loading ? <Loader2 className="mx-auto my-10 h-6 w-6 animate-spin text-primary" /> :
-                                    teams.map(team => (
+                                    teams.map(team => {
+                                        // O botao segue exatamente o veredito do balanceador: se ele
+                                        // recusaria a transferencia, a tela ja diz o porque em vez de
+                                        // oferecer um clique que vira erro.
+                                        const unavailable = team.availability !== 'available';
+                                        const unavailableReason = unavailable
+                                            ? describeTeamUnavailability(team.availability, team.name)
+                                            : undefined;
+                                        return (
                                         <div key={team.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors">
                                             <div className="flex items-center gap-3">
                                                 <span className="h-3 w-3 rounded-full flex-shrink-0 ring-2 ring-border" style={{ backgroundColor: team.color }}></span>
                                                 <div>
                                                     <p className="font-medium text-foreground">{team.name}</p>
-                                                    <p className="text-xs text-muted-foreground">{team.onlineMembersCount} agente(s) online</p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {team.onlineMembersCount} agente(s) online
+                                                        {unavailable && ` · ${shortTeamAvailabilityLabel(team.availability)}`}
+                                                    </p>
                                                 </div>
                                             </div>
-                                            <Button size="sm" onClick={() => handleTransfer({ teamId: team.id })} disabled={isTransferring || team.onlineMembersCount === 0} className="bg-blue-600 hover:bg-blue-500 text-white">
+                                            <Button size="sm" onClick={() => handleTransfer({ teamId: team.id })} disabled={isTransferring || unavailable} title={unavailableReason} className="bg-blue-600 hover:bg-blue-500 text-white">
                                                 {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                                 Transferir
                                             </Button>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                             </div>
                         </ScrollArea>
                     </TabsContent>
@@ -1134,10 +1159,20 @@ export default function ContactPanel({
     // Fetch deals for the contact
     useEffect(() => {
         if (!contactId) { setDeals([]); return; }
+        let cancelled = false;
+        setDeals([]);
         setDealsLoading(true);
         getDealsByContact(contactId)
-            .then(res => setDeals(res.deals || []))
-            .finally(() => setDealsLoading(false));
+            .then((res) => {
+                if (!cancelled) setDeals(res.deals || []);
+            })
+            .finally(() => {
+                if (!cancelled) setDealsLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, [contactId]);
 
     useEffect(() => {
@@ -1146,16 +1181,25 @@ export default function ContactPanel({
             return;
         }
 
+        let cancelled = false;
+        setProtocolHistory([]);
         setProtocolHistoryLoading(true);
         getContactProtocolsAction(chat.workspace_id, contactId)
             .then((res) => {
+                if (cancelled) return;
                 if (res.error) {
                     setProtocolHistory([]);
                     return;
                 }
                 setProtocolHistory(res.protocols || []);
             })
-            .finally(() => setProtocolHistoryLoading(false));
+            .finally(() => {
+                if (!cancelled) setProtocolHistoryLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, [chat?.workspace_id, contactId]);
 
     const openDeals = useMemo(() => deals.filter(d => d.won === null || d.won === undefined), [deals]);

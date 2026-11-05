@@ -82,7 +82,9 @@ async function verifySignature(token: string, secret: string): Promise<SupabaseJ
 
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) {
-    return decodeWithoutVerify(token);
+    // Falha fechada: sem primitiva de verificacao nao ha como confiar no token.
+    console.error('[AUTH] crypto.subtle indisponivel; token recusado.');
+    return null;
   }
 
   const key = await subtle.importKey('raw', textEncoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
@@ -94,13 +96,15 @@ async function verifySignature(token: string, secret: string): Promise<SupabaseJ
   if (expected !== signature) return null;
 
   const decoded = safeJsonParse<SupabaseJwtPayload>(base64UrlDecode(payload));
-  return decoded;
-}
+  if (!decoded) return null;
 
-function decodeWithoutVerify(token: string): SupabaseJwtPayload | null {
-  const parts = token.split('.');
-  if (parts.length < 2) return null;
-  return safeJsonParse<SupabaseJwtPayload>(base64UrlDecode(parts[1]));
+  // Assinatura valida nao basta: um token expirado continua assinado para
+  // sempre. Sem esta checagem, sessao encerrada nunca deixa de valer no servidor.
+  if (typeof decoded.exp === 'number' && decoded.exp * 1000 <= Date.now()) {
+    return null;
+  }
+
+  return decoded;
 }
 
 /**
@@ -180,17 +184,29 @@ export function getSupabaseAccessTokenFromCookies(
   return null;
 }
 
+/**
+ * Valida o access token e devolve o payload, ou null.
+ *
+ * Falha fechada, sempre. A versao anterior caia num decode sem verificacao
+ * quando a assinatura nao batia — o que aceitava qualquer JWT forjado e
+ * transformava `sub` em campo escolhido pelo cliente. Como o servidor monta a
+ * sessao a partir daqui (server.ts substitui supabase.auth.getUser pelo
+ * resultado), isso valia como autenticar-se como qualquer usuario.
+ *
+ * Devolver null nao desloga ninguem legitimo: server.ts so troca o getUser
+ * quando ha payload valido, entao o caminho normal do Supabase — com chamada
+ * real ao servico de auth — assume e decide.
+ */
 export async function decodeSupabaseJwt(token: string | null): Promise<SupabaseJwtPayload | null> {
   if (!token) return null;
   const secret = process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_SECRET || '';
 
-  if (secret) {
-    const verified = await verifySignature(token, secret);
-    if (verified) return verified;
+  if (!secret) {
+    console.error('[AUTH] SUPABASE_JWT_SECRET ausente; token nao verificavel foi recusado.');
+    return null;
   }
 
-  // As a last resort, decode without verifying to avoid extra auth calls.
-  return decodeWithoutVerify(token);
+  return verifySignature(token, secret);
 }
 
 export function mapPayloadToSupabaseUser(payload: SupabaseJwtPayload): SupabaseUser {

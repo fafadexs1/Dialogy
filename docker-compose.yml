@@ -1,13 +1,14 @@
 ﻿x-app-environment: &app-environment
   NODE_ENV: ${NODE_ENV:-production}
-  PORT: ${PORT:-9045}
+  PORT: ${PORT}
   QUEUE_MODE: ${QUEUE_MODE:-enqueue}
   QUEUE_ENABLED_JOBS: ${QUEUE_ENABLED_JOBS:-evolution_webhook_process,whatsapp_send,webhook_outbound,queue_auto_close,marketing_auto_close,ai_document_ingest,ai_autopilot_process,ai_autopilot_learning_cycle,ai_case_memory_refresh}
   NEXTAUTH_URL: ${NEXTAUTH_URL}
+  EVOLUTION_WEBHOOK_BASE_URL: ${EVOLUTION_WEBHOOK_BASE_URL:-}
   NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
   NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
-  PRODUCT_UPDATES_ENABLED: ${PRODUCT_UPDATES_ENABLED:-false}
-  NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED: ${NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED:-false}
+  PRODUCT_UPDATES_ENABLED: ${PRODUCT_UPDATES_ENABLED:-true}
+  NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED: ${NEXT_PUBLIC_PRODUCT_UPDATES_ENABLED:-true}
   ANALYTICS_SNAPSHOT_ENABLED: ${ANALYTICS_SNAPSHOT_ENABLED:-true}
   ANALYTICS_SNAPSHOT_FRESH_MS: ${ANALYTICS_SNAPSHOT_FRESH_MS:-300000}
   ANALYTICS_SNAPSHOT_HISTORICAL_GRACE_MS: ${ANALYTICS_SNAPSHOT_HISTORICAL_GRACE_MS:-86400000}
@@ -28,6 +29,13 @@
   ALLOW_DANGEROUS_ADMIN_OPERATIONS: ${ALLOW_DANGEROUS_ADMIN_OPERATIONS}
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
   STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  ASAAS_ENVIRONMENT: ${ASAAS_ENVIRONMENT:-sandbox}
+  ASAAS_API_KEY: ${ASAAS_API_KEY:-}
+  ASAAS_WEBHOOK_TOKEN: ${ASAAS_WEBHOOK_TOKEN:-}
+  ASAAS_ENCRYPTION_KEY: ${ASAAS_ENCRYPTION_KEY:-}
+  # Freio de emergência do operador da plataforma: desliga toda a autonomia dos agentes sem mexer na configuração de ninguém.
+  # A autonomia (encerrar, transferir, avisar, fila) é configurada por agente, no Estúdio.
+  STUDIO_AUTOMATION_KILL_SWITCH: ${STUDIO_AUTOMATION_KILL_SWITCH:-false}
   STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
   STRIPE_WEBHOOK_FORWARD_TO: ${STRIPE_WEBHOOK_FORWARD_TO:-}
   STRIPE_WEBHOOK_SECRET_WAIT_MS: ${STRIPE_WEBHOOK_SECRET_WAIT_MS:-}
@@ -46,11 +54,21 @@
   GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
   GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v24}
   GOOGLE_ADS_EXPORT_SECRET: ${GOOGLE_ADS_EXPORT_SECRET:-}
+  # Cifra o refresh token do Google Ads guardado em workspace_integrations.
+  # Sem esta chave o sistema usa META_PAYLOAD_ENCRYPTION_KEY.
+  GOOGLE_ADS_SECRET_ENCRYPTION_KEY: ${GOOGLE_ADS_SECRET_ENCRYPTION_KEY:-}
+  GOOGLE_ADS_EXPORT_BATCH_SIZE: ${GOOGLE_ADS_EXPORT_BATCH_SIZE:-25}
+  GOOGLE_ADS_EXPORT_INTERVAL_MS: ${GOOGLE_ADS_EXPORT_INTERVAL_MS:-60000}
+  GOOGLE_ADS_EXPORT_LEASE_MS: ${GOOGLE_ADS_EXPORT_LEASE_MS:-120000}
   GOOGLE_GENAI_API_KEY: ${GOOGLE_GENAI_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   # Whisper Transcription API
   WHISPER_API_KEY: ${WHISPER_API_KEY:-}
   WHISPER_BASE_URL: ${WHISPER_BASE_URL:-${BASE_URL:-}}
+  WHISPER_ASYNC_JOBS_ENABLED: ${WHISPER_ASYNC_JOBS_ENABLED:-true}
+  WHISPER_REQUEST_TIMEOUT_MS: ${WHISPER_REQUEST_TIMEOUT_MS:-60000}
+  WHISPER_JOB_WAIT_TIMEOUT_MS: ${WHISPER_JOB_WAIT_TIMEOUT_MS:-10800000}
+  WHISPER_TIMEOUT_MS: ${WHISPER_TIMEOUT_MS:-600000}
   AI_DEFAULT_MODEL: ${AI_DEFAULT_MODEL:-}
   AI_ORCHESTRATOR_TOTAL_TIMEOUT_MS: ${AI_ORCHESTRATOR_TOTAL_TIMEOUT_MS:-30000}
   AI_ORCHESTRATOR_LLM_TIMEOUT_MS: ${AI_ORCHESTRATOR_LLM_TIMEOUT_MS:-20000}
@@ -93,11 +111,8 @@
   EVOLUTION_BUSINESS_FIELD_MAX_LENGTH: ${EVOLUTION_BUSINESS_FIELD_MAX_LENGTH}
   WEBHOOK_TIMEOUT_MS: ${WEBHOOK_TIMEOUT_MS}
   EVOLUTION_API_TIMEOUT_MS: ${EVOLUTION_API_TIMEOUT_MS:-30000}
-  NEXUS_URL: ${NEXUS_URL}
-  NEXT_PUBLIC_NEXUS_URL: ${NEXT_PUBLIC_NEXUS_URL}
   NSXD_URL: ${NSXD_URL}
   NEXT_PUBLIC_NSXD_URL: ${NEXT_PUBLIC_NSXD_URL}
-  NEXUS_WORKSPACE_EMAIL_DOMAIN: ${NEXUS_WORKSPACE_EMAIL_DOMAIN:-}
   MERCADOLIVRE_APP_ID: ${MERCADOLIVRE_APP_ID:-}
   MERCADOLIVRE_CLIENT_SECRET: ${MERCADOLIVRE_CLIENT_SECRET:-}
   FFMPEG_PATH: ${FFMPEG_PATH}
@@ -133,6 +148,9 @@
   PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-}
   PRESENCE_RECENT_ACTIVITY_SECONDS: ${PRESENCE_RECENT_ACTIVITY_SECONDS:-}
   PRESENCE_HEARTBEAT_MS: ${PRESENCE_HEARTBEAT_MS:-}
+  # 'postgres' (padrao) mantem o comportamento atual; 'redis' tira o heartbeat
+  # do banco. A virada e reversivel a quente: basta trocar e reiniciar.
+  PRESENCE_BACKEND: ${PRESENCE_BACKEND:-postgres}
   BUILD_ID: ${BUILD_ID:-}
   NEXT_BUILD_ID: ${NEXT_BUILD_ID:-}
   VERCEL_GIT_COMMIT_SHA: ${VERCEL_GIT_COMMIT_SHA:-}
@@ -143,13 +161,17 @@
   NEXT_PUBLIC_INBOX_DEBUG: ${NEXT_PUBLIC_INBOX_DEBUG:-}
   DIALOGY_LOCAL_ORIGIN: ${DIALOGY_LOCAL_ORIGIN:-}
   DIALOGY_PRESERVE_APP_URLS: ${DIALOGY_PRESERVE_APP_URLS:-}
-  DIALOGY_USE_TURBO: ${DIALOGY_USE_TURBO:-}
   DIALOGY_INTERNAL_HMAC_CURRENT_KEY_ID: ${DIALOGY_INTERNAL_HMAC_CURRENT_KEY_ID:-}
   DIALOGY_INTERNAL_HMAC_KEYS: ${DIALOGY_INTERNAL_HMAC_KEYS:-}
   EVOLUTION_WEBHOOK_REQUIRE_HMAC: ${EVOLUTION_WEBHOOK_REQUIRE_HMAC:-}
   META_RELAY_CONCURRENCY: ${META_RELAY_CONCURRENCY:-}
   META_RELAY_TIMEOUT_MS: ${META_RELAY_TIMEOUT_MS:-}
   META_PAYLOAD_ENCRYPTION_KEY: ${META_PAYLOAD_ENCRYPTION_KEY:-}
+  WORKSPACE_CREDENTIALS_ENCRYPTION_KEY: ${WORKSPACE_CREDENTIALS_ENCRYPTION_KEY:-}
+  NEXUS_SCHEDULE_ENABLED: ${NEXUS_SCHEDULE_ENABLED:-true}
+  NEXUS_SCHEDULE_POLL_MS: ${NEXUS_SCHEDULE_POLL_MS:-30000}
+  NEXUS_SCHEDULE_CATCHUP_MINUTES: ${NEXUS_SCHEDULE_CATCHUP_MINUTES:-1440}
+  NEXUS_MONITOR_POLL_MS: ${NEXUS_MONITOR_POLL_MS:-30000}
   META_APP_ID: ${META_APP_ID:-}
   META_APP_SECRETS: ${META_APP_SECRETS:-}
   META_WHATSAPP_VERIFY_TOKEN: ${META_WHATSAPP_VERIFY_TOKEN:-}
@@ -174,7 +196,7 @@ services:
   # as uid 1001, so initialise the shared Hugging Face/ONNX cache before either
   # process can load a local embedding or reranking model.
   ai-cache-init:
-    image: fafadexs/dialogy-worker-ai:PDC-1.28
+    image: fafadexs/dialogy-worker-ai:PDC-1.115
     restart: "no"
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
@@ -187,7 +209,7 @@ services:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
 
   dialogy:
-    image: fafadexs/dialogy:PDC-1.28
+    image: fafadexs/dialogy:PDC-1.115
     restart: unless-stopped
     init: true
     depends_on:
@@ -195,10 +217,14 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *app-environment
+      # Orcamento de conexoes: o Postgres tem max_connections=100 e o Supabase
+      # self-hosted ja consome ~45, deixando ~41 livres. A soma dos 7 servicos
+      # com acesso ao banco da 36, preservando folga para migrations e diagnostico.
+      DB_POOL_MAX: ${DIALOGY_DB_POOL_MAX:-15}
     volumes:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
     ports:
-      - "9045:9045"
+      - "${PORT:-9045}:${PORT:-9045}"
     healthcheck:
       test:
         [
@@ -211,10 +237,11 @@ services:
       interval: 30s
       retries: 5
       start_period: 40s
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker:
-    image: fafadexs/dialogy-worker:PDC-1.28
+    image: fafadexs/dialogy-worker:PDC-1.115
     restart: unless-stopped
     init: true
     depends_on:
@@ -222,10 +249,15 @@ services:
         condition: service_healthy
     environment:
       <<: *worker-environment
+      # QUEUE_WORKER_CONCURRENCY=8 — o pool nao precisa passar disso.
+      DB_POOL_MAX: ${WORKER_DB_POOL_MAX:-8}
+      # O agendador Nexus pertence ao servico dialogy-nexus neste stack.
+      NEXUS_SCHEDULE_ENABLED: "false"
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker-ai:
-    image: fafadexs/dialogy-worker-ai:PDC-1.28
+    image: fafadexs/dialogy-worker-ai:PDC-1.115
     restart: unless-stopped
     init: true
     depends_on:
@@ -235,12 +267,15 @@ services:
         condition: service_healthy
     environment:
       <<: *worker-ai-environment
+      # AI_QUEUE_WORKER_CONCURRENCY=2.
+      DB_POOL_MAX: ${WORKER_AI_DB_POOL_MAX:-3}
     volumes:
       - dialogy-transformers-cache:/tmp/dialogy-transformers-cache
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker-campaign:
-    image: fafadexs/dialogy-worker:PDC-1.28
+    image: fafadexs/dialogy-worker:PDC-1.115
     command: ["node", "dist/worker-campaign.js"]
     restart: unless-stopped
     init: true
@@ -249,10 +284,13 @@ services:
         condition: service_healthy
     environment:
       <<: *worker-campaign-environment
+      # CAMPAIGN_WORKER_CONCURRENCY=2.
+      DB_POOL_MAX: ${WORKER_CAMPAIGN_DB_POOL_MAX:-3}
+    networks: [default, supabase]
     stop_grace_period: 30s
 
   worker-meta-relay:
-    image: fafadexs/dialogy-worker:PDC-1.28
+    image: fafadexs/dialogy-worker:PDC-1.115
     command: ["node", "dist/worker-meta-relay.js"]
     restart: unless-stopped
     init: true
@@ -261,7 +299,72 @@ services:
         condition: service_healthy
     environment:
       <<: *app-environment
+      # META_RELAY_CONCURRENCY=5.
+      DB_POOL_MAX: ${WORKER_META_RELAY_DB_POOL_MAX:-4}
+    networks: [default, supabase]
+    stop_grace_period: 30s
+
+  worker-google-ads:
+    image: fafadexs/dialogy-worker:PDC-1.115
+    command: ["node", "dist/worker-google-ads.js"]
+    restart: unless-stopped
+    init: true
+    depends_on:
+      dialogy:
+        condition: service_healthy
+    environment:
+      <<: *app-environment
+      # Fila de conversoes offline: baixo volume, pool pequeno basta.
+      DB_POOL_MAX: ${WORKER_GOOGLE_ADS_DB_POOL_MAX:-2}
+    networks: [default, supabase]
+    stop_grace_period: 30s
+
+  # Nexus continua sendo codigo nativo da Dialogy. Este processo dedicado
+  # executa somente os gatilhos agendados e publica saude/metricas operacionais;
+  # mensagens e webhooks seguem no runtime principal, sem consumo duplicado.
+  dialogy-nexus:
+    image: fafadexs/dialogy-worker:PDC-1.115
+    command: ["node", "dist/worker-nexus.js"]
+    restart: unless-stopped
+    init: true
+    depends_on:
+      dialogy:
+        condition: service_healthy
+    environment:
+      <<: *app-environment
+      # Consultas e execucoes agendadas sao seriais neste processo; uma conexao
+      # basta e preserva folga no Postgres para o app e os workers de mensagens.
+      DB_POOL_MAX: ${NEXUS_DB_POOL_MAX:-1}
+      NEXUS_SCHEDULE_ENABLED: ${NEXUS_SCHEDULE_ENABLED:-true}
+      NEXUS_MONITOR_PORT: 9050
+    ports:
+      - "127.0.0.1:${NEXUS_MONITOR_PORT:-9050}:9050"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:9050/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      timeout: 5s
+      interval: 30s
+      retries: 5
+      start_period: 20s
+    networks: [default, supabase]
     stop_grace_period: 30s
 
 volumes:
   dialogy-transformers-cache:
+
+networks:
+  # Rede interna do proprio stack.
+  default:
+  # Rede da stack Supabase, para alcancar o Supavisor pelo nome do servico.
+  # Com isto o DATABASE_URL passa a ser:
+  #   postgresql://postgres.dialogy:SENHA@supavisor:6543/postgres
+  # Repare na porta 6543 — a interna do container. A 6547 e a publicacao no
+  # host, que deixa de ser necessaria e deveria ser fechada.
+  supabase:
+    external: true
+    name: dialogy_supabase_default

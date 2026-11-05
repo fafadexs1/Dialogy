@@ -4,6 +4,7 @@ import { sendAutomatedMessageAction, sendAutomatedMediaAction, sendAgentTemplate
 import { isSGPPayload, adaptSGPPayload, normalizeAgentListPayload, AgentSendPayload } from '@/lib/sgp-payloads';
 import { randomUUID } from 'crypto';
 import { buildChatProtocol } from '@/lib/utils';
+import { chatBelongsToWorkspace } from '@/lib/security/system-agent-access';
 import {
     findOrCreateWhatsappContact,
     findWhatsappChatByIdentity,
@@ -149,6 +150,9 @@ export async function POST(request: Request) {
                 marketingTargetSystemAgentId: agent.handoff_system_agent_id || null,
             }
             : {};
+        const automatedMetadata = payload.skipUserSignature === true
+            ? { ...metadata, skipUserSignature: true }
+            : metadata;
 
         // --- TEMPLATE FLOW ---
         if (type === 'template') {
@@ -190,6 +194,9 @@ export async function POST(request: Request) {
             if (!instance) {
                 return NextResponse.json({ error: 'instance is required for sending lists.' }, { status: 400 });
             }
+            if (providedChatId && !await chatBelongsToWorkspace(providedChatId, agent.workspace_id)) {
+                return NextResponse.json({ error: 'Chat not found in the agent workspace.' }, { status: 404 });
+            }
 
             const result = await sendAgentListAction({
                 agentId: agent.id,
@@ -223,6 +230,9 @@ export async function POST(request: Request) {
             if (!chatId) {
                 return NextResponse.json({ error: 'Either chatId or phoneNumber is required.' }, { status: 400 });
             }
+            if (!await chatBelongsToWorkspace(chatId, agent.workspace_id)) {
+                return NextResponse.json({ error: 'Chat not found in the agent workspace.' }, { status: 404 });
+            }
 
             const content = body.content || '';
             const media = body.media;
@@ -234,9 +244,9 @@ export async function POST(request: Request) {
             let result: { success: boolean; error?: string };
 
             if (media && media.length > 0) {
-                result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, metadata as any);
+                result = await sendAutomatedMediaAction(chatId, content, media, agent.id, instance, automatedMetadata as any);
             } else {
-                result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, metadata as any);
+                result = await sendAutomatedMessageAction(chatId, content, agent.id, true, instance, automatedMetadata as any);
             }
 
             if (result.success) {

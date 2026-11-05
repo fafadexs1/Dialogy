@@ -1,5 +1,4 @@
 import { db } from '@/lib/db';
-import { DEFAULT_AUTOPILOT_MODEL, normalizeGoogleAiModelId } from '@/lib/ai-models';
 import type { AutopilotConfig, KnowledgeBaseDocument, KnowledgeCollection } from '@/lib/types';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 
@@ -38,29 +37,6 @@ function mapAutopilotConfig(row: any): AutopilotConfig {
         default_fallback_reply: row.default_fallback_reply || null,
         transcription_model: row.transcription_model || null,
     } as AutopilotConfig;
-}
-
-function normalizeWorkspaceIntegrationModel(provider: string, value: unknown): string | undefined {
-    const model = typeof value === 'string' ? value.trim() : '';
-    if (!model) return undefined;
-
-    if (provider === 'gemini') {
-        return normalizeGoogleAiModelId(model) || undefined;
-    }
-
-    if (provider === 'openai') {
-        if (model.startsWith('openai/') || model.startsWith('codex/')) return model;
-        if (model.includes('/')) return undefined;
-        return `openai/${model}`;
-    }
-
-    if (provider === 'deepseek') {
-        if (model.startsWith('deepseek/')) return model;
-        if (model.includes('/')) return undefined;
-        return `deepseek/${model}`;
-    }
-
-    return undefined;
 }
 
 export type WorkspaceAiExecutionContext = {
@@ -109,59 +85,7 @@ export async function resolveWorkspaceAiExecutionContext(
         }
     }
 
-    let workspaceGeminiApiKey: string | undefined;
-    let workspaceModel: string | undefined;
-    let workspaceGeminiModel: string | undefined;
-
-    try {
-        const integrationRes = await db.query(
-            `SELECT provider, config
-             FROM workspace_integrations
-             WHERE workspace_id = $1
-               AND provider = ANY($2::text[])
-               AND is_active = true
-             ORDER BY updated_at DESC`,
-            [workspaceId, ['gemini', 'openai', 'deepseek']]
-        );
-
-        for (const row of integrationRes.rows) {
-            const config = row.config || {};
-            if (row.provider === 'gemini' && !workspaceGeminiApiKey) {
-                workspaceGeminiApiKey =
-                    typeof config.apiKey === 'string' && config.apiKey.trim().length > 0
-                        ? config.apiKey.trim()
-                        : undefined;
-            }
-
-            const normalizedModel = normalizeWorkspaceIntegrationModel(row.provider, config.aiModel);
-            if (row.provider === 'gemini' && normalizedModel && !workspaceGeminiModel) {
-                workspaceGeminiModel = normalizedModel;
-            }
-            if (normalizedModel && !workspaceModel) {
-                workspaceModel = normalizedModel;
-            }
-        }
-    } catch (error) {
-        console.error('[AI_RUNTIME] Failed to resolve workspace AI integrations:', error);
-    }
-
-    const configuredModel =
-        autopilotConfig?.ai_model ||
-        workspaceModel ||
-        process.env.AI_DEFAULT_MODEL?.trim() ||
-        null;
-    const resolvedModel = await resolveAutopilotModelFromCatalog(configuredModel);
-
-    if (resolvedModel.fallbackUsed) {
-        console.warn(
-            `[AI_RUNTIME] Model "${resolvedModel.requestedModel}" is not enabled in the global catalog. Falling back to "${resolvedModel.model}".`
-        );
-    }
-
-    return {
-        autopilotConfig,
-        workspaceGeminiApiKey,
-        workspaceGeminiModel: workspaceGeminiModel || DEFAULT_AUTOPILOT_MODEL,
-        model: resolvedModel.model,
-    };
+    const resolvedModel = await resolveAutopilotModelFromCatalog();
+    return { autopilotConfig: autopilotConfig ? {...autopilotConfig,ai_model:resolvedModel.model,gemini_api_key:null} : null,
+      workspaceGeminiApiKey: undefined,workspaceGeminiModel:resolvedModel.model,model:resolvedModel.model };
 }

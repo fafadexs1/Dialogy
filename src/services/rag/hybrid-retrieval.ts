@@ -6,6 +6,7 @@ import type { ResolvedCasePromptItem } from './retrieval';
 import { getCanonicalKnowledgeAnswer, isUnsafeAsCustomerFacingKnowledge } from './document-safety';
 import { rerankKnowledgeCandidatesWithBgeV2M3 } from './bge-reranker-v2-m3';
 import { inferKnowledgeContextRole } from './knowledge-document';
+import { buildKnowledgeEvidence, type AgentEvidence } from '@/services/agent-runtime/grounding';
 
 const DEFAULT_SELECTED_DOCUMENT_LIMIT = 5;
 const MAX_DOCUMENTS_PER_CATEGORY = 2;
@@ -26,6 +27,8 @@ export type KnowledgeDocumentSelectionSource = 'vector' | 'keyword' | 'static';
 export type HybridKnowledgeRetrievalResult = {
   knowledgeBaseDocuments: KnowledgeBaseDocument[];
   resolvedCases: ResolvedCasePromptItem[];
+  /** Stable references that can be attached to the agent trace/response. */
+  provenance: AgentEvidence[];
   strategy: KnowledgeRetrievalStrategy;
   knowledgeCoverage: KnowledgeCoverage;
   retrieved: {
@@ -507,6 +510,9 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
   );
   const enforceDocumentScope = <T extends { knowledgeBaseDocuments: KnowledgeBaseDocument[] }>(retrieval: T): T => ({
     ...retrieval,
+    // Defense in depth for older retrieval providers: private cases must never
+    // become customer-facing context through either initial or corrective RAG.
+    resolvedCases: [],
     // Defense in depth: VectorStore applies the filter in SQL, but retain the
     // boundary if a mocked, cached, or future retrieval source returns a row
     // outside the active knowledge step.
@@ -638,6 +644,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
     const result: HybridKnowledgeRetrievalResult = {
       ...finalMerged,
       resolvedCases: vectorRetrieval.resolvedCases,
+      provenance: finalMerged.knowledgeBaseDocuments.map(buildKnowledgeEvidence),
       retrieved: {
         vectorDocuments: vectorRetrieval.knowledgeBaseDocuments.length,
         staticDocuments: scopedStaticDocuments.length,
@@ -670,6 +677,7 @@ export async function retrieveHybridSupportContext(input: BaseRetrievalInput & {
     const result: HybridKnowledgeRetrievalResult = {
       ...merged,
       resolvedCases: [],
+      provenance: merged.knowledgeBaseDocuments.map(buildKnowledgeEvidence),
       retrieved: {
         vectorDocuments: 0,
         staticDocuments: scopedStaticDocuments.length,

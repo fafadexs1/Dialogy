@@ -8,16 +8,23 @@ const CHANNEL_NAME = 'dialogy-build-sync';
 const STORAGE_KEY = 'dialogy-build-id';
 const CHECK_INTERVAL_MS = 30000;
 
-function getCurrentBuildId(): string {
-  if (typeof window === 'undefined') return 'dev';
+function getInitialBuildId(): string | null {
+  if (typeof window === 'undefined') return null;
   const buildId = (window as any).__NEXT_DATA__?.buildId;
-  return typeof buildId === 'string' ? buildId : 'dev';
+  if (typeof buildId === 'string' && buildId && buildId !== 'dev') return buildId;
+  try {
+    const sessionVal = sessionStorage.getItem(STORAGE_KEY);
+    if (sessionVal && sessionVal !== 'dev') return sessionVal;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function BuildVersionWatcher() {
   const { toast } = useToast();
   const router = useRouter();
-  const currentBuildIdRef = useRef<string>(getCurrentBuildId());
+  const currentBuildIdRef = useRef<string | null>(getInitialBuildId());
   const updateNotifiedRef = useRef(false);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const softRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -35,7 +42,7 @@ export function BuildVersionWatcher() {
     updateNotifiedRef.current = true;
     try {
       if (serverBuildId) {
-        localStorage.setItem(STORAGE_KEY, serverBuildId);
+        sessionStorage.setItem(STORAGE_KEY, serverBuildId);
       }
     } catch {
       /* ignore storage failures */
@@ -76,15 +83,23 @@ export function BuildVersionWatcher() {
           serverBuildId = null;
         }
       }
-      if (!serverBuildId) return;
+      if (!serverBuildId || serverBuildId === 'dev') return;
+
+      if (!currentBuildIdRef.current) {
+        // Establish baseline build ID for the current browser session without triggering a mismatch
+        currentBuildIdRef.current = serverBuildId;
+        try {
+          sessionStorage.setItem(STORAGE_KEY, serverBuildId);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
 
       if (serverBuildId !== currentBuildIdRef.current) {
         notifyUpdateAvailable('build-mismatch', serverBuildId);
         return;
       }
-
-      currentBuildIdRef.current = serverBuildId;
-      localStorage.setItem(STORAGE_KEY, serverBuildId);
     } catch (err) {
       console.debug('[BUILD_WATCHER] Failed to check build id', err);
     }
@@ -98,7 +113,9 @@ export function BuildVersionWatcher() {
       if (
         ['BUILD_RELOAD', 'BUILD_UPDATE', 'BUILD_UPDATE_AVAILABLE'].includes(data?.type)
         && data.buildId
+        && currentBuildIdRef.current
         && data.buildId !== currentBuildIdRef.current
+        && data.buildId !== 'dev'
       ) {
         notifyUpdateAvailable('peer-signal', data.buildId);
       }
@@ -112,15 +129,6 @@ export function BuildVersionWatcher() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored && stored !== currentBuildIdRef.current) {
-        notifyUpdateAvailable('stored-mismatch', stored);
-        return;
-      }
-    } catch {
-      /* ignore storage failures */
-    }
 
     checkBuild();
     const interval = setInterval(checkBuild, CHECK_INTERVAL_MS);
@@ -140,7 +148,7 @@ export function BuildVersionWatcher() {
       window.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onFocus);
     };
-  }, [checkBuild, notifyUpdateAvailable]);
+  }, [checkBuild]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -151,9 +159,16 @@ export function BuildVersionWatcher() {
 
       const url = typeof args[0] === 'string' ? args[0] : ('url' in args[0] ? (args[0] as Request).url : args[0].toString());
       const headerBuildId = response.headers.get('x-build-id');
-      if (headerBuildId && headerBuildId !== currentBuildIdRef.current) {
-        notifyUpdateAvailable('header-mismatch', headerBuildId);
-        return response;
+      if (headerBuildId && headerBuildId !== 'dev') {
+        if (!currentBuildIdRef.current) {
+          currentBuildIdRef.current = headerBuildId;
+          try {
+            sessionStorage.setItem(STORAGE_KEY, headerBuildId);
+          } catch {}
+        } else if (headerBuildId !== currentBuildIdRef.current) {
+          notifyUpdateAvailable('header-mismatch', headerBuildId);
+          return response;
+        }
       }
 
       const isServerActionCall = typeof url === 'string' && url.includes('/_next/server-actions');

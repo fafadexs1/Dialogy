@@ -1,0 +1,12 @@
+{
+  "viewports": [
+    1440,
+    390,
+    320
+  ],
+  "dynamicValue": true,
+  "tableVerified": true,
+  "minimumRecharge": true,
+  "noSupplierCosts": true,
+  "backend": "isolated fixtures; no payments"
+}

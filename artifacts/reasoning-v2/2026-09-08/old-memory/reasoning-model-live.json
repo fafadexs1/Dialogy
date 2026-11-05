@@ -1,0 +1,64 @@
+{
+  "at": "2026-09-08T18:29:12.795Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation and integration responses; no publication or customer effects",
+  "traces": [],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "req_instalacao",
+            "procedureId": "contract",
+            "objective": "Registrar plano, preferência de mesh e endereço de instalação",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": "req_instalacao",
+          "capabilityId": null,
+          "query": "Plano, preferência de mesh e endereço escolhidos pelo cliente em atendimento anterior para instalação",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Cliente retomou atendimento dizendo que já escolheu plano e mesh. Não há escolhas registradas nesta sessão e há memória antiga; vou recuperar as escolhas anteriores antes de pedir repetição."
+        }
+      },
+      "ms": 31950
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "error": "deepseek exhausted the output budget before completing dialogy_reasoning_decision.",
+      "ms": 52452
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 1983,
+      "outputTokens": 3834,
+      "totalTokens": 5817,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2320,
+      "outputTokens": 6984,
+      "totalTokens": 9304,
+      "ruleName": "decision"
+    }
+  ]
+}

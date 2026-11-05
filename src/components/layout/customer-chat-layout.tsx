@@ -11,6 +11,7 @@ import { type Chat, Message, User, Tag, Contact } from '@/lib/types';
 import { getTags } from '@/actions/crm';
 import { getInitialChatsData, syncInboxData, getChatMessagesWindow, loadOlderChatsAction } from '@/actions/chats';
 import type { InitialChatsPayload } from '@/actions/chats';
+import { getInboxPaginationTab, isChatInInboxQueueScope, type InboxListFilters } from '@/lib/inbox-pagination';
 import { Skeleton } from '../ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -21,7 +22,7 @@ import { Sheet, SheetDescription, SheetOverlay, SheetPortal, SheetTitle } from '
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { ptBR } from 'date-fns/locale';
-import { replaceChatPath } from '@/lib/chat-navigation';
+import { replaceChatPath, resolveHydratedChatSelection } from '@/lib/chat-navigation';
 import { useRouter } from 'next/navigation';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { useInboxConnectionRecovery } from '@/hooks/use-inbox-connection-recovery';
@@ -31,8 +32,15 @@ import ErrorBoundary from '@/components/layout/error-boundary';
 import { reportClientMetric } from '@/lib/observability/client';
 import { cn, formatMessageDate } from '@/lib/utils';
 import { resolveRealtimeSender } from '@/lib/realtime-message-sender';
-import { isChatVisibleForOwnership } from '@/lib/inbox-ownership';
-import { reconcileRealtimeChatAssignment, reconcileRealtimeChatPresentation } from '@/lib/realtime/realtime-reconciler';
+import {
+  isChatVisibleForOwnership,
+  shouldClearSelectedChatOnOwnershipChange,
+} from '@/lib/inbox-ownership';
+import {
+  hasCompleteRealtimeChatPresentation,
+  reconcileRealtimeChatAssignment,
+  reconcileRealtimeChatPresentation,
+} from '@/lib/realtime/realtime-reconciler';
 import { shouldMarkChatAsRead } from '@/lib/inbox-read-state';
 import { persistChatRead } from '@/lib/inbox-mark-as-read';
 import { inboxDebug } from '@/lib/inbox-debug';
@@ -258,10 +266,12 @@ export default function CustomerChatLayout({
   initialUser,
   chatId: initialChatId,
   initialData,
+  preserveClientState = false,
 }: {
   initialUser: User | null;
   chatId: string | null;
   initialData?: InitialChatsPayload | null;
+  preserveClientState?: boolean;
 }) {
   const router = useRouter();
   const [closeReasons, setCloseReasons] = useState<Tag[]>([]);
@@ -306,7 +316,7 @@ export default function CustomerChatLayout({
   const removeMessagesForChat = useInboxStore((state) => state.removeMessagesForChat);
   const appendChats = useInboxStore((state) => state.appendChats);
   const hasMoreChats = useInboxStore((state) => state.hasMoreChats);
-  const setHasMoreChats = useInboxStore((state) => state.setHasMoreChats);
+  const setChatPagination = useInboxStore((state) => state.setChatPagination);
   const removeChat = useInboxStore((state) => state.removeChat);
 
   const handleBoundaryError = useCallback((error: Error) => {
@@ -314,6 +324,7 @@ export default function CustomerChatLayout({
   }, []);
 
   const selectedChatIdRef = useRef<string | null>(initialData?.selectedChatId ?? initialChatId);
+  const hasUserSelectedChatRef = useRef(false);
   const audioRefs = useRef<{ queue: HTMLAudioElement | null; attending: HTMLAudioElement | null }>({
     queue: null,
     attending: null,
@@ -327,24 +338,67 @@ export default function CustomerChatLayout({
   const activatedChatIdsRef = useRef<Set<string>>(new Set());
   const messageWindowLoadsInFlightRef = useRef<Set<string>>(new Set());
   const pendingContactFetchRef = useRef<Set<string>>(new Set());
+  const pendingChatPresentationHydrationRef = useRef<Set<string>>(new Set());
+  const hydratedChatPresentationRef = useRef<Set<string>>(new Set());
   const deltaSyncInFlightRef = useRef<Promise<void> | null>(null);
   const deltaSyncQueuedRef = useRef(false);
   const lastDeltaSyncCompletedAtRef = useRef(0);
   const realtimeHealthyRef = useRef(false);
+  const deltaSyncDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleDebouncedDeltaSync = useCallback(() => {
+    if (deltaSyncDebounceTimerRef.current) return;
+    deltaSyncDebounceTimerRef.current = setTimeout(() => {
+      deltaSyncDebounceTimerRef.current = null;
+      void runDeltaSyncRef.current?.();
+    }, 400);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deltaSyncDebounceTimerRef.current) {
+        clearTimeout(deltaSyncDebounceTimerRef.current);
+        deltaSyncDebounceTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const isHydratedRef = useRef(false);
   const initialResetDoneRef = useRef(false);
   const [retryCount, setRetryCount] = useState(0);
+
+  const requestRealtimeChatPresentationHydration = useCallback((chatId: string) => {
+    if (
+      hydratedChatPresentationRef.current.has(chatId) ||
+      pendingChatPresentationHydrationRef.current.has(chatId)
+    ) {
+      return;
+    }
+
+    const sync = runDeltaSyncRef.current;
+    if (!sync) return;
+
+    pendingChatPresentationHydrationRef.current.add(chatId);
+    void sync().finally(() => {
+      pendingChatPresentationHydrationRef.current.delete(chatId);
+      hydratedChatPresentationRef.current.add(chatId);
+    });
+  }, []);
 
   useEffect(() => {
     // Strict Mode Safety: Only reset once per mount cycle.
     // This prevents double-reset on dev hot-reloads/strict mode remounts.
     if (!initialResetDoneRef.current) {
       initialResetDoneRef.current = true;
-      useInboxStore.getState().reset();
-      inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+      if (!preserveClientState) {
+        useInboxStore.getState().reset();
+        inboxDebug('[NOTIFICATION] Layout mounted. Store reset. Waiting for inbox data...');
+      } else {
+        selectedChatIdRef.current = useInboxStore.getState().selectedChatId;
+        inboxDebug('[NOTIFICATION] Layout changed breakpoint. Preserving inbox store state.');
+      }
     }
-  }, []);
+  }, [preserveClientState]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -417,7 +471,7 @@ export default function CustomerChatLayout({
   const messagesListChatIdsCsv = useMemo(() => {
     if (!initialUser?.id || ownershipFilter !== 'mine') return '';
     const ids = chats
-      .filter((chat) => chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id)
+      .filter((chat) => isChatVisibleForOwnership(chat, 'mine', initialUser.id))
       .map((chat) => chat.id)
       .sort();
     return ids.join(',');
@@ -427,7 +481,7 @@ export default function CustomerChatLayout({
     if (!initialUser?.id || ownershipFilter !== 'mine') return '';
     const ids = new Set<string>();
     chats.forEach((chat) => {
-      if (chat.status === 'gerais' || chat.agent?.id === initialUser.id || chat.agentId === initialUser.id) {
+      if (isChatVisibleForOwnership(chat, 'mine', initialUser.id)) {
         ids.add(chat.id);
       }
     });
@@ -656,6 +710,7 @@ export default function CustomerChatLayout({
     const isQueueMessage = messageChat?.status === 'gerais';
     const isAttendingMessage = messageChat?.status === 'atendimentos';
     const isOwnAttending = isAttendingMessage && (messageChat?.agent?.id === initialUser?.id || messageChat?.agentId === initialUser?.id);
+    const shouldHydrateChatPresentation = isAttendingMessage && (!messageChat?.teamName || !messageChat?.teamColor);
     const currentSelectedChatId = snapshot.selectedChatId;
 
     // Always update the data store
@@ -671,8 +726,8 @@ export default function CustomerChatLayout({
       snapshot.markMessagesAsReadByRecipient(message.chat_id, message.createdAt);
     }
 
-    if (!messageChat && runDeltaSyncRef.current) {
-      runDeltaSyncRef.current();
+    if (!messageChat || shouldHydrateChatPresentation) {
+      requestRealtimeChatPresentationHydration(message.chat_id);
     }
 
     // Notification Logic: strict check for INSERT event
@@ -687,7 +742,7 @@ export default function CustomerChatLayout({
         playNotificationSound(soundKind);
       }
     }
-  }, [appendMessagesToChat, getIncomingMessageSoundKind, incrementUnread, initialUser?.id, initialUser?.activeWorkspaceId, mapRealtimePayload, playNotificationSound, removeMessagesForChat]);
+  }, [appendMessagesToChat, getIncomingMessageSoundKind, incrementUnread, initialUser?.id, initialUser?.activeWorkspaceId, mapRealtimePayload, playNotificationSound, removeMessagesForChat, requestRealtimeChatPresentationHydration]);
 
   const loadChatMessages = useCallback(async (chatId: string, beforeDate?: string | null, beforeId?: string | null) => {
     const startedAt = performance.now();
@@ -695,14 +750,14 @@ export default function CustomerChatLayout({
       inboxDebug('[LOAD_MESSAGES] Fetching messages for chat:', chatId, 'before:', beforeDate, 'beforeId:', beforeId);
       const state = useInboxStore.getState();
       const activeChat = state.chats.find((candidate) => candidate.id === chatId);
-      const chatOnly = !!(activeChat as any)?.protocolScoped;
+      const replaceMessageWindow = !!(activeChat as any)?.protocolScoped;
       const result = await getChatMessagesWindow({
         chatId,
         before: beforeDate ?? undefined,
         beforeId: beforeId ?? undefined,
         limit: 50,
         timezone: workspaceTimezone,
-        chatOnly,
+        chatOnly: replaceMessageWindow,
       });
       inboxDebug('[LOAD_MESSAGES] Result:', {
         messagesCount: result.messages.length,
@@ -720,7 +775,7 @@ export default function CustomerChatLayout({
           result.oldestMessageDate,
           result.oldestMessageId,
           result.hasMoreHistory,
-          chatOnly
+          replaceMessageWindow
         );
       }
       if (result.contact) {
@@ -812,12 +867,17 @@ export default function CustomerChatLayout({
     void ensureMessagesForChat(selectedChatId, { force: !hasLoadedSelectedMessageWindow });
   }, [selectedChatId, ensureMessagesForChat, hasLoadedSelectedMessageWindow]);
 
-  const handleLoadMoreChats = useCallback(async (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone' }) => {
-    if (isLoadingMoreChats || !hasMoreChats || !initialUser?.activeWorkspaceId) return;
+  const handleLoadMoreChats = useCallback(async (options?: { statuses?: Chat['status'][], ownership?: 'mine' | 'everyone', filters?: InboxListFilters }) => {
+    if (isLoadingMoreChats || !initialUser?.activeWorkspaceId) return;
 
     const state = useInboxStore.getState();
     const currentChats = state.chats;
-    const { statuses = ['gerais', 'atendimentos'], ownership = 'mine' } = options || {};
+    const { statuses = ['gerais', 'atendimentos'], ownership = 'mine', filters } = options || {};
+    const status = statuses.length === 1 ? statuses[0] : null;
+    const paginationTab = status ? getInboxPaginationTab(status, filters?.queueScope) : null;
+    const storedPage = paginationTab ? state.chatPagination[paginationTab] : null;
+
+    if (storedPage && (!storedPage.hasMore || !storedPage.cursor)) return;
 
     // Filter logic to find the LAST chat that is visible in the current view
     // This is critical because 'currentChats' contains ALL chats (mixed statuses)
@@ -827,38 +887,40 @@ export default function CustomerChatLayout({
       const matchesStatus = statuses.includes(chat.status);
       if (!matchesStatus) return false;
 
+      if (filters?.queueScope && !isChatInInboxQueueScope(chat, filters.queueScope)) return false;
+
       // 2. Ownership Check
-      const chatAgentId = chat.agent?.id || chat.agentId;
-      const matchesOwner =
-        ownership === 'everyone' ||
-        chatAgentId === initialUser.id ||
-        chat.status === 'gerais'; // Gerais always visible if status matches
+      const matchesOwner = isChatVisibleForOwnership(chat, ownership, initialUser.id);
 
       return matchesOwner;
     });
 
-    if (filteredChats.length === 0) return;
-
     const lastChat = filteredChats[filteredChats.length - 1];
-    if (!lastChat.updatedAt) return;
+    const cursor = storedPage?.cursor || (lastChat?.updatedAt
+      ? { lastActivityAt: lastChat.updatedAt, id: lastChat.id }
+      : null);
+    if (!cursor) return;
 
     setIsLoadingMoreChats(true);
     try {
       const result = await loadOlderChatsAction(
         initialUser.activeWorkspaceId,
-        lastChat.updatedAt,
-        lastChat.id,
+        cursor.lastActivityAt,
+        cursor.id,
         statuses,
-        ownership
+        ownership,
+        filters,
       );
 
       if (result.success && result.chats) {
-        if (result.chats.length === 0) {
-          // If the server returns empty for this filter, it implies we reached the end *for this view*.
-          // However, global 'hasMoreChats' might still be true for other views.
-          // We don't setHasMoreChats(false) globally here to avoid breaking other tabs.
-        } else {
+        if (result.chats.length > 0) {
           appendChats(result.chats);
+        }
+        if (paginationTab) {
+          setChatPagination(paginationTab, {
+            hasMore: result.hasMoreChats ?? false,
+            cursor: result.nextCursor ?? null,
+          });
         }
       } else {
         if (result.error) {
@@ -870,9 +932,11 @@ export default function CustomerChatLayout({
     } finally {
       setIsLoadingMoreChats(false);
     }
-  }, [isLoadingMoreChats, hasMoreChats, initialUser, appendChats]);
+  }, [appendChats, initialUser, isLoadingMoreChats, setChatPagination]);
 
   const handleSetSelectedChat = useCallback((chat: Chat | null) => {
+    hasUserSelectedChatRef.current = true;
+
     if (!chat) {
       selectedChatIdRef.current = null;
       setSelectedChatId(null);
@@ -889,6 +953,9 @@ export default function CustomerChatLayout({
     // Fix: Check against the *Store State* (selectedChatId) rather than just the Ref.
     // We only skip if BOTH the store and the ref agree it's already selected.
     if (selectedChatId === chat.id && selectedChatIdRef.current === chat.id) {
+      // Reaplicar o caminho também repara uma URL que tenha ficado para trás
+      // após uma revalidação, mantendo esse clique idempotente.
+      updateSelectedChatPath(chat.id);
       const isFirstActivation = !activatedChatIdsRef.current.has(chat.id);
       if (isFirstActivation) {
         activatedChatIdsRef.current.add(chat.id);
@@ -911,6 +978,19 @@ export default function CustomerChatLayout({
     activatedChatIdsRef.current.add(chat.id);
     void ensureMessagesForChat(chat.id, { force: isFirstActivation });
   }, [selectedChatId, ensureMessagesForChat, setSelectedChatId, updateSelectedChatPath, upsertChats]);
+
+  const handleOwnershipFilterChange = useCallback((nextOwnership: 'mine' | 'everyone') => {
+    setOwnershipFilter(nextOwnership);
+    if (nextOwnership !== 'mine') return;
+
+    const currentSelectedChatId = selectedChatIdRef.current ?? selectedChatId;
+    if (!currentSelectedChatId) return;
+
+    const currentSelectedChat = useInboxStore.getState().chats.find((chat) => chat.id === currentSelectedChatId);
+    if (shouldClearSelectedChatOnOwnershipChange(currentSelectedChat, nextOwnership, initialUser?.id)) {
+      handleSetSelectedChat(null);
+    }
+  }, [handleSetSelectedChat, initialUser?.id, selectedChatId]);
 
   const jumpChatByOffset = useCallback((delta: number) => {
     if (!chats.length) return;
@@ -968,6 +1048,8 @@ export default function CustomerChatLayout({
         oldestMessageId: result.oldestMessageId,
         hasMoreHistory: result.hasMoreHistory,
         hasMoreChats: result.hasMoreChats,
+        inboxCounts: result.inboxCounts,
+        chatPagination: result.statusPagination,
       });
       if (result.selectedChatId) {
         selectedChatIdRef.current = result.selectedChatId;
@@ -1062,10 +1144,10 @@ export default function CustomerChatLayout({
         }
 
         const visibleDeltaChats = result.deltaChats.filter((chat) =>
-          isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId)
+          isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id)
         );
         const hiddenDeltaChatIds = result.deltaChats
-          .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id, snapshot.selectedChatId))
+          .filter((chat) => !isChatVisibleForOwnership(chat, ownershipFilter, initialUser?.id))
           .map((chat) => chat.id)
           .filter((chatId) => chatId !== snapshot.selectedChatId);
 
@@ -1272,14 +1354,19 @@ export default function CustomerChatLayout({
 
     let hiddenCatchUpTimeout: ReturnType<typeof setTimeout> | undefined;
 
+    const handleResume = () => {
+      if (document.visibilityState !== 'visible') return;
+      void runDeltaSync({ force: true });
+      markSelectedChatAsRead();
+    };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         if (hiddenCatchUpTimeout) {
           clearTimeout(hiddenCatchUpTimeout);
           hiddenCatchUpTimeout = undefined;
         }
-        runDeltaSync({ force: true });
-        markSelectedChatAsRead();
+        handleResume();
         return;
       }
 
@@ -1290,8 +1377,14 @@ export default function CustomerChatLayout({
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleResume);
+    window.addEventListener('pageshow', handleResume);
+    window.addEventListener('online', handleResume);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleResume);
+      window.removeEventListener('pageshow', handleResume);
+      window.removeEventListener('online', handleResume);
       if (hiddenCatchUpTimeout) {
         clearTimeout(hiddenCatchUpTimeout);
       }
@@ -1403,7 +1496,35 @@ export default function CustomerChatLayout({
 
     const snapshot = useInboxStore.getState();
     const existingChat = snapshot.chats.find((chat) => chat.id === newChatData.id);
-    const incomingStatus = newChatData.status || existingChat?.status || 'gerais';
+
+    // Se o payload não traz status e o chat não existe no store, nunca inventar
+    // um chat fantasma com status 'gerais' que possa vazar para o robô/fila.
+    if (!newChatData.status && !existingChat) {
+      scheduleDebouncedDeltaSync();
+      return;
+    }
+
+    const incomingStatus = newChatData.status || existingChat?.status;
+    if (!incomingStatus) {
+      scheduleDebouncedDeltaSync();
+      return;
+    }
+
+    const hasHydratedPresentation = hasCompleteRealtimeChatPresentation(newChatData);
+    const teamAssignmentChanged = hasRecordKey(newChatData, 'team_id')
+      && newChatData.team_id !== existingChat?.team_id;
+
+    if (hasHydratedPresentation) {
+      hydratedChatPresentationRef.current.add(newChatData.id);
+    } else if (teamAssignmentChanged) {
+      hydratedChatPresentationRef.current.delete(newChatData.id);
+    }
+
+    const statusChanged = Boolean(existingChat?.status && incomingStatus !== existingChat.status);
+    if (statusChanged) {
+      scheduleDebouncedDeltaSync();
+    }
+
     const shouldKeepVisible = isChatVisibleForOwnership(
       {
         id: newChatData.id,
@@ -1412,14 +1533,19 @@ export default function CustomerChatLayout({
       },
       ownershipFilter,
       initialUser?.id,
-      snapshot.selectedChatId
     );
 
     if (!shouldKeepVisible) {
       if (existingChat && snapshot.selectedChatId !== newChatData.id) {
         removeChat(newChatData.id);
+        scheduleDebouncedDeltaSync();
       }
-      return;
+      if (snapshot.selectedChatId !== newChatData.id) {
+        return;
+      }
+      // If the chat is currently selected, do not return early or remove it.
+      // Continue below so optimisticUpdate applies status and assignments
+      // to useInboxStore for the active view.
     }
 
     const contactId: string | null = newChatData.contact_id ?? existingChat?.contact?.id ?? null;
@@ -1517,32 +1643,44 @@ export default function CustomerChatLayout({
         : (existingChat?.messages || []),
     };
 
-    if (!optimisticUpdate.contact && contactId) {
-      optimisticUpdate.contact = {
-        id: contactId,
-        name: 'Novo Contato...',
-        workspace_id: optimisticUpdate.workspace_id || initialUser?.activeWorkspaceId || '',
-        avatar_url: undefined,
-        phone: '',
-      } as Contact;
-      void fetchContactById(contactId);
+    const resolvedContactId = contactId || newChatData.contact_id || existingChat?.contact?.id || null;
+    const broadcastContact: Contact | undefined = (newChatData.contact_name || newChatData.contact_phone || newChatData.contact_phone_number_jid || resolvedContactId) ? {
+      id: resolvedContactId || `temp-contact-${newChatData.id}`,
+      name: newChatData.contact_name || existingChat?.contact?.name || newChatData.protocol || 'Novo Contato...',
+      phone: newChatData.contact_phone || existingChat?.contact?.phone || '',
+      phone_number_jid: newChatData.contact_phone_number_jid || existingChat?.contact?.phone_number_jid || '',
+      avatar_url: newChatData.contact_avatar_url || existingChat?.contact?.avatar_url || undefined,
+      workspace_id: optimisticUpdate.workspace_id || initialUser?.activeWorkspaceId || '',
+    } as Contact : undefined;
+
+    optimisticUpdate.contact = existingChat?.contact || broadcastContact;
+
+    if (resolvedContactId && (!optimisticUpdate.contact || optimisticUpdate.contact.name === 'Novo Contato...')) {
+      void fetchContactById(resolvedContactId);
     }
 
     snapshot.upsertChats([optimisticUpdate as Chat]);
-  }, [fetchContactById, formatMessageDay, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, workspaceTimezone]);
+
+    const shouldHydratePresentation =
+      incomingStatus === 'atendimentos' &&
+      !hasHydratedPresentation &&
+      !hydratedChatPresentationRef.current.has(newChatData.id) &&
+      (!existingChat?.teamName || !existingChat?.teamColor);
+
+    if (shouldHydratePresentation) {
+      requestRealtimeChatPresentationHydration(newChatData.id);
+    }
+  }, [fetchContactById, formatMessageDay, initialUser, initialUser?.activeWorkspaceId, initialUser?.id, ownershipFilter, removeChat, requestRealtimeChatPresentationHydration, scheduleDebouncedDeltaSync, workspaceTimezone]);
 
   const handleRealtimeStatusChange = useCallback((status: string, type: 'chats' | 'messages') => {
     console.info(`[REALTIME] ${type} channel status: ${status}`);
     if (status === 'SUBSCRIBED') {
-      if (realtimeHealthyRef.current) {
-        clearRecoverySync();
-      } else {
-        scheduleRecoverySync(`${type}:subscribed-waiting-peer`);
-      }
+      clearRecoverySync();
       return;
     }
 
-    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+    // Only recover if an actual network error or timeout occurs on the global channel
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
       console.warn(`[REALTIME] Connection lost (${status}). Running delta sync recovery.`);
       scheduleRecoverySync(`${type}:${status}`);
     }
@@ -1558,6 +1696,12 @@ export default function CustomerChatLayout({
     updateChatContact(contact);
   }, [initialUser?.activeWorkspaceId, updateChatContact]);
 
+  const handleRealtimeMessageOutsideList = useCallback(() => {
+    // The workspace message exists, but its chat is not in the current list yet.
+    // Force a delta sync so a newly-created customer appears immediately.
+    void runDeltaSyncRef.current?.();
+  }, []);
+
   // Use centralized Realtime hook
   const { isChatsConnected, isMessagesConnected } = useRealtimeSubscriptions({
     workspaceId: initialUser?.activeWorkspaceId,
@@ -1566,6 +1710,7 @@ export default function CustomerChatLayout({
     messagesListChatIdsCsv: ownershipFilter === 'mine' ? messagesListChatIdsCsv : undefined,
     onChatUpdate: handleRealtimeChatUpdate,
     onMessageUpdate: handleRealtimeMessage,
+    onMessageOutsideList: handleRealtimeMessageOutsideList,
     onContactUpdate: handleRealtimeContactUpdate,
     onStatusChange: handleRealtimeStatusChange,
   });
@@ -1573,6 +1718,13 @@ export default function CustomerChatLayout({
   realtimeHealthyRef.current = isRealtimeHealthy;
 
   useEffect(() => {
+    if (preserveClientState) {
+      selectedChatIdRef.current = useInboxStore.getState().selectedChatId;
+      hasUserSelectedChatRef.current = true;
+      isHydratedRef.current = true;
+      setIsLoading(false);
+      return;
+    }
     if (initialData) {
       setWorkspaceTimezone(initialData.timezone || FALLBACK_TIMEZONE);
 
@@ -1585,9 +1737,14 @@ export default function CustomerChatLayout({
 
       // If hydrated, we almost ALWAYS trust the client ref over the server's suggestion for selection,
       // because the server prompt is often lagging or generic.
-      const shouldPreserveSelection = isHydratedRef.current && clientHasSelection;
+      const shouldPreserveSelection = hasUserSelectedChatRef.current
+        || (isHydratedRef.current && clientHasSelection);
 
-      let effectiveSelectedChatId = initialData.selectedChatId;
+      let effectiveSelectedChatId = resolveHydratedChatSelection(
+        initialData.selectedChatId,
+        selectedChatIdRef.current,
+        shouldPreserveSelection,
+      );
       let effectiveChats = initialData.chats;
 
       if (shouldPreserveSelection && selectedChatIdRef.current) {
@@ -1627,6 +1784,8 @@ export default function CustomerChatLayout({
         oldestMessageId: initialData.oldestMessageId,
         hasMoreHistory: initialData.hasMoreHistory,
         hasMoreChats: initialData.hasMoreChats,
+        inboxCounts: initialData.inboxCounts,
+        chatPagination: initialData.statusPagination,
       });
       setFetchError(initialData.error ?? null);
 
@@ -1650,13 +1809,15 @@ export default function CustomerChatLayout({
       isHydratedRef.current = true;
       setIsLoading(false);
     }
-  }, [initialData, initialUser, initializeInbox, setInitialData, setSelectedChatId, updateSelectedChatPath]);
+  }, [initialData, initialUser, initializeInbox, preserveClientState, setInitialData, setSelectedChatId, updateSelectedChatPath]);
 
   useEffect(() => {
-    if (selectedChatId) {
-      selectedChatIdRef.current = selectedChatId;
+    selectedChatIdRef.current = selectedChatId;
+
+    if (hasUserSelectedChatRef.current) {
+      updateSelectedChatPath(selectedChatId);
     }
-  }, [selectedChatId]);
+  }, [selectedChatId, updateSelectedChatPath]);
 
   if (!initialUser) {
     return <LoadingSkeleton />;
@@ -1709,14 +1870,19 @@ export default function CustomerChatLayout({
           )}
           <audio ref={(el) => { audioRefs.current.queue = el; }} src={SOUND_SOURCES.queue} preload="auto" />
           <audio ref={(el) => { audioRefs.current.attending = el; }} src={SOUND_SOURCES.attending} preload="auto" />
-          <ErrorBoundary fallback={<ChatListSkeleton />} onError={handleBoundaryError}>
+          <ErrorBoundary
+            fallback={<ChatListSkeleton />}
+            onError={handleBoundaryError}
+            resetKeys={[chats.length, selectedChatId, ownershipFilter]}
+          >
             <ChatList
               chats={chats}
               selectedChat={enrichedSelectedChat}
               setSelectedChat={handleSetSelectedChat}
               currentUser={initialUser}
               onUpdate={handleDataMutation}
-              onOwnershipFilterChange={setOwnershipFilter}
+              ownershipFilter={ownershipFilter}
+              onOwnershipFilterChange={handleOwnershipFilterChange}
               isForwarding={isForwarding}
               selectedForwardingChatIds={selectedForwardingChatIds}
               onToggleForwardSelection={handleToggleForwardSelection}
@@ -1729,7 +1895,11 @@ export default function CustomerChatLayout({
               isLoadingMore={isLoadingMoreChats}
             />
           </ErrorBoundary>
-          <ErrorBoundary fallback={<ThreadSkeleton />} onError={handleBoundaryError}>
+          <ErrorBoundary
+            fallback={<ThreadSkeleton />}
+            onError={handleBoundaryError}
+            resetKeys={[selectedChatId, enrichedSelectedChat?.updatedAt]}
+          >
             <ChatPanel
               chat={enrichedSelectedChat}
               currentUser={initialUser}

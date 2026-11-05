@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { AI_DESCRIPTION, AI_TITLE } from '@/content/ai-page';
 
 import {
     HOME_SEO_DESCRIPTION,
@@ -18,6 +19,16 @@ export type PublicSeoRoute = {
 };
 
 export const PUBLIC_SEO_ROUTES: PublicSeoRoute[] = [
+    {
+        pathname: '/ia',
+        title: AI_TITLE,
+        description: AI_DESCRIPTION,
+        keywords: ['IA para atendimento', 'agentes de IA', 'automação com IA', 'Dialogy IA'],
+        priority: 0.9,
+        changeFrequency: 'monthly',
+        index: true,
+        ogType: 'website',
+    },
     {
         pathname: '/',
         title: HOME_SEO_TITLE,

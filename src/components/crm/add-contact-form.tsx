@@ -32,6 +32,7 @@ import { toast } from '@/hooks/use-toast';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
 import { Badge } from '../ui/badge';
 import { uploadToS3Action } from '@/actions/upload-s3';
+import { badgeColorStyle } from '@/lib/color-contrast';
 
 const WHATSAPP_JID_SUFFIX = '@s.whatsapp.net';
 const LIGHT_DIALOG_SCOPE_CLASS = 'app-shell-light text-foreground';
@@ -65,7 +66,7 @@ function SaveButton() {
     <Button
       type="submit"
       disabled={pending}
-      className="h-11 rounded-2xl border border-white/20 bg-gradient-to-r from-emerald-300 via-primary to-cyan-300 px-7 font-semibold text-black shadow-[0_18px_40px_-18px_rgba(16,185,129,0.9)] transition-all hover:brightness-110 hover:shadow-[0_22px_42px_-16px_rgba(16,185,129,0.95)]"
+      className="h-11 rounded-xl bg-[#164e34] px-7 font-semibold text-white shadow-[0_14px_30px_-18px_rgba(5,71,38,.7)] transition-all hover:bg-[#0b6b42]"
     >
       {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       <Save className="mr-2 h-4 w-4" />
@@ -102,7 +103,7 @@ function MultiSelectTags({ availableTags, initialSelectedTags }: { availableTags
         >
           <div className="flex flex-wrap gap-1.5 py-1.5">
             {selectedTags.length > 0 ? selectedTags.map(tag => (
-              <Badge key={tag.id} style={{ backgroundColor: tag.color, color: tag.color.startsWith('#FEE') || tag.color === '#FFFFFF' || tag.color.toLowerCase() === '#fff' ? '#000' : '#fff' }} className="rounded-xl border-transparent px-2.5 py-0.5 text-[11px] font-medium shadow-sm transition-transform hover:scale-105" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
+              <Badge key={tag.id} style={badgeColorStyle(tag.color) ?? undefined} className="rounded-xl border-transparent px-2.5 py-0.5 text-[11px] font-medium shadow-sm transition-transform hover:scale-105" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
                 {tag.label}
                 <X className="ml-1.5 h-3 w-3 rounded-full transition-colors hover:bg-slate-200" />
               </Badge>
@@ -147,7 +148,7 @@ function FileUploadField({ field, fieldName, defaultValue, workspaceId }: { fiel
       if (Array.isArray(parsed)) return parsed;
       // Handle legacy single url string
       return [{ url: defaultValue, name: defaultValue.split('/').pop() || 'Arquivo', note: '' }];
-    } catch (e) {
+    } catch {
       // Fallback for raw legacy url
       return [{ url: defaultValue, name: defaultValue.split('/').pop() || 'Arquivo', note: '' }];
     }
@@ -310,11 +311,10 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className={`${LIGHT_DIALOG_SCOPE_CLASS} sm:max-w-[980px] gap-0 overflow-hidden rounded-[30px] border border-slate-200 bg-white p-0 shadow-[0_42px_120px_-70px_rgba(15,23,42,0.18)]`}>
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_20%,rgba(14,165,233,0.12),transparent_36%),radial-gradient(circle_at_92%_12%,rgba(16,185,129,0.16),transparent_34%),radial-gradient(circle_at_30%_100%,rgba(59,130,246,0.10),transparent_42%)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-emerald-400/10 to-transparent" />
+      <DialogContent className={`${LIGHT_DIALOG_SCOPE_CLASS} sm:max-w-[980px] gap-0 overflow-hidden rounded-[24px] border border-[#dfe8dd] bg-white p-0 shadow-[0_42px_120px_-70px_rgba(15,23,42,0.22)]`}>
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-emerald-50 to-transparent" />
 
-        <DialogHeader className="relative z-10 border-b border-slate-200 px-6 py-5 md:px-8 md:py-6">
+        <DialogHeader className="relative z-10 border-b border-[#e1e9df] px-6 py-4 md:px-8 md:py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-2">
               <span className="inline-flex rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
@@ -324,12 +324,8 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                 {contact ? 'Editar Contato' : 'Criar Novo Contato'}
               </DialogTitle>
               <DialogDescription className="max-w-2xl text-sm font-medium text-muted-foreground/85">
-                Atualize os dados com rapidez. O layout foi otimizado para preenchimento direto por blocos.
+                Organize as informações e mantenha o relacionamento em dia.
               </DialogDescription>
-            </div>
-            <div className="hidden max-w-[200px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right md:block">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary/90">Modo rapido</p>
-              <p className="mt-1 text-xs text-muted-foreground/80">Preencha por aba e salve sem trocar de tela.</p>
             </div>
           </div>
         </DialogHeader>
@@ -339,8 +335,8 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
           <input type="hidden" name="workspaceId" value={workspaceId} />
 
           <Tabs defaultValue="personal" className="relative z-10 px-6 py-5 md:px-8 md:py-6">
-            <div className="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
-              <aside className="space-y-4">
+            <div className="grid gap-6 md:grid-cols-[180px_minmax(0,1fr)]">
+              <aside>
                 <TabsList className="grid h-auto grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 md:grid-cols-1">
                   <TabsTrigger value="personal" className="h-11 gap-2 rounded-xl border border-transparent text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary md:justify-start md:px-3">
                     <UserIcon className="h-4 w-4" />
@@ -356,16 +352,6 @@ export function AddContactForm({ isOpen, setIsOpen, onSave, contact, workspaceId
                   </TabsTrigger>
                 </TabsList>
 
-                <div className="hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 md:block">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary/90">Fluxo sugerido</p>
-                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground/85">
-                    1. Preencha dados pessoais.
-                    <br />
-                    2. Ajuste local e midia.
-                    <br />
-                    3. Defina dono e etiquetas.
-                  </p>
-                </div>
               </aside>
 
               <div className="min-w-0">

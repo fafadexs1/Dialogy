@@ -207,4 +207,11 @@ describe('publishCopilotSuggestion', () => {
     expect(httpSend).not.toHaveBeenCalled();
     expect(db.connect).not.toHaveBeenCalled();
   });
+
+  it('does not broadcast if the operator disables the copilot while persistence is running', async () => {
+    const assertCurrent = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('superseded'));
+    await expect(publishCopilotSuggestion({ workspaceId: 'workspace-1', chatId: 'chat-1', autopilotConfigId: 'config-1',
+      stage: 'procedure_runtime', suggestion: 'Rascunho', assertCurrent })).rejects.toThrow('superseded');
+    expect(httpSend).not.toHaveBeenCalled();
+  });
 });

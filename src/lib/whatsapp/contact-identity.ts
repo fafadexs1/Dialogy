@@ -1,3 +1,5 @@
+import { isWhatsappBsuidIdentity, parseScopedWhatsappBsuid } from './bsuid';
+
 export const WHATSAPP_STANDARD_JID_SUFFIX = '@s.whatsapp.net';
 export const WHATSAPP_ALT_JID_SUFFIX = '@c.us';
 const BRAZIL_COUNTRY_CODE = '55';
@@ -14,6 +16,7 @@ type QueryableClient = {
 };
 
 export function extractWhatsappDigits(value?: string | null): string {
+    if (isWhatsappBsuidIdentity(value) || /^(?:bsuid:|[A-Za-z]{2}\.)/.test(String(value ?? ''))) return '';
     return String(value ?? '')
         .trim()
         .replace(/@.*$/, '')
@@ -21,6 +24,7 @@ export function extractWhatsappDigits(value?: string | null): string {
 }
 
 export function isResolvableWhatsappIdentity(value?: string | null): boolean {
+    if (isWhatsappBsuidIdentity(value) || /^(?:bsuid:|[A-Za-z]{2}\.)/.test(String(value ?? ''))) return false;
     const rawValue = String(value ?? '').trim().toLowerCase();
     if (!rawValue) return false;
     if (rawValue.includes(':')) return false;
@@ -63,7 +67,11 @@ function isBrazilianMobileWithNinthDigit(digits: string): boolean {
     return /^9[6-9]/.test(subscriberDigits);
 }
 
-function buildAlternateBrazilianDigits(digits: string): string | null {
+/**
+ * Alterna a forma do celular brasileiro entre com e sem o nono dígito.
+ * 556195215930 <-> 5561995215930. Retorna null se não for um celular BR.
+ */
+export function buildAlternateBrazilianDigits(digits: string): string | null {
     if (isBrazilianMobileWithoutNinthDigit(digits)) {
         return `${digits.slice(0, 4)}9${digits.slice(4)}`;
     }
@@ -91,6 +99,7 @@ export function normalizeWhatsappPhoneNumber(value?: string | null): string | nu
 }
 
 export function normalizeWhatsappJid(value?: string | null): string | null {
+    if (parseScopedWhatsappBsuid(value)) return value!;
     const normalizedPhone = normalizeWhatsappPhoneNumber(value);
     if (!normalizedPhone) return null;
 
@@ -98,6 +107,7 @@ export function normalizeWhatsappJid(value?: string | null): string | null {
 }
 
 export function buildWhatsappLookupJids(value?: string | null): string[] {
+    if (parseScopedWhatsappBsuid(value)) return [value!];
     const normalizedPhone = normalizeWhatsappPhoneNumber(value);
     if (!normalizedPhone) return [];
 
@@ -134,6 +144,7 @@ export function buildWhatsappLookupDigits(value?: string | null): string[] {
 }
 
 export function getWhatsappThreadIdentityKey(value?: string | null): string | null {
+    if (parseScopedWhatsappBsuid(value)) return `whatsapp:${value}`;
     const normalizedPhone = normalizeWhatsappPhoneNumber(value);
     return normalizedPhone ? `whatsapp:${normalizedPhone}` : null;
 }
@@ -280,6 +291,7 @@ export async function resolveCanonicalWhatsappChatId(
         `SELECT
             ch.id,
             ch.workspace_id,
+            ch.status,
             c.phone_number_jid
          FROM chats ch
          JOIN contacts c
@@ -295,6 +307,10 @@ export async function resolveCanonicalWhatsappChatId(
     }
 
     const chatRow = chatRes.rows[0];
+    if (chatRow.status === 'encerrados') {
+        return chatRow.id;
+    }
+
     return resolveCanonicalWhatsappChatIdByIdentity(client, {
         workspaceId: chatRow.workspace_id,
         phoneOrJid: chatRow.phone_number_jid,
@@ -309,7 +325,8 @@ export async function lockWhatsappIdentityTransaction(
         phoneOrJid: string;
     }
 ): Promise<string | null> {
-    const normalizedPhone = normalizeWhatsappPhoneNumber(params.phoneOrJid);
+    const normalizedPhone = parseScopedWhatsappBsuid(params.phoneOrJid)
+        ? params.phoneOrJid : normalizeWhatsappPhoneNumber(params.phoneOrJid);
     if (!normalizedPhone) {
         return null;
     }
@@ -441,6 +458,25 @@ export async function findOrCreateWhatsappContact(
     lookupJids: string[];
 }> {
     const { workspaceId, phoneOrJid, fallbackName, fallbackPhone, avatarUrl = null } = params;
+
+    if (parseScopedWhatsappBsuid(phoneOrJid)) {
+        const lookupJids = [phoneOrJid];
+        const existing = await selectPreferredWhatsappContact(client, workspaceId, lookupJids, phoneOrJid);
+        if (existing) return {
+            contact: existing, created: false, normalizedJid: phoneOrJid, normalizedPhone: '', lookupJids,
+        };
+        const inserted = await client.query(
+            `INSERT INTO contacts (workspace_id, name, phone, phone_number_jid, avatar_url)
+             VALUES ($1, $2, '', $3, $4)
+             ON CONFLICT (workspace_id, phone_number_jid) DO UPDATE SET name = contacts.name
+             RETURNING *, (xmax = 0) AS inserted`,
+            [workspaceId, String(fallbackName ?? '').trim() || 'Contato do WhatsApp', phoneOrJid, avatarUrl],
+        );
+        return {
+            contact: inserted.rows[0], created: Boolean(inserted.rows[0]?.inserted),
+            normalizedJid: phoneOrJid, normalizedPhone: '', lookupJids,
+        };
+    }
 
     const normalizedPhone = normalizeWhatsappPhoneNumber(phoneOrJid);
     const normalizedJid = normalizeWhatsappJid(phoneOrJid);

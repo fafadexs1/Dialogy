@@ -17,7 +17,8 @@ export async function getCommunityPostsFeed(userId: string): Promise<ProductUpda
       w.name AS workspace_name,
       COALESCE(rc.likes, 0)::int AS likes,
       (mine.user_id IS NOT NULL) AS liked_by_me,
-      COALESCE(cc.total, 0)::int AS comments_count
+      COALESCE(cc.total, 0)::int AS comments_count,
+      COALESCE(vc.views_count, 0)::int AS views_count
     FROM public.community_posts cp
     JOIN public.users u ON u.id = cp.author_id
     LEFT JOIN public.workspaces w ON w.id = u.last_active_workspace_id
@@ -29,6 +30,10 @@ export async function getCommunityPostsFeed(userId: string): Promise<ProductUpda
       SELECT COUNT(*) AS total FROM public.community_post_comments cpc
       WHERE cpc.post_id = cp.id AND cpc.deleted_at IS NULL
     ) cc ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COUNT(DISTINCT cpv.user_id)::int AS views_count FROM public.community_post_views cpv
+      WHERE cpv.post_id = cp.id
+    ) vc ON TRUE
     WHERE cp.status = 'published' AND cp.deleted_at IS NULL
     ORDER BY cp.created_at DESC, cp.id DESC
     LIMIT 50
@@ -58,5 +63,6 @@ export async function getCommunityPostsFeed(userId: string): Promise<ProductUpda
     isMine: row.author_id === userId,
     reactions: { likes: row.likes, dislikes: 0, mine: row.liked_by_me ? 'like' : null },
     commentsCount: row.comments_count,
+    viewsCount: row.views_count,
   }));
 }

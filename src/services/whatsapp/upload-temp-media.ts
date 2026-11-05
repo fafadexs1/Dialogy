@@ -10,11 +10,12 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'crypto';
-import { resilientFetch } from '@/lib/http/resilient-fetch';
+import { fetchSafeRemote, readResponseBodyLimited } from '@/lib/security/safe-remote-url';
 import { RETRY_MEDIA_RETENTION_MS } from '@/services/messages/temp-media-retention';
 
 const TEMP_MEDIA_BUCKET = 'temp-media';
 const DELETE_DELAY_MS = RETRY_MEDIA_RETENTION_MS;
+const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
 
 type UploadParams = {
     media: string; // Base64 (with or without data URI) or remote URL
@@ -37,12 +38,17 @@ async function toBufferFromSource(source: string): Promise<Buffer> {
     const isUrl = /^https?:\/\//i.test(trimmed);
 
     if (isUrl) {
-        const response = await resilientFetch(trimmed);
+        const response = await fetchSafeRemote(trimmed, {
+            cache: 'no-store',
+            headers: { 'user-agent': 'Dialogy-Media-Normalizer/1.0' },
+        }, {
+            timeoutMs: 30_000,
+            maxRedirects: 3,
+        });
         if (!response.ok) {
             throw new Error(`Falha ao baixar mídia da URL: ${response.status} ${response.statusText}`);
         }
-        const arrayBuffer = await response.arrayBuffer();
-        return Buffer.from(arrayBuffer);
+        return Buffer.from(await readResponseBodyLimited(response, MAX_MEDIA_BYTES));
     }
 
     const base64Data = trimmed.includes(',')
@@ -53,7 +59,10 @@ async function toBufferFromSource(source: string): Promise<Buffer> {
         throw new Error('Conteúdo da mídia vazio ou inválido.');
     }
 
-    return Buffer.from(base64Data, 'base64');
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (!buffer.length) throw new Error('Conteúdo da mídia vazio ou inválido.');
+    if (buffer.length > MAX_MEDIA_BYTES) throw new Error('A mídia excede o limite de 25 MB.');
+    return buffer;
 }
 
 function scheduleTempDeletion(filePath: string) {

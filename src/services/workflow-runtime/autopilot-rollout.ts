@@ -10,7 +10,7 @@ import { createDefaultNodeHandlerRegistry } from './node-handlers';
 import { ModelFallbackChain, type GenerateRequest, type GenerateResult, type ModelAdapter, type ModelInfo, type ModelHealth, type ModelStreamEvent, type StructuredGenerateRequest } from './model-adapter';
 import { PostgresWorkflowPersistence } from './postgres-persistence';
 import { ToolRegistry } from './tools';
-import type { ModelConfiguration, WorkflowDefinition, WorkflowExecution, WorkflowValidationResult } from './types';
+import type { ModelConfiguration, WorkflowDefinition, WorkflowValidationResult } from './types';
 import { WorkflowDefinitionSchema } from './schemas';
 import { validateWorkflowDefinition } from './validator';
 import { WorkflowExecutor } from './executor';
@@ -118,17 +118,32 @@ function configEnablesMode(
   return false;
 }
 
+function configuredModelCapabilities(provider: ReturnType<typeof getAiModelRuntimeProvider>) {
+  if (provider === 'lmstudio') {
+    return {
+      supportsTools: asBoolean(process.env.LM_STUDIO_WORKFLOW_SUPPORTS_TOOLS) === true,
+      supportsStructuredOutput: asBoolean(process.env.LM_STUDIO_WORKFLOW_SUPPORTS_STRUCTURED_OUTPUT) === true,
+      supportsStreaming: asBoolean(process.env.LM_STUDIO_WORKFLOW_SUPPORTS_STREAMING) === true,
+    };
+  }
+  const managedProvider = provider === 'googleai' || provider === 'openai' || provider === 'deepseek';
+  return {
+    supportsTools: managedProvider,
+    supportsStructuredOutput: managedProvider,
+    supportsStreaming: provider === 'googleai',
+  };
+}
+
 function modelConfigurationFromAutopilot(config: Pick<AutopilotConfig, 'ai_model'>): ModelConfiguration {
   const model = config.ai_model || process.env.DEFAULT_AUTOPILOT_MODEL || 'gemini-2.0-flash';
   const provider = getAiModelRuntimeProvider(model);
+  const capabilities = configuredModelCapabilities(provider);
   return {
     provider,
     model,
     temperature: 0.2,
     maxOutputTokens: 2048,
-    supportsTools: true,
-    supportsStructuredOutput: true,
-    supportsStreaming: true,
+    ...capabilities,
     timeoutMs: 60_000,
     maxRetries: 2,
   };

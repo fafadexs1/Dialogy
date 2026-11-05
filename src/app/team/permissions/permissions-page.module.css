@@ -1,0 +1,172 @@
+.pageHeader .welcomeRow { padding-block: 22px; }
+.pageHeader h1 { font-size: clamp(28px, 2.7vw, 36px); }
+.workspace { display: grid; grid-template-columns: 244px minmax(0, 1fr); max-width: 1440px; margin: 0 auto; }
+.roleSidebar { min-width: 0; border-right: 1px solid hsl(var(--border)); padding: 28px 20px; }
+.sidebarHeading { display: flex; align-items: center; justify-content: space-between; padding: 0 5px 18px; }
+.sidebarHeading h2 { font-size: 13px; font-weight: 600; }
+.roleSearch { position: relative; margin-bottom: 18px; }
+.roleSearch > svg { position: absolute; left: 11px; top: 13px; color: hsl(var(--muted-foreground)); }
+.roleSearch input { padding-left: 34px; font-size: 11px; }
+.roleList { display: flex; flex-direction: column; gap: 7px; }
+.roleOption { display: flex; align-items: center; width: 100%; gap: 10px; padding: 13px 10px; text-align: left; border: 1px solid transparent; border-radius: 12px; transition: background .16s, border-color .16s; }
+.roleOption:hover { background: hsl(var(--secondary)); }
+.roleOption:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.roleOption.selectedRole { background: hsl(var(--accent)); border-color: hsl(var(--primary) / .18); }
+.roleIcon { display: grid; place-items: center; width: 36px; height: 40px; flex-shrink: 0; border: 1px solid hsl(var(--border)); border-radius: 11px; color: hsl(var(--muted-foreground)); background: hsl(var(--card) / .65); }
+.selectedRole .roleIcon { color: hsl(var(--primary)); border-color: hsl(var(--primary) / .14); }
+.roleOptionText { flex: 1; min-width: 0; }
+.roleOptionText strong { display: block; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roleOptionText > span { display: block; margin-top: 5px; color: hsl(var(--muted-foreground)); font-size: 10px; line-height: 1.6; }
+.roleOption > svg { flex-shrink: 0; opacity: 0; color: hsl(var(--primary)); }
+.selectedRole > svg { opacity: 1; }
+.noRoles { padding: 15px 5px; font-size: 12px; line-height: 1.8; color: hsl(var(--muted-foreground)); }
+.sidebarNote { border-top: 1px solid hsl(var(--border)); padding-top: 23px; margin: 40px 5px 0; }
+.sidebarNote h3 { font-size: 12px; font-weight: 500; margin: 14px 0 8px; }
+.sidebarNote p { font-size: 11px; line-height: 1.9; color: hsl(var(--muted-foreground)); }
+.sidebarNote a { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: hsl(var(--primary)); margin-top: 18px; }
+.sidebarNote a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.mainContent { min-width: 0; padding: 30px 38px 38px; }
+.roleHero { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.roleIdentity { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.heroIcon { display: grid; place-items: center; width: 61px; height: 66px; flex-shrink: 0; color: hsl(var(--primary)); background: hsl(var(--accent)); border: 1px solid hsl(var(--primary) / .13); border-radius: 19px; }
+.roleIdentity h2 { font-size: 26px; line-height: 1.3; font-weight: 600; letter-spacing: -.045em; margin: 5px 0 6px; overflow-wrap: anywhere; }
+.roleIdentity p { max-width: 480px; font-size: 12px; line-height: 1.8; color: hsl(var(--muted-foreground)); overflow-wrap: anywhere; }
+.editButton { display: inline-flex; gap: 7px; flex-shrink: 0; border-radius: 9px; font-size: 11px; color: hsl(var(--muted-foreground)); background: hsl(var(--card)); }
+.roleOverview { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 20px 0; margin-top: 5px; border-bottom: 1px solid hsl(var(--border)); }
+.roleOverview > span:first-child { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: hsl(var(--muted-foreground)); }
+.roleOverview strong { font-weight: 600; color: hsl(var(--foreground)); }
+.roleOverview > span > svg { color: hsl(var(--primary)); }
+.defaultBadge { padding: 4px 8px; font-size: 9px; border-radius: 5px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); }
+.saveStatus { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: hsl(var(--muted-foreground)); }
+.saveStatus > svg { color: hsl(var(--primary)); }
+.failedSave, .failedSave > svg { color: #b36b44; }
+.accessNote { display: flex; align-items: flex-start; gap: 9px; padding: 13px 15px; margin-top: 20px; color: hsl(var(--muted-foreground)); background: hsl(var(--secondary)); border-radius: 10px; }
+.accessNote svg { margin-top: 1px; flex-shrink: 0; color: hsl(var(--primary)); }
+.accessNote p { font-size: 11px; line-height: 1.7; }
+.tools { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 22px 0 17px; }
+.viewToggle { display: inline-flex; align-items: center; gap: 3px; padding: 4px; background: hsl(var(--secondary)); border: 1px solid hsl(var(--border) / .6); border-radius: 10px; }
+.viewToggle > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; font-size: 10px; white-space: nowrap; border-radius: 7px; color: hsl(var(--muted-foreground)); }
+.viewToggle > button[aria-pressed='true'] { color: hsl(var(--primary)); background: hsl(var(--card)); box-shadow: 0 1px 4px hsl(var(--foreground) / .04); }
+.viewToggle button:focus-visible, .categoryFilters button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.permissionSearch { position: relative; min-width: 170px; flex: 1; }
+.permissionSearch > svg { position: absolute; top: 12px; left: 11px; color: hsl(var(--muted-foreground)); }
+.permissionSearch input { padding-left: 34px; padding-right: 30px; }
+.permissionSearch > button { position: absolute; top: 6px; right: 4px; width: 28px; height: 28px; color: hsl(var(--muted-foreground)); }
+.tools button.accessFilter { width: 157px; flex-shrink: 0; font-size: 11px; background: hsl(var(--card)); }
+.categoryFilters { display: flex; align-items: center; gap: 12px; padding: 0 0 18px; }
+.categoryFilters button.areaFilter { display: inline-flex; align-items: center; gap: 8px; width: 174px; background: hsl(var(--card)); height: 34px; font-size: 11px; }
+.areaFilter > span { flex: 1; text-align: left; }
+.areaFilter > svg:first-child { color: hsl(var(--primary)); }
+.resultsCount { font-size: 10px; color: hsl(var(--muted-foreground)); }
+.clearFilters { gap: 5px; margin-left: auto; color: hsl(var(--muted-foreground)); font-size: 10px; padding: 0 6px; }
+.permissionGroups { display: flex; flex-direction: column; gap: 14px; }
+.permissionGroup { border: 1px solid hsl(var(--border)); border-radius: 14px; background: hsl(var(--card)); overflow: hidden; }
+.groupTrigger { padding: 20px 22px; gap: 12px; text-align: left; }
+.groupTrigger:hover { text-decoration: none; background: hsl(var(--accent) / .12); }
+.groupTrigger > svg { color: hsl(var(--muted-foreground)); width: 14px; }
+.groupIcon { display: grid; place-items: center; width: 37px; height: 39px; border-radius: 11px; background: hsl(var(--accent) / .7); color: hsl(var(--primary)); flex-shrink: 0; }
+.groupTitle { flex: 1; min-width: 0; }
+.groupTitle strong { display: block; font-weight: 600; font-size: 13px; letter-spacing: -.015em; }
+.groupTitle > span { display: block; margin-top: 5px; font-size: 11px; line-height: 1.6; color: hsl(var(--muted-foreground)); font-weight: 400; }
+.groupCount { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; border-radius: 6px; min-width: 40px; color: hsl(var(--primary)); background: hsl(var(--accent) / .7); font-size: 10px; font-weight: 500; flex-shrink: 0; white-space: pre; }
+.groupCount > span { color: hsl(var(--muted-foreground)); }
+.groupContent { padding: 0 22px 7px; }
+.permissionRow { display: flex; align-items: center; gap: 16px; min-height: 59px; padding: 14px 1px; border-top: 1px solid hsl(var(--border) / .7); }
+.permissionRow > label { flex: 1; min-width: 0; font-size: 12px; font-weight: 400; line-height: 1.7; cursor: pointer; }
+.accessLabel { font-size: 10px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.allowedLabel { color: hsl(var(--primary)); }
+.permissionControl { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: hsl(var(--primary)); flex-shrink: 0; position: relative; }
+.permissionControl > svg { position: absolute; right: calc(100% + 7px); }
+.permissionControl > button[role='switch'] { width: 35px; height: 21px; }
+.permissionControl > button[role='switch'] > span { width: 17px; height: 17px; box-shadow: 0 1px 2px hsl(var(--foreground) / .1); }
+.permissionControl > button[role='switch'] > span[data-state='checked'] { transform: translateX(14px); }
+.bottomNote { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 2px 0; }
+.bottomNote > span { display: inline-flex; align-items: center; gap: 6px; color: hsl(var(--muted-foreground)); font-size: 10px; }
+.bottomNote > span > svg { color: hsl(var(--primary)); flex-shrink: 0; }
+.bottomNote > button { gap: 6px; font-size: 10px; color: hsl(var(--muted-foreground)); }
+.bottomNote > button:hover { color: hsl(var(--destructive)); }
+.matrixContainer { overflow: auto; border: 1px solid hsl(var(--border)); border-radius: 14px; background: hsl(var(--card)); max-height: 670px; scrollbar-width: thin; }
+.matrix { width: 100%; font-size: 11px; border-collapse: separate; border-spacing: 0; }
+.matrix th, .matrix td { border-bottom: 1px solid hsl(var(--border) / .7); padding: 14px 18px; }
+.matrix thead th { position: sticky; top: 0; z-index: 2; min-width: 130px; background: hsl(var(--secondary)); font-size: 11px; text-align: center; font-weight: 500; white-space: nowrap; }
+.matrix thead th svg { display: inline; margin-left: 6px; color: hsl(var(--muted-foreground)); }
+.matrix thead th:first-child { left: 0; text-align: left; z-index: 3; }
+.matrix tbody th { position: sticky; left: 0; z-index: 1; min-width: 235px; max-width: 300px; background: hsl(var(--card)); font-weight: 400; text-align: left; line-height: 1.8; }
+.matrix td { text-align: center; }
+.matrix tbody tr:hover td { background: hsl(var(--accent) / .2); }
+.matrix .matrixCategory th { color: hsl(var(--primary)); background: hsl(var(--accent)); font-size: 10px; font-weight: 600; padding-block: 9px; }
+.matrixCategory svg { display: inline; vertical-align: middle; margin-right: 5px; }
+.emptyState, .errorState { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 20px; text-align: center; }
+.emptyState { border: 1px dashed hsl(var(--border)); border-radius: 14px; }
+.emptyState h2, .emptyState h3, .errorState h2 { font-size: 19px; font-weight: 500; letter-spacing: -.035em; }
+.emptyState p, .errorState p { font-size: 12px; line-height: 1.9; color: hsl(var(--muted-foreground)); max-width: 370px; margin: 12px 0 22px; }
+.roleDialog { border-radius: 19px; padding: 28px; }
+.roleDialog header, .roleDialog h2 { line-height: 1.5; }
+.roleDialog h2 { padding-top: 10px; font-size: 21px; letter-spacing: -.035em; }
+.formFields { display: flex; flex-direction: column; gap: 21px; padding: 24px 0; }
+.formFields input { margin-top: 8px; }
+.formHint { display: flex; align-items: flex-start; gap: 8px; padding: 12px; background: hsl(var(--accent) / .5); color: hsl(var(--muted-foreground)); font-size: 11px; line-height: 1.8; border-radius: 9px; }
+.formHint svg { flex-shrink: 0; margin-top: 2px; color: hsl(var(--primary)); }
+.formError { display: flex; align-items: flex-start; gap: 7px; color: hsl(var(--destructive)); font-size: 12px; line-height: 1.7; }
+.formError > svg { flex-shrink: 0; margin-top: 2px; }
+
+@container (max-width: 1100px) {
+  .workspace { grid-template-columns: 212px minmax(0, 1fr); }
+  .roleSidebar { padding: 26px 14px; }
+  .mainContent { padding: 26px 24px; }
+  .roleHero { align-items: flex-start; }
+  .roleIdentity { gap: 12px; }
+  .heroIcon { width: 52px; height: 57px; border-radius: 16px; }
+  .roleIdentity h2 { font-size: 24px; }
+  .tools { gap: 10px; }
+  .viewToggle { margin-right: auto; }
+  .permissionSearch { flex-basis: calc(100% - 175px); }
+  .groupTitle > span { font-size: 10px; }
+}
+@container (max-width: 800px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .roleSidebar { border-right: 0; padding: 22px 24px 0; }
+  .roleSearch { max-width: 330px; margin-bottom: 12px; }
+  .roleList { flex-direction: row; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; }
+  .roleOption { width: 215px; flex-shrink: 0; padding: 11px; }
+  .sidebarNote { display: none; }
+  .mainContent { padding-top: 20px; }
+  .tools { flex-wrap: nowrap; }
+  .permissionSearch { flex-basis: auto; }
+  .roleOverview { padding-top: 18px; }
+}
+@container (max-width: 540px) {
+  .roleSidebar { padding: 22px 18px 0; }
+  .roleSearch { max-width: none; }
+  .mainContent { padding: 20px 18px 30px; }
+  .roleHero { flex-wrap: wrap; gap: 15px; }
+  .roleIdentity { align-items: flex-start; }
+  .roleIdentity h2 { font-size: 24px; }
+  .roleIdentity p { font-size: 12px; }
+  .editButton { margin-left: 64px; height: 32px; }
+  .roleOverview { gap: 10px; padding-block: 17px; }
+  .saveStatus { flex-basis: 100%; margin-left: 0; font-size: 10px; }
+  .tools { flex-wrap: wrap; padding-top: 18px; }
+  .viewToggle { flex-basis: 100%; justify-content: stretch; margin-bottom: 3px; }
+  .viewToggle > button { flex: 1; padding-block: 8px; font-size: 11px; }
+  .tools .permissionSearch { flex: 1 1 144px; min-width: 0; }
+  .tools button.accessFilter { width: 156px; font-size: 11px; }
+  .categoryFilters { padding-bottom: 16px; }
+  .categoryFilters { gap: 8px; flex-wrap: wrap; }
+  .categoryFilters button.areaFilter { width: 174px; }
+  .groupTrigger { gap: 9px; padding: 17px 15px; }
+  .groupIcon { width: 32px; height: 35px; border-radius: 10px; }
+  .groupTitle strong { font-size: 13px; }
+  .groupTitle > span { font-size: 10px; line-height: 1.7; }
+  .groupCount { padding-inline: 6px; min-width: 35px; font-size: 9px; }
+  .groupContent { padding-inline: 15px; }
+  .permissionRow { gap: 12px; min-height: 64px; }
+  .permissionRow > label { font-size: 12px; }
+  .accessLabel { display: none; }
+  .bottomNote > span { align-items: flex-start; font-size: 10px; line-height: 1.7; }
+  .bottomNote > span > svg { margin-top: 2px; }
+  .matrix tbody th { min-width: 170px; max-width: 170px; font-size: 10px; }
+  .matrix thead th { min-width: 110px; }
+  .matrix th, .matrix td { padding-inline: 12px; }
+  .roleDialog { max-width: calc(100% - 28px); padding: 23px; }
+}

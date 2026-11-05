@@ -66,6 +66,95 @@ export function extractEvolutionInteractiveResponseText(rawMessage: any): string
   );
 }
 
+function parseRecord(value: unknown): Record<string, any> | undefined {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, any>
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : undefined;
+}
+
+function normalizeInteractiveLabel(value: unknown) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR');
+}
+
+/**
+ * WhatsApp Cloud may return only the visible (and truncated) row title while
+ * preserving the outbound message id in contextInfo. Recover the opaque rowId
+ * from the interactive payload persisted on that quoted outbound message.
+ */
+export function resolveEvolutionInteractiveSelectionFromQuotedMessage(
+  selectedText: unknown,
+  quotedMetadata: unknown,
+): string | undefined {
+  const metadata = parseRecord(quotedMetadata);
+  const interactive = parseRecord(metadata?.interactivePayload);
+  const selected = normalizeInteractiveLabel(selectedText);
+  if (!interactive || !selected) return undefined;
+
+  const candidates: Array<{ id: string; labels: string[] }> = [];
+  const sections = Array.isArray(interactive.sections) ? interactive.sections : [];
+  for (const section of sections) {
+    const rows = Array.isArray(section?.rows) ? section.rows : [];
+    for (const row of rows) {
+      const id = String(row?.rowId || row?.id || '').trim();
+      if (!id) continue;
+      candidates.push({
+        id,
+        labels: [row?.title, row?.description].map(normalizeInteractiveLabel).filter(Boolean),
+      });
+    }
+  }
+  const cards = Array.isArray(interactive.cards) ? interactive.cards : [];
+  const buttons = [
+    ...(Array.isArray(interactive.buttons) ? interactive.buttons : []),
+    ...cards.flatMap((card: any) => Array.isArray(card?.buttons) ? card.buttons : []),
+  ];
+  for (const button of buttons) {
+    const id = String(button?.id || '').trim();
+    if (!id) continue;
+    candidates.push({
+      id,
+      labels: [button?.displayText, button?.title].map(normalizeInteractiveLabel).filter(Boolean),
+    });
+  }
+
+  const matches = candidates.filter((candidate) => candidate.labels.includes(selected));
+  return matches.length === 1 ? matches[0]!.id : undefined;
+}
+
+export function extractEvolutionInteractiveResponseId(rawMessage: any): string | undefined {
+  if (!rawMessage || typeof rawMessage !== 'object') return undefined;
+
+  const buttonsResponse = rawMessage.buttonsResponseMessage;
+  const templateButtonReply = rawMessage.templateButtonReplyMessage;
+  const listResponse = rawMessage.listResponseMessage;
+  const interactiveResponse = rawMessage.interactiveResponseMessage;
+  const interactiveMessage = rawMessage.interactiveMessage;
+  const nativeFlowParams = parseNativeFlowParams(
+    interactiveResponse?.nativeFlowResponseMessage?.paramsJson
+    ?? interactiveMessage?.nativeFlowResponseMessage?.paramsJson
+  );
+
+  return pickFirstNonEmptyString(
+    buttonsResponse?.selectedButtonId,
+    templateButtonReply?.selectedId,
+    listResponse?.singleSelectReply?.selectedRowId,
+    nativeFlowParams?.selectedId,
+    nativeFlowParams?.selectedRowId,
+    nativeFlowParams?.id,
+    nativeFlowParams?.value
+  );
+}
+
 export function resolveEvolutionInboundMessageType(params: {
   messageType?: unknown;
   rawMessage?: any;

@@ -6,11 +6,14 @@ import {
   Activity,
   AlertTriangle,
   ArrowLeft,
+  BookOpen,
   CheckCircle2,
   Clock3,
   Code2,
   DatabaseZap,
+  FileText,
   KeyRound,
+  Layers,
   Loader2,
   PlugZap,
   Plus,
@@ -18,6 +21,7 @@ import {
   Save,
   Search,
   Server,
+  ShieldAlert,
   ShieldCheck,
   TerminalSquare,
   Trash2,
@@ -28,6 +32,9 @@ import {
 import {
   deleteMcpServerAction,
   getMcpServersAction,
+  getMcpToolManualAction,
+  syncAcsManualsToKnowledgeAction,
+  syncMcpManualsAction,
   syncMcpServerToolsAction,
   testMcpServerConnectionAction,
   upsertMcpServerAction,
@@ -35,6 +42,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -53,6 +67,7 @@ const EMPTY_ENV = '{\n  "API_KEY": "..."\n}';
 type StatusFilter = 'all' | 'active' | 'attention';
 
 function formatTransport(transport: McpServerTransport): string {
+  if (transport === 'direct_http') return 'HTTP Direto (ACS)';
   if (transport === 'streamable_http') return 'HTTP';
   if (transport === 'sse') return 'SSE';
   return 'Stdio';
@@ -144,6 +159,17 @@ export default function McpIntegrationPage() {
   const [argsJson, setArgsJson] = useState('[]');
   const [envJson, setEnvJson] = useState('{}');
   const [cwd, setCwd] = useState('');
+
+  const [syncingManualsId, setSyncingManualsId] = useState<string | null>(null);
+  const [copyingKnowledgeId, setCopyingKnowledgeId] = useState<string | null>(null);
+  const [selectedManual, setSelectedManual] = useState<{
+    serverId: string;
+    serverName: string;
+    toolName: string;
+    title: string;
+    markdown: string | null;
+    loading: boolean;
+  } | null>(null);
 
   const workspaceId = user?.activeWorkspaceId;
 
@@ -341,6 +367,73 @@ export default function McpIntegrationPage() {
     }
   };
 
+  const syncManuals = async (serverId: string) => {
+    if (!workspaceId) return;
+    setSyncingManualsId(serverId);
+    try {
+      const result = await syncMcpManualsAction(workspaceId, serverId);
+      if (!result.success) {
+        toast({ title: 'Falha ao sincronizar manuais', description: result.error, variant: 'destructive' });
+      } else {
+        toast({
+          title: 'Manuais atualizados',
+          description: `${result.catalog?.tools?.length || 0} manual(is) sincronizado(s).`,
+        });
+      }
+      await loadServers();
+    } finally {
+      setSyncingManualsId(null);
+    }
+  };
+
+  const copyManualsToKnowledge = async (serverId: string) => {
+    if (!workspaceId) return;
+    setCopyingKnowledgeId(serverId);
+    try {
+      const result = await syncAcsManualsToKnowledgeAction({ workspaceId, serverId });
+      if (!result.success) {
+        toast({ title: 'Erro ao copiar manuais', description: result.error, variant: 'destructive' });
+      } else {
+        toast({
+          title: 'Manuais integrados à Base de Conhecimento!',
+          description: `${result.count || 0} documento(s) cadastrados com sucesso para o Autopilot.`,
+        });
+      }
+      await loadServers();
+    } finally {
+      setCopyingKnowledgeId(null);
+    }
+  };
+
+  const viewToolManual = async (server: McpServerConfig, toolName: string, title?: string) => {
+    if (!workspaceId) return;
+    setSelectedManual({
+      serverId: server.id,
+      serverName: server.name,
+      toolName,
+      title: title || toolName,
+      markdown: null,
+      loading: true,
+    });
+    try {
+      const result = await getMcpToolManualAction(workspaceId, server.id, toolName);
+      if (result.success && result.manual) {
+        setSelectedManual({
+          serverId: server.id,
+          serverName: server.name,
+          toolName,
+          title: result.manual.title || title || toolName,
+          markdown: result.manual.markdown,
+          loading: false,
+        });
+      } else {
+        setSelectedManual((prev) => (prev ? { ...prev, markdown: 'Não foi possível carregar o conteúdo deste manual.', loading: false } : null));
+      }
+    } catch {
+      setSelectedManual((prev) => (prev ? { ...prev, markdown: 'Erro ao consultar manual.', loading: false } : null));
+    }
+  };
+
   return (
     <TooltipProvider>
       <div className="flex h-full min-w-0 flex-col overflow-y-auto bg-muted/30 px-4 py-4 sm:px-6 lg:px-8">
@@ -475,11 +568,16 @@ export default function McpIntegrationPage() {
                       isSyncing={syncingId === server.id}
                       isTesting={testingId === server.id}
                       isUpdating={updatingId === server.id}
+                      isSyncingManuals={syncingManualsId === server.id}
+                      isCopyingKnowledge={copyingKnowledgeId === server.id}
                       onEdit={() => editServer(server)}
                       onSync={() => void syncServer(server.id)}
                       onTest={() => void testServer(server.id)}
                       onDelete={() => void deleteServer(server.id)}
                       onToggle={() => void toggleServer(server)}
+                      onSyncManuals={() => void syncManuals(server.id)}
+                      onCopyKnowledge={() => void copyManualsToKnowledge(server.id)}
+                      onViewManual={(toolName, title) => void viewToolManual(server, toolName, title)}
                     />
                   ))}
                 </div>
@@ -514,6 +612,7 @@ export default function McpIntegrationPage() {
                     <Select value={transport} onValueChange={(value) => setTransport(value as McpServerTransport)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="direct_http">HTTP Direto (JSON-RPC 2.0 / ACS Recomendado)</SelectItem>
                         <SelectItem value="streamable_http">Streamable HTTP</SelectItem>
                         <SelectItem value="sse">SSE legado</SelectItem>
                         <SelectItem value="stdio">Stdio</SelectItem>
@@ -586,6 +685,32 @@ export default function McpIntegrationPage() {
           </main>
         </div>
       </div>
+
+      <Dialog open={Boolean(selectedManual)} onOpenChange={(open) => !open && setSelectedManual(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <BookOpen className="h-5 w-5 text-primary" />
+              {selectedManual?.title || 'Manual Técnico'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedManual?.serverName} &bull; Ferramenta: <code className="text-xs bg-muted px-1 py-0.5 rounded">{selectedManual?.toolName}</code>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto min-h-0 pr-1 mt-2">
+            {selectedManual?.loading ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-xs text-muted-foreground">Carregando manual do servidor MCP...</p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border bg-muted/30 p-4 font-mono text-xs whitespace-pre-wrap leading-relaxed select-text">
+                {selectedManual?.markdown || 'Conteúdo não disponível.'}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }
@@ -597,11 +722,16 @@ function McpServerCard({
   isSyncing,
   isTesting,
   isUpdating,
+  isSyncingManuals,
+  isCopyingKnowledge,
   onEdit,
   onSync,
   onTest,
   onDelete,
   onToggle,
+  onSyncManuals,
+  onCopyKnowledge,
+  onViewManual,
 }: {
   server: McpServerConfig;
   query: string;
@@ -609,15 +739,22 @@ function McpServerCard({
   isSyncing: boolean;
   isTesting: boolean;
   isUpdating: boolean;
+  isSyncingManuals: boolean;
+  isCopyingKnowledge: boolean;
   onEdit: () => void;
   onSync: () => void;
   onTest: () => void;
   onDelete: () => void;
   onToggle: () => void;
+  onSyncManuals: () => void;
+  onCopyKnowledge: () => void;
+  onViewManual: (toolName: string, title?: string) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<'tools' | 'manuals'>('tools');
   const tools = filteredTools(server, query);
   const endpoint = serverEndpoint(server);
   const health = server.healthStatus || 'unknown';
+  const manualsCount = server.manualsCatalog?.tools?.length || 0;
   const healthClass = health === 'healthy'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
     : health === 'unreachable'
@@ -657,8 +794,9 @@ function McpServerCard({
       </CardHeader>
 
       <CardContent className="grid gap-5 p-5">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           <Metric icon={Wrench} label="Tools" value={String(server.tools?.length || 0)} />
+          <Metric icon={BookOpen} label="Manuais (/como-usar)" value={manualsCount ? `${manualsCount} disponíveis` : 'Nenhum'} />
           <Metric icon={Clock3} label="Sincronizacao" value={formatDate(server.syncedAt)} />
           <Metric
             icon={Activity}
@@ -674,30 +812,169 @@ function McpServerCard({
           </div>
         )}
 
-        <div className="rounded-lg border border-border">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <DatabaseZap className="h-4 w-4 text-primary" />
-              <span className="text-sm font-medium text-foreground">Tools deste MCP</span>
-            </div>
-            <Badge variant="outline" className="rounded-full">{tools.length} visivel(is)</Badge>
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="flex border-b border-border bg-muted/40 px-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('tools')}
+              className={cn(
+                'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                activeTab === 'tools'
+                  ? 'border-primary text-primary font-semibold bg-background rounded-t-md'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <DatabaseZap className="h-4 w-4" />
+              <span>Ferramentas ({tools.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('manuals')}
+              className={cn(
+                'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                activeTab === 'manuals'
+                  ? 'border-primary text-primary font-semibold bg-background rounded-t-md'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <BookOpen className="h-4 w-4" />
+              <span>Como Usar / Manuais {manualsCount > 0 ? `(${manualsCount})` : ''}</span>
+            </button>
           </div>
 
-          {tools.length === 0 ? (
-            <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 px-5 py-8 text-center">
-              <Wrench className="h-7 w-7 text-muted-foreground" />
-              <p className="text-sm font-medium text-foreground">Nenhuma tool sincronizada</p>
-              <p className="max-w-md text-xs text-muted-foreground">
-                Use sincronizar para descobrir as ferramentas expostas por este servidor.
-              </p>
+          {activeTab === 'tools' ? (
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/10 px-4 py-2.5">
+                <span className="text-xs text-muted-foreground font-medium">Ferramentas sincronizadas com o MCP</span>
+                <Badge variant="outline" className="rounded-full">{tools.length} visivel(is)</Badge>
+              </div>
+              {tools.length === 0 ? (
+                <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 px-5 py-8 text-center">
+                  <Wrench className="h-7 w-7 text-muted-foreground" />
+                  <p className="text-sm font-medium text-foreground">Nenhuma tool sincronizada</p>
+                  <p className="max-w-md text-xs text-muted-foreground">
+                    Use sincronizar para descobrir as ferramentas expostas por este servidor.
+                  </p>
+                </div>
+              ) : (
+                <div className="max-h-[520px] overflow-y-auto overscroll-contain [scrollbar-width:thin]">
+                  <div className="divide-y divide-border">
+                    {tools.map((tool) => (
+                      <McpToolRow
+                        key={tool.qualifiedName}
+                        tool={tool}
+                        onViewManual={onViewManual}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="max-h-[520px] overflow-y-auto overscroll-contain [scrollbar-width:thin]">
-              <div className="divide-y divide-border">
-                {tools.map((tool) => (
-                  <McpToolRow key={tool.qualifiedName} tool={tool} />
-                ))}
+            <div className="p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+                <div>
+                  <div className="flex items-center gap-2 font-semibold text-sm text-foreground">
+                    <BookOpen className="h-4 w-4 text-primary" />
+                    Manuais Operacionais do ACS (/como-usar)
+                    {server.manualsCatalog?.version && (
+                      <Badge variant="outline" className="text-xs font-mono">v{server.manualsCatalog.version}</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Instruções obrigatórias para a IA e operadores: Zero Plaintext Secrets, diagnósticos prévios e regras atômicas.
+                  </p>
+                  {server.manualsCatalog?.categories && server.manualsCatalog.categories.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {server.manualsCatalog.categories.map((cat) => (
+                        <Badge key={cat} variant="secondary" className="text-[10px] px-2 py-0">
+                          {cat}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onViewManual('index', 'Guia Geral /como-usar')}
+                  >
+                    <FileText className="mr-1.5 h-3.5 w-3.5" />
+                    Guia Geral
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={onSyncManuals}
+                    disabled={isSyncingManuals}
+                  >
+                    {isSyncingManuals ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                    Sincronizar Manuais
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={onCopyKnowledge}
+                    disabled={isCopyingKnowledge || !manualsCount}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    {isCopyingKnowledge ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Layers className="mr-1.5 h-3.5 w-3.5" />}
+                    Copiar para Base de Conhecimento
+                  </Button>
+                </div>
               </div>
+
+              {!server.manualsCatalog || manualsCount === 0 ? (
+                <div className="flex min-h-[140px] flex-col items-center justify-center gap-2 px-5 py-8 text-center rounded-lg border border-dashed">
+                  <BookOpen className="h-7 w-7 text-muted-foreground" />
+                  <p className="text-sm font-medium text-foreground">Nenhum catálogo de manuais sincronizado</p>
+                  <p className="max-w-md text-xs text-muted-foreground">
+                    Clique em "Sincronizar Manuais" para carregar as documentações de /como-usar deste servidor ACS.
+                  </p>
+                  <Button size="sm" onClick={onSyncManuals} disabled={isSyncingManuals} className="mt-2">
+                    {isSyncingManuals ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                    Sincronizar Manuais Agora
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {server.manualsCatalog.tools.map((m) => (
+                    <div
+                      key={m.name}
+                      className="flex flex-col justify-between rounded-lg border border-border bg-card p-3.5 shadow-sm hover:border-primary/40 transition-colors"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-sm text-foreground">{m.title || m.name}</span>
+                          <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                            {m.category || 'Geral'}
+                          </Badge>
+                        </div>
+                        <p className="text-xs font-mono text-muted-foreground mt-0.5">{m.fileName || `${m.name}.md`}</p>
+                        {m.summary && (
+                          <p className="text-xs text-muted-foreground mt-2 line-clamp-3 leading-relaxed">
+                            {m.summary}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="mt-3 pt-3 border-t border-border/60 flex items-center justify-between">
+                        <code className="text-[11px] text-muted-foreground">{m.name}</code>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2.5 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                          onClick={() => onViewManual(m.name, m.title || m.name)}
+                        >
+                          <FileText className="mr-1 h-3 w-3" />
+                          Ver Manual
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -729,12 +1006,18 @@ function McpServerCard({
   );
 }
 
-function McpToolRow({ tool }: { tool: McpToolConfig }) {
+function McpToolRow({
+  tool,
+  onViewManual,
+}: {
+  tool: McpToolConfig;
+  onViewManual?: (toolName: string, title?: string) => void;
+}) {
   const fields = schemaFieldNames(tool.inputSchema);
   const badges = toolAnnotationBadges(tool);
 
   return (
-    <div className="grid gap-3 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-start">
+    <div className="grid gap-3 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-start">
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <p className="truncate text-sm font-semibold text-foreground">{toolDisplayName(tool)}</p>
@@ -753,12 +1036,46 @@ function McpToolRow({ tool }: { tool: McpToolConfig }) {
         {tool.description && (
           <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">{tool.description}</p>
         )}
+
+        {tool.manualSummary && (
+          <div className="mt-2.5 rounded bg-muted/50 border border-border/80 p-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Resumo /como-usar:</span> {tool.manualSummary}
+          </div>
+        )}
+
+        {tool.operationalRules && tool.operationalRules.length > 0 && (
+          <div className="mt-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-300">
+              <ShieldAlert className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              Regras Operacionais (/como-usar):
+            </div>
+            <ul className="mt-1.5 list-disc list-inside space-y-1 pl-1">
+              {tool.operationalRules.map((rule, idx) => (
+                <li key={idx} className="leading-snug">{rule}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3">
-        <div className="flex items-center gap-2 text-xs font-medium text-foreground">
-          <KeyRound className="h-3.5 w-3.5 text-primary" />
-          Entrada
+        <div className="flex items-center justify-between text-xs font-medium text-foreground">
+          <div className="flex items-center gap-2">
+            <KeyRound className="h-3.5 w-3.5 text-primary" />
+            Entrada
+          </div>
+          {onViewManual && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[11px] text-primary hover:text-primary hover:bg-primary/10"
+              onClick={() => onViewManual(tool.name, tool.title || tool.name)}
+            >
+              <FileText className="mr-1 h-3 w-3" />
+              Manual
+            </Button>
+          )}
         </div>
         {fields.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">

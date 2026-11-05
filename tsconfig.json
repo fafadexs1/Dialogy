@@ -35,17 +35,14 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     ".next/dev/dev/types/**/*.ts",
-    ".next-codex-dev/types/**/*.ts",
-    ".next-codex-dev/dev/types/**/*.ts",
-    ".next-perf/types/**/*.ts",
-    ".next-perf/dev/types/**/*.ts",
-    ".next-analytics-validation/types/**/*.ts",
-    ".next-analytics-validation/dev/types/**/*.ts",
-    ".next-analytics-snapshot-validation/types/**/*.ts",
-    ".next-analytics-snapshot-validation/dev/types/**/*.ts"
+    ".next-workflow-preview/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "mobile"
+    "mobile",
+    "scratch",
+    "scripts",
+    ".next-*",
+    "dist"
   ]
 }

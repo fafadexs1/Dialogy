@@ -1,0 +1,64 @@
+{
+  "at": "2026-09-08T18:31:56.560Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "installation",
+            "procedureId": "contract",
+            "objective": "Preparar instalação",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "recall",
+          "requestId": "installation",
+          "capabilityId": null,
+          "query": "recuperar escolhas de plano, mesh e endereço registradas anteriormente",
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "Cliente afirma que já escolheu plano e mesh em atendimento anterior; preciso consultar a memória para reutilizar essas escolhas antes de prosseguir."
+        }
+      },
+      "ms": 14637
+    },
+    {
+      "observations": [
+        {
+          "result": "memory_loaded",
+          "count": 2
+        }
+      ],
+      "error": "deepseek exhausted the output budget before completing dialogy_reasoning_decision.",
+      "ms": 108340
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 1983,
+      "outputTokens": 1933,
+      "totalTokens": 3916,
+      "ruleName": "decision"
+    },
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 2301,
+      "outputTokens": 13384,
+      "totalTokens": 15685,
+      "ruleName": "decision"
+    }
+  ]
+}

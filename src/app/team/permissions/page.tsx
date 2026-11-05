@@ -1,359 +1,243 @@
-
 'use client';
 
-import React, { useState, useEffect, useActionState, useRef } from 'react';
-import type { User, Role, Permission } from '@/lib/types';
-import { Loader2, Fingerprint, PlusCircle, Trash2, Edit, Check, Settings, AlertCircle, Save } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import type { Permission, Role } from '@/lib/types';
+import { AlertCircle, ArrowUpRight, BarChart3, Check, CheckCheck, ChevronRight, ContactRound, Fingerprint, HeartHandshake, KeyRound, LayoutList, Loader2, LockKeyhole, Megaphone, MessageCircle, Pencil, Plus, Search, Settings2, ShieldCheck, Sparkles, Table2, Trash2, Users, Workflow, X } from 'lucide-react';
 import { getRolesAndPermissions, updateRolePermissionAction, createRoleAction, updateRoleAction, deleteRoleAction } from '@/actions/permissions';
+import { useCurrentUser } from '@/hooks/use-online-status';
 import { toast } from '@/hooks/use-toast';
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useFormStatus } from 'react-dom';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import { useCurrentUser } from '@/hooks/use-online-status';
+import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
+import { filterPermissionGroups, hasRolePermission, isProtectedRole, setRolePermission, type PermissionFilter } from '@/lib/permission-editor';
+import shared from '../team-page.module.css';
+import styles from './permissions-page.module.css';
 
-// --- Dialog Forms ---
-function RoleFormButton({ isEditing }: { isEditing: boolean }) {
-    const { pending } = useFormStatus();
-    return (
-        <Button type="submit" disabled={pending}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4" />
-            {isEditing ? 'Salvar Alterações' : 'Salvar Papel'}
-        </Button>
-    )
+const categoryOrder = ['Chat', 'CRM', 'Equipes', 'Membros', 'Campanhas', 'Automações', 'Analytics', 'Workspace', 'Faturamento', 'Atalhos'];
+const compareCategories = (a: string, b: string) => {
+  const position = (value: string) => categoryOrder.includes(value) ? categoryOrder.indexOf(value) : categoryOrder.length;
+  return position(a) - position(b) || a.localeCompare(b, 'pt-BR');
+};
+const categoryDescriptions: Record<string, string> = {
+  Chat: 'Conversas, atendimentos e conexão com seus clientes.',
+  CRM: 'Contatos e informações que aproximam sua equipe dos clientes.',
+  Equipes: 'Organização de pessoas e equipes de atendimento.',
+  Membros: 'Pessoas, funções e controle de acesso ao workspace.',
+  Campanhas: 'Comunicação com seus contatos e gestão de campanhas.',
+  Automações: 'Piloto Automático e agentes que apoiam a equipe.',
+  Analytics: 'Visibilidade sobre os resultados do atendimento.',
+  Workspace: 'Configurações e convites para o seu espaço de trabalho.',
+  Faturamento: 'Informações de cobrança e histórico do workspace.',
+  Atalhos: 'Respostas e atalhos compartilhados com a equipe.',
+};
+
+function CategoryIcon({ category, size = 18 }: { category: string; size?: number }) {
+  const Icon = ({ Chat: MessageCircle, CRM: ContactRound, Equipes: Users, Membros: ShieldCheck, Campanhas: Megaphone, Automações: Workflow, Analytics: BarChart3, Workspace: Settings2, Faturamento: KeyRound, Atalhos: Sparkles } as Record<string, typeof Users>)[category] || KeyRound;
+  return <Icon size={size} />;
 }
 
-function RoleForm({
-    workspaceId,
-    onSuccess,
-    initialData,
-    action,
-}: {
-    workspaceId: string,
-    onSuccess: () => void,
-    initialData?: Role | null,
-    action: (prevState: any, formData: FormData) => Promise<{ success: boolean; error?: string; }>
-}) {
-    const formRef = useRef<HTMLFormElement>(null);
-    const [state, formAction] = useActionState(action, { success: false, error: undefined });
-
-    useEffect(() => {
-        if (state.success) {
-            toast({ title: "Sucesso!", description: `Papel ${initialData ? 'atualizado' : 'criado'} com sucesso.` });
-            onSuccess();
-        }
-    }, [state, onSuccess, initialData]);
-
-    return (
-        <form ref={formRef} action={formAction}>
-            <input type="hidden" name="workspaceId" value={workspaceId} />
-            {initialData && <input type="hidden" name="roleId" value={initialData.id} />}
-            <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                    <Label htmlFor="name">Nome do Papel</Label>
-                    <Input id="name" name="name" placeholder="Ex: Gerente de Vendas" required defaultValue={initialData?.name} />
-                </div>
-                <div className="space-y-2">
-                    <Label htmlFor="description">Descrição</Label>
-                    <Input id="description" name="description" placeholder="Ex: Pode visualizar e editar negócios" defaultValue={initialData?.description} />
-                </div>
-                {state.error && (
-                    <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertTitle>Erro</AlertTitle>
-                        <AlertDescription>{state.error}</AlertDescription>
-                    </Alert>
-                )}
-            </div>
-            <DialogFooter>
-                <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                <RoleFormButton isEditing={!!initialData} />
-            </DialogFooter>
-        </form>
-    );
+function RoleForm({ role, workspaceId, onSaved }: { role: Role | null; workspaceId: string; onSaved: (roleId?: string) => Promise<void> }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPending(true);
+    setError('');
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get('name') || '').trim();
+    if (!name) { setError('Dê um nome à função para continuar.'); setPending(false); return; }
+    form.set('name', name);
+    try {
+      const result = role ? await updateRoleAction({}, form) : await createRoleAction({}, form);
+      if (!result.success) { setError(result.error || 'Não foi possível salvar a função.'); return; }
+      await onSaved('roleId' in result ? result.roleId as string : role?.id);
+      toast({ title: role ? 'Função atualizada!' : 'Função criada!' });
+    } catch { setError('Não foi possível salvar agora. Tente novamente.'); }
+    finally { setPending(false); }
+  };
+  return <form onSubmit={submit}>
+    <input type="hidden" name="workspaceId" value={workspaceId} />
+    {role && <input type="hidden" name="roleId" value={role.id} />}
+    <div className={styles.formFields}>
+      <div><Label htmlFor="role-name">Nome da função</Label><Input id="role-name" name="name" autoFocus required maxLength={100} defaultValue={role?.name} placeholder="Ex: Sucesso do Cliente" /></div>
+      <div><Label htmlFor="role-description">Uma breve descrição</Label><Input id="role-description" name="description" maxLength={300} defaultValue={role?.description} placeholder="Como essa função contribui com a equipe?" /></div>
+      {!role && <p className={styles.formHint}><KeyRound size={15} />A nova função começa sem acessos. Depois de criar, escolha as permissões na página.</p>}
+      {error && <p className={styles.formError} role="alert"><AlertCircle size={16} />{error}</p>}
+    </div>
+    <DialogFooter><DialogClose asChild><Button type="button" variant="outline" disabled={pending}>Cancelar</Button></DialogClose><Button type="submit" disabled={pending}>{pending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Check size={15} className="mr-2" />}{role ? 'Salvar alterações' : 'Criar função'}</Button></DialogFooter>
+  </form>;
 }
 
-// --- Permissions Matrix Component ---
-
-function PermissionsMatrix({
-    initialRoles,
-    initialPermissions,
-    workspaceId,
-    onMutate
-}: {
-    initialRoles: Role[],
-    initialPermissions: Permission[],
-    workspaceId: string,
-    onMutate: () => void;
-}) {
-    const [localRoles, setLocalRoles] = useState<Role[]>(initialRoles);
-
-    useEffect(() => {
-        setLocalRoles(initialRoles);
-    }, [initialRoles]);
-
-    const handlePermissionChange = async (roleId: string, permissionId: string, checked: boolean) => {
-        setLocalRoles(prev =>
-            prev.map(role => {
-                if (role.id !== roleId) return role;
-                const permission = initialPermissions.find(p => p.id === permissionId);
-                if (!permission) return role;
-                const newPermissions = checked
-                    ? [...role.permissions, permission]
-                    : role.permissions.filter(p => p.id !== permissionId);
-                return { ...role, permissions: newPermissions };
-            })
-        );
-
-        const result = await updateRolePermissionAction(roleId, permissionId, checked);
-        if (result.error) {
-            toast({ title: "Erro ao Salvar", description: result.error, variant: "destructive" });
-            onMutate(); // Re-fetch to revert optimistic update
-        }
-    };
-
-    const handleDeleteRole = async (roleId: string) => {
-        const result = await deleteRoleAction(roleId, workspaceId);
-        if (result.error) {
-            toast({ title: "Erro ao Remover", description: result.error, variant: "destructive" });
-        } else {
-            toast({ title: "Sucesso!", description: "Papel removido com sucesso." });
-            onMutate();
-        }
-    }
-
-    const permissionCategories = initialPermissions.reduce((acc, p) => {
-        if (!acc[p.category]) acc[p.category] = [];
-        acc[p.category].push(p);
-        return acc;
-    }, {} as Record<string, Permission[]>);
-
-    return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Matriz de Permissões</CardTitle>
-                <CardDescription>Marque as caixas para conceder permissões a cada papel (role). As alterações são salvas automaticamente.</CardDescription>
-            </CardHeader>
-            <CardContent>
-                <ScrollArea className="w-full whitespace-nowrap">
-                    <div className="relative overflow-auto border rounded-lg">
-                        <table className="w-full text-sm">
-                            <thead className="bg-muted/50">
-                                <tr className="[&_th]:h-12 [&_th]:px-4 [&_th]:text-left [&_th]:align-middle [&_th]:font-medium [&_th]:text-muted-foreground">
-                                    <th className="sticky left-0 bg-muted/50 z-10 min-w-48">Permissão</th>
-                                    {localRoles.map(role => (
-                                        <th key={role.id} className="text-center min-w-48">
-                                            <div className='flex items-center justify-center gap-2'>
-                                                {role.name}
-                                                {role.name !== 'Administrador' && (
-                                                    <Dialog>
-                                                        <DropdownMenu>
-                                                            <DropdownMenuTrigger asChild>
-                                                                <Button variant="ghost" size="icon" className="h-7 w-7"><Settings className="h-4 w-4" /></Button>
-                                                            </DropdownMenuTrigger>
-                                                            <DropdownMenuContent>
-                                                                <DialogTrigger asChild>
-                                                                    <DropdownMenuItem><Edit className="mr-2 h-4 w-4" />Editar Papel</DropdownMenuItem>
-                                                                </DialogTrigger>
-                                                                <AlertDialog>
-                                                                    <AlertDialogTrigger asChild>
-                                                                        <DropdownMenuItem className="text-destructive" onSelect={(e) => e.preventDefault()}>
-                                                                            <Trash2 className="mr-2 h-4 w-4" />Remover Papel
-                                                                        </DropdownMenuItem>
-                                                                    </AlertDialogTrigger>
-                                                                    <AlertDialogContent>
-                                                                        <AlertDialogHeader>
-                                                                            <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
-                                                                            <AlertDialogDescription>
-                                                                                Esta ação não pode ser desfeita. Isso removerá permanentemente o papel "{role.name}".
-                                                                            </AlertDialogDescription>
-                                                                        </AlertDialogHeader>
-                                                                        <AlertDialogFooter>
-                                                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                                                            <AlertDialogAction onClick={() => handleDeleteRole(role.id)}>Remover</AlertDialogAction>
-                                                                        </AlertDialogFooter>
-                                                                    </AlertDialogContent>
-                                                                </AlertDialog>
-                                                            </DropdownMenuContent>
-                                                        </DropdownMenu>
-                                                        <DialogContent>
-                                                            <DialogHeader>
-                                                                <DialogTitle>Editar Papel: {role.name}</DialogTitle>
-                                                            </DialogHeader>
-                                                            <RoleForm workspaceId={workspaceId} onSuccess={onMutate} initialData={role} action={updateRoleAction} />
-                                                        </DialogContent>
-                                                    </Dialog>
-                                                )}
-                                            </div>
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {Object.entries(permissionCategories).map(([category, permissions]) => (
-                                    <React.Fragment key={category}>
-                                        <tr className="border-t">
-                                            <td colSpan={localRoles.length + 1} className="py-2 px-4 bg-secondary/30 font-semibold text-muted-foreground sticky left-0 z-10">
-                                                {category}
-                                            </td>
-                                        </tr>
-                                        {permissions.map(permission => (
-                                            <tr key={permission.id} className="[&_td]:px-4 [&_td]:py-2 [&_td]:align-middle border-t">
-                                                <td className="sticky left-0 bg-background z-10">
-                                                    <div className="font-medium">{permission.description}</div>
-                                                    <div className="text-xs text-muted-foreground font-mono">{permission.id}</div>
-                                                </td>
-                                                {localRoles.map(role => (
-                                                    <td key={`${role.id}-${permission.id}`} className="text-center">
-                                                        <Checkbox
-                                                            checked={role.permissions.some(p => p.id === permission.id)}
-                                                            onCheckedChange={(checked) => handlePermissionChange(role.id, permission.id, !!checked)}
-                                                            id={`${role.id}-${permission.id}`}
-                                                            disabled={role.name === 'Administrador'}
-                                                        />
-                                                    </td>
-                                                ))}
-                                            </tr>
-                                        ))}
-                                    </React.Fragment>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    <ScrollBar orientation="horizontal" />
-                </ScrollArea>
-            </CardContent>
-        </Card>
-    );
-}
-
-// --- Main Page Component ---
 export default function PermissionsPage() {
-    const user = useCurrentUser();
-    const [roles, setRoles] = useState<Role[]>([]);
-    const [permissions, setPermissions] = useState<Permission[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-    const [workspaceId, setWorkspaceId] = useState<string | undefined>();
+  const user = useCurrentUser();
+  const workspaceId = user?.activeWorkspaceId;
+  const workspace = user?.workspaces?.find(item => item.id === workspaceId);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [canEdit, setCanEdit] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [roleQuery, setRoleQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [access, setAccess] = useState<PermissionFilter>('all');
+  const [view, setView] = useState<'role' | 'compare'>('role');
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
+  const [editor, setEditor] = useState<Role | 'create' | null>(null);
+  const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const pendingRef = useRef(new Set<string>());
+  const fetchVersion = useRef(0);
+  const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
 
-    useEffect(() => {
-        if (user) {
-            setWorkspaceId(user.activeWorkspaceId);
-        }
-    }, [user]);
+  const fetchData = useCallback(async () => {
+    if (!workspaceId) return;
+    const version = ++fetchVersion.current;
+    setError('');
+    try {
+      const result = await getRolesAndPermissions(workspaceId);
+      if (version !== fetchVersion.current) return;
+      if (result.error) throw new Error(result.error);
+      setRoles(result.roles || []);
+      setPermissions(result.permissions || []);
+      setCanEdit(result.canEdit === true);
+      setSelectedRoleId(current => result.roles.some(role => role.id === current) ? current : (result.roles.find(role => role.is_default) || result.roles.find(role => !isProtectedRole(role)) || result.roles[0])?.id || null);
+    } catch (reason) {
+      if (version === fetchVersion.current) setError(reason instanceof Error ? reason.message : 'Não foi possível carregar as funções.');
+    } finally { if (version === fetchVersion.current) setLoading(false); }
+  }, [workspaceId]);
 
-    const fetchData = React.useCallback(async () => {
-        if (!workspaceId) return;
-        setLoading(true);
-        setError(null);
-        try {
-            const { roles, permissions, error: fetchError } = await getRolesAndPermissions(workspaceId);
-            if (fetchError) {
-                throw new Error(fetchError);
-            }
-            setRoles(roles || []);
-            setPermissions(permissions || []);
-        } catch (err: any) {
-            toast({
-                title: "Erro ao Carregar Dados",
-                description: err.message || "Não foi possível buscar os papéis e permissões.",
-                variant: "destructive"
-            });
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    }, [workspaceId]);
+  useEffect(() => {
+    setLoading(true);
+    setSelectedRoleId(null);
+    setSaveState('idle');
+    void fetchData();
+  }, [fetchData]);
 
-    useEffect(() => {
-        if (workspaceId) {
-            fetchData();
-        }
-    }, [workspaceId, fetchData]);
+  const categories = [...new Set(permissions.map(permission => permission.category))].sort(compareCategories);
+  const categoryKey = categories.join('|');
+  useEffect(() => { setOpenGroups(categoryKey ? categoryKey.split('|').slice(0, 2) : []); }, [categoryKey]);
+  const selectedRole = roles.find(role => role.id === selectedRoleId);
+  const groups = selectedRole ? filterPermissionGroups(permissions, selectedRole, query, category, view === 'compare' ? 'all' : access).sort(([a], [b]) => compareCategories(a, b)) : [];
+  const filteredRoles = roles.filter(role => `${role.name} ${role.description}`.toLocaleLowerCase('pt-BR').includes(roleQuery.toLocaleLowerCase('pt-BR').trim()));
+  const countPermissions = (role: Role) => permissions.filter(permission => hasRolePermission(role, permission.id)).length;
+  const busy = pending.size > 0;
+  const protectedRole = selectedRole ? isProtectedRole(selectedRole) : false;
+  const clearFilters = () => { setQuery(''); setCategory('all'); setAccess('all'); };
 
-    const handleSuccess = () => {
-        setIsCreateModalOpen(false);
-        fetchData();
+  const changePermission = async (role: Role, permission: Permission, enabled: boolean) => {
+    const key = `${role.id}:${permission.id}`;
+    if (!canEdit || isProtectedRole(role) || pendingRef.current.has(key)) return;
+    const previous = hasRolePermission(role, permission.id);
+    pendingRef.current.add(key);
+    setPending(new Set(pendingRef.current));
+    setRoles(current => setRolePermission(current, role.id, permission, enabled));
+    try {
+      const result = await updateRolePermissionAction(role.id, permission.id, enabled);
+      if (!result.success) throw new Error(result.error || 'Não foi possível salvar o acesso.');
+      setSaveState('saved');
+    } catch (reason) {
+      setRoles(current => setRolePermission(current, role.id, permission, previous));
+      setSaveState('error');
+      toast({ title: 'A alteração não foi salva', description: reason instanceof Error ? reason.message : 'Tente novamente.', variant: 'destructive' });
+    } finally {
+      pendingRef.current.delete(key);
+      setPending(new Set(pendingRef.current));
     }
+  };
 
-    if (loading || !user) {
-        return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-        );
-    }
+  const deleteRole = async () => {
+    if (!roleToDelete || deleting) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      const result = await deleteRoleAction(roleToDelete.id, workspaceId!);
+      if (!result.success) { setDeleteError(result.error || 'Não foi possível remover a função.'); return; }
+      await fetchData();
+      setRoleToDelete(null);
+      toast({ title: 'Função removida' });
+    } catch { setDeleteError('Não foi possível remover agora. Tente novamente.'); }
+    finally { setDeleting(false); }
+  };
 
-    return (
-        <div className="flex flex-col flex-1 h-full">
-            <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background flex justify-between items-center">
-                <div>
-                    <h1 className="text-2xl font-bold flex items-center gap-2"><Fingerprint /> Papéis & Permissões</h1>
-                    <p className="text-muted-foreground">Defina papéis e controle o que cada membro pode acessar e fazer no workspace.</p>
-                </div>
-                <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-                    <DialogTrigger asChild>
-                        <Button>
-                            <PlusCircle className="mr-2 h-4 w-4" />
-                            Criar Novo Papel
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Criar Novo Papel</DialogTitle>
-                            <DialogDescription>
-                                Defina um nome e descrição para o novo papel. Você poderá atribuir permissões na tela seguinte.
-                            </DialogDescription>
-                        </DialogHeader>
-                        {workspaceId && <RoleForm
-                            workspaceId={workspaceId}
-                            onSuccess={handleSuccess}
-                            action={createRoleAction}
-                        />}
-                    </DialogContent>
-                </Dialog>
-            </header>
-            <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-                {error ? (
-                    <div className="text-center py-20 text-destructive">
-                        <AlertCircle className="mx-auto h-12 w-12" />
-                        <h2 className="mt-4 text-xl font-bold">Falha ao carregar dados</h2>
-                        <p className="text-muted-foreground">{error}</p>
-                        <Button onClick={fetchData} className="mt-4">Tentar Novamente</Button>
-                    </div>
-                ) : roles.length > 0 && permissions.length > 0 && workspaceId ? (
-                    <PermissionsMatrix
-                        initialRoles={roles}
-                        initialPermissions={permissions}
-                        workspaceId={workspaceId}
-                        onMutate={fetchData}
-                    />
-                ) : (
-                    <div className="text-center py-20">
-                        <h2 className="text-xl font-medium text-muted-foreground">Nenhum dado de permissão encontrado.</h2>
-                        <p className="text-muted-foreground">Isso pode acontecer se o workspace não foi configurado corretamente.</p>
-                    </div>
-                )}
-            </main>
-        </div>
-    );
+  const permissionControl = (role: Role, permission: Permission, compact = false) => {
+    const key = `${role.id}:${permission.id}`;
+    const saving = pending.has(key);
+    const disabled = !canEdit || isProtectedRole(role) || saving;
+    const checked = hasRolePermission(role, permission.id);
+    return <div className={styles.permissionControl}>
+      {saving && <Loader2 size={13} className="animate-spin" aria-label="Salvando acesso" />}
+      {compact ? <Checkbox aria-label={`${permission.description} — ${role.name}`} checked={checked} disabled={disabled} onCheckedChange={value => void changePermission(role, permission, value === true)} /> : <Switch id={`access-${role.id}-${permission.id}`} aria-label={`${permission.description} — ${role.name}`} checked={checked} disabled={disabled} onCheckedChange={value => void changePermission(role, permission, value)} />}
+    </div>;
+  };
+
+  if (loading || !user) return <div className="flex h-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Carregando funções e permissões" /></div>;
+
+  return <div className={cn(shared.page, shared.surface)}>
+    <header className={cn(shared.pageHeader, styles.pageHeader)}>
+      <div className={shared.headerTop}>
+        <nav className={shared.breadcrumb} aria-label="Localização"><span>Workspace</span><ChevronRight size={12} /><Link href="/team">Equipes</Link><ChevronRight size={12} /><span aria-current="page">Permissões</span></nav>
+        <span className={shared.headerLabel}><HeartHandshake size={14} /> Feito de pessoas</span>
+      </div>
+      <div className={cn(shared.welcomeRow, styles.welcomeRow)}>
+        <div><span className={shared.eyebrow}>CONFIANÇA EM CADA CONEXÃO</span><h1>As pessoas certas.<br />Os acessos certos<span className={shared.titleDot}>.</span></h1><p>Autonomia para colaborar. Clareza para cuidar do seu workspace.</p></div>
+        {canEdit && <Button className={shared.createButton} disabled={busy} onClick={() => setEditor('create')}><Plus size={17} /> Criar função <ArrowUpRight size={16} /></Button>}
+      </div>
+      <div className={shared.workspaceSummary}><span><ShieldCheck size={15} /><strong>{roles.length}</strong> {roles.length === 1 ? 'função' : 'funções'}</span><span><KeyRound size={15} /><strong>{permissions.length}</strong> permissões disponíveis</span><span><LayoutList size={15} /><strong>{categories.length}</strong> áreas do workspace</span><span className={shared.summaryHint}>{workspace?.name || 'Seu workspace'}</span></div>
+    </header>
+    {error ? <div className={styles.errorState} role="alert"><span className={shared.emptyIcon}><AlertCircle size={26} /></span><h2>Vamos tentar de novo?</h2><p>{error}</p><Button variant="outline" onClick={() => void fetchData()}>Recarregar funções</Button></div> : <div className={styles.workspace}>
+      <aside className={styles.roleSidebar} aria-label="Funções do workspace">
+        <div className={styles.sidebarHeading}><h2>Suas funções</h2><span className={shared.count}>{roles.length}</span></div>
+        <div className={styles.roleSearch}><Search size={15} /><Input aria-label="Buscar função" placeholder="Encontrar uma função..." value={roleQuery} onChange={event => setRoleQuery(event.target.value)} /></div>
+        <nav className={styles.roleList} aria-label="Selecionar função">
+          {filteredRoles.map(role => <button type="button" key={role.id} className={cn(styles.roleOption, selectedRoleId === role.id && styles.selectedRole)} aria-current={selectedRoleId === role.id ? 'true' : undefined} onClick={() => { setSelectedRoleId(role.id); setAccess('all'); }}>
+            <span className={styles.roleIcon}>{isProtectedRole(role) ? <LockKeyhole size={18} /> : role.is_default ? <Users size={18} /> : <Fingerprint size={18} />}</span>
+            <span className={styles.roleOptionText}><strong>{role.name}</strong><span>{isProtectedRole(role) ? 'Acesso total · protegida' : `${countPermissions(role)} de ${permissions.length} acessos${role.is_default ? ' · padrão' : ''}`}</span></span><ChevronRight size={14} />
+          </button>)}
+          {filteredRoles.length === 0 && <p className={styles.noRoles}>{roleQuery ? 'Nenhuma função com esse nome.' : 'Crie sua primeira função para começar.'}</p>}
+        </nav>
+        <div className={styles.sidebarNote}><span className={shared.sectionIcon}><HeartHandshake size={20} /></span><h3>Autonomia com cuidado.</h3><p>Permita que cada pessoa tenha os acessos que fazem sentido para o seu trabalho.</p><Link href="/team/members">Ver pessoas do workspace <ArrowUpRight size={12} /></Link></div>
+      </aside>
+      <main className={styles.mainContent}>
+        {selectedRole ? <>
+          <div className={styles.roleHero}>
+            <div className={styles.roleIdentity}><span className={styles.heroIcon}>{protectedRole ? <LockKeyhole size={27} /> : <Fingerprint size={27} />}</span><div><span className={shared.eyebrow}>ESPAÇO DA FUNÇÃO</span><h2>{selectedRole.name}</h2><p>{selectedRole.description || 'Defina os acessos de quem faz parte desta função.'}</p></div></div>
+            {canEdit && !protectedRole && <Button variant="outline" size="sm" className={styles.editButton} disabled={busy} onClick={() => setEditor(selectedRole)}><Pencil size={13} /> Editar função</Button>}
+          </div>
+          <div className={styles.roleOverview}><span><KeyRound size={14} /><strong>{countPermissions(selectedRole)}</strong> de {permissions.length} acessos permitidos</span>{selectedRole.is_default && <span className={styles.defaultBadge}>Função padrão</span>}<div className={cn(styles.saveStatus, saveState === 'error' && styles.failedSave)} role="status" aria-live="polite">{!canEdit ? <><LockKeyhole size={13} />Somente consulta</> : busy ? <><Loader2 size={13} className="animate-spin" /> Salvando alteração...</> : saveState === 'error' ? <><AlertCircle size={13} /> Alteração não salva. Tente novamente.</> : <><CheckCheck size={14} />{saveState === 'saved' ? 'Alteração salva' : 'Alterações salvas automaticamente'}</>}</div></div>
+          {(!canEdit || protectedRole) && <div className={styles.accessNote}><LockKeyhole size={16} /><p>{!canEdit ? 'Você pode consultar os acessos. Para fazer alterações, solicite a permissão de editar funções.' : 'Esta função tem acesso total e é protegida. Suas permissões não podem ser alteradas.'}</p></div>}
+          <div className={styles.tools}>
+            <div className={styles.viewToggle} role="group" aria-label="Modo de visualizar permissões"><button type="button" aria-pressed={view === 'role'} onClick={() => setView('role')}><LayoutList size={14} /> Por função</button><button type="button" aria-pressed={view === 'compare'} onClick={() => { setView('compare'); setAccess('all'); }}><Table2 size={14} /> Comparar funções</button></div>
+            <div className={styles.permissionSearch}><Search size={16} /><Input aria-label="Buscar permissão" placeholder="Buscar uma permissão..." value={query} onChange={event => setQuery(event.target.value)} />{query && <Button variant="ghost" size="icon" aria-label="Limpar busca de permissões" onClick={() => setQuery('')}><X size={13} /></Button>}</div>
+            {view === 'role' && <Select value={access} onValueChange={value => setAccess(value as PermissionFilter)}><SelectTrigger aria-label="Filtrar permissões por acesso" className={styles.accessFilter}><SelectValue /></SelectTrigger><SelectContent className={shared.surface}><SelectItem value="all">Todos os acessos</SelectItem><SelectItem value="allowed">Permitidos</SelectItem><SelectItem value="blocked">Não permitidos</SelectItem></SelectContent></Select>}
+          </div>
+          <div className={styles.categoryFilters}>
+            <Select value={category} onValueChange={value => { setCategory(value); if (value !== 'all') setOpenGroups([value]); }}><SelectTrigger aria-label="Filtrar por área do workspace" className={styles.areaFilter}><LayoutList size={14} /><SelectValue /></SelectTrigger><SelectContent className={shared.surface}><SelectItem value="all">Todas as áreas</SelectItem>{categories.map(item => <SelectItem key={item} value={item}><span className="flex items-center gap-2"><CategoryIcon category={item} size={13} />{item}</span></SelectItem>)}</SelectContent></Select>
+            <span className={styles.resultsCount}>{groups.reduce((total, [, items]) => total + items.length, 0)} de {permissions.length} permissões</span>
+            {(query || category !== 'all' || access !== 'all') && <Button variant="ghost" size="sm" onClick={clearFilters} className={styles.clearFilters}><X size={12} />Limpar filtros</Button>}
+          </div>
+          {groups.length === 0 ? <div className={styles.emptyState}><span className={shared.emptyIcon}><Search size={25} /></span><h3>{permissions.length ? 'Nenhum acesso encontrado por aqui' : 'As permissões ainda não estão disponíveis'}</h3><p>{permissions.length ? 'Tente outro termo ou ajuste os filtros para encontrar o que procura.' : 'Recarregue a página para buscar as permissões do workspace.'}</p><Button variant="outline" onClick={permissions.length ? clearFilters : () => void fetchData()}>{permissions.length ? 'Limpar filtros' : 'Recarregar'}</Button></div> : view === 'role' ? <Accordion type="multiple" value={query || category !== 'all' || access !== 'all' ? groups.map(([name]) => name) : openGroups} onValueChange={setOpenGroups} className={styles.permissionGroups}>
+            {groups.map(([name, items]) => <AccordionItem value={name} key={name} className={styles.permissionGroup}>
+              <AccordionTrigger className={styles.groupTrigger}><span className={styles.groupIcon}><CategoryIcon category={name} /></span><span className={styles.groupTitle}><strong>{name}</strong><span>{categoryDescriptions[name] || 'Permissões disponíveis nesta área do workspace.'}</span></span><span className={styles.groupCount}>{items.filter(item => hasRolePermission(selectedRole, item.id)).length}<span> / {items.length}</span></span></AccordionTrigger>
+              <AccordionContent className={styles.groupContent}>{items.map(permission => <div key={permission.id} className={styles.permissionRow}><Label htmlFor={`access-${selectedRole.id}-${permission.id}`}>{permission.description}</Label><span className={cn(styles.accessLabel, hasRolePermission(selectedRole, permission.id) && styles.allowedLabel)}>{hasRolePermission(selectedRole, permission.id) ? 'Permitido' : 'Não permitido'}</span>{permissionControl(selectedRole, permission)}</div>)}</AccordionContent>
+            </AccordionItem>)}
+          </Accordion> : <div className={styles.matrixContainer}><table className={styles.matrix}><caption className="sr-only">Comparação das permissões entre as funções do workspace</caption><thead><tr><th scope="col">Permissão</th>{roles.map(role => <th key={role.id} scope="col"><span>{role.name}</span>{isProtectedRole(role) && <LockKeyhole size={12} aria-label="Função protegida" />}</th>)}</tr></thead><tbody>{groups.map(([name, items]) => <React.Fragment key={name}><tr className={styles.matrixCategory}><th scope="rowgroup" colSpan={roles.length + 1}><CategoryIcon category={name} size={14} /> {name}</th></tr>{items.map(permission => <tr key={permission.id}><th scope="row">{permission.description}</th>{roles.map(role => <td key={role.id}>{permissionControl(role, permission, true)}</td>)}</tr>)}</React.Fragment>)}</tbody></table></div>}
+          <div className={styles.bottomNote}><span><ShieldCheck size={14} /> Os acessos são aplicados a quem usa esta função.</span>{canEdit && !protectedRole && !selectedRole.is_default && <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setDeleteError(''); setRoleToDelete(selectedRole); }}><Trash2 size={12} /> Remover função</Button>}</div>
+        </> : <div className={styles.emptyState}><span className={shared.emptyIcon}><Fingerprint size={30} /></span><h2>Um espaço para cada responsabilidade.</h2><p>Crie uma função e defina os acessos que combinam com a sua equipe.</p>{canEdit && <Button onClick={() => setEditor('create')}><Plus size={15} className="mr-2" /> Criar primeira função</Button>}</div>}
+      </main>
+    </div>}
+    <Dialog open={editor !== null} onOpenChange={open => { if (!open) setEditor(null); }}><DialogContent className={cn(shared.surface, styles.roleDialog)}><DialogHeader><span className={shared.sectionIcon}><Fingerprint size={22} /></span><DialogTitle>{editor === 'create' ? 'Uma nova forma de colaborar' : 'Uma função com a sua identidade'}</DialogTitle><DialogDescription>{editor === 'create' ? 'Dê um nome à função. Depois, escolha quais portas ela pode abrir.' : 'Atualize o nome e a descrição sem alterar os acessos configurados.'}</DialogDescription></DialogHeader>{editor && workspaceId && <RoleForm key={editor === 'create' ? 'create' : editor.id} role={editor === 'create' ? null : editor} workspaceId={workspaceId} onSaved={async id => { await fetchData(); if (id) setSelectedRoleId(id); setEditor(null); }} />}</DialogContent></Dialog>
+    <AlertDialog open={roleToDelete !== null} onOpenChange={open => { if (!open && !deleting) setRoleToDelete(null); }}><AlertDialogContent className={shared.surface}><AlertDialogHeader><AlertDialogTitle>Remover a função {roleToDelete?.name}?</AlertDialogTitle><AlertDialogDescription>Esta ação remove a função e os acessos configurados nela. Funções vinculadas a pessoas ou equipes não podem ser removidas.</AlertDialogDescription></AlertDialogHeader>{deleteError && <p className={styles.formError} role="alert"><AlertCircle size={16} />{deleteError}</p>}<AlertDialogFooter><AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel><AlertDialogAction disabled={deleting} onClick={event => { event.preventDefault(); void deleteRole(); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{deleting && <Loader2 size={14} className="mr-2 animate-spin" />}Remover função</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+  </div>;
 }

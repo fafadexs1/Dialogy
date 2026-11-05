@@ -8,6 +8,7 @@
 export type CopilotSuggestionStatus = 'pending' | 'sent' | 'edited' | 'dismissed' | 'superseded';
 
 export type CopilotSuggestionStage =
+  | 'studio_copilot'
   | 'deterministic_routing'
   | 'flow_message'
   | 'tool_memory'
@@ -37,6 +38,12 @@ export type CopilotRecommendedAction = {
 };
 
 export type CopilotSuggestionInsights = {
+  summary?: string;
+  missingInformation?: string[];
+  cautions?: string[];
+  studioReleaseId?: string;
+  studioVersion?: number;
+  contextMessageId?: string;
   intent?: string | null;
   intentConfidence?: number | null;
   workflowId?: string | null;
@@ -69,6 +76,7 @@ export type CopilotSuggestion = {
 };
 
 const STAGE_LABELS: Record<CopilotSuggestionStage, string> = {
+  studio_copilot: 'Copiloto do Studio',
   deterministic_routing: 'Roteamento determinístico',
   flow_message: 'Etapa do fluxo',
   tool_memory: 'Dados já consultados',

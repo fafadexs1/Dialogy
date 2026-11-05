@@ -171,6 +171,50 @@ describe('autopilot response validator', () => {
     expect(result.response).not.toMatch(/ferramenta|certeza/i);
   });
 
+  it('routes an admitted knowledge gap to handoff instead of a refusal repair', () => {
+    // Admitting a gap is the wanted behaviour when the base does not back the
+    // fact. Repairing it away pushes the model back toward inventing a value:
+    // the escalation path must stay reachable.
+    const result = validate({
+      message: 'Quero falar com um atendente humano sobre a garantia.',
+      response: 'Nao tenho certeza sobre o prazo exato de garantia e nao quero te passar um valor errado. Vou encaminhar para a equipe responsavel confirmar com voce.',
+    });
+
+    expect(result.decision).toBe('handoff');
+    expect(result.reasons).not.toContain('customer_facing_tool_refusal_repaired');
+  });
+
+  it('repairs an admitted gap that only promises a future return', () => {
+    // "Vou confirmar e ja te retorno" leaves the customer waiting on nothing:
+    // it is a deferred promise, not one of the allowed exits.
+    const result = validate({
+      message: 'Qual o prazo de garantia do servico?',
+      response: 'Nao tenho certeza sobre o prazo exato de garantia. Vou confirmar essa informacao e ja te retorno com o valor correto.',
+    });
+
+    expect(result.decision).toBe('repair');
+  });
+
+  it('keeps an admitted knowledge gap followed by an objective question', () => {
+    const result = validate({
+      message: 'Voces atendem no meu bairro?',
+      response: 'Nao tenho certeza sobre a cobertura nesse endereco. Qual e o seu CEP?',
+    });
+
+    expect(result.decision).not.toBe('repair');
+    expect(result.response).toContain('CEP');
+  });
+
+  it('repairs an admitted knowledge gap that dead-ends with no next step', () => {
+    const result = validate({
+      message: 'Qual o prazo de garantia do servico?',
+      response: 'Nao tenho certeza.',
+    });
+
+    expect(result.decision).toBe('repair');
+    expect(result.reasons).toContain('customer_facing_tool_refusal_repaired');
+  });
+
   it('preserves a deterministic unavailable-integration response instead of treating it as a lookup promise', () => {
     const response = 'Nao consigo validar com seguranca qual roteador deve ser reiniciado porque a consulta de contrato nao esta habilitada. Vou precisar de verificacao manual.';
     const result = validate({
@@ -693,6 +737,7 @@ describe('autopilot response validator', () => {
     expect(result.decision).toBe('repair');
     expect(result.actions.map((action) => action.type)).toEqual(['close_chat']);
     expect((result.actions[0] as any).payload.sendCloseMessage).toBe(false);
+    expect(result.response).toBe('Vou encerrar o atendimento conforme solicitado.');
   });
 
   it('repairs first-person closure claims without close action', () => {

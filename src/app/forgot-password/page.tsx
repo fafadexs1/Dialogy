@@ -84,8 +84,6 @@ export default function ForgotPasswordPage() {
 
 
 
-            // ... existing code ...
-
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="reset-email" className="text-xs font-semibold text-gray-300 ml-1">{t("E-mail")}</Label>

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Chat, Message } from '@/lib/types';
-import { isMarketingMessage, matchesChatTeamFilter, shouldKeepMarketingOnlyChatVisible } from '@/components/chat/chat-list-visibility';
+import type { Message } from '@/lib/types';
+import { isMarketingMessage, matchesChatTeamFilter } from '@/components/chat/chat-list-visibility';
+import { isChatInInboxQueueScope } from '@/lib/inbox-pagination';
 
 describe('chat list team visibility', () => {
   const teams = [
@@ -32,9 +33,21 @@ describe('chat list team visibility', () => {
       ['team-support']
     )).toBe(false);
   });
+
+  it('does not use a stale tag to leak an explicitly transferred chat', () => {
+    expect(matchesChatTeamFilter(
+      { team_id: 'team-sales', tag: 'Suporte' },
+      teams,
+      ['team-support']
+    )).toBe(false);
+  });
 });
 
 describe('chat list marketing visibility', () => {
+  it('recognizes older campaign messages even without the marketing flag', () => {
+    expect(isMarketingMessage({ metadata: { campaignId: 'campaign-1' } } as Message)).toBe(true);
+    expect(isMarketingMessage({ metadata: {} } as Message)).toBe(false);
+  });
   it('detects marketing messages by metadata flag', () => {
     const message = {
       id: 'msg-1',
@@ -51,44 +64,107 @@ describe('chat list marketing visibility', () => {
 
     expect(isMarketingMessage(message)).toBe(true);
   });
+});
 
-  it('keeps selected chats visible even when only marketing messages are hidden', () => {
+describe('isChatInInboxQueueScope', () => {
+  it('prevents chats in attendance from entering robo or fila', () => {
     const chat = {
-      id: 'chat-1',
-      status: 'gerais',
-      workspace_id: 'ws-1',
-      contact: { id: 'contact-1', workspace_id: 'ws-1', name: 'Cliente' },
-      messages: [],
-      unreadCount: 0,
-    } as Chat;
+      status: 'atendimentos' as const,
+      agentId: 'user-123',
+      team_id: 'team-comercial',
+      tag: 'Comercial',
+    };
 
-    expect(shouldKeepMarketingOnlyChatVisible(chat, 'chat-1')).toBe(true);
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(false);
   });
 
-  it('keeps handed off chats visible even when only marketing messages are hidden', () => {
+  it('prevents closed chats from entering robo or fila', () => {
     const chat = {
-      id: 'chat-2',
-      status: 'atendimentos',
-      workspace_id: 'ws-1',
-      contact: { id: 'contact-1', workspace_id: 'ws-1', name: 'Cliente' },
-      agentId: 'agent-1',
-      messages: [],
-      unreadCount: 0,
-    } as Chat;
+      status: 'encerrados' as const,
+      agentId: 'user-123',
+      tag: 'Inviabilidade técnica',
+    };
 
-    expect(shouldKeepMarketingOnlyChatVisible(chat, null)).toBe(true);
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(false);
   });
 
-  it('still allows hiding untouched queue chats that only contain marketing messages', () => {
-    const chat = {
-      id: 'chat-3',
-      status: 'gerais',
-      workspace_id: 'ws-1',
-      contact: { id: 'contact-1', workspace_id: 'ws-1', name: 'Cliente' },
-      messages: [],
-      unreadCount: 0,
-    } as Chat;
+  it('prevents chats with human agent assigned from entering robo or fila even if status is gerais', () => {
+    expect(
+      isChatInInboxQueueScope(
+        {
+          status: 'gerais',
+          agentId: 'user-123',
+        },
+        'robo'
+      )
+    ).toBe(false);
 
-    expect(shouldKeepMarketingOnlyChatVisible(chat, null)).toBe(false);
+    expect(
+      isChatInInboxQueueScope(
+        {
+          status: 'gerais',
+          agent_id: 'user-123',
+        },
+        'robo'
+      )
+    ).toBe(false);
+
+    expect(
+      isChatInInboxQueueScope(
+        {
+          status: 'gerais',
+          agent: { id: 'user-123' },
+        },
+        'robo'
+      )
+    ).toBe(false);
+  });
+
+  it('routes chats with team_id to fila and NOT robo, even if tag is missing or null', () => {
+    const chat = {
+      status: 'gerais' as const,
+      team_id: 'team-support',
+      tag: null,
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(true);
+  });
+
+  it('routes chats with teamName to fila and NOT robo', () => {
+    const chat = {
+      status: 'gerais' as const,
+      teamName: 'Suporte Técnico',
+      tag: '',
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(true);
+  });
+
+  it('routes chats with tag to fila and NOT robo', () => {
+    const chat = {
+      status: 'gerais' as const,
+      tag: 'Comercial',
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(false);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(true);
+  });
+
+  it('routes unassigned chats without team/tag to robo and NOT fila', () => {
+    const chat = {
+      status: 'gerais' as const,
+      tag: '',
+      team_id: undefined,
+      teamName: undefined,
+      agentId: undefined,
+    };
+
+    expect(isChatInInboxQueueScope(chat, 'robo')).toBe(true);
+    expect(isChatInInboxQueueScope(chat, 'fila')).toBe(false);
   });
 });
+

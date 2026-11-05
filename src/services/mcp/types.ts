@@ -1,4 +1,21 @@
-export type McpServerTransport = 'streamable_http' | 'sse' | 'stdio';
+export type McpServerTransport = 'streamable_http' | 'sse' | 'stdio' | 'direct_http';
+
+export type ToolManualInfo = {
+  name: string;
+  title: string;
+  category: string;
+  summary: string;
+  fileName: string;
+  markdown?: string;
+  markdownLength?: number;
+};
+
+export type ManualCatalogResponse = {
+  version: string;
+  totalTools: number;
+  categories: string[];
+  tools: ToolManualInfo[];
+};
 
 export type McpServerConfig = {
   id: string;
@@ -17,6 +34,8 @@ export type McpServerConfig = {
   healthCheckedAt?: string | null;
   healthLatencyMs?: number | null;
   tools?: McpToolConfig[];
+  manualsCatalog?: ManualCatalogResponse | null;
+  manualsSyncedAt?: string | null;
 };
 
 export type McpToolConfig = {
@@ -34,6 +53,8 @@ export type McpToolConfig = {
     idempotentHint?: boolean;
     openWorldHint?: boolean;
   } | null;
+  manualSummary?: string | null;
+  operationalRules?: string[] | null;
 };
 
 export type McpWorkspaceConfig = {

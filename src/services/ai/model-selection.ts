@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
+import { platformModel } from './platform-config';
 import {
   DEFAULT_AUTOPILOT_MODEL,
-  getAutopilotSelectableModels,
   parseAiModelCatalog,
   SYSTEM_AI_MODEL_CATALOG_KEY,
   type AiModelCatalogEntry,
@@ -26,11 +26,12 @@ export async function getGlobalAutopilotModelCatalog(): Promise<AiModelCatalogEn
 export async function resolveAutopilotModelFromCatalog(
   requestedModel?: string | null
 ): Promise<ResolvedAutopilotModel> {
-  const catalog = await getGlobalAutopilotModelCatalog();
-  const selectable = getAutopilotSelectableModels(catalog);
+  const selected = await platformModel();
+  const catalog: AiModelCatalogEntry[] = [{ ...selected, provider: selected.id.split('/')[0] as AiModelCatalogEntry['provider'] }];
+  const selectable = catalog;
   const normalizedRequested = requestedModel?.trim() || null;
 
-  if (normalizedRequested && selectable.some((entry) => entry.id === normalizedRequested)) {
+  if (normalizedRequested === selected.id) {
     return {
       model: normalizedRequested,
       requestedModel: normalizedRequested,

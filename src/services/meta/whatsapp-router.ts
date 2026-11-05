@@ -106,9 +106,14 @@ export function atomizeMetaWhatsappPayload(
               ? message.id
               : canonicalHash(message);
           const sender = typeof message.from === 'string' ? message.from : null;
-          const matchingContacts = sender
-            ? contacts.filter((item) => (item as JsonRecord).wa_id === sender)
-            : [];
+          const userId = typeof message.from_user_id === 'string' ? message.from_user_id : null;
+          const parentId = typeof message.from_parent_user_id === 'string' ? message.from_parent_user_id : null;
+          const matchingContacts = contacts.filter((item) => {
+            const contact = item as JsonRecord;
+            return userId ? contact.user_id === userId
+              : sender ? contact.wa_id === sender
+              : parentId ? contact.parent_user_id === parentId : false;
+          });
           const atomicValue: JsonRecord = {
             ...sharedValue,
             messages: [message],
@@ -132,6 +137,10 @@ export function atomizeMetaWhatsappPayload(
             typeof status.status === 'string' ? status.status : 'unknown';
           const timestamp =
             typeof status.timestamp === 'string' ? status.timestamp : 'unknown';
+          const userId = typeof status.recipient_user_id === 'string' ? status.recipient_user_id : null;
+          const matchingContacts = userId
+            ? contacts.filter((item) => (item as JsonRecord).user_id === userId)
+            : [];
           atoms.push({
             eventKey: `${appId}:${phoneNumberId ?? 'missing'}:${statusId}:${statusName}:${timestamp}`,
             field,
@@ -140,6 +149,7 @@ export function atomizeMetaWhatsappPayload(
             payload: atomicEnvelope(payload.object, entry, change, {
               ...sharedValue,
               statuses: [status],
+              ...(matchingContacts.length ? { contacts: matchingContacts } : {}),
             }),
           });
         }

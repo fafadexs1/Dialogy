@@ -593,3 +593,29 @@
     --inbox-filter-scale: 0.68;
   }
 }
+
+/* Mobile Chat Viewport & Safe-Area Utilities (Feature: 001-redefinir-modo-mobile) */
+:root {
+  --keyboard-offset: 0px;
+}
+
+.mobile-chat-screen {
+  height: 100dvh;
+  min-height: -webkit-fill-available;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.keyboard-anchored {
+  bottom: var(--keyboard-offset, 0px);
+  transition: bottom 0.15s ease-out;
+}
+

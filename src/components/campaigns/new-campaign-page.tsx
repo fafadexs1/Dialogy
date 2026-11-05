@@ -8,10 +8,11 @@ import { findWhatsappTemplates, getEvolutionApiInstances } from '@/actions/evolu
 import { getTelegramInstances as fetchTelegramInstances } from '@/actions/telegram';
 import { listMetaChannels as fetchMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
-import { parseCampaignContactsCsv } from '@/lib/campaigns/csv-import';
-import { renderCampaignMessage } from '@/lib/campaigns/personalization';
+import { MAX_CAMPAIGN_LIST_ROWS, MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
+import { parseCampaignContactsFile } from '@/lib/campaigns/file-import';
+import { getCampaignTemplateBodyParameterKeys, renderCampaignMessage, renderCampaignTemplatePreview } from '@/lib/campaigns/personalization';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
-import type { CampaignChannel, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
+import type { CampaignChannel, CampaignInteractivePayload, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CalendarClock, Clock3, Gauge, ImageIcon, ListFilter, Music2, ShieldCheck, X } from 'lucide-react';
 
@@ -55,6 +56,10 @@ type CsvImportSummary = {
   imported: number;
   invalidRows: number;
   duplicateRows: number;
+  totalRows: number;
+  expandedRows: number;
+  headerRow: number | null;
+  sheetName?: string;
 };
 
 async function loadCampaignChannels(workspaceId: string) {
@@ -72,9 +77,16 @@ async function loadCampaignChannels(workspaceId: string) {
   };
 }
 
-function templatePreview(template: WhatsappTemplateOption | null) {
+function templatePreview(template: CampaignTemplate | null) {
   const body = template?.components?.find((component: any) => component.type?.toUpperCase() === 'BODY');
-  return (body?.text || (template ? `[Template: ${template.name}]` : '')).replace(/\{\{\d+\}\}/g, PLACEHOLDER);
+  const parameterKeys = getCampaignTemplateBodyParameterKeys(template);
+  return (body?.text || (template ? `[Template: ${template.name}]` : '')).replace(
+    /\{\{\s*([^{}]+?)\s*\}\}/g,
+    (placeholder: string, key: string) => {
+      const parameterIndex = parameterKeys.indexOf(key.trim());
+      return parameterIndex >= 0 ? template?.bodyParameterValues?.[parameterIndex] || placeholder : placeholder;
+    },
+  );
 }
 
 function applyPlaceholder(msg: string) {
@@ -244,7 +256,15 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const maxChars = 1000;
   const [mediaAttachment, setMediaAttachment] = useState<CampaignMediaAttachment | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [interactiveKind, setInteractiveKind] = useState<'none' | 'buttons' | 'list'>('none');
+  const [interactiveTitle, setInteractiveTitle] = useState('');
+  const [interactiveFooter, setInteractiveFooter] = useState('');
+  const [interactiveListButtonText, setInteractiveListButtonText] = useState('Ver opções');
+  const [interactiveOptions, setInteractiveOptions] = useState<Array<{ id: string; label: string }>>([
+    { id: 'opt_1', label: '' },
+  ]);
   const [csvImportSummary, setCsvImportSummary] = useState<CsvImportSummary | null>(null);
+  const [isImportingContacts, setIsImportingContacts] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<CampaignScheduleConfig['mode']>('immediate');
   const [scheduleEndAt, setScheduleEndAt] = useState('');
   const [windowStart, setWindowStart] = useState('09:00');
@@ -261,7 +281,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   // Data states
   const [crmContacts, setCrmContacts] = useState<ContactType[]>([]);
   const [visibleCrmContacts, setVisibleCrmContacts] = useState<ContactType[]>([]);
-  const [csvContacts, setCsvContacts] = useState<ContactType[]>([]);
+  const [csvContacts, setCsvContacts] = useState<(ContactType & { csvData: Record<string, string> })[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [segmentPreviewContacts, setSegmentPreviewContacts] = useState<ContactType[]>([]);
   const [segmentTotal, setSegmentTotal] = useState(0);
@@ -270,6 +290,8 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const [metaChannels, setMetaChannels] = useState<MetaChannel[]>([]);
   const [whatsappTemplates, setWhatsappTemplates] = useState<WhatsappTemplateOption[]>([]);
   const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
+  const [templateParameterValues, setTemplateParameterValues] = useState<string[]>([]);
+  const [templateParameterColumns, setTemplateParameterColumns] = useState<(string | null)[]>([]);
 
   // Loading states
   const [loadingCrm, setLoadingCrm] = useState(true);
@@ -405,7 +427,27 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }, [deliveryChannel, instances, metaChannels, telegramInstances]);
 
   const selectedTemplate = whatsappTemplates.find(template => template.name === selectedTemplateName) || null;
-  const campaignMessage = deliveryChannel === 'whatsapp_cloud' ? templatePreview(selectedTemplate) : message;
+  const templateBodyParameterKeys = useMemo(() => getCampaignTemplateBodyParameterKeys(selectedTemplate), [selectedTemplate]);
+  const templateBodyParameterCount = templateBodyParameterKeys.length;
+  const csvColumns = Object.keys(csvContacts[0]?.csvData || {});
+  const areTemplateParametersComplete = templateBodyParameterCount === 0 || Array.from(
+    { length: templateBodyParameterCount },
+    (_, index) => {
+      const column = templateParameterColumns[index];
+      const fallback = Boolean(templateParameterValues[index]?.trim());
+      if (!column) return fallback;
+      return csvColumns.includes(column)
+        && csvContacts.every(contact => Boolean(contact.csvData[column]?.trim()) || fallback)
+        && (!(selectedCrmIds.size > 0 || selectedSegmentIds.size > 0) || fallback);
+    },
+  ).every(Boolean);
+  const campaignTemplate = useMemo<CampaignTemplate | null>(() => selectedTemplate ? {
+    ...selectedTemplate,
+    bodyParameterValues: templateParameterValues.slice(0, templateBodyParameterCount),
+    bodyParameterNames: templateBodyParameterKeys,
+    bodyParameterColumns: templateParameterColumns.slice(0, templateBodyParameterCount),
+  } : null, [selectedTemplate, templateParameterValues, templateParameterColumns, templateBodyParameterKeys, templateBodyParameterCount]);
+  const campaignMessage = deliveryChannel === 'whatsapp_cloud' ? templatePreview(campaignTemplate) : message;
   const preview = useMemo(() => {
     const channel = CHANNEL_OPTIONS.find(option => option.value === deliveryChannel) ?? CHANNEL_OPTIONS[0];
     const destinationLabel = channelDestinations.find(destination => destination.id === destinationId)?.label || channel.label;
@@ -413,13 +455,25 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     return {
       channel,
       destinationLabel,
-      message: campaignMessage,
+      message: (() => {
+        if (!campaignTemplate) return campaignMessage;
+        try {
+          return renderCampaignTemplatePreview(campaignTemplate, {
+            contactName: csvContacts[0]?.name || PREVIEW_CONTACT_NAME,
+            csvData: csvContacts[0]?.csvData,
+          });
+        } catch {
+          return campaignMessage;
+        }
+      })(),
     };
-  }, [campaignMessage, channelDestinations, deliveryChannel, destinationId]);
+  }, [campaignMessage, campaignTemplate, csvContacts, channelDestinations, deliveryChannel, destinationId]);
 
   useEffect(() => {
     setDestinationId(null);
     setSelectedTemplateName(null);
+    setTemplateParameterValues([]);
+    setTemplateParameterColumns([]);
     setWhatsappTemplates([]);
     if (deliveryChannel !== 'whatsapp_baileys') {
       setMediaAttachment(null);
@@ -435,6 +489,8 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     if (deliveryChannel !== 'whatsapp_cloud' || !destinationId) {
       setWhatsappTemplates([]);
       setSelectedTemplateName(null);
+      setTemplateParameterValues([]);
+      setTemplateParameterColumns([]);
       return;
     }
 
@@ -469,8 +525,18 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     && consentConfirmed
     && customScheduleIsValid
     && !isUploadingMedia
+    && !isImportingContacts
     && (deliveryChannel !== 'whatsapp_cloud' || selectedTemplate)
+    && (deliveryChannel !== 'whatsapp_cloud' || areTemplateParametersComplete)
   );
+
+  function handleTemplateSelection(templateName: string) {
+    const template = whatsappTemplates.find(option => option.name === templateName) || null;
+    const parameterKeys = getCampaignTemplateBodyParameterKeys(template);
+    setSelectedTemplateName(templateName);
+    setTemplateParameterValues(Array.from({ length: parameterKeys.length }, () => PLACEHOLDER));
+    setTemplateParameterColumns([]);
+  }
 
   function toggleSelect(id: string) {
     setSelectedCrmIds((prev) => {
@@ -504,21 +570,16 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }
 
   async function importCsvFile(file: File) {
-    if (!user?.activeWorkspaceId) return;
-    const lowerName = file.name.toLowerCase();
-    if (!lowerName.endsWith('.csv') && file.type && !file.type.includes('csv')) {
-      toast({ title: 'Arquivo invalido', description: 'Selecione um arquivo CSV.', variant: 'destructive' });
-      return;
-    }
+    if (!user?.activeWorkspaceId || isImportingContacts) return;
 
+    setIsImportingContacts(true);
     try {
-      const text = await file.text();
-      const parsed = parseCampaignContactsCsv(text);
+      const parsed = await parseCampaignContactsFile(file);
 
       if (parsed.contacts.length === 0) {
         toast({
           title: 'Nenhum contato importado',
-          description: parsed.errors[0] || 'Confira se o CSV possui uma coluna de telefone ou WhatsApp.',
+          description: parsed.errors[0] || 'Confira se a planilha possui uma coluna de telefone ou WhatsApp.',
           variant: 'destructive',
         });
         return;
@@ -530,22 +591,29 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
         name: contact.name,
         phone: contact.phone,
         phone_number_jid: contact.phone_number_jid,
-      } as ContactType)));
+        csvData: contact.csvData,
+      } as ContactType & { csvData: Record<string, string> })));
       setCsvImportSummary({
         fileName: file.name,
         imported: parsed.contacts.length,
         invalidRows: parsed.invalidRows,
         duplicateRows: parsed.duplicateRows,
+        totalRows: parsed.totalRows,
+        expandedRows: parsed.expandedRows,
+        headerRow: parsed.headerRow,
+        sheetName: parsed.sheetName,
       });
       setTab('csv');
 
       toast({
-        title: 'CSV importado',
+        title: 'Planilha normalizada',
         description: `${parsed.contacts.length} contato(s) pronto(s) para o disparo.`,
       });
     } catch (error) {
-      console.error('[NEW_CAMPAIGN] Falha ao importar CSV', error);
-      toast({ title: 'Erro ao importar CSV', description: 'Nao foi possivel ler este arquivo.', variant: 'destructive' });
+      console.error('[NEW_CAMPAIGN] Falha ao importar planilha', error);
+      toast({ title: 'Erro ao importar planilha', description: error instanceof Error ? error.message : 'Não foi possível ler este arquivo.', variant: 'destructive' });
+    } finally {
+      setIsImportingContacts(false);
     }
   }
 
@@ -611,6 +679,78 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     }
   }
 
+  // Botoes/lista so existem no WhatsApp conectado. Se o canal mudar, a config
+  // fica ignorada em vez de bloquear o envio com um bloco que nem esta na tela.
+  const interactiveEnabled = deliveryChannel === 'whatsapp_baileys' && interactiveKind !== 'none';
+  const filledInteractiveOptions = interactiveOptions.filter(
+    (option) => option.label.trim().length > 0 && option.id.trim().length > 0
+  );
+  const interactiveOptionLimit = interactiveKind === 'buttons' ? MAX_CAMPAIGN_REPLY_BUTTONS : MAX_CAMPAIGN_LIST_ROWS;
+  const interactiveError = (() => {
+    if (!interactiveEnabled) return null;
+    if (!interactiveTitle.trim()) return 'Informe o titulo da mensagem interativa.';
+    if (interactiveKind === 'list' && !interactiveListButtonText.trim()) {
+      return 'Informe o texto do botao da lista.';
+    }
+    if (filledInteractiveOptions.length === 0) {
+      return 'Preencha ao menos uma opcao com rotulo e id.';
+    }
+    if (filledInteractiveOptions.length > interactiveOptionLimit) {
+      return `Voce tem ${filledInteractiveOptions.length} opcoes preenchidas e o limite e ${interactiveOptionLimit}. Remova as excedentes.`;
+    }
+    if (mediaAttachment) {
+      return 'Remova o anexo de midia para enviar botoes ou lista.';
+    }
+    return null;
+  })();
+
+  function buildInteractivePayload(): CampaignInteractivePayload | null {
+    if (!interactiveEnabled || filledInteractiveOptions.length === 0) return null;
+
+    if (interactiveKind === 'buttons') {
+      return {
+        kind: 'buttons',
+        title: interactiveTitle.trim(),
+        footer: interactiveFooter.trim() || undefined,
+        buttons: filledInteractiveOptions.map((option) => ({
+          type: 'reply' as const,
+          displayText: option.label.trim(),
+          id: option.id.trim(),
+        })),
+      };
+    }
+
+    return {
+      kind: 'list',
+      title: interactiveTitle.trim(),
+      footer: interactiveFooter.trim() || undefined,
+      buttonText: interactiveListButtonText.trim(),
+      sections: [
+        {
+          title: 'Opções',
+          rows: filledInteractiveOptions.map((option) => ({
+            title: option.label.trim(),
+            rowId: option.id.trim(),
+          })),
+        },
+      ],
+    };
+  }
+
+  function updateInteractiveOption(index: number, changes: Partial<{ id: string; label: string }>) {
+    setInteractiveOptions((previous) =>
+      previous.map((option, optionIndex) => (optionIndex === index ? { ...option, ...changes } : option))
+    );
+  }
+
+  function addInteractiveOption() {
+    setInteractiveOptions((previous) => [...previous, { id: `opt_${previous.length + 1}`, label: '' }]);
+  }
+
+  function removeInteractiveOption(index: number) {
+    setInteractiveOptions((previous) => previous.filter((_, optionIndex) => optionIndex !== index));
+  }
+
   async function handleSendCampaign() {
     if (!user?.activeWorkspaceId || !destinationId || !campaignMessage || selectedCount === 0) {
       toast({ title: 'Dados Incompletos', description: 'Selecione o canal, a conta de envio e pelo menos um contato.', variant: 'destructive' });
@@ -620,8 +760,16 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       toast({ title: 'Consentimento necessario', description: 'Confirme que os destinatarios autorizaram o recebimento da campanha.', variant: 'destructive' });
       return;
     }
+    if (deliveryChannel === 'whatsapp_cloud' && !areTemplateParametersComplete) {
+      toast({ title: 'Campos do template incompletos', description: 'Revise as colunas selecionadas e informe um valor alternativo quando houver células vazias ou contatos fora da planilha.', variant: 'destructive' });
+      return;
+    }
     if (!customScheduleIsValid) {
       toast({ title: 'Agendamento incompleto', description: 'Revise a data limite, os dias, a janela e os intervalos.', variant: 'destructive' });
+      return;
+    }
+    if (interactiveError) {
+      toast({ title: 'Mensagem interativa incompleta', description: interactiveError, variant: 'destructive' });
       return;
     }
     setIsSubmitting(true);
@@ -653,8 +801,8 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       channel: deliveryChannel,
       instanceName: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? undefined : destinationId,
       metaChannelId: deliveryChannel === 'messenger' || deliveryChannel === 'instagram' ? destinationId : undefined,
-      template: selectedTemplate,
-    }, campaignMessage, allContactsToSend, [...selectedSegmentIds], scheduleConfig, mediaAttachment);
+      template: campaignTemplate,
+    }, campaignMessage, allContactsToSend, [...selectedSegmentIds], scheduleConfig, mediaAttachment, buildInteractivePayload());
 
     if (result.error) {
       toast({ title: 'Erro ao criar campanha', description: result.error, variant: 'destructive' });
@@ -805,6 +953,115 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                     )}
                   </div>
                 )}
+                {deliveryChannel === 'whatsapp_baileys' && (
+                  <div className="space-y-3 mt-6 rounded-xl border bg-muted/20 p-4">
+                    <div>
+                      <p className="text-sm font-medium leading-none">Resposta rapida (opcional)</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Envie a campanha com botoes ou com um menu de lista. A mensagem acima vira o corpo do card.
+                      </p>
+                    </div>
+
+                    <Select
+                      value={interactiveKind}
+                      onValueChange={(value) => setInteractiveKind(value as 'none' | 'buttons' | 'list')}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Somente texto</SelectItem>
+                        <SelectItem value="buttons">Botoes de resposta (max. {MAX_CAMPAIGN_REPLY_BUTTONS})</SelectItem>
+                        <SelectItem value="list">Lista de opcoes</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {interactiveKind !== 'none' && (
+                      <div className="space-y-3">
+                        {interactiveError && (
+                          <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                            {interactiveError}
+                          </p>
+                        )}
+
+                        <div className="space-y-2">
+                          <label htmlFor="interactive-title" className="text-sm font-medium leading-none">Titulo</label>
+                          <Input
+                            id="interactive-title"
+                            value={interactiveTitle}
+                            onChange={(e) => setInteractiveTitle(e.target.value)}
+                            placeholder="Ex: Resposta Rapida"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label htmlFor="interactive-footer" className="text-sm font-medium leading-none">Rodape (opcional)</label>
+                          <Input
+                            id="interactive-footer"
+                            value={interactiveFooter}
+                            onChange={(e) => setInteractiveFooter(e.target.value)}
+                            placeholder="Ex: Escolha uma opcao para continuar"
+                          />
+                        </div>
+
+                        {interactiveKind === 'list' && (
+                          <div className="space-y-2">
+                            <label htmlFor="interactive-buttontext" className="text-sm font-medium leading-none">Texto do botao da lista</label>
+                            <Input
+                              id="interactive-buttontext"
+                              value={interactiveListButtonText}
+                              onChange={(e) => setInteractiveListButtonText(e.target.value)}
+                              placeholder="Ver opcoes"
+                            />
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium leading-none">Opcoes</p>
+                          {interactiveOptions.map((option, index) => (
+                            <div key={index} className="flex items-center gap-2">
+                              <Input
+                                value={option.label}
+                                onChange={(e) => updateInteractiveOption(index, { label: e.target.value })}
+                                placeholder={`Opcao ${index + 1}`}
+                                className="flex-1"
+                              />
+                              <Input
+                                value={option.id}
+                                onChange={(e) => updateInteractiveOption(index, { id: e.target.value })}
+                                placeholder="id"
+                                className="w-32 font-mono text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeInteractiveOption(index)}
+                                disabled={interactiveOptions.length <= 1}
+                                className="rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-40"
+                                aria-label="Remover opcao"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={addInteractiveOption}
+                              disabled={interactiveOptions.length >= interactiveOptionLimit}
+                            >
+                              Adicionar opcao
+                            </Button>
+                            <span className="text-xs text-muted-foreground">
+                              {filledInteractiveOptions.length}/{interactiveOptionLimit}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            O <code className="rounded bg-muted px-1">id</code> e o valor que volta no webhook quando o contato responde.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-2 mt-6">
                   <label htmlFor="instance" className="text-sm font-medium leading-none">Conta de envio</label>
                   <Select onValueChange={setDestinationId} value={destinationId || undefined}>
@@ -822,7 +1079,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                 {deliveryChannel === 'whatsapp_cloud' && destinationId && (
                   <div className="space-y-2 mt-6">
                     <label htmlFor="template" className="text-sm font-medium leading-none">Template aprovado da Meta</label>
-                    <Select onValueChange={setSelectedTemplateName} value={selectedTemplateName || undefined}>
+                    <Select onValueChange={handleTemplateSelection} value={selectedTemplateName || undefined}>
                       <SelectTrigger id="template">
                         <SelectValue placeholder="Selecione o template para o disparo" />
                       </SelectTrigger>
@@ -837,6 +1094,65 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">No WhatsApp Cloud, campanhas usam o template aprovado selecionado acima.</p>
+                    {selectedTemplate && templateBodyParameterCount > 0 && (
+                      <div className="mt-4 space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/[0.06]">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Campos editáveis do template</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Use um valor fixo ou uma coluna da planilha para cada variável. Cada destinatário recebe o valor da sua linha.</p>
+                          {csvContacts.length === 0 && <p className="mt-1 text-xs text-muted-foreground">Importe um CSV ou Excel na seção Público para disponibilizar suas colunas.</p>}
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {Array.from({ length: templateBodyParameterCount }, (_, index) => (
+                            <div key={index} className="space-y-1.5">
+                              <label htmlFor={`template-parameter-${index}`} className="text-xs font-medium text-foreground">
+                                Campo {index + 1} <span className="font-normal text-muted-foreground">{`{{${templateBodyParameterKeys[index]}}}`}</span>
+                              </label>
+                              <Select
+                                value={templateParameterColumns[index] ? `column:${templateParameterColumns[index]}` : 'fixed'}
+                                onValueChange={(value) => {
+                                  setTemplateParameterColumns(current => {
+                                    const next = [...current];
+                                    next[index] = value === 'fixed' ? null : value.slice('column:'.length);
+                                    return next;
+                                  });
+                                  setTemplateParameterValues(current => {
+                                    const next = [...current];
+                                    next[index] = '';
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <SelectTrigger aria-label={`Origem do campo ${index + 1}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="fixed">Valor fixo ou personalização</SelectItem>
+                                  {csvColumns.map(column => <SelectItem key={column} value={`column:${column}`}>Coluna: {column}</SelectItem>)}
+                                  {templateParameterColumns[index] && !csvColumns.includes(templateParameterColumns[index]!) && (
+                                    <SelectItem value={`column:${templateParameterColumns[index]}`}>Coluna indisponível: {templateParameterColumns[index]}</SelectItem>
+                                  )}
+                                </SelectContent>
+                              </Select>
+                              {templateParameterColumns[index] && <p className="text-xs text-muted-foreground">Exemplo da primeira linha: {csvContacts[0]?.csvData[templateParameterColumns[index]!] || '(vazio)'}</p>}
+                              {templateParameterColumns[index] && <label htmlFor={`template-parameter-${index}`} className="block text-xs text-muted-foreground">Valor alternativo para células vazias ou contatos fora da planilha</label>}
+                              <Input
+                                id={`template-parameter-${index}`}
+                                value={templateParameterValues[index] || ''}
+                                onChange={(event) => setTemplateParameterValues(current => {
+                                  const next = [...current];
+                                  next[index] = event.target.value;
+                                  return next;
+                                })}
+                                placeholder={templateParameterColumns[index] ? 'Valor alternativo (opcional)' : 'Digite o conteúdo deste campo'}
+                                aria-invalid={!templateParameterColumns[index] && !templateParameterValues[index]?.trim()}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Personalização disponível: <code>{'{{nome}}'}</code>, <code>{'{{primeiro_nome}}'}</code> e <code>{'{{Saudação}}'}</code>.
+                        </p>
+                        {!areTemplateParametersComplete && <p role="alert" className="text-xs text-destructive">Preencha os valores fixos, revise as colunas e informe um valor alternativo para células vazias ou contatos fora da planilha.</p>}
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -1036,36 +1352,41 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                           dragActive ? "border-primary bg-primary/5" : "border-border"
                         )}
                         role="region"
-                        aria-label="Área para soltar arquivo CSV"
+                        aria-label="Área para soltar planilha"
+                        aria-busy={isImportingContacts}
                       >
-                        <Icon.Upload className="h-6 w-6" />
-                        <p className="text-sm">Arraste e solte seu arquivo CSV aqui</p>
-                        <p className="text-xs text-muted-foreground">Ou clique para selecionar</p>
+                        {isImportingContacts ? <Icon.Loader2 className="h-6 w-6 animate-spin" /> : <Icon.Upload className="h-6 w-6" />}
+                        <p className="text-sm">{isImportingContacts ? 'Lendo e normalizando a planilha...' : 'Arraste e solte seu CSV ou Excel aqui'}</p>
+                        <p className="text-xs text-muted-foreground">CSV ou XLSX, incluindo exportações do SGP. Até 10 MB.</p>
                         <input
                           type="file"
-                          accept=".csv,text/csv"
-                          aria-label="Selecionar arquivo CSV"
+                          accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                          aria-label="Selecionar planilha CSV ou Excel"
+                          disabled={isImportingContacts}
                           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                           onChange={handleCsvInputChange}
                         />
                       </div>
-                      <p className="mt-2 text-xs text-muted-foreground">Após importar, detectaremos as colunas <code>nome</code> e <code>telefone</code>.</p>
+                      <p className="mt-2 text-xs text-muted-foreground">Detectamos o cabeçalho, separamos os telefones de cada célula e adicionamos o DDI 55 aos números brasileiros. As demais colunas ficam disponíveis para o template.</p>
                       {csvImportSummary && (
                         <div className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
                           <p className="font-medium text-emerald-700">
                             {csvImportSummary.imported} contato(s) importado(s) de {csvImportSummary.fileName}
                           </p>
+                          <p className="mt-1 text-muted-foreground">Colunas disponíveis para o template: {csvColumns.join(', ')}.</p>
+                          <p className="mt-1 text-muted-foreground">{csvImportSummary.totalRows} linha(s) de dados{csvImportSummary.sheetName ? ` na aba ${csvImportSummary.sheetName}` : ''}. {csvImportSummary.expandedRows > 0 ? `${csvImportSummary.expandedRows} linha(s) com vários telefones foram separadas em destinatários individuais.` : ''}</p>
+                          {csvImportSummary.headerRow !== null && csvImportSummary.headerRow > 1 && <p className="mt-1 text-muted-foreground">Cabeçalho identificado na linha {csvImportSummary.headerRow}; o resumo inicial foi ignorado.</p>}
                           {(csvImportSummary.invalidRows > 0 || csvImportSummary.duplicateRows > 0) && (
                             <p className="mt-1 text-muted-foreground">
                               {csvImportSummary.invalidRows > 0 ? `${csvImportSummary.invalidRows} linha(s) sem telefone valido. ` : ''}
-                              {csvImportSummary.duplicateRows > 0 ? `${csvImportSummary.duplicateRows} duplicata(s) ignorada(s).` : ''}
+                              {csvImportSummary.duplicateRows > 0 ? `${csvImportSummary.duplicateRows} telefone(s) repetido(s) ignorado(s); mantidos os dados da primeira ocorrência.` : ''}
                             </p>
                           )}
                         </div>
                       )}
                       {csvContacts.length > 0 && (
                         <div className="mt-3 overflow-hidden rounded-md border">
-                          <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">Prévia do CSV</div>
+                          <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">Prévia da planilha normalizada</div>
                           <ul className="max-h-44 divide-y overflow-y-auto">
                             {csvContacts.slice(0, 20).map(contact => (
                               <li key={contact.id} className="flex items-center gap-3 p-2">
@@ -1332,6 +1653,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
               <CardHeader>
                 <h3 className="text-xl font-semibold">Pré-visualização</h3>
                 <p className="text-sm text-muted-foreground">Veja o conteúdo que será enviado no canal selecionado.</p>
+                {deliveryChannel === 'whatsapp_cloud' && csvContacts.length > 0 && <p className="text-xs text-muted-foreground">Exemplo com {csvContacts[0].name}, da primeira linha importada.</p>}
               </CardHeader>
               <CardContent>
                 <div className="mx-auto w-full max-w-sm rounded-2xl border bg-background p-4">
@@ -1356,9 +1678,47 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                       </div>
                     )}
                     <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-emerald-600 text-white px-3 py-2 text-sm shadow">
-                      {preview.message ? applyPlaceholder(preview.message) : "Sua mensagem aparecerá aqui..."}
+                      {interactiveEnabled && interactiveTitle.trim() && (
+                        <p className="font-semibold">{applyPlaceholder(interactiveTitle)}</p>
+                      )}
+                      <p className={cx(interactiveEnabled && interactiveTitle.trim() ? 'mt-1' : undefined)}>
+                        {preview.message ? (deliveryChannel === 'whatsapp_cloud' ? preview.message : applyPlaceholder(preview.message)) : "Sua mensagem aparecerá aqui..."}
+                      </p>
+                      {interactiveEnabled && interactiveFooter.trim() && (
+                        <p className="mt-1.5 text-[10px] text-white/75">{applyPlaceholder(interactiveFooter)}</p>
+                      )}
                     </div>
-                    <p className="text-[10px] text-muted-foreground">Previa com {PREVIEW_CONTACT_NAME}, primeiro nome e saudacao atual.</p>
+
+                    {interactiveEnabled && interactiveKind === 'buttons' && filledInteractiveOptions.length > 0 && (
+                      <div className="max-w-[85%] space-y-1">
+                        {filledInteractiveOptions.map((option, index) => (
+                          <div
+                            key={`${option.id}:${index}`}
+                            className="rounded-xl border bg-background px-3 py-2 text-center text-sm font-medium text-emerald-700 shadow-sm"
+                          >
+                            {option.label.trim()}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {interactiveEnabled && interactiveKind === 'list' && filledInteractiveOptions.length > 0 && (
+                      <div className="max-w-[85%] space-y-1">
+                        <div className="flex items-center justify-center gap-2 rounded-xl border bg-background px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm">
+                          <ListFilter className="h-4 w-4" />
+                          {interactiveListButtonText.trim() || 'Ver opções'}
+                        </div>
+                        <div className="rounded-xl border bg-muted/40 px-3 py-2">
+                          {filledInteractiveOptions.map((option, index) => (
+                            <p key={`${option.id}:${index}`} className="truncate text-xs text-muted-foreground">
+                              • {option.label.trim()}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-muted-foreground">{deliveryChannel === 'whatsapp_cloud' && csvContacts.length > 0 ? 'Valores preenchidos com a primeira linha da planilha.' : `Prévia com ${PREVIEW_CONTACT_NAME}, primeiro nome e saudação atual.`}</p>
                   </div>
                 </div>
               </CardContent>

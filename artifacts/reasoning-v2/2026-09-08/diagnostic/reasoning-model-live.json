@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-08T18:20:38.503Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "056a4d09-bbed-4615-85e2-754c7e27d6e4",
+  "scope": "real model; synthetic conversation and integration responses; no publication or customer effects",
+  "traces": [],
+  "decisions": [
+    {
+      "observations": [],
+      "error": "deepseek returned invalid JSON for dialogy_reasoning_decision.",
+      "ms": 47025
+    }
+  ],
+  "usage": [
+    {
+      "configId": "0a952e14-2fdc-47eb-99d6-733a2d4868a5",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-v4-flash",
+      "inputTokens": 1802,
+      "outputTokens": 6207,
+      "totalTokens": 8009,
+      "ruleName": "decision"
+    }
+  ]
+}

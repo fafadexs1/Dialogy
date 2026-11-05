@@ -1,6 +1,7 @@
 'use server';
 
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
+import { preserveWhatsappRecipient } from '@/lib/whatsapp/bsuid';
 import type { EvolutionApiConfig } from '@/lib/types';
 
 type ListRowPayload = {
@@ -33,7 +34,7 @@ type SendListPayload = {
 };
 
 function normalizeRecipientNumber(value: string): string {
-    const normalized = value.replace(/@.*$/, '').replace(/\D/g, '');
+    const normalized = preserveWhatsappRecipient(value);
     return normalized || value;
 }
 

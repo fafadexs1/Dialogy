@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-09-15T04:44:59.514Z",
+  "liveTools": [
+    "list_routers",
+    "get_router_details",
+    "get_wifi_diagnostics",
+    "configure_wifi",
+    "list_connected_clients",
+    "scan_wifi_spectrum",
+    "reboot_router",
+    "get_operation_status",
+    "get_tool_manual"
+  ],
+  "manualSuccess": true,
+  "routerCommandsSent": 0
+}

@@ -26,7 +26,8 @@ import {
     XCircle,
     Loader2,
     ChevronDown,
-    ListTree
+    ListTree,
+    ScanEye
 } from 'lucide-react';
 import { type Message } from '@/lib/types';
 import {
@@ -53,6 +54,7 @@ import { MediaViewer } from './media-viewer';
 import { useToast } from '@/hooks/use-toast';
 import { resolveClientMediaUrl } from '@/lib/storage-url';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { CatalogPreview } from './catalog-preview';
 
 function formatDuration(seconds: number): string {
     if (!seconds) return '0:00';
@@ -61,7 +63,9 @@ function formatDuration(seconds: number): string {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
-type InteractiveListPayload = NonNullable<NonNullable<Message['metadata']>['interactivePayload']>;
+type InteractivePayload = NonNullable<NonNullable<Message['metadata']>['interactivePayload']>;
+type InteractiveListPayload = Extract<InteractivePayload, { kind: 'list' }>;
+type InteractiveButtonsPayload = Extract<InteractivePayload, { kind: 'buttons' }>;
 
 function InteractiveListMessage({ payload, isFromMe }: { payload: InteractiveListPayload; isFromMe: boolean }) {
     const [open, setOpen] = React.useState(false);
@@ -122,6 +126,35 @@ function InteractiveListMessage({ payload, isFromMe }: { payload: InteractiveLis
                 </CollapsibleContent>
             </Collapsible>
             {payload.footerText?.trim() && <p className="text-[10px] opacity-65">{payload.footerText}</p>}
+        </div>
+    );
+}
+
+function InteractiveButtonsMessage({ payload, isFromMe }: { payload: InteractiveButtonsPayload; isFromMe: boolean }) {
+    return (
+        <div className="min-w-[220px] max-w-full space-y-2">
+            {payload.title?.trim() && <p className="text-sm font-semibold leading-snug">{payload.title}</p>}
+            {payload.description?.trim() && (
+                <p className={cn('whitespace-pre-wrap text-xs leading-relaxed', isFromMe ? 'text-white/85' : 'text-slate-600 dark:text-zinc-300')}>
+                    {payload.description}
+                </p>
+            )}
+            <div className="space-y-1.5">
+                {payload.buttons.map((button, index) => (
+                    <div
+                        key={`${button.id || button.displayText || button.type}:${index}`}
+                        className={cn(
+                            'flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-center text-xs font-semibold',
+                            isFromMe
+                                ? 'border-white/25 bg-white/10'
+                                : 'border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/5'
+                        )}
+                    >
+                        <span className="truncate">{button.displayText || button.name || button.id}</span>
+                    </div>
+                ))}
+            </div>
+            {payload.footer?.trim() && <p className="text-[10px] opacity-65">{payload.footer}</p>}
         </div>
     );
 }
@@ -505,38 +538,65 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
 
     const renderMedia = () => {
         if (effectiveMimeType.startsWith('image/')) {
+            const isFromMe = Boolean(message.from_me);
+            const shellClasses = isFromMe
+                ? 'border-blue-500/25 bg-blue-600 text-white shadow-blue-950/15'
+                : 'border-slate-200/90 bg-slate-50/90 text-slate-900 shadow-slate-900/5 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-100';
+            const secondaryTextClasses = isFromMe
+                ? 'text-white/60'
+                : 'text-slate-500 dark:text-zinc-500';
+            const dividerClasses = isFromMe ? 'border-white/10' : 'border-slate-200/80 dark:border-white/10';
+
             return (
-                <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName} chatId={message.chat_id}>
-                    <div
-                        className="group relative w-[min(78vw,320px)] max-w-full cursor-pointer overflow-hidden rounded-xl border border-black/10 bg-black/10 shadow-sm dark:border-white/10"
-                        onMouseDown={startPress}
-                        onMouseUp={cancelPress}
-                        onMouseLeave={cancelPress}
-                        onTouchStart={startPress}
-                        onTouchEnd={cancelPress}
-                        onClick={(e) => {
-                            if (isLongPressRef.current) {
-                                e.preventDefault();
-                                e.stopPropagation();
-                            }
-                        }}
-                    >
-                        <SafeMediaImage
-                            src={urlToUse}
-                            alt={message.content || fileName || 'Imagem enviada'}
-                            width={320}
-                            height={320}
-                            className="block max-h-[420px] w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
-                        />
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/65 via-black/15 to-transparent px-3 pb-2 pt-10 text-white">
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-white/90">
-                                <ImageIcon className="h-3.5 w-3.5" />
-                                Imagem
-                            </span>
-                            <span className="text-[10px] text-white/70">Toque para ampliar</span>
+                <div className={cn(
+                    'w-[min(78vw,320px)] max-w-full overflow-hidden rounded-2xl border shadow-sm',
+                    shellClasses
+                )}>
+                    <MediaViewer src={urlToUse} type="image" alt={message.content || fileName || 'Imagem enviada'} fileName={fileName} chatId={message.chat_id}>
+                        <div
+                            className="group relative cursor-pointer overflow-hidden"
+                            onMouseDown={startPress}
+                            onMouseUp={cancelPress}
+                            onMouseLeave={cancelPress}
+                            onTouchStart={startPress}
+                            onTouchEnd={cancelPress}
+                            onClick={(e) => {
+                                if (isLongPressRef.current) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                }
+                            }}
+                        >
+                            <SafeMediaImage
+                                src={urlToUse}
+                                alt={message.content || fileName || 'Imagem enviada'}
+                                width={320}
+                                height={320}
+                                className="block max-h-[420px] w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
+                            />
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/65 via-black/15 to-transparent px-3 pb-2 pt-10 text-white">
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-white/90">
+                                    <ImageIcon className="h-3.5 w-3.5" />
+                                    Imagem
+                                </span>
+                                <span className="text-[10px] text-white/70">Toque para ampliar</span>
+                            </div>
                         </div>
-                    </div>
-                </MediaViewer>
+                    </MediaViewer>
+                    {message.transcription && (
+                        <div className={cn('border-t px-3 py-2.5', dividerClasses)}>
+                            <div className="space-y-1.5">
+                                <div className={cn('flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em]', secondaryTextClasses)}>
+                                    <ScanEye className="h-3 w-3" />
+                                    Descrição da Imagem
+                                </div>
+                                <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-current opacity-90 [overflow-wrap:anywhere]">
+                                    {message.transcription}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
             );
         }
 
@@ -581,20 +641,47 @@ function MediaMessage({ message, workspaceId }: { message: Message, workspaceId:
             />;
         }
 
+        const isFromMe = Boolean(message.from_me);
+        const shellClasses = isFromMe
+            ? 'border-blue-500/25 bg-blue-600 text-white shadow-blue-950/15'
+            : 'border-slate-200/90 bg-slate-50/90 text-slate-900 shadow-slate-900/5 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-100';
+        const secondaryTextClasses = isFromMe
+            ? 'text-white/60'
+            : 'text-slate-500 dark:text-zinc-500';
+        const dividerClasses = isFromMe ? 'border-white/10' : 'border-slate-200/80 dark:border-white/10';
+
         return (
-            <a
-                href={mediaAssetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex w-[300px] max-w-full min-w-0 items-center gap-3 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted/80 dark:bg-white/10 dark:hover:bg-white/20"
-            >
-                <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />
-                <div className='min-w-0 flex-1'>
-                    <p className="font-medium truncate opacity-90">{fileName || 'Documento'}</p>
-                    <p className="text-xs opacity-70">Clique para abrir ou baixar</p>
-                </div>
-                <Download className="h-5 w-5 opacity-70 ml-auto flex-shrink-0" />
-            </a>
+            <div className={cn(
+                'w-[320px] max-w-full min-w-0 overflow-hidden rounded-2xl border shadow-sm',
+                shellClasses
+            )}>
+                <a
+                    href={mediaAssetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-3 transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                    <FileIcon className="h-8 w-8 opacity-70 flex-shrink-0" />
+                    <div className='min-w-0 flex-1'>
+                        <p className="font-medium truncate opacity-90">{fileName || 'Documento'}</p>
+                        <p className="text-xs opacity-70">Clique para abrir ou baixar</p>
+                    </div>
+                    <Download className="h-5 w-5 opacity-70 ml-auto flex-shrink-0" />
+                </a>
+                {message.transcription && (
+                    <div className={cn('border-t px-3 py-2.5', dividerClasses)}>
+                        <div className="space-y-1.5">
+                            <div className={cn('flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em]', secondaryTextClasses)}>
+                                <ScanEye className="h-3 w-3" />
+                                Resumo do Documento
+                            </div>
+                            <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-current opacity-90 [overflow-wrap:anywhere]">
+                                {message.transcription}
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
         );
     };
 
@@ -735,10 +822,17 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
             messageMimeType.startsWith('image/') ||
             messageMimeType.startsWith('video/')
         );
+    const isAudioMessage =
+        !isDeleted &&
+        !isInternalNote &&
+        !isAiAnalysis &&
+        !isToolExecution &&
+        (message.type === 'audio' || messageMimeType.startsWith('audio/'));
     const failureDetails = normalizeFailureDetails(message);
     const replyPreview = resolveReplyPreview(message, quotedMessage);
     const statusTitle = isFailed
         ? `Falha ao enviar: ${failureDetails.summary}`
+        : status === 'UNKNOWN' ? 'Envio não confirmado. Confira o WhatsApp antes de reenviar.'
         : (message.api_message_status || 'Sem status');
     const failedCapturedAtLabel = (() => {
         if (!failureDetails.capturedAt) return undefined;
@@ -769,12 +863,20 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
 
     const renderMessageContent = (message: Message, isFromMe = false) => {
         const orderDetails = getTemplateOrderDetails(message);
-        const interactiveList = message.metadata?.interactiveType === 'list'
+        const interactivePayload = message.metadata?.interactiveType
             ? message.metadata.interactivePayload
             : undefined;
 
-        if (interactiveList?.kind === 'list' && Array.isArray(interactiveList.sections)) {
-            return <InteractiveListMessage payload={interactiveList} isFromMe={isFromMe} />;
+        if (interactivePayload?.kind === 'carousel' && Array.isArray(interactivePayload.cards)) {
+            return <CatalogPreview catalog={interactivePayload} />;
+        }
+
+        if (interactivePayload?.kind === 'list' && Array.isArray(interactivePayload.sections)) {
+            return <InteractiveListMessage payload={interactivePayload} isFromMe={isFromMe} />;
+        }
+
+        if (interactivePayload?.kind === 'buttons' && Array.isArray(interactivePayload.buttons)) {
+            return <InteractiveButtonsMessage payload={interactivePayload} isFromMe={isFromMe} />;
         }
 
         const hasSharedContacts =
@@ -853,14 +955,24 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                             <AvatarImage fallbackOnBlank src={senderAvatar} alt={senderName} data-ai-hint="person" />
                             <AvatarFallback className="bg-slate-100 text-slate-600 text-xs font-medium dark:bg-zinc-900 dark:text-zinc-300">{senderInitial}</AvatarFallback>
                         </Avatar>
-                        <div className={cn("flex min-w-0 flex-1 flex-col", isFromMe ? 'items-end' : 'items-start')}>
-                            <div className={cn("flex w-full min-w-0 items-end gap-1", isFromMe ? 'flex-row-reverse' : 'flex-row')}>
+                        <div className={cn(
+                            "flex min-w-0 flex-1 flex-col",
+                            isFromMe ? 'items-end' : 'items-start',
+                        )}>
+                            <div className={cn(
+                                "flex min-w-0 max-w-full items-end gap-1",
+                                isAudioMessage ? 'w-fit' : 'w-full',
+                                isAudioMessage && 'relative',
+                                isAudioMessage
+                                    ? (isFromMe ? 'flex-row-reverse justify-start' : 'flex-row justify-start')
+                                    : (isFromMe ? 'flex-row-reverse' : 'flex-row'),
+                            )}>
                                 <div
                                     data-message-bubble
                                     data-message-direction={isFromMe ? 'outgoing' : 'incoming'}
                                     className={cn(
                                         "relative w-fit min-w-0 max-w-[88%] break-words [overflow-wrap:anywhere] sm:max-w-[78%] md:max-w-[min(72%,560px)]",
-                                        !isVisualMediaMessage && "rounded-[18px] p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)] md:p-3.5",
+                                        !isVisualMediaMessage && !isAudioMessage && "rounded-[18px] p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)] md:p-3.5",
                                         isDeleted
                                             ? 'border border-border/50 bg-muted/30 italic text-muted-foreground'
                                             : isPrearmedTool
@@ -871,7 +983,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                 ? 'border border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
                                             : isInternalNote
                                                     ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-700'
-                                                : isVisualMediaMessage
+                                                : isVisualMediaMessage || isAudioMessage
                                                     ? ''
                                                 : (isFromMe
                                                     ? 'rounded-tr-md border border-blue-500/20 bg-blue-600 text-white'
@@ -932,7 +1044,13 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                     )}
                                 </div>
                                 {!isDeleted && (
-                                    <div className="flex-shrink-0 self-start">
+                                    <div className={cn(
+                                        'flex-shrink-0 self-start',
+                                        isAudioMessage && cn(
+                                            'absolute top-1/2 z-10 -translate-y-1/2',
+                                            isFromMe ? 'right-full mr-1' : 'left-full ml-1',
+                                        ),
+                                    )}>
                                         <AlertDialog>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
@@ -1023,7 +1141,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </TooltipProvider>
-                                                {onRetry && !isInternalNote && !isAiAnalysis && !isToolExecution && (
+                                                {onRetry && !isInternalNote && !isAiAnalysis && !isToolExecution && message.metadata?.interactiveType !== 'carousel' && (
                                                     <Button
                                                         type="button"
                                                         variant="link"
@@ -1047,6 +1165,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                     );
                                                 }
 
+                                                if (status === 'UNKNOWN') return <Clock className="h-3 w-3 text-amber-500" />;
                                                 if (status === 'PENDING') return <Check className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />; // Saved in DB: Single Check
 
                                                 if (status === 'READ' || status === 'PLAYED') return <CheckCheck className="h-3 w-3 text-blue-500 dark:text-blue-400" />; // Read: Blue Double Check

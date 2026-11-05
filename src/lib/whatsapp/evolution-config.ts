@@ -43,12 +43,22 @@ type ResolveEvolutionInstanceOptions = {
 };
 
 export function buildEvolutionWebhookUrl(identifier: string): string {
-  const baseUrl = process.env.NEXTAUTH_URL;
+  const baseUrl = process.env.EVOLUTION_WEBHOOK_BASE_URL?.trim() || process.env.NEXTAUTH_URL?.trim();
   if (!baseUrl) {
-    throw new Error('A variavel de ambiente NEXTAUTH_URL nao esta definida.');
+    throw new Error('Defina EVOLUTION_WEBHOOK_BASE_URL ou NEXTAUTH_URL com o endereco publico da Dialogy.');
   }
 
-  return `${baseUrl.replace(/\/+$/, '')}/api/webhooks/evolution/${identifier}`;
+  const url = new URL(baseUrl);
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('A base do webhook deve ser uma URL HTTP(S) publica, sem credenciais, query ou fragmento.');
+  }
+  if (url.hostname === 'localhost' || url.hostname.endsWith('.localhost')
+      || url.hostname === '[::1]' || url.hostname === '0.0.0.0' || url.hostname.startsWith('127.')) {
+    throw new Error('A Evolution API precisa de uma URL publica. Configure EVOLUTION_WEBHOOK_BASE_URL; localhost aponta para o proprio servidor da Evolution.');
+  }
+  if (!identifier.trim()) throw new Error('Identificador do webhook nao informado.');
+
+  return `${url.toString().replace(/\/+$/, '')}/api/webhooks/evolution/${encodeURIComponent(identifier.trim())}`;
 }
 
 export async function resolveEvolutionInstance(

@@ -199,6 +199,67 @@ export async function markEvolutionWebhookEventProcessed(input: {
   );
 }
 
+/**
+ * Apaga eventos ja processados mais antigos que a janela de retencao.
+ *
+ * Trabalha em lotes curtos de proposito: um `DELETE` unico sobre centenas de
+ * milhares de linhas seguraria lock e inflaria o WAL enquanto o worker ainda
+ * precisa reivindicar eventos novos na mesma tabela. `SKIP LOCKED` garante que a
+ * poda nunca dispute linha com quem esta processando.
+ *
+ * So remove `processed`. `dead_letter` fica para investigacao — sao poucos e sao
+ * justamente os que interessa olhar depois.
+ */
+export async function pruneProcessedEvolutionWebhookEvents(input?: {
+  retentionDays?: number;
+  batchSize?: number;
+  maxBatches?: number;
+  database?: Queryable;
+}): Promise<{ deleted: number; batches: number; reachedLimit: boolean }> {
+  const database = input?.database || db;
+  const retentionDays = Number.isFinite(input?.retentionDays) && Number(input?.retentionDays) > 0
+    ? Number(input?.retentionDays)
+    : 7;
+  const batchSize = Number.isFinite(input?.batchSize) && Number(input?.batchSize) > 0
+    ? Math.min(Number(input?.batchSize), 20_000)
+    : 5_000;
+  const maxBatches = Number.isFinite(input?.maxBatches) && Number(input?.maxBatches) > 0
+    ? Number(input?.maxBatches)
+    : 20;
+
+  let deleted = 0;
+  let batches = 0;
+
+  for (let batch = 0; batch < maxBatches; batch += 1) {
+    const result = await database.query(
+      `WITH doomed AS (
+         SELECT id
+         FROM evolution_webhook_events
+         WHERE status = 'processed'
+           AND created_at < clock_timestamp() - ($1::int * interval '1 day')
+         ORDER BY created_at
+         LIMIT $2
+         FOR UPDATE SKIP LOCKED
+       )
+       DELETE FROM evolution_webhook_events target
+       USING doomed
+       WHERE target.id = doomed.id`,
+      [retentionDays, batchSize],
+    );
+
+    const removed = result.rowCount ?? 0;
+    deleted += removed;
+    batches += 1;
+
+    if (removed < batchSize) {
+      return { deleted, batches, reachedLimit: false };
+    }
+  }
+
+  // Saiu pelo teto de lotes: ainda ha backlog, o proximo ciclo continua daqui.
+  return { deleted, batches, reachedLimit: true };
+}
+
 export async function markEvolutionWebhookEventFailed(input: {
   eventId: string;
   workerId: string;

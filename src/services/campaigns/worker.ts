@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@/lib/db';
-import type { CampaignChannel, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, EvolutionApiConfig } from '@/lib/types';
+import type { CampaignChannel, CampaignInteractivePayload, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, EvolutionApiConfig } from '@/lib/types';
 import { buildChatProtocol } from '@/lib/utils';
 import { getMonthlyChatLimitStatus } from '@/lib/billing-logic';
 import { getEvolutionApiConfig } from '@/lib/whatsapp/evolution-config';
 import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import { sendTextMessage } from '@/services/whatsapp/send-text-message';
 import { sendAudioMessage } from '@/services/whatsapp/send-audio-message';
+import { sendListMessage } from '@/services/whatsapp/send-list-message';
+import { sendButtonsMessage } from '@/services/whatsapp/send-buttons-message';
 import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { sendTelegramTextMessage } from '@/services/telegram/bot-api';
 import { InstagramMessagingService } from '@/services/meta/instagram-messaging-service';
@@ -15,7 +17,11 @@ import type { MetaChannelRecord } from '@/services/meta/meta-channel.service';
 import {
   buildCampaignTemplateSendComponents,
   renderCampaignMessage,
+  renderCampaignTemplatePreview,
 } from '@/lib/campaigns/personalization';
+import { MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
+import { scheduleMarketingAutoClose } from '@/services/chat/marketing-auto-close';
+import { runDueMarketingAutoCloses } from '@/services/chat/auto-close';
 
 const FINAL_MESSAGE_STATUSES = new Set(['SENT', 'DELIVERY_ACK', 'READ', 'PLAYED']);
 const DEFAULT_POLL_MS = 1_000;
@@ -31,6 +37,7 @@ type ClaimedRecipient = {
 };
 
 type RecipientDeliveryContext = ClaimedRecipient & {
+  csv_data: Record<string, string>;
   contact_name: string;
   phone_number_jid: string | null;
   marketing_opt_out_at: string | null;
@@ -42,6 +49,7 @@ type RecipientDeliveryContext = ClaimedRecipient & {
   destination_id: string | null;
   template_payload: CampaignTemplate | null;
   media_payload: CampaignMediaAttachment | null;
+  interactive_payload: CampaignInteractivePayload | null;
   schedule_config: CampaignScheduleConfig;
   scheduled_end_at: string | null;
   campaign_status: string;
@@ -66,6 +74,40 @@ function normalizeCampaignMediaPayload(payload: CampaignMediaAttachment | null |
   if (type === 'image' && !mimetype.startsWith('image/')) return null;
   if (type === 'audio' && !mimetype.startsWith('audio/')) return null;
   return { ...payload, type, url, mimetype, filename };
+}
+
+function normalizeCampaignInteractivePayload(
+  payload: CampaignInteractivePayload | null | undefined
+): CampaignInteractivePayload | null {
+  if (!payload) return null;
+
+  const title = String(payload.title || '').trim();
+  if (!title) return null;
+
+  if (payload.kind === 'buttons') {
+    const buttons = (payload.buttons || []).filter(
+      (button) => String(button?.displayText || '').trim() && String(button?.id || '').trim()
+    );
+    if (buttons.length === 0 || buttons.length > MAX_CAMPAIGN_REPLY_BUTTONS) return null;
+    return { ...payload, kind: 'buttons', title, buttons };
+  }
+
+  if (payload.kind === 'list') {
+    const buttonText = String(payload.buttonText || '').trim();
+    if (!buttonText) return null;
+    const sections = (payload.sections || [])
+      .map((section) => ({
+        title: String(section?.title || '').trim() || 'Opções',
+        rows: (section?.rows || []).filter(
+          (row) => String(row?.title || '').trim() && String(row?.rowId || '').trim()
+        ),
+      }))
+      .filter((section) => section.rows.length > 0);
+    if (sections.length === 0) return null;
+    return { ...payload, kind: 'list', title, buttonText, sections };
+  }
+
+  return null;
 }
 
 function providerMessageId(response: any): string | null {
@@ -136,25 +178,43 @@ async function recoverStaleClaims(lockMs: number): Promise<void> {
   }
 }
 
-async function claimDueRecipient(workerId: string): Promise<ClaimedRecipient | null> {
+export async function claimDueRecipient(workerId: string): Promise<ClaimedRecipient | null> {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      `WITH candidate AS (
-         SELECT cr.id
-         FROM campaign_recipients cr
-         JOIN campaigns c ON c.id = cr.campaign_id
-         WHERE cr.status IN ('waiting', 'scheduled')
-           AND cr.scheduled_at <= NOW()
-           AND c.status IN ('scheduled', 'sending')
+       `WITH due_campaign AS (
+         SELECT c.id
+         FROM campaigns c
+         WHERE c.status IN ('scheduled', 'sending')
            AND c.cancelled_at IS NULL
+           AND EXISTS (
+             SELECT 1
+             FROM campaign_recipients due
+             WHERE due.campaign_id = c.id
+               AND due.status IN ('waiting', 'scheduled')
+               AND due.scheduled_at <= NOW()
+           )
            AND NOT EXISTS (
              SELECT 1
              FROM campaign_recipients active
-             WHERE active.campaign_id = cr.campaign_id
+             WHERE active.campaign_id = c.id
                AND active.status = 'processing'
            )
+         ORDER BY (
+           SELECT MIN(due.scheduled_at)
+           FROM campaign_recipients due
+           WHERE due.campaign_id = c.id
+             AND due.status IN ('waiting', 'scheduled')
+         ), c.id
+         FOR UPDATE OF c SKIP LOCKED
+         LIMIT 1
+       ), candidate AS (
+         SELECT cr.id
+         FROM campaign_recipients cr
+         JOIN due_campaign dc ON dc.id = cr.campaign_id
+         WHERE cr.status IN ('waiting', 'scheduled')
+           AND cr.scheduled_at <= NOW()
          ORDER BY cr.scheduled_at ASC, cr.id ASC
          FOR UPDATE OF cr SKIP LOCKED
          LIMIT 1
@@ -203,6 +263,7 @@ async function loadDeliveryContext(recipientId: string): Promise<RecipientDelive
        cr.message_id,
        cr.attempt_count,
        cr.max_attempts,
+       cr.csv_data,
        ct.name AS contact_name,
        ct.phone_number_jid,
        ct.marketing_opt_out_at,
@@ -214,6 +275,7 @@ async function loadDeliveryContext(recipientId: string): Promise<RecipientDelive
        c.destination_id,
        c.template_payload,
        c.media_payload,
+       c.interactive_payload,
        c.schedule_config,
        c.scheduled_end_at,
        c.status AS campaign_status
@@ -288,33 +350,52 @@ async function resolveChat(context: RecipientDeliveryContext): Promise<{
     };
   }
 
-  const existing = await db.query(
-    `SELECT c.id
-     FROM chats c
-     WHERE c.contact_id = $1
-       AND c.workspace_id = $2
-       AND c.status IN ('gerais', 'atendimentos')
-       AND NOT EXISTS (SELECT 1 FROM meta_conversations mc WHERE mc.chat_id = c.id)
-     ORDER BY c.created_at DESC
-     LIMIT 1`,
-    [context.contact_id, context.workspace_id]
-  );
-  if (existing.rows[0]?.id) {
-    return { chatId: existing.rows[0].id };
-  }
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    // Serialize campaign-created chats per workspace. This makes both the plan
+    // limit check and the re-check for an existing contact chat atomic relative
+    // to other campaign workers.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended('campaign-chat-workspace:' || $1::text, 0))`,
+      [context.workspace_id],
+    );
+    const existing = await client.query(
+      `SELECT c.id
+       FROM chats c
+       WHERE c.contact_id = $1
+         AND c.workspace_id = $2
+         AND c.status IN ('gerais', 'atendimentos')
+         AND NOT EXISTS (SELECT 1 FROM meta_conversations mc WHERE mc.chat_id = c.id)
+       ORDER BY c.created_at DESC
+       LIMIT 1`,
+      [context.contact_id, context.workspace_id]
+    );
+    if (existing.rows[0]?.id) {
+      await client.query('COMMIT');
+      return { chatId: existing.rows[0].id };
+    }
 
-  const limitStatus = await getMonthlyChatLimitStatus(context.workspace_id);
-  if (!limitStatus.allowed) {
-    throw new Error(`Limite mensal de chats do plano ${limitStatus.plan.toUpperCase()} atingido.`);
-  }
+    const limitStatus = await getMonthlyChatLimitStatus(context.workspace_id);
+    if (!limitStatus.allowed) {
+      await client.query('ROLLBACK');
+      throw new Error(`Limite mensal de chats do plano ${limitStatus.plan.toUpperCase()} atingido.`);
+    }
 
-  const chatId = randomUUID();
-  await db.query(
-    `INSERT INTO chats (id, workspace_id, contact_id, status, protocol)
-     VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4)`,
-    [chatId, context.workspace_id, context.contact_id, buildChatProtocol(chatId)]
-  );
-  return { chatId };
+    const chatId = randomUUID();
+    await client.query(
+      `INSERT INTO chats (id, workspace_id, contact_id, status, protocol)
+       VALUES ($1, $2, $3, 'gerais'::chat_status_enum, $4)`,
+      [chatId, context.workspace_id, context.contact_id, buildChatProtocol(chatId)]
+    );
+    await client.query('COMMIT');
+    return { chatId };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function prepareIdempotentMessage(
@@ -325,6 +406,7 @@ async function prepareIdempotentMessage(
   const media = normalizeCampaignMediaPayload(context.media_payload);
   const messageType = media?.type || 'text';
   const messageMetadata = {
+    isMarketing: true,
     campaignId: context.campaign_id,
     campaignRecipientId: context.id,
     consentConfirmed: true,
@@ -474,6 +556,53 @@ async function deliverToProvider(
     return providerMessageId(response);
   }
 
+  const interactive = normalizeCampaignInteractivePayload(context.interactive_payload);
+  if (interactive) {
+    if (context.delivery_channel !== 'whatsapp_baileys') {
+      throw new Error('Botoes e listas de campanha estao disponiveis apenas para WhatsApp conectado.');
+    }
+
+    const personalize = (value?: string) =>
+      value
+        ? renderCampaignMessage(value, {
+            contactName: context.contact_name,
+            now: personalizationNow,
+            timeZone: context.schedule_config?.timeZone,
+          })
+        : undefined;
+
+    // O corpo da mensagem interativa e o proprio texto da campanha (ja personalizado).
+    const body = personalize(interactive.description) || content;
+
+    if (interactive.kind === 'buttons') {
+      const response = await sendButtonsMessage(apiConfig, instanceName, {
+        number: context.phone_number_jid,
+        title: personalize(interactive.title) || interactive.title,
+        description: body,
+        footer: personalize(interactive.footer),
+        buttons: interactive.buttons || [],
+      });
+      return providerMessageId(response);
+    }
+
+    const response = await sendListMessage(apiConfig, instanceName, {
+      number: context.phone_number_jid,
+      title: personalize(interactive.title) || interactive.title,
+      description: body,
+      buttonText: interactive.buttonText!,
+      footerText: personalize(interactive.footer),
+      sections: (interactive.sections || []).map((section) => ({
+        title: section.title,
+        rows: section.rows.map((row) => ({
+          title: row.title,
+          description: row.description ?? '\u200B',
+          rowId: row.rowId,
+        })),
+      })),
+    });
+    return providerMessageId(response);
+  }
+
   if (context.delivery_channel === 'whatsapp_cloud' && context.template_payload) {
     const response = await sendTemplateMessage(apiConfig, instanceName, {
       number: context.phone_number_jid,
@@ -481,6 +610,7 @@ async function deliverToProvider(
       language: context.template_payload.language,
       components: buildCampaignTemplateSendComponents(context.template_payload, {
         contactName: context.contact_name,
+        csvData: context.csv_data,
         campaignMessage: context.message,
         now: personalizationNow,
         timeZone: context.schedule_config?.timeZone,
@@ -609,8 +739,28 @@ async function markRecipientFailure(context: RecipientDeliveryContext, error: un
   }
 }
 
-async function processClaimedRecipient(claimed: ClaimedRecipient): Promise<void> {
-  const context = await loadDeliveryContext(claimed.id);
+export async function processClaimedRecipient(claimed: ClaimedRecipient): Promise<void> {
+  let context: RecipientDeliveryContext;
+  try {
+    context = await loadDeliveryContext(claimed.id);
+  } catch (error) {
+    const message = errorMessage(error).slice(0, 2_000);
+    const canRetry = claimed.attempt_count < claimed.max_attempts;
+    await db.query(
+      `UPDATE campaign_recipients
+       SET status = $1,
+           scheduled_at = CASE WHEN $1 = 'scheduled' THEN NOW() + interval '30 seconds' ELSE scheduled_at END,
+           error_message = $2,
+           locked_at = NULL,
+           locked_by = NULL,
+           updated_at = NOW()
+       WHERE id = $3
+         AND status = 'processing'`,
+      [canRetry ? 'scheduled' : 'failed', message, claimed.id],
+    );
+    await updateCampaignCompletion(claimed.campaign_id);
+    return;
+  }
   if (context.campaign_status === 'cancelled' || context.campaign_status === 'paused') {
     await db.query(
       `UPDATE campaign_recipients
@@ -637,12 +787,16 @@ async function processClaimedRecipient(claimed: ClaimedRecipient): Promise<void>
   }
 
   const now = new Date();
-  const content = renderCampaignMessage(context.message, {
-    contactName: context.contact_name,
-    now,
-    timeZone: context.schedule_config?.timeZone,
-  });
   try {
+    const personalizationContext = {
+      contactName: context.contact_name,
+      csvData: context.csv_data,
+      now,
+      timeZone: context.schedule_config?.timeZone,
+    };
+    const content = context.delivery_channel === 'whatsapp_cloud' && context.template_payload
+      ? renderCampaignTemplatePreview(context.template_payload, personalizationContext)
+      : renderCampaignMessage(context.message, personalizationContext);
     const resolvedChat = await resolveChat(context);
     const messageState = await prepareIdempotentMessage(context, resolvedChat.chatId, content);
     if (messageState === 'uncertain') {
@@ -660,7 +814,8 @@ async function processClaimedRecipient(claimed: ClaimedRecipient): Promise<void>
       );
     }
 
-    await db.query(
+    const marketingSentAt = new Date();
+    const sentRecipient = await db.query(
       `UPDATE campaign_recipients
        SET status = 'sent',
            sent_at = COALESCE(sent_at, NOW()),
@@ -668,9 +823,23 @@ async function processClaimedRecipient(claimed: ClaimedRecipient): Promise<void>
            locked_at = NULL,
            locked_by = NULL,
            updated_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING sent_at`,
       [context.id]
     );
+    // Scheduling failure must never turn a successful delivery into a resend.
+    // The recovery sweep will close overdue marketing chats after a restart.
+    try {
+      await scheduleMarketingAutoClose(
+        resolvedChat.chatId,
+        context.workspace_id,
+        sentRecipient.rows[0]?.sent_at ? new Date(sentRecipient.rows[0].sent_at) : marketingSentAt,
+        undefined,
+        context.message_id,
+      );
+    } catch (error) {
+      console.error('[CAMPAIGN_WORKER] Falha ao agendar encerramento de marketing:', error);
+    }
     await updateCampaignCompletion(context.campaign_id);
   } catch (error) {
     await markRecipientFailure(context, error);
@@ -700,9 +869,45 @@ export function startCampaignWorker(options?: {
   };
 
   const loop = (async () => {
-    await recoverStaleClaims(lockMs);
+    const recoverClaims = async () => {
+      try {
+        await recoverStaleClaims(lockMs);
+      } catch (error) {
+        console.error('[CAMPAIGN_WORKER] Stale claim recovery failed:', error);
+      }
+    };
+    await recoverClaims();
+    const recoverPersonalInactivity = async () => {
+      try {
+        const { runDuePersonalInactivity } = await import('@/services/chat/personal-inactivity');
+        await runDuePersonalInactivity();
+      } catch (error) {
+        console.error('[CAMPAIGN_WORKER] Inactivity recovery failed:', error);
+      }
+    };
+    const recoverMarketingChats = async () => {
+      try {
+        await runDueMarketingAutoCloses();
+      } catch (error) {
+        console.error('[CAMPAIGN_WORKER] Marketing close recovery failed:', error);
+      }
+    };
+    await recoverMarketingChats();
+    await recoverPersonalInactivity();
+    let nextMarketingRecoveryAt = Date.now() + 5_000;
+    const recoveryIntervalMs = Math.max(pollMs, Math.min(lockMs, 60_000));
+    let nextRecoveryAt = Date.now() + recoveryIntervalMs;
     console.log(`[CAMPAIGN_WORKER] Ready. workerId=${workerId} concurrency=${concurrency}`);
     while (!stopping) {
+      if (Date.now() >= nextMarketingRecoveryAt) {
+        await recoverMarketingChats();
+        await recoverPersonalInactivity();
+        nextMarketingRecoveryAt = Date.now() + 5_000;
+      }
+      if (Date.now() >= nextRecoveryAt) {
+        await recoverClaims();
+        nextRecoveryAt = Date.now() + recoveryIntervalMs;
+      }
       const results = await Promise.allSettled(
         Array.from({ length: concurrency }, () => processOne())
       );

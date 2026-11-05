@@ -5,6 +5,10 @@ import { appendNewChatsById, dedupeChats, mergeChatsById, sortChatsByActivity } 
 import { dedupeMessages, pruneMessageThreads, removeReplacedOptimisticMessages, touchMessageThread } from '@/hooks/inbox-store/message-thread-slice';
 import { normalizeDraftForStorage } from '@/hooks/inbox-store/draft-slice';
 import { baseInboxState, type InboxState } from '@/hooks/inbox-store/types';
+import { isChatInInboxQueueScope } from '@/lib/inbox-pagination';
+
+const messagesForChat = (chatId: string, messages: Message[]) =>
+  messages.filter((message) => message.chat_id === chatId);
 
 export const useInboxStore = create<InboxState>((set, get) => ({
   ...baseInboxState,
@@ -18,15 +22,20 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     oldestMessageId,
     hasMoreHistory,
     hasMoreChats,
+    inboxCounts,
+    chatPagination,
   }) => {
+    const scopedMessages = selectedChatId ? messagesForChat(selectedChatId, messages) : [];
     set((state) => {
       const hasSelection = !!selectedChatId;
-      const existingMessages = hasSelection ? state.messagesByChat[selectedChatId!] || [] : [];
-      const shouldPreserveMessages = hasSelection && messages.length === 0 && existingMessages.length > 0;
+      const existingMessages = hasSelection
+        ? messagesForChat(selectedChatId!, state.messagesByChat[selectedChatId!] || [])
+        : [];
+      const shouldPreserveMessages = hasSelection && scopedMessages.length === 0 && existingMessages.length > 0;
       const nextMessagesByChat = hasSelection
         ? {
           ...state.messagesByChat,
-          ...(shouldPreserveMessages ? {} : { [selectedChatId!]: messages }),
+          ...(shouldPreserveMessages ? {} : { [selectedChatId!]: scopedMessages }),
         }
         : state.messagesByChat;
       const nextLastSyncMessages = hasSelection
@@ -75,6 +84,8 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         ...prunedState,
         lastSyncChats,
         hasMoreChats,
+        inboxCounts: inboxCounts ?? state.inboxCounts,
+        chatPagination: chatPagination ?? state.chatPagination,
       };
     });
 
@@ -83,8 +94,8 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     if (persistedChats.length > 0 && persistedChats[0]?.workspace_id) {
       const workspaceId = persistedChats[0].workspace_id;
       cacheService.setChats(workspaceId, persistedChats).catch(() => { });
-      if (selectedChatId && messages.length > 0) {
-        cacheService.setMessages(selectedChatId, workspaceId, messages).catch(() => { });
+      if (selectedChatId && scopedMessages.length > 0) {
+        cacheService.setMessages(selectedChatId, workspaceId, scopedMessages).catch(() => { });
       }
     }
   },
@@ -118,11 +129,17 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       };
     });
 
-    // Persist full merged chats to IndexedDB (fire-and-forget)
+    // Persiste só o que mudou. Reescrever a lista inteira aqui custava um
+    // JSON.stringify + put por chat em memoria a cada delta sync (a cada 3s sob
+    // carga), mesmo quando um único chat tinha mudado — era a maior fonte de
+    // lixo no heap e de travada na aba.
     const workspaceId = incomingChats[0]?.workspace_id;
-    if (incomingChats.length > 0 && workspaceId) {
-      const fullChats = get().chats;
-      cacheService.setChats(workspaceId, fullChats).catch(() => { });
+    if (workspaceId) {
+      const touchedIds = new Set(incomingChats.map((chat) => chat.id));
+      const mergedTouchedChats = get().chats.filter((chat) => touchedIds.has(chat.id));
+      if (mergedTouchedChats.length > 0) {
+        cacheService.setChats(workspaceId, mergedTouchedChats).catch(() => { });
+      }
     }
   },
   appendChats: (incomingChats) => {
@@ -132,18 +149,76 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       return { chats: dedupeChats(nextChats, state.selectedChatId) };
     });
   },
+  replaceChatsForStatus: (status, incomingChats) => {
+    set((state) => {
+      const selectedStatusChat = state.chats.find((chat) => (
+        chat.id === state.selectedChatId && chat.status === status
+      ));
+      const otherStatuses = state.chats.filter((chat) => chat.status !== status);
+      const nextStatusChats = selectedStatusChat && !incomingChats.some((chat) => chat.id === selectedStatusChat.id)
+        ? [...incomingChats, selectedStatusChat]
+        : incomingChats;
+
+      return {
+        chats: dedupeChats(
+          sortChatsByActivity([...otherStatuses, ...nextStatusChats]),
+          state.selectedChatId
+        ),
+      };
+    });
+  },
+  replaceChatsForQueueScope: (scope, incomingChats) => {
+    set((state) => {
+      const belongsToScope = (chat: Chat) => isChatInInboxQueueScope(chat, scope);
+      const selectedScopeChat = state.chats.find((chat) => (
+        chat.id === state.selectedChatId && belongsToScope(chat)
+      ));
+      const otherScopes = state.chats.filter((chat) => !belongsToScope(chat));
+      const nextScopeChats = selectedScopeChat && !incomingChats.some((chat) => chat.id === selectedScopeChat.id)
+        ? [...incomingChats, selectedScopeChat]
+        : incomingChats;
+
+      return {
+        chats: dedupeChats(
+          sortChatsByActivity([...otherScopes, ...nextScopeChats]),
+          state.selectedChatId
+        ),
+      };
+    });
+  },
+  setInboxCounts: (inboxCounts) => set({ inboxCounts }),
+  setChatPagination: (tab, pagination) => set((state) => {
+    const chatPagination = {
+      ...state.chatPagination,
+      [tab]: pagination,
+    };
+    return {
+      chatPagination,
+      hasMoreChats: Object.values(chatPagination).some((page) => page.hasMore),
+    };
+  }),
   setHasMoreChats: (hasMore) => set({ hasMoreChats: hasMore }),
   updateChatContact: (contact) => {
     set((state) => ({
-      chats: state.chats.map((chat) =>
-        chat.contact?.id === contact.id ? { ...chat, contact: { ...chat.contact, ...contact } } : chat
-      ),
+      chats: state.chats.map((chat) => {
+        const matchesContact =
+          chat.contact?.id === contact.id ||
+          (chat as any).contact_id === contact.id ||
+          (Boolean(contact.phone_number_jid) && chat.contact?.phone_number_jid === contact.phone_number_jid);
+        if (!matchesContact) return chat;
+        return {
+          ...chat,
+          contact_id: contact.id,
+          contact: { ...(chat.contact || {}), ...contact },
+        };
+      }),
     }));
   },
   setMessagesForChat: (chatId, messages, lastSync, oldestDate, oldestId, hasMoreHistory, replace = false) => {
+    const scopedMessages = messagesForChat(chatId, messages);
     set((state) => {
-      const current = state.messagesByChat[chatId] || [];
-      const merged = replace ? dedupeMessages(messages) : dedupeMessages([...current, ...messages]);
+      const current = messagesForChat(chatId, state.messagesByChat[chatId] || []);
+      const merged = replace ? dedupeMessages(scopedMessages) : dedupeMessages([...current, ...scopedMessages]);
       const nextMessagesByChat = { ...state.messagesByChat, [chatId]: merged };
       const nextLastSyncMessages =
         typeof lastSync !== 'undefined'
@@ -176,11 +251,12 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     });
   },
   appendMessagesToChat: (chatId, messages, lastSync) => {
-    if (!messages.length) return;
+    const scopedMessages = messagesForChat(chatId, messages);
+    if (!scopedMessages.length) return;
     set((state) => {
-      const current = state.messagesByChat[chatId] || [];
-      const cleanedCurrent = removeReplacedOptimisticMessages(current, messages);
-      const merged = dedupeMessages([...cleanedCurrent, ...messages]);
+      const current = messagesForChat(chatId, state.messagesByChat[chatId] || []);
+      const cleanedCurrent = removeReplacedOptimisticMessages(current, scopedMessages);
+      const merged = dedupeMessages([...cleanedCurrent, ...scopedMessages]);
       const latest = merged[merged.length - 1];
       const chats = state.chats.map((chat) =>
         chat.id === chatId
@@ -211,7 +287,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     });
 
     // Persist new messages to IndexedDB (fire-and-forget, only non-optimistic)
-    const nonOptimisticMessages = messages.filter((m) => !m.optimistic);
+    const nonOptimisticMessages = scopedMessages.filter((m) => !m.optimistic);
     if (nonOptimisticMessages.length > 0 && nonOptimisticMessages[0]?.workspace_id) {
       cacheService.appendMessages(
         chatId,
@@ -221,11 +297,12 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     }
   },
   prependMessagesToChat: (chatId, messages, oldestDate, oldestId, hasMoreHistory) => {
+    const scopedMessages = messagesForChat(chatId, messages);
     set((state) => {
-      const current = state.messagesByChat[chatId] || [];
-      const merged = messages.length ? dedupeMessages([...messages, ...current]) : current;
-      const shouldUpdateCursor = messages.length > 0;
-      const nextMessagesByChat = messages.length
+      const current = messagesForChat(chatId, state.messagesByChat[chatId] || []);
+      const merged = scopedMessages.length ? dedupeMessages([...scopedMessages, ...current]) : current;
+      const shouldUpdateCursor = scopedMessages.length > 0;
+      const nextMessagesByChat = scopedMessages.length
         ? { ...state.messagesByChat, [chatId]: merged }
         : state.messagesByChat;
       const nextOldestMessageDateByChat =
@@ -324,6 +401,22 @@ export const useInboxStore = create<InboxState>((set, get) => ({
         messagesByChat: {
           ...state.messagesByChat,
           [chatId]: updatedMessages,
+        },
+      };
+    });
+  },
+  setAudioTranscription: (messageId, job) => {
+    set((state) => {
+      if (!job) {
+        const remaining = { ...state.audioTranscriptions };
+        delete remaining[messageId];
+        return { audioTranscriptions: remaining };
+      }
+
+      return {
+        audioTranscriptions: {
+          ...state.audioTranscriptions,
+          [messageId]: job,
         },
       };
     });

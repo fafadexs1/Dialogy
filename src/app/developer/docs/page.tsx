@@ -43,6 +43,7 @@ export default function DocsPage() {
                             <Link href="#" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Webhooks</Link>
                             <Link href="#" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Contatos</Link>
                             <Link href="/developer/docs/google-ads-whatsapp" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Google Ads + WhatsApp</Link>
+                            <Link href="/developer/docs/conversions" className="block px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors text-sm">Tutorial de Conversões</Link>
                         </div>
                     </div>
                     <div>

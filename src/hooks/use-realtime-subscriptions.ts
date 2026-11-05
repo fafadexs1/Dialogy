@@ -13,14 +13,15 @@ import {
     teardownChannel,
 } from '@/lib/realtime/chat-subscriptions';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/providers/auth-provider';
-
-function getPayloadChatId(payload: RealtimePostgresChangesPayload<any>): string | null {
-    const nextChatId = (payload.new as { chat_id?: string } | null)?.chat_id;
-    if (nextChatId) return nextChatId;
-    return (payload.old as { chat_id?: string } | null)?.chat_id ?? null;
-}
+import { getWorkspaceMessageDisposition } from '@/lib/realtime/realtime-reconciler';
+import {
+    applyRealtimeChannelStatus,
+    hasHealthyMessageCoverage,
+    INITIAL_REALTIME_CHANNEL_HEALTH,
+    type RealtimeChannelKind,
+} from '@/lib/realtime/channel-health';
 
 function csvToSet(csv?: string): Set<string> | null {
     if (typeof csv !== 'string') return null;
@@ -66,6 +67,19 @@ const messageThreadHandlers = new Set<(payload: RealtimePostgresChangesPayload<a
 const messageListHandlers = new Set<(payload: RealtimePostgresChangesPayload<any>) => void>();
 const contactHandlers = new Set<(payload: RealtimePostgresChangesPayload<any>) => void>();
 const statusHandlers = new Set<(status: string, type: 'chats' | 'messages') => void>();
+const healthHandlers = new Set<() => void>();
+let globalChannelHealth = INITIAL_REALTIME_CHANNEL_HEALTH;
+
+const RESUME_REPLAY_OVERLAP_MS = 5000;
+const RESUME_REPLAY_FALLBACK_WINDOW_MS = 15000;
+const RESUME_RECONNECT_COOLDOWN_MS = 1000;
+
+function updateGlobalChannelHealth(channel: RealtimeChannelKind, status: string) {
+    const next = applyRealtimeChannelStatus(globalChannelHealth, channel, status);
+    if (next === globalChannelHealth) return;
+    globalChannelHealth = next;
+    healthHandlers.forEach((handler) => handler());
+}
 
 export function useRealtimeSubscriptions(options: {
     workspaceId: string | null | undefined;
@@ -74,27 +88,43 @@ export function useRealtimeSubscriptions(options: {
     messagesListChatIdsCsv?: string;
     onChatUpdate?: (payload: RealtimePostgresChangesPayload<any>) => void;
     onMessageUpdate?: (payload: RealtimePostgresChangesPayload<any>) => void;
+    onMessageOutsideList?: (payload: RealtimePostgresChangesPayload<any>) => void;
     onContactUpdate?: (payload: RealtimePostgresChangesPayload<any>) => void;
     onStatusChange?: (status: string, type: 'chats' | 'messages') => void;
 }) {
-    const { workspaceId, selectedChatId, messagesListChatIdsCsv, onChatUpdate, onMessageUpdate, onContactUpdate, onStatusChange } = options;
+    const { workspaceId, selectedChatId, messagesListChatIdsCsv, onChatUpdate, onMessageUpdate, onMessageOutsideList, onContactUpdate, onStatusChange } = options;
     const { session, isLoading } = useAuth();
     const accessToken = session?.access_token ?? null;
 
     const onChatUpdateRef = useRef(onChatUpdate);
     const onMessageUpdateRef = useRef(onMessageUpdate);
+    const onMessageOutsideListRef = useRef(onMessageOutsideList);
     const onContactUpdateRef = useRef(onContactUpdate);
     const onStatusChangeRef = useRef(onStatusChange);
     const selectedChatIdRef = useRef<string | null>(selectedChatId ?? null);
     const messagesListChatIdsRef = useRef<Set<string> | null>(csvToSet(messagesListChatIdsCsv));
+    const hiddenAtRef = useRef<number | null>(null);
+    const replaySinceRef = useRef<number | null>(null);
+    const lastResumeAtRef = useRef(0);
+    const [resumeRevision, setResumeRevision] = useState(0);
+    const [, setHealthRevision] = useState(0);
+
+    useEffect(() => {
+        const handleHealthChange = () => setHealthRevision((revision) => revision + 1);
+        healthHandlers.add(handleHealthChange);
+        return () => {
+            healthHandlers.delete(handleHealthChange);
+        };
+    }, []);
 
     // Keep refs up to date
     useEffect(() => {
         onChatUpdateRef.current = onChatUpdate;
         onMessageUpdateRef.current = onMessageUpdate;
+        onMessageOutsideListRef.current = onMessageOutsideList;
         onContactUpdateRef.current = onContactUpdate;
         onStatusChangeRef.current = onStatusChange;
-    }, [onChatUpdate, onMessageUpdate, onContactUpdate, onStatusChange]);
+    }, [onChatUpdate, onMessageUpdate, onMessageOutsideList, onContactUpdate, onStatusChange]);
 
     useEffect(() => {
         selectedChatIdRef.current = selectedChatId ?? null;
@@ -103,6 +133,57 @@ export function useRealtimeSubscriptions(options: {
     useEffect(() => {
         messagesListChatIdsRef.current = csvToSet(messagesListChatIdsCsv);
     }, [messagesListChatIdsCsv]);
+
+    // A browser may keep the Realtime channel in SUBSCRIBED state while the tab
+    // is suspended. Reconnect on resume and ask Broadcast Replay for the window
+    // that could have been missed. The inbox delta sync remains the durable
+    // fallback for gaps larger than the replay limit.
+    useEffect(() => {
+        if (!workspaceId || typeof document === 'undefined') return;
+
+        if (document.visibilityState === 'hidden') {
+            hiddenAtRef.current = Date.now();
+        }
+
+        const markHidden = () => {
+            if (document.visibilityState === 'hidden' && hiddenAtRef.current === null) {
+                hiddenAtRef.current = Date.now();
+            }
+        };
+
+        const resumeRealtime = () => {
+            if (document.visibilityState !== 'visible') return;
+
+            const now = Date.now();
+            if (now - lastResumeAtRef.current < RESUME_RECONNECT_COOLDOWN_MS) return;
+
+            const hiddenAt = hiddenAtRef.current ?? now - RESUME_REPLAY_FALLBACK_WINDOW_MS;
+            hiddenAtRef.current = null;
+            lastResumeAtRef.current = now;
+            replaySinceRef.current = Math.max(0, hiddenAt - RESUME_REPLAY_OVERLAP_MS);
+            setResumeRevision((revision) => revision + 1);
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                markHidden();
+            } else {
+                resumeRealtime();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('focus', resumeRealtime);
+        window.addEventListener('pageshow', resumeRealtime);
+        window.addEventListener('online', resumeRealtime);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('focus', resumeRealtime);
+            window.removeEventListener('pageshow', resumeRealtime);
+            window.removeEventListener('online', resumeRealtime);
+        };
+    }, [workspaceId]);
 
     // Wrapper handlers
     const chatHandler = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
@@ -114,15 +195,18 @@ export function useRealtimeSubscriptions(options: {
     }, []);
 
     const messageListHandler = useCallback((payload: RealtimePostgresChangesPayload<any>) => {
-        const visibleChatIds = messagesListChatIdsRef.current;
-        const payloadChatId = getPayloadChatId(payload);
-        const currentSelectedChatId = selectedChatIdRef.current;
+        const disposition = getWorkspaceMessageDisposition(
+            payload,
+            messagesListChatIdsRef.current,
+            selectedChatIdRef.current,
+        );
 
-        if (currentSelectedChatId && payloadChatId && payloadChatId === currentSelectedChatId) {
+        if (disposition === 'ignore-selected') {
             return;
         }
 
-        if (visibleChatIds && (!payloadChatId || !visibleChatIds.has(payloadChatId))) {
+        if (disposition === 'reconcile-list') {
+            onMessageOutsideListRef.current?.(payload);
             return;
         }
 
@@ -143,6 +227,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         // Register this component's handler
         if (onChatUpdateRef.current) {
@@ -154,6 +239,7 @@ export function useRealtimeSubscriptions(options: {
 
         const handleChatStatusChange = (status: string) => {
             console.info(`[REALTIME-GLOBAL] Chats channel status: ${status}`);
+            updateGlobalChannelHealth('chats', status);
             statusHandlers.forEach((handler) => handler(status, 'chats'));
         };
 
@@ -165,10 +251,12 @@ export function useRealtimeSubscriptions(options: {
 
             const channelName = buildWorkspaceChatChannelName(workspaceId);
             console.info(`[REALTIME-GLOBAL] Creating chats channel ${channelName}`);
+            updateGlobalChannelHealth('chats', 'CONNECTING');
 
             globalChannels.chats = subscribeToWorkspaceChatUpdates({
                 client: supabase,
                 workspaceId,
+                replaySince,
                 onChatUpdate: (payload) => {
                     console.log('[REALTIME-GLOBAL] Chat update received:', payload);
                     chatHandlers.forEach((handler) => handler(payload));
@@ -195,9 +283,10 @@ export function useRealtimeSubscriptions(options: {
                 globalChannels.chats = null;
                 globalChannels.chatsWorkspaceId = null;
                 globalChannels.chatsSubscribers = 0;
+                updateGlobalChannelHealth('chats', 'CLOSED');
             }
         };
-    }, [workspaceId, isLoading, accessToken, chatHandler, statusHandler]);
+    }, [workspaceId, isLoading, accessToken, chatHandler, statusHandler, resumeRevision]);
 
     // Subscribe to contacts channel
     useEffect(() => {
@@ -205,6 +294,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         if (onContactUpdateRef.current) {
             contactHandlers.add(contactHandler);
@@ -226,6 +316,7 @@ export function useRealtimeSubscriptions(options: {
             globalChannels.contacts = subscribeToWorkspaceContacts({
                 client: supabase,
                 workspaceId,
+                replaySince,
                 onContactUpdate: (payload) => {
                     contactHandlers.forEach((handler) => handler(payload));
                 },
@@ -251,7 +342,7 @@ export function useRealtimeSubscriptions(options: {
                 globalChannels.contactsSubscribers = 0;
             }
         };
-    }, [workspaceId, isLoading, accessToken, contactHandler]);
+    }, [workspaceId, isLoading, accessToken, contactHandler, resumeRevision]);
 
     // Subscribe to messages channel (Global for workspace)
     useEffect(() => {
@@ -259,6 +350,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         // Register this component's handler
         if (onMessageUpdateRef.current) {
@@ -267,6 +359,7 @@ export function useRealtimeSubscriptions(options: {
 
         const handleMessageStatusChange = (status: string) => {
             console.info(`[REALTIME-GLOBAL] Messages channel status: ${status}`);
+            updateGlobalChannelHealth('messages', status);
             statusHandlers.forEach((handler) => handler(status, 'messages'));
         };
 
@@ -287,11 +380,13 @@ export function useRealtimeSubscriptions(options: {
                 ? buildWorkspaceMessageChannelName(workspaceId)
                 : buildChatMessageChannelName(workspaceId, targetFilter);
             console.info(`[REALTIME-GLOBAL] Creating messages channel ${channelName} (Filter: ${targetFilter})`);
+            updateGlobalChannelHealth('messages', 'CONNECTING');
 
             globalChannels.messages = subscribeToChatMessages({
                 client: supabase,
                 workspaceId,
                 chatId: targetFilter,
+                replaySince,
                 onMessage: (payload) => {
                     // console.log('[REALTIME-GLOBAL] Message received:', payload);
                     messageThreadHandlers.forEach((handler) => handler(payload));
@@ -306,6 +401,7 @@ export function useRealtimeSubscriptions(options: {
             teardownChannel(supabase, globalChannels.messages);
             globalChannels.messages = null;
             globalChannels.messagesChatId = null;
+            updateGlobalChannelHealth('messages', 'CLOSED');
         }
 
         globalChannels.messagesSubscribers++;
@@ -323,9 +419,10 @@ export function useRealtimeSubscriptions(options: {
                 globalChannels.messages = null;
                 globalChannels.messagesChatId = null;
                 globalChannels.messagesSubscribers = 0;
+                updateGlobalChannelHealth('messages', 'CLOSED');
             }
         };
-    }, [workspaceId, isLoading, accessToken, selectedChatId, messageThreadHandler]);
+    }, [workspaceId, isLoading, accessToken, selectedChatId, messageThreadHandler, resumeRevision]);
 
     // Subscribe to messages channel for list updates (other chats)
     useEffect(() => {
@@ -333,6 +430,7 @@ export function useRealtimeSubscriptions(options: {
 
         const supabase = createClient();
         supabase.realtime.setAuth(accessToken);
+        const replaySince = replaySinceRef.current;
 
         if (onMessageUpdateRef.current) {
             messageListHandlers.add(messageListHandler);
@@ -340,6 +438,7 @@ export function useRealtimeSubscriptions(options: {
 
         const handleListMessageStatusChange = (status: string) => {
             console.info(`[REALTIME-GLOBAL] Messages list channel status: ${status}`);
+            updateGlobalChannelHealth('messagesList', status);
             statusHandlers.forEach((handler) => handler(status, 'messages'));
         };
 
@@ -351,10 +450,12 @@ export function useRealtimeSubscriptions(options: {
 
             const channelName = buildWorkspaceMessageChannelName(workspaceId);
             console.info(`[REALTIME-GLOBAL] Creating messages list channel ${channelName}`);
+            updateGlobalChannelHealth('messagesList', 'CONNECTING');
 
             globalChannels.messagesList = subscribeToWorkspaceMessages({
                 client: supabase,
                 workspaceId,
+                replaySince,
                 onMessage: (payload) => {
                     messageListHandlers.forEach((handler) => handler(payload));
                 },
@@ -378,12 +479,13 @@ export function useRealtimeSubscriptions(options: {
                 globalChannels.messagesList = null;
                 globalChannels.messagesListWorkspaceId = null;
                 globalChannels.messagesListSubscribers = 0;
+                updateGlobalChannelHealth('messagesList', 'CLOSED');
             }
         };
-    }, [workspaceId, isLoading, accessToken, messageListHandler]);
+    }, [workspaceId, isLoading, accessToken, messageListHandler, resumeRevision]);
 
     return {
-        isChatsConnected: globalChannels.chats !== null,
-        isMessagesConnected: globalChannels.messages !== null || globalChannels.messagesList !== null,
+        isChatsConnected: globalChannelHealth.chats,
+        isMessagesConnected: hasHealthyMessageCoverage(globalChannelHealth, Boolean(selectedChatId)),
     };
 }

@@ -1,0 +1,123 @@
+{
+  "scope": "Conversa executada pelo motor real com persistência em memória, IA simulada e envio interceptado. Não é homologação de DeepSeek nem envio a contato real.",
+  "status": "completed",
+  "modelCalls": 1,
+  "externalTools": 0,
+  "order": {
+    "id": "DEMO-000000000Z",
+    "status": "simulated_confirmed",
+    "fictional": true,
+    "totalCents": 180310,
+    "productId": "kit",
+    "leadScore": 100,
+    "crm": {
+      "simulated": true,
+      "stage": "demonstracao_confirmada",
+      "name": "Maria"
+    },
+    "paymentCollected": false,
+    "externalSideEffects": []
+  },
+  "conversation": [
+    {
+      "role": "user",
+      "text": "demo aurora"
+    },
+    {
+      "role": "assistant",
+      "text": "Olá! Sou a Nina, da Aurora Work. Vamos montar seu escritório? ✨\n\nEsta loja, os produtos, as condições e os pedidos são FICTÍCIOS. Não há cobrança, reserva de estoque ou envio real. Não envie documentos ou dados de pagamento."
+    },
+    {
+      "role": "assistant",
+      "text": "Como prefere começar?\n\n1. consult — Quero uma recomendação\n2. catalog — Ver o catálogo direto\n3. human — Falar com uma pessoa\n4. stop — Encerrar\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "Quero uma recomendação"
+    },
+    {
+      "role": "assistant",
+      "text": "Como posso chamar você? Basta o primeiro nome."
+    },
+    {
+      "role": "user",
+      "text": "Maria"
+    },
+    {
+      "role": "assistant",
+      "text": "O que você quer melhorar no seu espaço de trabalho?\n\n1. conforto — Conforto ao sentar\n2. espaco — Mesa e espaço de trabalho\n3. completo — Montar o escritório completo\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "Montar o escritório completo"
+    },
+    {
+      "role": "assistant",
+      "text": "Qual o seu orçamento aproximado em reais? Digite somente o número, por exemplo 1500. Use 0 se preferir comparar sem definir um valor."
+    },
+    {
+      "role": "user",
+      "text": "2000"
+    },
+    {
+      "role": "assistant",
+      "text": "Para quando você está planejando essa compra fictícia?\n\n1. now — Quero escolher hoje\n2. week — Estou comparando esta semana\n3. research — Só pesquisando\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "Quero escolher hoje"
+    },
+    {
+      "role": "assistant",
+      "text": "Vamos pensar no conforto do seu espaço, Maria. A opção sugerida pode ajudar você a montar uma rotina mais agradável.\n\nSugestão: Kit Aurora Pro — R$ 1799,00\nCadeira Fit + mesa Lift. Economia fictícia de R$ 199,00 sobre os itens separados.\n\nCatálogo fictício:\nCadeira Aurora Fit — R$ 699,00\nApoio lombar ajustável, braços reguláveis e revestimento em tela.\n\nMesa Aurora Lift — R$ 1299,00\nMesa de altura ajustável com tampo de 120 × 60 cm.\n\nKit Aurora Pro — R$ 1799,00\nCadeira Fit + mesa Lift. Economia fictícia de R$ 199,00 sobre os itens separados.\n\nSe a sugestão exceder seu orçamento, você pode comparar ou encerrar sem compromisso."
+    },
+    {
+      "role": "assistant",
+      "text": "Qual caminho faz sentido para você?\n\n1. chair — Cadeira Fit · R$ 699,00\n2. desk — Mesa Lift · R$ 1.299,00\n3. kit — Kit Pro · R$ 1.799,00\n4. question — Tenho uma dúvida ou objeção\n5. later — Prefiro decidir depois\n6. human — Quero ajuda de uma pessoa\n7. stop — Não tenho interesse\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "Kit Pro · R$ 1.799,00"
+    },
+    {
+      "role": "assistant",
+      "text": "Quer acrescentar o apoio de pés Aurora Soft por R$ 99,00 fictícios? É opcional.\n\n1. yes — Adicionar por R$ 99,00\n2. no — Continuar sem complemento\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "Adicionar por R$ 99,00"
+    },
+    {
+      "role": "assistant",
+      "text": "Como prefere simular a condição de pagamento? Não envie dados bancários ou de cartão.\n\n1. pix — PIX · 5% nos produtos\n2. card — Cartão · até 3x sem juros\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "PIX · 5% nos produtos"
+    },
+    {
+      "role": "assistant",
+      "text": "Sua proposta de demonstração:\n\nKit Aurora Pro + apoio de pés\nProdutos: R$ 1898,00\nDesconto: R$ 94,90\nFrete: R$ 0,00\nTotal FICTÍCIO: R$ 1803,10\nCondição: PIX fictício. Nenhuma chave ou link de pagamento será emitido.\n\nÉ uma simulação: não há cobrança, pedido comercial, estoque reservado ou entrega real."
+    },
+    {
+      "role": "assistant",
+      "text": "Você quer registrar esse pedido FICTÍCIO na demonstração?\n\n1. yes — Confirmar somente a simulação\n2. change — Trocar produto ou condição\n3. human — Quero revisão de uma pessoa\n4. stop — Cancelar a simulação\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "Confirmar somente a simulação"
+    },
+    {
+      "role": "assistant",
+      "text": "Simulação confirmada! ✨\nReferência: DEMO-000000000Z\n\nKit Aurora Pro + apoio de pés\nProdutos: R$ 1898,00\nDesconto: R$ 94,90\nFrete: R$ 0,00\nTotal FICTÍCIO: R$ 1803,10\nCondição: PIX fictício. Nenhuma chave ou link de pagamento será emitido.\n\nNenhum valor foi cobrado e nenhum pedido real foi criado. Obrigada por conhecer a Aurora Work!"
+    },
+    {
+      "role": "assistant",
+      "text": "Essa jornada ajudou você a escolher?\n\n1. yes — Sim, foi útil\n2. improve — Precisa melhorar\n3. stop — Prefiro encerrar\n\nAurora Work · demonstração fictícia"
+    },
+    {
+      "role": "user",
+      "text": "Sim, foi útil"
+    }
+  ]
+}

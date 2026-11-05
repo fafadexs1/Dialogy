@@ -22,6 +22,22 @@ The signature selects the owning app from `META_APP_SECRETS`; the app id is neve
 Every Meta app whose WABAs point at this callback must be present in the key ring. Do not put this key ring in a
 `NEXT_PUBLIC_*` variable.
 
+### Evolution instance identity
+
+`evolution_api_instances.id` and the routing tables' `instance_id` are Dialogy IDs.
+They are not Evolution's `Instance.id`. The relay resolves Evolution's UUID through
+the cluster's authenticated `/instance/fetchInstances?instanceName=...` endpoint,
+checks the name, integration, Phone Number ID and WABA ID, and sends that provider
+UUID as `target.instanceId`. Do not rewrite Dialogy primary keys or disable
+Evolution's ownership checks to make these IDs equal.
+
+If deliveries are quarantined with HTTP 409 `instance_id_mismatch`, deploy the
+corrected `worker-meta-relay` and validate a new inbound message through Meta
+delivery, Evolution inbox, Dialogy message and workflow execution. A connected
+instance or successful outbound event does not prove inbound delivery is healthy.
+Do not bulk replay quarantined messages without reviewing their age and conversation
+state: a replay can trigger delayed or duplicate automated replies.
+
 Apply migrations only through the normal migration ledger:
 
 ```bash

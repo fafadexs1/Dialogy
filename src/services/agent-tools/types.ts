@@ -1,5 +1,7 @@
 import type { AutopilotConfig, Chat, Contact } from '@/lib/types';
 import type { AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
+import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
+import type { SlotExtractionResult } from '@/services/autopilot/slots';
 
 export type AgentToolName =
   | 'transfer_chat'
@@ -22,6 +24,9 @@ export type AgentToolAction =
         teamId?: string | null;
         teamName?: string | null;
         agentId?: string | null;
+        /** Closed-vocabulary reason (agent-studio/handoff-reasons.ts) and the internal note for the person taking over. */
+        reasonCode?: string | null;
+        briefing?: string | null;
       } | null;
     }
   | {
@@ -99,6 +104,8 @@ export type AgentToolRuntimeContext = {
   systemAgentName: string;
   autopilotConfig: AutopilotConfig;
   turnPolicy: AutopilotTurnPolicy;
+  intent?: UniversalAutopilotIntent | null;
+  slotExtraction?: SlotExtractionResult | null;
   customerMessage: string;
   recentCustomerVisibleMessages?: Array<{
     fromMe: boolean;

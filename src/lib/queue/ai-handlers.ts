@@ -18,7 +18,7 @@ import type {
 
 type QueueHandler = (job: QueueJobRecord) => Promise<void>;
 
-async function loadChatForAutopilot(chatId: string): Promise<Chat | null> {
+async function loadChatForAutopilot(chatId: string, workspaceId: string): Promise<Chat | null> {
   const { rows } = await db.query(
     `SELECT
         c.id,
@@ -34,14 +34,15 @@ async function loadChatForAutopilot(chatId: string): Promise<Chat | null> {
         ct.id AS contact_id,
         ct.name AS contact_name,
         ct.email AS contact_email,
+        ct.phone AS contact_phone,
         ct.phone_number_jid AS contact_phone_number_jid,
         ct.avatar_url AS contact_avatar_url,
         ct.address AS contact_address
      FROM chats c
-     LEFT JOIN contacts ct ON ct.id = c.contact_id
-     WHERE c.id = $1
+     JOIN contacts ct ON ct.id = c.contact_id AND ct.workspace_id = c.workspace_id
+     WHERE c.id = $1 AND c.workspace_id = $2
      LIMIT 1`,
-    [chatId]
+    [chatId, workspaceId]
   );
 
   if (rows.length === 0) {
@@ -65,6 +66,7 @@ async function loadChatForAutopilot(chatId: string): Promise<Chat | null> {
       id: row.contact_id,
       name: row.contact_name,
       email: row.contact_email,
+      phone: row.contact_phone,
       phone_number_jid: row.contact_phone_number_jid,
       avatar_url: row.contact_avatar_url,
       address: row.contact_address,
@@ -74,6 +76,7 @@ async function loadChatForAutopilot(chatId: string): Promise<Chat | null> {
 
 const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   evolution_webhook_process: undefined,
+  nexus_workflow: undefined,
   ai_document_ingest: async (job) => {
     const payload = job.payload as AiDocumentIngestPayload;
     if (!payload.workspaceId || !payload.documentId || !payload.documentName || !payload.content) {
@@ -95,7 +98,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       throw new Error('Invalid ai_autopilot_process payload.');
     }
 
-    const chat = await loadChatForAutopilot(payload.chatId);
+    const chat = await loadChatForAutopilot(payload.chatId, payload.workspaceId);
     if (!chat) {
       console.warn(`[AI_QUEUE] Chat ${payload.chatId} not found for autopilot job.`);
       return;
@@ -112,7 +115,8 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
         chat,
         payload.lastMessageContent || '',
         payload.instanceName,
-        payload.messageId
+        payload.messageId,
+        payload.suggestionRequest
       );
     } catch (error) {
       if (
@@ -175,6 +179,7 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   webhook_outbound: undefined,
   queue_auto_close: undefined,
   marketing_auto_close: undefined,
+  nexus_internal_event: undefined,
   analytics_event: undefined,
   notification_send: undefined,
   ai_task: undefined,
@@ -299,8 +304,12 @@ export async function handleAiQueueJobFailure(
            assigned_at = NULL,
            updated_at = clock_timestamp()
        WHERE id = $1
-         AND workspace_id = $2`,
-      [payload.chatId, payload.workspaceId],
+         AND workspace_id = $2
+         AND status <> 'encerrados'
+         AND agent_id IS NULL
+         AND assigned_system_agent_id = $3
+         AND is_autopilot_active = true`,
+      [payload.chatId, payload.workspaceId, systemAgentId],
     );
 
     const errorMessage = error instanceof Error ? error.message : String(error);

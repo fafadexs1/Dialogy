@@ -41,6 +41,7 @@ export function isAtomicMetaEnvelope(payload: JsonRecord): boolean {
 export function buildEvolutionRelayRequest(input: {
   delivery: JsonRecord;
   instanceName: string | null;
+  providerInstanceId: string | null;
   payload: JsonRecord;
   timestamp: string;
   keyId: string;
@@ -48,6 +49,8 @@ export function buildEvolutionRelayRequest(input: {
 }) {
   if (!isAtomicMetaEnvelope(input.payload))
     throw new Error('invalid_atomic_meta_payload');
+  if (input.delivery.phone_number_id && (!input.instanceName || !input.providerInstanceId))
+    throw new Error('missing_provider_instance_identity');
   const deliveryId = String(input.delivery.id);
   const envelope = {
     deliveryId,
@@ -55,9 +58,8 @@ export function buildEvolutionRelayRequest(input: {
     routeVersion: Number(input.delivery.route_version),
     target: {
       clusterId: String(input.delivery.cluster_id),
-      instanceId: input.delivery.instance_id
-        ? String(input.delivery.instance_id)
-        : null,
+      // delivery.instance_id is a Dialogy FK, not the Evolution Instance.id.
+      instanceId: input.providerInstanceId,
       instanceName: input.instanceName,
       workspaceId: input.delivery.workspace_id
         ? String(input.delivery.workspace_id)

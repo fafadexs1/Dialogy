@@ -8,6 +8,7 @@ import { PresenceProvider } from '@/hooks/use-online-status';
 import { AuthProvider } from '@/providers/auth-provider';
 import { ThemeProvider } from '@/providers/theme-provider';
 import { getWorkspaceLimits } from '@/lib/billing-logic';
+import { TeamReactionOverlay } from '@/components/team/team-reaction-overlay';
 import { ProductUpdateAnnouncementModal } from '@/components/product-updates/product-update-announcement';
 
 export async function AppRouteShell({ children }: { children: React.ReactNode }) {
@@ -31,6 +32,7 @@ export async function AppRouteShell({ children }: { children: React.ReactNode })
             <AuthProvider>
               <ProductUpdateAnnouncementModal />
               <PresenceProvider initialUser={user}>
+                <TeamReactionOverlay />
                 <MainAppLayout
                   billingStatus={billing?.billingStatus ?? null}
                   billingBlocked={billing?.blocked === true && billing.availability === 'available'}

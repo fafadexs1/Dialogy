@@ -4,7 +4,6 @@ import { ToolRegistry } from './tools';
 import type {
   WorkflowConnection,
   WorkflowDefinition,
-  WorkflowNode,
   WorkflowStartInput,
 } from './types';
 import { isRecord, mergeStatePatch } from './utils';
@@ -18,6 +17,30 @@ export type WorkflowBlockTestFixture = {
 };
 
 export type WorkflowBlockTestFixtures = Record<string, WorkflowBlockTestFixture>;
+
+export type WorkflowTestChatMessage = {
+  id: string;
+  nodeId?: string;
+  nodeType?: string;
+  role: 'bot' | 'user' | 'system';
+  text: string;
+  type?: 'text' | 'options' | 'input' | 'media' | 'handoff' | 'error';
+  options?: Array<{ id: string; label: string; value: string }>;
+  timestamp: string;
+};
+
+export type WorkflowTestExecutionResult = {
+  success: boolean;
+  input?: Record<string, unknown>;
+  executionId?: string;
+  status?: string;
+  resumeToken?: string;
+  waitingNodeId?: string;
+  messages?: WorkflowTestChatMessage[];
+  variables?: Record<string, unknown>;
+  nodeResults?: Record<string, unknown>;
+  error?: string;
+};
 
 export type WorkflowBlockTestBlocker = {
   code:
@@ -53,7 +76,7 @@ export type PreparedWorkflowBlockTest = {
 };
 
 export type WorkflowBlockTestSideEffectRecord = {
-  kind: 'message_delivery' | 'handoff';
+  kind: 'message_delivery' | 'media_delivery' | 'handoff';
   nodeId: string;
   simulated: true;
   characterCount?: number;
@@ -68,6 +91,11 @@ export function createWorkflowBlockTestSideEffectAdapters(): {
   dependencies: {
     resolveToolRegistry: NonNullable<WorkflowHandlerDependencies['resolveToolRegistry']>;
     sendResponse: NonNullable<WorkflowHandlerDependencies['sendResponse']>;
+    sendMedia: NonNullable<WorkflowHandlerDependencies['sendMedia']>;
+    executeHttp: NonNullable<WorkflowHandlerDependencies['executeHttp']>;
+    executeIntegration: NonNullable<WorkflowHandlerDependencies['executeIntegration']>;
+    executePlatformAction: NonNullable<WorkflowHandlerDependencies['executePlatformAction']>;
+    executeToolbox: NonNullable<WorkflowHandlerDependencies['executeToolbox']>;
     handoff: NonNullable<WorkflowHandlerDependencies['handoff']>;
   };
   records: WorkflowBlockTestSideEffectRecord[];
@@ -76,6 +104,13 @@ export function createWorkflowBlockTestSideEffectAdapters(): {
   return {
     records,
     dependencies: {
+      executeToolbox: async runtimeInput => {
+        const fixtures = isRecord(runtimeInput.execution.context.studioFixtures) ? runtimeInput.execution.context.studioFixtures : {};
+        const fixtureValue = fixtures[runtimeInput.node.id];
+        const fixture = isRecord(fixtureValue) ? fixtureValue : {};
+        const output = { ...(isRecord(fixture.output) ? fixture.output : {}), simulated: true, nodeType: runtimeInput.node.type, externalEffectsExecuted: false };
+        return { status: 'success', selectedOutput: runtimeInput.node.type === 'logic.approval' ? 'approved' : 'success', output, statePatch: isRecord(fixture.statePatch) ? fixture.statePatch : { [String(runtimeInput.node.config.outputKey || 'result')]: output } };
+      },
       resolveToolRegistry: async () => new ToolRegistry(async () => false),
       sendResponse: async (message, runtimeInput) => {
         records.push({
@@ -85,6 +120,43 @@ export function createWorkflowBlockTestSideEffectAdapters(): {
           characterCount: message.length,
         });
         return { sandbox: true, delivered: false, characterCount: message.length };
+      },
+      sendMedia: async (media, runtimeInput) => {
+        records.push({
+          kind: 'media_delivery',
+          nodeId: runtimeInput.node.id,
+          simulated: true,
+          characterCount: media.caption?.length || 0,
+        });
+        return { sandbox: true, delivered: false, mediaType: media.type };
+      },
+      executeHttp: async (runtimeInput) => {
+        const outputKey = String(runtimeInput.node.config.outputKey || 'response');
+        const simulated = { sandbox: true, status: 200, data: { simulated: true } };
+        return { ...simulated, statePatch: { [outputKey]: simulated.data } };
+      },
+      executeIntegration: async (runtimeInput) => ({
+        simulated: true,
+        nodeType: runtimeInput.node.type,
+        statePatch: { [String(runtimeInput.node.config.outputKey || 'result')]: { simulated: true } },
+      }),
+      executePlatformAction: async (runtimeInput) => {
+        const selectedOutput = runtimeInput.node.type === 'dialogy.team_availability'
+          ? 'open'
+          : runtimeInput.node.type === 'dialogy.sgp_identify_customer'
+          ? 'selected'
+          : runtimeInput.node.type === 'dialogy.sgp_contract_status'
+          ? 'active'
+          : runtimeInput.node.type === 'dialogy.sgp_payment_promise'
+            ? 'status-1'
+            : 'success';
+        const value = { simulated: true, nodeType: runtimeInput.node.type };
+        return {
+          status: 'route',
+          selectedOutput,
+          output: value,
+          statePatch: { [String(runtimeInput.node.config.outputKey || 'result')]: value },
+        };
       },
       handoff: async (runtimeInput) => {
         records.push({ kind: 'handoff', nodeId: runtimeInput.node.id, simulated: true });
@@ -277,6 +349,48 @@ export function prepareWorkflowBlockTest(input: {
       targetPortId: mainInput.id,
       connectionType: 'main',
     }, ...connections];
+  }
+
+  // Handoffs are metadata-only in the sandbox. Supplying a local destination
+  // keeps the isolated graph statically valid without depending on a real team
+  // or on a confirmation value that the sandbox intentionally never consumes.
+  nodes = nodes.map((node) => node.type === 'output.handoff'
+    ? {
+      ...node,
+      config: {
+        ...node.config,
+        destinationType: 'human',
+        teamId: String(node.config.teamId || '__block_test_team__'),
+        requireConfirmation: false,
+        confirmationPath: '',
+      },
+    }
+    : node);
+
+  const danglingErrorOutputs = nodes.flatMap((node) => node.type === 'error.handler'
+    ? node.outputPorts
+      .filter((port) => port.connectionType === 'main')
+      .filter((port) => !connections.some((connection) => (
+        connection.sourceNodeId === node.id && connection.sourcePortId === port.id
+      )))
+      .map((port) => ({ node, port }))
+    : []);
+  if (danglingErrorOutputs.length > 0) {
+    const errorEnd = createWorkflowNode('output.end', {
+      id: `__block_test_error_end_${selected.id}`,
+      name: 'Fim seguro do teste isolado',
+      position: { x: selected.position.x + 900, y: selected.position.y + 620 },
+      config: { output: { sandbox: true, outcome: 'simulated_error' } },
+    });
+    nodes.push(errorEnd);
+    connections.push(...danglingErrorOutputs.map(({ node, port }, index) => ({
+      id: `__block_test_error_connection_${selected.id}_${index + 1}`,
+      sourceNodeId: node.id,
+      sourcePortId: port.id,
+      targetNodeId: errorEnd.id,
+      targetPortId: 'main',
+      connectionType: 'main' as const,
+    })));
   }
 
   let variables = structuredClone(input.variables || {});

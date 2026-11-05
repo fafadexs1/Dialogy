@@ -8,12 +8,11 @@ import {
     ChevronRight,
     Clock3,
     Download,
+    UploadCloud,
     Edit,
     Eye,
-    Filter,
     ListFilter,
     Loader2,
-    MessageCircle,
     MoreHorizontal,
     Phone,
     PhoneOff,
@@ -49,7 +48,6 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -152,7 +150,7 @@ function TableActions({ contact, onSelect }: { contact: Contact; onSelect: (acti
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white">
+                <Button variant="ghost" size="icon" aria-label={`Ações de ${contact.name || 'contato'}`} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white">
                     <MoreHorizontal className="h-4 w-4" />
                 </Button>
             </DropdownMenuTrigger>
@@ -186,6 +184,7 @@ export default function CustomerList({ user }: { user: User }) {
 
     const [loading, setLoading] = useState(true);
     const [exportingSegmentId, setExportingSegmentId] = useState<string | null>(null);
+    const [syncingSegmentId, setSyncingSegmentId] = useState<string | null>(null);
     const [refreshKey, setRefreshKey] = useState(0);
     const [isSegmentBuilderOpen, setIsSegmentBuilderOpen] = useState(false);
 
@@ -212,11 +211,6 @@ export default function CustomerList({ user }: { user: User }) {
     const totalPages = Math.ceil(totalItems / itemsPerPage);
     const startItem = totalItems > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
     const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-    const recentContacts = customers.filter((contact) => {
-        if (!contact.last_activity) return false;
-        return new Date(contact.last_activity).getTime() >= subDays(new Date(), 7).getTime();
-    }).length;
-    const withoutActivity = customers.filter((contact) => !contact.last_activity).length;
 
     const fetchData = useCallback(async () => {
         if (!user?.activeWorkspaceId) return;
@@ -258,7 +252,6 @@ export default function CustomerList({ user }: { user: User }) {
         customFields.length,
         dateCriteria,
         itemsPerPage,
-        refreshKey,
         searchTerm,
         segments.length,
         selectedSegmentId,
@@ -270,7 +263,7 @@ export default function CustomerList({ user }: { user: User }) {
         if (user?.activeWorkspaceId) {
             fetchData();
         }
-    }, [fetchData, user?.activeWorkspaceId]);
+    }, [fetchData, refreshKey, user?.activeWorkspaceId]);
 
     useEffect(() => {
         setCurrentPage(1);
@@ -355,6 +348,39 @@ export default function CustomerList({ user }: { user: User }) {
         }
     };
 
+    /**
+     * Sincroniza a lista direto como publico de Customer Match, sem CSV manual.
+     * Os contatos sobem apenas com hash SHA-256.
+     */
+    const handleSyncSegmentToGoogleAds = async (segment: Segment) => {
+        const workspaceId = user.activeWorkspaceId;
+        if (!workspaceId) return;
+        setSyncingSegmentId(segment.id);
+        try {
+            const { syncSegmentToGoogleAdsAudience } = await import('@/actions/google-ads');
+            const { result, error } = await syncSegmentToGoogleAdsAudience(workspaceId, segment.id);
+
+            if (error || !result) {
+                toast({
+                    title: 'Erro ao sincronizar público',
+                    description: error || 'Não foi possível sincronizar com o Google Ads.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            toast({
+                title: 'Público sincronizado',
+                description:
+                    `${result.uploadedCount} contato(s) enviados para "${result.userListName}"` +
+                    `${result.skippedCount > 0 ? `; ${result.skippedCount} sem e-mail ou telefone foram ignorados.` : '.'}` +
+                    ' O Google leva algumas horas para processar a lista.',
+            });
+        } finally {
+            setSyncingSegmentId(null);
+        }
+    };
+
     const handleAction = useCallback(async (action: ContactAction, contact: Contact) => {
         setSelectedContact(contact);
         switch (action) {
@@ -404,250 +430,59 @@ export default function CustomerList({ user }: { user: User }) {
     };
 
     return (
-        <div className="flex h-full flex-1 overflow-hidden bg-slate-50 text-slate-900 dark:bg-black dark:text-zinc-100">
-            <aside className="hidden w-[292px] shrink-0 border-r border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-[#050807] lg:flex lg:flex-col">
-                <div className="mb-6 flex items-center justify-between">
-                    <div>
-                        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-300">CRM Dialogy</p>
-                        <h2 className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">Listas</h2>
-                    </div>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-200 dark:hover:bg-emerald-400/20 dark:hover:text-white"
-                        onClick={() => setIsSegmentBuilderOpen(true)}
-                    >
-                        <Plus className="h-4 w-4" />
-                    </Button>
-                </div>
-
-                <Button
-                    variant="ghost"
-                    className={cn(
-                        'mb-5 h-12 w-full justify-start rounded-xl border px-4 text-sm font-semibold',
-                        selectedSegmentId === null
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-400/15 dark:text-emerald-100'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
-                    )}
-                    onClick={() => setSelectedSegmentId(null)}
-                >
-                    <Users className="mr-3 h-4 w-4" />
-                    Todos os contatos
-                    <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-white/10 dark:text-zinc-300">{totalItems}</span>
-                </Button>
-
-                <div className="mb-5">
-                    <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">
-                        <CalendarClock className="h-3.5 w-3.5" />
-                        Atalhos por data
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                        {DATE_FILTERS.map((filter) => {
-                            const Icon = filter.icon;
-                            const isActive = dateFilter === filter.id;
-                            return (
-                                <button
-                                    key={filter.id}
-                                    type="button"
-                                    onClick={() => setDateFilter(filter.id)}
-                                    className={cn(
-                                        'rounded-xl border p-3 text-left transition',
-                                        isActive
-                                            ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-400/45 dark:bg-emerald-400/15 dark:text-white'
-                                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:border-white/20 dark:hover:bg-white/[0.06] dark:hover:text-zinc-100'
-                                    )}
-                                >
-                                    <Icon className={cn('mb-2 h-4 w-4', isActive ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-400 dark:text-zinc-500')} />
-                                    <div className="text-xs font-bold">{filter.label}</div>
-                                    <div className="mt-0.5 text-[10px] text-slate-500 dark:text-zinc-500">{filter.description}</div>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                <div className="mb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">
-                    <span>Listas inteligentes</span>
-                    <span>{segments.length}</span>
-                </div>
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                    {segments.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.02] dark:text-zinc-500">
-                            Crie listas por tag, vendedor, data de contato ou campos personalizados.
+        <div className="flex h-full flex-1 overflow-hidden bg-[#f4f6f2] text-slate-900 dark:bg-[#090e0c] dark:text-zinc-100">
+            <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#f4f6f2] dark:bg-[#090e0c]">
+                <div className="shrink-0 px-4 pt-4 lg:px-7 lg:pt-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <h1 className="text-[23px] font-semibold tracking-[-0.04em] text-[#132b20] dark:text-white">Contatos</h1>
+                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">{totalItems.toLocaleString('pt-BR')}</span>
                         </div>
-                    ) : segments.map((segment) => (
-                        <div key={segment.id} className="group relative">
-                            <Button
-                                variant="ghost"
-                                className={cn(
-                                    'h-auto min-h-12 w-full justify-start rounded-xl border px-4 py-3 pr-10 text-left text-sm font-semibold',
-                                    selectedSegmentId === segment.id
-                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-400/15 dark:text-emerald-100'
-                                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
-                                )}
-                                onClick={() => setSelectedSegmentId(segment.id)}
-                            >
-                                <ListFilter className="mr-3 h-4 w-4 shrink-0" />
-                                <span className="truncate">{segment.name}</span>
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="absolute right-2 top-1/2 h-7 w-7 -translate-y-1/2 rounded-lg text-slate-400 opacity-0 hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:text-zinc-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-300"
-                                onClick={(event) => handleDeleteSegment(event, segment.id)}
-                            >
-                                <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                        </div>
-                    ))}
-                </div>
-            </aside>
-
-            <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-black">
-                <div className="shrink-0 bg-slate-50 px-5 pb-0 pt-5 dark:bg-black lg:px-7">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                        <div>
-                            <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">Lista do CRM</h1>
-                            <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
-                                Organize contatos por comportamento, responsavel e recencia de atendimento.
-                            </p>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                            {selectedSegment && (
-                                <Button
-                                    variant="outline"
-                                    className="h-10 rounded-lg border-slate-200 bg-white px-4 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200 dark:hover:bg-white/10 dark:hover:text-white"
-                                    disabled={exportingSegmentId === selectedSegment.id}
-                                    onClick={() => handleExportSegment(selectedSegment)}
-                                >
-                                    {exportingSegmentId === selectedSegment.id
-                                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        : <Download className="mr-2 h-4 w-4" />}
-                                    Exportar para Google Ads
-                                </Button>
-                            )}
-                            <Button
-                                variant="outline"
-                                className="h-10 rounded-lg border-slate-200 bg-white px-4 text-emerald-700 shadow-sm hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-100 dark:hover:bg-emerald-400/20 dark:hover:text-white"
-                                onClick={() => setIsSegmentBuilderOpen(true)}
-                            >
-                                <Filter className="mr-2 h-4 w-4" />
-                                Nova lista inteligente
-                            </Button>
+                        <div className="flex items-center gap-2">
                             <CrmSettings user={user}>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    title="Configuracoes do CRM"
-                                    className="h-10 w-10 rounded-lg border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white"
-                                >
-                                    <Settings className="h-4 w-4" />
-                                </Button>
+                                <Button variant="outline" size="icon" title="Configurações do CRM" aria-label="Configurações do CRM" className="h-9 w-9 rounded-xl border-[#dfe8dd] bg-white text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300"><Settings className="h-4 w-4" /></Button>
                             </CrmSettings>
-                            <Button
-                                className="h-10 rounded-lg bg-emerald-600 px-5 font-bold text-white shadow-sm hover:bg-emerald-700 dark:bg-white dark:text-black dark:hover:bg-emerald-100"
-                                onClick={() => { setEditingContact(null); setIsAddEditModalOpen(true); }}
-                            >
-                                <Plus className="mr-2 h-4 w-4" />
-                                Novo contato
-                            </Button>
+                            <Button className="h-9 rounded-xl bg-[#164e34] px-4 text-xs font-semibold text-white hover:bg-[#0b6b42] dark:bg-emerald-400 dark:text-[#092015] dark:hover:bg-emerald-300" onClick={() => { setEditingContact(null); setIsAddEditModalOpen(true); }}><Plus className="mr-1.5 h-4 w-4" /> Novo contato</Button>
                         </div>
                     </div>
 
-                    <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#070b09]">
-                        <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2.5 dark:border-white/10">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200">
-                                    <ListFilter className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-                                    {selectedSegment?.name || 'Todos os contatos'}
-                                </span>
-                                {dateFilter !== 'all' && (
-                                    <span className="text-xs text-slate-500 dark:text-zinc-500">
-                                        {DATE_FILTERS.find((filter) => filter.id === dateFilter)?.description}
-                                    </span>
-                                )}
-                            </div>
-                            <div className="lg:hidden">
-                                <Select value={selectedSegmentId || 'all'} onValueChange={(value) => setSelectedSegmentId(value === 'all' ? null : value)}>
-                                    <SelectTrigger className="h-9 rounded-lg border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white">
-                                        <SelectValue placeholder="Listas" />
-                                    </SelectTrigger>
-                                    <SelectContent className="border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-100">
-                                        <SelectItem value="all">Todos os contatos</SelectItem>
-                                        {segments.map((segment) => (
-                                            <SelectItem key={segment.id} value={segment.id}>{segment.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[18px] border border-[#e1e9df] bg-white p-2 shadow-[0_10px_28px_-25px_rgba(14,47,27,.35)] dark:border-white/10 dark:bg-[#121b16]">
+                        <Select value={selectedSegmentId || 'all'} onValueChange={(value) => setSelectedSegmentId(value === 'all' ? null : value)}>
+                            <SelectTrigger aria-label="Selecionar lista" className="h-9 w-full shrink-0 rounded-xl border-[#dfe8dd] bg-[#f7f9f5] text-xs font-semibold text-[#23402d] dark:border-white/10 dark:bg-white/[0.04] dark:text-white sm:w-[215px]">
+                                <ListFilter className="mr-2 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" /><SelectValue placeholder="Selecionar lista" />
+                            </SelectTrigger>
+                            <SelectContent className="border-[#dfe8dd] bg-white text-slate-700 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-100">
+                                <SelectItem value="all">Todos os contatos</SelectItem>
+                                {segments.map((segment) => <SelectItem key={segment.id} value={segment.id}>{segment.name}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <div className="relative min-w-[190px] flex-1">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <Input type="search" placeholder="Buscar nome, telefone ou e-mail" aria-label="Buscar contatos" className="h-9 rounded-xl border-[#dfe8dd] bg-white pl-9 text-xs dark:border-white/10 dark:bg-white/[0.04] dark:text-white" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
                         </div>
+                        <Button variant="outline" size="sm" className="h-9 shrink-0 rounded-xl border-[#dfe8dd] bg-white px-3 text-xs font-semibold text-emerald-800 dark:border-white/10 dark:bg-white/[0.04] dark:text-emerald-200" onClick={() => setIsSegmentBuilderOpen(true)}><Plus className="mr-1.5 h-3.5 w-3.5" /> Nova lista</Button>
+                        {selectedSegment && <DropdownMenu>
+                            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" title="Ações da lista" aria-label="Ações da lista" className="h-9 w-9 shrink-0 rounded-xl border-[#dfe8dd] bg-white dark:border-white/10 dark:bg-white/[0.04]"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-60 border-[#dfe8dd] bg-white dark:border-white/10 dark:bg-zinc-950">
+                                <DropdownMenuItem disabled={exportingSegmentId === selectedSegment.id} onClick={() => handleExportSegment(selectedSegment)}><Download className="mr-2 h-4 w-4" /> Baixar CSV</DropdownMenuItem>
+                                <DropdownMenuItem disabled={syncingSegmentId === selectedSegment.id} onClick={() => handleSyncSegmentToGoogleAds(selectedSegment)}><UploadCloud className="mr-2 h-4 w-4" /> Sincronizar com Google Ads</DropdownMenuItem>
+                                <DropdownMenuItem className="text-rose-600 focus:text-rose-700" onClick={(event) => handleDeleteSegment(event, selectedSegment.id)}><Trash2 className="mr-2 h-4 w-4" /> Excluir lista</DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>}
+                    </div>
 
-                        <div className="flex flex-col divide-y divide-slate-200 dark:divide-white/10 xl:flex-row xl:divide-x xl:divide-y-0">
-                            <div className="flex min-w-[280px] flex-1 items-center px-4 py-3">
-                                <div className="relative w-full max-w-md">
-                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-zinc-500" />
-                                <Input
-                                    type="text"
-                                    placeholder="Buscar por nome, telefone, JID ou email..."
-                                    className="h-10 rounded-lg border-slate-200 bg-white pl-10 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-400 focus-visible:ring-emerald-400/20 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:placeholder:text-zinc-500"
-                                    value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
-                                />
-                                </div>
-                            </div>
-
-                            <div className="grid shrink-0 grid-cols-3 divide-x divide-slate-200 dark:divide-white/10">
-                                <div className="min-w-[128px] px-4 py-3">
-                                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Resultado</p>
-                                    <p className="mt-0.5 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><Users className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />{totalItems}</p>
-                                </div>
-                                <div className="min-w-[142px] px-4 py-3">
-                                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Ativos na pagina</p>
-                                    <p className="mt-0.5 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><MessageCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />{recentContacts}</p>
-                                </div>
-                                <div className="min-w-[178px] px-4 py-3">
-                                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-zinc-500">Sem atividade na pagina</p>
-                                    <p className="mt-0.5 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><PhoneOff className="h-4 w-4 text-slate-400 dark:text-zinc-400" />{withoutActivity}</p>
-                                </div>
-                            </div>
-
-                            <div className="flex shrink-0 gap-2 overflow-x-auto px-4 py-3">
-                                {DATE_FILTERS.map((filter) => {
-                                    const Icon = filter.icon;
-                                    const isActive = dateFilter === filter.id;
-                                    return (
-                                        <Button
-                                            key={filter.id}
-                                            variant="outline"
-                                            className={cn(
-                                                'h-10 shrink-0 rounded-lg border px-3.5 text-sm',
-                                                isActive
-                                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-400/40 dark:bg-emerald-400/15 dark:text-emerald-100'
-                                                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white'
-                                            )}
-                                            onClick={() => setDateFilter(filter.id)}
-                                        >
-                                            <Icon className="mr-2 h-4 w-4" />
-                                            {filter.label}
-                                        </Button>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                    <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1">
+                        <span className="hidden shrink-0 pr-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400 md:inline">Atividade</span>
+                        {DATE_FILTERS.map((filter) => { const Icon = filter.icon; const active = dateFilter === filter.id; return <Button key={filter.id} variant="outline" size="sm" className={cn('h-8 shrink-0 rounded-full px-3 text-[11px] font-semibold', active ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-200' : 'border-transparent bg-transparent text-slate-500 hover:border-[#dfe8dd] hover:bg-white dark:text-zinc-400 dark:hover:border-white/10 dark:hover:bg-white/[0.04]')} onClick={() => setDateFilter(filter.id)}><Icon className="mr-1.5 h-3.5 w-3.5" />{filter.label}</Button>; })}
+                        {selectedSegment && <span className="ml-auto hidden shrink-0 text-xs text-slate-400 lg:inline">Lista: {selectedSegment.name}</span>}
                     </div>
                 </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-7">
-                    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#070b09]">
-                        <Table>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-2 lg:px-7 lg:pb-5 lg:pt-2">
+                    <section className="overflow-hidden rounded-[22px] border border-[#e1e9df] bg-white shadow-[0_12px_36px_-28px_rgba(14,47,27,.35)] dark:border-white/10 dark:bg-[#121b16]">
+                        <div className="hidden overflow-x-auto xl:block"><Table className="min-w-[880px]">
                             <TableHeader className="bg-slate-50/80 dark:bg-white/[0.04]">
                                 <TableRow className="border-slate-200 hover:bg-transparent dark:border-white/10">
-                                    <TableHead className="w-12 text-slate-400 dark:text-zinc-500">
-                                        <Checkbox className="border-slate-300 data-[state=checked]:border-emerald-500 data-[state=checked]:bg-emerald-600 dark:border-white/20 dark:data-[state=checked]:border-emerald-400 dark:data-[state=checked]:bg-emerald-500" />
-                                    </TableHead>
                                     <TableHead className="min-w-[280px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Contato</TableHead>
-                                    <TableHead className="min-w-[190px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Canal</TableHead>
                                     <TableHead className="min-w-[180px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Responsavel</TableHead>
                                     <TableHead className="min-w-[180px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Tags</TableHead>
                                     <TableHead className="min-w-[210px] text-xs font-semibold text-slate-600 dark:text-zinc-400">Ultima atividade</TableHead>
@@ -657,14 +492,14 @@ export default function CustomerList({ user }: { user: User }) {
                             <TableBody>
                                 {loading ? (
                                     <TableRow className="border-slate-200 hover:bg-slate-50/60 dark:border-white/10 dark:hover:bg-white/[0.02]">
-                                        <TableCell colSpan={7} className="h-56 text-center">
+                                        <TableCell colSpan={5} className="h-56 text-center">
                                             <Loader2 className="mx-auto h-7 w-7 animate-spin text-emerald-600 dark:text-emerald-300" />
                                             <p className="mt-3 text-sm text-slate-500 dark:text-zinc-500">Carregando contatos...</p>
                                         </TableCell>
                                     </TableRow>
                                 ) : customers.length === 0 ? (
                                     <TableRow className="border-slate-200 hover:bg-slate-50/60 dark:border-white/10 dark:hover:bg-white/[0.02]">
-                                        <TableCell colSpan={7} className="h-56 text-center">
+                                        <TableCell colSpan={5} className="h-56 text-center">
                                             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-400 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-500">
                                                 <Search className="h-6 w-6" />
                                             </div>
@@ -679,9 +514,6 @@ export default function CustomerList({ user }: { user: User }) {
                                             key={customer.id}
                                             className="group border-slate-200 transition-colors hover:bg-emerald-50/50 dark:border-white/10 dark:hover:bg-emerald-400/[0.045]"
                                         >
-                                            <TableCell className="py-3">
-                                                <Checkbox className="border-slate-300 data-[state=checked]:border-emerald-500 data-[state=checked]:bg-emerald-600 dark:border-white/20 dark:data-[state=checked]:border-emerald-400 dark:data-[state=checked]:bg-emerald-500" />
-                                            </TableCell>
                                             <TableCell className="py-3">
                                                 <div className="flex items-center gap-3">
                                                     <Avatar className="h-10 w-10 border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/[0.04]">
@@ -703,12 +535,6 @@ export default function CustomerList({ user }: { user: User }) {
                                                             <span className="truncate">{getPhoneLabel(customer)}</span>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="py-3">
-                                                <div className="inline-flex max-w-[260px] items-center gap-2 text-xs font-semibold text-slate-600 dark:text-zinc-300">
-                                                    <MessageCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
-                                                    <span className="truncate">{customer.phone_number_jid || customer.phone || 'Sem canal'}</span>
                                                 </div>
                                             </TableCell>
                                             <TableCell className="py-3">
@@ -762,7 +588,24 @@ export default function CustomerList({ user }: { user: User }) {
                                     );
                                 })}
                             </TableBody>
-                        </Table>
+                        </Table></div>
+
+                        <div className="divide-y divide-[#e9eee7] dark:divide-white/10 xl:hidden">
+                            {loading ? <div className="flex min-h-36 items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> Carregando contatos...</div>
+                                : customers.length === 0 ? <div className="flex min-h-36 flex-col items-center justify-center px-4 text-center"><Search className="mb-2 h-5 w-5 text-emerald-600" /><p className="text-sm font-semibold text-[#142d20] dark:text-white">Nenhum contato encontrado</p><p className="mt-1 text-xs text-slate-500">Ajuste a busca ou os filtros.</p></div>
+                                    : customers.map((customer) => {
+                                        const activity = formatLastActivity(customer.last_activity);
+                                        return <article key={customer.id} className="p-4 transition-colors hover:bg-emerald-50/40 dark:hover:bg-white/[0.025]">
+                                            <div className="flex items-start gap-3">
+                                                <Avatar className="h-10 w-10 shrink-0 border border-emerald-100 dark:border-white/10"><AvatarImage src={customer.avatar_url || undefined} alt={customer.name} /><AvatarFallback className="bg-emerald-50 font-semibold text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200">{getInitials(customer.name)}</AvatarFallback></Avatar>
+                                                <div className="min-w-0 flex-1"><button type="button" onClick={() => handleAction('view', customer)} className="block max-w-full truncate text-left text-sm font-semibold text-[#142d20] hover:text-emerald-700 dark:text-white dark:hover:text-emerald-300">{customer.name || 'Contato sem nome'}</button><p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400"><Phone className="h-3 w-3 shrink-0" /><span className="truncate">{getPhoneLabel(customer)}</span></p></div>
+                                                <TableActions contact={customer} onSelect={handleAction} />
+                                            </div>
+                                            <div className="mt-3 flex flex-wrap items-center gap-2 pl-[52px] text-[11px]"><span className="inline-flex items-center gap-1 text-slate-500 dark:text-zinc-400"><UserRound className="h-3 w-3" />{customer.owner?.name || 'Sem responsável'}</span><span className={cn('rounded-full border px-2 py-0.5 font-medium', activity.tone)}>{activity.label}</span></div>
+                                            {customer.tags?.length ? <div className="mt-2 flex flex-wrap gap-1 pl-[52px]">{customer.tags.slice(0, 3).map((tag) => <Badge key={tag.id} style={getTagStyle(tag.value)} className="rounded-full border px-2 py-0.5 text-[10px] font-medium">{tag.label}</Badge>)}{customer.tags.length > 3 && <span className="text-[11px] text-slate-400">+{customer.tags.length - 3}</span>}</div> : null}
+                                        </article>;
+                                    })}
+                        </div>
 
                         <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.025] dark:text-zinc-500 lg:flex-row lg:items-center lg:justify-between">
                             <span>{`Mostrando ${startItem}-${endItem} de ${totalItems} contatos`}</span>

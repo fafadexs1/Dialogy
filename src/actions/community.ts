@@ -109,7 +109,7 @@ export async function getCommunityPostCommentsAction(postId: string): Promise<{
   const userId = await authenticatedUserId();
   if (!userId || !UUID_PATTERN.test(postId)) return { success: false, error: 'Publicação inválida.' };
   const result = await db.query(`
-    SELECT cpc.*, u.full_name, u.avatar_url, w.name AS workspace_name
+    SELECT cpc.*, u.full_name, u.avatar_url, u.is_superadmin, w.name AS workspace_name, w.avatar_url AS workspace_avatar_url
     FROM public.community_post_comments cpc
     JOIN public.users u ON u.id = cpc.user_id
     LEFT JOIN public.workspaces w ON w.id = u.last_active_workspace_id
@@ -120,7 +120,14 @@ export async function getCommunityPostCommentsAction(postId: string): Promise<{
   return { success: true, comments: result.rows.map((row): ProductUpdateComment => ({
     id: row.id, updateId: row.post_id, content: row.content,
     createdAt: new Date(row.created_at).toISOString(), isEdited: false, isMine: row.user_id === userId,
-    author: { id: row.user_id, name: row.full_name, avatarUrl: row.avatar_url, workspaceName: row.workspace_name },
+    author: {
+      id: row.user_id,
+      name: row.full_name,
+      avatarUrl: row.avatar_url,
+      isSuperAdmin: Boolean(row.is_superadmin),
+      workspaceName: row.workspace_name,
+      workspaceAvatarUrl: row.workspace_avatar_url,
+    },
   })) };
 }
 
@@ -137,7 +144,7 @@ export async function addCommunityPostCommentAction(postId: string, content: str
       SELECT id, $2, $3 FROM public.community_posts WHERE id = $1 AND status = 'published' AND deleted_at IS NULL
       RETURNING *
     )
-    SELECT inserted.*, u.full_name, u.avatar_url, w.name AS workspace_name
+    SELECT inserted.*, u.full_name, u.avatar_url, u.is_superadmin, w.name AS workspace_name, w.avatar_url AS workspace_avatar_url
     FROM inserted JOIN public.users u ON u.id = inserted.user_id
     LEFT JOIN public.workspaces w ON w.id = u.last_active_workspace_id
   `, [postId, userId, body]);
@@ -147,7 +154,14 @@ export async function addCommunityPostCommentAction(postId: string, content: str
   return { success: true, comment: {
     id: row.id, updateId: row.post_id, content: row.content,
     createdAt: new Date(row.created_at).toISOString(), isEdited: false, isMine: true,
-    author: { id: userId, name: row.full_name, avatarUrl: row.avatar_url, workspaceName: row.workspace_name },
+    author: {
+      id: userId,
+      name: row.full_name,
+      avatarUrl: row.avatar_url,
+      isSuperAdmin: Boolean(row.is_superadmin),
+      workspaceName: row.workspace_name,
+      workspaceAvatarUrl: row.workspace_avatar_url,
+    },
   } };
 }
 
@@ -161,4 +175,103 @@ export async function deleteCommunityPostCommentAction(commentId: string): Promi
   if (!result.rowCount) return { success: false, error: 'Comentário não encontrado.' };
   refreshCommunity();
   return { success: true };
+}
+
+export async function recordPostViewAction(input: {
+  id: string;
+  kind: 'community' | 'update';
+}): Promise<{ success: boolean }> {
+  const userId = await authenticatedUserId();
+  if (!userId || !UUID_PATTERN.test(input.id)) return { success: false };
+
+  try {
+    if (input.kind === 'community') {
+      await db.query(`
+        INSERT INTO public.community_post_views (post_id, user_id, viewed_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (post_id, user_id) DO NOTHING
+      `, [input.id, userId]);
+    } else {
+      await db.query(`
+        INSERT INTO public.product_update_reads (update_id, user_id, read_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (update_id, user_id) DO NOTHING
+      `, [input.id, userId]);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('[COMMUNITY] Error recording view:', error);
+    return { success: false };
+  }
+}
+
+export async function getPostViewersAction(input: {
+  id: string;
+  kind: 'community' | 'update';
+}): Promise<{
+  success: boolean;
+  viewers?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    avatarUrl: string | null;
+    viewedAt: string;
+  }>;
+  error?: string;
+}> {
+  const userId = await authenticatedUserId();
+  if (!userId) return { success: false, error: 'Não autenticado' };
+
+  // STRICT: Apenas administrador do sistema pode ver quem visualizou
+  const userRes = await db.query('SELECT is_superadmin FROM public.users WHERE id = $1', [userId]);
+  if (!userRes.rows[0]?.is_superadmin) {
+    return { success: false, error: 'Acesso restrito ao administrador do sistema.' };
+  }
+
+  if (!UUID_PATTERN.test(input.id)) {
+    return { success: false, error: 'Identificador inválido.' };
+  }
+
+  try {
+    if (input.kind === 'community') {
+      const result = await db.query(`
+        SELECT u.id, u.full_name, u.email, u.avatar_url, cpv.viewed_at
+        FROM public.community_post_views cpv
+        JOIN public.users u ON u.id = cpv.user_id
+        WHERE cpv.post_id = $1
+        ORDER BY cpv.viewed_at DESC
+      `, [input.id]);
+      return {
+        success: true,
+        viewers: result.rows.map(row => ({
+          id: row.id,
+          name: row.full_name || row.email || 'Usuário',
+          email: row.email,
+          avatarUrl: row.avatar_url,
+          viewedAt: new Date(row.viewed_at).toISOString(),
+        })),
+      };
+    } else {
+      const result = await db.query(`
+        SELECT u.id, u.full_name, u.email, u.avatar_url, pur.read_at AS viewed_at
+        FROM public.product_update_reads pur
+        JOIN public.users u ON u.id = pur.user_id
+        WHERE pur.update_id = $1
+        ORDER BY pur.read_at DESC
+      `, [input.id]);
+      return {
+        success: true,
+        viewers: result.rows.map(row => ({
+          id: row.id,
+          name: row.full_name || row.email || 'Usuário',
+          email: row.email,
+          avatarUrl: row.avatar_url,
+          viewedAt: new Date(row.viewed_at).toISOString(),
+        })),
+      };
+    }
+  } catch (error) {
+    console.error('[COMMUNITY] Error getting viewers:', error);
+    return { success: false, error: 'Não foi possível carregar os visualizadores.' };
+  }
 }

@@ -33,6 +33,7 @@ type CopilotChatRow = {
     is_autopilot_active: boolean | null;
     autopilot_config_id: string | null;
     assigned_system_agent_id: string | null;
+    copilot_mode: string | null;
 };
 
 async function getSessionUserId(): Promise<string | null> {
@@ -43,7 +44,7 @@ async function getSessionUserId(): Promise<string | null> {
 
 async function loadCopilotChat(chatId: string): Promise<CopilotChatRow | null> {
     const { rows } = await db.query<CopilotChatRow>(
-        `SELECT id, workspace_id, status, is_autopilot_active, autopilot_config_id, assigned_system_agent_id
+        `SELECT id, workspace_id, status, is_autopilot_active, autopilot_config_id, assigned_system_agent_id, copilot_mode
            FROM chats
           WHERE id = $1
           LIMIT 1`,
@@ -121,20 +122,26 @@ export async function requestCopilotSuggestion(chatId: string): Promise<{
     if (!access.ok) return { success: false, error: access.error };
 
     const chat = await loadCopilotChat(chatId);
+    if (chat?.status === 'encerrados') {
+        return { success: false, error: 'Nao e possivel usar o copiloto em uma conversa encerrada.' };
+    }
     if (!chat) return { success: false, error: 'Conversa não encontrada.' };
-    if (!chat.is_autopilot_active || !chat.autopilot_config_id) {
+    if (!chat.is_autopilot_active || !chat.autopilot_config_id || chat.copilot_mode !== 'suggest' || chat.assigned_system_agent_id) {
         return { success: false, error: 'Ative o copiloto nesta conversa antes de pedir uma sugestão.' };
     }
 
     const { rows } = await db.query(
-        `SELECT id, content, instance_name
+        `SELECT id, COALESCE(NULLIF(transcription, ''), content, '') AS content, instance_name
            FROM messages
           WHERE chat_id = $1
             AND from_me = FALSE
-            AND COALESCE(content, '') <> ''
-          ORDER BY created_at DESC
+            AND workspace_id = $2
+            AND COALESCE(type, '') <> 'system'
+            AND COALESCE(metadata->>'isInternalNote', 'false') <> 'true'
+            AND LOWER(COALESCE(api_message_status, '')) NOT IN ('internal', 'failed', 'error')
+          ORDER BY created_at DESC, id DESC
           LIMIT 1`,
-        [chatId],
+        [chatId, chat.workspace_id],
     );
     const lastInbound = rows[0];
     if (!lastInbound) {
@@ -170,6 +177,7 @@ async function queueAutopilotTurn(input: {
             messageId: input.messageId,
             lastMessageContent: input.content,
             instanceName: input.instanceName,
+            suggestionRequest: { agentId: input.chat.autopilot_config_id! },
         });
         return;
     }
@@ -191,6 +199,7 @@ async function queueAutopilotTurn(input: {
         input.content,
         input.instanceName,
         input.messageId,
+        { agentId: input.chat.autopilot_config_id! },
     );
 }
 
@@ -209,6 +218,14 @@ export async function activateChatCopilot(chatId: string, agentId: string): Prom
     const chat = await loadCopilotChat(chatId);
     if (!chat) return { success: false, error: 'Conversa não encontrada.' };
 
+    if (chat.assigned_system_agent_id) {
+        return { success: false, error: 'Assuma o atendimento antes de ativar o copiloto.' };
+    }
+
+    if (chat?.status === 'encerrados') {
+        return { success: false, error: 'Nao e possivel ativar o copiloto em uma conversa encerrada.' };
+    }
+
     const agent = await db.query(
         `SELECT id FROM autopilot_configs
           WHERE id = $1 AND workspace_id = $2 AND is_active = TRUE
@@ -220,15 +237,22 @@ export async function activateChatCopilot(chatId: string, agentId: string): Prom
     }
 
     try {
-        await db.query(
+        const updateResult = await db.query(
             `UPDATE chats
                 SET is_autopilot_active = TRUE,
                     autopilot_config_id = $1,
                     copilot_mode = 'suggest',
                     updated_at = clock_timestamp()
-              WHERE id = $2`,
-            [agentId, chatId],
+              WHERE id = $2
+                AND workspace_id = $3
+                AND assigned_system_agent_id IS NULL
+                AND status <> 'encerrados'`,
+            [agentId, chatId, chat.workspace_id],
         );
+        if (updateResult.rowCount === 0) {
+            return { success: false, error: 'Nao e possivel ativar o copiloto em uma conversa encerrada.' };
+        }
+        await discardPendingCopilotSuggestions(chatId);
         revalidatePath('/', 'layout');
     } catch (error) {
         console.error('[COPILOT] Failed to activate copilot:', error);
@@ -254,7 +278,7 @@ export async function deactivateChatCopilot(chatId: string): Promise<{
                 SET is_autopilot_active = FALSE,
                     copilot_mode = 'off',
                     updated_at = clock_timestamp()
-              WHERE id = $1`,
+              WHERE id = $1 AND copilot_mode = 'suggest' AND assigned_system_agent_id IS NULL`,
             [chatId],
         );
         await discardPendingCopilotSuggestions(chatId);

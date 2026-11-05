@@ -6,6 +6,8 @@ import { getServerLocale } from '@/i18n/server';
 import { I18nProvider } from '@/i18n/i18n-provider';
 import { buildRootMetadata } from '@/lib/seo/metadata';
 import { JsonLd, getOrganizationSchema, getWebSiteSchema } from '@/lib/seo/schema';
+import { PwaInstallPrompt } from '@/components/pwa/install-prompt';
+import { ServiceWorkerRegistration } from '@/components/pwa/service-worker-registration';
 
 export async function generateMetadata(): Promise<Metadata> {
   return buildRootMetadata();
@@ -15,6 +17,7 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
+  interactiveWidget: 'resizes-content',
 };
 
 export default async function RootLayout({
@@ -37,6 +40,8 @@ export default async function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap" rel="stylesheet" />
       </head>
       <body className="h-full font-body antialiased" suppressHydrationWarning>
+        <ServiceWorkerRegistration />
+        <PwaInstallPrompt />
         <JsonLd id="dialogy-organization-schema" data={organizationSchema} />
         <JsonLd id="dialogy-website-schema" data={websiteSchema} />
         <I18nProvider initialLocale={locale}>

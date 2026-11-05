@@ -16,8 +16,14 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function normalizeRuntimeError(error: unknown, fallbackCode = 'UNEXPECTED_ERROR') {
   const candidate = error as RuntimeError | null;
+  const rawCode = candidate?.code ?? (error as any)?.status ?? (error as any)?.statusCode;
+  const code = typeof rawCode === 'string' && rawCode.trim().length > 0
+    ? rawCode.trim()
+    : typeof rawCode === 'number'
+    ? `ERROR_${rawCode}`
+    : fallbackCode;
   return {
-    code: candidate?.code || fallbackCode,
+    code,
     message: error instanceof Error ? error.message : String(error || 'Unknown error'),
     retryable: candidate?.retryable === true,
     details: isRecord(candidate?.details) ? candidate.details : undefined,
@@ -72,6 +78,30 @@ export function mergeStatePatch(
     }
   }
   return next;
+}
+
+export function statePatchAtPath(path: string, value: unknown): Record<string, unknown> {
+  const blocked = new Set(['__proto__', 'prototype', 'constructor']);
+  const segments = path
+    .replace(/^\{\{\s*|\s*\}\}$/g, '')
+    .replace(/^\$\./, '')
+    .trim()
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0 || segments.some((segment) => blocked.has(segment))) return {};
+  const patch: Record<string, unknown> = {};
+  let cursor = patch;
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) {
+      cursor[segment] = structuredClone(value);
+      return;
+    }
+    const child: Record<string, unknown> = {};
+    cursor[segment] = child;
+    cursor = child;
+  });
+  return patch;
 }
 
 export function readPath(source: unknown, path: string): unknown {

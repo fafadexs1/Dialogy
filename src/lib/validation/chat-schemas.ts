@@ -13,6 +13,10 @@ export const closeChatSchema = z.object({
 });
 
 export const transferChatSchema = z.object({
+  operationId: z.string().min(1).max(200).optional(),
+  expectedAgentId: z.string().nullable().optional(),
+  expectedTeamId: z.string().nullable().optional(),
+  expectedSystemAgentId: z.string().nullable().optional(),
   chatId: z.string().min(1),
   teamId: z.string().min(1).optional(),
   agentId: z.string().min(1).optional(),

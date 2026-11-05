@@ -11,6 +11,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   return NextResponse.json({
     publicKey: widget.publicKey, name: widget.name, title: widget.title, welcomeMessage: widget.welcomeMessage,
     primaryColor: widget.primaryColor, position: widget.position, requireName: widget.requireName, requireEmail: widget.requireEmail,
+  }, {
+    headers: {
+      'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600',
+    },
   });
 }
 

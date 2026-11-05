@@ -105,6 +105,8 @@ export type NodeHandler = {
   inputSchema?: z.ZodType<Record<string, unknown>>;
   configSchema?: z.ZodType<Record<string, unknown>>;
   execute: (input: NodeRuntimeInput) => Promise<NodeExecutionResult>;
+  /** End a suspended child session without executing or replaying business operations. Must be idempotent. */
+  stop?: (input: Pick<NodeRuntimeInput, 'execution' | 'workflow' | 'node'> & { reason: 'cancelled' | 'expired' | 'failed' }) => Promise<void>;
 };
 
 export type NodeHandlerRegistry = {
@@ -112,6 +114,7 @@ export type NodeHandlerRegistry = {
 };
 
 export type WorkflowRunOptions = {
+  limits?: Partial<Pick<WorkflowLimits, 'maxModelCalls' | 'maxToolCalls' | 'executionTimeoutMs'>>;
   workerId?: string;
   signal?: AbortSignal;
   maxSteps?: number;
@@ -119,6 +122,7 @@ export type WorkflowRunOptions = {
 
 export type WorkflowStartInput = {
   workflow: WorkflowDefinition;
+  triggerNodeId?: string;
   input: Record<string, unknown>;
   context?: Record<string, unknown>;
   variables?: Record<string, unknown>;
@@ -134,3 +138,9 @@ export type WorkflowResumeInput = {
   workerId?: string;
 };
 
+export type {
+  WorkflowBlockTestFixture,
+  WorkflowBlockTestFixtures,
+  WorkflowTestChatMessage,
+  WorkflowTestExecutionResult,
+} from './block-test';

@@ -90,7 +90,6 @@ export function analyzeAutopilotToolCoverage(input: {
   toolCatalog: AgentToolCatalogItem[];
 }): AutopilotToolCoverageReport {
   const enabledToolNames = unique(input.enabledToolNames);
-  const enabled = new Set(enabledToolNames);
   const declaredToolNames = (input.graph?.nodes || [])
     .filter((node) => node.kind === 'tool' && Boolean(node.toolName?.trim()))
     .map((node) => node.toolName!.trim());

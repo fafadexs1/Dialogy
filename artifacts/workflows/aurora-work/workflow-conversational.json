@@ -1,0 +1,128 @@
+{
+  "id": "nexus:79962002-b803-4bac-b549-98fb5607f19f",
+  "workspaceId": "5c3a91e9-b243-4436-80ba-42434bc5ca97",
+  "name": "Aurora Work · Vendedora IA (Nina)",
+  "version": "draft",
+  "status": "draft",
+  "nodes": [
+    {
+      "id": "aurora_conversation_start",
+      "type": "trigger.received_message",
+      "name": "Iniciar conversa de vendas fictícias",
+      "position": {
+        "x": 80,
+        "y": 160
+      },
+      "config": {
+        "pattern": "",
+        "keywords": [
+          "demo aurora"
+        ],
+        "matchMode": "any_keyword",
+        "platforms": [],
+        "startPolicy": "all",
+        "messageTypes": [
+          "text"
+        ],
+        "caseSensitive": false,
+        "defaultOutput": "message",
+        "instanceNames": [],
+        "continueMatching": false,
+        "sessionTimeoutMs": 86400000,
+        "keywordThresholds": {}
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "id": "message",
+          "label": "Mensagem",
+          "direction": "output",
+          "connectionType": "main",
+          "required": true,
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "id": "aurora_nina_studio",
+      "type": "ai.published_agent",
+      "name": "Nina · vendedora conversacional do Studio",
+      "position": {
+        "x": 540,
+        "y": 160
+      },
+      "config": {
+        "agentId": "bc053c26-6c89-4415-96bf-16592252afca",
+        "releaseId": "7d3ea960-4f30-41ec-8e03-062b5d0fe018",
+        "outputKeys": [],
+        "inputMappings": []
+      },
+      "inputPorts": [
+        {
+          "id": "main",
+          "label": "Entrada",
+          "direction": "input",
+          "connectionType": "main",
+          "required": true,
+          "multiple": true
+        }
+      ],
+      "outputPorts": [],
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "initialDelayMs": 1000,
+        "backoffMultiplier": 1,
+        "maxDelayMs": 1000,
+        "retryableErrorCodes": []
+      },
+      "timeoutMs": 120000
+    }
+  ],
+  "connections": [
+    {
+      "id": "aurora_start_nina",
+      "sourceNodeId": "aurora_conversation_start",
+      "sourcePortId": "message",
+      "targetNodeId": "aurora_nina_studio",
+      "targetPortId": "main",
+      "connectionType": "main"
+    }
+  ],
+  "settings": {
+    "executionTimeoutMs": 86400000,
+    "maxSteps": 100,
+    "maxModelCalls": 200,
+    "maxToolCalls": 40,
+    "maxAgentTurnsPerNode": 8,
+    "maxRepeatedDecisionSignatures": 2,
+    "maxTotalInputTokens": 500000,
+    "maxTotalOutputTokens": 64000,
+    "concurrencyLimit": 1
+  },
+  "metadata": {
+    "kind": "standalone",
+    "editor": "nexus",
+    "demoKey": "aurora-work-sales-v1",
+    "template": "sales_conversation",
+    "demoVersion": 2,
+    "flowBuilderUi": {
+      "groups": [
+        {
+          "id": "aurora-conversation",
+          "title": "Conversa livre · identidade e habilidades no IA Studio",
+          "nodeIds": [
+            "aurora_conversation_start",
+            "aurora_nina_studio"
+          ]
+        }
+      ],
+      "version": 1
+    },
+    "nexusWorkflowId": "79962002-b803-4bac-b549-98fb5607f19f",
+    "fictionalCommerce": true,
+    "pendingConfiguration": [],
+    "realProviderHomologated": false
+  },
+  "createdAt": "2026-10-25T03:51:11.618Z",
+  "updatedAt": "2026-10-25T12:00:37.856Z"
+}

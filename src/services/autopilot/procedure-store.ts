@@ -12,7 +12,6 @@ import type {
   ProcedureExecutionContext,
   ProcedureExecutionStatus,
   ProcedureGraph,
-  StepExecutionRecord,
 } from './procedure-types';
 import { compactToolOutputForContinuation } from './runtime/tool-memory';
 
@@ -107,8 +106,14 @@ async function upsertAgentProcedureDefinition(input: {
         definition_json = EXCLUDED.definition_json,
         version = GREATEST(agent_procedure_definitions.version, EXCLUDED.version),
         status = EXCLUDED.status,
-        source = EXCLUDED.source,
-        document_id = EXCLUDED.document_id,
+        source = CASE
+          WHEN agent_procedure_definitions.source = 'procedure_studio' THEN agent_procedure_definitions.source
+          ELSE EXCLUDED.source
+        END,
+        document_id = CASE
+          WHEN agent_procedure_definitions.source = 'procedure_studio' THEN agent_procedure_definitions.document_id
+          ELSE EXCLUDED.document_id
+        END,
         updated_at = NOW()`,
       [
         context.workspaceId,
@@ -122,7 +127,9 @@ async function upsertAgentProcedureDefinition(input: {
           currentStepId: context.currentStepId,
         }),
         graph?.version || 1,
-        graph ? 'compiled_document' : 'runtime_session',
+        graph?.metadata?.source === 'procedure_studio'
+          ? 'procedure_studio'
+          : graph ? 'compiled_document' : 'runtime_session',
         graph?.documentId || null,
       ],
     );

@@ -11,6 +11,7 @@ import { ensurePermissionsSeed } from '@/lib/permissions-seed';
 import { updateUserOnlineStatus } from '@/lib/presence-server';
 import { loadResourceMappingProfileText, upsertResourceMappingProfile } from '@/services/resource-mapper/profiles';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
+import { requireWorkspaceAccess, toPublicAccessError } from '@/lib/security/access';
 
 function normalizeWorkspaceVertical(value: FormDataEntryValue | null): string | null {
   if (typeof value !== 'string') return null;
@@ -212,17 +213,6 @@ export async function updateWorkspaceAction(
     }
   }
 
-  const nexusEmail = formData.get('nexusEmail') as string | null;
-  if (nexusEmail !== null && nexusEmail !== undefined) {
-    // If empty string, we might want to plain null or empty object. 
-    // Let's store object { email: ... }
-    if (nexusEmail.trim() === '') {
-      fieldsToUpdate.nexus_settings = {};
-    } else {
-      fieldsToUpdate.nexus_settings = { email: nexusEmail.trim() };
-    }
-  }
-
   if (avatarFile && avatarFile instanceof File && avatarFile.size > 0) {
     try {
       const arrayBuffer = await avatarFile.arrayBuffer();
@@ -283,11 +273,13 @@ export async function updateWorkspaceAction(
 }
 
 export async function switchWorkspaceAction(workspaceId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    console.error('[SWITCH_WORKSPACE] Usuário não autenticado.');
-    return;
+  let user;
+  try {
+    user = await requireWorkspaceAccess(workspaceId);
+  } catch (error) {
+    const accessError = toPublicAccessError(error);
+    console.error('[SWITCH_WORKSPACE] Acesso negado.', accessError?.code || error);
+    return { success: false, error: accessError?.error || 'Acesso negado ao workspace.' };
   }
   const userId = user.id;
 
@@ -311,7 +303,9 @@ export async function switchWorkspaceAction(workspaceId: string) {
     console.log(`[SWITCH_WORKSPACE] Usuário ${userId} trocou para o workspace ${workspaceId}.`);
   } catch (error) {
     console.error('[SWITCH_WORKSPACE] Erro:', error);
+    return { success: false, error: 'Falha ao trocar de workspace.' };
   }
 
   revalidatePath('/', 'layout');
+  return { success: true };
 }

@@ -1,3 +1,4 @@
+import { readBillingCatalog } from '@/services/billing/catalog';
 import LandingPage from '@/components/landing/landing-page';
 import { StoredSeoJsonLd } from '@/components/seo/stored-json-ld';
 import {
@@ -44,7 +45,7 @@ export default async function Page() {
         </>
       )}
       <StoredSeoJsonLd pathname="/" />
-      <LandingPage />
+      <LandingPage plans={await readBillingCatalog()} />
     </>
   );
 }

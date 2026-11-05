@@ -1,0 +1,244 @@
+{
+  "at": "2026-09-23T13:23:25.903Z",
+  "model": "deepseek/deepseek-v4-flash",
+  "publishedReleaseId": "7cf156f3-ecec-4a41-bf6f-9225765699e5",
+  "scope": "real model; synthetic conversation, memory and integration responses; no publication or customer effects",
+  "traces": [
+    {
+      "scenario": "commercial-eligibility",
+      "response": "Esta oferta não está disponível para este contrato.",
+      "ms": 5029,
+      "reasoning": {
+        "version": 2,
+        "requests": [
+          {
+            "id": "offer-eligibility-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar elegibilidade do cliente para a oferta mencionada e informar o resultado.",
+            "status": "resolved",
+            "memoryRequestId": "synthetic-eligibility-session:offer-eligibility-1",
+            "values": {},
+            "integrationValues": {
+              "eligible": false
+            },
+            "choiceLabels": {},
+            "unavailable": []
+          }
+        ],
+        "operations": [
+          {
+            "id": "synthetic-eligibility-session:e71c04dc4a09f999601764370a7f3b949195ee45e5b9a57174ddf0eaf40d62ce:read-0",
+            "requestId": "offer-eligibility-1",
+            "memoryRequestId": "synthetic-eligibility-session:offer-eligibility-1",
+            "capabilityId": "offer:eligibility",
+            "title": "Consultar elegibilidade",
+            "signature": "e71c04dc4a09f999601764370a7f3b949195ee45e5b9a57174ddf0eaf40d62ce",
+            "status": "succeeded",
+            "readOnly": true,
+            "attemptMessageId": "synthetic-eligibility",
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-23T13:23:23.551Z",
+            "failureCategory": "business_negative"
+          }
+        ],
+        "pendingAction": null,
+        "lastTurnMetrics": {
+          "messageId": "synthetic-eligibility",
+          "durationMs": 4979,
+          "modelDecisions": 2,
+          "toolCalls": 1,
+          "activeRequests": 0,
+          "pausedRequests": 0,
+          "resolvedRequests": 1,
+          "uncertainOperations": 0,
+          "transferred": false,
+          "budgetReached": false,
+          "usage": [
+            {
+              "model": "deepseek/deepseek-flash",
+              "stage": "decision",
+              "calls": 2,
+              "inputTokens": 8856,
+              "outputTokens": 631,
+              "totalTokens": 9487
+            }
+          ]
+        },
+        "usageTotals": {
+          "lastMessageId": "synthetic-eligibility",
+          "recordedTurns": 1,
+          "turnsWithoutUsage": 0,
+          "inputTokens": 8856,
+          "outputTokens": 631,
+          "totalTokens": 9487
+        }
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "observations": [],
+      "result": {
+        "requests": [
+          {
+            "id": "offer-eligibility-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar elegibilidade do cliente para a oferta mencionada e informar o resultado.",
+            "status": "active"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "tool",
+          "requestId": "offer-eligibility-1",
+          "capabilityId": "offer:eligibility",
+          "query": null,
+          "response": null,
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "O cliente pediu para verificar se a oferta está disponível; a consulta de elegibilidade é read-only e está pronta, sem pré-requisitos."
+        }
+      },
+      "ms": 2548
+    },
+    {
+      "observations": [
+        {
+          "kind": "tool",
+          "operation": {
+            "id": "synthetic-eligibility-session:e71c04dc4a09f999601764370a7f3b949195ee45e5b9a57174ddf0eaf40d62ce:read-0",
+            "requestId": "offer-eligibility-1",
+            "memoryRequestId": "synthetic-eligibility-session:offer-eligibility-1",
+            "capabilityId": "offer:eligibility",
+            "title": "Consultar elegibilidade",
+            "signature": "e71c04dc4a09f999601764370a7f3b949195ee45e5b9a57174ddf0eaf40d62ce",
+            "status": "succeeded",
+            "readOnly": true,
+            "attemptMessageId": "synthetic-eligibility",
+            "values": {
+              "eligible": false
+            },
+            "at": "2026-09-23T13:23:23.551Z",
+            "failureCategory": "business_negative"
+          },
+          "category": "business_negative",
+          "result": "business_negative",
+          "detail": "A consulta funcionou, mas o retorno de negócio foi negativo. Avalie outra capacidade publicada ou explique o resultado; não repita a mesma consulta sem dado novo."
+        }
+      ],
+      "result": {
+        "requests": [
+          {
+            "id": "offer-eligibility-1",
+            "procedureId": "offer",
+            "resumeFrom": null,
+            "objective": "Consultar elegibilidade do cliente para a oferta mencionada e informar o resultado.",
+            "status": "resolved"
+          }
+        ],
+        "choices": [],
+        "action": {
+          "kind": "respond",
+          "requestId": "offer-eligibility-1",
+          "capabilityId": null,
+          "query": null,
+          "response": "Esta oferta não está disponível para este contrato.",
+          "consent": "none",
+          "consentQuote": null,
+          "reason": "A consulta de elegibilidade foi executada com sucesso e retornou resultado negativo (eligible=false); a etapa de ativação segue bloqueada, então informo o resultado ao cliente e concluo o pedido, que foi atendido com evidência."
+        }
+      },
+      "ms": 2277
+    }
+  ],
+  "usage": [
+    {
+      "configId": "3b3339a1-a81f-49ac-bde9-963e7e648a30",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-flash",
+      "inputTokens": 3628,
+      "outputTokens": 336,
+      "totalTokens": 3964,
+      "ruleName": "decision",
+      "chatId": "synthetic-reasoning",
+      "status": "charged",
+      "metadata": {
+        "releaseId": "7cf156f3-ecec-4a41-bf6f-9225765699e5",
+        "sessionId": "synthetic-eligibility-session",
+        "messageId": "synthetic-eligibility",
+        "publishedModelMismatch": true,
+        "decisionIndex": 1,
+        "contextMode": "legacy",
+        "promptChars": 1543,
+        "contextSizes": {
+          "objective": 94,
+          "message": 72,
+          "messageId": 23,
+          "suggestionOnly": 5,
+          "mediaAnalysis": 0,
+          "supportAvailable": 5,
+          "historicalOperationsAvailable": 4,
+          "executionBudget": 108,
+          "requests": 2,
+          "operations": 2,
+          "pendingAction": 4,
+          "procedures": 788,
+          "capabilities": 2,
+          "choices": 2,
+          "hasOlderMemory": 5,
+          "hasOlderHistory": 5,
+          "recentMessages": 137,
+          "observations": 2
+        },
+        "priorOutcome": null,
+        "priorFailureCategory": null
+      }
+    },
+    {
+      "configId": "3b3339a1-a81f-49ac-bde9-963e7e648a30",
+      "flowName": "studioReasoningV2",
+      "modelName": "deepseek/deepseek-flash",
+      "inputTokens": 5228,
+      "outputTokens": 295,
+      "totalTokens": 5523,
+      "ruleName": "decision",
+      "chatId": "synthetic-reasoning",
+      "status": "charged",
+      "metadata": {
+        "releaseId": "7cf156f3-ecec-4a41-bf6f-9225765699e5",
+        "sessionId": "synthetic-eligibility-session",
+        "messageId": "synthetic-eligibility",
+        "publishedModelMismatch": true,
+        "decisionIndex": 2,
+        "contextMode": "legacy",
+        "promptChars": 4570,
+        "contextSizes": {
+          "objective": 94,
+          "message": 72,
+          "messageId": 23,
+          "suggestionOnly": 5,
+          "mediaAnalysis": 0,
+          "supportAvailable": 5,
+          "historicalOperationsAvailable": 4,
+          "executionBudget": 108,
+          "requests": 517,
+          "operations": 418,
+          "pendingAction": 4,
+          "procedures": 788,
+          "capabilities": 700,
+          "choices": 598,
+          "hasOlderMemory": 5,
+          "hasOlderHistory": 5,
+          "recentMessages": 137,
+          "observations": 804
+        },
+        "priorOutcome": "business_negative",
+        "priorFailureCategory": "business_negative"
+      }
+    }
+  ]
+}

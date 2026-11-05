@@ -13,12 +13,12 @@ export const availableIntegrations: Integration[] = [
   },
   {
     id: 'evolution-api',
-    name: 'Evolution API',
-    description: 'Gerencie instancias de WhatsApp com QR Code ou Cloud API pela Evolution API.',
+    name: 'WhatsApp API',
+    description: 'Conecte números, crie mensagens e monte carrosséis para o WhatsApp.',
     icon_url: '/icons/whatsapp.svg',
     tag: 'WhatsApp',
     tag_type: 'primary',
-    href: '/integrations/evolution-api',
+    href: '/integrations/whatsapp-api',
     status: 'active',
   },
   {
@@ -79,16 +79,6 @@ export const availableIntegrations: Integration[] = [
     tag: 'SGP',
     tag_type: 'beta',
     href: '/integrations/sgp',
-    status: 'active',
-  },
-  {
-    id: 'delivery-hub',
-    name: 'Delivery Hub',
-    description: 'Crie uma vitrine publica com varios negocios, cards e cardapios compartilhaveis.',
-    icon_url: '/icons/delivery-hub.svg',
-    tag: 'Delivery',
-    tag_type: 'primary',
-    href: '/integrations/delivery-hub',
     status: 'active',
   },
 ];

@@ -96,6 +96,125 @@ export function normalizeSupabaseStorageUrl(url?: string | null): string {
   return trimmedUrl;
 }
 
+/**
+ * Hosts de storage que mudaram de endereco.
+ *
+ * O MinIO da Evolution migrou de dominio, mas as URLs antigas continuam gravadas
+ * nas mensagens apontando para o host desativado. Os objetos foram para o host
+ * novo com as mesmas chaves, entao trocar o host recupera a midia.
+ *
+ * Sobrescrevivel por `NEXT_PUBLIC_LEGACY_MEDIA_HOST_REWRITES` no formato
+ * "antigo1=novo1,antigo2=novo2" caso o endereco mude de novo.
+ */
+const LEGACY_STORAGE_HOST_REWRITES: Record<string, string> = (() => {
+  const defaults: Record<string, string> = {
+    'evo-minio.fhgg2n.easypanel.host': 'storage.klyraai.com.br',
+  };
+
+  const rawConfig =
+    process.env.MEDIA_HOST_REWRITES ||
+    process.env.NEXT_PUBLIC_MEDIA_HOST_REWRITES ||
+    process.env.NEXT_PUBLIC_LEGACY_MEDIA_HOST_REWRITES ||
+    '';
+
+  const configured = rawConfig.trim();
+  if (!configured) return defaults;
+
+  const rewrites: Record<string, string> = { ...defaults };
+  for (const pair of configured.split(',')) {
+    const [from, to] = pair.split('=').map((part) => part.trim().toLowerCase());
+    if (from && to) rewrites[from] = to;
+  }
+  return rewrites;
+})();
+
+/** Aponta a URL para o host atual quando o storage mudou de endereco. */
+export function rewriteLegacyStorageHost(url?: string | null): string {
+  if (!url) return '';
+
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+
+  const replacement = LEGACY_STORAGE_HOST_REWRITES[parsed.host.toLowerCase()];
+  if (!replacement) return trimmed;
+
+  parsed.host = replacement;
+  parsed.protocol = 'https:';
+  return parsed.toString();
+}
+
+// Parametros de assinatura SigV4. Presentes = URL com prazo de validade.
+const SIGV4_QUERY_PARAMS = [
+  'X-Amz-Algorithm',
+  'X-Amz-Credential',
+  'X-Amz-Date',
+  'X-Amz-Expires',
+  'X-Amz-SignedHeaders',
+  'X-Amz-Signature',
+  'X-Amz-Security-Token',
+];
+
+/**
+ * Descarta a assinatura temporaria de uma URL de storage, deixando o caminho
+ * bruto do objeto.
+ *
+ * A Evolution entrega a midia do MinIO via `presignedGetObject` sem prazo
+ * explicito, o que produz uma assinatura de 7 dias (padrao do MinIO). O Dialogy
+ * gravava essa URL como endereco definitivo da mensagem, entao passada uma
+ * semana o arquivo continuava intacto no bucket e o link e que morria — dando
+ * "midia expirada".
+ *
+ * O bucket e de leitura publica, entao o caminho sem querystring resolve
+ * sozinho e nao vence nunca. Mesma ideia que `normalizeSupabaseStorageUrl` ja
+ * aplica para as URLs assinadas do Supabase.
+ */
+export function stripStorageSignature(url?: string | null): string {
+  if (!url) return '';
+
+  const trimmed = url.trim();
+  if (!trimmed || !trimmed.includes('X-Amz-Signature=')) return trimmed;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+
+  // Nao remover assinatura de storages que exigem SigV4 autenticado (Cloudflare R2, AWS S3)
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    hostname.endsWith('.r2.cloudflarestorage.com') ||
+    hostname.endsWith('.amazonaws.com') ||
+    hostname.includes('r2.cloudflarestorage.com')
+  ) {
+    return trimmed;
+  }
+
+  for (const param of SIGV4_QUERY_PARAMS) {
+    parsed.searchParams.delete(param);
+  }
+
+  return parsed.toString();
+}
+
+/**
+ * Deixa a URL de midia no formato duravel: host atual e sem assinatura com prazo.
+ *
+ * Usada tanto na gravacao (para o banco ficar canonico) quanto na leitura (para
+ * as URLs ja gravadas antes desta correcao continuarem abrindo).
+ */
+export function normalizeStoredMediaUrl(url?: string | null): string {
+  return stripStorageSignature(rewriteLegacyStorageHost(url));
+}
+
 export function buildMediaProxyUrl(url: string, kind: 'image' | 'media' = 'media'): string {
   const search = new URLSearchParams({
     url,
@@ -128,8 +247,10 @@ export function resolveClientMediaUrl(
   url?: string | null,
   options: { kind?: 'image' | 'media'; proxy?: boolean } = {}
 ): string {
-  const normalizedUrl = normalizeSupabaseStorageUrl(
-    options.kind === 'image' ? normalizeImageThumbnailSource(url) : url
+  const normalizedUrl = normalizeStoredMediaUrl(
+    normalizeSupabaseStorageUrl(
+      options.kind === 'image' ? normalizeImageThumbnailSource(url) : url
+    )
   );
   if (!normalizedUrl) return '';
 

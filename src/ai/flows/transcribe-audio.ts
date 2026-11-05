@@ -1,4 +1,4 @@
-'use server';
+import 'server-only';
 
 /**
  * @fileOverview Audio transcription flow backed by the hosted Whisper API.

@@ -1,0 +1,654 @@
+.page {
+  min-width: 0;
+}
+.summaryDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 0 4px hsl(var(--primary) / 0.08);
+  margin: 0 3px;
+}
+.tabs {
+  min-width: 0;
+}
+.tabBar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  background: hsl(var(--card) / 0.4);
+  width: 100%;
+  height: auto;
+  padding: 0 max(42px, calc((100% - 1500px) / 2 + 42px));
+  border-radius: 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.tabBar > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  gap: 8px;
+  font-size: 12px;
+  border-radius: 0;
+  padding: 18px 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: hsl(var(--muted-foreground));
+}
+.tabBar > button[data-state='active'] {
+  color: hsl(var(--primary));
+  background: transparent;
+  box-shadow: none;
+  border-bottom-color: hsl(var(--primary));
+}
+.tabBar > button > span {
+  font-size: 9px;
+  background: hsl(var(--secondary));
+  border-radius: 5px;
+  padding: 3px 5px;
+  margin-left: 2px;
+}
+.tabPanel {
+  padding: 30px 42px 45px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.tabPanel[data-state='inactive'] {
+  display: none;
+}
+.connectionsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 25px;
+  padding: 4px 0 25px;
+}
+.connectionsHeading h2 {
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  margin: 9px 0;
+  line-height: 1.3;
+}
+.connectionsHeading p {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.8;
+}
+.connectionTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.connectionTools input {
+  width: 250px;
+  background: hsl(var(--card));
+  border-radius: 10px;
+  font-size: 11px;
+}
+.connectionTools > button {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.connectionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+.connectionCard {
+  min-width: 0;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  overflow: hidden;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+  animation: enter 0.35s ease both;
+}
+.connectionCard:hover {
+  border-color: hsl(var(--primary) / 0.3);
+  box-shadow: 0 6px 20px hsl(var(--foreground) / 0.025);
+}
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 20px 20px 17px;
+}
+.whatsappIcon {
+  display: grid;
+  place-items: center;
+  width: 45px;
+  height: 48px;
+  background: hsl(var(--accent));
+  color: hsl(var(--primary));
+  border-radius: 15px;
+  flex-shrink: 0;
+}
+.connectionStatus {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  color: hsl(var(--muted-foreground));
+  margin-left: auto;
+  line-height: 1.8;
+}
+.connectionStatus > span {
+  height: 5px;
+  width: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.connectionStatus[data-status='connected'] {
+  color: hsl(var(--primary));
+}
+.connectionStatus[data-status='pending'] {
+  color: #b18b52;
+}
+.connectionStatus[data-status='disconnected'] {
+  color: #b3836c;
+}
+.cardHeader > button {
+  width: 25px;
+  height: 29px;
+  color: hsl(var(--muted-foreground));
+}
+.connectionCard > h3 {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  padding: 0 21px;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.connectionNumber {
+  margin: 6px 21px 14px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  min-height: 18px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.typeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 21px 19px;
+  font-size: 10px;
+  padding: 5px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  color: hsl(var(--primary));
+}
+.connectionFeatures {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin: 0 21px 22px;
+}
+.connectionFeatures > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.connectionFeatures svg {
+  color: hsl(var(--primary));
+  opacity: 0.8;
+}
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 19px;
+  border-top: 1px solid hsl(var(--border) / 0.7);
+}
+.cardFooter > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  color: hsl(var(--muted-foreground));
+}
+.cardFooter button {
+  border-radius: 8px;
+  font-size: 10px;
+  height: 32px;
+  gap: 5px;
+  padding: 0 10px;
+}
+.connectionError {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 19px 15px;
+  color: #b3836c;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.connectionError svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.connectionError button {
+  text-decoration: underline;
+}
+.technicalDetails {
+  border-top: 1px solid hsl(var(--border) / 0.7);
+}
+.technicalDetails > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 13px 21px;
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  cursor: pointer;
+}
+.technicalDetails > summary > svg:last-child {
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+.technicalDetails[open] > summary > svg:last-child {
+  transform: rotate(90deg);
+}
+.technicalDetails > div {
+  border-top: 1px solid hsl(var(--border));
+  overflow-wrap: anywhere;
+}
+.technicalDetails > div > div {
+  border-radius: 0;
+  margin: 0;
+  border: 0;
+}
+.instanceIdentifier {
+  padding: 14px 20px 0;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.instanceIdentifier code {
+  font-size: 9px;
+}
+.addConnection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  padding: 30px 19px;
+  min-height: 325px;
+  border: 1px dashed hsl(var(--primary) / 0.3);
+  border-radius: 16px;
+  text-align: center;
+  background: hsl(var(--accent) / 0.16);
+}
+.addConnection:hover {
+  background: hsl(var(--accent) / 0.5);
+  border-color: hsl(var(--primary) / 0.6);
+}
+.addConnection > span {
+  display: grid;
+  place-items: center;
+  width: 47px;
+  height: 49px;
+  color: hsl(var(--primary));
+  border: 1px solid hsl(var(--primary) / 0.16);
+  border-radius: 16px;
+  margin-bottom: 4px;
+  background: hsl(var(--card) / 0.7);
+}
+.addConnection strong {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.7;
+}
+.addConnection p {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.8;
+  max-width: 220px;
+}
+.addConnection small {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: hsl(var(--primary));
+  padding-top: 3px;
+}
+.connectionGuide {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 25px 1px 0;
+  margin-top: 28px;
+  border-top: 1px solid hsl(var(--border));
+}
+.guideIcon {
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 39px;
+  border-radius: 12px;
+  color: hsl(var(--primary));
+  background: hsl(var(--accent) / 0.65);
+  flex-shrink: 0;
+}
+.connectionGuide h3 {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.8;
+}
+.connectionGuide p {
+  font-size: 11px;
+  line-height: 1.9;
+  color: hsl(var(--muted-foreground));
+  max-width: 670px;
+  padding-top: 6px;
+}
+.connectionGuide p strong {
+  font-weight: 500;
+  color: hsl(var(--foreground));
+}
+.connectionGuide > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-top: 3px;
+  color: hsl(var(--primary));
+  font-size: 10px;
+  white-space: nowrap;
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  border: 1px dashed hsl(var(--border));
+  background: hsl(var(--card));
+  border-radius: 16px;
+  padding: 50px 20px;
+  text-align: center;
+}
+.empty h3 {
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+}
+.empty p {
+  font-size: 12px;
+  line-height: 1.9;
+  color: hsl(var(--muted-foreground));
+  max-width: 400px;
+}
+.empty button {
+  gap: 8px;
+  border-radius: 10px;
+  margin-top: 4px;
+}
+.noResults {
+  padding: 25px 0;
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+.error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 11px;
+  margin-bottom: 20px;
+  font-size: 12px;
+}
+.error > svg {
+  color: #b3836c;
+  flex-shrink: 0;
+}
+.error > p {
+  flex: 1;
+}
+.dialog {
+  border-radius: 20px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 28px;
+}
+.dialog h2 {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.4;
+}
+.dialog :global([id$='description']) {
+  font-size: 12px;
+  line-height: 1.85;
+}
+.dialog button {
+  border-radius: 10px;
+}
+.dialogIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 57px;
+  height: 59px;
+  border-radius: 18px;
+  background: hsl(var(--accent));
+  color: hsl(var(--primary));
+  margin-bottom: 8px;
+}
+.connectDialog {
+  max-width: 700px;
+}
+.connectChoices {
+  padding: 12px 0 4px;
+}
+.connectChoices > h2 {
+  font-size: 28px;
+  line-height: 1.2;
+  margin: 14px 0;
+}
+.connectChoices > p {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.9;
+  max-width: 460px;
+}
+.connectionOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  padding: 26px 0 18px;
+}
+.connectionOptions > button {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  text-align: left;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  background: hsl(var(--card));
+}
+.connectionOptions > button:hover {
+  border-color: hsl(var(--primary) / 0.5);
+  background: hsl(var(--accent) / 0.4);
+}
+.connectionOptions > button > svg {
+  color: hsl(var(--primary));
+}
+.connectionOptions strong {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+.connectionOptions small {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.9;
+}
+.connectionOptions button > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: hsl(var(--primary));
+  margin-top: auto;
+  padding-top: 3px;
+}
+.connectManual {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.qrDialog {
+  max-width: 440px;
+}
+.qrImage {
+  margin: 6px auto 12px;
+  padding: 10px;
+  background: white;
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  width: 230px;
+  height: 230px;
+}
+.qrDialog ol {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.qrDialog li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.qrDialog li > span {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 7px;
+  font-size: 10px;
+  color: hsl(var(--primary));
+}
+.qrNote {
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.9;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 17px;
+  margin-top: 5px;
+}
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  min-height: 65vh;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@container (max-width: 1100px) {
+  .tabBar {
+    padding-inline: 30px;
+  }
+  .connectionGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .connectionsHeading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .connectionTools {
+    width: 100%;
+  }
+  .connectionTools input {
+    flex: 1;
+  }
+  .connectionGuide > span:last-child {
+    display: none;
+  }
+  .tabPanel {
+    padding: 27px 30px 40px;
+  }
+}
+@container (max-width: 700px) {
+  .tabBar {
+    padding: 0 22px;
+    gap: 24px;
+  }
+  .tabBar > button {
+    font-size: 11px;
+  }
+  .tabPanel {
+    padding: 25px 22px 35px;
+  }
+  .connectionsHeading h2 {
+    font-size: 22px;
+  }
+  .connectionGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 15px;
+  }
+  .addConnection {
+    min-height: 225px;
+  }
+  .dialog {
+    width: calc(100vw - 24px);
+    padding: 23px 20px;
+  }
+  .connectionOptions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .connectionOptions > button {
+    padding: 18px;
+    gap: 11px;
+  }
+  .connectChoices > h2 {
+    font-size: 25px;
+  }
+  .connectionOptions strong {
+    font-size: 15px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connectionCard,
+  .technicalDetails > summary > svg {
+    animation: none;
+    transition: none;
+  }
+}

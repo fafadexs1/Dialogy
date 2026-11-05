@@ -8,6 +8,7 @@ export type CampaignPersonalizationContext = {
   campaignMessage?: string | null;
   now?: Date;
   timeZone?: string | null;
+  csvData?: Record<string, string> | null;
 };
 
 function normalizeTimeZone(value?: string | null): string {
@@ -85,25 +86,72 @@ function extractTemplateParameterValues(message: string, context: CampaignPerson
     .filter((value): value is string => value !== null);
 }
 
+export function getCampaignTemplateBodyParameterKeys(template: CampaignTemplate | null): string[] {
+  const body = template?.components?.find(component => String(component.type).toUpperCase() === 'BODY');
+  const keys = Array.from(
+    String(body?.text || '').matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g),
+    match => match[1].trim(),
+  );
+  const uniqueKeys = [...new Set(keys)];
+
+  if (uniqueKeys.length > 0 && uniqueKeys.every(key => /^\d+$/.test(key))) {
+    const highestPosition = Math.max(...uniqueKeys.map(Number));
+    return Array.from({ length: highestPosition }, (_, index) => String(index + 1));
+  }
+
+  return uniqueKeys;
+}
+
 export function buildCampaignTemplateSendComponents(
   template: CampaignTemplate,
   context: CampaignPersonalizationContext,
 ): any[] {
-  const body = template.components?.find(component => String(component.type).toUpperCase() === 'BODY');
-  const placeholderCount = (String(body?.text || '').match(/\{\{\d+\}\}/g) || []).length;
+  const parameterKeys = getCampaignTemplateBodyParameterKeys(template);
+  const placeholderCount = parameterKeys.length;
   if (placeholderCount === 0) {
     return [];
   }
 
-  const values = extractTemplateParameterValues(String(context.campaignMessage || ''), context);
+  const configuredValues = template.bodyParameterValues?.map(value =>
+    renderCampaignMessage(String(value || ''), context)
+  );
+  const values = configuredValues?.length
+    ? configuredValues
+    : extractTemplateParameterValues(String(context.campaignMessage || ''), context);
   const fallback = String(context.contactName || '').trim();
-  const parameters = Array.from({ length: placeholderCount }, (_, index) => ({
-    type: 'text',
-    text: values[index] ?? fallback,
-  }));
+  const parameters = Array.from({ length: placeholderCount }, (_, index) => {
+    const column = template.bodyParameterColumns?.[index];
+    const csvValue = column && context.csvData && Object.hasOwn(context.csvData, column)
+      ? context.csvData[column]
+      : undefined;
+    const text = column ? (csvValue?.trim() ? csvValue : configuredValues?.[index] || '') : values[index] ?? fallback;
+    if (column && !text.trim()) {
+      throw new Error(`Coluna "${column}" vazia ou ausente para o campo {{${parameterKeys[index]}}} do template. Informe um valor alternativo.`);
+    }
+    const parameterName = template.bodyParameterNames?.[index];
+    return {
+      type: 'text',
+      text,
+      ...(parameterName && !/^\d+$/.test(parameterName) ? { parameter_name: parameterName } : {}),
+    };
+  });
 
   return [{
     type: 'body',
     parameters,
   }];
+}
+
+/** Use the same parameter resolution for the chat history, preview and actual provider send. */
+export function renderCampaignTemplatePreview(
+  template: CampaignTemplate,
+  context: CampaignPersonalizationContext,
+): string {
+  const body = template.components?.find(component => String(component.type).toUpperCase() === 'BODY');
+  const keys = getCampaignTemplateBodyParameterKeys(template);
+  const parameters = buildCampaignTemplateSendComponents(template, context)[0]?.parameters || [];
+  return String(body?.text || `[Template: ${template.name}]`).replace(VARIABLE_PATTERN, (placeholder, key: string) => {
+    const index = keys.indexOf(key.trim());
+    return index >= 0 ? parameters[index]?.text ?? placeholder : placeholder;
+  });
 }
