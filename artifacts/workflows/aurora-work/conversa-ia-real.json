@@ -1,0 +1,28 @@
+{
+  "provider": "DeepSeek real",
+  "execution": "Nexus executor and real published Studio agent, persistence in memory",
+  "businessEffects": "Intercepted: no customer, CRM, charge, transfer or delivery",
+  "workflowId": "nexus:79962002-b803-4bac-b549-98fb5607f19f",
+  "agentId": "bc053c26-6c89-4415-96bf-16592252afca",
+  "releaseId": "7d3ea960-4f30-41ec-8e03-062b5d0fe018",
+  "status": "waiting",
+  "modelCalls": 5,
+  "conversation": [
+    {
+      "role": "user",
+      "text": "Oi! Já tenho mesa e quero só a cadeira, sem apoio para os pés. Tenho até dois mil reais. Quanto fica no PIX e no cartão, contando frete? Só estou comparando, não quero confirmar nada."
+    },
+    {
+      "role": "assistant",
+      "text": "Oi! Antes de tudo: esta é uma loja de demonstração, então tudo aqui é fictício — nada é cobrado, reservado ou enviado.\n\nSobre a Cadeira Aurora Fit sozinha, sem apoio para os pés, os valores aprovados são:\n\n• No PIX fictício: produtos R$ 699,00, desconto de R$ 34,95 e frete de R$ 49,00 — total de R$ 713,05.\n• No cartão fictício em 3 parcelas: produtos R$ 699,00, sem desconto, e frete de R$ 49,00 — total de R$ 748,00, em parcelas de R$ 249,33, R$ 249,33 e R$ 249,34.\n\nAs duas opções ficam bem abaixo dos seus dois mil reais, e como você já tem mesa, ir só de cadeira faz sentido: é o item que muda a postura e o conforto de quem passa muitas horas sentado. A diferença entre PIX e cartão aqui é de R$ 34,95, o que costuma compensar mais no PIX se o pagamento à vista não pesar no orçamento.\n\nE fica tranquilo: como você está só comparando, não vou confirmar nada. Quer que eu detalhe algum desses pontos antes de você decidir?"
+    },
+    {
+      "role": "user",
+      "text": "Ainda está caro. Pode fazer por seiscentos no PIX e tirar o frete? Continuo sem autorizar qualquer compra."
+    },
+    {
+      "role": "assistant",
+      "text": "Entendo a vontade de fechar mais em conta, mas não consigo criar desconto, cupom ou frete grátis: os valores são os aprovados na tabela fictícia da loja, e R$ 699,00 com o desconto de R$ 34,95 no PIX e frete de R$ 49,00 é o que existe publicado para a Cadeira Aurora Fit. Também não tenho como mexer no preço por conta própria — só consigo trabalhar com o que está aprovado.\n\nSó para deixar claro: você não autorizou nada e nada foi confirmado, reservado ou cobrado. Como é uma demonstração, continua tudo fictício.\n\nComo as duas opções já ficam abaixo dos seus dois mil, talvez valha mais olhar o que a cadeira resolve para você do que o desconto em si. O que mais te incomoda hoje quando passa tantas horas sentado?"
+    }
+  ]
+}

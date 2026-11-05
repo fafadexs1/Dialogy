@@ -22,7 +22,7 @@ describe('native specialized inspectors', () => {
   it('covers every stable node that does not use the dedicated AI agent editor', () => {
     const expected = listStableWorkflowNodeManifests()
       .map((manifest) => manifest.type)
-      .filter((type) => type !== 'ai.agent')
+      .filter((type) => !['ai.agent', 'ai.published_agent', 'ai.studio_agent', 'integration.studio_procedure', 'tool.studio_agent', 'tool.studio_procedure'].includes(type))
       .sort();
 
     expect([...SPECIALIZED_WORKFLOW_INSPECTOR_TYPES].sort()).toEqual(expected);

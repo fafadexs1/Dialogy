@@ -24,6 +24,7 @@ import { useSettings } from '../settings-context';
 import { timezones } from '@/lib/timezones';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { WorkspaceGifLibrary } from '@/components/team/workspace-gif-library';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const workspaceVerticalOptions = [
@@ -273,6 +274,7 @@ export default function WorkspaceSettingsPage() {
                 <TabsList className="bg-muted/50 p-1">
                     <TabsTrigger value="general" className="gap-2"><Settings className="h-4 w-4" /> Geral</TabsTrigger>
                     <TabsTrigger value="ai-ops" className="gap-2"><BrainCircuit className="h-4 w-4" /> IA operacional</TabsTrigger>
+                    <TabsTrigger value="gifs" className="gap-2">🎞️ GIFs da equipe</TabsTrigger>
                     <TabsTrigger value="members" className="gap-2"><Users className="h-4 w-4" /> Membros & Convites</TabsTrigger>
                 </TabsList>
 
@@ -500,6 +502,8 @@ export default function WorkspaceSettingsPage() {
                         </form>
                     </Card>
                 </TabsContent>
+
+                <TabsContent value="gifs"><WorkspaceGifLibrary key={activeWorkspace.id} workspaceId={activeWorkspace.id} /></TabsContent>
 
                 <TabsContent value="members" className="space-y-6">
                     <Card>

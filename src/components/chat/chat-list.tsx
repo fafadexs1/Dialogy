@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { ArrowRightLeft, PlusCircle, File, Video, Mic, Image as ImageIcon, Users, Loader2, Filter, MessageSquare, MapPin, RefreshCw, Megaphone, Check, UserCheck, PencilLine, User as UserIcon, ChevronsUpDown, AlertTriangle, ListTodo, CheckCircle2, Bot, Brain, MessageSquareQuote, Search, Send, CircleCheck, LayoutTemplate, MessageCircle, Hash, X, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn, formatMessageTime } from '@/lib/utils';
 import { badgeColorStyle } from '@/lib/color-contrast';
@@ -11,19 +11,16 @@ import { resolveClientMediaUrl } from '@/lib/storage-url';
 import { Virtuoso } from 'react-virtuoso';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import { getInboxChatsSnapshotAction } from '@/actions/chats';
+import { transferChatsBulkAction } from '@/actions/bulk-transfer';
 import { AgentProfileSheet } from '@/components/team/agent-profile-sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { type Chat, type OnlineAgent, type User, type Message, EvolutionInstance, type TelegramBotInstance, type Team, type AutopilotConfig } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { usePresence } from '@/hooks/use-online-status';
 import { FaWhatsapp, FaInstagram, FaFacebookMessenger, FaTelegram } from 'react-icons/fa6';
 import { Badge } from '../ui/badge';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -60,7 +57,7 @@ import { Separator } from '@/components/ui/separator';
 import { getTeams } from '@/actions/teams';
 import { getWorkspaceUsers } from '@/actions/crm';
 import { getChatPlatformLabel, resolveChatPlatform } from '@/lib/chat-platform';
-import { isMarketingMessage, matchesChatTeamFilter } from './chat-list-visibility';
+import { isMarketingMessage, matchesChatTeamFilter, matchesInboxMarketingFilter } from './chat-list-visibility';
 import { isChatVisibleForOwnership, isOwnershipScopedChat } from '@/lib/inbox-ownership';
 import { formatInboxCount, getInboxPaginationScope, hasMoreChatsInScope, isChatInInboxQueueScope, isInboxAssignmentFilterTab, resolveInboxStatusFilterForTab, scopeInboxListFilters, type InboxListFilters } from '@/lib/inbox-pagination';
 import { sanitizeNationalPhoneInput } from '@/lib/phone-input';
@@ -534,37 +531,6 @@ function NewConversationDialog({ workspaceId, onActionSuccess, trigger }: { work
     </Dialog>
   );
 }
-
-interface AgentTooltipContentProps {
-  agent: OnlineAgent;
-}
-
-const AgentTooltipContent: React.FC<AgentTooltipContentProps> = ({ agent }) => {
-  const [onlineSince, setOnlineSince] = React.useState('');
-
-  React.useEffect(() => {
-    if (agent.joined_at) {
-      const updateOnlineTime = () => {
-        const distance = formatDistanceToNow(new Date(agent.joined_at), { addSuffix: true, locale: ptBR });
-        setOnlineSince(distance);
-      };
-      updateOnlineTime();
-      const interval = setInterval(updateOnlineTime, 60000);
-      return () => clearInterval(interval);
-    }
-  }, [agent.joined_at]);
-
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="font-semibold">{agent.user.name}</p>
-      {onlineSince ? (
-        <p className="text-xs text-muted-foreground">Online {onlineSince}</p>
-      ) : (
-        <p className="text-xs text-muted-foreground">Carregando...</p>
-      )}
-    </div>
-  );
-};
 
 interface LastMessagePreviewProps {
   message: Message;
@@ -1271,6 +1237,7 @@ type ChatListTabId = 'robo' | 'gerais' | 'atendimentos' | 'encerrados';
 export default function ChatList({ chats, selectedChat, setSelectedChat, currentUser, onUpdate, ownershipFilter: controlledOwnershipFilter, onOwnershipFilterChange, isForwarding, selectedForwardingChatIds, onToggleForwardSelection, onSelectAllForwarding, onConfirmForward, onCancelForward, onPrefetch, className, loadMore, hasMore, isLoadingMore, bottomPadding }: ChatListProps) {
   const { onlineAgents, isOffline } = usePresence();
   const [selectedAgent, setSelectedAgent] = useState<OnlineAgent['user'] | null>(null);
+  const [moreAgentsOpen, setMoreAgentsOpen] = useState(false);
   const visibleOnlineAgents = useMemo(
     () => onlineAgents.slice(0, MAX_VISIBLE_ONLINE_AGENTS),
     [onlineAgents]
@@ -1328,8 +1295,11 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   const filterRequestSeqRef = React.useRef(0);
 
   const [isBulkMode, setIsBulkMode] = useState(false);
-  const [bulkAction, setBulkAction] = useState<'close' | 'agent' | null>(null);
+  const [bulkAction, setBulkAction] = useState<'close' | 'agent' | 'transfer' | null>(null);
   const [selectedBulkChats, setSelectedBulkChats] = useState<Set<string>>(new Set());
+  const [bulkTransferOpen, setBulkTransferOpen] = useState(false);
+  const [bulkTransferType, setBulkTransferType] = useState<'agent' | 'team'>('agent');
+  const [bulkTransferTarget, setBulkTransferTarget] = useState('');
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
@@ -1368,7 +1338,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
   // Assign Confirmation State
   const [chatToAssign, setChatToAssign] = useState<Chat | null>(null);
 
-  const toggleBulkMode = (action: 'close' | 'agent' = 'close') => {
+  const toggleBulkMode = (action: 'close' | 'agent' | 'transfer' = 'close') => {
     if (isBulkMode && bulkAction === action) {
       setIsBulkMode(false);
       setBulkAction(null);
@@ -1462,6 +1432,31 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     }
 
     setIsBulkSubmitting(false);
+  };
+
+  const bulkTransferIntentRef = useRef<{signature:string; payload:Parameters<typeof transferChatsBulkAction>[0]} | null>(null);
+  const handleBulkTransfer = async () => {
+    if (!currentUser.activeWorkspaceId || !bulkTransferTarget || selectedBulkChats.size === 0 || (bulkTransferType === 'agent' && isOffline)) return;
+    if (selectedBulkChats.size > 100) { toast({ title: 'Selecione até 100 conversas por vez', variant: 'destructive' }); return; }
+    setIsBulkSubmitting(true);
+    try {
+      const signature=JSON.stringify([currentUser.activeWorkspaceId,[...selectedBulkChats].sort(),bulkTransferType,bulkTransferTarget]);
+      if (bulkTransferIntentRef.current?.signature!==signature) bulkTransferIntentRef.current={signature,payload:{
+        workspaceId:currentUser.activeWorkspaceId,chatIds:[...selectedBulkChats],destination:{type:bulkTransferType,id:bulkTransferTarget},
+        operationId:crypto.randomUUID(),expectedStates:Object.fromEntries([...selectedBulkChats].map(id=>{
+          const selected=chats.find(chat=>chat.id===id);
+          return [id,{agentId:selected?.agentId ?? selected?.agent?.id ?? null,teamId:selected?.team_id ?? null,systemAgentId:selected?.assigned_system_agent_id ?? null}];
+        })),
+      }};
+      const result = await transferChatsBulkAction(bulkTransferIntentRef.current.payload);
+      if (!result.success) { toast({ title: 'Não foi possível transferir', description: result.error, variant: 'destructive' }); return; }
+      setSelectedBulkChats(new Set(result.failed.map(item => item.id)));
+      setBulkTransferOpen(false);
+      if (!result.failed.length) { setIsBulkMode(false); setBulkAction(null); }
+      toast({ title: `${result.transferred.length} conversa(s) transferida(s)`, description: result.failed.length ? `${result.failed.length} não transferida(s): ${result.failed[0].error}` : 'As conversas foram encaminhadas ao destino escolhido.', variant: result.failed.length ? 'destructive' : 'default' });
+      onUpdate();
+    } catch { toast({ title: 'Não foi possível confirmar o lote', description: 'Atualize a lista antes de tentar novamente.', variant: 'destructive' }); }
+    finally { setIsBulkSubmitting(false); }
   };
 
   const handleBulkAgentToggle = async () => {
@@ -1563,10 +1558,8 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     responsibleId: responsibleFilter,
     onlyUnread,
     unassignedOnly: showUnassignedOnly,
-    // Esta opção controla apenas o preview. Uma troca de aba nunca deve remover
-    // o atendimento inteiro por a última mensagem ser de marketing.
-    includeMarketing: true,
-  }), [activeTab, onlyUnread, responsibleFilter, showUnassignedOnly, teamFilter]);
+    includeMarketing: showMarketing,
+  }), [activeTab, onlyUnread, responsibleFilter, showMarketing, showUnassignedOnly, teamFilter]);
 
   useEffect(() => {
     const fetchFilteredChats = async () => {
@@ -1651,6 +1644,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
     const query = debouncedSearchTerm.trim().toLocaleLowerCase('pt-BR');
 
     const matchesControls = (chat: Chat) => {
+      if (!matchesInboxMarketingFilter(chat, showMarketing)) return false;
       const messages = chat.messages || [];
       let matchesMessageContent = false;
 
@@ -1817,7 +1811,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
       + (statusFilter !== 'all' ? 1 : 0)
       + (showUnassignedOnly ? 1 : 0)
       + (showMarketing ? 1 : 0)
-    : 0;
+    : (showMarketing ? 1 : 0);
 
   const paginationCounts = inboxCounts ?? loadedTabCounts;
   const paginationScope = getInboxPaginationScope(activeTab, paginationCounts);
@@ -1944,6 +1938,15 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     <TooltipContent>
                       {isBulkMode && bulkAction === 'close' ? "Sair da seleção" : "Encerrar em massa"}
                     </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant={isBulkMode && bulkAction === 'transfer' ? 'secondary' : 'ghost'} size="icon" aria-label={isBulkMode && bulkAction === 'transfer' ? 'Sair da seleção de transferência' : 'Transferir em lote'} className={cn('h-7 w-7 text-muted-foreground hover:bg-muted hover:text-foreground', isBulkMode && bulkAction === 'transfer' && 'bg-emerald-500/15 text-emerald-700')} onClick={() => toggleBulkMode('transfer')}><ArrowRightLeft className="h-[15px] w-[15px]" /></Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Transferir em lote</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
 
@@ -2078,7 +2081,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onEnter={handleSubmitSearch}
-            renderFilterTrigger={(filterTriggerClassName) => isOwnershipFilterVisible ? (
+            renderFilterTrigger={(filterTriggerClassName) => (
               <Popover>
                 <PopoverTrigger asChild>
                   <button
@@ -2121,7 +2124,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       </div>
                       <div>
                         <p className="text-sm font-bold tracking-tight">Visão inteligente</p>
-                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-zinc-400">Filtros exclusivos de Atendendo e Encerrados.</p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-zinc-400">{isOwnershipFilterVisible ? 'Personalize as conversas exibidas.' : 'Escolha se deseja incluir campanhas na lista.'}</p>
                       </div>
                     </div>
                     {advancedFilterCount > 0 && (
@@ -2132,6 +2135,7 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                     )}
                   </div>
 
+                  {isOwnershipFilterVisible && <>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div>
@@ -2346,8 +2350,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                       ))}
                     </div>
                   </div>
+                  </>}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
+                    {isOwnershipFilterVisible && <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium text-foreground">Somente sem responsável</p>
                         <p className="text-xs text-muted-foreground">Conversas que ainda precisam de atribuição</p>
@@ -2360,18 +2365,18 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
                         }}
                         className="data-[state=checked]:bg-blue-600"
                       />
-                    </div>
+                    </div>}
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-foreground">Mostrar mensagens de Marketing</p>
-                        <p className="text-xs text-muted-foreground">Altera apenas o preview; a conversa continua na lista</p>
+                        <p className="text-xs text-muted-foreground">Inclui campanhas sem resposta na Fila e no Robô</p>
                       </div>
                       <Switch checked={showMarketing} onCheckedChange={setShowMarketing} className="data-[state=checked]:bg-blue-600" />
                     </div>
                   </div>
                 </PopoverContent>
               </Popover>
-            ) : null}
+            )}
           />
           {isOwnershipFilterVisible && selectedResponsible && (
             <div className="pt-2">
@@ -2478,149 +2483,57 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
         onSelectChat={setSelectedChat}
       />
 
-      <div className="flex flex-shrink-0 items-center gap-3 border-b border-slate-100 bg-white px-4 py-2 dark:border-white/10 dark:bg-[#050507]">
-        <h3 className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-          Online ({onlineAgents.length})
-          {isOffline && (
-            <Badge variant="destructive" className="h-4 text-[10px] px-1">
-              Offline - Reconectando...
-            </Badge>
-          )}
-        </h3>
-          <div className={cn("flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 overflow-x-hidden overflow-y-visible py-0.5 transition-opacity duration-300", isOffline ? "opacity-50 grayscale pointer-events-none" : "opacity-100")}>
-            {onlineAgents.length === 0 ? (
-              <div className="flex gap-2">
-                <Skeleton className="h-7 w-7 rounded-full" />
-                <Skeleton className="h-7 w-7 rounded-full" />
-                <Skeleton className="h-7 w-7 rounded-full" />
-              </div>
-            ) : (
-              visibleOnlineAgents.map((agent) => (
-                <HoverCard key={agent.user.id}>
-                  <HoverCardTrigger asChild>
-                    <div
-                      className="relative shrink-0 cursor-pointer transition-transform duration-150 hover:-translate-y-0.5 active:scale-90 motion-reduce:transform-none motion-reduce:transition-none"
-                      onClick={() => setSelectedAgent(agent.user)}
-                    >
-                      <Avatar className="h-7 w-7 border border-emerald-400">
-                        <AvatarImage fallbackOnBlank src={agent.user.avatar} className="object-cover" />
-                        <AvatarFallback className="bg-emerald-900 text-white text-xs font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
-                      </Avatar>
-                      <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#22C05C] border border-background"></span>
-                    </div>
-                  </HoverCardTrigger>
-                  <HoverCardContent className="w-80 p-0 border-border bg-popover text-popover-foreground shadow-2xl rounded-xl overflow-hidden">
-                    <div className="relative h-20 bg-gradient-to-r from-green-600/20 to-emerald-900/20 p-4">
-                      <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] opacity-10" />
-                      <div className="flex items-center gap-3 relative z-10">
-                        <Avatar className="h-12 w-12 border-2 border-white/10 shadow-lg">
-                          <AvatarImage fallbackOnBlank src={agent.user.avatar} />
-                          <AvatarFallback className="bg-green-700 text-white font-bold">{agent.user.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-bold text-lg leading-tight">{agent.user.name}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                            Online agora
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="p-4 space-y-3">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Cargo</span>
-                        {agent.user.is_superadmin ? (
-                          <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">Admin</Badge>
-                        ) : (agent.user.role?.name === 'Owner' || agent.user.role?.name === 'Proprietário') ? (
-                          <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">Proprietário</Badge>
-                        ) : (
-                          <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
-                            {agent.user.team || agent.user.role?.name || 'Agente'}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Equipe</span>
-                        <span className="font-medium text-foreground">{agent.user.team || 'Geral'}</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white font-medium"
-                        onClick={() => {
-                          setSelectedAgent(agent.user);
-                        }}
-                      >
-                        <UserCheck className="w-4 h-4 mr-2" />
-                        Ver Perfil / Transferir
-                      </Button>
-                    </div>
-                  </HoverCardContent>
-                </HoverCard>
-              ))
-            )}
-            {hiddenOnlineAgents.length > 0 && (
-              <HoverCard openDelay={120}>
-                <HoverCardTrigger asChild>
-                  <button
-                    type="button"
-                    className="h-7 w-7 min-w-7 flex-shrink-0 rounded-full border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:border-white/10 dark:bg-white/[0.05] dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
-                    aria-label={`Mostrar ${hiddenOnlineAgents.length} agentes online adicionais`}
-                  >
-                    +{hiddenOnlineAgents.length}
+      <div className="flex h-[45px] flex-shrink-0 items-center gap-2.5 border-b border-zinc-100 bg-white px-4 dark:border-white/10 dark:bg-[#050507]">
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[.13em] text-zinc-500 dark:text-zinc-400">{isOffline ? 'Reconectando' : 'Online'}</span>
+          <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-zinc-500 dark:bg-white/10 dark:text-zinc-300">{onlineAgents.length}</span>
+        </div>
+        <div className={cn('flex min-w-0 flex-1 items-center justify-end gap-1.5', isOffline && 'opacity-60')}>
+          {!isOffline && onlineAgents.length === 0 && <span className="truncate text-[11px] text-zinc-400 dark:text-zinc-500">Ninguém por aqui agora</span>}
+          <TooltipProvider delayDuration={250}>
+            {visibleOnlineAgents.map((agent) => (
+              <Tooltip key={agent.user.id}>
+                <TooltipTrigger asChild>
+                  <button type="button" disabled={isOffline} aria-label={`Ver perfil de ${agent.user.name}`} onClick={() => setSelectedAgent(agent.user)} className="group relative shrink-0 rounded-full outline-none transition-transform duration-200 hover:-translate-y-0.5 hover:scale-110 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+                    <Avatar className="h-7 w-7 border-2 border-white shadow-[0_2px_8px_rgba(0,0,0,.12)] ring-1 ring-zinc-200 dark:border-[#050507] dark:ring-white/20"><AvatarImage fallbackOnBlank src={agent.user.avatar || agent.user.avatar_url} alt="" className="object-cover" /><AvatarFallback className="bg-zinc-700 text-[10px] font-bold text-white">{agent.user.name.charAt(0).toUpperCase()}</AvatarFallback></Avatar>
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 dark:border-[#050507]" />
                   </button>
-                </HoverCardTrigger>
-                <HoverCardContent align="end" className="w-64 border-border bg-popover text-popover-foreground">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Outros agentes online
-                  </p>
-                  <div className="mt-2 max-h-56 overflow-y-auto space-y-1">
-                    {hiddenOnlineAgents.map((agent) => (
-                      <button
-                        key={`extra-online-${agent.user.id}`}
-                        type="button"
-                        className="w-full rounded-md px-2 py-1.5 hover:bg-muted text-left flex items-center gap-2"
-                        onClick={() => setSelectedAgent(agent.user)}
-                      >
-                        <Avatar className="h-7 w-7 border border-border shrink-0">
-                          <AvatarImage fallbackOnBlank src={agent.user.avatar} />
-                          <AvatarFallback className="text-[10px]">{agent.user.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{agent.user.name}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{agent.user.team || agent.user.role?.name || 'Agente'}</p>
-                        </div>
-                        <span className="h-2 w-2 rounded-full bg-[#22C05C] shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            )}
-            {onlineAgents.length === 0 && (
-              <p className="text-xs text-muted-foreground italic sr-only">Nenhum agente online</p>
-            )}
-          </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p className="font-medium">{agent.user.name}</p><p className="text-xs opacity-70">{agent.user.team || agent.user.role?.name || 'Pessoa da equipe'} · Online</p></TooltipContent>
+              </Tooltip>
+            ))}
+          </TooltipProvider>
+          {hiddenOnlineAgents.length > 0 && (
+            <Popover open={moreAgentsOpen} onOpenChange={setMoreAgentsOpen}>
+              <PopoverTrigger asChild><button type="button" disabled={isOffline} aria-label={`Mostrar mais ${hiddenOnlineAgents.length} pessoas online`} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-[10px] font-bold text-zinc-500 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300">+{hiddenOnlineAgents.length}</button></PopoverTrigger>
+              <PopoverContent align="end" className="w-64 rounded-2xl border-zinc-200 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-[#171719]">
+                <p className="px-1 text-[10px] font-bold uppercase tracking-[.15em] text-zinc-400">Mais pessoas online</p>
+                <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">{hiddenOnlineAgents.map((agent) => <button key={agent.user.id} type="button" onClick={() => { setMoreAgentsOpen(false); setSelectedAgent(agent.user); }} className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:hover:bg-white/5"><Avatar className="h-8 w-8 shrink-0"><AvatarImage fallbackOnBlank src={agent.user.avatar || agent.user.avatar_url} alt="" /><AvatarFallback className="bg-zinc-700 text-xs text-white">{agent.user.name.charAt(0).toUpperCase()}</AvatarFallback></Avatar><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{agent.user.name}</span><span className="block truncate text-[11px] text-zinc-400">{agent.user.team || agent.user.role?.name || 'Pessoa da equipe'}</span></span><span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /></button>)}</div>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
       </div>
 
       <AgentProfileSheet
         member={selectedAgent}
         isOpen={!!selectedAgent}
         onClose={() => setSelectedAgent(null)}
-        isOnline={true}
+        isOnline={!isOffline && onlineAgents.some((agent) => agent.user.id === selectedAgent?.id)}
+        joinedAt={onlineAgents.find((agent) => agent.user.id === selectedAgent?.id)?.joined_at}
       />
-
 
 
       {
         isBulkMode && (
           <div className={cn(
             "p-2 border-b border-border flex items-center justify-between animate-in slide-in-from-top-2",
-            bulkAction === 'agent' ? "bg-blue-500/10" : "bg-red-500/10"
+            bulkAction === 'agent' ? "bg-blue-500/10" : bulkAction === 'transfer' ? "bg-emerald-500/10" : "bg-red-500/10"
           )}>
             <div className="flex items-center gap-2 px-2">
               <p className={cn(
                 "text-sm font-medium",
-                bulkAction === 'agent' ? "text-blue-800" : "text-red-800"
+                bulkAction === 'agent' ? "text-blue-800" : bulkAction === 'transfer' ? "text-emerald-800 dark:text-emerald-200" : "text-red-800"
               )}>
                 {selectedBulkChats.size} selecionado(s)
               </p>
@@ -2630,7 +2543,9 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
             </div>
             
             <div className="flex items-center gap-2">
-              {bulkAction === 'agent' ? (
+              {bulkAction === 'transfer' ? (
+                <Button size="sm" className="h-8" disabled={selectedBulkChats.size === 0 || isBulkSubmitting} onClick={() => { setBulkTransferTarget(''); setBulkTransferOpen(true); }}>Transferir</Button>
+              ) : bulkAction === 'agent' ? (
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2 px-2 border-r border-border mr-2">
                     <p className="text-xs font-semibold text-blue-800 uppercase tracking-wider">
@@ -2685,6 +2600,21 @@ export default function ChatList({ chats, selectedChat, setSelectedChat, current
           </div>
         )
       }
+
+      <Dialog open={bulkTransferOpen} onOpenChange={open => { if (!isBulkSubmitting) setBulkTransferOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Transferir {selectedBulkChats.size} conversa(s)</DialogTitle><DialogDescription>Escolha uma pessoa online ou uma equipe. A distribuição respeita as regras e a disponibilidade do destino.</DialogDescription></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-2"><Button type="button" variant={bulkTransferType === 'agent' ? 'default' : 'outline'} onClick={() => { setBulkTransferType('agent'); setBulkTransferTarget(''); }}>Pessoa</Button><Button type="button" variant={bulkTransferType === 'team' ? 'default' : 'outline'} onClick={() => { setBulkTransferType('team'); setBulkTransferTarget(''); }}>Equipe</Button></div>
+            <Label htmlFor="bulk-transfer-target">Destino</Label>
+            <Select value={bulkTransferTarget} onValueChange={setBulkTransferTarget}><SelectTrigger id="bulk-transfer-target"><SelectValue placeholder={bulkTransferType === 'agent' ? 'Selecione uma pessoa online' : 'Selecione uma equipe'} /></SelectTrigger><SelectContent>{bulkTransferType === 'agent' ? onlineAgents.filter(agent => agent.user.id !== currentUser.id).map(agent => <SelectItem key={agent.user.id} value={agent.user.id}>{agent.user.name}</SelectItem>) : teams.map(team => <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>)}</SelectContent></Select>
+            {bulkTransferType === 'agent' && isOffline && <p className="text-xs text-muted-foreground">A presença está reconectando. Aguarde para escolher uma pessoa.</p>}
+            {bulkTransferType === 'agent' && !isOffline && !onlineAgents.some(agent => agent.user.id !== currentUser.id) && <p className="text-xs text-muted-foreground">Nenhuma outra pessoa online no momento.</p>}
+            <p className="text-xs text-muted-foreground">Até 100 conversas por lote. Se alguma falhar, ela continuará selecionada.</p>
+          </div>
+          <DialogFooter><Button variant="outline" disabled={isBulkSubmitting} onClick={() => setBulkTransferOpen(false)}>Cancelar</Button><Button disabled={!bulkTransferTarget || isBulkSubmitting || selectedBulkChats.size > 100 || (bulkTransferType === 'agent' && isOffline)} onClick={handleBulkTransfer}>{isBulkSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirmar transferência</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex-1 overflow-hidden relative flex flex-col min-h-0 bg-transparent">
         {filteredChats.length > 0 ? (

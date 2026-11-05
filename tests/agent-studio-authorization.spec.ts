@@ -3,7 +3,9 @@ import { createDefaultAgentStudioDocument } from '@/services/agent-studio/types'
 import { createStudioSession } from '@/services/agent-studio/engine';
 const preview = vi.hoisted(() => vi.fn());
 const configuredModels = vi.hoisted(() => vi.fn());
+const platformModel = vi.hoisted(() => vi.fn());
 vi.mock('@/services/ai/workspace-ai-credentials', () => ({ listWorkspaceConfiguredAiModels: configuredModels }));
+vi.mock('@/services/ai/platform-config', () => ({ platformModel }));
 vi.mock('@/services/agent-studio/runtime', () => ({ runStudioConversation: preview }));
 const m = vi.hoisted(() => ({ user: vi.fn(), permission: vi.fn(), query: vi.fn(), connect: vi.fn(), create: vi.fn(), http: vi.fn(), mcp: vi.fn(), resolveMcp: vi.fn() }));
 vi.mock('@/actions/user', () => ({ getCurrentUser: m.user }));
@@ -20,25 +22,26 @@ import { getAgentStudioDataAction, saveAgentStudioDraftAction, publishAgentStudi
 const id = '00000000-0000-4000-8000-000000000001';
 const workspaceId = '00000000-0000-4000-8000-000000000002';
 const document = createDefaultAgentStudioDocument(id, workspaceId);
-beforeEach(() => { vi.resetAllMocks(); m.user.mockResolvedValue({ id: 'user', activeWorkspaceId: workspaceId }); m.permission.mockResolvedValue(true); m.query.mockResolvedValue({ rows: [] }); configuredModels.mockResolvedValue([{ id: 'configured-model', enabled: true }]); });
+beforeEach(() => { vi.resetAllMocks(); m.user.mockResolvedValue({ id: 'user', activeWorkspaceId: workspaceId }); m.permission.mockResolvedValue(true); m.query.mockResolvedValue({ rows: [] }); configuredModels.mockResolvedValue([{ id: 'configured-model', enabled: true }]); platformModel.mockResolvedValue({ id: 'configured-model', enabled: true }); });
 describe('Studio server action authorization', () => {
-  it('previews the selected draft model instead of the production model', async () => {
+  it('previews with the global execution model while preserving the unsaved draft', async () => {
     m.query.mockResolvedValue({ rows: [{ id, workspace_id: workspaceId, ai_model: 'production-model', knowledge_base_documents: [] }] });
     configuredModels.mockResolvedValue([{ id: 'openai/selected-model', provider: 'openai', label: 'Selected', enabled: true }]);
     const state = createStudioSession(id, 'simulation', id);
     preview.mockResolvedValue({ state, response: 'Resposta', replay: false });
     const result = await testAgentStudioConversationAction(id, { document: { ...document, aiModel: 'openai/selected-model' }, state, message: 'Olá', messageId: id });
-    expect(result).toMatchObject({ success: true, model: 'openai/selected-model' });
-    expect(preview.mock.calls[0][0].release.runtimeConfig.aiModel).toBe('openai/selected-model');
-    expect(configuredModels).toHaveBeenCalledWith(workspaceId);
+    expect(result).toMatchObject({ success: true, model: 'configured-model' });
+    expect(preview.mock.calls[0][0].release.runtimeConfig.aiModel).toBe('configured-model');
+    expect(preview.mock.calls[0][0].release.agentSnapshot.aiModel).toBe('openai/selected-model');
+    expect(platformModel).toHaveBeenCalled();
   });
-  it('rejects a model not registered in this workspace before saving, publishing or calling a provider', async () => {
+  it('refuses to save, publish or preview when the platform model is unavailable', async () => {
     m.query.mockResolvedValue({ rows: [{ id, workspace_id: workspaceId }] });
-    configuredModels.mockResolvedValue([]);
+    platformModel.mockRejectedValue(new Error('platform model unavailable'));
     const draft = { ...document, aiModel: 'googleai/gemini-2.5-flash-lite' };
-    expect(await saveAgentStudioDraftAction(id, draft)).toMatchObject({ success: false, error: expect.stringContaining('modelo de IA') });
-    expect(await publishAgentStudioAction(id, draft)).toMatchObject({ success: false, error: expect.stringContaining('Modelos de IA') });
-    expect(await testAgentStudioConversationAction(id, { document: draft, state: createStudioSession(id, 'simulation', id), message: 'Olá', messageId: id })).toMatchObject({ success: false });
+    expect(await saveAgentStudioDraftAction(id, draft)).toMatchObject({ success: false, error: 'platform model unavailable' });
+    expect(await publishAgentStudioAction(id, draft)).toMatchObject({ success: false, error: 'platform model unavailable' });
+    expect(await testAgentStudioConversationAction(id, { document: draft, state: createStudioSession(id, 'simulation', id), message: 'Olá', messageId: id })).toMatchObject({ success: false, error: 'platform model unavailable' });
     expect(m.connect).not.toHaveBeenCalled(); expect(preview).not.toHaveBeenCalled();
   });
   it.each([

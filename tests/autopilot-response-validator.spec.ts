@@ -737,6 +737,7 @@ describe('autopilot response validator', () => {
     expect(result.decision).toBe('repair');
     expect(result.actions.map((action) => action.type)).toEqual(['close_chat']);
     expect((result.actions[0] as any).payload.sendCloseMessage).toBe(false);
+    expect(result.response).toBe('Vou encerrar o atendimento conforme solicitado.');
   });
 
   it('repairs first-person closure claims without close action', () => {

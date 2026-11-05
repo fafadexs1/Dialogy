@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
 import { sendAutomatedMessageAction } from '@/actions/messages';
@@ -428,6 +429,10 @@ async function runTransferChatTool(
     const result = await transferChatAction(
       {
         chatId: context.chat.id,
+        operationId: context.orchestratorRunId || context.sourceMessageId ? `tool:${context.orchestratorRunId ?? context.sourceMessageId}:${context.sourceMessageId ?? 'handoff'}` : randomUUID(),
+        expectedAgentId: context.chat.agentId ?? context.chat.agent?.id ?? null,
+        expectedTeamId: context.chat.team_id ?? null,
+        expectedSystemAgentId: context.chat.assigned_system_agent_id ?? context.chat.assignedSystemAgent?.id ?? null,
         ...target,
       },
       createTrustedActorContext({
@@ -440,6 +445,15 @@ async function runTransferChatTool(
     );
 
     if (!result.success) {
+      if (result.outcomeUncertain) {
+        return {
+          toolName: 'transfer_chat',
+          status: 'error',
+          input: action,
+          output: { disposition: 'uncertain', target },
+          error: '[tool_idempotency:uncertain] Não foi possível confirmar a transferência; verifique o atendimento antes de repetir.',
+        };
+      }
       // Ramificar por `reasonCode`, nunca pelo texto do erro: com a comparacao
       // por string, todo motivo de indisponibilidade virava o aviso de "fora do
       // expediente" para o cliente — inclusive quando a equipe estava aberta e
@@ -468,7 +482,7 @@ async function runTransferChatTool(
           let messageText: string;
           if (result.reasonCode === 'outside_business_hours') {
             const businessHoursText = await formatTeamBusinessHours(target.teamId);
-            messageText = `Agradeço o seu contato! No momento, a nossa equipe do setor ${teamName} está fora do expediente (${businessHoursText}). Vou transferir seu atendimento para este setor assim que o expediente iniciar. Seu chat já foi colocado na fila de espera para que nossa equipe te atenda logo no início das atividades!`;
+            messageText = `Agradeço o seu contato! No momento, a equipe ${teamName} está fora do expediente (${businessHoursText}). Seu atendimento foi colocado na fila para a equipe acompanhar quando estiver disponível.`;
           } else {
             messageText = `Agradeço o seu contato! No momento, todos os atendentes do setor ${teamName} estão ocupados. Seu atendimento já está na fila de espera e assim que um atendente ficar disponível você será atendido!`;
           }
@@ -480,6 +494,7 @@ async function runTransferChatTool(
                  is_autopilot_active = FALSE,
                  copilot_mode = 'off',
                  status = 'gerais',
+                 team_id = $6,
                  tag = $1,
                  color = $2,
                  assigned_at = NULL,
@@ -491,7 +506,7 @@ async function runTransferChatTool(
                AND is_autopilot_active = TRUE
                AND status <> 'encerrados'
              RETURNING id`,
-            [chatTag, chatColor, context.chat.id, context.workspaceId, context.systemAgentId]
+            [chatTag, chatColor, context.chat.id, context.workspaceId, context.systemAgentId, target.teamId]
           );
           if ((queueUpdate.rowCount ?? 0) === 0) {
             throw new Error('Chat mudou de responsavel antes da transferencia para a fila.');
@@ -520,6 +535,7 @@ async function runTransferChatTool(
             is_autopilot_active: false,
             copilot_mode: 'off',
             status: 'gerais',
+            team_id: target.teamId,
             tag: chatTag,
             color: chatColor,
             assigned_at: null,
@@ -536,6 +552,7 @@ async function runTransferChatTool(
             input: action,
             output: {
               transferred: false,
+              disposition: 'queued',
               fallbackExecuted: true,
               notificationDelivered,
               target,
@@ -556,13 +573,16 @@ async function runTransferChatTool(
       };
     }
 
-    await abortActiveProcedures(context.chat.id);
+    await abortActiveProcedures(context.chat.id).catch((error) => {
+      console.error('[TRANSFER_CHAT] Transfer succeeded but procedure cleanup failed:', error);
+    });
     return {
       toolName: 'transfer_chat',
       status: 'success',
       input: action,
       output: {
         transferred: true,
+        disposition: 'assigned',
         target,
         reason: action.reason || null,
       },
@@ -1337,10 +1357,10 @@ export async function runAgentTools(
         }
         return runSgpTool(runtimeContext, action as any);
       })();
-      // close_chat owns a database transaction. A Promise timeout cannot
-      // cancel PostgreSQL and could report an error while the transaction later
-      // commits, so wait for its authoritative result.
-      result = action.type === 'close_chat'
+      // These operations mutate chat ownership/state. A Promise timeout cannot
+      // cancel their transaction and may report failure before it commits.
+      // Wait for the authoritative result instead of triggering a duplicate.
+      result = action.type === 'close_chat' || action.type === 'transfer_chat'
         ? await operation
         : await withTimeout(operation, definition.timeoutMs, `agent tool ${definition.name}`);
     } catch (error) {
@@ -1374,7 +1394,9 @@ export async function runAgentTools(
       await recordOutcomeSafely({
         workspaceId: runtimeContext.workspaceId,
         chatId: runtimeContext.chat.id,
-        trigger: action.type === 'transfer_chat' ? 'handoff' : 'closed',
+        trigger: action.type === 'transfer_chat'
+          ? (result.output?.transferred === false ? 'manual' : 'handoff')
+          : 'closed',
       });
     }
     results.push(result);

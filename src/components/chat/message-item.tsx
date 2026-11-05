@@ -54,6 +54,7 @@ import { MediaViewer } from './media-viewer';
 import { useToast } from '@/hooks/use-toast';
 import { resolveClientMediaUrl } from '@/lib/storage-url';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { CatalogPreview } from './catalog-preview';
 
 function formatDuration(seconds: number): string {
     if (!seconds) return '0:00';
@@ -831,6 +832,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
     const replyPreview = resolveReplyPreview(message, quotedMessage);
     const statusTitle = isFailed
         ? `Falha ao enviar: ${failureDetails.summary}`
+        : status === 'UNKNOWN' ? 'Envio não confirmado. Confira o WhatsApp antes de reenviar.'
         : (message.api_message_status || 'Sem status');
     const failedCapturedAtLabel = (() => {
         if (!failureDetails.capturedAt) return undefined;
@@ -864,6 +866,10 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
         const interactivePayload = message.metadata?.interactiveType
             ? message.metadata.interactivePayload
             : undefined;
+
+        if (interactivePayload?.kind === 'carousel' && Array.isArray(interactivePayload.cards)) {
+            return <CatalogPreview catalog={interactivePayload} />;
+        }
 
         if (interactivePayload?.kind === 'list' && Array.isArray(interactivePayload.sections)) {
             return <InteractiveListMessage payload={interactivePayload} isFromMe={isFromMe} />;
@@ -1135,7 +1141,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </TooltipProvider>
-                                                {onRetry && !isInternalNote && !isAiAnalysis && !isToolExecution && (
+                                                {onRetry && !isInternalNote && !isAiAnalysis && !isToolExecution && message.metadata?.interactiveType !== 'carousel' && (
                                                     <Button
                                                         type="button"
                                                         variant="link"
@@ -1159,6 +1165,7 @@ const MessageItem = memo(({ message, quotedMessage, prevMessage, workspaceTimezo
                                                     );
                                                 }
 
+                                                if (status === 'UNKNOWN') return <Clock className="h-3 w-3 text-amber-500" />;
                                                 if (status === 'PENDING') return <Check className="h-3 w-3 text-muted-foreground/40 dark:text-white/40" />; // Saved in DB: Single Check
 
                                                 if (status === 'READ' || status === 'PLAYED') return <CheckCheck className="h-3 w-3 text-blue-500 dark:text-blue-400" />; // Read: Blue Double Check

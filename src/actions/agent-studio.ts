@@ -8,7 +8,9 @@ import { revalidatePath } from 'next/cache';
 
 import { getCurrentUser } from '@/actions/user';
 import { db } from '@/lib/db';
+import { validateStudioFlowPublication } from '@/services/agent-studio/flow-contract';
 import { listWorkspaceConfiguredAiModels } from '@/services/ai/workspace-ai-credentials';
+import { platformModel } from '@/services/ai/platform-config';
 import { resolveAutopilotModelFromCatalog } from '@/services/ai/model-selection';
 import { resolveConfiguredAiModel } from '@/lib/ai-models';
 import { hasWorkspacePermission } from '@/lib/workspace-permissions';
@@ -20,6 +22,7 @@ import {
   saveNexusCredential,
   type NexusCredentialType,
 } from '@/modules/nexus/services/credentials';
+import { OAuthCredentialSchema } from '@/modules/nexus/services/oauth-credentials';
 import { validateAgentForPublication } from '@/services/agent-studio/assistant-validator';
 import {
   AgentStudioDocumentSchema,
@@ -53,7 +56,7 @@ export type AgentApiConnectionSummary = {
   id: string;
   name: string;
   baseUrl: string;
-  authType: 'none' | 'api_key' | 'bearer_token' | 'basic_auth';
+  authType: 'none' | 'api_key' | 'bearer_token' | 'basic_auth' | 'oauth2';
 };
 
 type JsonObject = Record<string, unknown>;
@@ -634,12 +637,14 @@ export async function publishAgentStudioAction(agentId: string, input: AgentStud
         };
       }
     }
+    if (document.flowBuilder?.enabled) validateStudioFlowPublication(document.flowBuilder, document.resolveStage.procedures.filter((procedure) => procedure.status !== 'archived').map((procedure) => procedure.id));
     const manifest: AgentReleaseManifest = {
       releaseId: crypto.randomUUID(),
       agentId,
       workspaceId,
       version: nextVersion,
       agentSnapshot: document,
+      flowContract: document.flowBuilder?.enabled ? document.flowBuilder : undefined,
       publishedProcedures: document.resolveStage.procedures.filter((procedure) => procedure.status !== 'archived'),
       runtimeVersion: 'studio-v1',
       knowledgeSnapshot,
@@ -737,7 +742,7 @@ export async function listAgentApiConnectionsAction(agentId: string) {
         id: credential.id,
         name: credential.name,
         baseUrl: String(credential.metadata.baseUrl || ''),
-        authType: ['api_key', 'bearer_token', 'basic_auth'].includes(String(credential.metadata.authType))
+        authType: ['api_key', 'bearer_token', 'basic_auth', 'oauth2'].includes(String(credential.metadata.authType))
           ? credential.metadata.authType as AgentApiConnectionSummary['authType']
           : 'none',
       }));
@@ -771,6 +776,12 @@ export async function saveAgentApiConnectionAction(agentId: string, input: {
   bearerToken?: string;
   basicUsername?: string;
   basicPassword?: string;
+  oauthTokenUrl?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+  oauthRefreshToken?: string;
+  oauthGrantType?: 'refresh_token' | 'client_credentials';
+  oauthScope?: string;
 }) {
   try {
     const { user, workspaceId } = await requireAgent(agentId);
@@ -780,12 +791,18 @@ export async function saveAgentApiConnectionAction(agentId: string, input: {
     const connection = z.object({
       name: z.string().trim().min(1).max(160),
       baseUrl: z.string().url().max(2048),
-      authType: z.enum(['none', 'api_key', 'bearer_token', 'basic_auth']),
+      authType: z.enum(['none', 'api_key', 'bearer_token', 'basic_auth', 'oauth2']),
       apiKeyHeader: z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/).optional(),
       apiKeyValue: z.string().max(16000).optional(),
       bearerToken: z.string().max(16000).optional(),
       basicUsername: z.string().max(1000).optional(),
       basicPassword: z.string().max(16000).optional(),
+      oauthTokenUrl: z.string().url().max(2048).optional(),
+      oauthClientId: z.string().max(2000).optional(),
+      oauthClientSecret: z.string().max(10000).optional(),
+      oauthRefreshToken: z.string().max(10000).optional(),
+      oauthGrantType: z.enum(['refresh_token', 'client_credentials']).optional(),
+      oauthScope: z.string().max(2000).optional(),
     }).parse(input);
     if ((connection.authType === 'api_key' && !connection.apiKeyValue?.trim()) ||
       (connection.authType === 'bearer_token' && !connection.bearerToken?.trim()) ||
@@ -794,7 +811,13 @@ export async function saveAgentApiConnectionAction(agentId: string, input: {
     }
     const target = await resolveSafeAutopilotWebhookTarget(connection.baseUrl);
     const baseUrl = target.url.toString();
-    const credentialType: NexusCredentialType = input.authType === 'bearer_token'
+    const oauthPayload = connection.authType === 'oauth2' ? OAuthCredentialSchema.parse({
+      tokenUrl: connection.oauthTokenUrl, allowedOrigin: new URL(baseUrl).origin, clientId: connection.oauthClientId,
+      clientSecret: connection.oauthClientSecret, refreshToken: connection.oauthRefreshToken || undefined,
+      grantType: connection.oauthGrantType || 'refresh_token', scope: connection.oauthScope || undefined,
+    }) : null;
+    if (oauthPayload) await resolveSafeAutopilotWebhookTarget(oauthPayload.tokenUrl);
+    const credentialType: NexusCredentialType = input.authType === 'oauth2' ? 'oauth2' : input.authType === 'bearer_token'
       ? 'bearer'
       : input.authType === 'basic_auth'
         ? 'basic'
@@ -804,7 +827,7 @@ export async function saveAgentApiConnectionAction(agentId: string, input: {
       userId: user.id,
       name: connection.name,
       type: credentialType,
-      payload: {
+      payload: oauthPayload || {
         name: connection.apiKeyHeader || 'X-API-Key',
         value: connection.apiKeyValue || '',
         placement: 'header',
@@ -894,7 +917,7 @@ export async function listStudioResourcesAction(agentId: string) {
 export async function getStudioResultsAction(agentId: string, periodDays = 30) {
   try {
     const { workspaceId } = await requireAgent(agentId);
-    const [metrics, releases, current] = await Promise.all([
+    const [metrics, releases, current, executingModel] = await Promise.all([
       readStudioResults(workspaceId, agentId, periodDays),
       db.query(`SELECT v.version_number AS version, v.snapshot->'agent_release_manifest' AS release,
         EXISTS (SELECT 1 FROM agent_studio_release_revocations r WHERE r.workspace_id = v.workspace_id
@@ -906,15 +929,18 @@ export async function getStudioResultsAction(agentId: string, periodDays = 30) {
       db.query(`SELECT snapshot ? 'agent_release_manifest' AS "isStudio",
         snapshot ? 'agent_studio_legacy_backup' AS "hasLegacyBackup"
         FROM autopilot_config_versions WHERE workspace_id = $1 AND config_id = $2 ORDER BY version_number DESC LIMIT 1`, [workspaceId, agentId]),
+      platformModel().catch(() => null),
     ]);
     const active = current.rows[0];
     return { success: true as const, ...metrics, releases: releases.rows.map((row) => {
       const revokedSources = new Set((row.revoked_sources || []).map(String));
       return { version: Number(row.version), id: String(row.release.releaseId), createdAt: String(row.release.createdAt), revoked: Boolean(row.revoked),
+        publishedModel: String(row.release.runtimeConfig?.aiModel || row.release.agentSnapshot?.aiModel || '') || null,
         knowledgeSources: (row.release.knowledgeSnapshot || []).flatMap((source: Record<string, unknown>) => source.id
           ? [{ id: String(source.id), name: String(source.name || source.id), revoked: revokedSources.has(String(source.id)) }] : []) };
     }),
-      currentRuntime: active?.isStudio ? 'studio' as const : 'legacy' as const, canRollbackToLegacy: Boolean(active?.isStudio && active?.hasLegacyBackup) };
+      currentRuntime: active?.isStudio ? 'studio' as const : 'legacy' as const, canRollbackToLegacy: Boolean(active?.isStudio && active?.hasLegacyBackup),
+      executingModel: executingModel?.id || null };
   } catch (error) { return { success: false as const, sessions: [], releases: [], currentRuntime: 'unknown' as const, canRollbackToLegacy: false,
     error: error instanceof Error ? error.message : 'Não foi possível carregar os resultados.' }; }
 }
@@ -969,7 +995,7 @@ export async function listPublishedStudioAgentsAction(workspaceId: string) {
     return { success: true as const, releases: result.rows.map((row) => {
       const parsedDoc = AgentStudioDocumentSchema.safeParse(row.release.agentSnapshot);
       const document = parsedDoc.success ? parsedDoc.data : (row.release.agentSnapshot as AgentStudioDocument);
-      return { agentId: String(row.id), agentName: String(row.name), releaseId: String(row.release.releaseId), version: Number(row.version_number), inputs: studioFlowInputs(document), outputs: studioFlowOutputs(document) };
+      return { agentId: String(row.id), agentName: String(row.name), releaseId: String(row.release.releaseId), version: Number(row.version_number), inputs: studioFlowInputs(document), outputs: studioFlowOutputs(document), flowContract: row.release.flowContract || null, testOperations: document.resolveStage.procedures.filter((procedure) => procedure.status !== 'archived').flatMap((procedure) => procedure.steps.filter((step) => ['native_action', 'http_request', 'mcp_tool_call'].includes(step.type)).map((step) => ({ id: step.id, label: `${procedure.name} · ${step.title}` }))), procedures: (row.release.publishedProcedures || []).filter((procedure: { id: string }) => row.release.flowContract?.exposedProcedureIds?.includes(procedure.id)).map((procedure: { id: string; name: string; description?: string }) => ({ id: procedure.id, name: procedure.name, description: procedure.description || '' })) };
     }) };
   } catch (error) { return { success: false as const, releases: [], error: error instanceof Error ? error.message : 'Não foi possível carregar os agentes publicados.' }; }
 }

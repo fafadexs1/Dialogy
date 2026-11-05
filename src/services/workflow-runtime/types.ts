@@ -114,6 +114,7 @@ export type NodeHandlerRegistry = {
 };
 
 export type WorkflowRunOptions = {
+  limits?: Partial<Pick<WorkflowLimits, 'maxModelCalls' | 'maxToolCalls' | 'executionTimeoutMs'>>;
   workerId?: string;
   signal?: AbortSignal;
   maxSteps?: number;

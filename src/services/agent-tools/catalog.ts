@@ -250,7 +250,7 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
     displayName: 'Gerar PIX de uma fatura',
     category: 'sgp',
     version: '2026-04-28',
-    description: 'Gera codigo PIX de uma fatura SGP existente.',
+    description: 'Gera PIX somente quando uma consulta atual de sgp_fetch_contact_panel_data nao retornou pixCode para a fatura solicitada. Consulte primeiro, identifique invoiceId e contractId reais e confirme qual fatura o cliente quer quando houver ambiguidade. Se pixCode ja existir, entregue esse codigo sem gerar outro.',
     class: 'write_idempotent',
     riskLevel: 'medium',
     sideEffect: 'medium',
@@ -262,6 +262,15 @@ const TOOL_CATALOG: Record<AgentToolName, AgentToolDefinition> = {
     allowedIntents: ['billing_or_payment'],
     requiredSlots: ['customer_identifier', 'invoice_or_payment_id'],
     fallbackAction: 'ask_missing_slot',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        invoiceId: { type: 'string', pattern: '^\\d+$', description: 'ID real da fatura em aberto retornada pela consulta atual ao SGP.' },
+        contractId: { type: 'string', pattern: '^\\d+$', description: 'ID real do contrato ao qual pertence a fatura consultada.' },
+      },
+      required: ['invoiceId', 'contractId'],
+      additionalProperties: false,
+    },
   },
   sgp_create_payment_promise: {
     name: 'sgp_create_payment_promise',

@@ -468,4 +468,157 @@ describe('reasoning loop: controlled decisions and real orchestration', () => {
     expect(result.state.reasoning?.requests[0].status).toBe('cancelled');
     expect(result.response).toContain('Encerrando o atendimento com carinho.');
   });
+
+  it('offers a published alternative after a temporary read failure without transferring', async () => {
+    const f = fixture();
+    f.dependencies.execute.mockRejectedValueOnce(Object.assign(new Error('upstream unavailable'), { status: 503 }))
+      .mockResolvedValueOnce({ values: { result: 'confirmed' } });
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }, { requests: [request()] }))
+      .mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:alternative' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'Conferi a alternativa disponível.' }));
+    const result = await advanceStudioReasoningSession(f.input);
+    expect(f.dependencies.execute.mock.calls.map(([step]) => step.id)).toEqual(['lookup', 'alternative']);
+    expect(f.dependencies.decide.mock.calls[1][0].observations).toContainEqual(expect.objectContaining({
+      result: 'read_failed', category: 'temporary_read_failure',
+    }));
+    expect(result.response).toContain('alternativa');
+    expect(f.dependencies.handoff).not.toHaveBeenCalled();
+  });
+
+  it('blocks an identical read after a negative business result while allowing another published lookup', async () => {
+    const f = fixture();
+    f.input.document.resolveStage.procedures[0].steps[1].httpRequest!.outputMappings.push({ chipKey: 'success', chipLabel: 'Sucesso', jsonPath: 'success', required: false, sensitive: false });
+    f.dependencies.execute.mockResolvedValueOnce({ values: { result: 'not found', success: false } })
+      .mockResolvedValueOnce({ values: { result: 'another path' } });
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }, { requests: [request()] }))
+      .mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }))
+      .mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:alternative' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'A primeira consulta não encontrou o contrato; verifiquei outra opção.' }));
+    const result = await advanceStudioReasoningSession(f.input);
+    expect(f.dependencies.execute.mock.calls.map(([step]) => step.id)).toEqual(['lookup', 'alternative']);
+    expect(f.dependencies.decide.mock.calls[2][0].observations).toContainEqual(expect.objectContaining({
+      error: 'identical_read_retry_blocked', category: 'business_negative',
+    }));
+    expect(result.state.reasoning?.operations[0]).toMatchObject({ status: 'succeeded', failureCategory: 'business_negative' });
+  });
+
+  it('classifies access denial and blocks the same lookup without blocking a published alternative', async () => {
+    const f = fixture();
+    f.dependencies.execute.mockRejectedValueOnce(Object.assign(new Error('forbidden'), { status: 403 }))
+      .mockResolvedValueOnce({ values: { result: 'confirmed' } });
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }, { requests: [request()] }))
+      .mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }))
+      .mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:alternative' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'Consegui verificar por outra consulta.' }));
+    const result = await advanceStudioReasoningSession(f.input);
+    expect(f.dependencies.execute.mock.calls.map(([step]) => step.id)).toEqual(['lookup', 'alternative']);
+    expect(f.dependencies.decide.mock.calls[1][0].observations).toContainEqual(expect.objectContaining({ category: 'access_blocked' }));
+    expect(f.dependencies.decide.mock.calls[2][0].observations).toContainEqual(expect.objectContaining({
+      error: 'identical_read_retry_blocked', category: 'access_blocked',
+    }));
+    expect(result.state.reasoning?.operations[0].failureCategory).toBe('access_blocked');
+  });
+
+  it('allows one useful retry for a temporary lookup failure, then blocks a third identical attempt', async () => {
+    const f = fixture();
+    f.input.document.resolveStage.procedures[0].steps[1].httpRequest!.maxRetries = 0;
+    f.dependencies.execute.mockRejectedValue(Object.assign(new Error('timeout'), { code: 'TIMEOUT' }));
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }, { requests: [request()] }))
+      .mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }))
+      .mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'A consulta continua indisponível.' }));
+    const result = await advanceStudioReasoningSession(f.input);
+    expect(f.dependencies.execute).toHaveBeenCalledTimes(2);
+    expect(result.state.reasoning?.operations.map((operation) => operation.failureCategory))
+      .toEqual(['temporary_read_failure', 'temporary_read_failure']);
+    expect(f.dependencies.decide.mock.calls[3][0].observations).toContainEqual(expect.objectContaining({
+      error: 'identical_read_retry_blocked', category: 'temporary_read_failure',
+    }));
+  });
+
+  it('requires a fresh customer request before repeating a negative business lookup in a later turn', async () => {
+    const f = fixture();
+    f.input.document.resolveStage.procedures[0].steps[1].httpRequest!.outputMappings.push({
+      chipKey: 'success', chipLabel: 'Sucesso', jsonPath: 'success', required: false, sensitive: false,
+    });
+    f.dependencies.execute.mockResolvedValue({ values: { result: 'not found', success: false } });
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }, { requests: [request()] }))
+      .mockResolvedValueOnce(decision('respond', { response: 'Não encontrei o contrato.' }));
+    const first = await advanceStudioReasoningSession(f.input);
+    f.dependencies.decide.mockReset().mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'A consulta anterior não encontrou o contrato.' }));
+    const continued = await advanceStudioReasoningSession({ ...f.input, state: first.state, messageId: 'm2', message: 'Continue' });
+    expect(f.dependencies.execute).toHaveBeenCalledTimes(1);
+    expect(f.dependencies.decide.mock.calls[1][0].observations).toContainEqual(expect.objectContaining({
+      error: 'identical_read_retry_blocked', category: 'business_negative',
+    }));
+    f.dependencies.decide.mockReset().mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'Verifiquei de novo.' }));
+    await advanceStudioReasoningSession({ ...f.input, state: continued.state, messageId: 'm3', message: 'Pode verificar novamente agora?' });
+    expect(f.dependencies.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an uncertain write pending with its failure category and does not dispatch it again', async () => {
+    const f = fixture();
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:activate', response: 'Confirma a ativação?' }, { requests: [request()] }));
+    const proposal = await advanceStudioReasoningSession(f.input);
+    f.dependencies.execute.mockRejectedValueOnce(new Error('connection lost'));
+    f.dependencies.decide.mockReset().mockResolvedValueOnce(decision('tool', {
+      requestId: 'contract', capabilityId: 'contract:activate', consent: 'approve', consentQuote: 'Sim',
+    })).mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:activate' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'Ainda preciso confirmar a ativação.' }));
+    const result = await advanceStudioReasoningSession({ ...f.input, state: proposal.state, messageId: 'm2', message: 'Sim' });
+    expect(f.dependencies.execute).toHaveBeenCalledTimes(1);
+    expect(result.state.reasoning?.operations[0]).toMatchObject({ status: 'unknown', failureCategory: 'unknown_effect' });
+    expect(f.dependencies.decide.mock.calls[1][0].observations).toContainEqual(expect.objectContaining({
+      result: 'effect_outcome_unknown', category: 'unknown_effect',
+    }));
+  });
+
+  it('does not execute tools or hand off in suggestion mode', async () => {
+    const f = fixture();
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' }, { requests: [request()] }))
+      .mockResolvedValueOnce(decision('handoff', { reason: 'Transferir' }))
+      .mockResolvedValueOnce(decision('respond', { response: 'Sugiro consultar o contrato.' }));
+    const result = await advanceStudioReasoningSession({ ...f.input, suggestionOnly: true });
+    expect(result.response).toContain('Sugiro');
+    expect(f.dependencies.execute).not.toHaveBeenCalled();
+    expect(f.dependencies.handoff).not.toHaveBeenCalled();
+  });
+
+  it('reserves the compact canary final decision and gives a specific pending response', async () => {
+    const f = fixture();
+    f.input.sources = [{ messageId: 'm1', content: f.input.message, fromMe: false }];
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' },
+      { requests: [request('resolved')], choices: [{ requestId: 'contract', key: 'plan', label: 'Plano', value: '700',
+        status: 'active', sourceMessageId: 'm1', quote: 'Quero 700' }] }));
+    const result = await advanceStudioReasoningSession({ ...f.input, compactContext: true, maxDecisions: 1 });
+    expect(f.dependencies.decide.mock.calls[0][0].finalDecisionOnly).toBe(true);
+    expect(f.dependencies.execute).not.toHaveBeenCalled();
+    expect(result.response).toContain('Contratar');
+    expect(result.state.reasoning?.requests[0]).toMatchObject({ status: 'active', values: { plan: '700' } });
+    expect(result.state.reasoning?.lastTurnMetrics?.budgetReached).toBe(true);
+  });
+
+  it('still allows a useful tool on the penultimate compact decision', async () => {
+    const f = fixture();
+    f.dependencies.decide.mockResolvedValueOnce(decision('tool', { requestId: 'contract', capabilityId: 'contract:lookup' },
+      { requests: [request()] })).mockResolvedValueOnce(decision('respond', { response: 'Consulta concluída.' }));
+    const result = await advanceStudioReasoningSession({ ...f.input, compactContext: true, maxDecisions: 2 });
+    expect(f.dependencies.decide.mock.calls.map(([context]) => context.finalDecisionOnly)).toEqual([false, true]);
+    expect(f.dependencies.execute).toHaveBeenCalledTimes(1);
+    expect(result.response).toBe('Consulta concluída.');
+  });
+
+  it('stops after one repair for malformed decisions and preserves the active request', async () => {
+    const f = fixture();
+    f.input.state.reasoning = { version: 2, requests: [{ ...request(), values: {}, integrationValues: {}, choiceLabels: {}, unavailable: [] }],
+      operations: [], pendingAction: null };
+    f.dependencies.decide.mockResolvedValue({ invalid: true });
+    const result = await advanceStudioReasoningSession(f.input);
+    expect(f.dependencies.decide).toHaveBeenCalledTimes(2);
+    expect(result.response).toContain('Contratar');
+    expect(result.state.reasoning?.requests[0].status).toBe('active');
+    expect(f.dependencies.execute).not.toHaveBeenCalled();
+  });
 });

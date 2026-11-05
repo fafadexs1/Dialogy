@@ -433,8 +433,14 @@ export async function timeOrchestratorStage<T>(
   try {
     const value = await task();
     const durationMs = Date.now() - startedAt;
-    await recordOrchestratorEvent({ run, kind, status: 'success', durationMs, payload });
-    recordStageMetric(kind, 'success', durationMs, run?.workspaceId);
+    const stageStatus = kind === 'tool_execution' && Array.isArray(value)
+      && value.some((item) => item && typeof item === 'object'
+        && (('status' in item && (item.status === 'error' || item.status === 'rejected'))
+          || ('output' in item && item.output && typeof item.output === 'object'
+            && 'disposition' in item.output && item.output.disposition === 'queued')))
+      ? 'fallback' : 'success';
+    await recordOrchestratorEvent({ run, kind, status: stageStatus, durationMs, payload });
+    recordStageMetric(kind, stageStatus, durationMs, run?.workspaceId);
     return { value, durationMs };
   } catch (error) {
     const durationMs = Date.now() - startedAt;

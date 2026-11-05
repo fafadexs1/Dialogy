@@ -8,6 +8,17 @@ import {
 import type { Contact } from '@/lib/types';
 
 describe('autopilot slot extraction', () => {
+  it.each(['Quero a fatura desse mês', 'Me manda o boleto deste mês', 'Fatura atual', 'Minha cobrança mensal'])
+    ('does not turn prose into an invoice identifier: %s', (customerMessage) => {
+      const result = extractAutopilotSlots({ customerMessage, rememberedSlots: { invoice_or_payment_id: 'desse' } });
+      expect(result.slots.invoice_or_payment_id).toBeUndefined();
+    });
+
+  it('keeps actual numeric and alphanumeric invoice references', () => {
+    expect(extractAutopilotSlots({ customerMessage: 'Fatura #800123' }).slots.invoice_or_payment_id).toBe('800123');
+    expect(extractAutopilotSlots({ customerMessage: 'Boleto FAT-1234' }).slots.invoice_or_payment_id).toBe('FAT-1234');
+  });
+
   it('extracts and validates CPF/CNPJ identifiers from the message', () => {
     const result = extractAutopilotSlots({
       customerMessage: 'Meu CPF e 529.982.247-25',
@@ -55,6 +66,28 @@ describe('autopilot slot extraction', () => {
 
     expect(result.slots.customer_identifier).toBe('52998224725');
     expect(result.details.find((detail) => detail.name === 'customer_identifier')?.source).toBe('contact');
+  });
+
+  it('prefers the named CRM document over an old document in contact memory', () => {
+    const result = extractAutopilotSlots({
+      customerMessage: 'Quero a próxima fatura',
+      rememberedSlots: { customer_identifier: '86675273191' },
+      contact: { id: 'contact-1', workspace_id: 'workspace-1', name: 'Cliente', custom_fields: {
+        telefone: '86675273191', CPF: '529.982.247-25',
+      } } as Contact,
+    });
+    expect(result.slots.customer_identifier).toBe('52998224725');
+    expect(result.details.find((detail) => detail.name === 'customer_identifier')?.source).toBe('contact');
+  });
+
+  it('keeps a document explicitly supplied in the current conversation ahead of CRM and memory', () => {
+    const result = extractAutopilotSlots({
+      customerMessage: 'Meu CPF é 866.752.731-91',
+      rememberedSlots: { customer_identifier: '52998224725' },
+      contact: { id: 'contact-1', workspace_id: 'workspace-1', name: 'Cliente', custom_fields: { CPF: '529.982.247-25' } } as Contact,
+    });
+    expect(result.slots.customer_identifier).toBe('86675273191');
+    expect(result.details.find((detail) => detail.name === 'customer_identifier')?.source).toBe('message');
   });
 
   it('extracts date, time and protocol slots', () => {

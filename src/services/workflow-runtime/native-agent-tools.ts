@@ -372,6 +372,9 @@ export function reconcileNativeWorkflowTools(
 
   const nodes = definition.nodes.map((node) => {
     if (!attachedToolNodeIds.has(node.id)) return node;
+    // Built-in utilities are identified by their immutable node type and use no
+    // workspace catalog credentials. They are resolved by the Nexus registry.
+    if (['tool.calculator', 'tool.clock', 'tool.read_url', 'tool.web_search', 'tool.sandbox', 'tool.image', 'tool.image_analysis', 'tool.video_analysis', 'tool.document_read', 'tool.document_write', 'tool.audio_transcribe', 'tool.text_to_speech', 'tool.browser', 'tool.schedule_workflow', 'tool.email_notification', 'tool.zapier', 'tool.google_ads_report', 'tool.whatsapp_reply', 'tool.whatsapp_history'].includes(node.type)) return node;
     const name = getWorkflowToolName(node);
     const tool = catalogByName.get(name);
     if (!tool) {

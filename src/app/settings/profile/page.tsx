@@ -1,5 +1,6 @@
 'use client';
 
+import { ReactionSoundSettings } from '@/components/team/reaction-sound-settings';
 import { useActionState, useEffect, useState, useRef, useTransition } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Loader2, Save, UserCircle, UploadCloud, Bell } from "lucide-react";
@@ -9,6 +10,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { LogoutTransferSettings } from '@/components/chat/logout-transfer-settings';
+import { PersonalInactivitySettings } from '@/components/chat/personal-inactivity-settings';
 import { updateUserProfile, updateUserThemePreference } from '@/actions/user';
 import { toast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
@@ -275,6 +278,10 @@ export default function ProfilePage() {
           </CardFooter>
         </Card>
       </form>
+
+      <ReactionSoundSettings />
+      <PersonalInactivitySettings key={user.activeWorkspaceId || user.id} />
+      {user.activeWorkspaceId && <LogoutTransferSettings key={user.activeWorkspaceId} workspaceId={user.activeWorkspaceId} userId={user.id} />}
 
       <Card>
         <CardHeader>

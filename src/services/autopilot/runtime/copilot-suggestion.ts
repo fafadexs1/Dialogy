@@ -119,6 +119,7 @@ export type PublishCopilotSuggestionInput = {
   suggestion: string;
   messageBlocks?: string[] | null;
   insights?: CopilotSuggestionInsights;
+  assertCurrent?: () => Promise<void>;
 };
 
 /**
@@ -133,6 +134,7 @@ export async function publishCopilotSuggestion(
 ): Promise<CopilotSuggestion | null> {
   const suggestion = (input.suggestion || '').trim();
   if (!suggestion) return null;
+  await input.assertCurrent?.();
 
   const blocks = normalizeBlocks(suggestion, input.messageBlocks);
   const insights = compactInsights(input.insights || {});
@@ -186,6 +188,7 @@ export async function publishCopilotSuggestion(
     console.warn('[COPILOT_SUGGESTION] Failed to persist suggestion:', error);
   }
 
+  await input.assertCurrent?.();
   await broadcastCopilotSuggestion({
     chatId: input.chatId,
     agentName,
@@ -243,11 +246,20 @@ export async function getPendingCopilotSuggestionForChat(input: {
               s.message_blocks, s.insights, s.status, s.created_at,
               COALESCE(sa.name, ac.name) AS agent_name
          FROM public.autopilot_chat_suggestions s
+         JOIN public.chats c ON c.id = s.chat_id AND c.workspace_id = s.workspace_id
          LEFT JOIN public.autopilot_configs ac ON ac.id = s.autopilot_config_id
          LEFT JOIN public.system_agents sa ON sa.id = s.system_agent_id
         WHERE s.chat_id = $1
           AND s.workspace_id = $2
           AND s.status = 'pending'
+          AND c.copilot_mode = 'suggest' AND c.is_autopilot_active = TRUE AND c.status <> 'encerrados'
+          AND c.autopilot_config_id = s.autopilot_config_id AND c.assigned_system_agent_id IS NULL
+          AND (s.insights->>'contextMessageId' IS NULL OR s.insights->>'contextMessageId' = (
+            SELECT m.id::text FROM messages m WHERE m.chat_id = c.id AND m.workspace_id = c.workspace_id
+              AND COALESCE(m.type, '') <> 'system'
+              AND COALESCE(m.metadata->>'isInternalNote', 'false') <> 'true'
+              AND LOWER(COALESCE(m.api_message_status, '')) NOT IN ('internal', 'failed', 'error')
+            ORDER BY m.created_at DESC, m.id DESC LIMIT 1))
         ORDER BY s.created_at DESC
         LIMIT 1`,
       [input.chatId, input.workspaceId],

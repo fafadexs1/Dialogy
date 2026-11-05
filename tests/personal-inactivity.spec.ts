@@ -1,0 +1,33 @@
+import { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
+const mocks=vi.hoisted(()=>({query:vi.fn(),connect:vi.fn(),send:vi.fn(),broadcast:vi.fn()}));
+vi.mock('server-only',()=>({}));
+vi.mock('@/lib/db',()=>({db:mocks}));
+vi.mock('@/actions/messages',()=>({sendAutomatedMessageAction:mocks.send}));
+vi.mock('@/lib/realtime/chat-broadcast',()=>({broadcastHydratedChatUpdate:mocks.broadcast}));
+import { claimDueInactivity,processInactivityAttempt,runDuePersonalInactivity } from '@/services/chat/personal-inactivity';
+let sql:PGlite;
+const w='10000000-0000-4000-8000-000000000001',u='20000000-0000-4000-8000-000000000001',c='30000000-0000-4000-8000-000000000001';
+beforeAll(async()=>{sql=new PGlite();await sql.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role;
+CREATE TABLE users(id uuid primary key,is_superadmin boolean default false);
+CREATE TABLE workspaces(id uuid primary key,owner_id uuid);
+CREATE TABLE user_workspace_roles(user_id uuid,workspace_id uuid);
+CREATE TABLE chats(id uuid primary key,workspace_id uuid,agent_id uuid,status text,created_at timestamptz,assigned_at timestamptz,closed_at timestamptz,assigned_system_agent_id uuid,is_autopilot_active boolean,copilot_mode text,updated_at timestamptz);
+CREATE TABLE messages(id uuid primary key default gen_random_uuid(),workspace_id uuid,chat_id uuid,type text,content text,from_me boolean,is_read boolean,api_message_status text,metadata jsonb,created_at timestamptz default clock_timestamp());
+CREATE TABLE meta_conversations(chat_id uuid,status text,updated_at timestamptz);
+CREATE TABLE workflow_executions(workspace_id uuid,conversation_id uuid,session_id uuid,status text,updated_at timestamptz);`);
+await sql.exec(readFileSync(new URL('../prisma/migrations/20261026150000_inactivity_and_whatsapp_rates/migration.sql',import.meta.url),'utf8'));
+mocks.query.mockImplementation(async(q:string,v?:unknown[])=>{const x=await sql.query(q,v);return {...x,rowCount:x.rows.length||x.affectedRows||0};});mocks.connect.mockResolvedValue({query:mocks.query,release:vi.fn()});});
+beforeEach(async()=>{vi.clearAllMocks();mocks.send.mockResolvedValue({success:true,providerAccepted:true});mocks.broadcast.mockResolvedValue(undefined);await sql.exec('TRUNCATE agent_inactivity_attempts,agent_inactivity_settings,whatsapp_reference_rates,messages,meta_conversations,workflow_executions,chats,workspaces,users,user_workspace_roles CASCADE');await sql.query('INSERT INTO users(id) VALUES($1)',[u]);await sql.query('INSERT INTO workspaces VALUES($1,$2)',[w,u]);await sql.query("INSERT INTO chats(id,workspace_id,agent_id,status,created_at,assigned_at) VALUES($1,$2,$3,'atendimentos',clock_timestamp()-interval '3 hours',clock_timestamp()-interval '2 hours')",[c,w,u]);await sql.query("INSERT INTO messages(workspace_id,chat_id,type,created_at) VALUES($1,$2,'text',clock_timestamp()-interval '61 minutes')",[w,c]);await sql.query("INSERT INTO agent_inactivity_settings(workspace_id,user_id,timeout_minutes,message) VALUES($1,$2,30,'Até logo!')",[w,u]);});
+afterAll(async()=>{await sql.close();});
+async function status(){return (await sql.query<{status:string}>('SELECT status FROM chats WHERE id=$1',[c])).rows[0].status;}
+describe('personal inactivity',()=>{
+ it('sends once then closes assigned attendance',async()=>{await runDuePersonalInactivity();expect(mocks.send).toHaveBeenCalledTimes(1);expect(await status()).toBe('encerrados');expect(mocks.broadcast).toHaveBeenCalledTimes(1);await runDuePersonalInactivity();expect(mocks.send).toHaveBeenCalledTimes(1);});
+ it('leaves a chat open when a response arrives during the send',async()=>{mocks.send.mockImplementation(async()=>{await sql.query("INSERT INTO messages(workspace_id,chat_id,type,created_at) VALUES($1,$2,'text',clock_timestamp())",[w,c]);return {success:true,providerAccepted:true};});await runDuePersonalInactivity();expect(await status()).toBe('atendimentos');});
+ it('does not close or retry when provider confirmation fails',async()=>{mocks.send.mockResolvedValue({success:false,providerAccepted:false});await runDuePersonalInactivity();await runDuePersonalInactivity();expect(await status()).toBe('atendimentos');expect(mocks.send).toHaveBeenCalledTimes(1);});
+ it('cancels if the responsible person changes before the send',async()=>{const claim=await claimDueInactivity();expect(claim).toBeDefined();await sql.query('UPDATE chats SET agent_id=NULL WHERE id=$1',[c]);await processInactivityAttempt(claim!);expect(await status()).toBe('atendimentos');expect(mocks.send).not.toHaveBeenCalled();});
+ it('closes without sending when no notice is configured',async()=>{await sql.query("UPDATE agent_inactivity_settings SET message=''");await runDuePersonalInactivity();expect(await status()).toBe('encerrados');expect(mocks.send).not.toHaveBeenCalled();});
+ it('resumes a confirmed notice without sending it twice',async()=>{const attempt=await claimDueInactivity();await sql.query("UPDATE agent_inactivity_attempts SET status='sent' WHERE id=$1",[attempt!.id]);await runDuePersonalInactivity();expect(await status()).toBe('encerrados');expect(mocks.send).not.toHaveBeenCalled();});
+ it('does nothing when disabled or not assigned',async()=>{await sql.query('UPDATE agent_inactivity_settings SET timeout_minutes=0');await runDuePersonalInactivity();expect(await status()).toBe('atendimentos');expect(mocks.send).not.toHaveBeenCalled();});
+});

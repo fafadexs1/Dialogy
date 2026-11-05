@@ -14,7 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
-    Zap, Plus, Trash2, Loader2, Play, Pause,
+    Zap, Plus, Trash2, Loader2,
     ArrowRight, UserCheck, Target, Bell, GitBranch,
     List, Globe, Braces
 } from 'lucide-react';
@@ -513,50 +513,57 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
     }
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="p-6 pb-4 flex items-center justify-between shrink-0">
+        <div className="mx-auto flex h-full w-full max-w-[1800px] flex-col bg-[#f4f6f2] dark:bg-[#090e0c]">
+            <div className="flex shrink-0 flex-wrap items-end justify-between gap-4 px-5 pb-5 pt-6 md:px-8 md:pt-8">
                 <div>
-                    <h2 className="text-lg font-semibold text-slate-950">Automacoes do Funil</h2>
-                    <p className="text-sm text-slate-500">Regras automaticas: quando algo acontecer, execute acoes.</p>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-300">Operação inteligente</p>
+                    <h2 className="mt-1 text-[28px] font-semibold tracking-[-0.045em] text-[#132b20] dark:text-white md:text-[34px]">Automações do funil</h2>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">Crie regras para manter cada oportunidade em movimento.</p>
                 </div>
-                <Button size="sm" className="gap-1.5" onClick={openCreate}>
-                    <Plus className="h-4 w-4" /> Nova Automacao
+                <Button size="sm" className="h-10 gap-1.5 rounded-xl bg-[#164e34] px-5 font-semibold text-white hover:bg-[#0b6b42] dark:bg-emerald-400 dark:text-[#092015] dark:hover:bg-emerald-300" onClick={openCreate}>
+                    <Plus className="h-4 w-4" /> Nova automação
                 </Button>
             </div>
 
-            <ScrollArea className="flex-1 px-6 pb-6">
+            <ScrollArea className="min-h-0 flex-1 px-5 pb-6 md:px-8">
+                <div className="mb-5 grid gap-3 rounded-[22px] border border-[#e1e9df] bg-white p-5 dark:border-white/10 dark:bg-[#121b16] sm:grid-cols-3">
+                    <div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400">Regras criadas</p><p className="mt-1 text-2xl font-semibold tracking-tight text-[#142d20] dark:text-white">{automations.length}</p></div>
+                    <div className="border-t border-[#e8eee5] pt-3 dark:border-white/10 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400">Em operação</p><p className="mt-1 text-2xl font-semibold tracking-tight text-emerald-700 dark:text-emerald-300">{automations.filter((item) => item.is_active).length}</p></div>
+                    <div className="border-t border-[#e8eee5] pt-3 dark:border-white/10 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400">Pausadas</p><p className="mt-1 text-2xl font-semibold tracking-tight text-[#142d20] dark:text-white">{automations.filter((item) => !item.is_active).length}</p></div>
+                </div>
                 {automations.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-20 text-center">
-                        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900">
-                            <Zap className="h-8 w-8 text-slate-400" />
+                    <div className="flex flex-col items-center justify-center rounded-[22px] border border-dashed border-[#d8e5d8] bg-white px-5 py-20 text-center dark:border-white/10 dark:bg-[#121b16]">
+                        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50 dark:border-emerald-400/20 dark:bg-emerald-400/10">
+                            <Zap className="h-8 w-8 text-emerald-600 dark:text-emerald-300" />
                         </div>
-                        <h3 className="mb-1 text-base font-medium text-slate-700 dark:text-slate-300">Nenhuma automacao criada</h3>
-                        <p className="max-w-xs text-sm text-slate-500 dark:text-slate-400">Crie regras para automatizar acoes quando contatos mudarem de estagio, deals forem criados, e mais.</p>
+                        <h3 className="mb-1 text-lg font-semibold text-[#142d20] dark:text-white">Seu CRM pode trabalhar junto com você</h3>
+                        <p className="max-w-md text-sm text-slate-500 dark:text-zinc-400">Crie uma regra para reagir a novas etapas, negócios e mudanças nos contatos.</p>
+                        <Button onClick={openCreate} className="mt-5 rounded-xl bg-[#164e34] text-white hover:bg-[#0b6b42]">Criar primeira automação</Button>
                     </div>
                 ) : (
-                    <div className="grid gap-3">
+                    <div className="grid gap-3 pb-8">
                         {automations.map(auto => {
                             const TriggerIcon = getTriggerIcon(auto.trigger_type);
                             return (
                                 <Card
                                     key={auto.id}
-                                    className={`border-slate-200 bg-white transition-all hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900/50 ${!auto.is_active ? 'opacity-50' : ''}`}
+                                    className={`rounded-[19px] border-[#e1e9df] bg-white shadow-[0_9px_24px_-19px_rgba(16,46,25,.5)] transition-all hover:border-emerald-200 hover:shadow-[0_15px_30px_-19px_rgba(16,46,25,.5)] dark:border-white/10 dark:bg-[#121b16] dark:hover:bg-[#18251c] ${!auto.is_active ? 'opacity-60' : ''}`}
                                 >
-                                    <CardContent className="p-4">
+                                    <CardContent className="p-5 md:p-6">
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="flex items-start gap-3 flex-1 min-w-0">
-                                                <div className="h-9 w-9 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                                                    <TriggerIcon className="h-4 w-4 text-blue-400" />
+                                                <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 dark:border-emerald-400/20 dark:bg-emerald-400/10">
+                                                    <TriggerIcon className="h-5 w-5 text-emerald-700 dark:text-emerald-300" />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        <span className="truncate text-sm font-medium text-slate-950 dark:text-slate-50">{auto.name}</span>
+                                                        <span className="truncate text-sm font-semibold text-[#142d20] dark:text-white">{auto.name}</span>
                                                         <Badge variant="outline" className={`shrink-0 text-[10px] ${auto.is_active ? 'border-emerald-500/30 text-emerald-500' : 'border-slate-300 text-slate-500 dark:border-slate-700 dark:text-slate-400'}`}>
                                                             {auto.is_active ? 'Ativa' : 'Inativa'}
                                                         </Badge>
                                                     </div>
                                                     <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                                                        <span className="text-blue-400 font-medium">{getTriggerLabel(auto.trigger_type)}</span>
+                                                        <span className="font-medium text-emerald-700 dark:text-emerald-300">{getTriggerLabel(auto.trigger_type)}</span>
                                                         {describeTrigger(auto) && (
                                                             <>
                                                                 <span className="text-slate-300 dark:text-slate-600">|</span>
@@ -565,7 +572,7 @@ export default function CrmAutomations({ workspaceId }: CrmAutomationsProps) {
                                                         )}
                                                         <ArrowRight className="mx-0.5 h-3 w-3 text-slate-300 dark:text-slate-600" />
                                                         {auto.actions.map((action, i) => (
-                                                            <span key={i} className="text-amber-400">
+                                                            <span key={i} className="text-[#87631a] dark:text-amber-300">
                                                                 {getActionLabel(action.type)}{' '}
                                                                 <span className="text-slate-500 dark:text-slate-400">{describeAction(action)}</span>
                                                                 {i < auto.actions.length - 1 && ', '}

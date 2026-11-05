@@ -19,15 +19,13 @@ export const DEFAULT_DISTRIBUTION_TIMEZONE = 'America/Sao_Paulo';
 
 /** Carga simultânea desejada por agente. Limite flexível: ver `rankDistributionCandidates`. */
 export const DEFAULT_CAPACITY = 6;
-/** Teto rígido de atendimentos em carteira por agente. */
-export const DEFAULT_MAX_PORTFOLIO = 25;
-
 export type TeamAvailabilityReason =
     | 'available'
     | 'no_members'
     | 'all_offline'
     | 'not_accepting'
     | 'portfolio_full'
+    | 'load_protected'
     | 'outside_business_hours';
 
 /**
@@ -54,6 +52,8 @@ export function describeTeamUnavailability(
             return `Os agentes de ${team} estão com a distribuição pausada no momento.`;
         case 'portfolio_full':
             return `Todos os agentes de ${team} atingiram o limite de atendimentos simultâneos.`;
+        case 'load_protected':
+            return `Os agentes de ${team} estão acima da carga desejada no momento.`;
         case 'outside_business_hours':
             return `${teamCapitalized} está fora do horário de atendimento no momento.`;
     }
@@ -72,6 +72,8 @@ export function shortTeamAvailabilityLabel(reason: TeamAvailabilityReason): stri
             return 'distribuição pausada';
         case 'portfolio_full':
             return 'limite de atendimentos atingido';
+        case 'load_protected':
+            return 'carga acima da capacidade desejada';
         case 'outside_business_hours':
             return 'fora do expediente';
     }

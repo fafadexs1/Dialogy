@@ -24,7 +24,11 @@ export function createStudioMcpFetch(endpoint: string, signal: AbortSignal): typ
     return new Promise<Response>((resolve, reject) => {
       const outgoing = https.request(target.url, {
         method: request.method, headers: Object.fromEntries(request.headers), servername: target.url.hostname,
-        lookup: (_host, _options, callback) => callback(null, address, isIP(address)), signal: combined,
+        lookup: (_host, options, callback) => {
+          const family = isIP(address);
+          if (options.all) callback(null, [{ address, family }]);
+          else callback(null, address, family);
+        }, signal: combined,
       }, (incoming) => {
         const status = incoming.statusCode || 502;
         if (status >= 300 && status < 400) { incoming.destroy(); reject(new Error('Redirecionamentos MCP não são permitidos.')); return; }

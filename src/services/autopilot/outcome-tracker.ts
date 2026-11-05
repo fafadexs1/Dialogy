@@ -34,6 +34,7 @@ type OutcomeMessage = {
 type OutcomeToolCall = {
   toolName: string;
   status: string;
+  output?: Record<string, unknown> | null;
   createdAt?: string | Date | null;
 };
 
@@ -137,7 +138,10 @@ export function buildDecisionOutcome(input: BuildDecisionOutcomeInput): Autopilo
   const failedTools = unique(toolCalls
     .filter((tool) => tool.status !== 'success')
     .map((tool) => tool.toolName));
-  const hasSuccessfulTransfer = successfulTools.includes('transfer_chat');
+  const hasSuccessfulTransfer = toolCalls.some((tool) => tool.toolName === 'transfer_chat'
+    && tool.status === 'success' && tool.output?.transferred !== false);
+  const queuedForHuman = toolCalls.some((tool) => tool.toolName === 'transfer_chat'
+    && tool.status === 'success' && tool.output?.transferred === false);
   const hasSuccessfulClose = successfulTools.includes('close_chat');
   const askedHuman = customerAskedForHuman(messages);
 
@@ -154,7 +158,7 @@ export function buildDecisionOutcome(input: BuildDecisionOutcomeInput): Autopilo
 
   const closedAt = toDate(input.closedAt)
     || (hasSuccessfulTransfer
-      ? toDate(toolCalls.find((tool) => tool.toolName === 'transfer_chat' && tool.status === 'success')?.createdAt)
+      ? toDate(toolCalls.find((tool) => tool.toolName === 'transfer_chat' && tool.status === 'success' && tool.output?.transferred !== false)?.createdAt)
       : null);
   const firstMessageAt = messages
     .map((message) => toDate(message.createdAt))
@@ -174,7 +178,7 @@ export function buildDecisionOutcome(input: BuildDecisionOutcomeInput): Autopilo
     customerSentimentFinal: inferCustomerSentiment(messages),
     toolsExecuted: successfulTools,
     toolsFailed: failedTools,
-    escalationNeeded: resolutionType === 'human_handoff' || askedHuman,
+    escalationNeeded: resolutionType === 'human_handoff' || queuedForHuman || askedHuman,
     closedBy: resolutionType === 'automated' ? 'agent'
       : resolutionType === 'manual_close' ? 'human'
         : resolutionType === 'timeout' ? 'system'
@@ -218,7 +222,7 @@ export async function recordDecisionOutcomesForChat(input: {
         [input.chatId],
       ),
       db.query(
-        `SELECT tool_name, status, created_at
+        `SELECT tool_name, status, output, created_at
          FROM orchestrator_tool_calls
          WHERE workspace_id = $1 AND chat_id = $2
          ORDER BY created_at ASC`,
@@ -247,6 +251,7 @@ export async function recordDecisionOutcomesForChat(input: {
       toolCalls: toolsRes.rows.map((row) => ({
         toolName: row.tool_name,
         status: row.status,
+        output: row.output,
         createdAt: row.created_at,
       })),
       decisions: decisionsRes.rows.map((row) => ({

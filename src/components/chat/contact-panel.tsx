@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { type Chat, type User, type Team, type Contact, type Deal, EvolutionInstance, type TelegramBotInstance, CustomFieldDefinition, type SystemAgent } from '@/lib/types';
 import {
     Mail,
@@ -139,12 +139,16 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
 
     }, [isDialogOpen, currentUser?.activeWorkspaceId]);
 
+    const transferIntentRef = useRef<{signature:string; payload:Parameters<typeof transferChatAction>[0]} | null>(null);
     const handleTransfer = async (target: { teamId?: string; agentId?: string }) => {
         setIsTransferring(true);
-        const result = await transferChatAction({
-            chatId: chat.id,
-            ...target
-        });
+        try {
+        const signature = JSON.stringify([chat.id,target,chat.agentId,chat.team_id,chat.assigned_at]);
+        if (transferIntentRef.current?.signature !== signature) transferIntentRef.current = {signature,payload:{
+            chatId:chat.id,...target,operationId:crypto.randomUUID(),expectedAgentId:chat.agentId ?? chat.agent?.id ?? null,
+            expectedTeamId:chat.team_id ?? null,expectedSystemAgentId:chat.assigned_system_agent_id ?? null,
+        }};
+        const result = await transferChatAction(transferIntentRef.current.payload);
 
         if (result.error) {
             toast({ title: "Erro ao transferir", description: result.error, variant: 'destructive' });
@@ -154,10 +158,15 @@ export function TransferChatDialog({ chat, currentUser, onTransferSuccess, disab
                 useInboxStore.getState().upsertChats([result.chat]);
             }
             toast({ title: "Atendimento transferido!" });
+            transferIntentRef.current = null;
             onTransferSuccess();
             setIsDialogOpen(false);
         }
-        setIsTransferring(false);
+        } catch {
+            toast({title:'Não foi possível confirmar a transferência',description:'Atualize a lista antes de tentar novamente.',variant:'destructive'});
+        } finally {
+            setIsTransferring(false);
+        }
     }
 
     const handleTransferToAi = async (systemAgentId: string) => {

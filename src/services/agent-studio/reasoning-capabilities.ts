@@ -1,3 +1,4 @@
+import { studioSgpOutputs } from './sgp-data';
 import type { AgentStudioDocument, ProcedureStep } from './types';
 import { readStudioValue, resolveStudioMapping, type StudioDataContext } from './data-mapping';
 import { StudioCatalogImageSchema, resolveStudioCatalogImage } from './catalog-media';
@@ -67,14 +68,15 @@ export function compileStudioReasoningCapabilities(document: AgentStudioDocument
         : step.nativeActionType === 'sgp_fetch_contracts'
         ? `${step.title}. Consulta no SGP os contratos ativos, planos e endereços vinculados ao CPF ou CNPJ do titular. Use sempre que o cliente informar o CPF ou perguntar quais contratos ele tem, para listar os contratos ou identificar a instalação correta.`
         : step.nativeActionType === 'sgp_fetch_contact_panel_data'
-        ? `${step.title}. Consulta os dados completos do cliente e status de conexão no SGP para o contrato selecionado.`
+        ? step.nativeActionPayload?.flexibleScope === true
+          ? `${step.title}. Consulta um ou vários contratos do mesmo titular. Em query envie JSON: {contractIds:[IDs reais retornados na consulta de contratos],sourceMessageId:ID da mensagem do cliente,quote:trecho literal,invoices?:{limit:1 a 10,distribution:"per_contract" ou "total",orderBy:"issueDate" ou "dueDate",status:"all" ou "open" ou "overdue"}}. Para cada contrato use per_contract; para um total entre contratos use total. Mais recentes significa issueDate; próximos vencimentos usa dueDate. Se quantidade ou endereço for ambíguo, esclareça. O servidor valida titularidade e seleciona as faturas. Não invente IDs nem escolha o primeiro contrato.`
+          : `${step.title}. Consulta os dados completos do cliente e status de conexão no SGP para o contrato selecionado.`
         : step.subtitle || step.httpRequest?.objective || step.title,
       readOnly, requiresConfirmation: (!readOnly && !conversationalMedia) || Boolean(step.httpRequest?.requiresConfirmation || step.mcpTool?.requiresConfirmation),
       prerequisites, ready: !blockedReason, blockedReason, inputs,
       outputs: [
         ...(step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || []).filter((o) => !o.sensitive).map((o) => o.chipKey),
-        ...(step.nativeActionType === 'sgp_fetch_contracts' ? ['contracts', 'contracts_count', 'customer_name', 'cpf_cnpj'] : []),
-        ...(step.nativeActionType === 'sgp_fetch_contact_panel_data' ? ['contracts', 'customer_name', 'online_contracts', 'invoices', 'open_invoices', 'overdue_invoices', 'ip_address', 'login', 'mac_address', 'connection_status'] : []),
+        ...studioSgpOutputs(step).map((output) => output.chipKey),
       ] };
   });
 }

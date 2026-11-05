@@ -61,7 +61,16 @@ tmp
 scratch
 
 # repository-only directories
-tests
+# The opt-in workflow preview page is compiled by Next even when disabled.
+# Include only its synthetic fixture dependency graph in the build context.
+tests/*
+!tests/fixtures/
+tests/fixtures/*
+!tests/fixtures/workflow-editor-preview.tsx
+!tests/fixtures/workflow-editor-fixture.ts
+!tests/fixtures/studio-composition-preview.ts
+!tests/fixtures/studio-flow-fixture.ts
+!tests/fixtures/toolbox-preview.ts
 docs
 delivery-app
 mobile

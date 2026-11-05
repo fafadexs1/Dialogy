@@ -7,6 +7,7 @@ import {
   type AgentToolDefinition,
 } from '@/services/agent-tools/catalog';
 import { runAgentTools } from '@/services/agent-tools/runtime';
+import { selectRequestedSgpInvoice } from '@/services/autopilot/customer-response-preparation';
 import type {
   AgentToolAction,
   AgentToolName,
@@ -196,9 +197,24 @@ function resolveDefinition(
   provided: Map<string, AutopilotToolBridgeDefinition>,
 ): AutopilotToolBridgeDefinition | null {
   const custom = provided.get(toolName);
-  if (custom) return custom;
-  if (toolName.startsWith('mcp:')) return null;
-  return getAgentToolDefinition(toolName);
+  if (toolName.startsWith('mcp:')) return custom || null;
+  const canonical = getAgentToolDefinition(toolName);
+  if (!custom) return canonical;
+  if (!canonical) return custom;
+  const schema = custom.inputSchema;
+  const hasProperties = schema?.properties && typeof schema.properties === 'object'
+    && Object.keys(schema.properties).length > 0;
+  return {
+    ...custom,
+    class: canonical.class,
+    riskLevel: canonical.riskLevel === 'high' || custom.riskLevel === 'high' ? 'high'
+      : canonical.riskLevel === 'medium' || custom.riskLevel === 'medium' ? 'medium' : 'low',
+    description: custom.description === toolName ? canonical.description : custom.description,
+    // Published cutovers can contain {} or just {type:'object'}. Those are
+    // placeholders, not an intentional replacement of the native contract.
+    inputSchema: toolName === 'sgp_generate_invoice_pix' ? canonical.inputSchema
+      : hasProperties ? schema : canonical.inputSchema || schema,
+  };
 }
 
 export function createAutopilotToolRegistry(input: {
@@ -206,6 +222,7 @@ export function createAutopilotToolRegistry(input: {
   toolNames: AgentToolName[];
   definitions?: AutopilotToolBridgeDefinition[];
   knownFields?: Record<string, unknown>;
+  responseTimeZone?: string;
   reportToolStatus?: (event: NativeToolStatusEvent) => Promise<void>;
 }): ToolRegistry {
   // The existing Autopilot policy and durable claim remain the final authority.
@@ -216,6 +233,7 @@ export function createAutopilotToolRegistry(input: {
   const knownCustomerIdentifier = extractKnownCustomerIdentifier(knownFields);
   let resolvedClientIp: string | null = null;
   let sgpLookupCompleted = false;
+  let sgpSnapshot: Record<string, unknown> | null = null;
   const executeWithStatus = async (
     action: AgentToolAction,
     displayToolName: string,
@@ -330,6 +348,7 @@ export function createAutopilotToolRegistry(input: {
               ? lookupResult.output
               : {};
             sgpLookupCompleted = true;
+            sgpSnapshot = lookupOutput;
             resolvedClientIp = extractSgpContractIp(lookupOutput, knownContractId);
           }
           executableArguments = hydrateClientIpArgument(executableArguments, resolvedClientIp);
@@ -342,6 +361,39 @@ export function createAutopilotToolRegistry(input: {
             error.code = 'TOOL_DEPENDENCY_MISSING';
             error.retryable = false;
             throw error;
+          }
+        }
+        if (toolName === 'sgp_generate_invoice_pix') {
+          if (!sgpSnapshot) {
+            const lookup = await executeWithStatus({
+              type: 'sgp_fetch_contact_panel_data',
+              reason: 'Conferir fatura, contrato e PIX existente antes de gerar um pagamento.',
+              payload: { contractId: knownContractId, customerIdentifier: knownCustomerIdentifier },
+            }, 'sgp_fetch_contact_panel_data');
+            if (!lookup || lookup.status !== 'success' || !lookup.output) {
+              const error = new Error('[SGP_INVOICE_LOOKUP_FAILED] Não foi possível verificar a fatura no SGP. Nenhum PIX foi gerado.') as Error & { code: string };
+              error.code = 'SGP_INVOICE_LOOKUP_FAILED';
+              throw error;
+            }
+            sgpSnapshot = lookup.output;
+          }
+          const selection = selectRequestedSgpInvoice({
+            snapshot: sgpSnapshot,
+            customerMessage: input.context.customerMessage,
+            timeZone: input.responseTimeZone,
+          });
+          const invoice = selection.invoice;
+          if (!invoice || String(invoice.id) !== String(executableArguments.invoiceId)
+            || String(invoice.contractId) !== String(executableArguments.contractId)) {
+            return { generated: false, requiresClarification: true, reason: selection.reason,
+              message: 'Confirme com o cliente qual fatura e contrato ele deseja. Nenhum PIX foi gerado.' };
+          }
+          if (!invoice.isOpen || invoice.isPaid || invoice.isCancelled) {
+            return { generated: false, payable: false, invoiceId: invoice.id, contractId: invoice.contractId,
+              message: 'Esta fatura não está em aberto. Nenhum PIX foi gerado.' };
+          }
+          if (invoice.pixCode) {
+            return { generated: false, reused: true, invoiceId: invoice.id, contractId: invoice.contractId, pixCode: invoice.pixCode };
           }
         }
         if (definition.inputSchema && Object.keys(definition.inputSchema).length > 0) {
@@ -379,6 +431,7 @@ export function createAutopilotToolRegistry(input: {
           : {};
         if (toolName === 'sgp_fetch_contact_panel_data') {
           sgpLookupCompleted = true;
+          sgpSnapshot = output;
           resolvedClientIp = extractSgpContractIp(
             output,
             String(executableArguments.contractId || knownContractId || ''),

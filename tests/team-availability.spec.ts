@@ -157,6 +157,7 @@ describe('unavailability messages', () => {
       'all_offline',
       'not_accepting',
       'portfolio_full',
+      'load_protected',
       'outside_business_hours',
     ] as const;
 

@@ -32,7 +32,7 @@ const nextConfig = {
     proxyClientMaxBodySize: '10mb',
   },
   transpilePackages: ['@supabase/node-fetch', '@radix-ui/react-slot', 'class-variance-authority'],
-  typescript: { ignoreBuildErrors: false },
+  typescript: { ignoreBuildErrors: false, tsconfigPath: process.env.NEXT_BUILD_TYPECHECK_CONFIG || 'tsconfig.json' },
   images: {
     remotePatterns: buildAllowedImagePatterns(),
   },

@@ -42,10 +42,10 @@ export default function LoadBalancingDocs() {
                     <div className="p-6 rounded-2xl bg-white/5 border border-white/10 mb-10">
                         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                             <Clock className="w-5 h-5 text-blue-400" />
-                            Carga efetiva com justiça por turno
+                            Carga projetada e justiça por oportunidade
                         </h3>
                         <p className="text-white/70 mb-0">
-                            O Dialogy combina <strong>carga conversacional efetiva</strong>, capacidade, limite de carteira e um score de justiça persistente. Conversas esperando resposta do agente pesam mais; conversas esperando o cliente ou inativas pesam menos.
+                            A política por oportunidades combina <strong>carga projetada</strong>, capacidade e créditos proporcionais a quem realmente pode receber. A quantidade de conversas na carteira não tem limite e não bloqueia transferências, distribuição ou a ação de assumir atendimento. Avisos de transferência, notas internas, campanhas e envios pendentes ou com falha não contam como resposta. A ativação é gradual por workspace; a política anterior permanece disponível para reversão.
                         </p>
                     </div>
 
@@ -73,8 +73,13 @@ export default function LoadBalancingDocs() {
                             },
                             {
                                 title: "4. Justiça e Seleção",
-                                desc: "Entre agentes com ocupação semelhante, recebe quem tem menor score de justiça e está há mais tempo sem uma atribuição. Quem entra depois começa na mediana da equipe, evitando punição ou enxurrada de chats.",
+                                desc: "Na política por oportunidades, disputam agentes com ocupação projetada até 25 pontos percentuais acima da menor, protegendo quem ultrapassaria a capacidade quando há outra opção. Cada candidato acumula crédito proporcional à capacidade; recebe quem tem maior saldo e consome uma unidade. Ausências e pausas não acumulam dívida. Se todos estiverem acima da capacidade, recebe o menos ocupado. Não há teto de quantidade de conversas.",
                                 icon: Scale
+                            },
+                            {
+                                title: "5. Entrada Gradual",
+                                desc: "Nos primeiros cinco minutos online, o agente recebe novas atribuições com intervalo de um minuto quando há outro colega elegível fora desse intervalo de espera. Se ele for a única opção, o atendimento continua sendo atribuído dentro da mesma equipe.",
+                                icon: Clock
                             }
                         ].map((step, i) => (
                             <div key={i} className="flex gap-4">
@@ -92,7 +97,7 @@ export default function LoadBalancingDocs() {
                     <h2 className="text-2xl font-bold mb-4">Benefícios</h2>
                     <ul className="space-y-3 text-white/60 mb-8 list-disc pl-6">
                         <li>Evita sobrecarga de agentes específicos.</li>
-                        <li>Garante que novos agentes comecem a receber atendimentos imediatamente (pois seu "último atendimento" é nulo/antigo).</li>
+                        <li>Permite que novos agentes recebam atendimentos com entrada gradual no turno.</li>
                         <li>Elimina a necessidade de um supervisor distribuir manualmente os tickets.</li>
                         <li>Funciona em tempo real, adaptando-se instantaneamente a quem entra ou sai do turno (online/offline).</li>
                     </ul>
@@ -100,7 +105,7 @@ export default function LoadBalancingDocs() {
                     <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-6">
                         <h4 className="text-blue-400 font-bold mb-2">Nota Técnica</h4>
                         <p className="text-white/70 text-sm">
-                            A verificação de presença é feita consultando a tabela <code>user_workspace_presence</code>, que é atualizada via WebSockets e Beacons. Isso garante que apenas agentes com a aba aberta e conexão ativa recebam novos chats.
+                            A verificação de presença é feita consultando a tabela <code>user_workspace_presence</code>, que é atualizada via WebSockets e Beacons. O critério considera presença com atualização recente ou atividade recente confirmada. A decisão final é transacional e o diagnóstico em Equipe → Roteamento mostra os motivos de exclusão e o histórico do turno.
                         </p>
                     </div>
                 </div>

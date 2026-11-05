@@ -2,6 +2,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import { once } from 'node:events';
 import { Client } from 'pg';
+import { v5 as uuidv5 } from 'uuid';
 
 import { db } from '@/lib/db';
 import { resolveSafeAutopilotWebhookTarget } from '@/services/autopilot/automation-rules';
@@ -13,6 +14,10 @@ import { isRecord, materializeValue, renderTemplate, statePatchAtPath } from '@/
 import { loadNexusCredentialPayload } from './credentials';
 import { executeNexusMcpOperation } from './mcp-executor';
 import { sendNexusGoogleAdsLead } from './google-ads-lead';
+import { workflowFileDownload } from './workflow-files';
+import { nodeInvocationKey } from './durable-effects';
+import { deliverWhatsappCatalog } from '@/services/whatsapp/deliver-catalog';
+import { whatsappCatalogSchema } from '@/lib/whatsapp/catalog';
 
 function source(input: NodeRuntimeInput) {
   return {
@@ -179,23 +184,44 @@ function tableIdentifier(value: unknown) {
   return String(value || '').split('.').map(identifier).join('.');
 }
 
+/** A connection string must not silently weaken the workspace's explicit TLS choice. */
+export function safeDatabaseConnectionString(connectionString: string, sslDisabled: boolean): string {
+  if (connectionString.startsWith('/')) return connectionString; // Explicit Unix socket; no URL parameters.
+  let url: URL;
+  try { url = new URL(connectionString); } catch { throw new Error('Connection string de banco inválida.'); }
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)) throw new Error('A credencial precisa usar uma connection string PostgreSQL.');
+  for (const key of ['sslcert', 'sslkey', 'sslrootcert']) {
+    if (url.searchParams.has(key)) throw new Error('Arquivos TLS locais não são aceitos na connection string.');
+  }
+  const modes = url.searchParams.getAll('sslmode').map(value => value.toLowerCase());
+  const sslValues = url.searchParams.getAll('ssl').map(value => value.toLowerCase());
+  const libpqCompat = url.searchParams.getAll('uselibpqcompat').map(value => value.toLowerCase());
+  if (!sslDisabled && (modes.some(mode => ['disable', 'no-verify'].includes(mode)) || sslValues.some(ssl => ['0', 'false', 'no-verify'].includes(ssl)) || libpqCompat.includes('true'))) throw new Error('A connection string não pode desabilitar a verificação TLS.');
+  // pg merges URI parameters over the client options; remove them after validation
+  // so that the workspace's explicit ssl setting remains authoritative.
+  for (const key of ['ssl', 'sslmode', 'uselibpqcompat']) url.searchParams.delete(key);
+  return url.toString();
+}
+
 export type NexusDatabaseOperationInput = {
   workspaceId: string;
   credentialId: string;
   config: Record<string, unknown>;
   runtimeSource: Record<string, unknown>;
+  preResolved?: boolean;
+  expectedCredentialFingerprint?: string;
 };
 
 export async function executeNexusDatabaseOperation(input: NexusDatabaseOperationInput) {
   const workspaceId = input.workspaceId;
   if (!workspaceId) throw new Error('O workflow de banco precisa pertencer a um workspace.');
-  const credential = await loadNexusCredentialPayload({ workspaceId, credentialId: input.credentialId, allowedTypes: ['database'] });
+  const credential = await loadNexusCredentialPayload({ workspaceId, credentialId: input.credentialId, allowedTypes: ['database'], ...(input.expectedCredentialFingerprint ? { expectedFingerprint: input.expectedCredentialFingerprint } : {}) });
   const connectionString = String(credential.payload.connectionString || '');
   if (!connectionString) throw new Error('A credencial de banco não possui connection string.');
   const operation = String(input.config.operation || 'select');
   const table = tableIdentifier(input.config.table);
   const context = input.runtimeSource;
-  const materializedValues = materializeValue(input.config.values || {}, context);
+  const materializedValues = input.preResolved ? input.config.values || {} : materializeValue(input.config.values || {}, context);
   const values = isRecord(materializedValues) ? materializedValues : {};
   const filters = Array.isArray(input.config.filters) ? input.config.filters.filter(isRecord) : [];
   if (['update', 'delete'].includes(operation) && filters.length === 0) throw new Error('UPDATE e DELETE exigem ao menos um filtro.');
@@ -206,7 +232,7 @@ export async function executeNexusDatabaseOperation(input: NexusDatabaseOperatio
     const operator = String(filter.operator || 'eq');
     if (operator === 'is_null') return `${column} IS NULL`;
     if (operator === 'not_null') return `${column} IS NOT NULL`;
-    const value = materializeValue(filter.value, context);
+    const value = input.preResolved ? filter.value : materializeValue(filter.value, context);
     if (operator === 'in') {
       if (!Array.isArray(value) || value.length === 0) throw new Error('O filtro IN precisa de uma lista não vazia.');
       return `${column} IN (${value.map(parameter).join(', ')})`;
@@ -237,7 +263,8 @@ export async function executeNexusDatabaseOperation(input: NexusDatabaseOperatio
     ? input.config.returning.map((column) => column === '*' ? '*' : identifier(column)).join(', ')
     : '';
   if (returning && operation !== 'select') sql += ` RETURNING ${returning}`;
-  const client = new Client({ connectionString, ssl: credential.payload.ssl === false ? false : { rejectUnauthorized: true }, connectionTimeoutMillis: 15_000, query_timeout: 30_000 });
+  const sslDisabled = credential.payload.ssl === false;
+  const client = new Client({ connectionString: safeDatabaseConnectionString(connectionString, sslDisabled), ssl: sslDisabled ? false : { rejectUnauthorized: true }, connectionTimeoutMillis: 15_000, query_timeout: 30_000 });
   try {
     await client.connect();
     const result = await client.query(sql, parameters);
@@ -421,13 +448,14 @@ async function sendWhatsappMedia(input: NodeRuntimeInput) {
   const target = await whatsappTarget(input);
   const mediaType = String(input.node.config.mediaType || 'image');
   if (!['image', 'video', 'audio', 'document'].includes(mediaType)) throw new Error('Tipo de mídia do WhatsApp inválido.');
-  const renderedUrl = renderTemplate(String(input.node.config.url || ''), target.context).trim();
+  const privateFile = input.node.config.file ? await workflowFileDownload(input.workflow.workspaceId!, materializeValue(input.node.config.file, target.context)) : undefined;
+  const renderedUrl = privateFile?.url || renderTemplate(String(input.node.config.url || ''), target.context).trim();
   if (!renderedUrl) throw new Error('A URL da mídia do WhatsApp está vazia.');
   const safeMedia = await resolveSafeAutopilotWebhookTarget(renderedUrl);
   const mediaUrl = safeMedia.url.toString();
   const caption = renderTemplate(String(input.node.config.caption || ''), target.context);
-  const fileName = renderTemplate(String(input.node.config.fileName || ''), target.context).trim() || `nexus-${input.node.id}`;
-  const mimeType = outboundMimeType(mediaType, mediaUrl, renderTemplate(String(input.node.config.mimeType || ''), target.context).trim());
+  const fileName = privateFile?.file.name || renderTemplate(String(input.node.config.fileName || ''), target.context).trim() || `nexus-${input.node.id}`;
+  const mimeType = privateFile?.file.mimeType || outboundMimeType(mediaType, mediaUrl, renderTemplate(String(input.node.config.mimeType || ''), target.context).trim());
   const response = await fetchEvolutionAPI(
     `/message/sendMedia/${encodeURIComponent(target.instanceName)}`,
     target.apiConfig,
@@ -443,7 +471,7 @@ async function sendWhatsappMedia(input: NodeRuntimeInput) {
       }),
     },
   );
-  const value = { instanceName: target.instanceName, phoneNumber: target.phoneNumber, mediaType, mediaUrl, response };
+  const value = { instanceName: target.instanceName, phoneNumber: target.phoneNumber, mediaType, ...(privateFile ? { file: privateFile.file } : { mediaUrl }), response: privateFile ? JSON.parse(JSON.stringify(response).split(mediaUrl).join('[PRIVATE_FILE_URL]')) : response };
   return stateResult(input, value, { sent: true, ...value });
 }
 
@@ -495,6 +523,26 @@ async function callMcpTool(input: NodeRuntimeInput) {
   return stateResult(input, value, value);
 }
 
+async function sendWhatsappCatalog(input: NodeRuntimeInput) {
+  const workspaceId = input.workflow.workspaceId;
+  const chatId = input.execution.conversationId;
+  if (!workspaceId || !chatId) throw new Error('O catálogo precisa ser executado em uma conversa com cliente.');
+  const senderSystemAgentId = String(input.workflow.metadata?.senderSystemAgentId || '').trim();
+  const sender = await db.query('SELECT id FROM system_agents WHERE id = $1 AND workspace_id = $2', [senderSystemAgentId, workspaceId]);
+  if (!sender.rows[0]) throw new Error('Selecione um atendente do workspace como remetente do fluxo.');
+  const catalog = whatsappCatalogSchema.parse(materializeValue({ body: input.node.config.body, cards: input.node.config.cards }, source(input)));
+  const result = await deliverWhatsappCatalog({
+    workspaceId, chatId, catalog, senderSystemAgentId,
+    requestId: uuidv5(`whatsapp-catalog:${nodeInvocationKey(input)}`, uuidv5.URL),
+  });
+  if (!result.success) throw Object.assign(new Error(result.error || 'Falha ao enviar catálogo.'), { retryable: false });
+  if (!result.message?.message_id_from_api) {
+    throw Object.assign(new Error(result.warning || 'A confirmação do catálogo está pendente. Confira a entrega antes de reenviar.'), { code: 'EXTERNAL_OUTCOME_UNKNOWN', retryable: false });
+  }
+  const value = { messageId: result.message.id, providerMessageId: result.message.message_id_from_api, products: catalog.cards.length };
+  return stateResult(input, value, { sent: true, ...value });
+}
+
 export async function executeNexusIntegration(input: NodeRuntimeInput): Promise<Record<string, unknown>> {
   if (input.node.type === 'integration.google_ads_lead') return stateResult(input, await sendNexusGoogleAdsLead(input));
   if (input.node.type === 'integration.email') return sendSmtp(input);
@@ -504,6 +552,7 @@ export async function executeNexusIntegration(input: NodeRuntimeInput): Promise<
   if (input.node.type === 'dialogy.crm_update') return updateCrm(input);
   if (input.node.type === 'whatsapp.send_text') return sendWhatsappText(input);
   if (input.node.type === 'whatsapp.send_media') return sendWhatsappMedia(input);
+  if (input.node.type === 'whatsapp.send_catalog') return sendWhatsappCatalog(input);
   if (input.node.type === 'whatsapp.group_create') return createWhatsappGroup(input);
   throw new Error(`Integração Nexus não implementada: ${input.node.type}.`);
 }

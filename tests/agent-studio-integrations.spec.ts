@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildStudioHttpRequest, buildStudioMcpArguments, mapStudioOutputs, readStudioValue, resolveStudioEndpoint } from '@/services/agent-studio/data-mapping';
 import { HttpRequestStepConfigSchema, McpToolStepConfigSchema } from '@/services/agent-studio/types';
 
-const mocks = vi.hoisted(() => ({ http: vi.fn(), connections: vi.fn(), credential: vi.fn(), workspace: vi.fn(), mcp: vi.fn() }));
+const mocks = vi.hoisted(() => ({ http: vi.fn(), connections: vi.fn(), credential: vi.fn(), workspace: vi.fn(), mcp: vi.fn(), oauth: vi.fn() }));
+vi.mock('@/modules/nexus/services/oauth-credentials', () => ({ resolveNexusOAuthToken: mocks.oauth }));
 vi.mock('@/modules/nexus/services/http-executor', () => ({ executeNexusHttpOperation: mocks.http }));
 vi.mock('@/modules/nexus/services/credentials', () => ({ listNexusCredentialSummaries: mocks.connections, loadNexusCredentialPayload: mocks.credential }));
 vi.mock('@/services/mcp/store', () => ({ getMcpWorkspaceConfig: mocks.workspace }));
@@ -72,6 +73,48 @@ describe('typed Studio mappings', () => {
     });
   });
 
+  it('resiliently extracts properties across casing and naming conventions (camelCase, snake_case, PascalCase)', () => {
+    // 1. Direct case-insensitivity: ID -> id
+    expect(readStudioValue([{ id: 'ROUTER-999' }], '[0].ID')).toBe('ROUTER-999');
+    expect(readStudioValue({ status: 'active' }, 'STATUS')).toBe('active');
+
+    // 2. Snake_case vs PascalCase / camelCase
+    expect(readStudioValue({ primary_ssid: 'VELPRO-FIBRA' }, 'PrimarySSID')).toBe('VELPRO-FIBRA');
+    expect(readStudioValue({ ip_address: '192.145.213.14' }, 'IPAddress')).toBe('192.145.213.14');
+    expect(readStudioValue({ uptime_seconds: 341088 }, 'UptimeSeconds')).toBe(341088);
+
+    // 3. Deeply nested mixed conventions
+    const realMcpResponse = {
+      id: 'ZTE3BJNQ7H01408',
+      optical_power: {
+        rx_power_dbm: -19.45,
+        tx_power_dbm: 2.3,
+        status: 'normal',
+      },
+      radios: [
+        { band: '2.4GHz', channel: 11, ssid: 'Velpro' },
+        { band: '5GHz', channel: 149, ssid: 'Velpro 5G' },
+      ],
+    };
+
+    expect(readStudioValue(realMcpResponse, 'OpticalPower.RxPowerdBm')).toBe(-19.45);
+    expect(readStudioValue(realMcpResponse, 'Radios[0].Channel')).toBe(11);
+    expect(readStudioValue(realMcpResponse, 'Radios[1].SSID')).toBe('Velpro 5G');
+
+    // 4. mapStudioOutputs integration test with MCP-style keys
+    const mappings = [
+      { jsonPath: '[0].ID', chipKey: 'deviceId', chipLabel: 'ID Equipamento' },
+      { jsonPath: '[0].PrimarySSID', chipKey: 'primarySsid', chipLabel: 'SSID' },
+      { jsonPath: '[0].IPAddress', chipKey: 'ipAddress', chipLabel: 'IP' },
+    ];
+    const data = [{ id: 'CPE-ZTE-1', primary_ssid: 'MinhaCasa', ip_address: '10.0.0.1' }];
+    expect(mapStudioOutputs(data, mappings)).toEqual({
+      deviceId: 'CPE-ZTE-1',
+      primarySsid: 'MinhaCasa',
+      ipAddress: '10.0.0.1',
+    });
+  });
+
   it.each(['__proto__.secret', 'constructor.prototype.secret', 'prototype', 'a..b'])('rejects prototype and malformed path %s', (path) => {
     expect(() => readStudioValue({}, path)).toThrow();
   });
@@ -93,6 +136,28 @@ describe('typed Studio mappings', () => {
 });
 
 describe('Studio HTTP execution', () => {
+  it('blocks mutations using a read-only Google connection', async () => {
+    mocks.connections.mockResolvedValue([{ id:'conn',type:'oauth2',metadata:{kind:'agent_http',baseUrl:'https://gmail.googleapis.com',authType:'oauth2',provider:'google_workspace',access:'read'} }]);
+    await expect(executeStudioHttp({ workspaceId:'ws', config:HttpRequestStepConfigSchema.parse({...httpConfig(),method:'POST'}),context:{values:{}},confirmed:true })).rejects.toThrow('apenas leitura');
+    expect(mocks.oauth).not.toHaveBeenCalled(); expect(mocks.http).not.toHaveBeenCalled();
+  });
+  it('renews an OAuth token for the exact connection origin and keeps it out of results', async () => {
+    mocks.connections.mockResolvedValue([{ id: 'conn', type: 'oauth2', metadata: { kind: 'agent_http', baseUrl: 'https://gmail.googleapis.com/', authType: 'oauth2' } }]);
+    mocks.oauth.mockResolvedValue('oauth-secret');
+    mocks.http.mockResolvedValue({ status: 200, data: { token: 'oauth-secret', text: 'oauth-secret' } });
+    const result = await executeStudioHttp({ workspaceId: 'ws', config: httpConfig(), context: { values: {} }, confirmed: false });
+    expect(mocks.oauth).toHaveBeenCalledWith('ws', 'conn', 'https://gmail.googleapis.com', expect.any(AbortSignal));
+    expect(mocks.http.mock.calls[0][0].runtimeSource.studio.headers.Authorization).toBe('Bearer oauth-secret');
+    expect(JSON.stringify(result)).not.toContain('oauth-secret');
+  });
+  it('rejects cross-origin paths and user supplied authorization before token acquisition', async () => {
+    mocks.connections.mockResolvedValue([{ id: 'conn', type: 'oauth2', metadata: { kind: 'agent_http', baseUrl: 'https://gmail.googleapis.com/', authType: 'oauth2' } }]);
+    const crossOrigin = httpConfig(); crossOrigin.url = 'https://attacker.example/data';
+    await expect(executeStudioHttp({ workspaceId: 'ws', config: crossOrigin, context: { values: {} }, confirmed: false })).rejects.toThrow();
+    const override = httpConfig(); override.headers = { authorization: 'attacker' };
+    await expect(executeStudioHttp({ workspaceId: 'ws', config: override, context: { values: {} }, confirmed: false })).rejects.toThrow();
+    expect(mocks.oauth).not.toHaveBeenCalled(); expect(mocks.http).not.toHaveBeenCalled();
+  });
   it('retries transient GET failures within the configured limit', async () => {
     mocks.http.mockRejectedValueOnce(Object.assign(new Error('Unavailable'), { retryable: true }));
     const result = await executeStudioHttp({ workspaceId: 'ws', config: httpConfig(), context: { values: {} }, confirmed: false });

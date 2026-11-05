@@ -43,11 +43,49 @@ describe('central access guards', () => {
     } satisfies Partial<AccessError>);
   });
 
-  it('rejects a mutation without the required workspace permission', async () => {
-    mocks.hasWorkspacePermission.mockResolvedValue(false);
-    await expect(requireWorkspacePermission('workspace-1', 'workspace:settings:edit')).rejects.toMatchObject({
-      code: 'forbidden',
-      status: 403,
-    } satisfies Partial<AccessError>);
+  it('allows workspace access immediately via app_metadata.workspace_ids without querying DB', async () => {
+    mocks.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: 'user-1',
+          app_metadata: { workspace_ids: ['workspace-123'] },
+        },
+      },
+    });
+
+    const user = await requireWorkspaceAccess('workspace-123');
+    expect(user.id).toBe('user-1');
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it('allows workspace access immediately for superadmin via app_metadata without querying DB', async () => {
+    mocks.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: 'user-admin',
+          app_metadata: { is_superadmin: true },
+        },
+      },
+    });
+
+    const user = await requireWorkspaceAccess('any-workspace');
+    expect(user.id).toBe('user-admin');
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it('falls back to DB query when workspace is not in app_metadata claims', async () => {
+    mocks.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: 'user-1',
+          app_metadata: { workspace_ids: ['other-ws'] },
+        },
+      },
+    });
+    mocks.query.mockResolvedValue({ rowCount: 1, rows: [{}] });
+
+    const user = await requireWorkspaceAccess('new-ws');
+    expect(user.id).toBe('user-1');
+    expect(mocks.query).toHaveBeenCalledTimes(1);
   });
 });

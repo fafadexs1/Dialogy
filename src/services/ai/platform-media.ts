@@ -4,8 +4,10 @@ import { meteredAiCall } from './metered-call';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { getGlobalLmStudioConfig,getLmStudioModelId } from './lm-studio';
 
-export async function requestPlatformMedia(input:{workspaceId:string;prompt:string;data:Buffer;mimeType:string}) {
+export async function requestPlatformMedia(input:{workspaceId:string;prompt:string;data:Buffer;mimeType:string;requireDeclaredCapability?:boolean}) {
   const selected=await platformModel();
+  if(input.requireDeclaredCapability && !selected.supportedMediaTypes?.includes(input.mimeType==='application/pdf'?'pdf':'image')) throw new Error('Este formato ainda não foi habilitado para o modelo principal na IA Global.');
+  if(input.requireDeclaredCapability && input.mimeType==='application/pdf' && getAiModelRuntimeProvider(selected.id)!=='googleai') throw new Error('O adaptador do modelo principal não aceita PDFs multimodais. Use a leitura de texto do PDF.');
   const apiKey=await platformApiKey(selected.id);
   const provider=getAiModelRuntimeProvider(selected.id);
   return meteredAiCall({workspaceId:input.workspaceId,model:selected.id,source:'media_analysis',inputTokenBudget:65536,outputTokenBudget:2048,

@@ -1,4 +1,10 @@
-import { hashValue, isRecord } from '@/services/workflow-runtime';
+import { readWebhookBody, parseWebhookBody, verifyWebhookSignature, webhookPublicHeaders } from '@/services/workflow-runtime/webhook-contract';
+import { loadNexusCredentialPayload } from '@/modules/nexus/services/credentials';
+import { assertAutomationToolboxEnabled } from '@/modules/nexus/services/toolbox-policy';
+import { enqueueWebhookExecution, customWebhookResponse } from '@/modules/nexus/services/webhook-execution';
+import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
+import { db } from '@/lib/db';
+import { hashValue } from '@/services/workflow-runtime';
 import { verifyNexusWebhookToken } from '@/modules/nexus/services/deployment';
 import {
   loadPublishedNexusWorkflow,
@@ -17,26 +23,6 @@ function bearerToken(request: Request) {
   return match?.[1]?.trim() || request.headers.get('x-nexus-key')?.trim() || '';
 }
 
-function publicHeaders(request: Request) {
-  const blocked = new Set(['authorization', 'cookie', 'set-cookie', 'x-nexus-key']);
-  return Object.fromEntries([...request.headers.entries()].filter(([name]) => !blocked.has(name.toLowerCase())));
-}
-
-async function parsePayload(request: Request) {
-  const raw = await request.text();
-  if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) throw new Error('PAYLOAD_TOO_LARGE');
-  const contentType = request.headers.get('content-type') || '';
-  if (!raw) return {};
-  if (contentType.includes('json')) {
-    const parsed = JSON.parse(raw) as unknown;
-    return isRecord(parsed) ? parsed : { value: parsed };
-  }
-  if (contentType.includes('application/x-www-form-urlencoded')) {
-    return Object.fromEntries(new URLSearchParams(raw));
-  }
-  return { text: raw };
-}
-
 async function handle(request: Request, context: { params: Promise<{ workflowId: string }> }) {
   const { workflowId } = await context.params;
   const published = await loadPublishedNexusWorkflow({ nexusWorkflowId: workflowId });
@@ -52,16 +38,46 @@ async function handle(request: Request, context: { params: Promise<{ workflowId:
   }
 
   try {
-    const body = await parsePayload(request);
+    const raw = await readWebhookBody(request, MAX_BODY_BYTES);
+    const body = parseWebhookBody(raw, request.headers.get('content-type') || '');
+    const signatureCredentialId = String(trigger.config.signatureCredentialId || '');
+    const signatureHeader = String(trigger.config.signatureHeader || 'x-signature');
+    if (signatureCredentialId) {
+      const credential = await loadNexusCredentialPayload({ workspaceId: published.workspaceId, credentialId: signatureCredentialId, allowedTypes: ['api_key'] });
+      const timestampHeader = String(trigger.config.timestampHeader || '');
+      if (!verifyWebhookSignature({ raw, secret: String(credential.payload.value || ''), signature: request.headers.get(signatureHeader) || '', ...(timestampHeader ? { timestamp: request.headers.get(timestampHeader) || '' } : {}) })) return Response.json({ error: 'Assinatura inválida ou expirada.' }, { status: 401 });
+    }
     const url = new URL(request.url);
     const eventId = request.headers.get('x-nexus-event-id')?.trim();
+    if (trigger.config.responseMode && trigger.config.responseMode !== 'legacy') {
+      assertAutomationToolboxEnabled(published.workspaceId);
+      const payload = { body, query: Object.fromEntries(url.searchParams), headers: webhookPublicHeaders(request.headers, signatureHeader), method: request.method, ...(trigger.config.includeRawBody === true ? { rawBody: raw.toString('utf8') } : {}) };
+      const id = await enqueueWebhookExecution(published.workspaceId, published.workflow, payload, eventId || (signatureCredentialId ? hashValue({ raw: raw.toString('base64'), signature: request.headers.get(signatureHeader) }) : undefined));
+      if (['synchronous', 'response_node'].includes(String(trigger.config.responseMode))) {
+        const configuredTimeout = Number(trigger.config.responseTimeoutMs || 10000);
+        if (!Number.isFinite(configuredTimeout)) throw new Error('Tempo de resposta inválido.');
+        const deadline = Date.now() + Math.max(100, Math.min(20000, configuredTimeout));
+        const persistence = new PostgresWorkflowPersistence(db);
+        do {
+          const execution = await persistence.getExecution(id);
+          if (execution) {
+            const response = await customWebhookResponse(execution, published.workspaceId);
+            if (response) return response;
+            if (['completed', 'failed', 'cancelled'].includes(execution.status)) return Response.json({ executionId: id, status: execution.status, output: terminalNexusOutput(execution) }, { status: execution.status === 'completed' ? 200 : 500 });
+          }
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } while (Date.now() < deadline);
+      }
+      const statusUrl = `/api/nexus/webhooks/${encodeURIComponent(workflowId)}/executions/${encodeURIComponent(id)}`;
+      return Response.json({ executionId: id, status: 'accepted', statusUrl }, { status: 202, headers: { Location: statusUrl } });
+    }
     const result = await startPublishedNexusWorkflow({
       published,
       triggerType: 'trigger.webhook',
       payload: {
         body,
         query: Object.fromEntries(url.searchParams),
-        headers: publicHeaders(request),
+        headers: webhookPublicHeaders(request.headers, signatureHeader),
         method: request.method,
       },
       context: { source: 'webhook', receivedAt: new Date().toISOString() },

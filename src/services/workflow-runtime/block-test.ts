@@ -31,6 +31,7 @@ export type WorkflowTestChatMessage = {
 
 export type WorkflowTestExecutionResult = {
   success: boolean;
+  input?: Record<string, unknown>;
   executionId?: string;
   status?: string;
   resumeToken?: string;
@@ -94,6 +95,7 @@ export function createWorkflowBlockTestSideEffectAdapters(): {
     executeHttp: NonNullable<WorkflowHandlerDependencies['executeHttp']>;
     executeIntegration: NonNullable<WorkflowHandlerDependencies['executeIntegration']>;
     executePlatformAction: NonNullable<WorkflowHandlerDependencies['executePlatformAction']>;
+    executeToolbox: NonNullable<WorkflowHandlerDependencies['executeToolbox']>;
     handoff: NonNullable<WorkflowHandlerDependencies['handoff']>;
   };
   records: WorkflowBlockTestSideEffectRecord[];
@@ -102,6 +104,13 @@ export function createWorkflowBlockTestSideEffectAdapters(): {
   return {
     records,
     dependencies: {
+      executeToolbox: async runtimeInput => {
+        const fixtures = isRecord(runtimeInput.execution.context.studioFixtures) ? runtimeInput.execution.context.studioFixtures : {};
+        const fixtureValue = fixtures[runtimeInput.node.id];
+        const fixture = isRecord(fixtureValue) ? fixtureValue : {};
+        const output = { ...(isRecord(fixture.output) ? fixture.output : {}), simulated: true, nodeType: runtimeInput.node.type, externalEffectsExecuted: false };
+        return { status: 'success', selectedOutput: runtimeInput.node.type === 'logic.approval' ? 'approved' : 'success', output, statePatch: isRecord(fixture.statePatch) ? fixture.statePatch : { [String(runtimeInput.node.config.outputKey || 'result')]: output } };
+      },
       resolveToolRegistry: async () => new ToolRegistry(async () => false),
       sendResponse: async (message, runtimeInput) => {
         records.push({

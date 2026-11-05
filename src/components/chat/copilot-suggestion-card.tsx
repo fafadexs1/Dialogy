@@ -173,7 +173,7 @@ function InsightChips({ insights }: { insights: CopilotSuggestionInsights }) {
 function ReasoningDetails({ insights, stage }: { insights: CopilotSuggestionInsights; stage: string }) {
     const [open, setOpen] = useState(false);
     const sources = insights.knowledgeSources || [];
-    const hasDetail = sources.length > 0 || Boolean(insights.model) || Boolean(insights.ragStrategy);
+    const hasDetail = sources.length > 0 || Boolean(insights.model) || Boolean(insights.ragStrategy) || Boolean(insights.summary);
 
     if (!hasDetail) return null;
 
@@ -190,6 +190,13 @@ function ReasoningDetails({ insights, stage }: { insights: CopilotSuggestionInsi
             </button>
             {open && (
                 <div className="mt-2 space-y-1.5 text-[11px] text-slate-600 dark:text-zinc-400">
+                    {insights.summary && <p><span className="font-medium">Contexto:</span> {insights.summary}</p>}
+                    {!!insights.missingInformation?.length && <p><span className="font-medium">Falta confirmar:</span> {insights.missingInformation.join(' · ')}</p>}
+                    {!!insights.cautions?.length && <ul className="space-y-1 text-amber-700 dark:text-amber-300">{insights.cautions.map((caution, index) => <li key={index}>{caution}</li>)}</ul>}
+                    {!!insights.recommendedActions?.length && <div>
+                        <p className="font-medium">Próximos passos para você</p>
+                        <ul className="mt-1 space-y-1">{insights.recommendedActions.map((action, index) => <li key={index}>{action.label}{action.reason ? ` — ${action.reason}` : ''}</li>)}</ul>
+                    </div>}
                     <p>
                         <span className="font-medium text-slate-700 dark:text-zinc-200">Origem:</span>{' '}
                         {describeCopilotSuggestionStage(stage)}

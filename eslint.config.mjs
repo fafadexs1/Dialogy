@@ -36,7 +36,6 @@ export default defineConfig([
     'scratch/**',
     'tmp/**',
     'public/sw.js',
-    'delivery-app/**',
     'next-env.d.ts',
   ]),
 ]);

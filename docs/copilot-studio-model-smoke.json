@@ -1,0 +1,34 @@
+{
+  "at": "2026-09-19T14:52:19.046Z",
+  "durationMs": 9463,
+  "scope": "Real platform model; synthetic conversation and published procedure; no external integrations, customer messages or session persistence. Not a production end-to-end test.",
+  "result": {
+    "response": "Sem problema, o CEP não é obrigatório para seguir. Com o endereço Rua das Flores, 10, Centro, Cidade Ocidental já temos o necessário para preparar a instalação do plano de 700 mega sem mesh.\n\nSe depois você localizar o CEP, pode informar para completarmos o cadastro — mas isso não impede o andamento.",
+    "messageBlocks": [
+      "Sem problema, o CEP não é obrigatório para seguir. Com o endereço Rua das Flores, 10, Centro, Cidade Ocidental já temos o necessário para preparar a instalação do plano de 700 mega sem mesh.",
+      "Se depois você localizar o CEP, pode informar para completarmos o cadastro — mas isso não impede o andamento."
+    ],
+    "insights": {
+      "intent": "Instalação de plano 700 mega sem mesh — cliente sem CEP",
+      "model": "deepseek/deepseek-flash",
+      "summary": "Cliente quer instalação de 700 mega sem mesh e informou o endereço (Rua das Flores, 10, Centro, Cidade Ocidental). Respondeu não saber o CEP e perguntou se dá para continuar. Pela etapa fornecida, o CEP é campo opcional (required: false), então a ausência dele não bloqueia o preparo; a hipótese de pendência sobre o CEP fica resolvida. Não há fontes recuperadas, logo não é possível confirmar disponibilidade do plano de 700 mega sem mesh para o endereço nem qualquer valor, prazo ou política. Falta executar a consulta de cobertura; nada essencial está pendente do cliente neste momento.",
+      "missingInformation": [],
+      "cautions": [
+        "Nenhuma fonte recuperada: não há base para afirmar disponibilidade do plano de 700 mega sem mesh no endereço informado, nem preços, prazos ou políticas.",
+        "A etapa de consulta de cobertura não foi executada neste turno; a disponibilidade permanece não confirmada."
+      ],
+      "recommendedActions": [
+        {
+          "type": "http_request",
+          "label": "Preparar instalação: Consultar cobertura para o endereço",
+          "reason": "Endereço já informado e CEP é opcional; a consulta de cobertura é o próximo passo necessário para o preparo da instalação."
+        }
+      ],
+      "studioReleaseId": "00000000-0000-4000-8000-000000000000",
+      "studioVersion": 1,
+      "knowledgeSources": [],
+      "knowledgeCoverage": "insufficient",
+      "ragStrategy": "studio_copilot_plan_and_retrieve"
+    }
+  }
+}

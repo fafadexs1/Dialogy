@@ -1,0 +1,51 @@
+{
+  "checkedAt": "2026-10-25T04:03:27.209Z",
+  "workflow": {
+    "id": "79962002-b803-4bac-b549-98fb5607f19f",
+    "name": "Aurora Work · Vendas fictícias com DeepSeek",
+    "status": "draft",
+    "published_workflow_id": null,
+    "published_revision": 0,
+    "nodes": 46,
+    "workspaceId": "5c3a91e9-b243-4436-80ba-42434bc5ca97",
+    "path": "/nexus/flows/79962002-b803-4bac-b549-98fb5607f19f",
+    "published": false,
+    "externallyExecuted": false
+  },
+  "checks": {
+    "tests": {
+      "passed": 39,
+      "failed": 0,
+      "suites": 6
+    },
+    "typecheck": "passed",
+    "productionBuild": "passed: isolated Next production preview build and HTTP UI verification; temporary route removed",
+    "sourceLint": "passed",
+    "visual": {
+      "viewport": "1280x720",
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "credentialPendingVisible": true,
+      "promptInspectorVerified": true
+    },
+    "database": {
+      "status": "draft",
+      "nodes": 46,
+      "connections": 149,
+      "sections": 7,
+      "versions": 1,
+      "publishedRevision": 0,
+      "idempotentCreationVerified": true
+    }
+  },
+  "limits": {
+    "model": "simulated: no live DeepSeek call or credential",
+    "transport": "intercepted: no real recipient",
+    "persistenceForRuntimeTests": "InMemoryWorkflowPersistence",
+    "durablePostgresRestartTestThisTask": false,
+    "productionDeploymentPerformed": false,
+    "publicationPerformed": false
+  }
+}

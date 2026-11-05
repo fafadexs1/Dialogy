@@ -1,4 +1,9 @@
+import { isStudioFlowNode } from '@/services/agent-studio/flow-contract';
+import { StudioFlowInputMappingsSchema } from '@/services/agent-studio/flow-inputs';
+import { readStudioValue } from '@/services/agent-studio/data-mapping';
+import { whatsappCatalogSchema } from '@/lib/whatsapp/catalog';
 import { getWorkflowNodeManifest } from './catalog';
+import { toolboxConfigurationErrors } from './toolbox-validation';
 import { WorkflowDefinitionSchema } from './schemas';
 import { assertValidCronExpression } from './cron';
 import type {
@@ -212,6 +217,7 @@ function validateNodeConfig(
   options: WorkflowValidatorOptions,
 ) {
   const manifest = getWorkflowNodeManifest(node.type);
+  for (const message of toolboxConfigurationErrors(node)) error(collector, 'toolbox_configuration_invalid', message, { nodeId: node.id });
   if (!manifest) {
     warning(
       collector,
@@ -241,6 +247,13 @@ function validateNodeConfig(
         );
       }
     }
+  }
+
+  if (isStudioFlowNode(node.type)) {
+    if (!configuredText(node.config.agentId) || !configuredText(node.config.releaseId)) error(collector, 'studio_flow_missing_release', `Selecione uma publicação no bloco “${node.name}”.`, { nodeId: node.id });
+    if (node.type.endsWith('studio_procedure') && !configuredText(node.config.procedureId)) error(collector, 'studio_flow_missing_procedure', `Selecione uma habilidade em “${node.name}”.`, { nodeId: node.id });
+    if (!StudioFlowInputMappingsSchema.safeParse(node.config.inputMappings || []).success) error(collector, 'studio_flow_invalid_mapping', 'Revise os mapeamentos do Studio.', { nodeId: node.id });
+    try { readStudioValue({}, String(node.config.outputKey || 'studioResult')); } catch { error(collector, 'studio_flow_invalid_output', 'Revise a variável de saída do Studio.', { nodeId: node.id }); }
   }
 
   if (node.type === 'ai.published_agent' && (!configuredText(node.config.agentId) || !configuredText(node.config.releaseId))) {
@@ -403,7 +416,7 @@ function validateNodeConfig(
 
   if (node.type === 'output.media') {
     const url = configuredText(node.config.url);
-    if (!url || (!url.includes('{{') && !/^https:\/\//i.test(url))) {
+      if (!node.config.file && (!url || (!url.includes('{{') && !/^https:\/\//i.test(url)))) {
       error(collector, 'media_url_invalid', `O bloco "${node.name}" precisa de uma URL HTTPS pública ou variável.`, { nodeId: node.id });
     }
   }
@@ -560,6 +573,19 @@ function validateNodeConfig(
     }
   }
 
+  if (node.type === 'whatsapp.send_catalog') {
+    // Substitute expressions only for publication-time shape validation. Runtime
+    // validates the actual resolved values before making any external call.
+    const replaceExpressions = (value: unknown, key = ''): unknown => {
+      if (typeof value === 'string') return value.replace(/\{\{[^{}]+\}\}/g, key === 'url' || key === 'imageUrl' ? 'https://example.com/product.jpg' : 'produto');
+      if (Array.isArray(value)) return value.map((child) => replaceExpressions(child));
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, child]) => [name, replaceExpressions(child, name)]));
+      return value;
+    };
+    const parsed = whatsappCatalogSchema.safeParse(replaceExpressions({ body: node.config.body, cards: node.config.cards }));
+    if (!parsed.success) error(collector, 'whatsapp_catalog_config_invalid', `O bloco "${node.name}" precisa de apresentação e 1 a 10 produtos com nome, descrição, foto HTTPS e botão.`, { nodeId: node.id });
+  }
+
   if (node.type.startsWith('tool.')) {
     if (!configuredText(node.config.name) || !configuredText(node.config.description)) {
       error(
@@ -569,7 +595,7 @@ function validateNodeConfig(
         { nodeId: node.id },
       );
     }
-    if (!isSchemaLike(node.config.inputSchema) || !isSchemaLike(node.config.outputSchema)) {
+    if (!isStudioFlowNode(node.type) && (!isSchemaLike(node.config.inputSchema) || !isSchemaLike(node.config.outputSchema))) {
       error(
         collector,
         'tool_missing_schema',
@@ -671,7 +697,10 @@ function validateNodeConfig(
     const hasEventInput = node.inputPorts.some((port) => port.connectionType === 'event');
     const resumeEvent = configuredText(node.config.resumeEvent);
     const mode = configuredText(node.config.mode);
-    if (!hasEventInput || (mode !== 'time' && !resumeEvent)) {
+    if (mode && !['time', 'event', 'message'].includes(mode)) {
+      error(collector, 'wait_invalid_mode', `O bloco "${node.name}" precisa aguardar tempo, evento externo ou mensagem.`, { nodeId: node.id });
+    }
+    if (!hasEventInput || (mode !== 'time' && mode !== 'message' && !resumeEvent)) {
       error(
         collector,
         'wait_missing_resume_mechanism',

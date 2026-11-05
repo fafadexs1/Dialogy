@@ -1,3 +1,4 @@
+import { workflowNodeGeometry, workflowVisibleOutputs } from './workflow-node-geometry';
 import { getWorkflowNodeManifest } from '@/services/workflow-runtime/catalog';
 import type { WorkflowConnection, WorkflowNode } from '@/services/workflow-runtime/types';
 
@@ -16,31 +17,7 @@ export function isAttachment(node: WorkflowNode): boolean {
   return getWorkflowNodeManifest(node.type)?.attachment === true;
 }
 
-export function getNodeDimensions(node: WorkflowNode): { width: number; height: number } {
-  const isOptions = node.type === 'interaction.options' && Array.isArray(node.config.options) && node.config.options.length > 0;
-  if (isOptions) {
-    const optionCount = Array.isArray(node.config.options) ? node.config.options.length : 0;
-    const fallbackCount = node.config.customErrorRoute ? 2 : 1;
-    const totalRoutes = optionCount + fallbackCount;
-    return {
-      width: 440,
-      height: Math.max(160, 64 + totalRoutes * 32),
-    };
-  }
-
-  const hasText = Boolean(
-    (typeof node.config.message === 'string' && node.config.message.trim()) ||
-    (typeof node.config.prompt === 'string' && node.config.prompt.trim()) ||
-    (typeof node.config.publicMessage === 'string' && node.config.publicMessage.trim()) ||
-    (typeof node.config.template === 'string' && node.config.template.trim())
-  );
-
-  const portCount = Math.max(node.inputPorts.length, node.outputPorts.length, 1);
-  const width = hasText ? 270 : 220;
-  const height = Math.max(120, 72 + portCount * 20 + (hasText ? 48 : 0));
-
-  return { width, height };
-}
+export const getNodeDimensions = workflowNodeGeometry;
 
 export function estimatedNodeHeight(node: WorkflowNode): number {
   return getNodeDimensions(node).height;
@@ -50,31 +27,8 @@ export function estimatedNodeHeight(node: WorkflowNode): number {
  * Returns the estimated relative Y offset (from card top) of an output port on a node.
  */
 function getSourcePortRelativeY(node: WorkflowNode, portId: string): number {
-  const dim = getNodeDimensions(node);
-
-  if (node.type === 'interaction.options' && Array.isArray(node.config.options)) {
-    const options = node.config.options as Array<Record<string, unknown>>;
-    const optIdx = options.findIndex((opt) => String(opt.id || opt.value || '') === portId);
-    if (optIdx >= 0) {
-      return 52 + optIdx * 32 + 16;
-    }
-    const normalized = (portId || '').toLowerCase().trim();
-    if (normalized === 'default') return dim.height - 40;
-    if (normalized === 'expired') return dim.height - 24;
-  }
-
-  if (node.type === 'logic.if') {
-    const normalized = (portId || '').toLowerCase().trim();
-    if (normalized === 'true' || normalized === 'yes' || normalized === 'success') return 40;
-    if (normalized === 'false' || normalized === 'no') return dim.height - 40;
-  }
-
-  const portIdx = node.outputPorts.findIndex((p) => p.id === portId);
-  if (portIdx >= 0 && node.outputPorts.length > 1) {
-    return ((portIdx + 1) / (node.outputPorts.length + 1)) * dim.height;
-  }
-
-  return dim.height / 2;
+  const index = workflowVisibleOutputs(node).findIndex((port) => port.id === portId);
+  return workflowNodeGeometry(node).portY(Math.max(0, index));
 }
 
 /**

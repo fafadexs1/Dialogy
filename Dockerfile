@@ -32,7 +32,7 @@ COPY package.json package-lock.json ./
 # queue mode is disabled. Its bundled webhook handler therefore needs the same
 # runtime AI dependencies as worker-ai; omitting them makes an inbound WhatsApp
 # message fail with `Cannot find module 'genkit'`.
-RUN node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const names=['bullmq','ioredis','pg','@huggingface/transformers','genkit','@genkit-ai/compat-oai','@genkit-ai/google-genai','@google/generative-ai','@modelcontextprotocol/sdk','zod','next','react','react-dom','postcss','@supabase/ssr','@supabase/supabase-js','clsx','tailwind-merge','date-fns','date-fns-tz','uuid','ffmpeg-static','@aws-sdk/client-s3','@aws-sdk/s3-request-presigner','openai','@opentelemetry/api','jsonata']; const deps=Object.fromEntries(names.map((name)=>{ const version=lock.packages?.['node_modules/'+name]?.version ?? pkg.dependencies?.[name]; if(!version){ throw new Error('Missing worker dependency: '+name); } return [name, version]; })); fs.writeFileSync('package.json', JSON.stringify({ name: 'dialogy-worker-runtime', private: true, dependencies: deps, overrides: pkg.overrides || {} }, null, 2)); fs.unlinkSync('package-lock.json');"
+RUN node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const names=['bullmq','ioredis','pg','@huggingface/transformers','genkit','@genkit-ai/compat-oai','@genkit-ai/google-genai','@google/generative-ai','@modelcontextprotocol/sdk','zod','next','react','react-dom','postcss','@supabase/ssr','@supabase/supabase-js','clsx','tailwind-merge','date-fns','date-fns-tz','uuid','ffmpeg-static','@aws-sdk/client-s3','@aws-sdk/s3-request-presigner','openai','@opentelemetry/api','jsonata','papaparse','pdfjs-dist','read-excel-file','sharp','exceljs','mammoth','pdf-lib','pptxgenjs']; const deps=Object.fromEntries(names.map((name)=>{ const version=lock.packages?.['node_modules/'+name]?.version ?? pkg.dependencies?.[name]; if(!version){ throw new Error('Missing worker dependency: '+name); } return [name, version]; })); fs.writeFileSync('package.json', JSON.stringify({ name: 'dialogy-worker-runtime', private: true, dependencies: deps, overrides: pkg.overrides || {} }, null, 2)); fs.unlinkSync('package-lock.json');"
 RUN npm install --package-lock-only --legacy-peer-deps
 RUN npm ci --omit=dev --include=optional --legacy-peer-deps
 
@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const names=['bullmq','ioredis','pg','@huggingface/transformers','genkit','@genkit-ai/compat-oai','@genkit-ai/google-genai','@google/generative-ai','@modelcontextprotocol/sdk','zod','next','react','react-dom','postcss','@supabase/ssr','@supabase/supabase-js','clsx','tailwind-merge','date-fns','date-fns-tz','uuid','ffmpeg-static','@aws-sdk/client-s3','@aws-sdk/s3-request-presigner','openai','@opentelemetry/api','jsonata']; const deps=Object.fromEntries(names.map((name)=>{ const version=lock.packages?.['node_modules/'+name]?.version ?? pkg.dependencies?.[name] ?? pkg.devDependencies?.[name]; if(!version){ throw new Error('Missing worker-ai dependency: '+name); } return [name, version]; })); fs.writeFileSync('package.json', JSON.stringify({ name: 'dialogy-worker-ai-runtime', private: true, dependencies: deps, overrides: pkg.overrides || {} }, null, 2)); fs.unlinkSync('package-lock.json');"
+RUN node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const names=['bullmq','ioredis','pg','@huggingface/transformers','genkit','@genkit-ai/compat-oai','@genkit-ai/google-genai','@google/generative-ai','@modelcontextprotocol/sdk','zod','next','react','react-dom','postcss','@supabase/ssr','@supabase/supabase-js','clsx','tailwind-merge','date-fns','date-fns-tz','uuid','ffmpeg-static','@aws-sdk/client-s3','@aws-sdk/s3-request-presigner','openai','@opentelemetry/api','jsonata','papaparse','pdfjs-dist','read-excel-file','sharp','exceljs','mammoth','pdf-lib','pptxgenjs']; const deps=Object.fromEntries(names.map((name)=>{ const version=lock.packages?.['node_modules/'+name]?.version ?? pkg.dependencies?.[name] ?? pkg.devDependencies?.[name]; if(!version){ throw new Error('Missing worker-ai dependency: '+name); } return [name, version]; })); fs.writeFileSync('package.json', JSON.stringify({ name: 'dialogy-worker-ai-runtime', private: true, dependencies: deps, overrides: pkg.overrides || {} }, null, 2)); fs.unlinkSync('package-lock.json');"
 RUN npm install --package-lock-only --legacy-peer-deps
 RUN npm ci --omit=dev --include=optional --legacy-peer-deps
 
@@ -58,6 +58,7 @@ COPY . .
 RUN --mount=type=secret,id=dotenv,target=/app/.env if grep -Eq '^[[:space:]]*model[[:space:]]+' prisma/schema.prisma; then npx prisma generate; else echo "No Prisma models found, skipping prisma generate"; fi
 
 RUN --mount=type=secret,id=dotenv,target=/app/.env \
+  export NEXT_BUILD_TYPECHECK_CONFIG=tsconfig.build.json; \
   if [ -f yarn.lock ]; then yarn run build; \
   elif [ -f package-lock.json ]; then npm run build; \
   elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
@@ -70,6 +71,7 @@ RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:campaign:build
 RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:meta-relay:build
 RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:google-ads:build
 RUN --mount=type=secret,id=dotenv,target=/app/.env npm run worker:nexus:build
+RUN node scripts/check-worker-runtime-dependencies.mjs
 RUN rm -f .next/standalone/.env .next/standalone/.env.*
 
 FROM base AS runtime-base

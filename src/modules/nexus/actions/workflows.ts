@@ -8,6 +8,9 @@ import { db } from '@/lib/db';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import { loadStudioRelease } from '@/services/agent-studio/repository';
 import { validateStudioFlowBindings } from '@/services/agent-studio/flow-inputs';
+import { isStudioFlowNode } from '@/services/agent-studio/flow-contract';
+import { validateStudioCompositionBinding, assertStudioDelegationAcyclic } from '@/services/agent-studio/flow-bindings';
+import { createStudioFlowNodeExecutor } from '@/services/agent-studio/flow-runtime';
 import type { PoolClient } from 'pg';
 import { assertNexusGoogleAdsBinding, loadNexusGoogleAdsOptions } from '../services/google-ads-lead';
 import { createClient } from '@/lib/supabase/server';
@@ -57,7 +60,10 @@ import {
 } from '../services/dialogy-resources';
 import { listNexusDialogyTools } from '../services/dialogy-tools';
 import { validateNexusWorkflowCredentialBindings } from '../services/credentials';
+import { validateAutomationBindings } from '../services/toolbox-publication';
+import { redactWorkflowValue } from '@/services/workflow-runtime/events';
 import { cancelPublishedNexusWorkflowExecution } from '../services/runtime';
+import { createPublishedStudioSandboxExecutor } from '@/services/agent-studio/workflow-sandbox';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 
 type NexusWorkflowRow = Record<string, unknown>;
@@ -940,13 +946,16 @@ export async function publishNexusWorkflow(input: {
     for (const node of draft.nodes.filter((item) => item.type === 'integration.google_ads_lead')) {
       await assertNexusGoogleAdsBinding(input.workspaceId, node.config);
     }
-    for (const node of draft.nodes.filter((item) => item.type === 'ai.published_agent')) {
+    for (const node of draft.nodes.filter((item) => item.type === 'ai.published_agent' || isStudioFlowNode(item.type))) {
       const release = await loadStudioRelease(input.workspaceId, String(node.config.agentId || ''), String(node.config.releaseId || ''));
       if (!release) throw new Error(`O bloco “${node.name}” não possui uma versão disponível neste workspace.`);
-      validateStudioFlowBindings(release.agentSnapshot, node.config.inputMappings, node.config.outputKeys);
+      if (isStudioFlowNode(node.type)) validateStudioCompositionBinding(draft, node, release);
+      else validateStudioFlowBindings(release.agentSnapshot, node.config.inputMappings, node.config.outputKeys);
       const active = await db.query('SELECT is_active FROM autopilot_configs WHERE workspace_id = $1 AND id = $2 AND (NOT is_private OR user_id = $3)', [input.workspaceId, release.agentId, user.id]);
       if (!active.rows[0]?.is_active) throw new Error(`O agente do bloco “${node.name}” está pausado.`);
     }
+    assertStudioDelegationAcyclic(draft);
+    await validateAutomationBindings(input.workspaceId, draft);
     const [credentialBindings, dialogyBindings] = await Promise.all([
       validateNexusWorkflowCredentialBindings({
         workspaceId: input.workspaceId,
@@ -972,7 +981,7 @@ export async function publishNexusWorkflow(input: {
 
     await client.query('BEGIN');
     // Recheck mutable visibility/activation under a shared lock. Published manifests are immutable.
-    for (const agentId of [...new Set(draft.nodes.filter((node) => node.type === 'ai.published_agent').map((node) => String(node.config.agentId)))].sort()) {
+    for (const agentId of [...new Set(draft.nodes.filter((node) => node.type === 'ai.published_agent' || isStudioFlowNode(node.type)).map((node) => String(node.config.agentId)))].sort()) {
       const available = await client.query('SELECT id FROM autopilot_configs WHERE workspace_id = $1 AND id = $2 AND is_active AND (NOT is_private OR user_id = $3) FOR SHARE', [input.workspaceId, agentId, user.id]);
       if (!available.rows[0]) throw new Error('Um agente foi pausado ou teve o acesso alterado. Revise os blocos antes de publicar.');
     }
@@ -1122,6 +1131,13 @@ export async function runNexusWorkflowTest(input: {
     const persistence = new PostgresWorkflowPersistence(db);
     await persistence.saveWorkflowDefinition(workflow);
     const handlers = createDefaultNodeHandlerRegistry({
+      executePublishedAgent: createPublishedStudioSandboxExecutor({ workspaceId: input.workspaceId, actorUserId: user.id,
+        sendResponse: async (message, runtimeInput) => { chatMessages.push({ id: `msg_${randomUUID()}`, nodeId: runtimeInput.node.id, nodeType: runtimeInput.node.type, role: 'bot', text: message, type: 'text', timestamp: new Date().toISOString() }); return { success: true, sandbox: true }; },
+      }),
+      executeStudioFlow: createStudioFlowNodeExecutor({ config: modelConfig,
+        sendResponse: async (message, runtimeInput) => { chatMessages.push({ id: `msg_${randomUUID()}`, nodeId: runtimeInput.node.id, nodeType: runtimeInput.node.type, role: 'bot', text: message, type: 'text', timestamp: new Date().toISOString() }); return { success: true }; },
+        retrieveKnowledge: async () => [], loadMemory: async () => ({}),
+      }),
       resolveModelChain: async (context) => modelChainForNode({
         workspaceId: input.workspaceId,
         config: modelConfig,
@@ -1190,7 +1206,7 @@ export async function runNexusWorkflowTest(input: {
       workflow,
       input: prepared?.startInput.input || standardInput,
       variables: prepared?.startInput.variables,
-      context: prepared?.startInput.context || { sandbox: true, userId: user.id },
+      context: { ...(prepared?.startInput.context || {}), sandbox: true, userId: user.id, studioFixtures: input.fixtures || {} },
       sessionId: `nexus-test:${user.id}`,
       conversationId: `nexus-test:${input.workflowId}`,
       executionId: `nexus_test_${randomUUID()}`,
@@ -1238,6 +1254,7 @@ export async function runNexusWorkflowTest(input: {
       waitingNodeId: execution.currentNodeId || undefined,
       messages: chatMessages,
       variables: execution.variables || {},
+      input: redactWorkflowValue(execution.input) as Record<string, unknown>,
       nodeResults: execution.nodeResults,
     };
   } catch (error) {
@@ -1267,6 +1284,13 @@ export async function resumeNexusWorkflowTest(input: {
     const sandbox = createWorkflowBlockTestSideEffectAdapters();
     const persistence = new PostgresWorkflowPersistence(db);
     const handlers = createDefaultNodeHandlerRegistry({
+      executePublishedAgent: createPublishedStudioSandboxExecutor({ workspaceId: input.workspaceId, actorUserId: user.id,
+        sendResponse: async (message, runtimeInput) => { chatMessages.push({ id: `msg_${randomUUID()}`, nodeId: runtimeInput.node.id, nodeType: runtimeInput.node.type, role: 'bot', text: message, type: 'text', timestamp: new Date().toISOString() }); return { success: true, sandbox: true }; },
+      }),
+      executeStudioFlow: createStudioFlowNodeExecutor({ config: modelConfig,
+        sendResponse: async (message, runtimeInput) => { chatMessages.push({ id: `msg_${randomUUID()}`, nodeId: runtimeInput.node.id, nodeType: runtimeInput.node.type, role: 'bot', text: message, type: 'text', timestamp: new Date().toISOString() }); return { success: true }; },
+        retrieveKnowledge: async () => [], loadMemory: async () => ({}),
+      }),
       resolveModelChain: async (context) => modelChainForNode({
         workspaceId: input.workspaceId,
         config: modelConfig,
@@ -1385,6 +1409,7 @@ export async function resumeNexusWorkflowTest(input: {
       waitingNodeId: execution.currentNodeId || undefined,
       messages: chatMessages,
       variables: execution.variables || {},
+      input: redactWorkflowValue(execution.input) as Record<string, unknown>,
       nodeResults: execution.nodeResults,
     };
   } catch (error) {

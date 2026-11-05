@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { consumeRateLimit } from '@/lib/ratelimit';
 import { requireAuthenticatedUser } from '@/lib/security/access';
-import { fetchSafeRemote, readResponseBodyLimited } from '@/lib/security/safe-remote-url';
+import { fetchSafeRemote } from '@/lib/security/safe-remote-url';
 import { normalizeStoredMediaUrl } from '@/lib/storage-url';
 
 const IMAGE_PLACEHOLDER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><rect width="320" height="320" rx="32" fill="#F4F4F5"/><text x="160" y="164" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#71717A">Midia indisponivel</text></svg>`;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
 
 function imageFallback(status = 502): NextResponse {
   return new NextResponse(IMAGE_PLACEHOLDER_SVG, {
@@ -68,29 +66,25 @@ export async function GET(request: NextRequest) {
       timeoutMs: 10_000,
       maxRedirects: 3,
     });
-    if (!upstream.ok) {
+    if (!upstream.ok && upstream.status !== 206) {
       return kind === 'image'
         ? imageFallback(upstream.status)
         : NextResponse.json({ error: `Failed to fetch upstream media (${upstream.status}).` }, { status: 502 });
     }
 
-    const body = await readResponseBodyLimited(upstream, kind === 'image' ? MAX_IMAGE_BYTES : MAX_MEDIA_BYTES);
     const responseHeaders = new Headers({
       'Content-Type': upstream.headers.get('content-type') || 'application/octet-stream',
-      'Content-Length': String(body.byteLength),
       'Cache-Control': 'private, max-age=60',
       'X-Robots-Tag': 'noindex',
     });
+
+    const contentLength = upstream.headers.get('content-length');
+    if (contentLength) responseHeaders.set('Content-Length', contentLength);
+
     const disposition = upstream.headers.get('content-disposition');
     if (disposition) responseHeaders.set('Content-Disposition', disposition);
 
     // Repassa a semântica de range do upstream.
-    //
-    // Antes esta rota encaminhava o `Range` do cliente mas devolvia sempre 200,
-    // sem `Accept-Ranges` e sem `Content-Range`. Para o navegador isso significa
-    // "este servidor não suporta range": ele desabilita o seek e, quando o corpo
-    // recebido era só um pedaço rotulado como 200, não conseguia deduzir o
-    // tamanho total — daí a duração aparecer como 0 em áudio e vídeo.
     const upstreamAcceptRanges = upstream.headers.get('accept-ranges');
     const upstreamContentRange = upstream.headers.get('content-range');
     const isPartial = upstream.status === 206 && Boolean(upstreamContentRange);
@@ -99,15 +93,14 @@ export async function GET(request: NextRequest) {
       responseHeaders.set('Content-Range', upstreamContentRange as string);
       responseHeaders.set('Accept-Ranges', 'bytes');
     } else if (upstreamAcceptRanges && upstreamAcceptRanges !== 'none') {
-      // Sem range nesta resposta, mas a origem aceita: anunciar permite ao
-      // player pedir os trechos que precisa para navegar na linha do tempo.
       responseHeaders.set('Accept-Ranges', upstreamAcceptRanges);
+    } else {
+      responseHeaders.set('Accept-Ranges', 'bytes');
     }
 
-    const responseBody = new Uint8Array(body.byteLength);
-    responseBody.set(body);
-    return new NextResponse(responseBody.buffer, {
-      status: isPartial ? 206 : 200,
+    // Streaming nativo via ReadableStream: zero cópia e zero consumo de RAM em buffer
+    return new Response(upstream.body, {
+      status: isPartial ? 206 : upstream.status,
       headers: responseHeaders,
     });
   } catch (error) {

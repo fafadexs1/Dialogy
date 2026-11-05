@@ -179,6 +179,20 @@ describe('template failures in the conversation', () => {
         expect(mocks.query).toHaveBeenCalledTimes(1); // Authentication only; no later status update.
     });
 
+    it('records divergent invoice amounts as FAILED and returns 422 without sending', async () => {
+        const components = [
+            { type: 'body', parameters: [{ text: 'Cliente' }, { text: '3647' }, { text: '15/10/2026' }, { text: '79.99' }] },
+            { type: 'button', sub_type: 'order_details', parameters: [{ action: { order_details: {
+                total_amount: { value: 9990, offset: 100 },
+                order: { subtotal: { value: 9990, offset: 100 }, items: [{ amount: { value: 9990, offset: 100 }, quantity: 1 }] },
+            } } }] },
+        ];
+        const response = await POST(request({ ...input, components }));
+        expect(response.status).toBe(422);
+        expect(insertedMessage()).toMatchObject({ status: 'FAILED', metadata: { send_error: expect.stringMatching(/valor do texto.*difere/) } });
+        expect(mocks.fetchEvolutionAPI).not.toHaveBeenCalled();
+    });
+
     it.each([null, undefined, {}])('also records components that are not a list (%s)', async (components) => {
         const response = await POST(request({ ...input, components }));
 

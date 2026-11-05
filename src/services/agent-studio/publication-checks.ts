@@ -1,3 +1,5 @@
+import { StudioFlowContractSchema, validateStudioFlowPublication } from './flow-contract';
+import { matchProhibitedStudioRequest } from './policy';
 import type { AgentStudioDocument, CollectedFieldDefinition } from './types';
 import type { PublicationValidationIssue } from './assistant-validator';
 import { readStudioValue, resolveStudioEndpoint } from './data-mapping';
@@ -10,6 +12,15 @@ import { StudioCatalogImageSchema } from './catalog-media';
 export function checkStudioDependencies(doc: AgentStudioDocument): PublicationValidationIssue[] {
   const issues: PublicationValidationIssue[] = [];
   const add = (code: string, title: string, procedureId?: string, stepId?: string) => issues.push({ code, title, description: title, severity: 'error', procedureId, stepId });
+  if (doc.flowBuilder?.enabled) {
+    const contract = StudioFlowContractSchema.safeParse(doc.flowBuilder);
+    if (!contract.success) add('FLOW_CONTRACT_INVALID', contract.error.issues.map((issue) => issue.message).join(' '));
+    else {
+      try { validateStudioFlowPublication(contract.data, doc.resolveStage.procedures.filter((procedure) => procedure.status !== 'archived').map((procedure) => procedure.id)); }
+      catch (error) { add('FLOW_CONTRACT_INVALID', error instanceof Error ? error.message : 'Revise o contrato do Flowbuilder.'); }
+      for (const field of [...contract.data.inputs, ...contract.data.outputs]) if (matchProhibitedStudioRequest(`Informe ${field.label} ${field.key}`, doc)) add('FLOW_PROHIBITED_DATA', `O campo ${field.label} não pode ser exposto ao fluxo segundo as regras do agente.`);
+    }
+  }
   const safeKey = (key: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !['__proto__', 'constructor', 'prototype'].includes(key);
   const fieldCheck = (field: CollectedFieldDefinition, procedureId?: string, stepId?: string) => {
     const normalized = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -21,7 +32,7 @@ export function checkStudioDependencies(doc: AgentStudioDocument): PublicationVa
     if (field.minValue !== undefined && field.maxValue !== undefined && field.minValue > field.maxValue) add('FIELD_LIMITS_INVALID', 'O valor mínimo não pode superar o máximo.', procedureId, stepId);
     if (field.reuseFrom) {
       try { if (!field.reuseFrom.sourceValue.trim()) throw new Error(); readStudioValue({}, field.reuseFrom.sourceValue); } catch { add('FIELD_SOURCE_INVALID', 'Selecione uma origem válida para reaproveitar o dado.', procedureId, stepId); }
-      if (field.reuseFrom.sourceType === 'contact_property' && !['name', 'email', 'phone'].includes(field.reuseFrom.sourceValue)) add('FIELD_SOURCE_FORBIDDEN', 'Este dado do contato não está disponível para coleta.', procedureId, stepId);
+      if (field.reuseFrom.sourceType === 'contact_property' && !['name', 'email', 'phone', 'address'].includes(field.reuseFrom.sourceValue) && !field.reuseFrom.sourceValue.startsWith('custom_fields.')) add('FIELD_SOURCE_FORBIDDEN', 'Este dado do contato não está disponível para coleta.', procedureId, stepId);
       if (field.type === 'file') add('FILE_SOURCE_FORBIDDEN', 'Arquivos devem ser recebidos pelo canal autorizado.', procedureId, stepId);
     }
     if (field.validationRegex) {
@@ -71,6 +82,11 @@ export function checkStudioDependencies(doc: AgentStudioDocument): PublicationVa
       if (step.type === 'handoff' && !step.handoffTeam?.trim() && !doc.concludeStage.handoffTeam.trim()) error('MISSING_STEP_TEAM', 'selecione a equipe de destino.');
       if (step.type === 'knowledge_lookup' && !step.knowledgeCollectionId && !doc.resolveStage.knowledgeCollectionIds.length) error('MISSING_KNOWLEDGE', 'selecione uma base de conhecimento.');
       if (step.type === 'native_action') {
+        if (step.nativeActionPayload?.flexibleScope === true) {
+          if (step.nativeActionType !== 'sgp_fetch_contact_panel_data') error('SGP_SCOPE_ACTION_INVALID', 'escopo variável está disponível apenas para consulta ao painel SGP.');
+          if (doc.resolveStage.conversationMode !== 'adaptive' || !doc.resolveStage.reasoning?.enabled) error('SGP_SCOPE_REQUIRES_REASONING', 'ative o atendimento adaptativo com raciocínio para consultar múltiplos contratos por pedido.');
+          if (step.nativeDataMappings?.some((mapping) => mapping.apiField === 'contractId')) error('SGP_SCOPE_CONFLICT', 'remova o contrato fixo para permitir que cada pedido selecione seu escopo.');
+        }
         if (step.nativeActionType === 'show_catalog_image') {
           const image = StudioCatalogImageSchema.safeParse(step.nativeActionPayload);
           if (!image.success) error('CATALOG_IMAGE_INVALID', 'configure catálogo, campos do produto e servidores autorizados para as fotos.');

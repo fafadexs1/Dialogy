@@ -197,6 +197,9 @@ async function main() {
 
   await refreshSnapshot(dbModule);
   scheduleModule.startNexusScheduleRunner();
+  const automationModule = await import('@/modules/nexus/services/automation-worker');
+  const automationTimer = setInterval(() => { void automationModule.pollAutomationTasks().catch(() => console.error('[NEXUS_AUTOMATION] Falha na recuperação de tarefas.')); }, 2000);
+  automationTimer.unref?.();
 
   const monitorTimer = setInterval(() => {
     void refreshSnapshot(dbModule);
@@ -237,6 +240,7 @@ async function main() {
     stopping = true;
     console.log(`[NEXUS_WORKER] ${signal} recebido; encerrando com segurança...`);
     clearInterval(monitorTimer);
+    clearInterval(automationTimer);
     scheduleModule.stopNexusScheduleRunner();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await dbModule.db.end();

@@ -12,6 +12,7 @@ beforeAll(async () => {
   bridge.query.mockImplementation((query, args) => sql.query(query, args));
   bridge.transaction.mockImplementation((fn) => sql.transaction((tx) => fn(tx)));
   await sql.exec(`CREATE TABLE contacts(id text PRIMARY KEY, workspace_id text, name text, phone text, email text, address text, updated_at timestamptz);
+    CREATE TABLE workspace_integrations(workspace_id text, provider text, config jsonb, is_active boolean);
     CREATE TABLE chats(id text PRIMARY KEY, workspace_id text, contact_id text);
     CREATE TABLE custom_field_definitions(id text PRIMARY KEY, workspace_id text, label text);
     CREATE TABLE contact_custom_field_values(contact_id text, field_id text, value text, PRIMARY KEY(contact_id,field_id));
@@ -26,6 +27,13 @@ describe('current-conversation CRM scope on isolated PostgreSQL', () => {
     expect(await loadStudioContactCrm('w','chat')).toEqual({ field: 'Essencial', Plano: 'Essencial' });
     expect(await loadStudioContactCrm('other','chat')).toEqual({});
     expect(await loadStudioContactCrm('w','broken')).toEqual({});
+  });
+  it('exposes only the document mapped by the current workspace SGP integration', async () => {
+    await sql.exec(`INSERT INTO custom_field_definitions VALUES ('document','w','CPF');
+      INSERT INTO contact_custom_field_values VALUES ('a','document','52998224725');
+      INSERT INTO workspace_integrations VALUES ('w','sgp','{"cpfFieldId":"document"}',true);`);
+    expect((await loadStudioContactCrm('w','chat')).sgp_document).toBe('52998224725');
+    expect((await loadStudioContactCrm('other','chat-c')).sgp_document).toBeUndefined();
   });
   const update = (apiField: string, value: string, chatId = 'chat', confirmed = true) => executeStudioContactAction({ workspaceId: 'w', chatId, confirmed,
     context: { values: { value }, contact: { id: 'b' } }, step: { id:'save',type:'native_action',order:1,title:'Salvar',nativeActionType:'update_crm_field',

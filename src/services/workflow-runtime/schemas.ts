@@ -116,6 +116,7 @@ export const NodeExecutionStatusSchema = z.enum([
 
 export const NodeExecutionResultSchema = z.object({
   status: NodeExecutionStatusSchema,
+  sensitiveData: z.object({ inputPaths: z.array(z.string()).max(100).default([]), initialInputPaths: z.array(z.string()).max(100).default([]), variablePaths: z.array(z.string()).max(100).default([]) }).optional(),
   output: JsonRecordSchema.optional(),
   statePatch: JsonRecordSchema.optional(),
   selectedOutput: z.string().min(1).optional(),

@@ -216,14 +216,13 @@ const ACS_ROUTER_RULES: Record<string, { summary: string; rules: string[] }> = {
     ],
   },
   get_wifi_diagnostics: {
-    summary: 'Coleta estado dos rádios 2.4GHz e 5GHz, SSIDs, canais e segurança.',
-    rules: ['Consulte antes de qualquer alteração de Wi-Fi para conhecer as redes atuais.'],
+    summary: 'Coleta estado dos rádios 2.4GHz e 5GHz, SSIDs, canais, segurança e senha Wi-Fi.',
+    rules: ['Consulte antes de qualquer alteração de Wi-Fi para conhecer as redes atuais e fornecer nome e senha da rede ao cliente quando solicitado.'],
   },
   configure_wifi: {
     summary: 'Configuração atômica de SSID, senha, canal e rádios.',
     rules: [
       'Altere SSID, senha e canal de forma atômica e simultânea em uma única chamada.',
-      'Zero Plaintext Secrets: nunca exiba senhas abertas ao cliente em logs.',
       'A senha Wi-Fi deve ter no mínimo 8 caracteres.',
     ],
   },

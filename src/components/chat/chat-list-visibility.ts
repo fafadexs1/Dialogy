@@ -1,4 +1,5 @@
-import type { Chat, Message, Team } from '@/lib/types';
+import type { Chat, Team } from '@/lib/types';
+export { isMarketingMessage, matchesInboxMarketingFilter } from '@/lib/inbox-marketing';
 
 export function matchesChatTeamFilter(
   chat: Pick<Chat, 'team_id' | 'tag'>,
@@ -16,9 +17,4 @@ export function matchesChatTeamFilter(
     selectedTeamIds.includes(team.id) &&
     Boolean(team.tagLabel && chat.tag && team.tagLabel === chat.tag)
   );
-}
-
-export function isMarketingMessage(message: Message) {
-  const meta = message.metadata as any;
-  return Boolean(meta?.isMarketing || meta?.event === 'marketing_auto_close');
 }

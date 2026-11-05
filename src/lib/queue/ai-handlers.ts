@@ -76,6 +76,7 @@ async function loadChatForAutopilot(chatId: string, workspaceId: string): Promis
 
 const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
   evolution_webhook_process: undefined,
+  nexus_workflow: undefined,
   ai_document_ingest: async (job) => {
     const payload = job.payload as AiDocumentIngestPayload;
     if (!payload.workspaceId || !payload.documentId || !payload.documentName || !payload.content) {
@@ -114,7 +115,8 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
         chat,
         payload.lastMessageContent || '',
         payload.instanceName,
-        payload.messageId
+        payload.messageId,
+        payload.suggestionRequest
       );
     } catch (error) {
       if (

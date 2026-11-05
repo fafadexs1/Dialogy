@@ -724,7 +724,7 @@ export function StudioKnowledgeSources({ document, onChange, collections, docume
             >
               <UploadCloud className="h-7 w-7 shrink-0 text-violet-600" />
               <span>
-                <strong className="block text-xs text-slate-800">{importing ? 'Lendo e extraindo RAG…' : 'Enviar PDF, TXT ou Markdown'}</strong>
+                <strong className="block text-xs text-slate-800">{importing ? 'Lendo e extraindo RAG…' : 'Enviar PDF, Word, Excel, PowerPoint ou texto'}</strong>
                 <span className="mt-1 block text-[10px] leading-snug text-slate-500">
                   Clique ou arraste aqui. O arquivo é lido, dividido em passagens e protegido pelo RAG.
                 </span>
@@ -733,7 +733,7 @@ export function StudioKnowledgeSources({ document, onChange, collections, docume
                 className="sr-only"
                 type="file"
                 disabled={importing || sources.length >= 20}
-                accept=".pdf,.txt,.md,.csv,.json,application/pdf,text/plain,text/markdown,text/csv,application/json"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.txt,.md,.csv,.json,application/pdf,application/msword,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/markdown,text/csv,application/json"
                 onChange={(event) => {
                   receiveFile(event.target.files);
                   event.target.value = '';

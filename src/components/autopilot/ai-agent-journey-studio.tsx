@@ -3,7 +3,10 @@
 import { createClientUuid } from '@/lib/client-uuid';
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import {
+  ArrowLeft,
+  Boxes,
   Sparkles,
   MessageSquare,
   HelpCircle,
@@ -58,6 +61,8 @@ import { StudioFieldEditor, StudioStageSettings, type StudioResources } from './
 import { StudioStepOptions } from './studio-step-options';
 import { StudioProcedureSettings } from './studio-procedure-settings';
 import { StudioResultsMetrics } from './studio-results';
+import { StudioFlowSettings } from './studio-flow-settings';
+import { createStudioSgpProcedure, createStudioSgpMultiProcedure } from '@/services/agent-studio/sgp-template';
 import { studioStepConsumers } from '@/services/agent-studio/data-availability';
 import {
   AgentStudioDocument,
@@ -103,7 +108,7 @@ export type AiAgentJourneyStudioProps = {
   initialDocument?: AgentStudioDocument;
   requiresMigrationReview?: boolean;
   migrationReport?: StudioMigrationReport | null;
-  initialTab?: 'flow' | 'appearance' | 'rules' | 'results';
+  initialTab?: 'flow' | 'appearance' | 'rules' | 'results' | 'composition';
   onSave?: (updatedConfig: Partial<AutopilotConfig>) => Promise<boolean | void>;
   onPublish?: () => Promise<boolean | void>;
   isSaving?: boolean;
@@ -143,11 +148,12 @@ export function AiAgentJourneyStudio({
   knowledgeCollections: existingKnowledgeCollections = [],
   tools = [],
   workspaceId,
+  onBackToOverview,
 }: AiAgentJourneyStudioProps) {
   const { toast } = useToast();
 
   // Navigation & Tabs State
-  const [activeTab, setActiveTab] = useState<'flow' | 'appearance' | 'rules' | 'results'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'flow' | 'appearance' | 'rules' | 'results' | 'composition'>(initialTab);
   const [viewLevel, setViewLevel] = useState<'journey' | 'procedure' | 'step' | 'knowledge'>('journey');
   const [activeProcedureId, setActiveProcedureId] = useState<string | null>(null);
   const [editingProcedure, setEditingProcedure] = useState(false);
@@ -233,6 +239,7 @@ export function AiAgentJourneyStudio({
     apiKeyHeader: 'X-API-Key',
     secret: '',
     username: '',
+    oauthTokenUrl: '', oauthClientId: '', oauthGrantType: 'refresh_token' as 'refresh_token' | 'client_credentials', oauthRefreshToken: '', oauthScope: '',
   });
   const [mcpServers, setMcpServers] = useState<Awaited<ReturnType<typeof listAgentMcpServersAction>>['servers']>([]);
   const [syncedMcpTools, setSyncedMcpTools] = useState<StudioToolOption[]>([]);
@@ -276,6 +283,12 @@ export function AiAgentJourneyStudio({
   const handleOpenProcedure = (procedureId: string) => {
     setActiveProcedureId(procedureId);
     setViewLevel('procedure');
+  };
+
+  const handleCreateSgpProcedure = (multiple = false) => {
+    const procedure = multiple ? createStudioSgpMultiProcedure(createClientUuid()) : createStudioSgpProcedure(createClientUuid());
+    setDoc((previous) => ({ ...previous, resolveStage: { ...previous.resolveStage, procedures: [...previous.resolveStage.procedures, procedure], ...(multiple ? { conversationMode: 'adaptive' as const, reasoning: { effort: 'high' as const, supportModel: null, maxDecisions: 12, maxTurnMs: 90000, ...previous.resolveStage.reasoning, enabled: true } } : {}) } }));
+    setActiveProcedureId(procedure.id); setViewLevel('procedure');
   };
 
   const handleCreateNewProcedure = () => {
@@ -662,6 +675,12 @@ export function AiAgentJourneyStudio({
       bearerToken: newApiConnection.authType === 'bearer_token' ? newApiConnection.secret : undefined,
       basicUsername: newApiConnection.authType === 'basic_auth' ? newApiConnection.username : undefined,
       basicPassword: newApiConnection.authType === 'basic_auth' ? newApiConnection.secret : undefined,
+      oauthTokenUrl: newApiConnection.authType === 'oauth2' ? newApiConnection.oauthTokenUrl : undefined,
+      oauthClientId: newApiConnection.authType === 'oauth2' ? newApiConnection.oauthClientId : undefined,
+      oauthClientSecret: newApiConnection.authType === 'oauth2' ? newApiConnection.secret : undefined,
+      oauthRefreshToken: newApiConnection.authType === 'oauth2' ? newApiConnection.oauthRefreshToken : undefined,
+      oauthGrantType: newApiConnection.authType === 'oauth2' ? newApiConnection.oauthGrantType : undefined,
+      oauthScope: newApiConnection.authType === 'oauth2' ? newApiConnection.oauthScope : undefined,
     });
     if (!saved.success) {
       toast({ title: 'Não foi possível salvar a conexão', description: saved.error, variant: 'destructive' });
@@ -673,7 +692,7 @@ export function AiAgentJourneyStudio({
       httpRequest: { ...previous.httpRequest, connectionId: saved.connection.id, authType: saved.connection.authType },
     } : previous);
     setIsAddApiConnectionOpen(false);
-    setNewApiConnection({ name: '', baseUrl: '', authType: 'none', apiKeyHeader: 'X-API-Key', secret: '', username: '' });
+    setNewApiConnection({ name: '', baseUrl: '', authType: 'none', apiKeyHeader: 'X-API-Key', secret: '', username: '', oauthTokenUrl: '', oauthClientId: '', oauthGrantType: 'refresh_token', oauthRefreshToken: '', oauthScope: '' });
     toast({ title: 'Conexão de API salva', description: 'A credencial foi criptografada e vinculada à etapa.' });
     } catch { toast({ title: 'Não foi possível salvar a conexão', description: 'Tente novamente.', variant: 'destructive' }); }
     finally { setSavingConnection(false); }
@@ -718,18 +737,19 @@ export function AiAgentJourneyStudio({
   return (
     <div className="flex h-screen w-full flex-col bg-[#0b131f] text-slate-100 overflow-hidden font-sans">
       {/* 1. TOP GLOBAL HEADER */}
-      <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-[#070b12] px-3 py-2 xl:px-5">
-        <div className="flex min-w-0 flex-wrap items-center gap-3 xl:gap-6">
+      <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 bg-[#0a111b] px-4 py-3 shadow-sm xl:px-6">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3 xl:flex-initial xl:gap-6">
           {/* Logo */}
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+            {onBackToOverview && <button type="button" onClick={onBackToOverview} aria-label="Voltar para agentes" title="Voltar para agentes" className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-800 hover:text-white"><ArrowLeft className="h-4 w-4" /></button>}
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
               <Sparkles className="h-4 w-4" />
             </div>
-            <span className="text-base font-bold tracking-tight text-white">Dialogy AI</span>
+            <div><span className="block text-sm font-semibold tracking-tight text-white">AI Studio</span><span className="block text-[10px] text-slate-500">Dialogy</span></div>
           </div>
 
           {/* Title with edit pencil */}
-          <div className="flex items-center gap-2 border-l border-slate-800 pl-4">
+          <div className="flex min-w-0 flex-1 items-center gap-2 border-l border-slate-800 pl-4 xl:flex-initial">
             {isEditingName ? (
               <Input
                 value={doc.name}
@@ -739,79 +759,73 @@ export function AiAgentJourneyStudio({
                   if (e.key === 'Enter') setIsEditingName(false);
                 }}
                 autoFocus
-                className="h-7 w-56 bg-slate-900 border-slate-700 text-xs text-white"
+                className="h-7 w-full max-w-56 bg-slate-900 border-slate-700 text-xs text-white"
               />
             ) : (
               <button
                 type="button"
                 onClick={() => setIsEditingName(true)}
-                className="flex items-center gap-2 text-sm font-semibold text-slate-200 hover:text-white transition"
+                className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-200 hover:text-white transition"
               >
-                <span>{doc.name}</span>
-                <Pencil className="h-3.5 w-3.5 text-slate-500 hover:text-slate-300" />
+                <span className="truncate">{doc.name}</span>
+                <Pencil className="h-3.5 w-3.5 shrink-0 text-slate-500 hover:text-slate-300" />
               </button>
             )}
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex items-center gap-1">
+          <nav aria-label="Seções do estúdio" className="flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-xl bg-slate-900/70 p-1 xl:w-auto">
             <button
               type="button"
               onClick={() => setActiveTab('flow')}
               className={cn(
-                'relative px-3 py-1.5 text-xs font-semibold transition',
-                activeTab === 'flow' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                'relative rounded-lg px-3 py-2 text-xs font-semibold transition',
+                activeTab === 'flow' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
               )}
+              aria-current={activeTab === 'flow' ? 'page' : undefined}
             >
               Fluxo
-              {activeTab === 'flow' && (
-                <div className="absolute bottom-[-14px] left-0 right-0 h-0.5 bg-emerald-500 rounded-full" />
-              )}
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('appearance')}
               className={cn(
-                'relative px-3 py-1.5 text-xs font-semibold transition',
-                activeTab === 'appearance' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                'relative rounded-lg px-3 py-2 text-xs font-semibold transition',
+                activeTab === 'appearance' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
               )}
+              aria-current={activeTab === 'appearance' ? 'page' : undefined}
             >
               Aparência
-              {activeTab === 'appearance' && (
-                <div className="absolute bottom-[-14px] left-0 right-0 h-0.5 bg-emerald-500 rounded-full" />
-              )}
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('rules')}
               className={cn(
-                'relative px-3 py-1.5 text-xs font-semibold transition',
-                activeTab === 'rules' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                'relative rounded-lg px-3 py-2 text-xs font-semibold transition',
+                activeTab === 'rules' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
               )}
+              aria-current={activeTab === 'rules' ? 'page' : undefined}
             >
               Regras
-              {activeTab === 'rules' && (
-                <div className="absolute bottom-[-14px] left-0 right-0 h-0.5 bg-emerald-500 rounded-full" />
-              )}
             </button>
+            <button type="button" onClick={() => setActiveTab('composition')} aria-current={activeTab === 'composition' ? 'page' : undefined} className={cn('rounded-lg px-3 py-2 text-xs font-semibold transition', activeTab === 'composition' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200')}>Flowbuilder</button>
             <button
               type="button"
               onClick={() => setActiveTab('results')}
               className={cn(
-                'relative px-3 py-1.5 text-xs font-semibold transition',
-                activeTab === 'results' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                'relative rounded-lg px-3 py-2 text-xs font-semibold transition',
+                activeTab === 'results' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
               )}
+              aria-current={activeTab === 'results' ? 'page' : undefined}
             >
               Resultados
-              {activeTab === 'results' && (
-                <div className="absolute bottom-[-14px] left-0 right-0 h-0.5 bg-emerald-500 rounded-full" />
-              )}
             </button>
-          </div>
+          </nav>
         </div>
 
         {/* Right Action Buttons */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-2.5">
+          <Link href="/integrations/ai-apps" className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-700/80 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-800"><Boxes className="h-3.5 w-3.5 text-emerald-400" />Aplicativos</Link>
           <button type="button" onClick={() => void handleSaveDraft()} disabled={isSaving || isPublishing} title={saveError || 'Salvar rascunho'} className={cn('max-w-48 truncate text-[11px]', saveError ? 'text-amber-300' : 'text-slate-400')}>
             {saveError ? 'Falha ao salvar · tentar novamente' : isSaving ? 'Salvando…' : currentFingerprint !== savedFingerprint.current ? 'Alterações pendentes' : 'Rascunho salvo'}
           </button>
@@ -1027,7 +1041,7 @@ export function AiAgentJourneyStudio({
         </aside>
 
         {/* 2B. CENTER MAIN CANVAS */}
-        <main className="min-w-0 flex-1 overflow-y-auto bg-[#f8fafc] p-3 text-slate-900 sm:p-5 xl:p-8">
+        <main className={cn('min-w-0 flex-1 overflow-y-auto p-3 sm:p-5 xl:p-8', activeTab === 'composition' ? 'bg-background text-foreground' : 'bg-[#f8fafc] text-slate-900')}>
           {requiresMigrationReview && !doc.publishedVersion && (migrationReport ? <StudioMigrationReview report={migrationReport} document={doc} onChange={setDoc} /> : <div role="status" className="mx-auto mb-5 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">Este agente possui configuração anterior preservada. Reabra o Estúdio para carregar o relatório de transição antes de publicar.</div>)}
           {activeTab === 'flow' ? (
             viewLevel === 'journey' ? (
@@ -1035,6 +1049,17 @@ export function AiAgentJourneyStudio({
               /* LEVEL 1: MAIN CONVERSATIONAL JOURNEY CANVAS              */
               /* ========================================================= */
               <div className="mx-auto max-w-2xl space-y-6">
+                <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-label="Visão geral do agente">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">Configuração do agente</p><h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">Construa a jornada de atendimento</h1><p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">Defina como o agente entende, resolve e conclui cada conversa. Teste o rascunho antes de publicar.</p></div>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600">{doc.publishedVersion ? `Versão ${doc.publishedVersion} publicada` : 'Ainda não publicado'}</span>
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+                    <div><p className="text-lg font-semibold text-slate-900">{doc.resolveStage.procedures.filter((procedure) => procedure.status !== 'archived').length}</p><p className="text-xs text-slate-500">procedimentos ativos</p></div>
+                    <div><p className="text-lg font-semibold text-slate-900">{activeKnowledgeCount}</p><p className="text-xs text-slate-500">fontes de conhecimento</p></div>
+                    <div><p className="text-lg font-semibold text-slate-900">{tools.length}</p><p className="text-xs text-slate-500">ferramentas disponíveis</p></div>
+                  </div>
+                </section>
                 {/* STAGE 1: Entender o cliente */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex items-center gap-3">
@@ -1147,6 +1172,8 @@ export function AiAgentJourneyStudio({
                           </div>
                         ))}</div> : <div className="rounded-xl border border-dashed border-purple-200 bg-white/70 p-4 text-center text-[11px] text-slate-500">Nenhum procedimento criado. Adicione o primeiro para ensinar uma tarefa à IA.</div>}
 
+                        <button type="button" onClick={() => handleCreateSgpProcedure(true)} className="w-full rounded-xl border border-purple-300 bg-white py-2.5 text-xs font-semibold text-purple-700">SGP · Vários contratos e pedidos simultâneos</button>
+                        <button type="button" onClick={() => handleCreateSgpProcedure(false)} className="w-full rounded-xl border border-purple-300 bg-white py-2.5 text-xs font-semibold text-purple-700">Adicionar consulta SGP com coleta de CPF e contrato</button>
                         <button type="button" onClick={handleCreateNewProcedure} className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-purple-300 bg-white py-2.5 text-xs font-semibold text-purple-700 transition hover:bg-purple-100/60"><Plus className="h-3.5 w-3.5" />Adicionar procedimento</button>
                       </div>
                     </div>
@@ -1693,7 +1720,7 @@ export function AiAgentJourneyStudio({
                 </div>
               </div>
             </div>
-          ) : activeTab === 'rules' ? (
+          ) : activeTab === 'composition' ? (<StudioFlowSettings document={doc} onChange={(flowBuilder) => setDoc((current) => ({ ...current, flowBuilder }))} />) : activeTab === 'rules' ? (
             /* ========================================================= */
             /* TAB: REGRAS                                               */
             /* ========================================================= */
@@ -1783,7 +1810,10 @@ export function AiAgentJourneyStudio({
               <h2 className="text-lg font-bold">Resultados do Estúdio</h2>
               <label className="block text-xs font-medium text-slate-600">Período<select className="ml-3 rounded-lg border border-slate-200 bg-white p-2" value={resultsPeriodDays} onChange={(event) => setResultsPeriodDays(Number(event.target.value))}>{[7, 30, 90].map((days) => <option key={days} value={days}>Últimos {days} dias</option>)}</select></label>
               {!results ? <p className="text-sm text-slate-500">Carregando…</p> : !results.success ? <p role="alert" className="text-sm text-amber-700">{results.error}</p> : <>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5"><div><h3 className="font-semibold">Runtime em uso</h3><p className="mt-1 text-xs text-slate-500">{results.currentRuntime === 'studio' ? 'Novos atendimentos usam o Estúdio de Agentes de IA.' : 'Novos atendimentos usam o modo anterior. O rascunho do Estúdio permanece disponível.'}</p></div>{results.canRollbackToLegacy && <Button variant="outline" size="sm" className="border-amber-300 text-amber-800" onClick={() => setRollbackOpen(true)}>Voltar ao modo anterior</Button>}</div>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5"><div><h3 className="font-semibold">Runtime em uso</h3><p className="mt-1 text-xs text-slate-500">{results.currentRuntime === 'studio' ? 'Novos atendimentos usam o Estúdio de Agentes de IA.' : 'Novos atendimentos usam o modo anterior. O rascunho do Estúdio permanece disponível.'}</p>
+                  {results.currentRuntime === 'studio' && results.executingModel && <p className="mt-2 text-xs text-slate-600">Modelo selecionado pelo motor LIA-1: <strong>{results.executingModel}</strong>. Modelo da versão publicada: <strong>{results.releases[0]?.publishedModel || 'não informado'}</strong>.</p>}
+                  {results.currentRuntime === 'studio' && results.executingModel && results.releases[0]?.publishedModel && results.executingModel !== results.releases[0].publishedModel && <p role="status" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">A publicação indica outro modelo. A LIA-1 mantém o modelo global atualmente em execução; esta divergência não altera a publicação.</p>}
+                </div>{results.canRollbackToLegacy && <Button variant="outline" size="sm" className="border-amber-300 text-amber-800" onClick={() => setRollbackOpen(true)}>Voltar ao modo anterior</Button>}</div>
                 <StudioResultsMetrics agentId={config.id} results={results} onReviewed={() => setResultsRevision((value) => value + 1)} />
                 <div className="rounded-2xl border border-slate-200 bg-white p-5"><h3 className="font-semibold">Versões publicadas</h3><p className="mt-1 text-xs text-slate-500">Cada versão guarda seus procedimentos e conhecimento. Alterar o rascunho não modifica versões anteriores.</p>
                   {results.releases.length ? <ul className="mt-4 space-y-3">{results.releases.map((release) => <li key={release.id} className="space-y-2 border-t border-slate-100 pt-3 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">Versão {release.version} {release.revoked && <Badge variant="destructive" className="ml-1">Revogada</Badge>}</span><time>{new Date(release.createdAt).toLocaleString('pt-BR')}</time>{!release.revoked && <><Button variant="ghost" size="sm" onClick={() => setCompareVersion(release)}>Comparar com rascunho</Button><Button variant="outline" size="sm" onClick={() => setRestoreVersion(release)}>Recuperar como rascunho</Button><Button variant="ghost" size="sm" className="text-red-700" onClick={() => setRevocationTarget({ releaseId: release.id, version: release.version, label: `Versão ${release.version}` })}>Revogar versão</Button></>}</div>{release.knowledgeSources.length > 0 && <div className="rounded-lg bg-slate-50 p-2"><p className="mb-1 font-medium text-slate-600">Conhecimento fixado</p>{release.knowledgeSources.map((source: { id: string; name: string; revoked: boolean }) => <div key={source.id} className="flex items-center justify-between gap-2 py-1"><span>{source.name} {source.revoked && <span className="text-red-700">· revogada</span>}</span>{!release.revoked && !source.revoked && <Button variant="ghost" size="sm" className="h-6 text-[11px] text-red-700" onClick={() => setRevocationTarget({ releaseId: release.id, version: release.version, sourceId: source.id, label: source.name })}>Revogar fonte</Button>}</div>)}</div>}</li>)}</ul> : <p className="mt-3 text-xs text-slate-400">Nenhuma versão publicada.</p>}
@@ -1804,7 +1834,7 @@ export function AiAgentJourneyStudio({
       {editingProcedure && activeProcedure && <StudioProcedureSettings key={activeProcedure.id} procedure={activeProcedure} onApply={updateProcedure} onClose={() => setEditingProcedure(false)} />}
       {stageSettings && <StudioStageSettings key={stageSettings} stage={stageSettings} document={doc} onChange={(edited) => setDoc((current) => ({ ...edited, draftRevision: current.draftRevision, publishedVersion: current.publishedVersion }))} onClose={() => setStageSettings(null)} resources={resources} />}
       <Dialog open={isAddApiConnectionOpen} onOpenChange={setIsAddApiConnectionOpen}>
-        <DialogContent className="dark max-w-md border-slate-800 bg-[#0f172a] text-slate-100">
+        <DialogContent className="dark max-h-[90vh] max-w-md overflow-y-auto border-slate-800 bg-[#0f172a] text-slate-100">
           <DialogHeader>
             <DialogTitle className="text-base font-bold text-white">Nova conexão de API</DialogTitle>
             <DialogDescription className="text-xs text-slate-400">
@@ -1827,8 +1857,19 @@ export function AiAgentJourneyStudio({
                 <option value="api_key">API Key</option>
                 <option value="bearer_token">Bearer Token</option>
                 <option value="basic_auth">Usuário e senha</option>
+                <option value="oauth2">OAuth2 (credenciais existentes)</option>
               </select>
             </div>
+            {newApiConnection.authType === 'oauth2' && (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-400">Informe credenciais já autorizadas pelo provedor. A renovação ocorre no servidor e o token só é enviado à origem da URL base.</p>
+                <div><Label className="text-xs text-slate-300">Endpoint HTTPS de token</Label><Input value={newApiConnection.oauthTokenUrl} onChange={e => setNewApiConnection(p => ({ ...p, oauthTokenUrl: e.target.value }))} placeholder="https://oauth2.googleapis.com/token" className="mt-1 bg-slate-950 border-slate-800 text-xs text-white" /></div>
+                <div><Label className="text-xs text-slate-300">Client ID</Label><Input value={newApiConnection.oauthClientId} onChange={e => setNewApiConnection(p => ({ ...p, oauthClientId: e.target.value }))} className="mt-1 bg-slate-950 border-slate-800 text-xs text-white" /></div>
+                <div><Label className="text-xs text-slate-300">Concessão</Label><select value={newApiConnection.oauthGrantType} onChange={e => setNewApiConnection(p => ({ ...p, oauthGrantType: e.target.value as 'refresh_token' | 'client_credentials' }))} className="mt-1 h-9 w-full rounded-md border border-slate-800 bg-slate-950 px-3 text-xs text-white"><option value="refresh_token">Refresh token</option><option value="client_credentials">Client credentials</option></select></div>
+                {newApiConnection.oauthGrantType === 'refresh_token' && <div><Label className="text-xs text-slate-300">Refresh token</Label><Input type="password" autoComplete="new-password" value={newApiConnection.oauthRefreshToken} onChange={e => setNewApiConnection(p => ({ ...p, oauthRefreshToken: e.target.value }))} className="mt-1 bg-slate-950 border-slate-800 text-xs text-white" /></div>}
+                <div><Label className="text-xs text-slate-300">Escopo (opcional)</Label><Input value={newApiConnection.oauthScope} onChange={e => setNewApiConnection(p => ({ ...p, oauthScope: e.target.value }))} className="mt-1 bg-slate-950 border-slate-800 text-xs text-white" /></div>
+              </div>
+            )}
             {newApiConnection.authType === 'api_key' && (
               <div>
                 <Label className="text-xs text-slate-300">Nome do header</Label>
@@ -1843,14 +1884,14 @@ export function AiAgentJourneyStudio({
             )}
             {newApiConnection.authType !== 'none' && (
               <div>
-                <Label className="text-xs text-slate-300">{newApiConnection.authType === 'basic_auth' ? 'Senha' : 'Segredo'}</Label>
+                <Label className="text-xs text-slate-300">{newApiConnection.authType === 'basic_auth' ? 'Senha' : newApiConnection.authType === 'oauth2' ? 'Client secret' : 'Segredo'}</Label>
                 <Input type="password" value={newApiConnection.secret} onChange={(event) => setNewApiConnection((previous) => ({ ...previous, secret: event.target.value }))} autoComplete="new-password" className="mt-1 bg-slate-950 border-slate-800 text-xs text-white" />
               </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setIsAddApiConnectionOpen(false)} className="text-xs">Cancelar</Button>
-            <Button size="sm" onClick={handleAddApiConnection} disabled={savingConnection || !newApiConnection.name.trim() || !newApiConnection.baseUrl.trim() || (newApiConnection.authType !== 'none' && !newApiConnection.secret)} className="bg-orange-600 text-xs font-semibold text-white hover:bg-orange-500">
+            <Button size="sm" onClick={handleAddApiConnection} disabled={savingConnection || !newApiConnection.name.trim() || !newApiConnection.baseUrl.trim() || (newApiConnection.authType !== 'none' && !newApiConnection.secret) || (newApiConnection.authType === 'oauth2' && (!newApiConnection.oauthTokenUrl.trim() || !newApiConnection.oauthClientId.trim() || (newApiConnection.oauthGrantType === 'refresh_token' && !newApiConnection.oauthRefreshToken.trim())))} className="bg-orange-600 text-xs font-semibold text-white hover:bg-orange-500">
               {savingConnection ? 'Salvando…' : 'Salvar conexão segura'}
             </Button>
           </DialogFooter>

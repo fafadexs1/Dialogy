@@ -1,15 +1,13 @@
-
 'use client';
 
 import React, { useState, useEffect, useActionState } from 'react';
-import type { User, Role, WorkspaceMember } from '@/lib/types';
-import { Loader2, ShieldAlert, MoreVertical, Edit, UserX, BarChart, AlertCircle, DollarSign, Users, Save, Copy } from 'lucide-react';
+import type { Role, WorkspaceMember } from '@/lib/types';
+import { Loader2, MoreHorizontal, Edit, UserX, AlertCircle, Users, Save, Copy, HeartHandshake, ChevronRight, UserPlus, ArrowUpRight, Search, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
+import Link from 'next/link';
 import { getWorkspaceMembers, removeMemberAction, updateMemberRoleAction } from '@/actions/members';
 import { getRolesAndPermissions } from '@/actions/permissions';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -44,15 +42,11 @@ import { useToast } from '@/hooks/use-toast';
 import { AlertDialogTrigger } from '@radix-ui/react-alert-dialog';
 import { useFormStatus } from 'react-dom';
 import { useCurrentUser } from '@/hooks/use-online-status';
-
-function CopyButton({ textToCopy }: { textToCopy: string }) {
-    const { toast } = useToast();
-    const handleCopy = () => {
-        navigator.clipboard.writeText(textToCopy);
-        toast({ title: 'Copiado!', description: 'O ID foi copiado para a área de transferência.' });
-    };
-    return <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}><Copy className="h-3 w-3" /></Button>;
-}
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import { filterWorkspaceMembers, groupWorkspaceMembers, type MemberStatusFilter } from '@/lib/team-members';
+import shared from '../team-page.module.css';
+import styles from './members-page.module.css';
 
 function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { member: WorkspaceMember, workspaceId: string, roles: Role[], onMutate: () => void, children: React.ReactNode }) {
     const [isOpen, setIsOpen] = useState(false);
@@ -73,7 +67,7 @@ function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { me
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>{children}</DialogTrigger>
-            <DialogContent>
+            <DialogContent className={shared.surface}>
                 <DialogHeader>
                     <DialogTitle>Editar Função de {member.name}</DialogTitle>
                     <DialogDescription>Selecione a nova função para este membro.</DialogDescription>
@@ -84,10 +78,10 @@ function EditRoleDialog({ member, workspaceId, roles, onMutate, children }: { me
                     <div className="py-4">
                         <Label htmlFor="role">Função</Label>
                         <Select name="roleId" defaultValue={member.roleId}>
-                            <SelectTrigger>
+                            <SelectTrigger id="role">
                                 <SelectValue placeholder="Selecione uma função" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className={shared.surface}>
                                 {roles.map(role => (
                                     <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
                                 ))}
@@ -131,20 +125,20 @@ function MemberActions({ member, workspaceId, roles, onMutate }: { member: Works
         <AlertDialog>
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon">
-                        <MoreVertical className="h-4 w-4" />
+                    <Button variant="ghost" size="icon" aria-label={`Ações de ${member.name}`} className={styles.actionsButton}>
+                        <MoreHorizontal className="h-4 w-4" />
                     </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className={cn(shared.surface, styles.actionMenu)}>
                     <EditRoleDialog member={member} workspaceId={workspaceId} roles={roles} onMutate={onMutate}>
                         <DropdownMenuItem onSelect={e => e.preventDefault()}>
                             <Edit className="mr-2 h-4 w-4" />
                             Editar Função
                         </DropdownMenuItem>
                     </EditRoleDialog>
-                    <DropdownMenuItem disabled>
-                        <BarChart className="mr-2 h-4 w-4" />
-                        Ver Histórico de Uso
+                    <DropdownMenuItem onSelect={() => { void navigator.clipboard.writeText(member.id).then(() => toast({ title: 'ID copiado!' })).catch(() => toast({ title: 'Não foi possível copiar o ID', variant: 'destructive' })); }}>
+                        <Copy className="mr-2 h-4 w-4" />
+                        Copiar ID do membro
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <AlertDialogTrigger asChild>
@@ -155,11 +149,11 @@ function MemberActions({ member, workspaceId, roles, onMutate }: { member: Works
                     </AlertDialogTrigger>
                 </DropdownMenuContent>
             </DropdownMenu>
-            <AlertDialogContent>
+            <AlertDialogContent className={shared.surface}>
                 <AlertDialogHeader>
                     <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
                     <AlertDialogDescription>
-                        Esta ação removerá permanentemente **{member.name}** do workspace. O usuário perderá todo o acesso. Esta ação não pode ser desfeita.
+                        Esta ação removerá <strong>{member.name}</strong> do workspace. Essa pessoa perderá o acesso e precisará de um novo convite para voltar.
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -178,11 +172,12 @@ export default function ManageMembersPage() {
     const [roles, setRoles] = useState<Role[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const { toast } = useToast();
+    const [search, setSearch] = useState('');
+    const [status, setStatus] = useState<MemberStatusFilter>('all');
+    const [roleFilter, setRoleFilter] = useState('all');
 
     const fetchData = React.useCallback(async (workspaceId: string) => {
         if (!workspaceId) return;
-        setLoading(true);
         setError(null);
         try {
             const [membersResult, rolesResult] = await Promise.all([
@@ -209,9 +204,10 @@ export default function ManageMembersPage() {
 
     useEffect(() => {
         if (user?.activeWorkspaceId) {
+            setLoading(true);
             fetchData(user.activeWorkspaceId);
         }
-    }, [user, fetchData]);
+    }, [user?.activeWorkspaceId, fetchData]);
 
     if (loading || !user) {
         return (
@@ -223,98 +219,80 @@ export default function ManageMembersPage() {
 
     const activeWorkspace = user?.workspaces?.find(ws => ws.id === user.activeWorkspaceId);
 
+    const directory = groupWorkspaceMembers(members);
+    const visibleMembers = filterWorkspaceMembers(directory, search, status, roleFilter);
+    const onlineCount = directory.filter(member => member.online).length;
+    const roleCount = new Set(directory.map(member => member.roleId).filter(Boolean)).size;
+    const hasFilters = Boolean(search || status !== 'all' || roleFilter !== 'all');
+    const clearFilters = () => { setSearch(''); setStatus('all'); setRoleFilter('all'); };
+
     return (
-        <div className="flex flex-col flex-1 h-full">
-            <header className="p-4 sm:p-6 border-b flex-shrink-0 bg-background">
-                <h1 className="text-2xl font-bold flex items-center gap-2"><ShieldAlert /> Gerenciar Membros</h1>
-                <p className="text-muted-foreground">Gerencie os membros do seu workspace, suas permissões e status.</p>
+        <div className={cn(shared.page, shared.surface)}>
+            <header className={shared.pageHeader}>
+                <div className={shared.headerTop}>
+                    <nav className={shared.breadcrumb} aria-label="Localização"><span>Workspace</span><ChevronRight size={12} /><Link href="/team">Equipes</Link><ChevronRight size={12} /><span aria-current="page">Membros</span></nav>
+                    <span className={shared.headerLabel}><HeartHandshake size={14} /> Feito de pessoas</span>
+                </div>
+                <div className={shared.welcomeRow}>
+                    <div><span className={shared.eyebrow}>CADA PESSOA IMPORTA</span><h1>Boas conexões têm<br className="hidden sm:block" /> pessoas por trás<span className={shared.titleDot}>.</span></h1><p>Conheça quem está com você e dê espaço para cada talento.</p></div>
+                    <Button asChild className={shared.createButton}><Link href="/team/invite"><UserPlus size={17} /> Convidar pessoa <ArrowUpRight size={16} /></Link></Button>
+                </div>
+                <div className={shared.workspaceSummary}>
+                    <span><Users size={15} /><strong>{directory.length}</strong> {directory.length === 1 ? 'pessoa no workspace' : 'pessoas no workspace'}</span>
+                    <span><span className={styles.onlineDot} /><strong>{onlineCount}</strong> {onlineCount === 1 ? 'pessoa online' : 'pessoas online'}</span>
+                    <span><ShieldCheck size={15} /><strong>{roleCount}</strong> {roleCount === 1 ? 'função' : 'funções'}</span>
+                    <span className={shared.summaryHint}>{activeWorkspace?.name || 'Seu workspace'}</span>
+                </div>
             </header>
-            <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6">
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Membros do Workspace</CardTitle>
-                        <CardDescription>
-                            Total de {members.length} membros no workspace: <span className='font-semibold'>{activeWorkspace?.name || ''}</span>
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {error ? (
-                            <div className="text-center py-10 text-destructive">
-                                <AlertCircle className="mx-auto h-12 w-12" />
-                                <h2 className="mt-4 text-xl font-bold">Falha ao carregar membros</h2>
-                                <p className="text-muted-foreground">{error}</p>
-                                <Button onClick={() => user?.activeWorkspaceId && fetchData(user.activeWorkspaceId)} className="mt-4">Tentar Novamente</Button>
-                            </div>
-                        ) : (
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className='w-[30%]'>Membro</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead>Função</TableHead>
-                                        <TableHead>Equipe</TableHead>
-                                        <TableHead>Membro Desde</TableHead>
-                                        <TableHead>Uso (Piloto Automático)</TableHead>
-                                        <TableHead className="text-right">Ações</TableHead>
+            <main className={styles.content}>
+                <div className={styles.directoryHeading}>
+                    <div><h2>Pessoas do workspace</h2><p>Talentos diferentes. Um mesmo propósito.</p></div>
+                    <Link href="/team" className={styles.textLink}>Organizar equipes <ArrowUpRight size={14} /></Link>
+                </div>
+                <section className={styles.directory} aria-label="Diretório de membros">
+                    <div className={styles.toolbar}>
+                        <div className={styles.searchField}><Search size={17} /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Encontre uma pessoa, equipe ou e-mail..." aria-label="Buscar membros" />{search && <Button variant="ghost" size="icon" aria-label="Limpar busca" onClick={() => setSearch('')}><X size={14} /></Button>}</div>
+                        <Select value={roleFilter} onValueChange={setRoleFilter}>
+                            <SelectTrigger className={styles.roleFilter} aria-label="Filtrar por função"><SlidersHorizontal size={14} /><SelectValue placeholder="Todas as funções" /></SelectTrigger>
+                            <SelectContent className={shared.surface}><SelectItem value="all">Todas as funções</SelectItem>{roles.map(role => <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </div>
+                    <div className={styles.statusBar}>
+                        <div className={styles.statusFilters} role="group" aria-label="Filtrar por status">
+                            <button type="button" aria-pressed={status === 'all'} onClick={() => setStatus('all')}>Todas as pessoas <span>{directory.length}</span></button>
+                            <button type="button" aria-pressed={status === 'online'} onClick={() => setStatus('online')}><span className={styles.onlineDot} /> Online <span>{onlineCount}</span></button>
+                            <button type="button" aria-pressed={status === 'offline'} onClick={() => setStatus('offline')}>Offline <span>{directory.length - onlineCount}</span></button>
+                        </div>
+                        {hasFilters && <Button variant="ghost" size="sm" className={styles.clearFilters} onClick={clearFilters}><X size={12} /> Limpar filtros</Button>}
+                    </div>
+                    {error ? (
+                        <div className={styles.emptyState} role="alert"><span className={shared.emptyIcon}><AlertCircle size={27} /></span><h3>Não conseguimos reunir todo mundo</h3><p>{error}</p><Button onClick={() => user.activeWorkspaceId && fetchData(user.activeWorkspaceId)} variant="outline">Tentar novamente</Button></div>
+                    ) : visibleMembers.length ? (
+                        <Table className={styles.membersTable} aria-label="Pessoas do workspace">
+                            <TableHeader><TableRow><TableHead>Pessoa</TableHead><TableHead>Status</TableHead><TableHead>Função</TableHead><TableHead>Equipe</TableHead><TableHead>Por aqui desde</TableHead><TableHead><span className="sr-only">Ações</span></TableHead></TableRow></TableHeader>
+                            <TableBody>
+                                {visibleMembers.map(member => (
+                                    <TableRow key={member.id} className={styles.memberRow}>
+                                        <TableCell className={styles.personCell}><div className={styles.person}>
+                                            <Avatar className={styles.personAvatar}><AvatarImage src={member.avatar || undefined} alt={member.name} /><AvatarFallback>{member.name.split(' ').filter(Boolean).filter((_, i, parts) => i === 0 || i === parts.length - 1).map(part => part[0]).join('').slice(0, 2)}</AvatarFallback></Avatar>
+                                            <div className={styles.personInfo}><div className={styles.personName}><span>{member.name}</span>{member.id === user.id && <span className={styles.youLabel}>Você</span>}</div><p>{member.email}</p></div>
+                                        </div></TableCell>
+                                        <TableCell className={styles.statusCell}><span className={cn(styles.presence, member.online && styles.isOnline)}><span />{member.online ? 'Online' : 'Offline'}</span></TableCell>
+                                        <TableCell className={styles.roleCell}><span className={styles.mobileLabel}>Função</span><span className={styles.roleBadge}><ShieldCheck size={12} />{member.role}</span></TableCell>
+                                        <TableCell className={styles.teamCell}><span className={styles.mobileLabel}>Equipe</span>{member.teams.length ? <div className={styles.teamNames}>{member.teams.map(team => <span key={team}><Users size={12} />{team}</span>)}</div> : <span className={styles.noTeam}>Ainda sem equipe</span>}</TableCell>
+                                        <TableCell className={styles.dateCell}><span className={styles.mobileLabel}>Por aqui desde</span>{member.memberSince}</TableCell>
+                                        <TableCell className={styles.actionCell}>{user.activeWorkspaceId && <MemberActions member={member} workspaceId={user.activeWorkspaceId} roles={roles} onMutate={() => fetchData(user.activeWorkspaceId!)} />}</TableCell>
                                     </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {members.map((member) => (
-                                        <TableRow key={member.id}>
-                                            <TableCell>
-                                                <div className="flex items-center gap-3">
-                                                    <Avatar>
-                                                        <AvatarImage src={member.avatar || undefined} alt={member.name} />
-                                                        <AvatarFallback>{member.name.charAt(0)}</AvatarFallback>
-                                                    </Avatar>
-                                                    <div>
-                                                        <p className="font-medium">{member.name}</p>
-                                                        <div className="flex items-center gap-1">
-                                                            <p className="text-xs text-muted-foreground">{member.email}</p>
-                                                        </div>
-                                                        <div className="flex items-center gap-1 mt-1">
-                                                            <span className="text-xs font-mono text-muted-foreground">ID: {member.id}</span>
-                                                            <CopyButton textToCopy={member.id} />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Badge variant={member.online ? 'default' : 'secondary'} className={member.online ? 'bg-green-500/20 text-green-700 border-transparent' : ''}>
-                                                    {member.online ? 'Online' : 'Offline'}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Badge variant="outline">{member.role}</Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Badge variant="secondary" className="flex items-center gap-1.5 w-fit">
-                                                    <Users className="h-3 w-3" />
-                                                    {member.team}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <span className="text-sm text-muted-foreground">{member.memberSince}</span>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-1 font-medium text-muted-foreground">
-                                                    <DollarSign className="h-4 w-4 text-green-500" />
-                                                    <span>
-                                                        {(member.autopilotUsage || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                    </span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                {activeWorkspace && <MemberActions member={member} workspaceId={activeWorkspace.id} roles={roles} onMutate={() => fetchData(activeWorkspace.id)} />}
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        )}
-                    </CardContent>
-                </Card>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    ) : (
+                        <div className={styles.emptyState}><span className={shared.emptyIcon}>{hasFilters ? <Search size={27} /> : <HeartHandshake size={29} />}</span><h3>{hasFilters ? 'Ainda não encontramos essa pessoa' : 'Sempre cabe mais um talento'}</h3><p>{hasFilters ? 'Tente outro nome, e-mail ou ajuste os filtros para encontrar quem procura.' : 'Convide alguém para somar e construir boas conversas com você.'}</p>{hasFilters ? <Button variant="outline" onClick={clearFilters}>Limpar filtros</Button> : <Button asChild><Link href="/team/invite"><UserPlus size={15} className="mr-2" /> Convidar pessoa</Link></Button>}</div>
+                    )}
+                    {!error && <div className={styles.listFooter}><span>{visibleMembers.length} de {directory.length} {directory.length === 1 ? 'pessoa' : 'pessoas'}</span><span><HeartHandshake size={13} /> Melhor quando é junto.</span></div>}
+                </section>
+                <div className={styles.permissionsNote}><ShieldCheck size={17} /><p>Cada função define o que uma pessoa pode acessar no workspace.</p><Link href="/team/permissions">Ver permissões <ArrowUpRight size={13} /></Link></div>
             </main>
         </div>
-    )
+    );
 }

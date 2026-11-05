@@ -154,7 +154,9 @@ export function nexusMessageTriggerIsCatchAll(config: Record<string, unknown>) {
 export function nexusWaitingExecutionIsSuperseded(input: {
   workflowVersion: unknown;
   publishedWorkflowVersion: unknown;
+  automationManaged?: boolean;
 }) {
+  if (input.automationManaged) return false;
   const workflowVersion = String(input.workflowVersion || '').trim();
   const publishedWorkflowVersion = String(input.publishedWorkflowVersion || '').trim();
   return Boolean(workflowVersion && publishedWorkflowVersion && workflowVersion !== publishedWorkflowVersion);
@@ -239,6 +241,8 @@ export async function dispatchPublishedNexusMessage(input: {
     `SELECT execution.id AS execution_id,
             execution.current_node_id,
             execution.resume_token,
+            execution.context,
+            execution.waiting_reason,
             execution.workflow_version,
             nexus.published_workflow_version,
             definition.definition
@@ -259,9 +263,12 @@ export async function dispatchPublishedNexusMessage(input: {
     [input.workspaceId, input.chatId],
   );
   let waitingRow = waitingResult.rows[0] as Record<string, unknown> | undefined;
+  const waitingContext = parseJson(waitingRow?.context);
+  const automationManaged = Boolean(waitingContext && typeof waitingContext === 'object' && 'automationManaged' in waitingContext && waitingContext.automationManaged === true);
   if (waitingRow && nexusWaitingExecutionIsSuperseded({
     workflowVersion: waitingRow.workflow_version,
     publishedWorkflowVersion: waitingRow.published_workflow_version,
+    automationManaged,
   })) {
     await cancelPublishedNexusWorkflowExecution({
       workspaceId: input.workspaceId,
@@ -275,6 +282,12 @@ export async function dispatchPublishedNexusMessage(input: {
     ? WorkflowDefinitionSchema.safeParse(parseJson(waitingRow.definition)).data
     : undefined;
   const waitingNode = waitingDefinition?.nodes.find((node) => node.id === String(waitingRow?.current_node_id || ''));
+  if (resumeToken && automationManaged && (
+    ['approval', 'subflows', 'event'].includes(String(waitingRow?.waiting_reason))
+    || (waitingNode?.type === 'logic.wait' && waitingNode.config.mode !== 'message')
+  )) {
+    return { handled: true, resumed: false, executions: [] };
+  }
   const providerSelectedOptionId = String(input.metadata?.selectedOptionId || '').trim();
   const resumeWaiting = async (selectedOptionId?: string, optionResolutionAttempted = false) => {
     const resumed = await resumePublishedNexusWorkflow({

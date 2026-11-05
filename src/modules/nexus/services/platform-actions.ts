@@ -19,7 +19,7 @@ export type NexusTemplateDelivery = {
 export type NexusPlatformActionDelivery = {
   sendResponse: NonNullable<WorkflowHandlerDependencies['sendResponse']>;
   sendOptions?: (
-    options: { title: string; choices: NexusPlatformChoice[]; invalid?: boolean },
+    options: { title: string; choices: NexusPlatformChoice[]; invalid?: boolean; invalidMessage?: string },
     input: NodeRuntimeInput,
   ) => Promise<Record<string, unknown>>;
   sendTemplate?: (template: NexusTemplateDelivery, input: NodeRuntimeInput) => Promise<Record<string, unknown>>;

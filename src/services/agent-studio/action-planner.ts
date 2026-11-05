@@ -1,3 +1,4 @@
+import { STUDIO_SGP_ACTIONS, studioSgpOutputs } from './sgp-data';
 import type { AgentStudioDocument, ProcedureStep } from './types';
 import type { StudioSession } from './engine';
 import { resolveStudioMapping, type StudioDataContext } from './data-mapping';
@@ -13,7 +14,7 @@ export function studioVerifiedEvidence(document: AgentStudioDocument, state: Stu
   const procedure = document.resolveStage.procedures.find((p) => p.id === state.procedureId);
   const evidence: Record<string, unknown> = {};
   let remaining = 24_000;
-  for (const step of procedure?.steps || []) for (const output of step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || []) {
+  for (const step of procedure?.steps || []) for (const output of step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || studioSgpOutputs(step)) {
     if (output.sensitive || state.valueOrigins?.[output.chipKey]?.source !== 'integration'
       || state.valueOrigins[output.chipKey].stepId !== step.id || !Object.hasOwn(state.values, output.chipKey)) continue;
     const value = state.values[output.chipKey];
@@ -26,7 +27,8 @@ export function studioVerifiedEvidence(document: AgentStudioDocument, state: Stu
 
 const operation = (step: ProcedureStep) => ['http_request', 'mcp_tool_call', 'native_action'].includes(step.type);
 const isRead = (step: ProcedureStep) => step.type === 'http_request' ? step.httpRequest?.method === 'GET' && !step.httpRequest.requiresConfirmation
-  : step.type === 'mcp_tool_call' && step.mcpTool?.riskLevel === 'read_only' && !step.mcpTool.requiresConfirmation;
+  : step.type === 'mcp_tool_call' ? step.mcpTool?.riskLevel === 'read_only' && !step.mcpTool.requiresConfirmation
+    : step.type === 'native_action' && STUDIO_SGP_ACTIONS.includes(step.nativeActionType || '');
 
 /** Compile available capabilities from the immutable procedure, never from model text.
  * Explicit edges, messages and decisions remain authorization/order barriers. */
@@ -79,7 +81,7 @@ export function availableStudioActions(document: AgentStudioDocument, state: Stu
     } catch { continue; }
     result.push({ id: `step:${step.id}`, kind: read ? 'read' : 'propose_write', stepId: step.id, index,
       title: step.title, purpose: (step.subtitle || step.httpRequest?.objective || step.httpRequest?.name || step.title).slice(0, 1000),
-      outputs: (step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || []).map((o) => o.chipKey) });
+      outputs: (step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || studioSgpOutputs(step)).map((o) => o.chipKey) });
   }
   if (question) {
     for (const other of document.resolveStage.procedures) {
@@ -104,7 +106,7 @@ export function availableStudioActions(document: AgentStudioDocument, state: Stu
           }
           result.push({ id: `step:${step.id}`, kind: 'read', stepId: step.id, index,
             title: `${other.name}: ${step.title}`, purpose: (step.subtitle || step.httpRequest?.objective || step.httpRequest?.name || step.title).slice(0, 1000),
-            outputs: (step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || []).map((o) => o.chipKey) });
+            outputs: (step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || studioSgpOutputs(step)).map((o) => o.chipKey) });
         } catch { continue; }
       }
     }

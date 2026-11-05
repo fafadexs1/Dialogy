@@ -1,3 +1,4 @@
+import { resolveHandoffTeam } from '@/services/agent-tools/router';
 import type { Contact } from '@/lib/types';
 import type { AgentToolCatalogItem } from '@/services/agent-tools/catalog';
 import type { AgentToolAction } from '@/services/agent-tools/types';
@@ -226,25 +227,6 @@ function hasExecutableLookupAction(actions: AgentToolAction[]): boolean {
   return actions.some((action) => LOOKUP_TOOL_TYPES.has(action.type));
 }
 
-function findHandoffTeam(input: {
-  intent: AutopilotIntentResolution['intent'];
-  availableTeams: ToolRouterTeam[];
-}): ToolRouterTeam | null {
-  const hints: Partial<Record<AutopilotIntentResolution['intent'], RegExp[]>> = {
-    billing_or_payment: [/\b(financeiro|cobranca|cobrança|billing)\b/i],
-    support_request: [/\b(suporte|sac|atendimento|help)\b/i],
-    troubleshooting: [/\b(suporte|tecnico|técnico|noc|atendimento)\b/i],
-    order_or_request_status: [/\b(suporte|atendimento|operacao|operação|logistica|logística)\b/i],
-    human_handoff: [/\b(atendimento|suporte|sac|help|humano)\b/i],
-    complaint: [/\b(sac|ouvidoria|qualidade|atendimento)\b/i],
-  };
-  const intentHints = hints[input.intent] || [];
-  return input.availableTeams.find((team) => intentHints.some((pattern) => pattern.test(team.name))) ||
-    input.availableTeams.find((team) => team.routingConfig?.enabled && team.routingConfig.autoTransfer !== false) ||
-    input.availableTeams[0] ||
-    null;
-}
-
 function buildInternalNote(input: {
   contact?: Contact | null;
   customerMessage: string;
@@ -325,9 +307,10 @@ export function planAutopilotTools(input: {
   ].filter(Boolean).join('\n'));
   const handoffAllowed = explicitHumanHandoff || safetyCriticalHandoff;
   const handoffTeam = handoffAllowed && input.enabledToolNames.includes('transfer_chat')
-    ? findHandoffTeam({
+    ? resolveHandoffTeam({
         intent: input.intentResolution.intent,
         availableTeams: input.availableTeams,
+          customerMessage: input.customerMessage,
       })
     : null;
   const hasImplicitTransferCandidate = input.actions.some((action) => (
@@ -500,9 +483,10 @@ export function planAutopilotTools(input: {
       repairReason = 'promise_missing_slots';
     } else {
       const team = explicitHumanHandoff && input.enabledToolNames.includes('transfer_chat')
-        ? findHandoffTeam({
+        ? resolveHandoffTeam({
             intent: input.intentResolution.intent,
             availableTeams: input.availableTeams,
+          customerMessage: input.customerMessage,
           })
         : null;
 

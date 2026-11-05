@@ -18,11 +18,45 @@ function pathSegments(path: string): string[] {
   return segments;
 }
 
-/** Only own properties: external payloads cannot read or write prototypes. */
+function findPropertyCaseInsensitive(obj: Record<string, unknown>, segment: string): string | undefined {
+  if (Object.hasOwn(obj, segment)) return segment;
+  if (Array.isArray(obj)) return undefined;
+
+  const lowerSegment = segment.toLowerCase();
+  const keys = Object.keys(obj);
+
+  // 1. Direct case-insensitive match (e.g. ID -> id, status -> Status)
+  for (const k of keys) {
+    if (k.toLowerCase() === lowerSegment && !forbiddenSegments.has(k)) {
+      return k;
+    }
+  }
+
+  // 2. Normalized match (ignoring _, -, and case: e.g. PrimarySSID -> primary_ssid, RxPowerdBm -> rx_power_dbm)
+  const normSegment = lowerSegment.replace(/[_-]/g, '');
+  for (const k of keys) {
+    if (k.toLowerCase().replace(/[_-]/g, '') === normSegment && !forbiddenSegments.has(k)) {
+      return k;
+    }
+  }
+
+  return undefined;
+}
+
+/** Only own properties: external payloads cannot read or write prototypes. Tolerant to casing and naming conventions (camelCase, snake_case, PascalCase, UPPERCASE). */
 export function readStudioValue(value: unknown, path: string): unknown {
   return pathSegments(path).reduce<unknown>((current, segment) => {
-    if (current === null || typeof current !== 'object' || !Object.hasOwn(current, segment)) return undefined;
-    return (current as Record<string, unknown>)[segment];
+    if (current === null || typeof current !== 'object') return undefined;
+    if (Object.hasOwn(current, segment)) {
+      return (current as Record<string, unknown>)[segment];
+    }
+    if (!Array.isArray(current)) {
+      const matchedKey = findPropertyCaseInsensitive(current as Record<string, unknown>, segment);
+      if (matchedKey !== undefined) {
+        return (current as Record<string, unknown>)[matchedKey];
+      }
+    }
+    return undefined;
   }, value);
 }
 
@@ -50,10 +84,27 @@ export function resolveStudioMapping(input: {
   sourceValue: string;
   valueType?: string;
 }, context: StudioDataContext): unknown {
-  const value = input.sourceType === 'static_value'
+  let value = input.sourceType === 'static_value'
     ? input.sourceValue
     : readStudioValue(input.sourceType === 'contact_property' ? context.contact || {}
       : input.sourceType === 'flow_input' ? context.input || {} : context.values, input.sourceValue);
+
+  if ((value === undefined || value === null || value === '') && context.values) {
+    if (['customer_ip', 'contract_ip', 'client_ip', 'ip_address'].includes(input.sourceValue)) {
+      const contracts = Array.isArray(context.values.contracts) ? (context.values.contracts as any[]) : [];
+      const contractId = String(context.values.customer_contract || context.values.contract_id || '').replace(/\D/g, '');
+      const matched = (contractId ? contracts.find((c) => String(c.id) === contractId) : null)
+        || (contracts.length === 1 ? contracts[0] : null);
+      if (matched?.ip) value = matched.ip;
+    } else if (['customer_mac', 'contract_mac', 'mac_address'].includes(input.sourceValue)) {
+      const contracts = Array.isArray(context.values.contracts) ? (context.values.contracts as any[]) : [];
+      const contractId = String(context.values.customer_contract || context.values.contract_id || '').replace(/\D/g, '');
+      const matched = (contractId ? contracts.find((c) => String(c.id) === contractId) : null)
+        || (contracts.length === 1 ? contracts[0] : null);
+      if (matched?.mac) value = matched.mac;
+    }
+  }
+
   if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
     throw new Error('Um dado necessário ainda não foi informado. Preencha os dados de entrada.');
   }

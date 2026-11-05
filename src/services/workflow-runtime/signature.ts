@@ -7,6 +7,7 @@ import type { WorkflowDefinition } from './types';
  */
 export function workflowFunctionalSignature(definition: WorkflowDefinition | null | undefined): string {
   if (!definition) return '';
+  const metadata = Object.fromEntries(Object.entries(definition.metadata || {}).filter(([key]) => key !== 'flowBuilderUi'));
   return JSON.stringify({
     name: definition.name,
     nodes: (definition.nodes || []).map((node) => ({
@@ -30,7 +31,7 @@ export function workflowFunctionalSignature(definition: WorkflowDefinition | nul
     settings: definition.settings,
     inputSchema: definition.inputSchema,
     outputSchema: definition.outputSchema,
-    metadata: definition.metadata,
+    metadata: Object.keys(metadata).length ? metadata : undefined,
   });
 }
 

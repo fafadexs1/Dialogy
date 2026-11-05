@@ -1,3 +1,5 @@
+import { markWorkflowSensitivePaths } from './sensitive-data';
+import { effectiveWorkflowLimits } from './runtime-limits';
 import { randomUUID } from 'node:crypto';
 import { getWorkflowNodeManifest } from './catalog';
 import { WorkflowEventBus } from './events';
@@ -85,12 +87,14 @@ const ATTACHMENT_CONNECTION_TYPES = new Set<ConnectionType>([
 ]);
 
 const MODEL_CONSUMING_NODE_TYPES = new Set([
+  'media.analyze',
   'data.extract',
   'logic.ai_router',
   'memory.history_summarizer',
 ]);
 
 const TOOL_CONSUMING_NODE_TYPES = new Set([
+  'audio.elevenlabs', 'audio.transcribe', 'integration.connector',
   'ai.agent',
   'ai.supervisor',
   'ai.plan_executor',
@@ -417,7 +421,7 @@ export class WorkflowExecutor {
       if (!validation.valid) throw new InvalidWorkflowDefinitionError(validation);
     }
     await this.persistence.saveWorkflowDefinition(workflow);
-    const execution = await this.persistence.createExecution(createExecution({ ...input, workflow }));
+    const execution = await this.persistence.createExecution(createExecution({ ...input, workflow, context: { ...input.context, ...(options.limits ? { __workflowRuntimeCaps: effectiveWorkflowLimits(workflow.settings, options.limits) } : {}) } }));
     await this.events.initializeExecution(execution.executionId);
     await this.emit(execution, {
       type: 'execution.started',
@@ -442,10 +446,21 @@ export class WorkflowExecutor {
     );
     if (!workflow) throw new Error(`Workflow ${execution.workflowId}@${execution.workflowVersion} not found.`);
 
-    const leaseMs = Math.max(this.lockLeaseMs, workflow.settings.executionTimeoutMs + 30_000);
+    const managed = execution.context.automationManaged === true;
+    const leaseMs = managed ? this.lockLeaseMs : Math.max(this.lockLeaseMs, workflow.settings.executionTimeoutMs + 30_000);
     const locked = await this.persistence.acquireExecutionLock(executionId, workerId, leaseMs);
     if (!locked) throw new WorkflowExecutionLockError(executionId);
     execution = locked;
+    let leaseLost = false, renewing = false;
+    const heartbeat = managed ? setInterval(() => {
+      if (renewing) return;
+      renewing = true;
+      void this.persistence.renewExecutionLock(executionId, workerId, leaseMs).then(renewed => {
+        if (!renewed) leaseLost = true;
+        else if (execution) execution.lockExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+      }).catch(() => { /* The next lock check or optimistic write fences a lost lease. */ }).finally(() => { renewing = false; });
+    }, Math.max(1000, Math.min(30000, Math.floor(leaseMs / 3)))) : null;
+    heartbeat?.unref?.();
 
     try {
       if (execution.status === 'waiting') {
@@ -467,8 +482,10 @@ export class WorkflowExecutor {
         execution = await this.persistence.saveExecution(execution, execution.version);
       }
       while (execution.status === 'running') {
+        if (leaseLost) throw new WorkflowExecutionLockError(executionId);
         const renewed = await this.persistence.renewExecutionLock(executionId, workerId, leaseMs);
         if (!renewed) throw new WorkflowExecutionLockError(executionId);
+        if (managed) execution.lockExpiresAt = new Date(Date.now() + leaseMs).toISOString();
         if (options.signal?.aborted) {
           execution = await this.markCancelled(execution, 'Execution aborted by caller.');
           break;
@@ -509,15 +526,17 @@ export class WorkflowExecutor {
       }
       return execution;
     } finally {
+      if (heartbeat) clearInterval(heartbeat);
       await this.persistence.releaseExecutionLock(executionId, workerId);
     }
   }
 
   private waitExpiration(execution: WorkflowExecution): number | null {
-    if (execution.status !== 'waiting' || execution.waitingReason !== 'time' || !execution.currentNodeId) {
+    if (execution.status !== 'waiting' || !execution.currentNodeId) {
       return null;
     }
     const output = execution.nodeResults[execution.currentNodeId]?.output;
+    if (execution.waitingReason !== 'time' && output?.expireWait !== true) return null;
     if (!isRecord(output) || typeof output.expiresAt !== 'string') return null;
     const expiresAt = new Date(output.expiresAt).getTime();
     return Number.isFinite(expiresAt) ? expiresAt : null;
@@ -555,6 +574,10 @@ export class WorkflowExecutor {
     let retryInteraction = false;
     let interactionRetryReason: 'unrecognized' | 'invalid' | null = null;
     const waitingMetadata = isRecord(waitingResult?.output) ? waitingResult.output : {};
+    if (waitingMetadata.pauseTimeoutWhileWaiting === true && typeof waitingMetadata.waitingSince === 'string') {
+      const since = Date.parse(waitingMetadata.waitingSince);
+      if (Number.isFinite(since)) locked.context.__automationPausedMs = Math.max(0, Number(locked.context.__automationPausedMs || 0)) + Math.max(0, Date.now() - since);
+    }
     if (selectedOutput === 'expired') await this.stopNodeSession(locked, 'expired', workflow);
     if (
       selectedOutput === 'expired'
@@ -830,21 +853,25 @@ export class WorkflowExecutor {
     options: WorkflowRunOptions,
     nextNode: WorkflowNode,
   ): { code: string; message: string } | null {
+    workflow = { ...workflow, settings: effectiveWorkflowLimits(workflow.settings, execution.context.__workflowRuntimeCaps) };
     const maxSteps = Math.min(options.maxSteps || workflow.settings.maxSteps, workflow.settings.maxSteps);
     if (execution.totalSteps >= maxSteps) {
       return { code: 'MAX_STEPS_REACHED', message: `Execution reached ${maxSteps} steps.` };
     }
-    if (Date.now() - new Date(execution.startedAt).getTime() >= workflow.settings.executionTimeoutMs) {
+    const confirmedRecovery = isRecord(execution.context.__automationRecovery) && execution.context.__automationRecovery.nodeId === nextNode.id;
+    if (Date.now() - new Date(execution.startedAt).getTime() - Math.max(0, Number(execution.context.__automationPausedMs || 0)) >= workflow.settings.executionTimeoutMs) {
       return { code: 'EXECUTION_TIMEOUT', message: 'Execution exceeded its total timeout.' };
     }
     if (
       nodeMayConsumeModel(nextNode)
+      && !confirmedRecovery
       && execution.totalModelCalls >= workflow.settings.maxModelCalls
     ) {
       return { code: 'MAX_MODEL_CALLS_REACHED', message: 'Execution reached the model call limit.' };
     }
     if (
-      nodeMayConsumeTools(nextNode)
+      (nodeMayConsumeTools(nextNode) || (execution.context.automationManaged === true && /^(integration\.|whatsapp\.|dialogy\.)/.test(nextNode.type)))
+      && !confirmedRecovery
       && execution.totalToolCalls >= workflow.settings.maxToolCalls
     ) {
       return { code: 'MAX_TOOL_CALLS_REACHED', message: 'Execution reached the tool call limit.' };
@@ -892,10 +919,20 @@ export class WorkflowExecutor {
       signal,
     );
     const result = continueAfterConfiguredError(node, rawResult);
+    if (isRecord(execution.context.__automationRecovery) && execution.context.__automationRecovery.nodeId === node.id) {
+      execution.context.__lastAutomationRecovery = execution.context.__automationRecovery;
+      delete execution.context.__automationRecovery;
+    }
     if (rawResult.status === 'error') await this.stopNodeSession(execution, 'failed', workflow);
     const stateAfter = result.statePatch
       ? mergeStatePatch(execution.variables, result.statePatch)
       : execution.variables;
+    if (result.sensitiveData) {
+      markWorkflowSensitivePaths(input, result.sensitiveData.inputPaths);
+      markWorkflowSensitivePaths(execution.input, result.sensitiveData.initialInputPaths);
+      markWorkflowSensitivePaths(stateBefore, result.sensitiveData.variablePaths);
+      markWorkflowSensitivePaths(stateAfter, result.sensitiveData.variablePaths);
+    }
     const finishedAt = now();
     const durationMs = Math.max(0, new Date(finishedAt).getTime() - new Date(startedAt).getTime());
     const finalResult = NodeExecutionResultSchema.parse({
@@ -1091,7 +1128,7 @@ export class WorkflowExecutor {
         const result = NodeExecutionResultSchema.parse(await withTimeout(
           (nodeSignal) => handler.execute({
             execution: clone(execution),
-            workflow,
+            workflow: { ...workflow, settings: effectiveWorkflowLimits(workflow.settings, execution.context.__workflowRuntimeCaps) },
             node,
             input: clone(input),
             attachments: nodeAttachments(workflow, node.id),

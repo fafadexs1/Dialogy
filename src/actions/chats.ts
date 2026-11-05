@@ -1,6 +1,7 @@
 'use server';
 
 import { db } from '@/lib/db';
+import { buildInboxMarketingVisibilitySql } from '@/lib/inbox-marketing';
 import { syncLegacyChatQueueTag } from '@/services/chat/chat-tag-routing-compat';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
@@ -36,6 +37,10 @@ import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
 import { recordDecisionOutcomesForChat } from '@/services/autopilot/outcome-tracker';
 import { hasWorkspacePermission as hasPermission } from '@/lib/workspace-permissions';
 import { selectFairAgentForTeam } from '@/services/chat-distribution/fair-distribution';
+import { lockWorkspaceAssignments, readTransferOperation, saveTransferOperation, transferIntentHash } from '@/services/chat-distribution/transfer-operation';
+import { scheduleChatPostCommit } from '@/services/chat/post-commit';
+import { claimQueueChat } from '@/services/chat-distribution/claim-queue-chat';
+import { recordDirectAssignment } from '@/services/chat-distribution/direct-assignment';
 import {
     describeTeamUnavailability,
     evaluateTeamBusinessHours,
@@ -94,51 +99,14 @@ export const assignChatToSelfAction = withDebug(
                 return { success: false, error: chatAccess.error };
             }
 
-            // Corrected query: Allow taking ownership as long as the chat is in the 'gerais' (general) queue,
-            // regardless of whether agent_id was previously filled.
-            const result = await db.query(
-                `UPDATE chats
-                 SET agent_id = $1,
-                     assigned_system_agent_id = NULL,
-                     is_autopilot_active = FALSE,
-                     copilot_mode = 'off',
-                     status = 'atendimentos',
-                     assigned_at = clock_timestamp(),
-                     updated_at = clock_timestamp(),
-                     -- Quem assume da fila so herda a equipe se pertencer a ela.
-                     team_id = CASE
-                         WHEN chats.team_id IS NOT NULL AND EXISTS (
-                             SELECT 1 FROM team_members tm
-                             WHERE tm.team_id = chats.team_id
-                               AND tm.user_id = $1
-                         ) THEN chats.team_id
-                         ELSE NULL
-                     END
-                 WHERE id = $2 AND status = 'gerais'
-                 RETURNING workspace_id`,
-                [currentAgentId, chatId]
-            );
-
-            if (result.rowCount === 0) {
-                // This can happen if another agent took the chat milliseconds before, or if the chat is not in 'gerais' status.
-                return { success: false, error: "Este atendimento não está mais na fila geral ou já foi assumido." };
-            }
-
-            const workspaceId = result.rows[0].workspace_id;
-
-            // Insert system message indicating attendance started
+            const scope = await db.query('SELECT workspace_id FROM chats WHERE id=$1',[chatId]);
+            const workspaceId = scope.rows[0]?.workspace_id;
+            if (!workspaceId) return {success:false,error:'Conversa indisponível.'};
             const agentName = user.user_metadata?.full_name || user.email || 'Agente';
-            const assignmentMessage = await db.query(
-                `INSERT INTO messages (
-                    workspace_id, chat_id, type, content, from_me, 
-                    sender_user_id, created_at, is_read
-                ) VALUES ($1, $2, 'system', $3, true, $4, clock_timestamp(), true)
-                RETURNING id, created_at`,
-                [workspaceId, chatId, `Atendimento iniciado por ${agentName}.`, currentAgentId]
-            );
+            const assignmentMessage = await claimQueueChat(workspaceId,chatId,currentAgentId,agentName);
 
-            await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'assign_chat');
-            await broadcastHydratedChatUpdate(workspaceId, chatId);
+            await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'assign_chat').catch(error=>console.error('[ASSIGN_CHAT_SELF][PRESENCE]',error));
+            await broadcastHydratedChatUpdate(workspaceId, chatId).catch(error=>console.error('[ASSIGN_CHAT_SELF][BROADCAST]',error));
             if (assignmentMessage.rows[0]?.id) {
                 scheduleDialogyNexusInternalEvent({
                     workspaceId,
@@ -167,7 +135,7 @@ export const assignChatToSelfAction = withDebug(
                 includeChatId: chatId,
                 ownership: 'everyone',
                 statuses: []
-            });
+            }).catch(()=>[]);
 
             let updatedChat: Chat | undefined;
             if (updatedRows.length > 0) {
@@ -192,11 +160,15 @@ export const assignChatToSelfAction = withDebug(
 export const transferChatAction = withDebug(
     'transfer_chat',
     async function transferChatAction(
-        input: { chatId: string; teamId?: string; agentId?: string; nexusEventContext?: NexusEventCausation; handoffSummary?: string },
+        input: { chatId: string; teamId?: string; agentId?: string; nexusEventContext?: NexusEventCausation; handoffSummary?: string; operationId?: string; expectedAgentId?: string | null; expectedSystemAgentId?: string | null; expectedTeamId?: string | null; sourceTeamId?: string; suppressTransferNotice?: boolean },
         trustedContext?: TrustedActorContext
     ): Promise<{
         success: boolean;
+        operationId?: string;
+        outcome?: 'assigned' | 'no_op' | 'conflict';
+        replayed?: boolean;
         error?: string;
+        outcomeUncertain?: boolean;
         /**
          * Motivo legível por máquina quando a transferência falha por
          * indisponibilidade. Os chamadores devem ramificar por aqui — comparar
@@ -234,14 +206,37 @@ export const transferChatAction = withDebug(
             return { success: false, error: "Parâmetros inválidos para transferência." };
         }
 
+        const operationId = input.operationId ?? randomUUID();
+        if (typeof operationId !== 'string' || !operationId.trim() || operationId.length > 200) return { success: false, outcome: 'conflict', error: 'Identificador de operação inválido.' };
+        const requestHash = transferIntentHash(input);
+        // Pool-backed authorization must finish before reserving a transaction client.
+        const authorizedScope = await db.query('SELECT workspace_id FROM chats WHERE id=$1',[chatId]);
+        const authorizedWorkspaceId = authorizedScope.rows[0]?.workspace_id;
+        if (!authorizedWorkspaceId) return {success:false,error:'Conversa não encontrada.'};
+        if (!trustedCall && !await hasPermission(currentAgentId,authorizedWorkspaceId,'teams:view')) {
+            return {success:false,error:'Você não tem permissão para transferir atendimentos.'};
+        }
         const client = await db.connect();
+        let transferCommitted = false;
+        let transferWorkspaceId: string | null = null;
+        let committedOutcome: 'assigned' | 'no_op' = 'assigned';
+        let transferCommitAttempted = false;
+        let transferEventId: string | null = null;
+        let committedAgent: { id: string; name: string } | undefined;
+        let transferClientReleased = false;
         try {
             await client.query('BEGIN');
 
+            const scope = await client.query('SELECT workspace_id FROM chats WHERE id=$1', [chatId]);
+            if (!scope.rows[0]) { await client.query('ROLLBACK'); return {success:false,error:'Conversa não encontrada.'}; }
+            if (scope.rows[0].workspace_id !== authorizedWorkspaceId) {await client.query('ROLLBACK');return {success:false,outcome:'conflict',error:'A conversa mudou de workspace.'};}
+            transferWorkspaceId = scope.rows[0].workspace_id;
+            await lockWorkspaceAssignments(client, scope.rows[0].workspace_id);
             const chatRes = await client.query(`
             SELECT 
                 workspace_id, 
-                agent_id as current_chat_agent_id, 
+                agent_id as current_chat_agent_id,
+                team_id as current_chat_team_id,
                 assigned_system_agent_id AS current_system_agent_id,
                 status,
                 (
@@ -259,12 +254,7 @@ export const transferChatAction = withDebug(
                 await client.query('ROLLBACK');
                 return { success: false, error: "Conversa não encontrada." };
             }
-            const { workspace_id: workspaceId, current_chat_agent_id, current_system_agent_id, status, last_instance_name: lastInstanceName } = chatRes.rows[0];
-
-            if (status === 'encerrados') {
-                await client.query('ROLLBACK');
-                return { success: false, error: "Não é possível transferir um atendimento que já foi encerrado." };
-            }
+            const { workspace_id: workspaceId, current_chat_agent_id, current_chat_team_id, current_system_agent_id, status, last_instance_name: lastInstanceName } = chatRes.rows[0];
 
             if (trustedCall && isSystemAgent) {
                 const actorAccess = await client.query(
@@ -277,11 +267,47 @@ export const transferChatAction = withDebug(
                     await client.query('ROLLBACK');
                     return { success: false, error: 'Agente do sistema não autorizado para este workspace.' };
                 }
-            } else if (!trustedCall) {
-                if (!await hasPermission(currentAgentId, workspaceId, 'teams:view')) { // Permission to be defined
+            }
+
+
+            const previousOperation = await readTransferOperation(client, workspaceId, currentAgentId, operationId, requestHash);
+            if (previousOperation) {
+                if (previousOperation.conflict) {
                     await client.query('ROLLBACK');
-                    return { success: false, error: "Você não tem permissão para transferir atendimentos." };
+                    return {success:false,outcome:'conflict',operationId,error:'Esta operação já foi usada com outro destino ou conversa.'};
                 }
+                await client.query('COMMIT');
+                client.release(); transferClientReleased=true;
+                return {success:true,operationId,outcome:previousOperation.outcome,replayed:true,
+                    assignedAgent:previousOperation.assignedAgent};
+            }
+            if (input.expectedSystemAgentId !== undefined && (current_system_agent_id || null) !== input.expectedSystemAgentId) {
+                await client.query('ROLLBACK');
+                return {success:false,outcome:'conflict',operationId,error:'O atendente automático mudou. Atualize a lista.'};
+            }
+            if (input.expectedAgentId !== undefined && (current_chat_agent_id || null) !== input.expectedAgentId) {
+                await client.query('ROLLBACK');
+                return { success: false, outcome: 'conflict', operationId, error: 'O responsável pela conversa mudou. Atualize a lista.' };
+            }
+
+            if (input.expectedTeamId !== undefined && (current_chat_team_id || null) !== input.expectedTeamId) {
+                await client.query('ROLLBACK');
+                return { success: false, outcome: 'conflict', operationId, error: 'A equipe da conversa mudou. Atualize a lista.' };
+            }
+            if (input.sourceTeamId) {
+                const sourceMembership = await client.query(
+                    `SELECT 1 FROM team_members tm JOIN teams t ON t.id=tm.team_id WHERE tm.user_id=$1 AND tm.team_id=$2 AND t.workspace_id=$3`,
+                    [currentAgentId, input.sourceTeamId, workspaceId],
+                );
+                if (!sourceMembership.rowCount || input.sourceTeamId !== teamId) {
+                    await client.query('ROLLBACK');
+                    return { success: false, outcome: 'conflict', operationId, error: 'A equipe do responsável mudou. Atualize a lista.' };
+                }
+            }
+
+            if (status === 'encerrados') {
+                await client.query('ROLLBACK');
+                return { success: false, outcome: 'conflict', operationId, error: "Não é possível transferir um atendimento que já foi encerrado." };
             }
 
 
@@ -360,6 +386,8 @@ export const transferChatAction = withDebug(
                     chatId,
                     source: isSystemAgent ? 'system_agent_team_transfer' : 'human_team_transfer',
                     excludeAgentId: isSystemAgent ? null : currentAgentId,
+                    currentAgentId: current_chat_agent_id,
+                    currentTeamId: current_chat_team_id,
                 });
 
                 const selectedAgent = distribution.selection;
@@ -400,6 +428,10 @@ export const transferChatAction = withDebug(
                            JOIN teams t ON t.id = tm.team_id
                            WHERE tm.user_id = u.id AND t.workspace_id = $2
                          )
+                         OR EXISTS (
+                           SELECT 1 FROM workspaces w
+                           WHERE w.id = $2 AND w.owner_id = u.id
+                         )
                        )`,
                     [agentId, workspaceId]
                 );
@@ -414,6 +446,26 @@ export const transferChatAction = withDebug(
                 await client.query('ROLLBACK');
                 return { success: false, error: "Não foi possível determinar um agente para a transferência." };
             }
+
+            const assignedName = (await client.query('SELECT full_name FROM users WHERE id=$1', [finalAgentId])).rows[0]?.full_name || transferTargetName;
+            const effectiveTeamId = teamId ?? ((await client.query(`SELECT id FROM (
+                SELECT t.id,COUNT(*) OVER() AS memberships FROM teams t JOIN team_members tm ON tm.team_id=t.id
+                WHERE t.workspace_id=$1 AND tm.user_id=$2) membership
+                WHERE id=$3 OR memberships=1 ORDER BY (id=$3) DESC NULLS LAST LIMIT 1`,
+                [workspaceId,finalAgentId,current_chat_team_id])).rows[0]?.id ?? null);
+            if (finalAgentId === current_chat_agent_id && effectiveTeamId === (current_chat_team_id || null)) {
+                await saveTransferOperation(client, {workspaceId,actorId:currentAgentId,operationId,requestHash,chatId,
+                    outcome:'no_op',agentId:finalAgentId,agentName:assignedName,teamId:effectiveTeamId,preconditions:{expectedAgentId:input.expectedAgentId,expectedTeamId:input.expectedTeamId,expectedSystemAgentId:input.expectedSystemAgentId}});
+                committedAgent={id:finalAgentId,name:assignedName};
+                committedOutcome='no_op';
+                transferCommitAttempted=true;
+                await client.query('COMMIT');
+                transferCommitted=true;
+                client.release(); transferClientReleased=true;
+                return {success:true,operationId,outcome:'no_op',assignedAgent:{id:finalAgentId,name:assignedName}};
+            }
+            if (!teamId) await recordDirectAssignment(client, {workspaceId,agentId:finalAgentId,
+                teamId:effectiveTeamId,chatId,source:'direct_transfer',currentAgentId:current_chat_agent_id});
 
             const isFirstAssignment = !current_chat_agent_id && !current_system_agent_id;
             const isActualTransfer = !!current_chat_agent_id && current_chat_agent_id !== finalAgentId;
@@ -446,7 +498,7 @@ export const transferChatAction = withDebug(
                     ELSE NULL
                 END
             WHERE id = $2
-        `, [finalAgentId, chatId, automaticTeamTag, automaticTeamTagColor, teamId ?? null]);
+        `, [finalAgentId, chatId, automaticTeamTag, automaticTeamTagColor, effectiveTeamId]);
 
             // Log system message
             const systemMessageContent = isHumanTakingFromAi ? `Atendimento reassumido por ${transferTargetName}.` : !isFirstAssignment
@@ -481,7 +533,14 @@ export const transferChatAction = withDebug(
                 }
             ]);
 
+            transferEventId = transferMessage.rows[0]?.id ? String(transferMessage.rows[0].id) : null;
+            committedAgent = { id: finalAgentId, name: assignedName };
+            await saveTransferOperation(client, {workspaceId,actorId:currentAgentId,operationId,requestHash,chatId,
+                outcome:'assigned',agentId:finalAgentId,agentName:assignedName,teamId:effectiveTeamId,eventId:transferEventId,preconditions:{expectedAgentId:input.expectedAgentId,expectedTeamId:input.expectedTeamId,expectedSystemAgentId:input.expectedSystemAgentId}});
+            transferCommitAttempted = true;
             await client.query('COMMIT');
+            transferCommitted = true;
+            client.release(); transferClientReleased=true;
             await broadcastHydratedChatUpdate(workspaceId, chatId);
             if (transferMessage.rows[0]?.id) {
                 scheduleDialogyNexusInternalEvent({
@@ -520,7 +579,7 @@ export const transferChatAction = withDebug(
                 await touchUserPresenceActivity(currentAgentId, workspaceId, null, 'transfer_chat');
             }
             console.log(`[TRANSFER_CHAT] Chat ${chatId} transferido com sucesso para o agente ${finalAgentId}.`);
-            if (isActualTransfer) {
+            if (isActualTransfer && !input.suppressTransferNotice) {
                 // Run template notice asynchronously so transfer UX stays snappy.
                 (async () => {
                     try {
@@ -548,15 +607,35 @@ export const transferChatAction = withDebug(
             return {
                 success: true,
                 chat: updatedChat,
-                assignedAgent: { id: finalAgentId, name: transferTargetName },
+                assignedAgent: committedAgent,
+                operationId, outcome: 'assigned',
             };
 
         } catch (error) {
-            await client.query('ROLLBACK');
+            if (!transferCommitted && transferCommitAttempted && transferWorkspaceId) {
+                try {
+                    // Do not reuse a connection whose COMMIT acknowledgement was lost.
+                    client.release(true);
+                    transferClientReleased = true;
+                    const proof = await db.query('SELECT operation_id FROM chat_transfer_operations WHERE workspace_id=$1 AND actor_id=$2 AND operation_id=$3 AND request_hash=$4',[transferWorkspaceId,currentAgentId,operationId,requestHash]);
+                    transferCommitted = (proof.rowCount ?? proof.rows.length) > 0;
+                } catch (reconciliationError) {
+                    console.error('[TRANSFER_CHAT] Não foi possível reconciliar a transferência:', reconciliationError);
+                }
+            }
+            if (transferCommitted) {
+                console.error('[TRANSFER_CHAT] Transferência confirmada, mas houve falha posterior:', error);
+                if (transferWorkspaceId) await broadcastHydratedChatUpdate(transferWorkspaceId,chatId).catch(()=>undefined);
+                return { success: true, assignedAgent: committedAgent, operationId, outcome: committedOutcome };
+            }
+            if (!transferClientReleased) await client.query('ROLLBACK').catch(() => undefined);
             console.error("Erro ao transferir chat:", error);
+            if (transferCommitAttempted) {
+                return { success: false, outcomeUncertain: true, error: 'Não foi possível confirmar o resultado da transferência.' };
+            }
             return { success: false, error: "Falha no servidor ao tentar transferir o atendimento." };
         } finally {
-            client.release();
+            if (!transferClientReleased) client.release();
         }
     },
     {
@@ -597,10 +676,20 @@ export const transferChatToIntelligentAgentAction = withDebug(
             return { success: false, error: "Chat e Atendente Inteligente são obrigatórios." };
         }
 
+        const authorizedScope=await db.query('SELECT workspace_id FROM chats WHERE id=$1',[chatId]);
+        const authorizedWorkspaceId=authorizedScope.rows[0]?.workspace_id;
+        if(!authorizedWorkspaceId) return {success:false,error:'Conversa não encontrada.'};
+        if(!trustedCall && !await hasPermission(sessionToUse.user.id,authorizedWorkspaceId,'teams:view'))
+            return {success:false,error:'Você não tem permissão para transferir atendimentos.'};
         const client = await db.connect();
+        let committed=false;
+        let clientReleased=false;
         try {
             await client.query('BEGIN');
 
+            const scope = await client.query('SELECT workspace_id FROM chats WHERE id=$1',[chatId]);
+            if (!scope.rows[0]) {await client.query('ROLLBACK');return {success:false,error:'Conversa indisponível.'};}
+            await lockWorkspaceAssignments(client,scope.rows[0].workspace_id);
             const chatRes = await client.query(
                 `SELECT workspace_id, status, contact_id
                  FROM chats
@@ -620,6 +709,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
             }
 
             const workspaceId = chat.workspace_id;
+            if(workspaceId!==authorizedWorkspaceId) {await client.query('ROLLBACK');return {success:false,error:'A conversa mudou de workspace.'};}
             if (trustedCall && trustedContext.isSystemAgent) {
                 const actorRes = await client.query(
                     `SELECT 1 FROM system_agents
@@ -631,10 +721,6 @@ export const transferChatToIntelligentAgentAction = withDebug(
                     await client.query('ROLLBACK');
                     return { success: false, error: "Agente do sistema não autorizado para este workspace." };
                 }
-            }
-            if (!trustedCall && !await hasPermission(sessionToUse.user.id, workspaceId, 'teams:view')) {
-                await client.query('ROLLBACK');
-                return { success: false, error: "Você não tem permissão para transferir atendimentos." };
             }
 
             const agentRes = await client.query(
@@ -709,6 +795,8 @@ export const transferChatToIntelligentAgentAction = withDebug(
             );
 
             await client.query('COMMIT');
+            committed=true;
+            client.release(); clientReleased=true;
             await broadcastHydratedChatUpdate(workspaceId, chatId);
             if (transferMessage.rows[0]?.id) {
                 scheduleDialogyNexusInternalEvent({
@@ -740,6 +828,7 @@ export const transferChatToIntelligentAgentAction = withDebug(
                 chatId,
             );
 
+            scheduleChatPostCommit('transfer_to_ai',async()=>{
             try {
                 const lastInboundRes = await db.query(
                     `SELECT id, content, instance_name
@@ -786,13 +875,15 @@ export const transferChatToIntelligentAgentAction = withDebug(
                 console.error('[TRANSFER_TO_AI] Falha ao enfileirar resposta inicial:', error);
             }
 
+            });
             return { success: true, chat: updatedChat };
         } catch (error) {
-            await client.query('ROLLBACK');
+            if (!clientReleased) await client.query('ROLLBACK').catch(()=>undefined);
+            if (committed) return {success:true};
             console.error('[TRANSFER_TO_AI] Erro ao transferir para Atendente Inteligente:', error);
             return { success: false, error: "Falha no servidor ao transferir para IA." };
         } finally {
-            client.release();
+            if (!clientReleased) client.release();
         }
     },
     {
@@ -845,8 +936,13 @@ export const closeChatAction = withDebug(
             }
         }
 
+        const scope = await db.query('SELECT workspace_id FROM chats WHERE id=$1',[chatId]);
+        if (!scope.rows[0]) return {success:false,error:'Chat nao encontrado.'};
+        const {closeMessageTemplate}=await getWorkspaceTemplates(scope.rows[0].workspace_id);
+        const closeTemplate=closeMessageTemplate || undefined;
         const client = await db.connect();
-        let closeTemplate: string | undefined;
+        let closeCommitted=false;
+        let closeClientReleased=false;
         try {
             await client.query('BEGIN');
 
@@ -884,9 +980,11 @@ export const closeChatAction = withDebug(
                 }
             }
 
-            const { closeMessageTemplate } = await getWorkspaceTemplates(workspace_id);
-            closeTemplate = closeMessageTemplate || undefined;
 
+            if (workspace_id !== scope.rows[0].workspace_id) {
+                await client.query('ROLLBACK');
+                return {success:false,error:'A conversa mudou de workspace.'};
+            }
             let tagInfo = { label: null as string | null, color: null as string | null };
             if (reasonTagId) {
                 const tagRes = await client.query(
@@ -964,6 +1062,9 @@ export const closeChatAction = withDebug(
             ]);
 
             await client.query('COMMIT');
+            closeCommitted=true;
+            client.release(); closeClientReleased=true;
+            scheduleChatPostCommit('close_chat',async()=>{
             await broadcastHydratedChatUpdate(workspace_id, chatId);
             if (closeMessage.rows[0]?.id) {
                 scheduleDialogyNexusInternalEvent({
@@ -1037,14 +1138,16 @@ export const closeChatAction = withDebug(
                     console.error('[CLOSE_CHAT] Falha ao enviar mensagem de encerramento:', templateErr);
                 }
             }
+            });
             // revalidatePath('/', 'layout'); // Removed to prevent page refresh
             return { success: true };
         } catch (error) {
-            await client.query('ROLLBACK');
+            if (!closeClientReleased) await client.query('ROLLBACK').catch(()=>undefined);
             console.error("Erro ao encerrar atendimento:", error);
+            if (closeCommitted) return {success:true};
             return { success: false, error: (error as any)?.message || "Falha no servidor ao encerrar o atendimento." };
         } finally {
-            client.release();
+            if (!closeClientReleased) client.release();
         }
     },
     {
@@ -1453,20 +1556,7 @@ function buildInboxListFilterClause({
     }
 
     if (!filters.includeMarketing) {
-        clauses.push(`(
-            ${chatAlias}.status <> 'gerais'
-            OR ${chatAlias}.agent_id IS NOT NULL
-            OR COALESCE((
-                SELECT NOT (
-                    COALESCE(latest_message.metadata->>'isMarketing', 'false') = 'true'
-                    OR latest_message.metadata->>'event' = 'marketing_auto_close'
-                )
-                FROM messages latest_message
-                WHERE latest_message.chat_id = ${chatAlias}.id
-                ORDER BY latest_message.created_at DESC, latest_message.id DESC
-                LIMIT 1
-            ), false)
-        )`);
+        clauses.push(buildInboxMarketingVisibilitySql(chatAlias));
     }
 
     return {
@@ -2173,7 +2263,7 @@ export const getInitialChatsData = withDebug(
                     workspaceId,
                     userId,
                     ownership,
-                    filters: { includeMarketing: true },
+                    filters: { includeMarketing: false },
                 }),
                 10000,
                 'Timeout ao contar chats da Inbox'

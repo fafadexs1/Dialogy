@@ -15,6 +15,7 @@ import { toAbsoluteAppUrl } from '@/lib/storage-url';
 import { useToast } from '@/hooks/use-toast';
 import { useInboxStore } from '@/hooks/use-inbox-store';
 import type { AudioTranscriptionJob } from '@/hooks/inbox-store/types';
+import { hasPendingAudioTranscription, transcribeAudioInBackground } from '@/services/audio/transcription-client';
 
 interface AudioPlayerProps {
     src: string;
@@ -77,12 +78,6 @@ function normalizeWaveform(values: number[] | undefined, source: string) {
         const normalized = range > 0 ? (average - minimum) / range : 0.62;
         return 0.24 + clamp(normalized, 0, 1) * 0.72;
     });
-}
-
-function getResultError(result: unknown) {
-    if (!result || typeof result !== 'object') return null;
-    const error = (result as { error?: unknown }).error;
-    return typeof error === 'string' && error.trim() ? error.trim() : null;
 }
 
 export function AudioPlayer({
@@ -290,7 +285,7 @@ export function AudioPlayer({
         window.localStorage.setItem('audioPlaybackRate', nextRate.toString());
     };
 
-    const handleTranscribe = async () => {
+    const handleTranscribe = useCallback(async () => {
         if (isTranscribing || transcription) return;
 
         const audioUrl = toAbsoluteAppUrl(src);
@@ -308,23 +303,7 @@ export function AudioPlayer({
         setTranscriptionJob({ status: 'transcribing', transcription: null, error: null });
 
         try {
-            const response = await fetch('/api/audio/transcribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ audioUrl, workspaceId, messageId, chatId }),
-            });
-            const result = await response.json().catch(() => null) as {
-                transcription?: unknown;
-                error?: unknown;
-            } | null;
-
-            if (!response.ok) {
-                throw new Error(getResultError(result) || 'Não foi possível transcrever o áudio.');
-            }
-
-            const nextTranscription = cleanTranscription(
-                typeof result?.transcription === 'string' ? result.transcription : null
-            );
+            const nextTranscription = await transcribeAudioInBackground({ audioUrl, workspaceId, messageId, chatId });
             if (!nextTranscription) {
                 throw new Error('A transcrição retornou vazia. Tente novamente.');
             }
@@ -342,7 +321,15 @@ export function AudioPlayer({
             setTranscriptionJob({ status: 'error', transcription: null, error: message });
             toast({ title: 'Erro ao transcrever', description: message, variant: 'destructive' });
         }
-    };
+    }, [isTranscribing, transcription, src, toast, setTranscriptionJob, workspaceId, messageId, chatId, updateMessage]);
+
+    useEffect(() => {
+        const audioUrl = toAbsoluteAppUrl(src);
+        if (!isFromMe && !transcription && !isTranscribing && !transcriptionError && audioUrl
+            && hasPendingAudioTranscription({ audioUrl, workspaceId, messageId, chatId })) {
+            void handleTranscribe();
+        }
+    }, [src, workspaceId, messageId, chatId, isFromMe, transcription, isTranscribing, transcriptionError, handleTranscribe]);
 
     const progressPercentage = duration > 0
         ? clamp((currentTime / duration) * 100, 0, 100)

@@ -35,6 +35,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { signOut } from "@/actions/auth";
+import { processLogoutTransferAction } from "@/actions/logout-transfer";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { getHasUnreadProductUpdatesAction } from "@/actions/product-updates";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { LanguageToggle } from "@/components/ui/language-toggle";
@@ -127,7 +129,7 @@ const integrationsCatalogItem: NavItem = {
 
 const integrationsKeyHubs: NavItem[] = [
   {
-    href: "/integrations/evolution-api",
+    href: "/integrations/whatsapp-api",
     icon: MessageCircleMore,
     labelKey: "nav.whatsapp",
     descriptionKey: "nav.channelsDescription",
@@ -839,6 +841,7 @@ export function Sidebar({ user }: SidebarProps) {
   const { resolvedTheme } = useTheme();
   const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [logoutTransferError, setLogoutTransferError] = useState('');
   const [mounted, setMounted] = useState(false);
 
   const initialTheme = user.themePreference === "light" || user.themePreference === "dark"
@@ -974,11 +977,20 @@ export function Sidebar({ user }: SidebarProps) {
     setOpenMenu((current) => current === menu ? null : menu);
   };
 
-  const handleSignOut = async () => {
+  const handleSignOut = async (skipTransfer = false) => {
     if (signingOut) return;
     setSigningOut(true);
 
     try {
+      if (!skipTransfer && user.activeWorkspaceId) {
+        try {
+          const transfer = await processLogoutTransferAction();
+          if (!transfer.success) { setLogoutTransferError(transfer.error); return; }
+        } catch {
+          setLogoutTransferError('Não foi possível confirmar a transferência automática.');
+          return;
+        }
+      }
       if (user.activeWorkspaceId) {
         try {
           await fetch("/api/users/online-status", {
@@ -1154,13 +1166,19 @@ export function Sidebar({ user }: SidebarProps) {
           onToggle={() => toggleMenu("account")}
           onClose={() => setOpenMenu(null)}
           containerRef={accountRef}
-          onSignOut={handleSignOut}
+          onSignOut={() => void handleSignOut()}
           signingOut={signingOut}
           light={light}
           pathname={pathname}
           suppressTooltip={hasOpenMenu}
         />
       </div>
+      <AlertDialog open={Boolean(logoutTransferError)} onOpenChange={open => { if (!open) setLogoutTransferError(''); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Alguns atendimentos continuam com você</AlertDialogTitle><AlertDialogDescription>{logoutTransferError} Você pode revisar os atendimentos ou sair sem transferir os que permaneceram.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Revisar atendimentos</AlertDialogCancel><AlertDialogAction onClick={() => { setLogoutTransferError(''); void handleSignOut(true); }}>Sair mesmo assim</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   );
 }

@@ -1,5 +1,5 @@
-import EvolutionApiPage from './evolution-api-page-client';
+import { permanentRedirect } from 'next/navigation';
 
 export default function EvolutionApiRoutePage() {
-    return <EvolutionApiPage channelMode="whatsapp" />;
+  permanentRedirect('/integrations/whatsapp-api');
 }

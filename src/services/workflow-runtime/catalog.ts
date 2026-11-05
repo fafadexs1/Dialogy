@@ -1,3 +1,5 @@
+import { studioFlowManifests } from './studio-flow-catalog';
+import { toolboxManifests } from './toolbox-catalog';
 import type { ConnectionType, NodePort, RetryPolicy, WorkflowNode } from './types';
 
 export type WorkflowNodeCategory =
@@ -50,6 +52,7 @@ type WorkflowNodeManifestInput = Omit<
 > & Partial<Pick<WorkflowNodeManifest, 'availability' | 'editorFields' | 'requiredCapabilities'>>;
 
 export const STABLE_WORKFLOW_NODE_TYPES = new Set([
+  ...toolboxManifests().map((manifest) => manifest.type),
   'trigger.received_message',
   'trigger.webhook',
   'trigger.internal_event',
@@ -92,16 +95,35 @@ export const STABLE_WORKFLOW_NODE_TYPES = new Set([
   'dialogy.sgp_payment_promise',
   'whatsapp.send_text',
   'whatsapp.send_media',
+  'whatsapp.send_catalog',
   'whatsapp.group_create',
   'ai.model',
+  'ai.prompt',
   'ai.agent',
   'ai.published_agent',
+  'ai.studio_agent',
+  'integration.studio_procedure',
+  'tool.studio_agent',
+  'tool.studio_procedure',
   'knowledge.rag_retriever',
   'memory.session',
   'tool.http',
   'tool.database',
   'tool.internal',
+  'tool.calculator',
+  'tool.document_read',
+  'tool.document_write',
+  'tool.audio_transcribe',
+  'tool.clock',
+  'tool.read_url',
+  'tool.web_search',
+  'tool.sandbox',
+  'tool.image',
+  'tool.image_analysis',
+  'tool.video_analysis',
+  'tool.browser',
   'tool.mcp',
+  'tool.subflow',
   'guardrail.policy',
   'output.respond',
   'output.media',
@@ -257,7 +279,7 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     tone: 'blue',
     inputPorts: [],
     outputPorts: [output('request', 'Requisição', 'main', { required: true }), errorOutput],
-    defaultConfig: { method: 'POST', authentication: 'signature' },
+    defaultConfig: { method: 'POST', authentication: 'token', responseMode: 'queued' },
     attachment: false,
     requiresErrorRoute: true,
   },
@@ -716,7 +738,7 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
       output('expired', 'Expirado', 'main'),
       errorOutput,
     ],
-    defaultConfig: { mode: 'event', timeoutMs: 86_400_000, resumeEvent: '', showTyping: false },
+    defaultConfig: { mode: 'event', timeoutMs: 86_400_000, resumeEvent: '', showTyping: false, pauseTimeoutWhileWaiting: true, expireEvents: false },
     attachment: false,
   },
   {
@@ -835,6 +857,8 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     attachment: false,
     requiresErrorRoute: true,
   },
+  ...studioFlowManifests(),
+  ...toolboxManifests(),
   {
     type: 'ai.published_agent',
     label: 'Agente do Studio',
@@ -1011,6 +1035,54 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     attachment: false,
   },
   {
+    type: 'tool.document_read', label: 'Ler documento', description: 'Lê documento privado do workspace.', category: 'tools', icon: 'FileText', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'read_document', description: 'Lê um documento privado.' }, attachment: true,
+  },
+  {
+    type: 'tool.document_write', label: 'Gerar documento', description: 'Gera PDF, planilha ou apresentação privada.', category: 'tools', icon: 'FilePlus', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'generate_document', description: 'Gera um documento privado.' }, attachment: true,
+  },
+  {
+    type: 'tool.audio_transcribe', label: 'Transcrever áudio', description: 'Transcreve áudio privado.', category: 'tools', icon: 'Mic', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'transcribe_audio', description: 'Transcreve um arquivo de áudio.' }, attachment: true,
+  },
+  {
+    type: 'tool.calculator', label: 'Calculadora', description: 'Calcula expressões aritméticas com precisão decimal.', category: 'tools', icon: 'Calculator', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'calculator', description: 'Calcula expressões aritméticas com precisão decimal.' }, attachment: true,
+  },
+  {
+    type: 'tool.clock', label: 'Data e hora', description: 'Consulta a data e hora atual em um fuso horário IANA.', category: 'tools', icon: 'Clock', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'current_time', description: 'Consulta data e hora.' }, attachment: true,
+  },
+  {
+    type: 'tool.read_url', label: 'Ler página pública', description: 'Lê texto de páginas HTTPS públicas com limites de rede.', category: 'tools', icon: 'Globe2', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'read_public_url', description: 'Lê texto de páginas HTTPS públicas.' }, attachment: true,
+  },
+  {
+    type: 'tool.web_search', label: 'Pesquisa na web', description: 'Pesquisa na web usando serviço externo configurado pelo operador.', category: 'tools', icon: 'Search', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'web_search', description: 'Pesquisa na web.' }, attachment: true,
+  },
+  {
+    type: 'tool.sandbox', label: 'Código e terminal isolados', description: 'Executa código somente em serviço remoto isolado configurado pelo operador.', category: 'tools', icon: 'Terminal', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'isolated_execution', description: 'Executa código em sandbox isolado.' }, attachment: true,
+  },
+  {
+    type: 'tool.image', label: 'Criar ou editar imagem', description: 'Usa o serviço de mídia configurado e armazena o resultado em arquivo privado.', category: 'tools', icon: 'Image', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'generate_or_edit_image', description: 'Cria ou edita imagem.' }, attachment: true,
+  },
+  {
+    type: 'tool.image_analysis', label: 'Analisar imagem', description: 'Analisa imagem privada por meio do serviço de mídia configurado.', category: 'tools', icon: 'ScanEye', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'analyze_image', description: 'Analisa imagem.' }, attachment: true,
+  },
+  {
+    type: 'tool.video_analysis', label: 'Analisar vídeo', description: 'Analisa vídeo privado por meio do serviço de mídia configurado.', category: 'tools', icon: 'Video', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'analyze_video', description: 'Analisa vídeo.' }, attachment: true,
+  },
+  {
+    type: 'tool.browser', label: 'Navegador isolado', description: 'Lê páginas e interage com formulários HTML com navegador sem rede e aprovação humana por navegação.', category: 'tools', icon: 'Globe2', tone: 'cyan', inputPorts: [],
+    outputPorts: [output('tool', 'Ferramenta', 'tool', { required: true, multiple: true })], defaultConfig: { name: 'isolated_browser', description: 'Navega com aprovação.' }, attachment: true,
+  },
+  {
     type: 'tool.http',
     label: 'Ferramenta HTTP',
     description: 'Executa uma API com segredo referenciado, timeout e schema.',
@@ -1027,6 +1099,7 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
       headers: {},
       query: {},
       bodyType: 'none',
+      responseFormat: 'auto',
       body: {},
       credentialId: '',
       responsePath: '',
@@ -1084,10 +1157,12 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     outputPorts: standardActionOutputs,
     defaultConfig: {
       method: 'GET',
+      permissionScope: 'integrations:http',
       url: 'https://',
       headers: {},
       query: {},
       bodyType: 'none',
+      responseFormat: 'auto',
       body: {},
       credentialId: '',
       outputKey: 'response',
@@ -1383,8 +1458,29 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     tone: 'emerald',
     inputPorts: [mainInput],
     outputPorts: standardActionOutputs,
-    defaultConfig: { instanceName: '', phoneNumber: '', mediaType: 'image', url: '', caption: '', fileName: '', mimeType: '', outputKey: 'whatsappMedia', permissionScope: 'whatsapp:messages:write' },
+    defaultConfig: { instanceName: '', phoneNumber: '', file: '', mediaType: 'image', url: '', caption: '', fileName: '', mimeType: '', outputKey: 'whatsappMedia', permissionScope: 'whatsapp:messages:write' },
     defaultRetryPolicy: networkRetryPolicy,
+    attachment: false,
+    sensitive: true,
+    requiresErrorRoute: true,
+  },
+  {
+    type: 'whatsapp.send_catalog',
+    label: 'Enviar catálogo no WhatsApp',
+    description: 'Envia até 10 cartões com fotos, descrição e botões para o cliente da conversa (Evolution/Baileys).',
+    category: 'interaction',
+    requiredCapabilities: ['message_delivery'],
+    icon: 'ShoppingBag',
+    tone: 'emerald',
+    inputPorts: [mainInput],
+    outputPorts: standardActionOutputs,
+    defaultConfig: {
+      body: 'Confira nossos produtos!',
+      cards: [{ title: '', body: '', imageUrl: '', buttons: [{ type: 'reply', displayText: 'Tenho interesse', id: 'product-1' }] }],
+      outputKey: 'whatsappCatalog',
+      permissionScope: 'whatsapp:messages:write',
+    },
+    defaultTimeoutMs: 120_000,
     attachment: false,
     sensitive: true,
     requiresErrorRoute: true,
@@ -1498,7 +1594,7 @@ const WORKFLOW_NODE_MANIFEST_INPUTS: readonly WorkflowNodeManifestInput[] = [
     tone: 'emerald',
     inputPorts: [mainInput],
     outputPorts: standardActionOutputs,
-    defaultConfig: { mediaType: 'image', url: '', caption: '', fileName: '', mimeType: '' },
+    defaultConfig: { file: '', mediaType: 'image', url: '', caption: '', fileName: '', mimeType: '' },
     attachment: false,
     requiresErrorRoute: true,
     editorFields: [

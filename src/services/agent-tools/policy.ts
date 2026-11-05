@@ -217,7 +217,7 @@ export async function evaluateAgentToolPolicy(input: {
 
   const failedDependency = (input.previousResults || [])
     .find((result) => result.status !== 'success' && result.toolName !== 'add_internal_note');
-  if (failedDependency && input.action.type !== 'add_internal_note') {
+  if (failedDependency && input.action.type !== 'add_internal_note' && input.action.type !== 'transfer_chat') {
     return policyReject(
       riskLevel,
       'dependency_failed',

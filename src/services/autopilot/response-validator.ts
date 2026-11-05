@@ -1,3 +1,4 @@
+import { resolveHandoffTeam } from '@/services/agent-tools/router';
 import type { Contact, KnowledgeBaseDocument } from '@/lib/types';
 import type { AgentToolAction, AgentToolExecutionResult } from '@/services/agent-tools/types';
 import type { ToolRouterTeam } from '@/services/agent-tools/router';
@@ -471,25 +472,6 @@ const FLOW_COMPLETION_REQUIRED_SLOTS: AutopilotSlotName[] = [
   'phone',
 ];
 
-function findHandoffTeam(input: {
-  intent: AutopilotIntentResolution['intent'];
-  availableTeams: ToolRouterTeam[];
-}): ToolRouterTeam | null {
-  const hints: Partial<Record<AutopilotIntentResolution['intent'], RegExp[]>> = {
-    billing_or_payment: [/\b(financeiro|cobranca|cobrança|billing)\b/i],
-    support_request: [/\b(suporte|sac|atendimento|help)\b/i],
-    troubleshooting: [/\b(suporte|tecnico|técnico|noc|atendimento)\b/i],
-    order_or_request_status: [/\b(suporte|atendimento|operacao|operação|logistica|logística)\b/i],
-    complaint: [/\b(sac|ouvidoria|qualidade|atendimento)\b/i],
-    human_handoff: [/\b(atendimento|suporte|sac|help|humano)\b/i],
-  };
-  const intentHints = hints[input.intent] || [];
-  return input.availableTeams.find((team) => intentHints.some((pattern) => pattern.test(team.name))) ||
-    input.availableTeams.find((team) => team.routingConfig?.enabled && team.routingConfig.autoTransfer !== false) ||
-    input.availableTeams[0] ||
-    null;
-}
-
 function buildHandoffActions(input: {
   team: ToolRouterTeam;
   enabledToolNames: string[];
@@ -781,9 +763,10 @@ export function validateAutopilotResponse(input: {
     }
 
     const team = input.enabledToolNames.includes('transfer_chat')
-      ? findHandoffTeam({
+      ? resolveHandoffTeam({
           intent: input.intentResolution.intent,
           availableTeams: input.availableTeams,
+          customerMessage: input.customerMessage,
         })
       : null;
 
@@ -895,9 +878,10 @@ export function validateAutopilotResponse(input: {
 
   if (hasTransferPromise(originalResponse) && !hasPlannedTransfer(input.plannedActions)) {
     const team = input.enabledToolNames.includes('transfer_chat')
-      ? findHandoffTeam({
+      ? resolveHandoffTeam({
           intent: input.intentResolution.intent,
           availableTeams: input.availableTeams,
+          customerMessage: input.customerMessage,
         })
       : null;
 
@@ -917,6 +901,14 @@ export function validateAutopilotResponse(input: {
         metadata: { decision: 'handoff', reasons, teamId: team.id, teamName: team.name, source: input.source },
       };
     }
+    reasons.push('transfer_destination_ambiguous_or_unavailable');
+    return {
+      decision: 'repair',
+      response: 'Não consegui identificar com segurança a equipe para encaminhar seu atendimento. Qual setor você precisa?',
+      actions: [],
+      reasons,
+      metadata: { decision: 'repair', reasons, source: input.source },
+    };
   }
 
   if (hasConversationCloseClaim(originalResponse) && !hasPlannedClose(input.plannedActions)) {
@@ -925,7 +917,7 @@ export function validateAutopilotResponse(input: {
       reasons.push('close_promise_matched_flow_completion');
       return {
         decision: 'repair',
-        response: 'Atendimento encerrado conforme solicitado.',
+        response: 'Vou encerrar o atendimento conforme solicitado.',
         actions: completionCloseActions,
         reasons,
         metadata: { decision: 'repair', reasons, source: input.source },
@@ -939,7 +931,7 @@ export function validateAutopilotResponse(input: {
       reasons.push('close_promise_without_action');
       return {
         decision: 'repair',
-        response: 'Atendimento encerrado conforme solicitado.',
+        response: 'Vou encerrar o atendimento conforme solicitado.',
         actions: [{
           type: 'close_chat',
           reason: 'Resposta prometeu encerramento sem acao planejada.',

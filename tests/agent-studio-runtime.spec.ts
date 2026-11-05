@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopilotConfig, Contact } from '@/lib/types';
 import { createDefaultAgentStudioDocument, ProcedureDocumentSchema, CollectedFieldDefinitionSchema, HttpRequestStepConfigSchema, type AgentReleaseManifest } from '@/services/agent-studio/types';
 import type { StudioSession } from '@/services/agent-studio/engine';
+import { createStudioSgpProcedure } from '@/services/agent-studio/sgp-template';
+const sgpMocks = vi.hoisted(() => ({ lookup: vi.fn(), panel: vi.fn() }));
+vi.mock('@/services/agent-tools/sgp-tools', () => ({ lookupSgpCustomerContracts: sgpMocks.lookup, runSgpWorkspaceTool: sgpMocks.panel }));
 const mocks = vi.hoisted(() => ({ query: vi.fn(), model: vi.fn(), rag: vi.fn(), http: vi.fn(), mcp: vi.fn(), resolveMcp: vi.fn(), contactAction: vi.fn() }));
 vi.mock('@/lib/db', () => ({ db: { query: mocks.query } }));
 vi.mock('@/ai/flows/procedure-runtime', () => ({ generateProcedureRuntimeOutput: mocks.model }));
@@ -37,6 +40,20 @@ beforeEach(() => {
 });
 
 describe('production Studio orchestration with controlled model and integration adapters', () => {
+  it.each([false, true])('makes SGP connection and invoice results available in preview=%s', async (preview) => {
+    const f = fixture();
+    f.release.agentSnapshot.resolveStage.procedures = [createStudioSgpProcedure('sgp')];
+    mocks.model.mockResolvedValue({ decision: 'sgp' });
+    sgpMocks.lookup.mockResolvedValue({ status: 'found', cpfCnpj: '52998224725', contracts: [{ id: '1', planDescription: 'Fibra', addressLabel: 'Instalação única' }] });
+    const panel = { customerName: 'Cliente SGP', cpfCnpj: '52998224725', contracts: [{ id: '1', label: 'Instalação única', connectionStatus: 'online' }], invoices: [{ id: 'invoice', isOpen: true }], openInvoices: 1, overdueInvoices: 0 };
+    sgpMocks.panel.mockResolvedValue({ status: 'success', output: panel });
+    const result = await f.send('52998224725', undefined, 'sgp-turn', preview ? { preview: { samples: { sgp_contracts: JSON.stringify(panel), sgp_panel: JSON.stringify(panel) } } } : {});
+    expect(result.state.values.customer_name).toBe('Cliente SGP');
+    expect(result.state.values.connection_status).toBe('online');
+    expect(result.state.values.open_invoices).toBe(1);
+    expect(result.state.values.invoices).toEqual([{ id: 'invoice', isOpen: true }]);
+    expect(sgpMocks.panel).toHaveBeenCalledTimes(preview ? 0 : 1);
+  });
   it.each([false, true])('plans a ready lookup before another question with the same published model in preview=%s', async (preview) => {
     const f = fixture(); f.release.agentSnapshot.resolveStage.conversationMode = 'adaptive';
     f.release.agentSnapshot.resolveStage.procedures[0].steps = [

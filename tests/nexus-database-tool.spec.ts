@@ -17,6 +17,16 @@ const dialogyModel: ModelConfiguration = {
 };
 
 describe('Nexus database agent tool', () => {
+  it.each(['insert', 'update', 'delete'])('requires approval for %s even if configuration disables confirmation', (operation) => {
+    const node = createWorkflowNode('tool.database', { id: 'db-write', position: { x: 0, y: 0 }, config: { name: 'db_write', description: 'Altera dados', credentialId: 'cred', operation, table: 'orders', requiresConfirmation: false } });
+    expect(createNexusToolRegistry({ workspaceId: 'workspace-1', toolNodes: [node] }).get('db_write')?.requiresConfirmation).toBe(true);
+  });
+  it('rejects a write through the generic registry instead of bypassing human approval', async () => {
+    const node = createWorkflowNode('tool.database', { id: 'db-write', position: { x: 0, y: 0 }, config: { name: 'db_write', description: 'Altera dados', credentialId: 'cred', operation: 'delete', table: 'orders', requiresConfirmation: false } });
+    const registry = createNexusToolRegistry({ workspaceId: 'workspace-1', toolNodes: [node] });
+    const result = await registry.executeSafely({ toolName: 'db_write', arguments: { filter_column: 'id', filter_value: '1' }, execution: { executionId: 'execution' } as never, workflow: { id: 'workflow' } as never, node, signal: new AbortController().signal, emit: async () => {} });
+    expect(result.record).toMatchObject({ status: 'rejected', error: { code: 'TOOL_PERMISSION_DENIED' } });
+  });
   it('registers only the declarative operation exposed by the attachment', () => {
     const node = createWorkflowNode('tool.database', {
       id: 'database-tool',

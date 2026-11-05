@@ -317,12 +317,12 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
     const availableIntegrations = [
       {
         id: 'evolution-api',
-        name: 'Evolution API',
-        description: 'Conecte WhatsApp com QR Code ou Cloud API pela Evolution API.',
+        name: 'WhatsApp API',
+        description: 'Conecte números, crie mensagens e monte carrosséis para o WhatsApp.',
         icon_url: '/icons/whatsapp.svg',
         tag: 'WhatsApp',
         tag_type: 'primary',
-        href: '/integrations/evolution-api',
+        href: '/integrations/whatsapp-api',
         status: 'active',
         provider: 'evolution-api',
         is_active: activeProviders.has('evolution-api') || whatsappCurrentCount > 0,
@@ -428,18 +428,6 @@ export async function getIntegrations(): Promise<{ integrations: any[]; error?: 
         status: 'active',
         provider: 'gads',
         is_active: activeProviders.has('gads'),
-      },
-      {
-        id: 'delivery-hub',
-        name: 'Delivery Hub',
-        description: 'Monte uma vitrine com varios negocios, cardapios e link publico compartilhavel.',
-        icon_url: '/icons/delivery-hub.svg',
-        tag: activeProviders.has('delivery-hub') ? 'Publicado' : 'Catalogo',
-        tag_type: activeProviders.has('delivery-hub') ? 'primary' : 'secondary',
-        href: '/integrations/delivery-hub',
-        status: 'active',
-        provider: 'delivery-hub',
-        is_active: activeProviders.has('delivery-hub'),
       },
     ];
 

@@ -165,7 +165,7 @@ export async function reconfigureEvolutionWebhook(instanceId: string, workspaceI
     try {
         await requireWorkspacePermission(workspaceId, 'workspace:settings:edit');
         const webhookUrl = await configureEvolutionInstanceWebhook(instanceId, workspaceId);
-        revalidatePath('/integrations/evolution-api');
+        revalidatePath('/integrations/whatsapp-api');
         return { success: true, webhookUrl };
     } catch {
         // Provider errors can contain authentication headers or the secret webhook URL.
@@ -179,7 +179,7 @@ export async function reconfigureEvolutionWebhook(instanceId: string, workspaceI
 export async function createEvolutionApiInstance(
     payload: EvolutionInstanceCreationPayload,
     workspaceId: string
-): Promise<{ success: boolean; error?: string | null; qrCode?: string }> {
+): Promise<{ success: boolean; error?: string | null; qrCode?: string; instanceId?: string }> {
     if (!workspaceId) {
         return { success: false, error: 'ID do Workspace não encontrado.' };
     }
@@ -456,8 +456,8 @@ export async function createEvolutionApiInstance(
 
         await client.query('COMMIT');
 
-        revalidatePath('/integrations/evolution-api');
-        return { success: true, error: null, qrCode };
+        revalidatePath('/integrations/whatsapp-api');
+        return { success: true, error: null, qrCode, instanceId: createdInstance.rows[0].id };
 
     } catch (error: any) {
         await client.query('ROLLBACK');
@@ -515,7 +515,7 @@ export async function deleteEvolutionApiInstance(instanceId: string): Promise<{ 
         return { error: `Falha ao deletar instância. Erro: ${error.message}` };
     }
 
-    revalidatePath('/integrations/evolution-api');
+    revalidatePath('/integrations/whatsapp-api');
     return { error: null };
 }
 
@@ -523,7 +523,7 @@ async function getApiConfigForInstance(instanceName: string): Promise<{ api_url:
     return getEvolutionApiConfig(instanceName);
 }
 
-export async function checkInstanceStatus(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
+export async function checkInstanceStatus(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string; error?: string }> {
     try {
         await requireInstanceAccess(instanceName, null);
         const telegramInstance = await getTelegramInstanceRecord(instanceName);
@@ -556,11 +556,11 @@ export async function checkInstanceStatus(instanceName: string): Promise<{ statu
         return { status: 'disconnected' };
     } catch (error) {
         console.error(`[EVO_ACTION_CHECK_STATUS] Erro ao verificar status da instância ${instanceName}:`, error);
-        return { status: 'disconnected' };
+        return { status: 'disconnected', error: 'Não foi possível consultar o status desta conexão.' };
     }
 }
 
-export async function connectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string }> {
+export async function connectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'], qrCode?: string; error?: string }> {
     try {
         await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const telegramInstance = await getTelegramInstanceRecord(instanceName);
@@ -588,11 +588,11 @@ export async function connectInstance(instanceName: string): Promise<{ status: E
         return { status: 'pending' };
     } catch (error) {
         console.error(`[EVO_ACTION_CONNECT] Erro ao conectar instância ${instanceName}:`, error);
-        return { status: 'disconnected' };
+        return { status: 'disconnected', error: 'Não foi possível iniciar esta conexão. Tente novamente.' };
     }
 }
 
-export async function disconnectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status'] }> {
+export async function disconnectInstance(instanceName: string): Promise<{ status: EvolutionInstance['status']; error?: string }> {
     try {
         await requireInstanceAccess(instanceName, 'workspace:settings:edit');
         const telegramInstance = await getTelegramInstanceRecord(instanceName);
@@ -607,7 +607,7 @@ export async function disconnectInstance(instanceName: string): Promise<{ status
         return { status: 'disconnected' };
     } catch (error) {
         console.error(`[EVO_ACTION_DISCONNECT] Erro ao desconectar instância ${instanceName}:`, error);
-        return { status: 'disconnected' };
+        return { status: 'disconnected', error: 'Não foi possível confirmar a desconexão.' };
     }
 }
 

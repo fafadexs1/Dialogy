@@ -1,12 +1,14 @@
 import { createWorkflowNode } from '@/services/workflow-runtime/catalog';
 import { WorkflowDefinitionSchema } from '@/services/workflow-runtime/schemas';
+import { populateSalesAutomation } from './sales-automation-template';
+import { populateAuroraSalesDemo } from './aurora-sales-demo';
 import type {
   WorkflowConnection,
   WorkflowDefinition,
   WorkflowNode,
 } from '@/services/workflow-runtime/types';
 
-export type NexusWorkflowTemplate = 'blank' | 'message' | 'webhook' | 'schedule' | 'crm_option';
+export type NexusWorkflowTemplate = 'blank' | 'message' | 'webhook' | 'schedule' | 'crm_option' | 'sales' | 'sales_webhook' | 'sales_demo';
 
 export type NexusWorkflowSummary = {
   id: string;
@@ -159,7 +161,11 @@ export function createStandaloneNexusWorkflow(input: {
     updatedAt: timestamp,
   };
 
-  if (input.template === 'crm_option') {
+  if (input.template === 'sales_demo') {
+    populateAuroraSalesDemo(definition);
+  } else if (input.template === 'sales' || input.template === 'sales_webhook') {
+    populateSalesAutomation(definition, input.template === 'sales_webhook');
+  } else if (input.template === 'crm_option') {
     const trigger = addNode(definition, 'trigger.internal_event', 'crm_option', 'Opção do CRM', { x: 100, y: 100 }, {
       eventName: 'contact.updated', defaultOutput: 'event', crmOption: input.crmOption || { fieldId: '', value: '' },
     });

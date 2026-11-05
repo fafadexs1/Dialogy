@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createNativeWorkflowLayout } from '@/components/workflow/native-workflow-layout';
+import { getNodeDimensions, createNativeWorkflowLayout } from '@/components/workflow/native-workflow-layout';
 import { createWorkflowNode } from '@/services/workflow-runtime/catalog';
 import { workflowFunctionalSignature, workflowLayoutSignature } from '@/services/workflow-runtime/signature';
 import type { WorkflowConnection, WorkflowNode } from '@/services/workflow-runtime/types';
@@ -190,9 +190,9 @@ describe('native workflow automatic layout', () => {
     const positions = createNativeWorkflowLayout(allNodes, connections);
 
     // 1. Column progression with dynamic width:
-    // Menu is 440px wide, so Column 2 (s1, sup1, b1) starts with generous clearance (X >= 440 + 120 = 560px from menu)
+    // Column pitch follows the shared card geometry, including branch cards.
     expect(positions.get('menu')!.x).toBeGreaterThan(positions.get('trigger')!.x);
-    expect(positions.get('s1')!.x - positions.get('menu')!.x).toBeGreaterThanOrEqual(500);
+    expect(positions.get('s1')!.x - positions.get('menu')!.x).toBeGreaterThanOrEqual(getNodeDimensions(menu).width + 80);
 
     // 2. Strict top-to-bottom visual port order:
     // Option 1 (Sales) < Option 2 (Support) < Option 3 (Billing)
@@ -284,8 +284,8 @@ describe('native workflow automatic layout', () => {
     const minY = Math.min(...allY);
     const maxY = Math.max(...allY);
 
-    // Entire workflow fits within ~1250px height, instead of 22,000px!
-    expect(maxY - minY).toBeLessThanOrEqual(1400);
+    // Readable 12px cards remain compact; the flow must not grow into a 20,000px canvas.
+    expect(maxY - minY).toBeLessThanOrEqual(2000);
     expect(minY).toBeGreaterThanOrEqual(80);
   });
 

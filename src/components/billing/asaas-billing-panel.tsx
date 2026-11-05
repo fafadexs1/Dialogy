@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ArrowRight, ArrowUpRight, Check, ChevronDown, Coins, CreditCard, Loader2, ReceiptText, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, ChevronDown, Coins, CreditCard, Loader2, ReceiptText, RefreshCw, Settings2, ShieldCheck, MessageCircle } from 'lucide-react';
 import { getAsaasBillingAction, createAsaasCheckoutAction, reconcileAsaasBillingAction, cancelAsaasSubscriptionAction } from '@/actions/asaas';
 import { AsaasPaymentDialog } from '@/components/billing/asaas-payment-dialog';
+import { WhatsappCostsPanel } from '@/components/billing/whatsapp-costs-panel';
 import { AiCreditsPanel } from '@/components/billing/ai-credits-panel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -95,14 +96,17 @@ export function AsaasBillingPanel() {
     </header>
 
     <Tabs value={tab} onValueChange={value => { setTab(value); setNotice(''); setError(''); }} className="min-w-0">
-      <TabsList aria-label="Cobrança" className="mb-7 grid h-auto w-full grid-cols-3 justify-start rounded-none border-b bg-transparent p-0 sm:flex">
+      <TabsList aria-label="Cobrança" className="mb-7 grid h-auto w-full grid-cols-4 justify-start rounded-none border-b bg-transparent p-0 sm:flex">
         <TabsTrigger value="plan" className={tabStyle}><CreditCard className="h-4 w-4 shrink-0" />Meu plano</TabsTrigger>
         <TabsTrigger value="credits" className={tabStyle}><Coins className="h-4 w-4 shrink-0" />Créditos de IA</TabsTrigger>
+        <TabsTrigger value="whatsapp" className={tabStyle}><MessageCircle className="h-4 w-4 shrink-0" />WhatsApp</TabsTrigger>
         <TabsTrigger value="invoices" className={tabStyle}><ReceiptText className="h-4 w-4 shrink-0" />Faturas{pending.length > 0 && <span className="hidden rounded bg-amber-500/15 px-1.5 text-xs text-amber-800 sm:inline dark:text-amber-300">{pending.length}</span>}</TabsTrigger>
       </TabsList>
 
       {error && !checkout && !cancel && <p role="alert" className="mb-5 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
       {notice && <p role="status" className="mb-5 flex items-start gap-2 rounded-md border border-primary/25 bg-primary/5 p-3 text-sm"><Check className="mt-0.5 h-4 w-4 shrink-0" />{notice}</p>}
+
+      <TabsContent value="whatsapp"><WhatsappCostsPanel /></TabsContent>
 
       <TabsContent value="plan" className="space-y-6">
         {data.legacyStripe && <p className="border-l-2 border-amber-500 pl-4 text-sm leading-relaxed text-muted-foreground">Sua assinatura atual continua no Stripe. Para alterar o plano, entre em contato com o suporte. Nenhuma nova assinatura será criada aqui. <a href="/settings/billing?provider=stripe" className="underline">Gerenciar assinatura atual</a></p>}

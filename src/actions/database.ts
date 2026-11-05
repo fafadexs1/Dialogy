@@ -1384,7 +1384,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; message:
     console.log('[DB_SETUP] Verificando e populando a tabela de integrações...');
     await client.query(`
         INSERT INTO app_integrations (id, name, description, icon_url, tag, tag_type, href, status) VALUES
-        ('evolution-api', 'Evolution API', 'Gerencie instancias de WhatsApp com QR Code ou Cloud API.', '/icons/whatsapp.svg', 'WhatsApp', 'primary', '/integrations/evolution-api', 'active'),
+        ('evolution-api', 'WhatsApp API', 'Conecte números, crie mensagens e monte carrosséis para o WhatsApp.', '/icons/whatsapp.svg', 'WhatsApp', 'primary', '/integrations/whatsapp-api', 'active'),
         ('telegram', 'Telegram Bot', 'Gerencie bots do Telegram com webhook proprio e eventos separados.', '/icons/telegram.svg', 'Telegram', 'primary', '/integrations/telegram', 'active'),
         ('dialogflow', 'Google Dialogflow', 'Conecte agentes de IA avan?ados do Dialogflow para automatizar conversas.', 'https://www.gstatic.com/dialogflow-console/common/assets/img/logo-mobile.png', 'IA', 'secondary', '#', 'coming_soon'),
         ('stripe', 'Stripe', 'Integre pagamentos e cobran?as diretamente nas suas conversas.', 'https://stripe.com/img/v3/home/twitter.png', 'Pagamentos', 'beta', '#', 'coming_soon'),

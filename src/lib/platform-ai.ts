@@ -6,6 +6,7 @@ export const PlatformAiModelSchema = z.object({
   label: z.string().trim().min(1).max(120),
   description: z.string().max(2000).optional(),
   enabled: z.boolean(),
+  supportedMediaTypes: z.array(z.enum(['image', 'pdf'])).max(2).optional(),
   inputCost: money,
   outputCost: money,
   inputMarkup: z.number().finite().min(0).max(10000),

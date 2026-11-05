@@ -3,6 +3,7 @@ import { fetchEvolutionAPI } from '@/lib/whatsapp/evolution-api-client';
 import { preserveWhatsappRecipient } from '@/lib/whatsapp/bsuid';
 import {
     assertValidTemplateComponents,
+    normalizeTemplateOrderDetailsAmounts,
     requireProviderMessageId,
 } from '@/services/whatsapp/template-send-contract';
 
@@ -39,6 +40,7 @@ export const sendTemplateMessage = withDebug(
         const { api_url, api_key } = apiConfig;
         const { number, name, language, components } = payload;
         assertValidTemplateComponents(components);
+        const normalizedComponents = normalizeTemplateOrderDetailsAmounts(components);
 
         const phoneNumber = sanitizePhoneNumber(number);
         if (!phoneNumber) {
@@ -49,7 +51,7 @@ export const sendTemplateMessage = withDebug(
             number: phoneNumber,
             name,
             language,
-            components
+            components: normalizedComponents
         };
 
         const response = await fetchEvolutionAPI(

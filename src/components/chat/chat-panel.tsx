@@ -125,6 +125,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { AudioRecorder } from './audio-recorder';
 import { ComposerAiMenu } from './composer-ai-menu';
 import { AnimatedComposer } from './animated-composer';
+import { CatalogDialog } from './catalog-dialog';
 import composerStyles from './composer.module.css';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { reportClientMetric } from '@/lib/observability/client';
@@ -396,6 +397,7 @@ export default function ChatPanel({
     const [mediaFiles, setMediaFiles] = useState<MediaFileType[]>([]);
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const chatRef = useRef(chat?.id);
+    const [catalogChatId, setCatalogChatId] = useState<string | null>(null);
     const newMessageRef = useRef(newMessage);
     newMessageRef.current = newMessage;
 
@@ -2093,9 +2095,20 @@ export default function ChatPanel({
     }));
     const copilotAgentName = selectedInboxAiAgent?.name || selectedAutopilotAgent?.name || 'IA Dialogy';
     const copilotAgentAvatarUrl = selectedInboxAiAgent?.systemAgentAvatarUrl || null;
+    const isRoboQueue = isChatInInboxQueueScope(chat, 'robo');
+    const isAssignedToSystemAgent = Boolean(
+        chat.assigned_system_agent_id ||
+        chat.assignedSystemAgent?.id ||
+        (isRoboQueue && (chat.autopilot_config_id || autopilotConfig?.id))
+    );
+    const assignedSystemAgentId = chat.assigned_system_agent_id || chat.assignedSystemAgent?.id;
+    const assignedInboxAiAgent = assignedSystemAgentId
+        ? inboxAiAgents.find(agent => agent.id === assignedSystemAgentId || agent.systemAgentId === assignedSystemAgentId)
+        : null;
+    const effectiveAgentName = chat.assignedSystemAgent?.name || assignedInboxAiAgent?.name || copilotAgentName || aiTypingDisplayName || 'IA Dialogy';
+    const effectiveAgentAvatarUrl = chat.assignedSystemAgent?.avatar_url || assignedInboxAiAgent?.systemAgentAvatarUrl || copilotAgentAvatarUrl || null;
     const canAiTakeOverConversation = Boolean(selectedInboxAiAgent?.canTakeOverConversation);
     const headerAssigneeName = chat.agent?.name || chat.assignedSystemAgent?.name || 'Não atribuído';
-    const isRoboQueue = isChatInInboxQueueScope(chat, 'robo');
     const headerStatusLabel = chat.status === 'atendimentos'
         ? 'Em atendimento'
         : chat.status === 'encerrados'
@@ -2487,25 +2500,7 @@ export default function ChatPanel({
                     totalListHeightChanged={settleInitialPositionAtLatest}
                     components={{
                         Header: () => <div className="h-4" aria-hidden="true" />,
-                        Footer: () => (
-                            <div className="min-h-4 px-2 pb-2 md:px-6">
-                                {isAiTyping && (
-                                    <div className="flex items-start gap-3 py-1">
-                                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500">
-                                            <Sparkles className="h-4 w-4" />
-                                        </div>
-                                        <div className="rounded-2xl rounded-tl-sm border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm dark:text-emerald-200">
-                                            <span>{aiTypingDisplayName} está analisando</span>
-                                            <span className="ml-1 inline-flex gap-0.5 align-middle">
-                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
-                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
-                                                <span className="h-1 w-1 animate-bounce rounded-full bg-current" />
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )
+                        Footer: () => <div className="h-4" aria-hidden="true" />,
                     }}
                     itemContent={(index, message) => {
                         const arrayIndex = index - firstItemIndex;
@@ -2545,15 +2540,16 @@ export default function ChatPanel({
             {
                 isChatOpen ? (
                     <footer className="z-20 shrink-0 bg-[#F8F9FB] p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-[padding] md:p-[clamp(12px,1.8vh,18px)] md:px-[clamp(16px,2.5vw,40px)] md:pb-[calc(clamp(12px,1.8vh,18px)+env(safe-area-inset-bottom))] dark:bg-black/25">
-                        {/* AI Copilot draft: same orchestrator as the Intelligent Attendant,
-                            proposed to the operator instead of sent to the customer. */}
-                        {isCopilotActive && (
+                        {/* AI Card:
+                            1) In Copilot mode: shows the full draft lifecycle (idle bar, thinking card, suggestion card with actions).
+                            2) In Autonomous Agent mode: shows the thinking card while the AI is preparing a response. */}
+                        {(isCopilotActive || (isAssignedToSystemAgent && isAiTyping)) && (
                             <div className="mb-2.5">
                                 <CopilotSuggestionCard
-                                    suggestion={aiSuggestion}
-                                    isThinking={isAiTyping || isRequestingSuggestion}
-                                    agentName={copilotAgentName}
-                                    agentAvatarUrl={copilotAgentAvatarUrl}
+                                    suggestion={isCopilotActive ? aiSuggestion : null}
+                                    isThinking={isAiTyping || (isCopilotActive && isRequestingSuggestion)}
+                                    agentName={effectiveAgentName}
+                                    agentAvatarUrl={effectiveAgentAvatarUrl}
                                     canRequest={hasAutopilotAvailable}
                                     onSend={(text) => {
                                         // Send exactly what the preview showed: one message per block.
@@ -2587,7 +2583,7 @@ export default function ChatPanel({
                             setIsVoiceActive={setIsVoiceActive}
                             shortcuts={shortcuts}
                             isAiTyping={isAiTyping}
-                            aiTypingDisplayName={copilotAgentName}
+                            aiTypingDisplayName={effectiveAgentName}
                             showAiTypingOverlay={showAiTypingOverlay}
                             isSpellChecking={isSpellChecking}
                             onSpellCheck={handleSpellCheck}
@@ -2603,6 +2599,7 @@ export default function ChatPanel({
                             onLearnFromConversation={handleLearnFromConversation}
                             onOpenToolExecutions={() => setIsToolExecutionsOpen(true)}
                             onOpenAiTakeOver={() => setIsAiTakeOverDialogOpen(true)}
+                            onOpenCatalog={() => setCatalogChatId(chat.id)}
                             emojiPickerTheme={emojiPickerTheme as any}
                             isSendBurstActive={isSendBurstActive}
                             sendFeedbackKey={sendFeedbackKey}
@@ -2611,6 +2608,14 @@ export default function ChatPanel({
                             processFiles={processFiles}
                             externalTextareaRef={textareaRef}
                         />
+                        {catalogChatId === chat.id && (
+                            <CatalogDialog key={chat.id} chatId={chat.id} contactName={chat.contact?.name || 'cliente'}
+                                open onOpenChange={(open) => { if (!open) setCatalogChatId(null); }}
+                                onSent={(message) => {
+                                    if (message) useInboxStore.getState().appendMessagesToChat(chat.id, [message]);
+                                    onActionSuccess();
+                                }} />
+                        )}
                     </footer>
                 ) : (
                     <footer className="p-4 flex-shrink-0 text-center bg-background border-t border-border">

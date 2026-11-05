@@ -100,6 +100,14 @@ export function analyzeProcedureAssistance(procedure: ProcedureDocument, initial
       });
     }
     for (const output of step.httpRequest?.outputMappings || step.mcpTool?.outputMappings || []) collectedKeys.add(output.chipKey.toLowerCase());
+    if (step.type === 'native_action' && ['sgp_fetch_contracts', 'sgp_fetch_contact_panel_data'].includes(step.nativeActionType || '')) {
+      collectedKeys.add('customer_ip');
+      collectedKeys.add('customer_mac');
+      collectedKeys.add('contract_ip');
+      collectedKeys.add('contract_mac');
+      collectedKeys.add('contracts');
+      collectedKeys.add('cpf_cnpj');
+    }
   });
 
   return suggestions;

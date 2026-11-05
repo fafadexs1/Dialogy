@@ -18,6 +18,7 @@ function candidate(overrides: Partial<DistributionCandidate> = {}): Distribution
     effectiveLoad: 0,
     fairnessScore: 0,
     lastAssignedAt: null,
+    onlineSince: null,
     ...overrides,
   };
 }
@@ -56,14 +57,15 @@ describe('fair chat distribution', () => {
     expect(late?.fairnessScoreBefore).toBe(15);
   });
 
-  it('prefers agents below capacity and never exceeds the hard portfolio ceiling', () => {
+  it('uses workload even when a candidate has reached an old portfolio ceiling', () => {
     const selected = rankDistributionCandidates([
       candidate({ agentId: 'at-load-capacity', effectiveLoad: 6, capacity: 6 }),
       candidate({ agentId: 'at-portfolio-capacity', portfolioCount: 25, maxPortfolio: 25 }),
       candidate({ agentId: 'available', effectiveLoad: 5.9, portfolioCount: 24 }),
     ]);
 
-    expect(selected?.agentId).toBe('available');
+    expect(selected?.agentId).toBe('at-portfolio-capacity');
+    expect(selected?.maxPortfolio).toBeNull();
     expect(selected?.overflow).toBe(false);
   });
 
@@ -77,13 +79,14 @@ describe('fair chat distribution', () => {
     expect(selected?.overflow).toBe(true);
   });
 
-  it('keeps the hard portfolio ceiling even when every agent is over capacity', () => {
+  it('overflows to the lowest load regardless of portfolio size or a saved ceiling', () => {
     const selected = rankDistributionCandidates([
       candidate({ agentId: 'full', effectiveLoad: 7, capacity: 6, portfolioCount: 25, maxPortfolio: 25 }),
       candidate({ agentId: 'also-full', effectiveLoad: 9, capacity: 6, portfolioCount: 30, maxPortfolio: 25 }),
     ]);
 
-    expect(selected).toBeNull();
+    expect(selected?.agentId).toBe('full');
+    expect(selected?.overflow).toBe(true);
   });
 
   it('honours allowOverflow: false for callers that prefer queueing', () => {
@@ -123,8 +126,71 @@ describe('fair chat distribution', () => {
     expect(longerIdle?.agentId).toBe('older');
   });
 
+  it('uses history for nearby loads but protects a substantially less occupied agent', () => {
+    const heavilyAssigned = candidate({ agentId: 'many', effectiveLoad: 1, fairnessScore: 100 });
+    const lightlyAssigned = candidate({ agentId: 'few', effectiveLoad: 1.05, fairnessScore: 0 });
+    expect(rankDistributionCandidates([heavilyAssigned, lightlyAssigned])?.agentId).toBe('few');
+    expect(rankDistributionCandidates([
+      heavilyAssigned,
+      { ...lightlyAssigned, effectiveLoad: 3 },
+    ])?.agentId).toBe('many');
+  });
+
+  it('anchors the load band to the minimum and makes selection independent of input order', () => {
+    const agents = [
+      candidate({ agentId: 'least-loaded', effectiveLoad: 1, fairnessScore: 100 }),
+      candidate({ agentId: 'nearby', effectiveLoad: 1.5, fairnessScore: 10 }),
+      candidate({ agentId: 'outside-band', effectiveLoad: 2, fairnessScore: 0 }),
+    ];
+    expect(rankDistributionCandidates(agents)?.agentId).toBe('nearby');
+    expect(rankDistributionCandidates([...agents].reverse())?.agentId).toBe('nearby');
+  });
+
+  it('compares occupancy relative to each agent capacity', () => {
+    expect(rankDistributionCandidates([
+      candidate({ agentId: 'standard', effectiveLoad: 2, capacity: 6, fairnessScore: 10 }),
+      candidate({ agentId: 'higher-capacity', effectiveLoad: 4, capacity: 12, fairnessScore: 0 }),
+    ])?.agentId).toBe('higher-capacity');
+  });
+
+  it('paces a newcomer after the first assignment even with an almost empty portfolio', () => {
+    const now = new Date('2026-10-23T12:00:00Z');
+    const incumbent = candidate({ agentId: 'incumbent', effectiveLoad: 5, fairnessScore: 10 });
+    const newcomer = candidate({
+      agentId: 'newcomer', onlineSince: now.toISOString(), fairnessScore: null,
+    });
+    const first = rankDistributionCandidates([incumbent, newcomer], null, { now });
+    expect(first?.agentId).toBe('newcomer');
+    const assigned = {
+      ...newcomer, effectiveLoad: 1.25, portfolioCount: 1,
+      fairnessScore: first!.fairnessScoreAfter, lastAssignedAt: now.toISOString(),
+    };
+    expect(rankDistributionCandidates([incumbent, assigned], null, {
+      now: new Date(now.getTime() + 1_000),
+    })?.agentId).toBe('incumbent');
+    expect(rankDistributionCandidates([incumbent, assigned], null, {
+      now: new Date(now.getTime() + 60_000),
+    })?.agentId).toBe('newcomer');
+  });
+
+  it('ends entry pacing after five minutes and never makes the only available person unavailable', () => {
+    const now = new Date('2026-10-23T12:00:00Z');
+    const newcomer = candidate({
+      agentId: 'newcomer', onlineSince: now.toISOString(), lastAssignedAt: now.toISOString(),
+    });
+    expect(rankDistributionCandidates([newcomer], null, { now })?.agentId).toBe('newcomer');
+    const incumbent = candidate({ agentId: 'incumbent', effectiveLoad: 5 });
+    expect(rankDistributionCandidates([
+      incumbent, { ...newcomer, onlineSince: '2026-10-23T11:55:00Z' },
+    ], null, { now })?.agentId).toBe('newcomer');
+    expect(rankDistributionCandidates([
+      { ...incumbent, effectiveLoad: 6 }, newcomer,
+    ], null, { now })?.agentId).toBe('newcomer');
+  });
+
   it('locks the team and scopes workload by workspace before persisting the decision', async () => {
     const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [{
@@ -152,20 +218,23 @@ describe('fair chat distribution', () => {
 
     expect(selection?.agentId).toBe('agent-a');
     expect(reason).toBe('available');
-    expect(query).toHaveBeenCalledTimes(4);
+    expect(query).toHaveBeenCalledTimes(5);
     expect(query.mock.calls[0][0]).toContain('pg_advisory_xact_lock');
-    expect(query.mock.calls[1][0]).toContain('assigned_chat.workspace_id = t.workspace_id');
+    expect(query.mock.calls[1][0]).toContain('FOR NO KEY UPDATE OF u');
+    expect(query.mock.calls[1][1]).toEqual(['team-1', 'workspace-1']);
+    expect(query.mock.calls[2][0]).toContain('assigned_chat.workspace_id = t.workspace_id');
     // Mesmo predicado de presenca da interface: is_online + last_seen OU
     // atividade recente. Divergir disso e o que fazia a tela mostrar agentes
     // que o balanceador nao enxergava.
-    expect(query.mock.calls[1][0]).toContain('uwp.is_online = TRUE');
-    expect(query.mock.calls[1][0]).toContain('uwp.recent_activity_at');
-    expect(query.mock.calls[2][0]).toContain('team_agent_distribution_state');
-    expect(query.mock.calls[3][0]).toContain('chat_assignment_events');
+    expect(query.mock.calls[2][0]).toContain('uwp.is_online = TRUE');
+    expect(query.mock.calls[2][0]).toContain('uwp.recent_activity_at');
+    expect(query.mock.calls[3][0]).toContain('team_agent_distribution_state');
+    expect(query.mock.calls[4][0]).toContain('chat_assignment_events');
   });
 
   it('reports why the team had no candidates instead of a generic failure', async () => {
     const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ members: 3, online: 0, accepting: 0 }] });
@@ -179,11 +248,12 @@ describe('fair chat distribution', () => {
 
     expect(selection).toBeNull();
     expect(reason).toBe('all_offline');
-    expect(query.mock.calls[2][0]).toContain('accepting_assignments');
+    expect(query.mock.calls[3][0]).toContain('accepting_assignments');
   });
 
   it('separates a paused team from an offline one', async () => {
     const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ members: 2, online: 2, accepting: 0 }] });
@@ -196,6 +266,24 @@ describe('fair chat distribution', () => {
     });
 
     expect(reason).toBe('not_accepting');
+  });
+
+  it('waits for shared members before reading the workload', async () => {
+    let releaseMembers!: () => void;
+    const membersLocked = new Promise<void>((resolve) => { releaseMembers = resolve; });
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FOR NO KEY UPDATE')) await membersLocked;
+      if (sql.includes('AS members')) return { rows: [{ members: 0, online: 0, accepting: 0 }] };
+      return { rows: [] };
+    });
+    const result = selectFairAgentForTeam({ query } as any, {
+      workspaceId: 'workspace-1', teamId: 'team-1', chatId: 'chat-1', source: 'test',
+    });
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    expect(query.mock.calls.some(([sql]) => sql.includes('AS effective_load'))).toBe(false);
+    releaseMembers();
+    await expect(result).resolves.toMatchObject({ selection: null, reason: 'no_members' });
+    expect(query.mock.calls.some(([sql]) => sql.includes('AS effective_load'))).toBe(true);
   });
 });
 

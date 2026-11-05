@@ -8,6 +8,7 @@ export type CampaignPersonalizationContext = {
   campaignMessage?: string | null;
   now?: Date;
   timeZone?: string | null;
+  csvData?: Record<string, string> | null;
 };
 
 function normalizeTimeZone(value?: string | null): string {
@@ -119,10 +120,18 @@ export function buildCampaignTemplateSendComponents(
     : extractTemplateParameterValues(String(context.campaignMessage || ''), context);
   const fallback = String(context.contactName || '').trim();
   const parameters = Array.from({ length: placeholderCount }, (_, index) => {
+    const column = template.bodyParameterColumns?.[index];
+    const csvValue = column && context.csvData && Object.hasOwn(context.csvData, column)
+      ? context.csvData[column]
+      : undefined;
+    const text = column ? (csvValue?.trim() ? csvValue : configuredValues?.[index] || '') : values[index] ?? fallback;
+    if (column && !text.trim()) {
+      throw new Error(`Coluna "${column}" vazia ou ausente para o campo {{${parameterKeys[index]}}} do template. Informe um valor alternativo.`);
+    }
     const parameterName = template.bodyParameterNames?.[index];
     return {
       type: 'text',
-      text: values[index] ?? fallback,
+      text,
       ...(parameterName && !/^\d+$/.test(parameterName) ? { parameter_name: parameterName } : {}),
     };
   });
@@ -131,4 +140,18 @@ export function buildCampaignTemplateSendComponents(
     type: 'body',
     parameters,
   }];
+}
+
+/** Use the same parameter resolution for the chat history, preview and actual provider send. */
+export function renderCampaignTemplatePreview(
+  template: CampaignTemplate,
+  context: CampaignPersonalizationContext,
+): string {
+  const body = template.components?.find(component => String(component.type).toUpperCase() === 'BODY');
+  const keys = getCampaignTemplateBodyParameterKeys(template);
+  const parameters = buildCampaignTemplateSendComponents(template, context)[0]?.parameters || [];
+  return String(body?.text || `[Template: ${template.name}]`).replace(VARIABLE_PATTERN, (placeholder, key: string) => {
+    const index = keys.indexOf(key.trim());
+    return index >= 0 ? parameters[index]?.text ?? placeholder : placeholder;
+  });
 }

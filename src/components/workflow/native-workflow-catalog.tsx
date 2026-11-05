@@ -1,50 +1,20 @@
 'use client';
 
-import { useMemo, useState, useEffect, type RefObject } from 'react';
-import {
-  AlertTriangle,
-  ArrowRight,
-  Bot,
-  Braces,
-  ChevronDown,
-  ChevronRight,
-  Database,
-  Eye,
-  EyeOff,
-  Filter,
-  GitBranch,
-  GripVertical,
-  HelpCircle,
-  Layers,
-  LayoutGrid,
-  ListChecks,
-  Loader2,
-  LucideIcon,
-  MessageSquareText,
-  PanelLeftClose,
-  Play,
-  Plus,
-  Search,
-  Send,
-  Settings2,
-  Sparkles,
-  Wrench,
-  X,
-  Zap,
-} from 'lucide-react';
+import { useMemo, useState, type RefObject } from 'react';
+import { Star } from 'lucide-react';
+import { WorkflowOperationIcon } from './workflow-operation-icon';
+import type { StudioFlowReleaseSummary } from '@/services/agent-studio/flow-contract';
+import type { StudioFlowSelection } from './studio-composition-inspector';
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
+import { AlertTriangle, Braces, Database, GitBranch, LayoutGrid, LucideIcon, MessageSquareText, Play, Send, Sparkles, Wrench, X, Zap } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
+
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
+
 import { cn } from '@/lib/utils';
-import type {
-  WorkflowNodeCategory,
-  WorkflowNodeManifest,
-} from '@/services/workflow-runtime/catalog';
-import type {
-  WorkflowNode,
-} from '@/services/workflow-runtime/types';
+import type { WorkflowNodeCategory, WorkflowNodeManifest } from '@/services/workflow-runtime/catalog';
+import type { WorkflowNode } from '@/services/workflow-runtime/types';
 import type { NativeAgentToolCatalogItem } from '@/services/workflow-runtime/native-agent-tools';
 
 export type CatalogCategoryMeta = {
@@ -114,6 +84,14 @@ export const BUSINESS_CATEGORY_META: Record<WorkflowNodeCategory, CatalogCategor
 
 export type NativeWorkflowCatalogProps = {
   open: boolean;
+  studioReleases?: StudioFlowReleaseSummary[];
+  studioAllowedTypes?: string[];
+  studioLoading?: boolean;
+  studioError?: string;
+  onAddStudio?: (selection: StudioFlowSelection) => void;
+  favorites?: string[];
+  recent?: string[];
+  onToggleFavorite?: (type: string) => void;
   onClose: () => void;
   query: string;
   onQueryChange: (query: string) => void;
@@ -143,548 +121,66 @@ export type NativeWorkflowCatalogProps = {
   getNodeAccent: (category: WorkflowNodeCategory) => string;
   isNarrowViewport?: boolean;
   panelRef?: RefObject<HTMLElement | null>;
+  unavailableReasons?: Record<string, string>;
 };
 
-export function NativeWorkflowCatalog({
-  open,
-  onClose,
-  query,
-  onQueryChange,
-  selectedWorkflowNode,
-  pendingConnection,
-  recommendedManifests,
-  groupedManifests,
-  attachmentManifests,
-  libraryToolGroups,
-  toolsLoading = false,
-  editorMode,
-  onAddCatalogItem,
-  onAddToolFromLibrary,
-  isNativeAgentToolAttachable,
-  getNativeAgentToolLabel,
-  getNativeAgentToolUnavailableReason,
-  getNodeCopy,
-  getNodeIcon,
-  getNodeAccent,
-  isNarrowViewport,
-  panelRef,
-}: NativeWorkflowCatalogProps) {
-  // Selected category filter tab: 'all' | category
-  const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('all');
-
-  // Open categories set for accordions
-  const [openCategories, setOpenCategories] = useState<Set<string>>(() => {
-    // Default open recommended and first 4 categories
-    return new Set(['recommended', 'triggers', 'interaction', 'ai', 'logic', 'data', 'integrations', 'utilities', 'output', 'advanced']);
-  });
-
-  // When searching, auto open all categories with results
-  useEffect(() => {
-    if (query.trim().length > 0) {
-      const allKeys = new Set<string>(['recommended', 'advanced', 'tools']);
-      groupedManifests.forEach((group) => allKeys.add(group.category));
-      setOpenCategories(allKeys);
-    }
-  }, [query, groupedManifests]);
-
-  const toggleCategory = (categoryKey: string) => {
-    setOpenCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(categoryKey)) {
-        next.delete(categoryKey);
-      } else {
-        next.add(categoryKey);
-      }
-      return next;
-    });
-  };
-
-  const handleExpandAll = () => {
-    const allKeys = new Set<string>(['recommended', 'advanced', 'tools']);
-    groupedManifests.forEach((group) => allKeys.add(group.category));
-    setOpenCategories(allKeys);
-  };
-
-  const handleCollapseAll = () => {
-    setOpenCategories(new Set());
-  };
-
-  // Filter groups by tab
-  const displayedGroups = useMemo(() => {
-    if (selectedCategoryTab === 'all') return groupedManifests;
-    if (selectedCategoryTab === 'recommended') return [];
-    if (selectedCategoryTab === 'advanced') return [];
-    return groupedManifests.filter((group) => group.category === selectedCategoryTab);
-  }, [groupedManifests, selectedCategoryTab]);
-
-  const showRecommended = useMemo(() => {
-    if (selectedCategoryTab === 'all' || selectedCategoryTab === 'recommended') {
-      return recommendedManifests.length > 0;
-    }
-    return false;
-  }, [recommendedManifests.length, selectedCategoryTab]);
-
-  const showAdvanced = useMemo(() => {
-    if (selectedCategoryTab === 'all' || selectedCategoryTab === 'advanced') {
-      return attachmentManifests.length > 0;
-    }
-    return false;
-  }, [attachmentManifests.length, selectedCategoryTab]);
-
-  const totalVisibleBlocks = useMemo(() => {
-    let count = 0;
-    if (showRecommended) count += recommendedManifests.length;
-    displayedGroups.forEach((g) => {
-      count += g.manifests.length;
-    });
-    if (showAdvanced) count += attachmentManifests.length;
-    return count;
-  }, [displayedGroups, recommendedManifests.length, showAdvanced, showRecommended, attachmentManifests.length]);
-
+export function NativeWorkflowCatalog(props: NativeWorkflowCatalogProps) {
+  const { open, onClose, query, onQueryChange, recommendedManifests, groupedManifests, attachmentManifests, favorites = [], recent = [], onToggleFavorite, getNodeCopy, getNodeAccent } = props;
+  const [category, setCategory] = useState('all');
+  const all = useMemo(() => [...new Map([...recommendedManifests, ...groupedManifests.flatMap((group) => group.manifests), ...attachmentManifests].map((manifest) => [manifest.type, manifest])).values()], [recommendedManifests, groupedManifests, attachmentManifests]);
+  const sections = useMemo(() => {
+    if (category === 'favorites') return [{ id: 'favorites', label: 'Favoritos', manifests: all.filter((manifest) => favorites.includes(manifest.type)) }];
+    if (category === 'recent') return [{ id: 'recent', label: 'Usados recentemente', manifests: recent.flatMap((type) => all.filter((manifest) => manifest.type === type)) }];
+    if (category !== 'all') return [{ id: category, label: BUSINESS_CATEGORY_META[category as WorkflowNodeCategory]?.label || 'Operações', manifests: all.filter((manifest) => manifest.category === category) }];
+    const recommended = new Set(recommendedManifests.map((manifest) => manifest.type));
+    return [
+      { id: 'recommended', label: 'Sugeridos para este passo', manifests: recommendedManifests },
+      ...Object.entries(BUSINESS_CATEGORY_META).map(([id, meta]) => ({ id, label: meta.label, manifests: all.filter((manifest) => manifest.category === id && !recommended.has(manifest.type)) })),
+    ];
+  }, [all, category, favorites, recent, recommendedManifests]);
   if (!open) return null;
-
-  return (
-    <aside
-      ref={panelRef}
-      aria-label="Biblioteca de blocos"
-      aria-modal={isNarrowViewport || undefined}
-      role={isNarrowViewport ? 'dialog' : undefined}
-      className={cn(
-        'absolute bottom-3 left-3 top-3 z-50 flex shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#0b1219]/95 shadow-[0_20px_50px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition-all duration-200',
-        isNarrowViewport ? 'w-[calc(100vw-1.5rem)]' : 'w-[370px]'
-      )}
-    >
-      {/* Header */}
-      <div className="border-b border-white/[0.07] bg-[#0f1722]/90 px-4 pb-3 pt-3.5">
-        <div className="mb-2.5 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
-                {selectedWorkflowNode ? 'Próximo passo' : 'Biblioteca de Blocos'}
-              </span>
-              <Badge variant="outline" className="h-4.5 border-slate-700 bg-slate-800/80 px-1.5 text-[9px] font-medium text-slate-300">
-                {totalVisibleBlocks} blocos
-              </Badge>
-            </div>
-            <p className="mt-0.5 truncate text-[11px] text-slate-400">
-              {selectedWorkflowNode
-                ? `Após "${selectedWorkflowNode.name}"`
-                : 'Arraste ou clique para inserir na tela'}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            className="h-8 w-8 rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white"
-            title="Fechar biblioteca"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* Business Search Bar */}
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
-          <Input
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Buscar por nome, função ou ação..."
-            className="h-9 rounded-xl border border-slate-700/60 bg-[#070d14] pl-9 pr-8 text-xs text-slate-200 placeholder:text-slate-500 focus-visible:border-slate-500 focus-visible:ring-1 focus-visible:ring-slate-500"
-          />
-          {query ? (
-            <button
-              type="button"
-              onClick={() => onQueryChange('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-white"
-              title="Limpar busca"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
-        </div>
-
-        {/* Category Pills / Filter Tabs */}
-        <div className="mt-2.5 flex items-center justify-between gap-1">
-          <div className="flex flex-1 items-center gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none]">
-            <button
-              type="button"
-              onClick={() => setSelectedCategoryTab('all')}
-              className={cn(
-                'rounded-lg px-2.5 py-1 text-[11px] font-medium transition whitespace-nowrap',
-                selectedCategoryTab === 'all'
-                  ? 'bg-slate-700/80 text-white shadow-xs'
-                  : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
-              )}
-            >
-              Todos
-            </button>
-            {recommendedManifests.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setSelectedCategoryTab('recommended')}
-                className={cn(
-                  'flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition whitespace-nowrap',
-                  selectedCategoryTab === 'recommended'
-                    ? 'bg-slate-700/80 text-white shadow-xs'
-                    : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
-                )}
-              >
-                <Sparkles className="h-3 w-3" />
-                Sugeridos
-              </button>
-            )}
-            {groupedManifests.map((group) => {
-              const meta = BUSINESS_CATEGORY_META[group.category] || group.meta;
-              const isSelected = selectedCategoryTab === group.category;
-              return (
-                <button
-                  key={group.category}
-                  type="button"
-                  onClick={() => setSelectedCategoryTab(group.category)}
-                  className={cn(
-                    'rounded-lg px-2 py-1 text-[11px] font-medium transition whitespace-nowrap',
-                    isSelected
-                      ? 'bg-slate-700/80 text-white shadow-xs'
-                      : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
-                  )}
-                >
-                  {meta.label.split(' ')[0]}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center pl-1 border-l border-white/[0.08]">
-            <button
-              type="button"
-              onClick={openCategories.size > 0 ? handleCollapseAll : handleExpandAll}
-              className="text-[10px] text-slate-400 hover:text-slate-200 transition px-1 py-0.5 whitespace-nowrap"
-              title={openCategories.size > 0 ? 'Recolher todos' : 'Expandir todos'}
-            >
-              {openCategories.size > 0 ? 'Recolher' : 'Expandir'}
-            </button>
-          </div>
-        </div>
+  return <aside ref={props.panelRef} className={cn('wf-catalog absolute bottom-4 left-4 top-[76px] z-50 flex w-[420px] max-w-[calc(100%-32px)] flex-col overflow-hidden rounded-2xl border border-[var(--wf-border)] bg-[var(--wf-panel)] text-[var(--wf-text)] shadow-xl', props.isNarrowViewport && '!top-4 !w-[calc(100%-32px)]')}
+    aria-label="Biblioteca de operações" role={props.isNarrowViewport ? 'dialog' : undefined} aria-modal={props.isNarrowViewport || undefined}
+    onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose(); } }}>
+    <div className="flex items-center justify-between border-b border-[var(--wf-border)] px-4 py-3">
+      <div><h2 className="text-sm font-semibold">Adicionar operação</h2><p className="mt-1 text-xs text-[var(--wf-muted)]">{props.pendingConnection ? 'Continuar o caminho selecionado' : 'Escolha o próximo passo do fluxo'}</p></div>
+      <Button type="button" size="icon" variant="ghost" onClick={onClose} aria-label="Fechar biblioteca"><X size={16} /></Button>
+    </div>
+    <Command shouldFilter={false} className="min-h-0 flex-1 rounded-none bg-transparent" label="Buscar operações">
+      <CommandInput autoFocus value={query} onValueChange={onQueryChange} placeholder="Buscar operação, função ou ação…" aria-label="Buscar operações" />
+      <div className="flex flex-wrap gap-1 border-b border-[var(--wf-border)] px-3 py-2" aria-label="Categorias de operações">
+        {[{ id: 'all', label: 'Todas' }, { id: 'studio', label: 'IA Studio' }, { id: 'favorites', label: 'Favoritos' }, { id: 'recent', label: 'Recentes' }, ...Object.entries(BUSINESS_CATEGORY_META).filter(([id]) => all.some((manifest) => manifest.category === id)).map(([id, meta]) => ({ id, label: meta.label }))].map((item) =>
+          <button type="button" key={item.id} aria-pressed={category === item.id} onClick={() => setCategory(item.id)} className={cn('min-h-7 rounded-md px-2 text-xs transition-colors', category === item.id ? 'bg-[var(--wf-hover)] font-semibold text-[var(--wf-accent)]' : 'text-[var(--wf-muted)] hover:bg-[var(--wf-hover)]')}>{item.label}</button>)}
       </div>
-
-      {/* Main Accordion Body */}
-      <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3 [scrollbar-width:thin]">
-        {/* Recommended Blocks Accordion */}
-        {showRecommended && (
-          <div className="rounded-xl border border-white/[0.06] bg-[#0e1620]/60 overflow-hidden transition">
-            <button
-              type="button"
-              onClick={() => toggleCategory('recommended')}
-              className="flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:bg-white/[0.03]"
-            >
-              <div className="flex items-center gap-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700/60 bg-slate-800/80 text-slate-300">
-                  <Sparkles className="h-3.5 w-3.5" />
-                </div>
-                <div>
-                  <span className="text-xs font-semibold text-slate-200">Recomendados agora</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-md bg-white/[0.04] border border-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
-                  {recommendedManifests.length}
-                </span>
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 text-slate-400 transition-transform duration-200',
-                    openCategories.has('recommended') ? 'rotate-180' : ''
-                  )}
-                />
-              </div>
-            </button>
-
-            {openCategories.has('recommended') && (
-              <div className="grid gap-1.5 p-2 pt-0">
-                {recommendedManifests.map((manifest) => (
-                  <CatalogItemCard
-                    key={`rec-${manifest.type}`}
-                    manifest={manifest}
-                    copy={getNodeCopy(manifest)}
-                    Icon={getNodeIcon(manifest.type)}
-                    accent={getNodeAccent(manifest.category)}
-                    onAdd={() => onAddCatalogItem(manifest)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Category Accordions */}
-        {displayedGroups.map((group) => {
-          const meta = BUSINESS_CATEGORY_META[group.category] || group.meta;
-          const Icon = meta.icon || group.meta.icon;
-          const isOpen = openCategories.has(group.category);
-
-          return (
-            <div
-              key={group.category}
-              className="rounded-xl border border-white/[0.06] bg-[#0e1620]/60 overflow-hidden transition"
-            >
-              <button
-                type="button"
-                onClick={() => toggleCategory(group.category)}
-                className="flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:bg-white/[0.03]"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700/60 bg-slate-800/80 text-slate-300">
-                    <Icon className="h-3.5 w-3.5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-semibold text-slate-200">{meta.label}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md bg-white/[0.04] border border-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
-                    {group.manifests.length}
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      'h-4 w-4 text-slate-400 transition-transform duration-200',
-                      isOpen ? 'rotate-180' : ''
-                    )}
-                  />
-                </div>
-              </button>
-
-              {isOpen && (
-                <div className="grid gap-1.5 p-2 pt-0">
-                  {group.manifests.map((manifest) => (
-                    <CatalogItemCard
-                      key={manifest.type}
-                      manifest={manifest}
-                      copy={getNodeCopy(manifest)}
-                      Icon={getNodeIcon(manifest.type)}
-                      accent={getNodeAccent(manifest.category)}
-                      onAdd={() => onAddCatalogItem(manifest)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Advanced Attachments Accordion */}
-        {showAdvanced && (
-          <div className="rounded-xl border border-white/[0.06] bg-[#0e1620]/60 overflow-hidden transition">
-            <button
-              type="button"
-              onClick={() => toggleCategory('advanced')}
-              className="flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:bg-white/[0.03]"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700/60 bg-slate-800/80 text-slate-300">
-                  <Settings2 className="h-3.5 w-3.5" />
-                </div>
-                <div>
-                  <span className="text-xs font-semibold text-slate-200">Recursos Avançados</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-md bg-white/[0.04] border border-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
-                  {attachmentManifests.length}
-                </span>
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 text-slate-400 transition-transform duration-200',
-                    openCategories.has('advanced') ? 'rotate-180' : ''
-                  )}
-                />
-              </div>
-            </button>
-
-            {openCategories.has('advanced') && (
-              <div className="space-y-2 p-2 pt-0">
-                <p className="px-1 text-[11px] leading-relaxed text-slate-400">
-                  Normalmente modelo, memória e proteções são configurados dentro do próprio Agente de IA.
-                </p>
-                <div className="grid gap-1.5">
-                  {attachmentManifests.map((manifest) => (
-                    <CatalogItemCard
-                      key={manifest.type}
-                      manifest={manifest}
-                      copy={getNodeCopy(manifest)}
-                      Icon={getNodeIcon(manifest.type)}
-                      accent={getNodeAccent(manifest.category)}
-                      onAdd={() => onAddCatalogItem(manifest)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tools loading state */}
-        {editorMode === 'advanced' && toolsLoading && (
-          <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-[#0e1620]/60 p-3 text-xs text-slate-300">
-            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-            <span>Carregando catálogo de ferramentas…</span>
-          </div>
-        )}
-
-        {/* Agent Tools Library */}
-        {libraryToolGroups.length > 0 && (
-          <div className="rounded-xl border border-white/[0.06] bg-[#0e1620]/60 overflow-hidden transition">
-            <button
-              type="button"
-              onClick={() => toggleCategory('tools')}
-              className="flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:bg-white/[0.03]"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700/60 bg-slate-800/80 text-slate-300">
-                  <Wrench className="h-3.5 w-3.5" />
-                </div>
-                <div>
-                  <span className="text-xs font-semibold text-slate-200">Ferramentas & Integrações MCP</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 text-slate-400 transition-transform duration-200',
-                    openCategories.has('tools') ? 'rotate-180' : ''
-                  )}
-                />
-              </div>
-            </button>
-
-            {openCategories.has('tools') && (
-              <div className="space-y-3 p-2 pt-0">
-                {libraryToolGroups.map((group) => (
-                  <div key={group.id} className="space-y-1">
-                    <p className="px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      {group.label}
-                    </p>
-                    <div className="grid gap-1.5">
-                      {group.tools.map((tool) => {
-                        const eligible = isNativeAgentToolAttachable(tool);
-                        const label = getNativeAgentToolLabel(tool);
-                        const reason = getNativeAgentToolUnavailableReason(tool);
-
-                        return (
-                          <button
-                            key={tool.name}
-                            type="button"
-                            draggable={eligible}
-                            disabled={!eligible}
-                            title={reason || tool.description}
-                            onClick={() => onAddToolFromLibrary(tool)}
-                            onDragStart={(event) =>
-                              event.dataTransfer.setData(
-                                'application/dialogy-workflow-tool',
-                                JSON.stringify(tool)
-                              )
-                            }
-                            className="group flex w-full items-center gap-2.5 rounded-xl border border-white/[0.04] bg-[#111822]/80 p-2 text-left transition hover:border-slate-600 hover:bg-[#16212e] disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700/60 bg-slate-800/90 text-slate-300">
-                              <Wrench className="h-3.5 w-3.5" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <span className="block truncate text-xs font-medium text-slate-200 group-hover:text-white">
-                                {label}
-                              </span>
-                              <span className="block truncate text-[10px] text-slate-400">
-                                {reason || tool.description}
-                              </span>
-                            </div>
-                            <span className="text-[10px] font-medium text-slate-400 opacity-0 group-hover:opacity-100 transition">
-                              + Inserir
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Empty State */}
-        {!toolsLoading &&
-          !showRecommended &&
-          displayedGroups.length === 0 &&
-          !showAdvanced &&
-          libraryToolGroups.length === 0 && (
-            <div className="rounded-xl border border-dashed border-slate-800 bg-white/[0.01] p-6 text-center">
-              <HelpCircle className="mx-auto mb-2 h-7 w-7 text-slate-500 opacity-60" />
-              <p className="text-xs font-medium text-slate-300">Nenhum bloco encontrado</p>
-              <p className="mt-1 text-[11px] text-slate-500">
-                Tente buscar por termos como "mensagem", "condição", "agente" ou "webhook".
-              </p>
-              {query && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onQueryChange('')}
-                  className="mt-3 h-7 rounded-lg border-slate-700 bg-slate-800/80 text-[11px] text-slate-300 hover:bg-slate-700 hover:text-white"
-                >
-                  Limpar busca
-                </Button>
-              )}
-            </div>
-          )}
-      </div>
-    </aside>
-  );
-}
-
-function CatalogItemCard({
-  manifest,
-  copy,
-  Icon,
-  accent,
-  onAdd,
-}: {
-  manifest: WorkflowNodeManifest;
-  copy: { label: string; description: string };
-  Icon: LucideIcon;
-  accent: string;
-  onAdd: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      draggable
-      onClick={onAdd}
-      title={`Adicionar ${copy.label}${manifest.attachment ? '' : ' e conectar ao bloco selecionado'}`}
-      onDragStart={(event) => {
-        event.dataTransfer.setData('application/dialogy-workflow-node', manifest.type);
-        event.dataTransfer.effectAllowed = 'copy';
-      }}
-      className="group relative flex w-full items-start gap-2.5 rounded-xl border border-white/[0.04] bg-[#111822]/80 p-2 text-left transition-all duration-150 hover:border-slate-600/70 hover:bg-[#16212e] active:scale-[0.99] cursor-grab active:cursor-grabbing"
-    >
-      <div
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700/60 bg-slate-800/90 text-slate-300 shadow-xs group-hover:border-slate-500 group-hover:text-white transition mt-0.5"
-      >
-        <Icon className="h-3.5 w-3.5" />
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-semibold text-slate-200 group-hover:text-white transition">
-          {copy.label}
-        </span>
-        <span className="block truncate text-[10px] leading-tight text-slate-400 mt-0.5">
-          {copy.description}
-        </span>
-      </div>
-
-      <div className="flex items-center gap-1 self-center opacity-0 group-hover:opacity-100 transition shrink-0">
-        <span className="rounded border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-medium text-slate-400 group-hover:text-slate-200">
-          + Inserir
-        </span>
-      </div>
-    </button>
-  );
+      <CommandList className="min-h-0 max-h-none flex-1 p-2">
+        <CommandEmpty>Nenhuma operação compatível encontrada.</CommandEmpty>
+        {(category === 'all' || category === 'studio') && <CommandGroup heading="IA Studio · publicações reutilizáveis" className="text-[var(--wf-muted)]">
+          {props.studioReleases?.flatMap((release) => [
+            { type: 'ai.studio_agent', release, label: `${release.agentName} · Agente`, procedureId: undefined },
+            ...(release.contract.modes.includes('task') ? [{ type: 'tool.studio_agent', release, label: `${release.agentName} · Especialista como ferramenta`, procedureId: undefined }] : []),
+            ...release.procedures.flatMap((procedure) => [{ type: 'integration.studio_procedure', release, label: `${procedure.name} · Habilidade de ${release.agentName}`, procedureId: procedure.id }, ...(release.contract.modes.includes('task') ? [{ type: 'tool.studio_procedure', release, label: `${procedure.name} · Ferramenta de ${release.agentName}`, procedureId: procedure.id }] : [])]),
+          ]).filter((entry) => (props.studioAllowedTypes || all.map((manifest) => manifest.type)).includes(entry.type) && entry.label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase())).map((entry) => <CommandItem key={`${entry.type}:${entry.release.releaseId}:${entry.procedureId || ''}`} value={`${entry.type}:${entry.release.releaseId}:${entry.procedureId || ''}`} onSelect={() => props.onAddStudio?.(entry)} draggable onDragStart={(event) => { event.dataTransfer.setData('application/dialogy-studio-flow', JSON.stringify({ type: entry.type, releaseId: entry.release.releaseId, procedureId: entry.procedureId })); event.dataTransfer.effectAllowed = 'copy'; }} className="gap-3 py-3 text-[var(--wf-text)] data-[selected=true]:bg-[var(--wf-hover)]"><WorkflowOperationIcon type={entry.type} /><span><span className="block text-sm">{entry.label}</span><span className="block text-xs text-[var(--wf-muted)]">Versão {entry.release.version} · {entry.release.contract.modes.map((mode) => mode === 'task' ? 'tarefa' : 'conversa').join(' / ')}</span></span></CommandItem>)}
+          {props.studioLoading && <p role="status" className="p-3 text-xs">Carregando o Studio…</p>}{props.studioError && <p role="alert" className="p-3 text-xs text-[var(--wf-danger)]">{props.studioError}</p>}{!props.studioLoading && !props.studioError && !props.studioReleases?.length && <p className="p-3 text-xs">Habilite Uso no Flowbuilder no Studio e publique um agente para reutilizá-lo aqui.</p>}
+        </CommandGroup>}
+        {sections.filter((section) => section.manifests.length).map((section) => <CommandGroup key={section.id} heading={section.label} className="text-[var(--wf-muted)]">
+          {section.manifests.map((manifest) => {
+            const copy = getNodeCopy(manifest);
+            const favorite = favorites.includes(manifest.type);
+            return <CommandItem key={manifest.type} value={manifest.type} disabled={Boolean(props.unavailableReasons?.[manifest.type])} onSelect={() => { if (!props.unavailableReasons?.[manifest.type]) props.onAddCatalogItem(manifest); }} draggable
+              onDragStart={(event) => { if (props.unavailableReasons?.[manifest.type]) { event.preventDefault(); return; } event.dataTransfer.setData('application/dialogy-workflow-node', manifest.type); event.dataTransfer.effectAllowed = 'copy'; }}
+              className="group my-1 flex cursor-pointer items-center gap-3 rounded-xl px-3 py-3 text-[var(--wf-text)] data-[selected=true]:bg-[var(--wf-hover)] data-[selected=true]:text-[var(--wf-text)]">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ color: getNodeAccent(manifest.category), backgroundColor: `${getNodeAccent(manifest.category)}16` }}><WorkflowOperationIcon type={manifest.type} size={19} /></span>
+              <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{copy.label}</span><span className="mt-1 block text-xs leading-5 text-[var(--wf-muted)]">{props.unavailableReasons?.[manifest.type] || copy.description}</span></span>
+              <button type="button" aria-label={`${favorite ? 'Remover' : 'Adicionar'} ${copy.label} ${favorite ? 'dos' : 'aos'} favoritos`} aria-pressed={favorite} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--wf-muted)] hover:text-[var(--wf-accent)]" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onToggleFavorite?.(manifest.type); }}><Star size={15} fill={favorite ? 'currentColor' : 'none'} /></button>
+            </CommandItem>;
+          })}
+        </CommandGroup>)}
+        {props.libraryToolGroups.map((group) => <CommandGroup key={group.id} heading={group.label}>
+          {group.tools.map((tool) => <CommandItem key={tool.name} value={`tool:${tool.name}`} disabled={!props.isNativeAgentToolAttachable(tool)} onSelect={() => props.onAddToolFromLibrary(tool)} draggable onDragStart={(event) => { if (!props.isNativeAgentToolAttachable(tool)) { event.preventDefault(); return; } event.dataTransfer.setData('application/dialogy-workflow-tool', JSON.stringify(tool)); event.dataTransfer.effectAllowed = 'copy'; }} className="gap-3 py-3 text-[var(--wf-text)] data-[selected=true]:bg-[var(--wf-hover)]"><Wrench size={18} /><span><span className="block text-sm">{props.getNativeAgentToolLabel(tool)}</span><span className="block text-xs text-[var(--wf-muted)]">{props.getNativeAgentToolUnavailableReason(tool) || tool.description}</span></span></CommandItem>)}
+        </CommandGroup>)}
+        {props.toolsLoading && <p role="status" className="p-4 text-xs text-[var(--wf-muted)]">Carregando ferramentas…</p>}
+      </CommandList>
+    </Command>
+    <footer className="flex gap-4 border-t border-[var(--wf-border)] px-4 py-2 text-xs text-[var(--wf-muted)]"><span>↑ ↓ navegar</span><span>Enter inserir</span><span>Esc fechar</span></footer>
+  </aside>;
 }

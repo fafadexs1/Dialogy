@@ -113,7 +113,11 @@ export function resolveEvolutionInteractiveSelectionFromQuotedMessage(
       });
     }
   }
-  const buttons = Array.isArray(interactive.buttons) ? interactive.buttons : [];
+  const cards = Array.isArray(interactive.cards) ? interactive.cards : [];
+  const buttons = [
+    ...(Array.isArray(interactive.buttons) ? interactive.buttons : []),
+    ...cards.flatMap((card: any) => Array.isArray(card?.buttons) ? card.buttons : []),
+  ];
   for (const button of buttons) {
     const id = String(button?.id || '').trim();
     if (!id) continue;

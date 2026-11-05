@@ -1,8 +1,9 @@
 import { db } from '@/lib/db';
+import { createHash } from 'node:crypto';
 import { decryptWithKey, encryptWithKey } from '@/lib/security/secret-box';
 import type { WorkflowDefinition } from '@/services/workflow-runtime';
 
-export type NexusCredentialType = 'bearer' | 'api_key' | 'basic' | 'smtp' | 'google_oauth' | 'database';
+export type NexusCredentialType = 'bearer' | 'api_key' | 'basic' | 'smtp' | 'google_oauth' | 'database' | 'oauth2';
 
 export type NexusCredentialSummary = {
   id: string;
@@ -28,12 +29,12 @@ function encryptionKey() {
   return { secret: process.env.META_PAYLOAD_ENCRYPTION_KEY, envName: 'META_PAYLOAD_ENCRYPTION_KEY' };
 }
 
-function encryptPayload(payload: Record<string, unknown>) {
+export function encryptPayload(payload: Record<string, unknown>) {
   const key = encryptionKey();
   return encryptWithKey(JSON.stringify(payload), key.secret, key.envName);
 }
 
-function decryptPayload(value: string): Record<string, unknown> {
+export function decryptPayload(value: string): Record<string, unknown> {
   const key = encryptionKey();
   const parsed = JSON.parse(decryptWithKey(value, key.secret, key.envName));
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Credencial armazenada em formato inválido.');
@@ -100,16 +101,29 @@ export async function loadNexusCredentialPayload(input: {
   workspaceId: string;
   credentialId: string;
   allowedTypes?: NexusCredentialType[];
+  expectedFingerprint?: string;
 }) {
   const result = await db.query(
-    `SELECT credential_type, encrypted_payload FROM public.nexus_credentials
+    `SELECT credential_type, encrypted_payload, metadata FROM public.nexus_credentials
      WHERE workspace_id = $1 AND id = $2 LIMIT 1`,
     [input.workspaceId, input.credentialId],
   );
   if (!result.rows[0]) throw new Error('Credencial não encontrada neste workspace.');
   const type = result.rows[0].credential_type as NexusCredentialType;
   if (input.allowedTypes && !input.allowedTypes.includes(type)) throw new Error(`Credencial incompatível com esta ação: ${type}.`);
-  return { type, payload: decryptPayload(String(result.rows[0].encrypted_payload)) };
+  if (input.expectedFingerprint && credentialFingerprint(type, String(result.rows[0].encrypted_payload)) !== input.expectedFingerprint) throw new Error('A credencial mudou após a aprovação. Solicite uma nova autorização.');
+  return { type, payload: decryptPayload(String(result.rows[0].encrypted_payload)), metadata: parseMetadata(result.rows[0].metadata) };
+}
+
+function credentialFingerprint(type: string, encryptedPayload: string) {
+  return createHash('sha256').update(JSON.stringify([type, encryptedPayload])).digest('hex');
+}
+
+/** Bind approvals to the exact encrypted workspace credential without exposing its contents. */
+export async function nexusCredentialFingerprint(input: { workspaceId: string; credentialId: string; type: NexusCredentialType }) {
+  const { rows } = await db.query(`SELECT credential_type, encrypted_payload FROM public.nexus_credentials WHERE workspace_id = $1 AND id = $2 LIMIT 1`, [input.workspaceId, input.credentialId]);
+  if (!rows[0] || rows[0].credential_type !== input.type || typeof rows[0].encrypted_payload !== 'string') throw new Error('Credencial não encontrada neste workspace.');
+  return credentialFingerprint(input.type, rows[0].encrypted_payload);
 }
 
 export async function validateNexusWorkflowCredentialBindings(input: {

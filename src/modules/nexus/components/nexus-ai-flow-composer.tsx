@@ -64,7 +64,7 @@ export function NexusAiFlowComposer({
 
   const isExpanded = expanded && input.length > 0;
   const resetButton = (
-    <button type="button" onClick={() => { setMessages([]); setInput(''); setError(''); setLastProposal(null); }} disabled={busy} title="Nova instrução" aria-label="Nova instrução" style={{ color: '#202124', opacity: 1 }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-[#f4f4f4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d5d7dc]"><Plus className="h-5 w-5" strokeWidth={1.8} /></button>
+    <button type="button" onClick={() => { setMessages([]); setInput(''); setError(''); setLastProposal(null); }} disabled={busy} title="Nova instrução" aria-label="Nova instrução" style={{ color: 'var(--wf-text)', opacity: 1 }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-[#f4f4f4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d5d7dc]"><Plus className="h-5 w-5" strokeWidth={1.8} /></button>
   );
   const composerInput = (
     <Textarea
@@ -81,14 +81,14 @@ export function NexusAiFlowComposer({
       disabled={busy || disabled}
       aria-label="Descreva a alteração que a IA deve fazer no fluxo"
       placeholder="Peça à Nexus AI"
-      style={{ color: '#202124', opacity: 1, WebkitTextFillColor: '#202124' }}
+      style={{ color: 'var(--wf-text)', opacity: 1, WebkitTextFillColor: 'var(--wf-text)' }}
       className="max-h-32 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2.5 py-2 text-base font-normal leading-6 shadow-none placeholder:!text-[#8e8e93] placeholder:opacity-100 focus-visible:ring-0 disabled:cursor-wait disabled:opacity-100"
     />
   );
   const actionControls = (
     <div className="flex shrink-0 items-center gap-1">
-      <span style={{ color: '#8e8e93', opacity: 1 }} className="hidden shrink-0 items-center gap-1 px-1.5 text-sm sm:flex">Automático <ChevronDown className="h-3.5 w-3.5" /></span>
-      <span style={{ color: '#202124', opacity: 1 }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full hover:bg-[#f4f4f4]" title="Entrada por voz"><Mic className="h-[18px] w-[18px]" strokeWidth={1.8} /></span>
+      <span style={{ color: 'var(--wf-muted)', opacity: 1 }} className="hidden shrink-0 items-center gap-1 px-1.5 text-sm sm:flex">Automático <ChevronDown className="h-3.5 w-3.5" /></span>
+      <span style={{ color: 'var(--wf-text)', opacity: 1 }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full hover:bg-[#f4f4f4]" title="Entrada por voz"><Mic className="h-[18px] w-[18px]" strokeWidth={1.8} /></span>
       <Button type="button" size="icon" onClick={() => void submit()} disabled={busy || disabled || !input.trim()} style={{ backgroundColor: '#3c83f6', color: '#ffffff' }} className="h-9 w-9 shrink-0 rounded-full !bg-[#3c83f6] !text-white opacity-100 shadow-none hover:!bg-[#3478e8] disabled:!bg-[#3c83f6] disabled:!text-white disabled:opacity-100">
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : input.trim() ? <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.2} /> : <AudioLines className="h-[18px] w-[18px]" />}
         <span className="sr-only">Enviar pedido para a IA</span>
@@ -98,8 +98,8 @@ export function NexusAiFlowComposer({
 
   return (
     <div
-      style={{ width: 'min(800px, calc(100% - 32px))' }}
-      className="pointer-events-none absolute bottom-6 left-1/2 z-20 -translate-x-1/2"
+      style={{ width: 'min(720px, calc(100% - 120px))' }}
+      className="wf-assistant pointer-events-none relative mx-auto w-full shrink-0 py-3"
     >
       <div className="pointer-events-auto w-full">
         {(lastProposal || error) && (
@@ -116,7 +116,7 @@ export function NexusAiFlowComposer({
           </div>
         )}
         <div
-          style={{ backgroundColor: '#ffffff', borderColor: '#e5e7eb', color: '#202124', opacity: 1 }}
+          style={{ backgroundColor: 'var(--wf-panel)', borderColor: 'var(--wf-border)', color: 'var(--wf-text)', opacity: 1 }}
           className={cn('isolate border px-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.08),0_8px_28px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow,border-radius] focus-within:border-[#d5d7dc] focus-within:shadow-[0_2px_14px_rgba(0,0,0,0.1),0_10px_32px_rgba(0,0,0,0.05)]', isExpanded ? 'rounded-[28px] pb-2 pt-2.5' : 'rounded-[28px] py-1.5')}
         >
           {isExpanded ? (

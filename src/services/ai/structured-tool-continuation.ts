@@ -3,6 +3,7 @@ export function createStructuredToolContinuation() {
   const messages: Record<string, unknown>[] = [];
   let pending: string | null = null;
   return {
+    estimatedBytes() { return Buffer.byteLength(JSON.stringify(messages), 'utf8'); },
     messages(system: string, context: string) {
       if (!messages.length) messages.push({ role: 'system', content: system }, { role: 'user', content: context });
       else if (pending) {

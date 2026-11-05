@@ -2,6 +2,7 @@
 
 import { HTMLInputTypeAttribute } from "react";
 import type { WorkflowDefinition } from '@/services/workflow-runtime/types';
+import type { WhatsappCatalog } from '@/lib/whatsapp/catalog';
 
 export type InterfaceTheme = 'light' | 'dark' | 'system';
 
@@ -309,8 +310,8 @@ export type MessageMetadata = {
   packId?: string;
   buyerId?: string;
   questionId?: string;
-  interactiveType?: 'list' | 'buttons';
-  interactivePayload?: {
+  interactiveType?: 'list' | 'buttons' | 'carousel';
+  interactivePayload?: ({ kind: 'carousel' } & WhatsappCatalog) | {
     kind: 'list';
     title?: string;
     description?: string;
@@ -1146,6 +1147,8 @@ export interface CampaignTemplate {
   components: any[];
   bodyParameterValues?: string[];
   bodyParameterNames?: string[];
+  /** CSV column for each body parameter; bodyParameterValues supplies its optional fallback. */
+  bodyParameterColumns?: (string | null)[];
 }
 
 export type CampaignMediaType = 'image' | 'audio';

@@ -1,4 +1,5 @@
 export type QueueJobType =
+  | 'nexus_workflow'
   | 'evolution_webhook_process'
   | 'whatsapp_send'
   | 'webhook_outbound'
@@ -58,6 +59,7 @@ export type MarketingAutoClosePayload = {
   chatId: string;
   workspaceId: string;
   marketingSentAt: string;
+  marketingMessageId?: string;
   autoCloseMs: number;
 };
 
@@ -84,6 +86,7 @@ export type AiAutopilotProcessPayload = {
   messageId: string;
   lastMessageContent?: string;
   instanceName: string;
+  suggestionRequest?: { agentId: string };
 };
 
 export type AiCaseMemoryRefreshPayload = {
@@ -125,6 +128,7 @@ export type NexusInternalEventPayload = {
 };
 
 export type QueueJobPayload =
+  | { workspaceId: string; automationJobId: string }
   | EvolutionWebhookProcessPayload
   | WhatsappSendPayload
   | WebhookOutboundPayload

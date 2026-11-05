@@ -1,4 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
+import { getAgentToolDefinition } from '@/services/agent-tools/catalog';
+import type { AgentToolName } from '@/services/agent-tools/types';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import type { AutopilotFlowGraph } from '@/lib/types';
 import { previewAutopilotNativeMigration } from './autopilot-migration';
@@ -136,6 +138,7 @@ function attachPreservedCapabilities(workflow: WorkflowDefinition, config: Autop
   }
 
   for (const [index, toolName] of tools.entries()) {
+    const nativeDefinition = toolName.startsWith('mcp:') ? null : getAgentToolDefinition(toolName as AgentToolName);
     const existing = workflow.nodes.find((node) => node.type.startsWith('tool.') && node.config.name === toolName);
     const tool = existing || createWorkflowNode(toolName.startsWith('mcp:') ? 'tool.mcp' : 'tool.internal', {
       id: `cutover_tool_${safeId(toolName) || 'tool'}_${index}`,
@@ -146,7 +149,16 @@ function attachPreservedCapabilities(workflow: WorkflowDefinition, config: Autop
           const [, serverId = '', mcpTool = ''] = toolName.split(':');
           return { name: toolName, serverId, allowedTools: mcpTool ? [mcpTool] : [], description: toolName, audit: true };
         })()
-        : { name: toolName, action: toolName, description: toolName, idempotent: true },
+        : {
+          name: toolName, action: toolName,
+          description: nativeDefinition?.description || toolName,
+          inputSchema: nativeDefinition?.inputSchema || {},
+          outputSchema: nativeDefinition?.outputSchema || {},
+          class: nativeDefinition?.class,
+          riskLevel: nativeDefinition?.riskLevel || 'low',
+          idempotent: nativeDefinition?.idempotent ?? true,
+          timeoutMs: nativeDefinition?.timeoutMs || 20_000,
+        },
     });
     if (!existing) workflow.nodes.push(tool);
     for (const agent of agents) {

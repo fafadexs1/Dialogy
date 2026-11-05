@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { StudioFlowContractSchema } from './flow-contract';
 
 // ==========================================
 // 1. DATA COLLECTION FIELD TYPES
@@ -375,6 +376,7 @@ export const AGENT_SERVICE_TYPE_LABELS: Record<AgentServiceType, string> = {
 };
 
 export const AgentStudioDocumentSchema = z.object({
+  flowBuilder: StudioFlowContractSchema.optional(),
   id: z.string().min(1),
   workspaceId: z.string().min(1),
   name: z.string().max(200),
@@ -456,6 +458,7 @@ export type AgentStudioDocument = z.infer<typeof AgentStudioDocumentSchema>;
 // 6. IMMUTABLE RELEASE MANIFEST
 // ==========================================
 export const AgentReleaseManifestSchema = z.object({
+  flowContract: StudioFlowContractSchema.optional(),
   releaseId: z.string().min(1),
   agentId: z.string().min(1),
   workspaceId: z.string().min(1),

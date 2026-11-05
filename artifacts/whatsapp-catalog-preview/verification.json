@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "viewports": [
+    "1280x900",
+    "390x844"
+  ],
+  "checks": [
+    "actual Baileys conversation composer",
+    "labelled catalog button",
+    "dialog fields",
+    "add/remove products",
+    "purchase URL",
+    "simulated send",
+    "workflow editor",
+    "mobile bounds"
+  ],
+  "pageErrors": []
+}

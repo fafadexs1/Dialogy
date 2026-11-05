@@ -1,3 +1,4 @@
+import { studioSgpOutputs } from './sgp-data';
 import type { AgentStudioDocument, ProcedureDocument, ProcedureStep } from './types';
 
 export type StudioDataOption = { key: string; label: string; type?: string; sourceType: 'collected_field' | 'step_output' | 'contact_property'; guaranteed: boolean };
@@ -33,7 +34,7 @@ export function studioDataAtSteps(document: AgentStudioDocument, procedure: Proc
 }
 
 export function studioStepOutputs(step: ProcedureStep) {
-  return step.type === 'http_request' ? step.httpRequest?.outputMappings || [] : step.type === 'mcp_tool_call' ? step.mcpTool?.outputMappings || [] : [];
+  return step.type === 'http_request' ? step.httpRequest?.outputMappings || [] : step.type === 'mcp_tool_call' ? step.mcpTool?.outputMappings || [] : studioSgpOutputs(step);
 }
 
 export function availableStudioData(document: AgentStudioDocument, procedure: ProcedureDocument | null, index: number): StudioDataOption[] {
@@ -43,6 +44,10 @@ export function availableStudioData(document: AgentStudioDocument, procedure: Pr
   for (const step of (procedure?.steps || []).slice(0, index)) {
     if (step.type === 'collect_data' && step.collectField) fields.push({ key: step.collectField.variableKey, label: step.collectField.name, type: step.collectField.type, sourceType: 'collected_field', guaranteed: guaranteed.has(step.collectField.variableKey) });
     for (const output of studioStepOutputs(step)) fields.push({ key: output.chipKey, label: `${output.chipLabel} · ${step.title}`, sourceType: 'step_output', guaranteed: guaranteed.has(output.chipKey) });
+    if (step.type === 'native_action' && ['sgp_fetch_contracts', 'sgp_fetch_contact_panel_data'].includes(step.nativeActionType || '')) {
+      fields.push({ key: 'customer_ip', label: `IP do Roteador / Conexão · ${step.title}`, sourceType: 'step_output', guaranteed: guaranteed.has('customer_ip') });
+      fields.push({ key: 'customer_mac', label: `MAC do Roteador · ${step.title}`, sourceType: 'step_output', guaranteed: guaranteed.has('customer_mac') });
+    }
   }
   fields.push(...[{ key: 'name', label: 'Nome do contato' }, { key: 'email', label: 'E-mail do contato' }, { key: 'phone', label: 'Telefone do contato' }].map((field) => ({ ...field, sourceType: 'contact_property' as const, guaranteed: false })));
   return fields.filter((field, index) => fields.findIndex((candidate) => candidate.key === field.key && candidate.sourceType === field.sourceType) === index);

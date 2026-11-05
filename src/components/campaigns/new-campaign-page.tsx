@@ -9,8 +9,8 @@ import { getTelegramInstances as fetchTelegramInstances } from '@/actions/telegr
 import { listMetaChannels as fetchMetaChannels } from '@/actions/meta-channels';
 import { createCampaign } from '@/actions/campaigns';
 import { MAX_CAMPAIGN_LIST_ROWS, MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
-import { parseCampaignContactsCsv } from '@/lib/campaigns/csv-import';
-import { getCampaignTemplateBodyParameterKeys, renderCampaignMessage } from '@/lib/campaigns/personalization';
+import { parseCampaignContactsFile } from '@/lib/campaigns/file-import';
+import { getCampaignTemplateBodyParameterKeys, renderCampaignMessage, renderCampaignTemplatePreview } from '@/lib/campaigns/personalization';
 import { uploadFileToStorage } from '@/lib/supabase/storage';
 import type { CampaignChannel, CampaignInteractivePayload, CampaignMediaAttachment, CampaignScheduleConfig, CampaignTemplate, Contact as ContactType, EvolutionInstance, MetaChannel, Segment, TelegramBotInstance, User } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -56,6 +56,10 @@ type CsvImportSummary = {
   imported: number;
   invalidRows: number;
   duplicateRows: number;
+  totalRows: number;
+  expandedRows: number;
+  headerRow: number | null;
+  sheetName?: string;
 };
 
 async function loadCampaignChannels(workspaceId: string) {
@@ -260,6 +264,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     { id: 'opt_1', label: '' },
   ]);
   const [csvImportSummary, setCsvImportSummary] = useState<CsvImportSummary | null>(null);
+  const [isImportingContacts, setIsImportingContacts] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<CampaignScheduleConfig['mode']>('immediate');
   const [scheduleEndAt, setScheduleEndAt] = useState('');
   const [windowStart, setWindowStart] = useState('09:00');
@@ -276,7 +281,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   // Data states
   const [crmContacts, setCrmContacts] = useState<ContactType[]>([]);
   const [visibleCrmContacts, setVisibleCrmContacts] = useState<ContactType[]>([]);
-  const [csvContacts, setCsvContacts] = useState<ContactType[]>([]);
+  const [csvContacts, setCsvContacts] = useState<(ContactType & { csvData: Record<string, string> })[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [segmentPreviewContacts, setSegmentPreviewContacts] = useState<ContactType[]>([]);
   const [segmentTotal, setSegmentTotal] = useState(0);
@@ -286,6 +291,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   const [whatsappTemplates, setWhatsappTemplates] = useState<WhatsappTemplateOption[]>([]);
   const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
   const [templateParameterValues, setTemplateParameterValues] = useState<string[]>([]);
+  const [templateParameterColumns, setTemplateParameterColumns] = useState<(string | null)[]>([]);
 
   // Loading states
   const [loadingCrm, setLoadingCrm] = useState(true);
@@ -421,17 +427,26 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }, [deliveryChannel, instances, metaChannels, telegramInstances]);
 
   const selectedTemplate = whatsappTemplates.find(template => template.name === selectedTemplateName) || null;
-  const templateBodyParameterKeys = getCampaignTemplateBodyParameterKeys(selectedTemplate);
+  const templateBodyParameterKeys = useMemo(() => getCampaignTemplateBodyParameterKeys(selectedTemplate), [selectedTemplate]);
   const templateBodyParameterCount = templateBodyParameterKeys.length;
+  const csvColumns = Object.keys(csvContacts[0]?.csvData || {});
   const areTemplateParametersComplete = templateBodyParameterCount === 0 || Array.from(
     { length: templateBodyParameterCount },
-    (_, index) => Boolean(templateParameterValues[index]?.trim()),
+    (_, index) => {
+      const column = templateParameterColumns[index];
+      const fallback = Boolean(templateParameterValues[index]?.trim());
+      if (!column) return fallback;
+      return csvColumns.includes(column)
+        && csvContacts.every(contact => Boolean(contact.csvData[column]?.trim()) || fallback)
+        && (!(selectedCrmIds.size > 0 || selectedSegmentIds.size > 0) || fallback);
+    },
   ).every(Boolean);
-  const campaignTemplate: CampaignTemplate | null = selectedTemplate ? {
+  const campaignTemplate = useMemo<CampaignTemplate | null>(() => selectedTemplate ? {
     ...selectedTemplate,
     bodyParameterValues: templateParameterValues.slice(0, templateBodyParameterCount),
     bodyParameterNames: templateBodyParameterKeys,
-  } : null;
+    bodyParameterColumns: templateParameterColumns.slice(0, templateBodyParameterCount),
+  } : null, [selectedTemplate, templateParameterValues, templateParameterColumns, templateBodyParameterKeys, templateBodyParameterCount]);
   const campaignMessage = deliveryChannel === 'whatsapp_cloud' ? templatePreview(campaignTemplate) : message;
   const preview = useMemo(() => {
     const channel = CHANNEL_OPTIONS.find(option => option.value === deliveryChannel) ?? CHANNEL_OPTIONS[0];
@@ -440,14 +455,25 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     return {
       channel,
       destinationLabel,
-      message: campaignMessage,
+      message: (() => {
+        if (!campaignTemplate) return campaignMessage;
+        try {
+          return renderCampaignTemplatePreview(campaignTemplate, {
+            contactName: csvContacts[0]?.name || PREVIEW_CONTACT_NAME,
+            csvData: csvContacts[0]?.csvData,
+          });
+        } catch {
+          return campaignMessage;
+        }
+      })(),
     };
-  }, [campaignMessage, channelDestinations, deliveryChannel, destinationId]);
+  }, [campaignMessage, campaignTemplate, csvContacts, channelDestinations, deliveryChannel, destinationId]);
 
   useEffect(() => {
     setDestinationId(null);
     setSelectedTemplateName(null);
     setTemplateParameterValues([]);
+    setTemplateParameterColumns([]);
     setWhatsappTemplates([]);
     if (deliveryChannel !== 'whatsapp_baileys') {
       setMediaAttachment(null);
@@ -464,6 +490,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       setWhatsappTemplates([]);
       setSelectedTemplateName(null);
       setTemplateParameterValues([]);
+      setTemplateParameterColumns([]);
       return;
     }
 
@@ -498,6 +525,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     && consentConfirmed
     && customScheduleIsValid
     && !isUploadingMedia
+    && !isImportingContacts
     && (deliveryChannel !== 'whatsapp_cloud' || selectedTemplate)
     && (deliveryChannel !== 'whatsapp_cloud' || areTemplateParametersComplete)
   );
@@ -507,6 +535,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
     const parameterKeys = getCampaignTemplateBodyParameterKeys(template);
     setSelectedTemplateName(templateName);
     setTemplateParameterValues(Array.from({ length: parameterKeys.length }, () => PLACEHOLDER));
+    setTemplateParameterColumns([]);
   }
 
   function toggleSelect(id: string) {
@@ -541,21 +570,16 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
   }
 
   async function importCsvFile(file: File) {
-    if (!user?.activeWorkspaceId) return;
-    const lowerName = file.name.toLowerCase();
-    if (!lowerName.endsWith('.csv') && file.type && !file.type.includes('csv')) {
-      toast({ title: 'Arquivo invalido', description: 'Selecione um arquivo CSV.', variant: 'destructive' });
-      return;
-    }
+    if (!user?.activeWorkspaceId || isImportingContacts) return;
 
+    setIsImportingContacts(true);
     try {
-      const text = await file.text();
-      const parsed = parseCampaignContactsCsv(text);
+      const parsed = await parseCampaignContactsFile(file);
 
       if (parsed.contacts.length === 0) {
         toast({
           title: 'Nenhum contato importado',
-          description: parsed.errors[0] || 'Confira se o CSV possui uma coluna de telefone ou WhatsApp.',
+          description: parsed.errors[0] || 'Confira se a planilha possui uma coluna de telefone ou WhatsApp.',
           variant: 'destructive',
         });
         return;
@@ -567,22 +591,29 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
         name: contact.name,
         phone: contact.phone,
         phone_number_jid: contact.phone_number_jid,
-      } as ContactType)));
+        csvData: contact.csvData,
+      } as ContactType & { csvData: Record<string, string> })));
       setCsvImportSummary({
         fileName: file.name,
         imported: parsed.contacts.length,
         invalidRows: parsed.invalidRows,
         duplicateRows: parsed.duplicateRows,
+        totalRows: parsed.totalRows,
+        expandedRows: parsed.expandedRows,
+        headerRow: parsed.headerRow,
+        sheetName: parsed.sheetName,
       });
       setTab('csv');
 
       toast({
-        title: 'CSV importado',
+        title: 'Planilha normalizada',
         description: `${parsed.contacts.length} contato(s) pronto(s) para o disparo.`,
       });
     } catch (error) {
-      console.error('[NEW_CAMPAIGN] Falha ao importar CSV', error);
-      toast({ title: 'Erro ao importar CSV', description: 'Nao foi possivel ler este arquivo.', variant: 'destructive' });
+      console.error('[NEW_CAMPAIGN] Falha ao importar planilha', error);
+      toast({ title: 'Erro ao importar planilha', description: error instanceof Error ? error.message : 'Não foi possível ler este arquivo.', variant: 'destructive' });
+    } finally {
+      setIsImportingContacts(false);
     }
   }
 
@@ -730,7 +761,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
       return;
     }
     if (deliveryChannel === 'whatsapp_cloud' && !areTemplateParametersComplete) {
-      toast({ title: 'Campos do template incompletos', description: 'Preencha todos os campos editáveis do template antes de criar a campanha.', variant: 'destructive' });
+      toast({ title: 'Campos do template incompletos', description: 'Revise as colunas selecionadas e informe um valor alternativo quando houver células vazias ou contatos fora da planilha.', variant: 'destructive' });
       return;
     }
     if (!customScheduleIsValid) {
@@ -1067,7 +1098,8 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                       <div className="mt-4 space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/[0.06]">
                         <div>
                           <p className="text-sm font-semibold text-foreground">Campos editáveis do template</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Defina o conteúdo de cada variável. A pré-visualização é atualizada imediatamente.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Use um valor fixo ou uma coluna da planilha para cada variável. Cada destinatário recebe o valor da sua linha.</p>
+                          {csvContacts.length === 0 && <p className="mt-1 text-xs text-muted-foreground">Importe um CSV ou Excel na seção Público para disponibilizar suas colunas.</p>}
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2">
                           {Array.from({ length: templateBodyParameterCount }, (_, index) => (
@@ -1075,6 +1107,32 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                               <label htmlFor={`template-parameter-${index}`} className="text-xs font-medium text-foreground">
                                 Campo {index + 1} <span className="font-normal text-muted-foreground">{`{{${templateBodyParameterKeys[index]}}}`}</span>
                               </label>
+                              <Select
+                                value={templateParameterColumns[index] ? `column:${templateParameterColumns[index]}` : 'fixed'}
+                                onValueChange={(value) => {
+                                  setTemplateParameterColumns(current => {
+                                    const next = [...current];
+                                    next[index] = value === 'fixed' ? null : value.slice('column:'.length);
+                                    return next;
+                                  });
+                                  setTemplateParameterValues(current => {
+                                    const next = [...current];
+                                    next[index] = '';
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <SelectTrigger aria-label={`Origem do campo ${index + 1}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="fixed">Valor fixo ou personalização</SelectItem>
+                                  {csvColumns.map(column => <SelectItem key={column} value={`column:${column}`}>Coluna: {column}</SelectItem>)}
+                                  {templateParameterColumns[index] && !csvColumns.includes(templateParameterColumns[index]!) && (
+                                    <SelectItem value={`column:${templateParameterColumns[index]}`}>Coluna indisponível: {templateParameterColumns[index]}</SelectItem>
+                                  )}
+                                </SelectContent>
+                              </Select>
+                              {templateParameterColumns[index] && <p className="text-xs text-muted-foreground">Exemplo da primeira linha: {csvContacts[0]?.csvData[templateParameterColumns[index]!] || '(vazio)'}</p>}
+                              {templateParameterColumns[index] && <label htmlFor={`template-parameter-${index}`} className="block text-xs text-muted-foreground">Valor alternativo para células vazias ou contatos fora da planilha</label>}
                               <Input
                                 id={`template-parameter-${index}`}
                                 value={templateParameterValues[index] || ''}
@@ -1083,8 +1141,8 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                                   next[index] = event.target.value;
                                   return next;
                                 })}
-                                placeholder="Digite o conteúdo deste campo"
-                                aria-invalid={!templateParameterValues[index]?.trim()}
+                                placeholder={templateParameterColumns[index] ? 'Valor alternativo (opcional)' : 'Digite o conteúdo deste campo'}
+                                aria-invalid={!templateParameterColumns[index] && !templateParameterValues[index]?.trim()}
                               />
                             </div>
                           ))}
@@ -1092,6 +1150,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                         <p className="text-[11px] text-muted-foreground">
                           Personalização disponível: <code>{'{{nome}}'}</code>, <code>{'{{primeiro_nome}}'}</code> e <code>{'{{Saudação}}'}</code>.
                         </p>
+                        {!areTemplateParametersComplete && <p role="alert" className="text-xs text-destructive">Preencha os valores fixos, revise as colunas e informe um valor alternativo para células vazias ou contatos fora da planilha.</p>}
                       </div>
                     )}
                   </div>
@@ -1293,36 +1352,41 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                           dragActive ? "border-primary bg-primary/5" : "border-border"
                         )}
                         role="region"
-                        aria-label="Área para soltar arquivo CSV"
+                        aria-label="Área para soltar planilha"
+                        aria-busy={isImportingContacts}
                       >
-                        <Icon.Upload className="h-6 w-6" />
-                        <p className="text-sm">Arraste e solte seu arquivo CSV aqui</p>
-                        <p className="text-xs text-muted-foreground">Ou clique para selecionar</p>
+                        {isImportingContacts ? <Icon.Loader2 className="h-6 w-6 animate-spin" /> : <Icon.Upload className="h-6 w-6" />}
+                        <p className="text-sm">{isImportingContacts ? 'Lendo e normalizando a planilha...' : 'Arraste e solte seu CSV ou Excel aqui'}</p>
+                        <p className="text-xs text-muted-foreground">CSV ou XLSX, incluindo exportações do SGP. Até 10 MB.</p>
                         <input
                           type="file"
-                          accept=".csv,text/csv"
-                          aria-label="Selecionar arquivo CSV"
+                          accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                          aria-label="Selecionar planilha CSV ou Excel"
+                          disabled={isImportingContacts}
                           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                           onChange={handleCsvInputChange}
                         />
                       </div>
-                      <p className="mt-2 text-xs text-muted-foreground">Após importar, detectaremos as colunas <code>nome</code> e <code>telefone</code>.</p>
+                      <p className="mt-2 text-xs text-muted-foreground">Detectamos o cabeçalho, separamos os telefones de cada célula e adicionamos o DDI 55 aos números brasileiros. As demais colunas ficam disponíveis para o template.</p>
                       {csvImportSummary && (
                         <div className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
                           <p className="font-medium text-emerald-700">
                             {csvImportSummary.imported} contato(s) importado(s) de {csvImportSummary.fileName}
                           </p>
+                          <p className="mt-1 text-muted-foreground">Colunas disponíveis para o template: {csvColumns.join(', ')}.</p>
+                          <p className="mt-1 text-muted-foreground">{csvImportSummary.totalRows} linha(s) de dados{csvImportSummary.sheetName ? ` na aba ${csvImportSummary.sheetName}` : ''}. {csvImportSummary.expandedRows > 0 ? `${csvImportSummary.expandedRows} linha(s) com vários telefones foram separadas em destinatários individuais.` : ''}</p>
+                          {csvImportSummary.headerRow !== null && csvImportSummary.headerRow > 1 && <p className="mt-1 text-muted-foreground">Cabeçalho identificado na linha {csvImportSummary.headerRow}; o resumo inicial foi ignorado.</p>}
                           {(csvImportSummary.invalidRows > 0 || csvImportSummary.duplicateRows > 0) && (
                             <p className="mt-1 text-muted-foreground">
                               {csvImportSummary.invalidRows > 0 ? `${csvImportSummary.invalidRows} linha(s) sem telefone valido. ` : ''}
-                              {csvImportSummary.duplicateRows > 0 ? `${csvImportSummary.duplicateRows} duplicata(s) ignorada(s).` : ''}
+                              {csvImportSummary.duplicateRows > 0 ? `${csvImportSummary.duplicateRows} telefone(s) repetido(s) ignorado(s); mantidos os dados da primeira ocorrência.` : ''}
                             </p>
                           )}
                         </div>
                       )}
                       {csvContacts.length > 0 && (
                         <div className="mt-3 overflow-hidden rounded-md border">
-                          <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">Prévia do CSV</div>
+                          <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">Prévia da planilha normalizada</div>
                           <ul className="max-h-44 divide-y overflow-y-auto">
                             {csvContacts.slice(0, 20).map(contact => (
                               <li key={contact.id} className="flex items-center gap-3 p-2">
@@ -1589,6 +1653,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
               <CardHeader>
                 <h3 className="text-xl font-semibold">Pré-visualização</h3>
                 <p className="text-sm text-muted-foreground">Veja o conteúdo que será enviado no canal selecionado.</p>
+                {deliveryChannel === 'whatsapp_cloud' && csvContacts.length > 0 && <p className="text-xs text-muted-foreground">Exemplo com {csvContacts[0].name}, da primeira linha importada.</p>}
               </CardHeader>
               <CardContent>
                 <div className="mx-auto w-full max-w-sm rounded-2xl border bg-background p-4">
@@ -1617,7 +1682,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                         <p className="font-semibold">{applyPlaceholder(interactiveTitle)}</p>
                       )}
                       <p className={cx(interactiveEnabled && interactiveTitle.trim() ? 'mt-1' : undefined)}>
-                        {preview.message ? applyPlaceholder(preview.message) : "Sua mensagem aparecerá aqui..."}
+                        {preview.message ? (deliveryChannel === 'whatsapp_cloud' ? preview.message : applyPlaceholder(preview.message)) : "Sua mensagem aparecerá aqui..."}
                       </p>
                       {interactiveEnabled && interactiveFooter.trim() && (
                         <p className="mt-1.5 text-[10px] text-white/75">{applyPlaceholder(interactiveFooter)}</p>
@@ -1653,7 +1718,7 @@ export default function NewCampaignPageClient({ user }: { user: User | null }) {
                       </div>
                     )}
 
-                    <p className="text-[10px] text-muted-foreground">Previa com {PREVIEW_CONTACT_NAME}, primeiro nome e saudacao atual.</p>
+                    <p className="text-[10px] text-muted-foreground">{deliveryChannel === 'whatsapp_cloud' && csvContacts.length > 0 ? 'Valores preenchidos com a primeira linha da planilha.' : `Prévia com ${PREVIEW_CONTACT_NAME}, primeiro nome e saudação atual.`}</p>
                   </div>
                 </div>
               </CardContent>

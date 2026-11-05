@@ -191,6 +191,9 @@ export type SgpIdentificationContract = {
   statusLabel: string;
   addressLabel: string;
   planDescription: string;
+  ip?: string | null;
+  mac?: string | null;
+  login?: string | null;
 };
 
 export type SgpIdentificationResult =
@@ -212,15 +215,30 @@ export async function lookupSgpCustomerContracts(target: SgpRuntimeTarget): Prom
     if (!context.success) return { status: context.code === 'SGP_IDENTIFIER_MISSING' ? 'missing-identifier' : context.code === 'SGP_IDENTIFIER_INVALID' ? 'invalid-identifier' : 'unavailable' };
     const clients = await fetchSgpClients(context.data, true);
     if (clients.length === 0) return { status: 'not-found' };
-    const panel = buildSGPContactPanelData(clients, []);
+    let supportContracts: any[] = [];
+    try {
+      const rawSupportContracts = await fetchSupportContracts(context.data);
+      const validatedSupportContracts = filterSupportContractsToValidatedClients(clients, rawSupportContracts);
+      supportContracts = await enrichSupportContractsWithLiveRadius({
+        global: context.data.global,
+        user: context.data.user,
+        contracts: validatedSupportContracts,
+      });
+    } catch (supportErr) {
+      console.warn('[SGP] Falha ao enriquecer contratos com suporte/radius:', supportErr);
+    }
+    const panel = buildSGPContactPanelData(clients, supportContracts);
     if (!panel) return { status: 'unavailable' };
-    // Only the selection fields leave this boundary, excluding invoices and credentials.
+    // The selection fields and live connection coordinates leave this boundary, excluding invoices and credentials.
     const contracts = panel.contracts.map(contract => ({
       id: contract.id,
       statusTone: contract.statusTone,
       statusLabel: contract.statusLabel || 'Sem status',
       addressLabel: contract.addressLabel || '',
       planDescription: contract.planDescription || '',
+      ip: contract.ip || null,
+      mac: contract.mac || null,
+      login: contract.login || null,
     }));
     return { status: 'found', cpfCnpj: context.data.cpf, contracts };
   } catch {

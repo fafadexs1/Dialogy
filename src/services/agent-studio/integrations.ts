@@ -2,6 +2,7 @@ import 'server-only';
 
 import { validateSchema } from 'genkit/schema';
 import { listNexusCredentialSummaries, loadNexusCredentialPayload } from '@/modules/nexus/services/credentials';
+import { resolveNexusOAuthToken } from '@/modules/nexus/services/oauth-credentials';
 import { executeNexusHttpOperation } from '@/modules/nexus/services/http-executor';
 import { callMcpServerTool, parseQualifiedMcpToolName } from '@/services/mcp/client';
 import { getMcpWorkspaceConfig } from '@/services/mcp/store';
@@ -21,10 +22,14 @@ export function redactStudioIntegrationResult(value: unknown, secrets: string[] 
   }
   if (Array.isArray(value)) return value.map((item) => redactStudioIntegrationResult(item, secrets, depth + 1));
   if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key,
-    /password|secret|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie/i.test(key)
-      ? '[protegido]' : redactStudioIntegrationResult(child, secrets, depth + 1),
-  ]));
+  const obj = value as Record<string, unknown>;
+  const isWifiRadio = 'ssid' in obj || 'band' in obj || 'radios' in obj;
+
+  return Object.fromEntries(Object.entries(obj).map(([key, child]) => {
+    const isWifiPassword = (isWifiRadio || /wifi|wlan/i.test(key)) && /password|passphrase|key/i.test(key);
+    const shouldRedact = !isWifiPassword && /password|secret|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie/i.test(key);
+    return [key, shouldRedact ? '[protegido]' : redactStudioIntegrationResult(child, secrets, depth + 1)];
+  }));
 }
 
 /** Same network executor as Nexus: DNS-pinned HTTPS, response limits, no redirects. */
@@ -43,14 +48,24 @@ export async function executeStudioHttp(input: {
   let baseUrl: string | undefined;
   const authHeaders: Record<string, string> = {};
   const secrets: string[] = [];
+  let oauthCredentialId: string | undefined;
   if (config.connectionId) {
     const connections = await listNexusCredentialSummaries(input.workspaceId);
     const connection = connections.find((item) => item.id === config.connectionId && item.metadata.kind === 'agent_http');
     if (!connection) throw new Error('Conexão de API não encontrada neste workspace.');
+    const notionSearch = connection.metadata.provider === 'notion' && config.method === 'POST' && config.url === '/v1/search';
+    const calendarFreebusy = connection.metadata.provider === 'google_workspace' && connection.metadata.app === 'calendar' && config.method === 'POST' && config.url === '/calendar/v3/freeBusy';
+    if (['google_workspace', 'github', 'notion'].includes(String(connection.metadata.provider)) && connection.metadata.access === 'read' && config.method !== 'GET' && !notionSearch && !calendarFreebusy) throw new Error('Esta conexão permite apenas leitura.');
     if (input.expectedConnectionFingerprint && input.expectedConnectionFingerprint !== studioConnectionFingerprint(connection)) throw new Error('A identidade ou o endereço da conexão mudou. Revise e publique o agente novamente antes de executar.');
     baseUrl = String(connection.metadata.baseUrl || '');
     if (!baseUrl) throw new Error('A conexão está sem endereço base.');
-    if (connection.metadata.authType !== 'none') {
+    if (connection.metadata.allowedOrigin && connection.metadata.allowedOrigin !== new URL(baseUrl).origin) throw new Error('Esta credencial não autoriza a origem configurada.');
+    if (connection.metadata.authType === 'oauth2') {
+      if (connection.type !== 'oauth2') throw new Error('Credencial OAuth2 incompatível com a conexão.');
+      oauthCredentialId = connection.id;
+      // Reserve the authorization header before acquiring any credentials.
+      authHeaders.Authorization = '';
+    } else if (connection.metadata.authType !== 'none') {
       const credential = await loadNexusCredentialPayload({
         workspaceId: input.workspaceId, credentialId: connection.id, allowedTypes: ['api_key', 'bearer', 'basic'],
       });
@@ -92,7 +107,7 @@ export async function executeStudioHttp(input: {
   try {
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        const error = new Error('A chamada de API excedeu o tempo limite.');
+        const error = Object.assign(new Error('A chamada de API excedeu o tempo limite.'), { code: 'TIMEOUT' });
         controller.abort(error);
         reject(error);
       }, config.timeoutSeconds * 1000);
@@ -109,6 +124,11 @@ export async function executeStudioHttp(input: {
       signal: controller.signal,
     });
     const executeWithSafeRetries = async () => {
+      if (oauthCredentialId) {
+        const token = await resolveNexusOAuthToken(input.workspaceId, oauthCredentialId, new URL(request.url).origin, controller.signal);
+        secrets.push(token);
+        authHeaders.Authorization = `Bearer ${token}`;
+      }
       const retries = config.method === 'GET' && !config.requiresConfirmation ? config.maxRetries : 0;
       for (let attempt = 0; ; attempt++) {
         controller.signal.throwIfAborted();
@@ -129,7 +149,12 @@ export async function executeStudioHttp(input: {
     const response = redactStudioIntegrationResult(result.data, secrets);
     return { statusCode: Number(result.status), response, values: mapStudioOutputs(response, config.outputMappings) };
   } catch (error) {
-    throw new Error(String(redactStudioIntegrationResult(error instanceof Error ? error.message : 'Falha na chamada de API.', secrets)));
+    const source = error as { status?: unknown; code?: unknown; details?: { status?: unknown } } | null;
+    const status = Number(source?.status ?? source?.details?.status);
+    const code = typeof source?.code === 'string' && /^[A-Z0-9_]{1,60}$/.test(source.code) ? source.code : undefined;
+    throw Object.assign(new Error(String(redactStudioIntegrationResult(error instanceof Error ? error.message : 'Falha na chamada de API.', secrets))), {
+      ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {}), ...(code ? { code } : {}),
+    });
   } finally {
     clearTimeout(timer);
     input.signal?.removeEventListener('abort', abort);
@@ -173,7 +198,14 @@ export async function executeStudioMcp(input: {
   }
   let result: Awaited<ReturnType<typeof callMcpServerTool>>;
   try { result = await callMcpServerTool({ server, toolName: tool.name, arguments: args, totalTimeoutMs: 30_000, strictPublicNetwork: true, signal: input.signal }); }
-  catch (error) { throw new Error(String(redactStudioIntegrationResult(error instanceof Error ? error.message : 'Falha no MCP.', Object.values(server.headers || {})))); }
+  catch (error) {
+    const source = error as { status?: unknown; code?: unknown } | null;
+    const status = Number(source?.status);
+    const code = typeof source?.code === 'string' && /^[A-Z0-9_]{1,60}$/.test(source.code) ? source.code : undefined;
+    throw Object.assign(new Error(String(redactStudioIntegrationResult(error instanceof Error ? error.message : 'Falha no MCP.', Object.values(server.headers || {})))), {
+      ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {}), ...(code ? { code } : {}),
+    });
+  }
   if (result.isError) throw new Error('A ferramenta informou falha. Nenhum resultado foi considerado concluído.');
   let data: unknown = result.structuredContent;
   if (data === undefined) {

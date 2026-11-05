@@ -911,6 +911,58 @@ async function main() {
           messageText: 'Contratos localizados com sucesso no sistema SGP da Velpro.'
         }
       ]
+    },
+
+    // 13. NOVO PROCEDIMENTO: Consulta do Nome da Rede Wi-Fi (SSID)
+    {
+      id: 'a1000001-0000-4000-8000-000000000013',
+      name: 'Consulta do Nome da Rede Wi-Fi (SSID)',
+      description: 'Consulta do nome atual da rede sem fio (SSID) configurado no roteador quando o cliente esquece ou deseja saber o nome do seu Wi-Fi.',
+      objective: 'Localizar o roteador do cliente via TR-069 e informar o nome atual da rede Wi-Fi (PrimarySSID) sem alterar nenhuma configuração.',
+      priority: 176,
+      whenToUse: 'Quando o cliente perguntar qual é o nome do seu Wi-Fi, disser que esqueceu o nome da rede ou quiser apenas saber/consultar o SSID atual sem alterar.',
+      whenNotToUse: 'Não usar quando o cliente quiser alterar ou trocar o nome do Wi-Fi (usar o procedimento de Alteração) ou para suporte financeiro.',
+      triggerKeywords: ['qual o nome do wifi', 'esqueci o nome do wifi', 'nome da rede', 'qual meu wifi', 'consultar wifi', 'saber o nome da rede', 'ver nome do wifi', 'apenas saber o nome atual', 'qual meu ssid', 'esqueci o nome'],
+      exampleRequests: ['Esqueci o nome do meu Wi-Fi', 'Qual é o nome da minha rede?', 'Apenas saber o nome atual', 'Por incrível que pareça esqueci o nome do meu Wi-Fi'],
+      status: 'published',
+      publishedVersion: nextVersion,
+      updatedAt: new Date().toISOString(),
+      steps: [
+        createCpfStep('consult_ssid', 1),
+        createSgpContractsStep('consult_ssid', 2),
+        createContractStep('consult_ssid', 3),
+        {
+          id: 'step_consult_ssid_list',
+          order: 4,
+          type: 'mcp_tool_call',
+          title: 'Localizar roteador e consultar SSID atual',
+          adaptiveAccess: { enabled: true, requiresSteps: [] },
+          mcpTool: {
+            serverId: mcpServerId,
+            serverName: 'MCP-TR069-Routers',
+            qualifiedToolName: `mcp:${mcpServerId}:list_routers`,
+            friendlyToolName: 'Localizar roteador e Wi-Fi',
+            riskLevel: 'read_only',
+            requiresConfirmation: false,
+            argumentMappings: [
+              { argumentName: 'limit', sourceType: 'static_value', sourceChipKey: '5', sourceChipLabel: 'Limite', valueType: 'number' }
+            ],
+            outputMappings: [
+              { jsonPath: '[0].ID', chipKey: 'consult_device_id', chipLabel: 'ID do Equipamento', required: true },
+              { jsonPath: '[0].PrimarySSID', chipKey: 'consult_primary_ssid', chipLabel: 'Nome da Rede Wi-Fi (SSID)', required: false }
+            ],
+            fallbackAction: 'handoff',
+            fallbackHandoffTeam: supportTeamId
+          }
+        },
+        {
+          id: 'step_consult_ssid_reply',
+          order: 5,
+          type: 'respond',
+          title: 'Informar nome atual da rede Wi-Fi',
+          messageText: 'Nome da rede Wi-Fi (SSID) consultado com sucesso no equipamento do assinante.'
+        }
+      ]
     }
   ];
 
@@ -959,11 +1011,10 @@ async function main() {
 - Não recomece saudações nem se apresente repetidamente ao retomar a conversa. Vá direto ao ponto.
 - Planeje o diagnóstico conforme o sintoma relatado: queda total (verificar sinal óptico Rx/Tx dBm), lentidão (verificar canais Wi-Fi e clientes conectados), intermitência (verificar uptime e rádios).
 
-## 4. AÇÕES CONDICIONAIS E ESCRITAS NO EQUIPAMENTO
-- Diagnóstico em leitura não autoriza reinício nem troca de parâmetros.
-- O reinício do roteador exige pedido ou indicação técnica justificada, explicação prévia do impacto (interrupção temporária) e autorização explícita imediatamente anterior. Nunca reinicie com luz LOS vermelha (falha física de fibra).
-- A alteração do nome do Wi-Fi (SSID) exige autorização explícita e aviso prévio de que os dispositivos serão desconectados. Não altere senha de Wi-Fi pelo chat (transfira para suporte humano seguro).
-- Não prometa prazos de visita técnica ou reparo sem confirmação real do sistema.
+## 4. CONSULTA E ALTERAÇÃO DO NOME DO WI-FI (SSID)
+- Se o cliente perguntar qual é o nome do seu Wi-Fi, disser que esqueceu o nome da rede ou quiser "Apenas saber o nome atual", execute a consulta via TR-069 (list_routers) e informe com precisão o nome exato da rede (PrimarySSID) encontrado no roteador dele.
+- Se o cliente quiser ALTERAR ou TROCAR o nome da rede, colete o novo nome desejado (com até 32 caracteres) e aplique via configure_wifi após consentimento prévio e aviso de que os aparelhos serão desconectados.
+- Não altere nem revele senhas de Wi-Fi pelo chat (transfira para suporte humano seguro).
 
 ## 5. RESOLUÇÃO E ENCERRAMENTO
 - Só encerre o atendimento quando o cliente confirmar que a internet voltou ou solicitar explicitamente o término.
@@ -1198,7 +1249,8 @@ async function main() {
     // CRITICAL: Reset session state for active chats of 5561995215930 so they immediately pick up V65!
     const resetResult = await client.query(
       `UPDATE autopilot_conversation_states s
-       SET metadata = jsonb_set(s.metadata, '{agent_studio}', 'null'::jsonb)
+       SET metadata = jsonb_set(COALESCE(s.metadata, '{}'::jsonb), '{agent_studio}', 'null'::jsonb),
+           updated_at = NOW()
        FROM chats ch
        JOIN contacts co ON co.id = ch.contact_id
        WHERE ch.id = s.chat_id AND co.phone LIKE '%5561995215930%'`

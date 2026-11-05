@@ -9,18 +9,18 @@ import { executeSgpIdentification } from '@/modules/nexus/services/sgp-identific
 import { InMemoryWorkflowPersistence, WorkflowExecutor, createDefaultNodeHandlerRegistry } from '@/services/workflow-runtime';
 import { workflowNode, workflowDefinition, connect } from './workflow-runtime-fixtures';
 
-function harness(allowNewCustomer = false) {
+function harness(allowNewCustomer = false, copy: Record<string, unknown> = {}, optionsDelivery = true) {
   const variables: Record<string, unknown> = {};
   const sendOptions = vi.fn().mockResolvedValue({ success: true });
   const sendResponse = vi.fn().mockResolvedValue({ success: true });
   return {
     variables, sendOptions, sendResponse,
     async run(value?: string) {
-      const input = { node: { id: 'identify', config: { outputKey: 'identity', allowNewCustomer } },
+      const input = { node: { id: 'identify', config: { outputKey: 'identity', allowNewCustomer, ...copy } },
         workflow: { workspaceId: 'workspace-1' }, execution: { executionId: 'execution-1', conversationId: 'chat-1', variables },
         input: value === undefined ? {} : { resume: { selectedOptionId: value } },
       } as unknown as NodeRuntimeInput;
-      const result = await executeSgpIdentification(input, { sendOptions, sendResponse });
+      const result = await executeSgpIdentification(input, { sendOptions: optionsDelivery ? sendOptions : undefined, sendResponse });
       Object.assign(variables, result.statePatch);
       return result;
     },
@@ -30,6 +30,29 @@ const contracts = Array.from({ length: 20 }, (_, index) => ({ id: String(index +
 
 describe('Identification before Velpro handoff', () => {
   beforeEach(() => { lookup.mockReset(); saveDocument.mockReset().mockResolvedValue('saved'); });
+  it('uses editable identification copy and stable button IDs in native menus', async () => {
+    lookup.mockResolvedValue({ status: 'missing-identifier' });
+    const h = harness(false, { messages: { missingDocument: 'Vamos localizar seu cadastro.', enterDocumentLabel: 'Informar documento', backLabel: 'Retornar', requestDocument: 'Digite seu documento.', invalidDocument: 'Revise seu documento.', invalidOption: 'Escolha Informar documento para continuar.' } });
+    await h.run();
+    expect(h.sendOptions.mock.calls.at(-1)![0]).toMatchObject({ title: 'Vamos localizar seu cadastro.', choices: [{ id: 'other_cpf', label: 'Informar documento' }, { id: 'back', label: 'Retornar' }] });
+    await h.run('unknown');
+    expect(h.sendOptions.mock.calls.at(-1)![0]).toMatchObject({ invalid: true, invalidMessage: 'Escolha Informar documento para continuar.' });
+    await h.run('other_cpf');
+    expect(h.sendResponse).toHaveBeenLastCalledWith('Digite seu documento.', expect.anything());
+    await h.run('123');
+    expect(h.sendResponse).toHaveBeenLastCalledWith('Revise seu documento.', expect.anything());
+    expect((await h.run('Retornar')).selectedOutput).toBe('cancelled');
+  });
+  it('uses the same editable copy for text fallback and preserves pagination placeholders', async () => {
+    lookup.mockResolvedValue({ status: 'found', cpfCnpj: '52998224725', contracts });
+    const h = harness(false, { messages: { selectContract: 'Escolha o contrato · página {{page}} de {{pages}}', invalidOption: 'Seleção não reconhecida.' } }, false);
+    await h.run();
+    expect(h.sendResponse.mock.calls.at(-1)![0]).toContain('Escolha o contrato · página 1 de 4');
+    await h.run('next');
+    expect(h.sendResponse.mock.calls.at(-1)![0]).toContain('Escolha o contrato · página 2 de 4');
+    await h.run('invalid');
+    expect(h.sendResponse.mock.calls.at(-1)![0]).toContain('Seleção não reconhecida.');
+  });
   it('paginates every contract without dropping IDs and always offers another CPF', async () => {
     lookup.mockResolvedValue({ status: 'found', cpfCnpj: '52998224725', contracts });
     const h = harness();

@@ -115,7 +115,13 @@ function extractCustomerIdentifierFromText(text: string, takeLast = false): { ra
 
 function extractCustomerIdentifierFromContact(contact?: Contact | null): string | null {
   const customFields = contact?.custom_fields || {};
-  const values = Object.values(customFields)
+  const entries = Object.entries(customFields);
+  // A named document field is a stronger source than an unrelated custom
+  // field that happens to contain eleven or fourteen digits.
+  const documentFields = entries.filter(([key]) =>
+    /^(?:cpf|cnpj|cpf_cnpj|documento|document|customer_identifier|tax_id)$/i.test(key.trim()),
+  );
+  const values = (documentFields.length ? documentFields.map(([, value]) => value) : entries.map(([, value]) => value))
     .flatMap((value) => Array.isArray(value) ? value : [value])
     .map((value) => String(value ?? ''))
     .filter(Boolean);
@@ -187,7 +193,8 @@ function extractOrderId(text: string): string | null {
 }
 
 function extractInvoiceId(text: string): string | null {
-  return text.match(/\b(?:fatura|boleto|cobranca|cobrança)\s*#?\s*([a-z0-9-]{4,})\b/i)?.[1] || null;
+  const candidate = text.match(/\b(?:fatura|boleto|cobranca|cobrança)\s*(?:n[uú]mero\s*|n[º°.]\s*|#\s*)?([a-z0-9-]{4,})\b/i)?.[1];
+  return candidate && /\d/.test(candidate) ? candidate : null;
 }
 
 function extractQuantity(text: string): string | null {
@@ -367,6 +374,15 @@ export function extractAutopilotSlots(input: {
   }
 
   if (!invalidCurrentIdentifier) {
+    const contactIdentifier = extractCustomerIdentifierFromContact(input.contact);
+    if (contactIdentifier) {
+      addSlot(result, {
+        name: 'customer_identifier',
+        value: contactIdentifier,
+        source: 'contact',
+        confidence: 0.9,
+      });
+    }
     const rememberedIdentifier = input.rememberedSlots?.customer_identifier;
     if (rememberedIdentifier && isValidCustomerIdentifier(rememberedIdentifier)) {
       addSlot(result, {
@@ -377,15 +393,6 @@ export function extractAutopilotSlots(input: {
       });
     }
 
-    const contactIdentifier = extractCustomerIdentifierFromContact(input.contact);
-    if (contactIdentifier) {
-      addSlot(result, {
-        name: 'customer_identifier',
-        value: contactIdentifier,
-        source: 'contact',
-        confidence: 0.9,
-      });
-    }
   }
 
   const extractFromTextOrHistory = <T>(
@@ -513,6 +520,7 @@ export function extractAutopilotSlots(input: {
   for (const [name, value] of Object.entries(input.rememberedSlots || {})) {
     if (!value) continue;
     if (name === 'customer_identifier' && invalidCurrentIdentifier) continue;
+    if (name === 'invoice_or_payment_id' && !/^[a-z0-9-]*\d[a-z0-9-]*$/i.test(String(value))) continue;
     addSlot(result, {
       name: name as AutopilotSlotName,
       value: String(value),

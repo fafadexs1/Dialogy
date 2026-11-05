@@ -38,6 +38,7 @@ export type NexusDialogyBindingIssue = {
 };
 
 const MESSAGE_DELIVERY_NODE_TYPES = new Set([
+  'whatsapp.send_catalog',
   'interaction.options',
   'interaction.form',
   'output.respond',

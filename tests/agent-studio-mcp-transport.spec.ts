@@ -22,6 +22,8 @@ describe('Studio MCP public HTTPS boundary', () => {
     expect(await (await fetch('https://mcp.example/protocol', { method: 'POST', body: '{}' })).json()).toEqual({ ok: true });
     const callback = vi.fn(); mock.request.mock.calls[0][1].lookup('mcp.example', {}, callback);
     expect(callback).toHaveBeenCalledWith(null, '93.184.216.34', 4);
+    const all = vi.fn(); mock.request.mock.calls[0][1].lookup('mcp.example', { all: true }, all);
+    expect(all).toHaveBeenCalledWith(null, [{ address: '93.184.216.34', family: 4 }]);
   });
   it.each(['https://evil.example', 'http://mcp.example/protocol', 'https://user:secret@mcp.example/protocol'])('blocks an unauthorized destination %s before any request', async (url) => {
     await expect(createStudioMcpFetch('https://mcp.example/protocol', new AbortController().signal)(url)).rejects.toThrow();

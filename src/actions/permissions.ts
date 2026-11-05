@@ -26,8 +26,10 @@ async function ensureWorkspaceRoles(workspaceId: string) {
     const ownerId = workspaceRes.rows[0].owner_id;
 
     let rolesRes = await db.query('SELECT id, name, is_default FROM roles WHERE workspace_id = $1', [workspaceId]);
+    let createdDefaultRoles = false;
 
     if ((rolesRes.rowCount || 0) === 0) {
+        createdDefaultRoles = true;
         const adminRoleRes = await db.query(
             `INSERT INTO roles (workspace_id, name, description, is_default)
              VALUES ($1, 'Administrador', 'Acesso total a todas as funcionalidades e configurações.', FALSE)
@@ -74,7 +76,9 @@ async function ensureWorkspaceRoles(workspaceId: string) {
     }
 
     const memberRole = rolesRes.rows.find((role: any) => role.name === 'Membro');
-    if (memberRole && DEFAULT_MEMBER_PERMISSIONS.length) {
+    // Defaults initialize a new workspace; revisiting this page must not
+    // regrant permissions that an administrator explicitly revoked.
+    if (createdDefaultRoles && memberRole && DEFAULT_MEMBER_PERMISSIONS.length) {
         const existingMemberPerms = await db.query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [memberRole.id]);
         const existingMemberSet = new Set(existingMemberPerms.rows.map((row: { permission_id: string }) => row.permission_id));
         const allowedMemberPerms = DEFAULT_MEMBER_PERMISSIONS.filter(permissionId => permissionIds.includes(permissionId));
@@ -91,7 +95,7 @@ async function ensureWorkspaceRoles(workspaceId: string) {
     }
 }
 
-export async function getRolesAndPermissions(workspaceId: string): Promise<{ roles: Role[], permissions: Permission[], error?: string }> {
+export async function getRolesAndPermissions(workspaceId: string): Promise<{ roles: Role[], permissions: Permission[], canEdit?: boolean, error?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { roles: [], permissions: [], error: "Usuário não autenticado." };
@@ -101,6 +105,7 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
     }
 
     try {
+        const canEdit = await hasWorkspacePermission(user.id, workspaceId, 'permissions:edit');
         await ensurePermissionsSeed();
         await ensureWorkspaceRoles(workspaceId);
 
@@ -126,7 +131,7 @@ export async function getRolesAndPermissions(workspaceId: string): Promise<{ rol
                 .map(({ id, description, category }) => ({ id, description, category }))
         }));
 
-        return { roles, permissions };
+        return { roles, permissions, canEdit };
     } catch (error) {
         console.error("Erro ao buscar papéis e permissões:", error);
         return { roles: [], permissions: [], error: "Falha ao buscar dados do banco de dados." };
@@ -144,7 +149,7 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
         if ((roleRes.rowCount || 0) === 0) {
             return { success: false, error: "Papel não encontrado." };
         }
-        const { workspace_id: workspaceId, name, is_default: isDefault } = roleRes.rows[0];
+        const { workspace_id: workspaceId, name } = roleRes.rows[0];
 
         if (!await hasWorkspacePermission(user.id, workspaceId, 'permissions:edit')) {
             return { success: false, error: "Você não tem permissão para editar papéis." };
@@ -169,12 +174,12 @@ export async function updateRolePermissionAction(roleId: string, permissionId: s
     }
 }
 
-export async function createRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string }> {
+export async function createRoleAction(prevState: any, formData: FormData): Promise<{ success: boolean; error?: string; roleId?: string }> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Usuário não autenticado." };
 
-    const name = formData.get('name') as string;
+    const name = String(formData.get('name') || '').trim();
     const description = formData.get('description') as string;
     const workspaceId = formData.get('workspaceId') as string;
 
@@ -187,12 +192,12 @@ export async function createRoleAction(prevState: any, formData: FormData): Prom
     }
 
     try {
-        await db.query(
-            'INSERT INTO roles (workspace_id, name, description) VALUES ($1, $2, $3)',
+        const createdRole = await db.query(
+            'INSERT INTO roles (workspace_id, name, description) VALUES ($1, $2, $3) RETURNING id',
             [workspaceId, name, description]
         );
         revalidatePath('/team/permissions');
-        return { success: true };
+        return { success: true, roleId: createdRole.rows[0].id };
     } catch (error) {
         console.error("Erro ao criar papel:", error);
         // @ts-ignore

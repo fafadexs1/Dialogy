@@ -1,6 +1,7 @@
 
 'use client';
 
+import { WhatsappReferenceRates } from '@/components/superadmin/whatsapp-reference-rates';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getBillingData, getInstanceCosts, updateInstanceCosts } from "@/actions/billing";
@@ -136,6 +137,7 @@ export default function BillingPage() {
 
     return (
         <div className="space-y-6">
+            <WhatsappReferenceRates />
             <CostSettings initialCosts={instanceCosts} />
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <StatCard

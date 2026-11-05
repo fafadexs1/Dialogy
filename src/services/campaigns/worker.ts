@@ -17,8 +17,11 @@ import type { MetaChannelRecord } from '@/services/meta/meta-channel.service';
 import {
   buildCampaignTemplateSendComponents,
   renderCampaignMessage,
+  renderCampaignTemplatePreview,
 } from '@/lib/campaigns/personalization';
 import { MAX_CAMPAIGN_REPLY_BUTTONS } from '@/lib/campaigns/interactive';
+import { scheduleMarketingAutoClose } from '@/services/chat/marketing-auto-close';
+import { runDueMarketingAutoCloses } from '@/services/chat/auto-close';
 
 const FINAL_MESSAGE_STATUSES = new Set(['SENT', 'DELIVERY_ACK', 'READ', 'PLAYED']);
 const DEFAULT_POLL_MS = 1_000;
@@ -34,6 +37,7 @@ type ClaimedRecipient = {
 };
 
 type RecipientDeliveryContext = ClaimedRecipient & {
+  csv_data: Record<string, string>;
   contact_name: string;
   phone_number_jid: string | null;
   marketing_opt_out_at: string | null;
@@ -259,6 +263,7 @@ async function loadDeliveryContext(recipientId: string): Promise<RecipientDelive
        cr.message_id,
        cr.attempt_count,
        cr.max_attempts,
+       cr.csv_data,
        ct.name AS contact_name,
        ct.phone_number_jid,
        ct.marketing_opt_out_at,
@@ -401,6 +406,7 @@ async function prepareIdempotentMessage(
   const media = normalizeCampaignMediaPayload(context.media_payload);
   const messageType = media?.type || 'text';
   const messageMetadata = {
+    isMarketing: true,
     campaignId: context.campaign_id,
     campaignRecipientId: context.id,
     consentConfirmed: true,
@@ -604,6 +610,7 @@ async function deliverToProvider(
       language: context.template_payload.language,
       components: buildCampaignTemplateSendComponents(context.template_payload, {
         contactName: context.contact_name,
+        csvData: context.csv_data,
         campaignMessage: context.message,
         now: personalizationNow,
         timeZone: context.schedule_config?.timeZone,
@@ -780,12 +787,16 @@ export async function processClaimedRecipient(claimed: ClaimedRecipient): Promis
   }
 
   const now = new Date();
-  const content = renderCampaignMessage(context.message, {
-    contactName: context.contact_name,
-    now,
-    timeZone: context.schedule_config?.timeZone,
-  });
   try {
+    const personalizationContext = {
+      contactName: context.contact_name,
+      csvData: context.csv_data,
+      now,
+      timeZone: context.schedule_config?.timeZone,
+    };
+    const content = context.delivery_channel === 'whatsapp_cloud' && context.template_payload
+      ? renderCampaignTemplatePreview(context.template_payload, personalizationContext)
+      : renderCampaignMessage(context.message, personalizationContext);
     const resolvedChat = await resolveChat(context);
     const messageState = await prepareIdempotentMessage(context, resolvedChat.chatId, content);
     if (messageState === 'uncertain') {
@@ -803,7 +814,8 @@ export async function processClaimedRecipient(claimed: ClaimedRecipient): Promis
       );
     }
 
-    await db.query(
+    const marketingSentAt = new Date();
+    const sentRecipient = await db.query(
       `UPDATE campaign_recipients
        SET status = 'sent',
            sent_at = COALESCE(sent_at, NOW()),
@@ -811,9 +823,23 @@ export async function processClaimedRecipient(claimed: ClaimedRecipient): Promis
            locked_at = NULL,
            locked_by = NULL,
            updated_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING sent_at`,
       [context.id]
     );
+    // Scheduling failure must never turn a successful delivery into a resend.
+    // The recovery sweep will close overdue marketing chats after a restart.
+    try {
+      await scheduleMarketingAutoClose(
+        resolvedChat.chatId,
+        context.workspace_id,
+        sentRecipient.rows[0]?.sent_at ? new Date(sentRecipient.rows[0].sent_at) : marketingSentAt,
+        undefined,
+        context.message_id,
+      );
+    } catch (error) {
+      console.error('[CAMPAIGN_WORKER] Falha ao agendar encerramento de marketing:', error);
+    }
     await updateCampaignCompletion(context.campaign_id);
   } catch (error) {
     await markRecipientFailure(context, error);
@@ -851,10 +877,33 @@ export function startCampaignWorker(options?: {
       }
     };
     await recoverClaims();
+    const recoverPersonalInactivity = async () => {
+      try {
+        const { runDuePersonalInactivity } = await import('@/services/chat/personal-inactivity');
+        await runDuePersonalInactivity();
+      } catch (error) {
+        console.error('[CAMPAIGN_WORKER] Inactivity recovery failed:', error);
+      }
+    };
+    const recoverMarketingChats = async () => {
+      try {
+        await runDueMarketingAutoCloses();
+      } catch (error) {
+        console.error('[CAMPAIGN_WORKER] Marketing close recovery failed:', error);
+      }
+    };
+    await recoverMarketingChats();
+    await recoverPersonalInactivity();
+    let nextMarketingRecoveryAt = Date.now() + 5_000;
     const recoveryIntervalMs = Math.max(pollMs, Math.min(lockMs, 60_000));
     let nextRecoveryAt = Date.now() + recoveryIntervalMs;
     console.log(`[CAMPAIGN_WORKER] Ready. workerId=${workerId} concurrency=${concurrency}`);
     while (!stopping) {
+      if (Date.now() >= nextMarketingRecoveryAt) {
+        await recoverMarketingChats();
+        await recoverPersonalInactivity();
+        nextMarketingRecoveryAt = Date.now() + 5_000;
+      }
       if (Date.now() >= nextRecoveryAt) {
         await recoverClaims();
         nextRecoveryAt = Date.now() + recoveryIntervalMs;

@@ -29,12 +29,33 @@ export function WebchatClient({ publicKey, parentOrigin, currentUrl, referrer }:
   }, [session?.sessionId]);
 
   useEffect(() => {
-    fetch(`/api/webchat/widgets/${encodeURIComponent(publicKey)}?origin=${encodeURIComponent(parentOrigin)}`)
-      .then(async (response) => { if (!response.ok) throw new Error('Widget indisponível.'); return response.json(); })
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const edgeEndpoint = supabaseUrl
+      ? `${supabaseUrl}/functions/v1/webchat-widget/${encodeURIComponent(publicKey)}?origin=${encodeURIComponent(parentOrigin)}`
+      : null;
+    const fallbackEndpoint = `/api/webchat/widgets/${encodeURIComponent(publicKey)}?origin=${encodeURIComponent(parentOrigin)}`;
+
+    const fetchConfig = async () => {
+      if (edgeEndpoint) {
+        try {
+          const res = await fetch(edgeEndpoint);
+          if (res.ok) return await res.json();
+        } catch {
+          // Silenciosamente tenta fallback
+        }
+      }
+      const fallbackRes = await fetch(fallbackEndpoint);
+      if (!fallbackRes.ok) throw new Error('Widget indisponível.');
+      return await fallbackRes.json();
+    };
+
+    fetchConfig()
       .then((loaded) => {
         setConfig(loaded);
         parent.postMessage({ type: 'dialogy:webchat:config', primaryColor: loaded.primaryColor, position: loaded.position }, '*');
-      }).catch((err) => setError(err.message));
+      })
+      .catch((err) => setError(err.message));
+
     try { const saved = localStorage.getItem(storageKey); if (saved) setSession(JSON.parse(saved)); } catch {}
   }, [parentOrigin, publicKey, storageKey]);
 

@@ -132,6 +132,12 @@ describe('native autopilot delivery outcome', () => {
     expect(outcome.recoveryResponse).not.toContain('instabilidade');
   });
 
+  it('reports a workflow failure without restarting the conversation with a greeting', () => {
+    const outcome = inspectAutopilotPrimaryDeliveryOutcome({ failure: { message: 'Workflow inválido: memória sem configuração.' } });
+    expect(outcome.recoveryResponse).toContain('solicitação continua pendente');
+    expect(outcome.recoveryResponse).not.toMatch(/ol[aá]|como posso ajudar/i);
+  });
+
   it('reports invalid tool arguments instead of hiding them behind instability', () => {
     const outcome = inspectAutopilotPrimaryDeliveryOutcome({
       executionPath: [],

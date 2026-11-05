@@ -68,7 +68,7 @@ export async function getTeams(workspaceId: string): Promise<{ teams: Team[], er
                         ) ORDER BY se.date ASC
                     )
                     FROM schedule_exceptions se
-                    WHERE se.team_id = t.id AND se.date >= CURRENT_DATE),
+                    WHERE se.team_id = t.id),
                     '[]'::json
                 ) as "scheduleExceptions"
             FROM teams t

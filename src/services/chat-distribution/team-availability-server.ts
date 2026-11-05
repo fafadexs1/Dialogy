@@ -1,5 +1,7 @@
 ﻿import 'server-only';
 
+import { readTeamCandidates } from './candidates';
+import { decideOpportunity, distributionMode } from './policy';
 import { db } from '@/lib/db';
 import {
     buildPresenceAvailabilitySql,
@@ -8,7 +10,6 @@ import {
 } from '@/lib/presence';
 
 import {
-    DEFAULT_MAX_PORTFOLIO,
     evaluateTeamBusinessHours,
     type TeamAvailabilityReason,
 } from './team-availability';
@@ -24,6 +25,9 @@ export type WorkspaceTeamAvailability = {
     acceptingMembers: number;
     assignableMembers: number;
     activeChats: number;
+    effectiveLoad: number;
+    protectedMembers: number;
+    previewSelectedAgentId: string | null;
     /** Carteira ativa dividida pelos agentes que podem receber. CritÃ©rio de escolha entre equipes. */
     loadPerAssignableAgent: number;
     isWithinBusinessHours: boolean;
@@ -100,12 +104,10 @@ export async function getWorkspaceTeamAvailability(
                 COUNT(*) FILTER (
                     WHERE ${availabilitySql}
                       AND COALESCE(ds.accepting_assignments, TRUE) = TRUE
-                      AND COALESCE(portfolio.active_count, 0) < COALESCE(ds.max_portfolio, $4)
                 ) AS assignable_count,
                 COALESCE(SUM(portfolio.active_count) FILTER (
                     WHERE ${availabilitySql}
                       AND COALESCE(ds.accepting_assignments, TRUE) = TRUE
-                      AND COALESCE(portfolio.active_count, 0) < COALESCE(ds.max_portfolio, $4)
                 ), 0) AS assignable_chats
             FROM team_members tm
             LEFT JOIN user_workspace_presence uwp
@@ -127,10 +129,14 @@ export async function getWorkspaceTeamAvailability(
         WHERE t.workspace_id = $1
         ORDER BY t.name
         `,
-        [workspaceId, ttlSeconds, recentActivitySeconds, DEFAULT_MAX_PORTFOLIO]
+        [workspaceId, ttlSeconds, recentActivitySeconds]
     );
 
-    return res.rows.map((row) => {
+    return Promise.all(res.rows.map(async (row) => {
+        const candidates = await readTeamCandidates(db,{workspaceId,teamId:row.id});
+        const preview = decideOpportunity(candidates);
+        const protectedMembers = preview.candidates.filter(candidate=>candidate.reason==='eligible').length;
+        const effectiveLoad = candidates.filter(candidate=>!candidate.availableReason).reduce((sum,candidate)=>sum+candidate.effectiveLoad,0);
         const totalMembers = Number(row.totalCount) || 0;
         const onlineMembers = Number(row.onlineCount) || 0;
         const acceptingMembers = Number(row.acceptingCount) || 0;
@@ -150,7 +156,6 @@ export async function getWorkspaceTeamAvailability(
         else if (!schedule.isOpen) availability = 'outside_business_hours';
         else if (onlineMembers === 0) availability = 'all_offline';
         else if (acceptingMembers === 0) availability = 'not_accepting';
-        else if (assignableMembers === 0) availability = 'portfolio_full';
 
         return {
             teamId: row.id,
@@ -162,12 +167,13 @@ export async function getWorkspaceTeamAvailability(
             onlineMembers,
             acceptingMembers,
             assignableMembers,
-            activeChats,
-            loadPerAssignableAgent: activeChats / Math.max(assignableMembers, 1),
+            activeChats, effectiveLoad, protectedMembers,
+            previewSelectedAgentId: schedule.isOpen && distributionMode(workspaceId)==='active' ? preview.selection?.agentId ?? null : null,
+            loadPerAssignableAgent: effectiveLoad / Math.max(assignableMembers, 1),
             isWithinBusinessHours: schedule.isOpen,
             availability,
         };
-    });
+    }));
 }
 
 /**

@@ -5,8 +5,7 @@ import type { Contact, Tag, CustomFieldDefinition, Deal } from '@/lib/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { Separator } from '../ui/separator';
-import { Mail, Phone, Building, Edit, PlusCircle, Smartphone, Target, DollarSign, Loader2 } from 'lucide-react';
+import { Mail, Building, Edit, PlusCircle, Smartphone, Target, DollarSign, Loader2 } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import { getTags, getCustomFieldDefinitions } from '@/actions/crm';
@@ -15,7 +14,6 @@ import { useAuth } from '@/hooks/use-auth';
 import ContactTimeline from './contact-timeline';
 import DealForm from './deal-form';
 import LeadScoreBadge from './lead-score-badge';
-import { calculateLeadScore } from '@/actions/lead-scoring';
 import { badgeColorStyle } from '@/lib/color-contrast';
 
 interface CustomerProfileProps {
@@ -67,42 +65,43 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
     return (
         <>
             <Sheet open={isOpen} onOpenChange={setIsOpen}>
-                <SheetContent className="sm:max-w-lg p-0">
-                    <div className="flex flex-col h-full">
-                        <SheetHeader className="p-6 border-b">
+                <SheetContent className="w-full border-l border-[#dfe8dd] bg-[#f6f8f4] p-0 sm:max-w-[560px] dark:border-white/10 dark:bg-[#0e1711]">
+                    <div className="flex h-full flex-col">
+                        <SheetHeader className="border-b border-[#dfe8dd] bg-[#133523] p-6 text-white dark:border-white/10">
                             <SheetTitle className="sr-only">Detalhes de {contact.name}</SheetTitle>
                             <SheetDescription className="sr-only">Exibindo detalhes para {contact.name}.</SheetDescription>
-                            <div className="flex items-center mb-4 pt-4">
-                                <Avatar className="h-16 w-16 mr-4">
+                            <p className="text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200/70">Perfil do contato</p>
+                            <div className="mb-4 flex items-center pt-2">
+                                <Avatar className="mr-4 h-16 w-16 border-2 border-white/30 shadow-lg">
                                     <AvatarImage src={contact.avatar_url || undefined} alt={contact.name} />
-                                    <AvatarFallback className="text-2xl">{contact.name.charAt(0)}</AvatarFallback>
+                                    <AvatarFallback className="bg-emerald-100 text-2xl font-semibold text-[#164e34]">{contact.name.charAt(0)}</AvatarFallback>
                                 </Avatar>
                                 <div>
                                     <div className="flex items-center gap-2">
-                                        <h2 className="text-xl font-bold">{contact.name}</h2>
+                                        <h2 className="text-xl font-semibold tracking-tight text-white">{contact.name}</h2>
                                         <LeadScoreBadge score={contact.lead_score} size="md" />
                                     </div>
-                                    {contact.owner && <p className='text-sm text-muted-foreground'>Proprietário: {contact.owner.name}</p>}
+                                    {contact.owner && <p className="mt-1 text-sm text-emerald-100/65">Responsável: {contact.owner.name}</p>}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={() => onAction('edit', contact)}>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <Button variant="outline" size="sm" className="rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white" onClick={() => onAction('edit', contact)}>
                                     <Edit className="mr-2 h-4 w-4" /> Editar
                                 </Button>
-                                <Button size="sm" onClick={() => onAction('addActivity', contact)}>
+                                <Button size="sm" className="rounded-xl bg-emerald-300 text-[#102f1d] hover:bg-emerald-200" onClick={() => onAction('addActivity', contact)}>
                                     <PlusCircle className="mr-2 h-4 w-4" /> Atividade
                                 </Button>
-                                <Button variant="outline" size="sm" onClick={() => setDealFormOpen(true)}>
+                                <Button variant="outline" size="sm" className="rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white" onClick={() => setDealFormOpen(true)}>
                                     <Target className="mr-2 h-4 w-4" /> Novo Deal
                                 </Button>
                             </div>
                         </SheetHeader>
 
                         <ScrollArea className="flex-1">
-                            <div className="p-6 space-y-6">
+                            <div className="space-y-5 p-6">
                                 {/* Contact Info */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-primary mb-3">Informações de Contato</h3>
+                                <section className="rounded-2xl border border-[#e1e9df] bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
+                                    <h3 className="mb-3 text-sm font-semibold text-[#174f34] dark:text-emerald-300">Informações de contato</h3>
                                     <div className="space-y-3 text-sm">
                                         {contact.email && (<div className="flex items-center gap-3"><Mail className="h-4 w-4 text-muted-foreground" /><span>{contact.email}</span></div>)}
                                         {contact.phone_number_jid && (<div className="flex items-center gap-3"><Smartphone className="h-4 w-4 text-muted-foreground" /><span>{contact.phone_number_jid}</span></div>)}
@@ -110,11 +109,10 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                                     </div>
                                 </section>
 
-                                <Separator />
 
                                 {/* Tags */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-primary mb-3">Etiquetas (Tags)</h3>
+                                <section className="rounded-2xl border border-[#e1e9df] bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
+                                    <h3 className="mb-3 text-sm font-semibold text-[#174f34] dark:text-emerald-300">Etiquetas</h3>
                                     <div className="flex flex-wrap gap-2">
                                         {contact.tags?.map(tag => (
                                             <Badge key={tag.id} style={getTagStyle(tag.value)}>{tag.label}</Badge>
@@ -125,12 +123,11 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                                     </div>
                                 </section>
 
-                                <Separator />
 
                                 {/* Deals */}
-                                <section>
+                                <section className="rounded-2xl border border-[#e1e9df] bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
                                     <div className="flex items-center justify-between mb-3">
-                                        <h3 className="text-sm font-semibold text-primary">Deals</h3>
+                                        <h3 className="text-sm font-semibold text-[#174f34] dark:text-emerald-300">Negócios</h3>
                                         {totalOpenValue > 0 && (
                                             <Badge variant="outline" className="text-[10px] font-semibold text-emerald-600 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-400">
                                                 <DollarSign className="h-3 w-3 mr-0.5" />
@@ -145,7 +142,7 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                                     ) : deals.length > 0 ? (
                                         <div className="space-y-2">
                                             {openDeals.map(deal => (
-                                                <div key={deal.id} className="p-3 border rounded-lg bg-secondary/30 text-sm">
+                                                <div key={deal.id} className="rounded-xl border border-[#e5ece3] bg-[#f8faf6] p-3 text-sm dark:border-white/10 dark:bg-white/[0.04]">
                                                     <div className="flex items-center justify-between">
                                                         <span className="font-medium">{deal.title}</span>
                                                         <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatBRL(deal.value)}</span>
@@ -177,13 +174,12 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                                     )}
                                 </section>
 
-                                <Separator />
 
                                 {/* Custom Fields */}
                                 {customFieldsToDisplay.length > 0 && (
                                     <>
-                                        <section>
-                                            <h3 className="text-sm font-semibold text-primary mb-3">Informações Adicionais</h3>
+                                        <section className="rounded-2xl border border-[#e1e9df] bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
+                                            <h3 className="mb-3 text-sm font-semibold text-[#174f34] dark:text-emerald-300">Informações adicionais</h3>
                                             <div className="space-y-3 text-sm">
                                                 {customFieldsToDisplay.map(def => (
                                                     <div key={def.id} className="flex flex-col">
@@ -193,13 +189,12 @@ export default function CustomerProfile({ contact, isOpen, setIsOpen, onAction, 
                                                 ))}
                                             </div>
                                         </section>
-                                        <Separator />
                                     </>
                                 )}
 
                                 {/* Timeline */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-primary mb-3">Timeline</h3>
+                                <section className="rounded-2xl border border-[#e1e9df] bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
+                                    <h3 className="mb-3 text-sm font-semibold text-[#174f34] dark:text-emerald-300">Histórico</h3>
                                     <ContactTimeline contactId={contact.id} compact maxItems={20} />
                                 </section>
                             </div>

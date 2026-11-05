@@ -1,0 +1,21 @@
+{
+  "version": "v33",
+  "apply": true,
+  "previousNodes": 95,
+  "nodes": 449,
+  "sharedBlocks": 0,
+  "localRetries": 1,
+  "tests": {
+    "terminalScenarios": 124,
+    "executions": 372,
+    "menuSelections": 753,
+    "menuInputModes": [
+      "id",
+      "number",
+      "label"
+    ],
+    "routingOutcomes": "simulated",
+    "externalEffects": "simulated"
+  },
+  "validation": true
+}

@@ -11,9 +11,12 @@ import type { AgentToolAction } from '@/services/agent-tools/types';
 import { advanceStudioSession, createStudioSession, studioHasUncertainOperation, type StudioSession } from './engine';
 import { executeStudioHttp, executeStudioMcp, resolveStudioMcpTool } from './integrations';
 import type { AgentReleaseManifest, ProcedureStep } from './types';
-import { buildStudioHttpRequest, buildStudioMcpArguments, mapStudioOutputs, type StudioDataContext } from './data-mapping';
+import { buildStudioHttpRequest, buildStudioMcpArguments, mapStudioOutputs, resolveStudioMapping, type StudioDataContext } from './data-mapping';
 import { executeStudioContactAction } from './native-actions';
-import { lookupSgpCustomerContracts, runSgpWorkspaceTool } from '@/services/agent-tools/sgp-tools';
+import { executeStudioSgp } from './sgp-runtime';
+import { loadStudioContactCrm } from './contact-crm';
+import { parseStudioSgpQuery, projectStudioSgpQuery } from './sgp-query';
+import { STUDIO_SGP_ACTIONS, studioSgpPanelValues } from './sgp-data';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import { extractStudioFieldCandidate, validateStudioField } from './collection';
 import { interpretStudioCollection } from './collection-interpreter';
@@ -25,10 +28,10 @@ import { studioContactPhone } from './contact-phone';
 import { studioCollectionPlanningPrompt } from './collection-planner';
 import { studioActionPlanningPrompt } from './action-planner';
 import { runStudioReasoningRuntime } from './reasoning-runtime';
-import type { StudioMemoryEvent } from './durable-memory';
+import type { StudioMemoryEvent, StudioMemoryPage } from './durable-memory';
 import { readStudioDurableMemory } from './durable-memory-store';
+import { lia1CompactContextEnabled } from './lia1-context';
 import { resolveStudioCatalogImage, StudioCatalogImageSchema } from './catalog-media';
-import { resolveStudioMapping } from './data-mapping';
 import type { StudioReasoningInput } from './reasoning-engine';
 
 export type StudioRuntimeInput = {
@@ -74,6 +77,11 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
   if (input.config.id !== release.agentId || input.config.workspace_id !== release.workspaceId) throw new Error('Publicação fora do escopo.');
   if (input.state && input.state.agentId !== release.agentId) throw new Error('A sessão não pertence ao agente publicado.');
   if (input.state && input.state.releaseId !== release.releaseId && (input.state.phase !== 'done' || studioHasUncertainOperation(input.state))) throw new Error('A versão da conversa mudou durante o atendimento.');
+  const fields = [...document.understandStage.initialFields, ...document.resolveStage.procedures.flatMap((p) => p.steps.flatMap((step) => step.collectField ? [step.collectField] : []))];
+  if (!input.preview && fields.some((field) => field.reuseFrom?.sourceValue === 'custom_fields.sgp_document')) {
+    const crm = await loadStudioContactCrm(release.workspaceId, input.chatId);
+    input = { ...input, contact: { ...input.contact, custom_fields: { ...(input.contact?.custom_fields || {}), ...crm } } as Contact };
+  }
   const previous = input.state;
   if (previous?.status === 'cancelled') return { state: previous, response: '', replay: false };
   if (previous?.lastTurn?.messageId === input.messageId) {
@@ -96,11 +104,12 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
     || (reasoningEnabled && previous.status === 'resolved' && previous.reasoning)
     || studioHasUncertainOperation(previous) || previous.suspendedProcedures?.length || previous.lastTurn?.messageId === input.messageId)
     ? previous : createStudioSession(release.agentId, release.releaseId, randomUUID());
+  let initialMemory: StudioMemoryPage | undefined;
   if (!previous && !input.preview) {
     try {
       const scope = { workspaceId: release.workspaceId, agentId: release.agentId, chatId: input.chatId };
-      const memory = await readStudioDurableMemory(scope, { limit: 20 });
-      for (const record of memory.records) {
+      initialMemory = await readStudioDurableMemory(scope, { limit: reasoningEnabled ? 40 : 20 });
+      for (const record of initialMemory.records.slice(0, 20)) {
         if (record.event.status === 'resolved' || record.event.status === 'active') {
           const key = record.event.key;
           if (key && record.event.value !== undefined && !record.event.sensitive) {
@@ -125,6 +134,7 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
   const persona = `${document.name}. Objetivo: ${document.objective || ''}. Idioma: ${document.language}. Tom: ${document.rules.toneOfVoice}. Assuntos fora do escopo: ${JSON.stringify(document.rules.excludedTopics || [])}. Nunca solicite senhas, tokens secretos ou códigos de autenticação. Também não solicite estes dados: ${JSON.stringify(document.rules.prohibitedDataLabels || [])}.`;
   const resolvedPlatformModel = !input.preview && !release.runtimeConfig?.aiModel ? await platformModel().catch(() => null) : null;
   const modelConfig = { ...input.config, ai_model: release.runtimeConfig?.aiModel || resolvedPlatformModel?.id || input.config?.ai_model || DEFAULT_AUTOPILOT_MODEL };
+  const compactReasoning = Boolean(reasoningEnabled && lia1CompactContextEnabled(release.agentId));
   const historyTurns = input.preview ? [] : await loadStudioConversationTurns(release.workspaceId, input.chatId, input.messageId, Boolean(reasoningEnabled));
   const rawHistory = input.chatHistory ?? historyTurns.map((turn) => `${turn.fromMe ? 'Agente' : 'Cliente'}: ${turn.content}`).join('\n');
   if (previous && state !== previous) {
@@ -337,6 +347,15 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
         }
         if (input.preview) {
           if (step.id === input.preview.failureStep) throw new Error('Falha simulada para testar a recuperação.');
+          if (STUDIO_SGP_ACTIONS.includes(step.nativeActionType || '')) {
+            const sample: unknown = JSON.parse(input.preview.samples[step.id] || 'null');
+            if (!sample || typeof sample !== 'object' || !Array.isArray((sample as Record<string, unknown>).contracts)) throw new Error(`Preencha contracts na resposta fictícia de “${step.title}”.`);
+            const out = sample as Record<string, any>;
+            const mapping = step.nativeDataMappings?.find((entry) => entry.apiField === 'contractId');
+            const selected = mapping ? resolveStudioMapping(mapping, context) : context.values.customer_contract;
+            const values = studioSgpPanelValues(out, selected == null ? undefined : String(selected));
+            return { values: operation.sgpQuery ? projectStudioSgpQuery(out, parseStudioSgpQuery(operation.sgpQuery)) : values };
+          }
           if (!step.httpRequest && !step.mcpTool) return {};
           if (step.httpRequest) buildStudioHttpRequest(step.httpRequest, context, step.httpRequest.connectionId ? 'https://simulation.example' : undefined);
           const raw = input.preview.samples[step.id];
@@ -367,83 +386,8 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
           await executeStudioContactAction({ workspaceId: release.workspaceId, chatId: input.chatId, step, context, confirmed: operation.confirmed });
           return {};
         }
-        if (step.type === 'native_action' && step.nativeActionType === 'sgp_fetch_contracts') {
-          const customFields = (context.contact?.custom_fields || {}) as Record<string, unknown>;
-          const rawCpf = String(context.values?.customer_cpf || customFields.cpf || customFields['53d4dc37-fa88-4749-be3a-194953864e80'] || '').replace(/\D/g, '')
-            || (input.message || '').replace(/\D/g, '').match(/(\d{11}|\d{14})/)?.[1] || '';
-          const result = await lookupSgpCustomerContracts({
-            workspaceId: release.workspaceId,
-            chatId: input.chatId,
-            contactId: input.contact?.id,
-            customerIdentifier: rawCpf || undefined,
-          });
-          if (result.status === 'not-found') {
-            return { values: { contracts: [], contracts_count: 0 } };
-          }
-          if (result.status !== 'found') {
-            throw new Error('Não foi possível consultar os contratos no SGP no momento.');
-          }
-          if (rawCpf && input.contact?.id) {
-            try {
-              const globalInt = await db.query(
-                `SELECT config->>'cpfFieldId' as cpf_field_id FROM workspace_integrations WHERE workspace_id = $1 AND provider = 'sgp' LIMIT 1`,
-                [release.workspaceId]
-              );
-              const cpfFieldId = globalInt.rows[0]?.cpf_field_id;
-              if (cpfFieldId) {
-                await db.query(
-                  `INSERT INTO contact_custom_field_values (contact_id, field_id, value) VALUES ($1, $2, $3)
-                   ON CONFLICT (contact_id, field_id) DO UPDATE SET value = EXCLUDED.value`,
-                  [input.contact.id, cpfFieldId, rawCpf]
-                );
-              }
-            } catch (err) {
-              console.warn('[STUDIO_SGP] Erro ao salvar CPF no contato:', err);
-            }
-          }
-          const contracts = result.contracts.map((c) => ({
-            id: c.id,
-            label: `${c.id} - ${c.planDescription || 'Plano'}${c.addressLabel ? ` - ${c.addressLabel}` : ''}${c.statusLabel ? ` (${c.statusLabel})` : ''}`,
-            plan: c.planDescription,
-            address: c.addressLabel,
-            status: c.statusLabel,
-          }));
-          return {
-            values: {
-              contracts,
-              contracts_count: contracts.length,
-              cpf_cnpj: result.cpfCnpj,
-            },
-          };
-        }
-        if (step.type === 'native_action' && step.nativeActionType === 'sgp_fetch_contact_panel_data') {
-          const customFields = (context.contact?.custom_fields || {}) as Record<string, unknown>;
-          const rawCpf = String(context.values?.customer_cpf || customFields.cpf || '').replace(/\D/g, '')
-            || (input.message || '').replace(/\D/g, '').match(/(\d{11}|\d{14})/)?.[1] || '';
-          const contractId = String(context.values?.customer_contract || '').replace(/\D/g, '');
-          const toolResult = await runSgpWorkspaceTool({
-            workspaceId: release.workspaceId,
-            chatId: input.chatId,
-            contactId: input.contact?.id,
-            customerIdentifier: rawCpf || undefined,
-          }, {
-            type: 'sgp_fetch_contact_panel_data',
-            payload: { contractId: contractId || undefined },
-          });
-          if (toolResult.status !== 'success' || !toolResult.output) {
-            throw new Error(toolResult.error || 'Falha ao consultar painel SGP.');
-          }
-          const out = toolResult.output as Record<string, any>;
-          return {
-            values: {
-              customer_name: out.customerName,
-              contracts: out.contracts,
-              online_contracts: out.onlineContracts,
-              invoices: out.invoices,
-              open_invoices: out.openInvoices,
-              overdue_invoices: out.overdueInvoices,
-            },
-          };
+        if (step.type === 'native_action' && ['sgp_fetch_contracts', 'sgp_fetch_contact_panel_data'].includes(step.nativeActionType || '')) {
+          return executeStudioSgp({ workspaceId: release.workspaceId, chatId: input.chatId, step, context, query: operation.sgpQuery });
         }
         if (step.type === 'native_action' && step.nativeActionType === 'close_chat') {
           await input.runNative({ type: 'close_chat', reason: step.title, payload: { sendCloseMessage: false, notes: document.concludeStage.successClosingMessage } }, operation);
@@ -463,7 +407,7 @@ export async function runStudioConversation(input: StudioRuntimeInput) {
     },
   };
   const result = await (reasoningEnabled
-    ? runStudioReasoningRuntime(input, state, engineInput.dependencies, historyTurns)
+    ? runStudioReasoningRuntime(input, state, engineInput.dependencies, historyTurns, initialMemory, compactReasoning)
     : advanceStudioSession(engineInput)).catch((error) => {
     if (modelFailed) throw new Error('A IA não retornou uma resposta válida. Confira o modelo e a conexão do provedor e tente novamente.');
     throw error;

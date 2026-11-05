@@ -19,7 +19,8 @@ import { createDefaultAgentStudioDocument } from '@/services/agent-studio/types'
 import { listWorkspaceConfiguredAiModels } from '@/services/ai/workspace-ai-credentials';
 import { readStudioMigrationInventory } from '@/services/agent-studio/migration-inventory';
 import { loadStudioRelease } from '@/services/agent-studio/repository';
-import { createNewAiAgentAction, getAgentStudioDataAction, saveAgentStudioDraftAction, publishAgentStudioAction, getStudioVersionForDraftAction, rollbackAgentStudioToLegacyAction, revokeAgentStudioReleaseAction, getStudioResultsAction } from '@/actions/agent-studio';
+import { createNewAiAgentAction, getAgentStudioDataAction, saveAgentStudioDraftAction, publishAgentStudioAction, getStudioVersionForDraftAction, rollbackAgentStudioToLegacyAction, revokeAgentStudioReleaseAction, getStudioResultsAction, listPublishedStudioAgentsAction } from '@/actions/agent-studio';
+import { StudioFlowContractSchema, STUDIO_FLOW_NODE_TYPES } from '@/services/agent-studio/flow-contract';
 
 const workspaceId = '00000000-0000-4000-8000-000000000001';
 const userId = '00000000-0000-4000-8000-000000000009';
@@ -28,6 +29,13 @@ const chatId = '00000000-0000-4000-8000-000000000003';
 const releaseId = '00000000-0000-4000-8000-000000000004';
 const sessionId = '00000000-0000-4000-8000-000000000005';
 const scope = { workspaceId, agentId, chatId };
+const platformConfig = (defaultModel: string) => ({
+  defaultModel,
+  models: ['googleai/gemini-2.5-flash-lite', 'openai/custom-agent-model'].map((id) => ({
+    id, label: id, enabled: true, inputCost: 0, outputCost: 0, inputMarkup: 0, outputMarkup: 0,
+  })),
+  creditValueBrl: 1, costCurrency: 'BRL', usdToBrl: 1, billingEnabled: false,
+});
 let sql: PGlite;
 beforeAll(async () => {
   sql = new PGlite();
@@ -36,6 +44,8 @@ beforeAll(async () => {
   await sql.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE TABLE workspaces(id uuid PRIMARY KEY);
     CREATE TABLE workspace_integrations(workspace_id uuid, provider text, config jsonb, is_active boolean, updated_at timestamptz);
+    CREATE TABLE ai_platform_settings(id text PRIMARY KEY CHECK (id = 'global'), config jsonb NOT NULL, updated_at timestamptz DEFAULT now());
+    CREATE TABLE ai_provider_credentials(provider text PRIMARY KEY, api_key text NOT NULL, updated_at timestamptz DEFAULT now());
     CREATE TABLE autopilot_configs(id uuid PRIMARY KEY, workspace_id uuid NOT NULL REFERENCES workspaces(id), user_id uuid, name text, is_active boolean DEFAULT false, is_private boolean DEFAULT false, is_primary boolean DEFAULT false, updated_at timestamptz);
     CREATE TABLE chats(id uuid PRIMARY KEY, workspace_id uuid NOT NULL REFERENCES workspaces(id), autopilot_config_id uuid);
     CREATE TABLE autopilot_conversation_states(chat_id uuid PRIMARY KEY REFERENCES chats(id), workspace_id uuid NOT NULL, autopilot_config_id uuid, metadata jsonb, updated_at timestamptz);
@@ -56,6 +66,7 @@ beforeAll(async () => {
     ADD default_fallback_reply text, ADD escalation_policy text, ADD closing_policy text, ADD inactivity_timeout_seconds integer`);
   await sql.exec(await readFile('prisma/migrations/20260827130000_agent_studio_session_history/migration.sql', 'utf8'));
   await sql.exec(await readFile('prisma/migrations/20260908140000_agent_studio_durable_memory/migration.sql', 'utf8'));
+  await sql.exec(await readFile('prisma/migrations/20261023180000_studio_flow_invocations/migration.sql', 'utf8'));
   await sql.query('INSERT INTO workspaces VALUES ($1)', [workspaceId]);
   await sql.query('INSERT INTO autopilot_configs (id, workspace_id) VALUES ($1, $2)', [agentId, workspaceId]);
   await sql.query('INSERT INTO chats (id, workspace_id) VALUES ($1, $2)', [chatId, workspaceId]);
@@ -68,6 +79,8 @@ beforeEach(async () => {
   await sql.exec("UPDATE autopilot_configs SET name = 'Agente', ai_model = NULL, is_active = false, knowledge_base_documents = NULL, knowledge_collections = NULL, default_fallback_reply = NULL");
   await sql.exec('UPDATE chats SET autopilot_config_id = NULL');
   await sql.exec('TRUNCATE workspace_integrations');
+  await sql.query(`INSERT INTO ai_platform_settings (id, config) VALUES ('global', $1::jsonb)
+    ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config`, [JSON.stringify(platformConfig('googleai/gemini-2.5-flash-lite'))]);
   await sql.query(`INSERT INTO workspace_integrations VALUES
     ($1, 'gemini', $2::jsonb, true, NOW()), ($1, 'openai', $3::jsonb, true, NOW())`,
     [workspaceId, JSON.stringify({ apiKey: 'isolated-test-key', aiModel: 'googleai/gemini-2.5-flash-lite' }),
@@ -76,7 +89,27 @@ beforeEach(async () => {
 afterAll(async () => { vi.unstubAllEnvs(); await sql?.close(); });
 
 describe('Studio persistence on isolated PostgreSQL (PGlite)', () => {
-  it('lists only active registrations with credentials from the current workspace, without exposing keys', async () => {
+  it('publishes and lists a fixed composition contract without changing it when a draft is edited', async () => {
+    const document = createDefaultAgentStudioDocument(agentId, workspaceId, 'Composição');
+    document.concludeStage.handoffTeam = 'Suporte';
+    document.flowBuilder = StudioFlowContractSchema.parse({ enabled: true, completionCriteria: 'Devolver resultado', outputs: [{ key: 'resultado', label: 'Resultado' }] });
+    const published = await publishAgentStudioAction(agentId, document); if (!published.success) throw new Error(published.error);
+    expect(published.manifest.flowContract).toEqual(document.flowBuilder);
+    await saveAgentStudioDraftAction(agentId, { ...published.document, flowBuilder: { ...document.flowBuilder, completionCriteria: 'Novo critério' } });
+    const library = await listPublishedStudioAgentsAction(workspaceId); if (!library.success) throw new Error(library.error);
+    expect(library.releases[0].flowContract).toEqual(document.flowBuilder);
+    expect((await loadStudioRelease(workspaceId, agentId, published.manifest.releaseId))?.flowContract).toEqual(document.flowBuilder);
+  });
+  it.each(STUDIO_FLOW_NODE_TYPES)('protects publications and agent deletion for %s', async (type) => {
+    const document = createDefaultAgentStudioDocument(agentId, workspaceId); document.concludeStage.handoffTeam = 'Suporte';
+    const published = await publishAgentStudioAction(agentId, document); if (!published.success) throw new Error(published.error);
+    const definition = { nodes: [{ type, config: { agentId, releaseId: published.manifest.releaseId } }] };
+    await sql.query("INSERT INTO workflow_definitions VALUES ('composed', '1', $1, 'Composição', 'published', $2::jsonb)", [workspaceId, JSON.stringify(definition)]);
+    await expect(sql.query('DELETE FROM autopilot_configs WHERE id = $1', [agentId])).rejects.toThrow('fluxos publicados');
+    definition.nodes[0].config.releaseId = 'unavailable';
+    await expect(sql.query("INSERT INTO workflow_definitions VALUES ('invalid-composed', '1', $1, 'Inválido', 'published', $2::jsonb)", [workspaceId, JSON.stringify(definition)])).rejects.toThrow('indisponível');
+  });
+  it('lists only the active platform model without exposing workspace credential keys', async () => {
     await sql.query(`INSERT INTO workspace_integrations VALUES
       ($1, 'deepseek', $2::jsonb, false, NOW()), ($3, 'deepseek', $4::jsonb, true, NOW()),
       ($1, 'deepseek', $5::jsonb, true, NOW())`,
@@ -84,19 +117,19 @@ describe('Studio persistence on isolated PostgreSQL (PGlite)', () => {
         releaseId, JSON.stringify({ apiKey: 'foreign-secret', aiModel: 'deepseek/foreign' }),
         JSON.stringify({ apiKey: '', aiModel: 'deepseek/no-key' })]);
     const models = await listWorkspaceConfiguredAiModels(workspaceId);
-    expect(models.map((model) => model.id).sort()).toEqual(['googleai/gemini-2.5-flash-lite', 'openai/custom-agent-model']);
+    expect(models.map((model) => model.id)).toEqual(['googleai/gemini-2.5-flash-lite']);
     expect(models.every((model) => !('apiKey' in model))).toBe(true);
   });
-  it('does not offer or create a global default when the workspace has no registered models', async () => {
-    await sql.exec('TRUNCATE workspace_integrations');
+  it('does not offer or create an agent when the platform has no configured model', async () => {
+    await sql.exec('TRUNCATE ai_platform_settings');
     expect(await listWorkspaceConfiguredAiModels(workspaceId)).toEqual([]);
     for (const aiModel of [undefined, 'googleai/gemini-2.5-flash-lite']) {
       const result = await createNewAiAgentAction({ name: 'Novo', objective: 'Atender', serviceType: 'support', creationId: releaseId, aiModel });
-      expect(result).toMatchObject({ success: false, error: expect.stringContaining('Modelos de IA') });
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('plataforma') });
     }
     expect((await sql.query('SELECT id FROM autopilot_configs WHERE id = $1', [releaseId])).rows).toEqual([]);
   });
-  it('keeps the selected model through creation, draft edits, publication and version restoration', async () => {
+  it('keeps each published platform model snapshot through a later global-model change and version restoration', async () => {
     const firstModel = 'googleai/gemini-2.5-flash-lite';
     const nextModel = 'openai/custom-agent-model';
     const created = await createNewAiAgentAction({ name: 'Modelo escolhido', objective: 'Ajudar clientes', serviceType: 'support', creationId: releaseId, aiModel: firstModel });
@@ -104,6 +137,7 @@ describe('Studio persistence on isolated PostgreSQL (PGlite)', () => {
     expect(created.document.aiModel).toBe(firstModel);
     const first = await publishAgentStudioAction(releaseId, { ...created.document, concludeStage: { ...created.document.concludeStage, handoffTeam: 'Suporte' } });
     if (!first.success) throw new Error(first.error);
+    await sql.query("UPDATE ai_platform_settings SET config = $1::jsonb WHERE id = 'global'", [JSON.stringify(platformConfig(nextModel))]);
     const draft = await saveAgentStudioDraftAction(releaseId, { ...first.document, aiModel: nextModel });
     if (!draft.success) throw new Error(draft.error);
     const loaded = await getAgentStudioDataAction(releaseId);

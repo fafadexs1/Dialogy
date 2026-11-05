@@ -25,7 +25,8 @@ export async function requestDecisionJson<T extends z.ZodTypeAny>(
 async function executeJson<T extends z.ZodTypeAny>(input: JsonRequest<T>, model: string, independent = false): Promise<z.output<T>> {
   const apiKey=await platformApiKey(model);
   return meteredAiCall({workspaceId:input.workspaceId,model,source:input.schemaName,independent,
-    inputTokenBudget:Buffer.byteLength(input.systemPrompt+input.userPrompt+JSON.stringify(input.jsonSchema),'utf8')+4096,
+    inputTokenBudget:(input.continuation?.estimatedBytes() || 0)
+      +Buffer.byteLength(input.systemPrompt+input.userPrompt+JSON.stringify(input.jsonSchema),'utf8')+4096,
     outputTokenBudget:input.maxTokens??4096,
     execute:recordUsage=>requestOpenAiCompatibleJson({...input,model,apiKey,
       onUsage:async usage=>{await recordUsage(usage);await input.onUsage?.(usage);},

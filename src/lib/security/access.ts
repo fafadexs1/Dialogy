@@ -43,6 +43,18 @@ export async function requireWorkspaceAccess(workspaceId: string): Promise<User>
   }
 
   const user = await requireAuthenticatedUser();
+
+  // Fast path: validação instantânea via custom claims injetados pelo GoTrue Hook no app_metadata
+  if (user.app_metadata?.is_superadmin === true) {
+    return user;
+  }
+
+  const workspaceIds = user.app_metadata?.workspace_ids;
+  if (Array.isArray(workspaceIds) && workspaceIds.includes(workspaceId)) {
+    return user;
+  }
+
+  // Fallback para o banco de dados caso o token seja legado ou o usuário tenha acabado de entrar no workspace
   const result = await db.query(
     `SELECT 1
        FROM workspaces w
@@ -86,6 +98,13 @@ export async function requireWorkspacePermission(
 
 export async function requireSuperadmin(): Promise<User> {
   const user = await requireAuthenticatedUser();
+
+  // Fast path via custom claim injetado no token
+  if (user.app_metadata?.is_superadmin === true) {
+    return user;
+  }
+
+  // Fallback para o banco
   const result = await db.query('SELECT is_superadmin FROM users WHERE id = $1', [user.id]);
 
   if (!result.rows[0]?.is_superadmin) {

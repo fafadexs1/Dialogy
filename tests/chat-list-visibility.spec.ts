@@ -44,6 +44,10 @@ describe('chat list team visibility', () => {
 });
 
 describe('chat list marketing visibility', () => {
+  it('recognizes older campaign messages even without the marketing flag', () => {
+    expect(isMarketingMessage({ metadata: { campaignId: 'campaign-1' } } as Message)).toBe(true);
+    expect(isMarketingMessage({ metadata: {} } as Message)).toBe(false);
+  });
   it('detects marketing messages by metadata flag', () => {
     const message = {
       id: 'msg-1',

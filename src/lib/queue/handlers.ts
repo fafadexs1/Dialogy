@@ -253,8 +253,14 @@ const HANDLERS: Record<QueueJobType, QueueHandler | undefined> = {
       chatId: payload.chatId,
       workspaceId: payload.workspaceId,
       marketingSentAt: new Date(payload.marketingSentAt),
+      marketingMessageId: payload.marketingMessageId,
       autoCloseMs: payload.autoCloseMs,
     });
+  },
+  nexus_workflow: async (job) => {
+    const payload = job.payload as { workspaceId: string; automationJobId: string };
+    if (!payload?.workspaceId || !payload.automationJobId) throw new Error('Invalid nexus_workflow payload.');
+    await (await import('@/modules/nexus/services/automation-worker')).processAutomationTask(payload.automationJobId, payload.workspaceId);
   },
   nexus_internal_event: async (job) => {
     const payload = job.payload as NexusInternalEventPayload;

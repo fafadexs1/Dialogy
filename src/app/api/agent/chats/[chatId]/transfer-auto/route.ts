@@ -1,5 +1,7 @@
 'use server';
 
+import { randomUUID } from 'crypto';
+import { transferSnapshot } from '@/services/chat-distribution/transfer-snapshot';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
@@ -76,7 +78,13 @@ export async function POST(
         // mais carregada. A lista inteira importa: escolher só a primeira e
         // desistir era o que fazia a transferência automática falhar quando a
         // equipe mais folgada estava fechada ou lotada.
-        const candidateTeams = await rankAssignableTeams(authResult.agent.workspace_id);
+        const operationId = request.headers.get('Idempotency-Key') || randomUUID();
+        const preconditions = await transferSnapshot(authResult.agent.workspace_id,authResult.agent.id,operationId,chatId);
+        const previous=await db.query(`SELECT op.team_id,t.name FROM chat_transfer_operations op JOIN teams t ON t.id=op.team_id
+          WHERE op.workspace_id=$1 AND op.actor_id=$2 AND op.operation_id=$3 AND op.chat_id=$4`,
+          [authResult.agent.workspace_id,authResult.agent.id,operationId,chatId]);
+        const candidateTeams = previous.rows[0] ? [{teamId:previous.rows[0].team_id,teamName:previous.rows[0].name}]
+          : await rankAssignableTeams(authResult.agent.workspace_id);
 
         if (candidateTeams.length === 0) {
             return NextResponse.json(
@@ -95,7 +103,7 @@ export async function POST(
 
         for (const team of candidateTeams) {
             const result = await transferChatAction({
-                chatId,
+                chatId, operationId, ...preconditions,
                 teamId: team.teamId,
             }, createTrustedActorContext({
                 user: {
@@ -109,6 +117,7 @@ export async function POST(
                 return NextResponse.json({
                     success: true,
                     message: 'Chat transferido com sucesso.',
+                    operationId:result.operationId,outcome:result.outcome,
                     teamId: team.teamId,
                     teamName: team.teamName,
                     agentId: result.assignedAgent?.id,

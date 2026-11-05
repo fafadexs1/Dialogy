@@ -1,9 +1,10 @@
+import { STUDIO_SGP_ACTIONS } from './sgp-data';
 import { z } from 'zod';
 import { StudioReasoningStateSchema } from './reasoning-contract';
 import type { AgentStudioDocument, CollectedFieldDefinition, ProcedureDocument, ProcedureStep } from './types';
 import { extractStudioFieldCandidate, isStudioFieldQuestion, matchesStudioFieldLabel, resolveStudioCollectionOptions, validateStudioField } from './collection';
 import { readStudioValue, type StudioDataContext } from './data-mapping';
-import { matchExcludedStudioTopic, matchProhibitedStudioField } from './policy';
+import { matchExcludedStudioTopic, matchProhibitedStudioField, studioOperatingHoursAllow } from './policy';
 import { isStudioInformationQuestion, resolveStudioOption } from './option-resolution';
 import type { StudioCollectionInterpretation, StudioCollectionInterpretationInput } from './collection-interpreter';
 import { isStudioResumeRequest, restoreStudioProcedure, suspendStudioProcedure, studioProcedureHasExecutedOperation, STUDIO_RESUME_TTL } from './suspension';
@@ -75,7 +76,7 @@ export type StudioEngineDependencies = {
     procedure: ProcedureDocument;
     pendingField?: CollectedFieldDefinition;
   }) => Promise<StudioConversationControl>;
-  execute: (step: ProcedureStep, context: StudioDataContext, operation: { id: string; confirmed: boolean; catalogProductId?: string | number }) => Promise<{ values?: Record<string, unknown>; presentedProduct?: { productId: string | number; caption: string; url: string } }>;
+  execute: (step: ProcedureStep, context: StudioDataContext, operation: { id: string; confirmed: boolean; startedAt?: string; catalogProductId?: string | number; sgpQuery?: unknown }) => Promise<{ values?: Record<string, unknown>; presentedProduct?: { productId: string | number; caption: string; url: string }; memoryWarning?: string }>;
   knowledge: (query: string, collectionIds: string[], options?: {
     requireSources: boolean;
     collectionContext?: { fieldName: string; options: string[] };
@@ -277,18 +278,7 @@ export async function advanceStudioSession(input: {
     event('limits', 'Limite de mensagens da sessão', 'limit_reached');
     await handoff('A conversa atingiu o limite de mensagens sem conclusão.'); return finish();
   }
-  if (document.rules.operatingHoursEnabled) {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: document.rules.timeZone || 'America/Sao_Paulo', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(now()));
-    const part = (name: string) => parts.find((value) => value.type === name)?.value || '';
-    const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(part('weekday'));
-    const time = `${part('hour')}:${part('minute')}`;
-    const start = document.rules.operatingHoursStart, end = document.rules.operatingHoursEnd;
-    const within = start < end ? time >= start && time < end : time >= start || time < end;
-    const operatingDay = start > end && time < end ? (day + 6) % 7 : day;
-    if (!(document.rules.operatingDays || [1, 2, 3, 4, 5]).includes(operatingDay) || !within) {
-      state.status = 'waiting_input'; messages.push(document.rules.outOfHoursMessage); return finish();
-    }
-  }
+  if (!studioOperatingHoursAllow(document, now())) { state.status = 'waiting_input'; messages.push(document.rules.outOfHoursMessage); return finish(); }
   type PlannedCollection = NonNullable<ReturnType<typeof validateStudioCollectionPlan>>;
   let cachedCollection: { key: string; result: PlannedCollection | null } | undefined;
   let planningCalls = 0;
@@ -1311,7 +1301,7 @@ export async function advanceStudioSession(input: {
           event(step.id, step.title, 'awaiting_operator'); return finish();
         }
         const mustConfirm = step.type === 'http_request' ? step.httpRequest?.method !== 'GET' || Boolean(step.httpRequest.requiresConfirmation)
-          : step.type === 'mcp_tool_call' ? Boolean(step.mcpTool?.requiresConfirmation) || step.mcpTool?.riskLevel !== 'read_only' : true;
+          : step.type === 'mcp_tool_call' ? Boolean(step.mcpTool?.requiresConfirmation) || step.mcpTool?.riskLevel !== 'read_only' : !STUDIO_SGP_ACTIONS.includes(step.nativeActionType || '');
         const requiresConfirmation = mustConfirm || await deps.needsConfirmation?.(step) || false;
         const signature = JSON.stringify({ step, values: state.values });
         if (requiresConfirmation) {

@@ -10,12 +10,12 @@
     {
       "id": "99000001-0000-4000-8000-000000000001",
       "name": "Diretrizes Técnicas e Blindagem Operacional do Suporte Velpro",
-      "content": "# LUCAS — SUPORTE TÉCNICO VELPRO TELECOM\n\n## 1. ACESSO OFICIAL AO SGP E LISTAGEM DE CONTRATOS DO ASSINANTE\n- Você É o assistente virtual oficial de suporte técnico da Velpro Telecom e POSSUI ACESSO INTEGRADO E AUTORIZADO ao SGP (Sistema de Gestão de Provedores).\n- NUNCA afirme ao cliente que você \"não tem acesso à lista de contratos do titular\", que \"por segurança dos dados não pode repassar esse número\" ou peça para ele passar o endereço completo em vez de listar os contratos. Você TEM acesso direto à ferramenta de consulta no SGP!\n- Sempre que o cliente informar o CPF/CNPJ ou perguntar pelos contratos (ex: \"Pode me informar os contratos? Eu não sei o número de cor\", \"Quais contratos tenho?\", \"Qual o contrato?\"), execute IMEDIATAMENTE a capacidade de sistema \"Consultar contratos do titular no SGP\" (sgp_fetch_contracts).\n- O SGP retornará a lista completa de contratos vinculados àquele CPF, com seus respectivos planos e endereços de instalação.\n- Ao receber o resultado do SGP:\n  - Se o titular possuir MÚLTIPLOS contratos (como 2, 3 ou 20 contratos): liste para o cliente os contratos encontrados com o número do contrato, o plano e o endereço/bairro (exemplo: \"Localizei os seguintes contratos em seu nome:\n1. Contrato 12438 - PLANO 500 MEGA - Taguatinga Norte\n2. Contrato 10102 - Empresarial 1G - Águas Claras\n...\nQual deles você gostaria de verificar hoje?\").\n  - Se o titular possuir apenas 1 contrato: confirme o plano e localidade e avance imediatamente para os testes técnicos.\n- Após a escolha ou confirmação do contrato, utilize as ferramentas TR-069 do roteador (list_routers, get_router_details, etc.) para realizar o diagnóstico técnico.\n\n## 2. IDENTIFICAÇÃO OBRIGATÓRIA E TRIAGEM INICIAL\n- Todo atendimento de suporte técnico de conexão de internet inicia pela identificação do titular via CPF ou CNPJ e confirmação do contrato ou endereço de instalação.\n- Reaproveite CPF e contrato já informados na conversa; não pergunte novamente se já foram fornecidos.\n- Nunca peça dados técnicos internos (como IP WAN, PPPoE, MAC, número de série da ONU) ao cliente; descubra via ferramentas de rede.\n- Nunca revele senhas de Wi-Fi, tokens ou credenciais sensíveis no chat.\n\n## 3. EXECUÇÃO SEGURA E CONTINUIDADE (ANTI-INTERROGATÓRIO)\n- Faça no máximo UMA pergunta simples por vez. Nunca sobrecarregue o cliente com múltiplas dúvidas.\n- Se o cliente responder \"não sei\", \"não tenho como ver\" ou \"não consigo\", aceite prontamente, marque como indisponível e avance imediatamente para uma alternativa útil. Não repita perguntas já respondidas.\n- Não recomece saudações nem se apresente repetidamente ao retomar a conversa. Vá direto ao ponto.\n- Planeje o diagnóstico conforme o sintoma relatado: queda total (verificar sinal óptico Rx/Tx dBm), lentidão (verificar canais Wi-Fi e clientes conectados), intermitência (verificar uptime e rádios).\n\n## 4. AÇÕES CONDICIONAIS E ESCRITAS NO EQUIPAMENTO\n- Diagnóstico em leitura não autoriza reinício nem troca de parâmetros.\n- O reinício do roteador exige pedido ou indicação técnica justificada, explicação prévia do impacto (interrupção temporária) e autorização explícita imediatamente anterior. Nunca reinicie com luz LOS vermelha (falha física de fibra).\n- A alteração do nome do Wi-Fi (SSID) exige autorização explícita e aviso prévio de que os dispositivos serão desconectados. Não altere senha de Wi-Fi pelo chat (transfira para suporte humano seguro).\n- Não prometa prazos de visita técnica ou reparo sem confirmação real do sistema.\n\n## 5. RESOLUÇÃO E ENCERRAMENTO\n- Só encerre o atendimento quando o cliente confirmar que a internet voltou ou solicitar explicitamente o término.\n- Pedidos de atendimento humano têm prioridade imediata e devem ser transferidos sem novos testes ou burocracia.",
+      "content": "# LUCAS — SUPORTE TÉCNICO VELPRO TELECOM\n\n## 1. ACESSO OFICIAL AO SGP E LISTAGEM DE CONTRATOS DO ASSINANTE\n- Você É o assistente virtual oficial de suporte técnico da Velpro Telecom e POSSUI ACESSO INTEGRADO E AUTORIZADO ao SGP (Sistema de Gestão de Provedores).\n- NUNCA afirme ao cliente que você \"não tem acesso à lista de contratos do titular\", que \"por segurança dos dados não pode repassar esse número\" ou peça para ele passar o endereço completo em vez de listar os contratos. Você TEM acesso direto à ferramenta de consulta no SGP!\n- Sempre que o cliente informar o CPF/CNPJ ou perguntar pelos contratos (ex: \"Pode me informar os contratos? Eu não sei o número de cor\", \"Quais contratos tenho?\", \"Qual o contrato?\"), execute IMEDIATAMENTE a capacidade de sistema \"Consultar contratos do titular no SGP\" (sgp_fetch_contracts).\n- O SGP retornará a lista completa de contratos vinculados àquele CPF, com seus respectivos planos e endereços de instalação.\n- Ao receber o resultado do SGP:\n  - Se o titular possuir MÚLTIPLOS contratos (como 2, 3 ou 20 contratos): liste para o cliente os contratos encontrados com o número do contrato, o plano e o endereço/bairro (exemplo: \"Localizei os seguintes contratos em seu nome:\n1. Contrato 12438 - PLANO 500 MEGA - Taguatinga Norte\n2. Contrato 10102 - Empresarial 1G - Águas Claras\n...\nQual deles você gostaria de verificar hoje?\").\n  - Se o titular possuir apenas 1 contrato: confirme o plano e localidade e avance imediatamente para os testes técnicos.\n- Após a escolha ou confirmação do contrato, utilize as ferramentas TR-069 do roteador (list_routers, get_router_details, get_wifi_diagnostics, etc.) para realizar o diagnóstico técnico.\n- REGRA CRÍTICA DE VINCULAÇÃO DE EQUIPAMENTO: Ao chamar list_routers, utilize SEMPRE o IP de conexão (customer_ip / rad_ip) do contrato confirmado no argumento query (ex: query: customer_ip). É TERMINANTEMENTE PROIBIDO listar roteadores sem filtro de busca ou pegar roteadores aleatórios da rede. Cada contrato possui seu próprio IP e equipamento correspondente no TR-069.\n\n## 2. IDENTIFICAÇÃO OBRIGATÓRIA E TRIAGEM INICIAL\n- Todo atendimento de suporte técnico de conexão de internet inicia pela identificação do titular via CPF ou CNPJ e confirmação do contrato ou endereço de instalação.\n- Reaproveite CPF e contrato já informados na conversa; não pergunte novamente se já foram fornecidos.\n- Nunca peça dados técnicos internos (como IP WAN, PPPoE, MAC, número de série da ONU) ao cliente; descubra via ferramentas de rede.\n- Forneça com precisão o nome da rede (SSID) e a senha atual do Wi-Fi quando o cliente perguntar ou solicitar. Mantenha sigilo absoluto de senhas de sistema/PPPoE, logins internos, tokens e dados bancários.\n\n## 3. EXECUÇÃO SEGURA E CONTINUIDADE (ANTI-INTERROGATÓRIO)\n- Faça no máximo UMA pergunta simples por vez. Nunca sobrecarregue o cliente com múltiplas dúvidas.\n- Se o cliente responder \"não sei\", \"não tenho como ver\" ou \"não consigo\", aceite prontamente, marque como indisponível e avance imediatamente para uma alternativa útil. Não repita perguntas já respondidas.\n- Não recomece saudações nem se apresente repetidamente ao retomar a conversa. Vá direto ao ponto.\n- Planeje o diagnóstico conforme o sintoma relatado: queda total (verificar sinal óptico Rx/Tx dBm), lentidão (verificar canais Wi-Fi e clientes conectados), intermitência (verificar uptime e rádios).\n\n## 4. CONSULTA E FORNECIMENTO DE NOME E SENHA DO WI-FI\n- Se o cliente perguntar qual é o nome do seu Wi-Fi ou qual é a senha do Wi-Fi (ex: \"qual o nome da rede?\", \"qual a senha?\", \"esqueci a senha do Wi-Fi\", \"nome e senha\"), execute a consulta via TR-069:\n  1. Primeiro localize o roteador correto do assinante via list_routers passando o IP de conexão do contrato (query: customer_ip).\n  2. Em seguida, consulte as credenciais e rádios via get_wifi_diagnostics passando o device_id retornado.\n  3. Informe com total clareza e precisão ao titular o nome exato da rede (SSID) e a senha atual do Wi-Fi encontradas no equipamento dele (nas frequências 2.4GHz e 5GHz).\n- Se o cliente quiser ALTERAR ou TROCAR o nome da rede ou a senha, colete os novos dados desejados (senha com no mínimo 8 caracteres) e aplique via configure_wifi após consentimento prévio e aviso de que os aparelhos serão desconectados.\n\n## 5. RESOLUÇÃO E ENCERRAMENTO\n- Só encerre o atendimento quando o cliente confirmar que a internet voltou ou solicitar explicitamente o término.\n- Pedidos de atendimento humano têm prioridade imediata e devem ser transferidos sem novos testes ou burocracia.",
       "sourceType": "manual"
     }
   ],
   "status": "published",
-  "publishedVersion": 65,
+  "publishedVersion": 68,
   "draftRevision": 12,
   "migrationReview": {
     "sourceHash": "f49a0b4b1ad0600513450eeb43b5e84237c9be11d5e065fea2c6dc96cf7c25d8",
@@ -164,6 +164,13 @@
               "requiresConfirmation": false,
               "argumentMappings": [
                 {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
                   "argumentName": "limit",
                   "sourceChipKey": "5",
                   "sourceChipLabel": "Limite",
@@ -173,19 +180,19 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "[0].ID",
+                  "jsonPath": "[0].id",
                   "chipLabel": "ID do Equipamento CPE",
                   "chipKey": "device_id",
                   "required": true
                 },
                 {
-                  "jsonPath": "[0].PrimarySSID",
+                  "jsonPath": "[0].primary_ssid",
                   "chipLabel": "Wi-Fi Principal",
                   "chipKey": "primary_ssid",
                   "required": false
                 },
                 {
-                  "jsonPath": "[0].IPAddress",
+                  "jsonPath": "[0].ip_address",
                   "chipLabel": "Endereço IP",
                   "chipKey": "ip_address",
                   "required": false
@@ -225,19 +232,19 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "OpticalPower.RxPowerdBm",
+                  "jsonPath": "optical_power.rx_power_dbm",
                   "chipLabel": "Potência Óptica Rx",
                   "chipKey": "rx_dbm",
                   "required": false
                 },
                 {
-                  "jsonPath": "OpticalPower.Status",
+                  "jsonPath": "optical_power.status",
                   "chipLabel": "Status da Fibra",
                   "chipKey": "optical_status",
                   "required": false
                 },
                 {
-                  "jsonPath": "UptimeSeconds",
+                  "jsonPath": "uptime_seconds",
                   "chipLabel": "Tempo Ligado",
                   "chipKey": "uptime_seconds",
                   "required": false
@@ -264,8 +271,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.261Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.938Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000002",
@@ -358,6 +365,13 @@
               "requiresConfirmation": false,
               "argumentMappings": [
                 {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
                   "argumentName": "limit",
                   "sourceChipKey": "5",
                   "sourceChipLabel": "Limite",
@@ -367,7 +381,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "[0].ID",
+                  "jsonPath": "[0].id",
                   "chipLabel": "ID do Equipamento",
                   "chipKey": "lent_device_id",
                   "required": true
@@ -406,7 +420,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "OpticalPower.RxPowerdBm",
+                  "jsonPath": "optical_power.rx_power_dbm",
                   "chipLabel": "Potência Rx",
                   "chipKey": "lent_rx_dbm",
                   "required": false
@@ -445,7 +459,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "Radios[0].Channel",
+                  "jsonPath": "radios[0].channel",
                   "chipLabel": "Canal Wi-Fi",
                   "chipKey": "lent_wifi_channel",
                   "required": false
@@ -484,7 +498,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "TotalCount",
+                  "jsonPath": "total_connected_clients",
                   "chipLabel": "Total de Aparelhos",
                   "chipKey": "lent_clients_count",
                   "required": false
@@ -530,7 +544,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "Count",
+                  "jsonPath": "count",
                   "chipLabel": "Redes Vizinhas",
                   "chipKey": "lent_neighbors_count",
                   "required": false
@@ -557,8 +571,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000003",
@@ -649,6 +663,13 @@
               "requiresConfirmation": false,
               "argumentMappings": [
                 {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
                   "argumentName": "limit",
                   "sourceChipKey": "5",
                   "sourceChipLabel": "Limite",
@@ -658,7 +679,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "[0].ID",
+                  "jsonPath": "[0].id",
                   "chipLabel": "ID do Equipamento",
                   "chipKey": "interm_device_id",
                   "required": true
@@ -697,13 +718,13 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "UptimeSeconds",
+                  "jsonPath": "uptime_seconds",
                   "chipLabel": "Tempo Ligado",
                   "chipKey": "interm_uptime",
                   "required": false
                 },
                 {
-                  "jsonPath": "OpticalPower.RxPowerdBm",
+                  "jsonPath": "optical_power.rx_power_dbm",
                   "chipLabel": "Potência Rx",
                   "chipKey": "interm_rx_dbm",
                   "required": false
@@ -730,29 +751,39 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000004",
-        "name": "Alteração do Nome da Rede Wi-Fi (SSID)",
-        "description": "Procedimento assistido e seguro para troca do nome da rede sem fio (SSID) a pedido do titular.",
-        "objective": "Validar novo nome de rede Wi-Fi, solicitar confirmação do cliente e aplicar alteração via TR-069.",
+        "name": "Consulta e Alteração do Nome e Senha da Rede Wi-Fi",
+        "description": "Procedimento assistido para consulta ou troca do nome da rede sem fio (SSID) e senha do Wi-Fi a pedido do titular.",
+        "objective": "Consultar ou alterar nome e senha da rede Wi-Fi via TR-069 a pedido do titular.",
         "priority": 175,
-        "whenToUse": "Quando o cliente solicitar explicitamente a alteração ou personalização do nome do Wi-Fi.",
-        "whenNotToUse": "Não usar para alteração de senha de Wi-Fi ou problemas de lentidão.",
+        "whenToUse": "Quando o cliente solicitar o nome da rede, a senha do Wi-Fi ou a alteração de qualquer um desses dados.",
+        "whenNotToUse": "Não usar para queda de fibra com sinal óptico rompido.",
         "triggerKeywords": [
           "mudar nome do wifi",
           "trocar nome da rede",
           "alterar ssid",
           "mudar ssid",
           "trocar nome do wifi",
-          "renomear rede"
+          "renomear rede",
+          "senha do wifi",
+          "qual a senha",
+          "esqueci a senha",
+          "ver senha",
+          "saber a senha",
+          "qual a senha do wifi",
+          "nome do wifi",
+          "qual o nome da rede"
         ],
         "exampleRequests": [
           "Quero mudar o nome do meu Wi-Fi",
-          "Como mudo o nome da minha rede?",
-          "Pode trocar o nome do meu Wi-Fi?"
+          "Qual a senha do meu Wi-Fi?",
+          "Esqueci a senha do Wi-Fi",
+          "Qual o nome da minha rede?",
+          "Pode me passar a senha do Wi-Fi?"
         ],
         "steps": [
           {
@@ -839,6 +870,13 @@
               "requiresConfirmation": false,
               "argumentMappings": [
                 {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
                   "argumentName": "limit",
                   "sourceChipKey": "5",
                   "sourceChipLabel": "Limite",
@@ -848,7 +886,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "[0].ID",
+                  "jsonPath": "[0].id",
                   "chipLabel": "ID do Equipamento",
                   "chipKey": "ssid_device_id",
                   "required": true
@@ -921,8 +959,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000005",
@@ -1012,6 +1050,13 @@
               "requiresConfirmation": false,
               "argumentMappings": [
                 {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
                   "argumentName": "limit",
                   "sourceChipKey": "5",
                   "sourceChipLabel": "Limite",
@@ -1021,7 +1066,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "[0].ID",
+                  "jsonPath": "[0].id",
                   "chipLabel": "ID do Equipamento",
                   "chipKey": "rf_device_id",
                   "required": true
@@ -1086,8 +1131,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000006",
@@ -1176,6 +1221,13 @@
               "requiresConfirmation": false,
               "argumentMappings": [
                 {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
                   "argumentName": "limit",
                   "sourceChipKey": "5",
                   "sourceChipLabel": "Limite",
@@ -1185,7 +1237,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "[0].ID",
+                  "jsonPath": "[0].id",
                   "chipLabel": "ID do Equipamento",
                   "chipKey": "disp_device_id",
                   "required": true
@@ -1224,7 +1276,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "TotalCount",
+                  "jsonPath": "total_connected_clients",
                   "chipLabel": "Total de Conectados",
                   "chipKey": "disp_total",
                   "required": false
@@ -1243,8 +1295,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000007",
@@ -1333,6 +1385,13 @@
               "requiresConfirmation": false,
               "argumentMappings": [
                 {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
                   "argumentName": "limit",
                   "sourceChipKey": "5",
                   "sourceChipLabel": "Limite",
@@ -1342,7 +1401,7 @@
               ],
               "outputMappings": [
                 {
-                  "jsonPath": "[0].ID",
+                  "jsonPath": "[0].id",
                   "chipLabel": "ID do Equipamento",
                   "chipKey": "reboot_device_id",
                   "required": true
@@ -1423,8 +1482,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000008",
@@ -1466,8 +1525,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000009",
@@ -1523,8 +1582,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000010",
@@ -1563,8 +1622,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000011",
@@ -1616,8 +1675,8 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       },
       {
         "id": "a1000001-0000-4000-8000-000000000012",
@@ -1702,8 +1761,208 @@
           }
         ],
         "status": "published",
-        "publishedVersion": 65,
-        "updatedAt": "2026-09-16T21:54:07.262Z"
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
+      },
+      {
+        "id": "a1000001-0000-4000-8000-000000000013",
+        "name": "Consulta do Nome e Senha da Rede Wi-Fi",
+        "description": "Consulta do nome atual da rede sem fio (SSID) e da senha do Wi-Fi configurados no roteador quando o cliente esquece ou deseja saber o nome e a senha do seu Wi-Fi.",
+        "objective": "Localizar o roteador do cliente via TR-069 pelo IP de conexão do contrato e consultar os rádios Wi-Fi via get_wifi_diagnostics para informar o nome atual da rede (SSID) e a senha do Wi-Fi com segurança e precisão, sem alterar nenhuma configuração.",
+        "priority": 176,
+        "whenToUse": "Quando o cliente perguntar qual é o nome do seu Wi-Fi, qual é a senha do Wi-Fi, disser que esqueceu a senha ou a rede, ou quiser apenas saber/consultar as credenciais do Wi-Fi atual sem alterar.",
+        "whenNotToUse": "Não usar quando o cliente quiser alterar ou trocar o nome ou a senha do Wi-Fi (usar o procedimento de Alteração) ou para suporte financeiro.",
+        "triggerKeywords": [
+          "qual a senha do wifi",
+          "qual a senha da rede",
+          "esqueci a senha do wifi",
+          "qual a senha",
+          "senha do wifi",
+          "nome e senha",
+          "qual o nome do wifi",
+          "esqueci o nome do wifi",
+          "nome da rede",
+          "qual meu wifi",
+          "consultar wifi",
+          "saber o nome da rede",
+          "ver nome do wifi",
+          "apenas saber o nome atual",
+          "qual meu ssid",
+          "esqueci o nome"
+        ],
+        "exampleRequests": [
+          "Qual é a senha do meu Wi-Fi?",
+          "Esqueci a senha do Wi-Fi",
+          "Qual é o nome da minha rede e a senha?",
+          "Pode me passar a senha do Wi-Fi?"
+        ],
+        "steps": [
+          {
+            "id": "step_consult_ssid_cpf",
+            "order": 1,
+            "type": "collect_data",
+            "title": "Confirmar CPF ou CNPJ do titular",
+            "collectField": {
+              "id": "field_consult_ssid_cpf",
+              "name": "CPF ou CNPJ do titular",
+              "variableKey": "customer_cpf",
+              "type": "cpf_cnpj",
+              "required": true,
+              "promptMessage": "Para iniciarmos o atendimento e localizarmos a sua conexão com precisão, por favor informe o CPF ou CNPJ do titular do contrato:",
+              "errorMessage": "Por favor, informe um CPF ou CNPJ válido com apenas os números.",
+              "maxAttempts": 3,
+              "requiresConfirmation": false,
+              "isSensitive": true
+            }
+          },
+          {
+            "id": "step_consult_ssid_sgp_contracts",
+            "order": 2,
+            "type": "native_action",
+            "title": "Consultar contratos do titular no SGP",
+            "subtitle": "Consulta no SGP os contratos ativos, planos e endereços vinculados ao CPF/CNPJ",
+            "adaptiveAccess": {
+              "enabled": true,
+              "requiresSteps": []
+            },
+            "nativeActionType": "sgp_fetch_contracts"
+          },
+          {
+            "id": "step_consult_ssid_contract",
+            "order": 3,
+            "type": "collect_data",
+            "title": "Confirmar contrato ou endereço",
+            "collectField": {
+              "id": "field_consult_ssid_contract",
+              "name": "Número do contrato ou endereço",
+              "variableKey": "customer_contract",
+              "type": "text",
+              "required": true,
+              "promptMessage": "Qual é o número do contrato ou o endereço da instalação onde está o roteador? (Se tiver apenas um contrato, pode responder com o endereço ou apenas \"único\"):",
+              "errorMessage": "Por favor, informe o endereço ou número do contrato.",
+              "maxAttempts": 3,
+              "requiresConfirmation": false,
+              "isSensitive": false
+            }
+          },
+          {
+            "id": "step_consult_ssid_list",
+            "order": 4,
+            "type": "mcp_tool_call",
+            "title": "Localizar roteador pelo IP de conexão",
+            "adaptiveAccess": {
+              "enabled": true,
+              "requiresSteps": []
+            },
+            "mcpTool": {
+              "serverId": "8171892c-827b-4216-a631-02839d36af85",
+              "serverName": "MCP-TR069-Routers",
+              "qualifiedToolName": "mcp:8171892c-827b-4216-a631-02839d36af85:list_routers",
+              "friendlyToolName": "Localizar roteador do contrato",
+              "riskLevel": "read_only",
+              "requiresConfirmation": false,
+              "argumentMappings": [
+                {
+                  "argumentName": "query",
+                  "sourceChipKey": "customer_ip",
+                  "sourceChipLabel": "IP do Roteador",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                },
+                {
+                  "argumentName": "limit",
+                  "sourceChipKey": "5",
+                  "sourceChipLabel": "Limite",
+                  "sourceType": "static_value",
+                  "valueType": "number"
+                }
+              ],
+              "outputMappings": [
+                {
+                  "jsonPath": "[0].id",
+                  "chipLabel": "ID do Equipamento",
+                  "chipKey": "consult_device_id",
+                  "required": true
+                },
+                {
+                  "jsonPath": "[0].primary_ssid",
+                  "chipLabel": "Nome da Rede Wi-Fi (SSID)",
+                  "chipKey": "consult_primary_ssid",
+                  "required": false
+                }
+              ],
+              "fallbackAction": "handoff",
+              "fallbackHandoffTeam": "b9a74d62-7f65-46c1-a5ae-4887fde9926e"
+            }
+          },
+          {
+            "id": "step_consult_wifi_diag",
+            "order": 5,
+            "type": "mcp_tool_call",
+            "title": "Consultar configurações e senhas de Wi-Fi",
+            "adaptiveAccess": {
+              "enabled": true,
+              "requiresSteps": [
+                "step_consult_ssid_list"
+              ]
+            },
+            "mcpTool": {
+              "serverId": "8171892c-827b-4216-a631-02839d36af85",
+              "serverName": "MCP-TR069-Routers",
+              "qualifiedToolName": "mcp:8171892c-827b-4216-a631-02839d36af85:get_wifi_diagnostics",
+              "friendlyToolName": "Diagnóstico e credenciais Wi-Fi",
+              "riskLevel": "read_only",
+              "requiresConfirmation": false,
+              "argumentMappings": [
+                {
+                  "argumentName": "device_id",
+                  "sourceChipKey": "consult_device_id",
+                  "sourceChipLabel": "ID do Equipamento",
+                  "sourceType": "step_output",
+                  "valueType": "text"
+                }
+              ],
+              "outputMappings": [
+                {
+                  "jsonPath": "radios[0].ssid",
+                  "chipLabel": "Nome Wi-Fi 2.4GHz",
+                  "chipKey": "consult_ssid_24g",
+                  "required": false
+                },
+                {
+                  "jsonPath": "radios[0].password",
+                  "chipLabel": "Senha Wi-Fi 2.4GHz",
+                  "chipKey": "consult_password_24g",
+                  "required": false
+                },
+                {
+                  "jsonPath": "radios[1].ssid",
+                  "chipLabel": "Nome Wi-Fi 5GHz",
+                  "chipKey": "consult_ssid_5g",
+                  "required": false
+                },
+                {
+                  "jsonPath": "radios[1].password",
+                  "chipLabel": "Senha Wi-Fi 5GHz",
+                  "chipKey": "consult_password_5g",
+                  "required": false
+                }
+              ],
+              "fallbackAction": "handoff",
+              "fallbackHandoffTeam": "b9a74d62-7f65-46c1-a5ae-4887fde9926e"
+            }
+          },
+          {
+            "id": "step_consult_ssid_reply",
+            "order": 6,
+            "type": "respond",
+            "title": "Informar nome e senha da rede Wi-Fi",
+            "messageText": "Nome e senha da rede Wi-Fi consultados com sucesso no roteador do assinante."
+          }
+        ],
+        "status": "published",
+        "publishedVersion": 68,
+        "updatedAt": "2026-09-19T19:53:22.939Z"
       }
     ],
     "allowGeneralAiChat": true
@@ -1725,7 +1984,7 @@
     "operatingHoursStart": "08:00",
     "operatingHoursEnd": "18:00",
     "outOfHoursMessage": "Nosso suporte técnico opera de segunda a sexta, das 08h às 18h.",
-    "toneOfVoice": "técnico, empático, objetivo, ágil e resolutivo. Identificar CPF/CNPJ e consultar contratos no SGP. Fazer no máximo UMA pergunta simples por vez para não interrogar o cliente. Reaproveitar dados e sintomas já relatados. Nunca pedir dados técnicos internos (IP, MAC, serial) ao cliente. Aceitar prontamente respostas como \"não sei\" e avançar. Sigilo absoluto de senhas. Nunca reiniciar roteador ou alterar Wi-Fi sem consentimento explícito prévio.",
+    "toneOfVoice": "técnico, empático, objetivo, ágil e resolutivo. Identificar CPF/CNPJ e consultar contratos no SGP. Fazer no máximo UMA pergunta simples por vez para não interrogar o cliente. Reaproveitar dados e sintomas já relatados. Nunca pedir dados técnicos internos (IP, MAC, serial) ao cliente. Aceitar prontamente respostas como \"não sei\" e avançar. Fornecer com clareza o nome e a senha do Wi-Fi quando o cliente solicitar. Sigilo absoluto de senhas de sistema e dados bancários. Nunca reiniciar roteador ou alterar Wi-Fi sem consentimento explícito prévio.",
     "timeZone": "America/Sao_Paulo",
     "operatingDays": [
       1,
@@ -1743,12 +2002,11 @@
       "conteúdo sexual"
     ],
     "prohibitedDataLabels": [
-      "senha",
       "token",
       "código de autenticação",
       "CVV",
       "dados do cartão"
     ]
   },
-  "updatedAt": "2026-09-16T21:54:07.262Z"
+  "updatedAt": "2026-09-19T19:53:22.940Z"
 }

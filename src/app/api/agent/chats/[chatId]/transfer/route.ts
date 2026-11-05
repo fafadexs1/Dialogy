@@ -1,6 +1,8 @@
 
 'use server';
 
+import { randomUUID } from 'crypto';
+import { transferSnapshot } from '@/services/chat-distribution/transfer-snapshot';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { transferChatAction } from '@/actions/chats';
@@ -8,6 +10,7 @@ import type { Chat } from '@/lib/types';
 import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
 
 interface TransferPayload {
+    operationId?: string;
     teamId?: string;
     agentId?: string;
 }
@@ -68,6 +71,8 @@ export async function POST(
     try {
         const body: TransferPayload = await request.json();
         const { teamId, agentId } = body;
+        const operationId = request.headers.get('Idempotency-Key') || body.operationId || randomUUID();
+        const preconditions = await transferSnapshot(authResult.agent.workspace_id,authResult.agent.id,operationId,chatId);
 
         if (!teamId && !agentId) {
             return NextResponse.json({ error: 'Either teamId or agentId is required.' }, { status: 400 });
@@ -100,7 +105,7 @@ export async function POST(
         // Let's create a temporary, slightly modified version of the action here for API usage.
         // This is not ideal, but avoids refactoring a shared server action.
         const result = await transferChatAction({
-            chatId,
+            chatId, operationId, ...preconditions,
             teamId,
             agentId,
         }, createTrustedActorContext({
@@ -113,7 +118,7 @@ export async function POST(
 
 
         if (result.success) {
-            return NextResponse.json({ success: true, message: 'Chat transferred successfully.' });
+            return NextResponse.json({ success: true, message: 'Chat transferred successfully.', operationId:result.operationId,outcome:result.outcome,assignedAgent:result.assignedAgent });
         } else {
             return NextResponse.json(
                 {
@@ -121,7 +126,7 @@ export async function POST(
                     error: result.error || 'Failed to transfer chat.',
                     reason: result.reasonCode,
                 },
-                { status: result.reasonCode ? 409 : 500 }
+                { status: result.reasonCode || result.outcome === 'conflict' ? 409 : 500 }
             );
         }
 

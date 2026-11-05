@@ -24,7 +24,7 @@ export function isInboxAssignmentFilterTab(tab: InboxTabId): boolean {
 /**
  * Equipe, responsável, não lidas e sem responsável pertencem ao escopo de
  * Atendendo/Encerrados. Robô e Fila são listas compartilhadas e recebem apenas
- * a divisão por tag que identifica cada uma delas.
+ * a divisão por tag e a opção de incluir campanhas de marketing.
  */
 export function scopeInboxListFilters(
   tab: InboxTabId,

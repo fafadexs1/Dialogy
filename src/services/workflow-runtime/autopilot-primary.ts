@@ -1,7 +1,9 @@
 import { platformModel,platformApiKey } from '@/services/ai/platform-config';
 import type { AutopilotConfig, KnowledgeBaseDocument } from '@/lib/types';
 import type { Pool } from 'pg';
-import type { AgentToolRuntimeContext } from '@/services/agent-tools/types';
+import type { AgentToolRuntimeContext, AgentToolExecutionResult } from '@/services/agent-tools/types';
+import { prepareCustomerResponse } from '@/services/autopilot/customer-response-preparation';
+import { splitIntoMessageBlocks } from '@/lib/ai-response-format';
 import type { AutopilotTurnPolicy } from '@/services/autopilot/turn-policy';
 import { retrieveHybridSupportContext } from '@/services/rag/hybrid-retrieval';
 import {
@@ -26,7 +28,10 @@ export type AutopilotPrimaryRuntimeDependencies = {
   toolContext: AgentToolRuntimeContext;
   recentMessages: Array<{ fromMe: boolean; content: string }>;
   structuredMemory?: Record<string, unknown>;
-  sendResponse: (message: string, input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
+  responseTimeZone?: string;
+  sendResponse: (message: string, input: NodeRuntimeInput, preparation?: {
+    preserveFormatting: boolean; blocks: string[];
+  }) => Promise<Record<string, unknown>>;
   handoff: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   closeConversation: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   loadState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
@@ -126,6 +131,9 @@ export function buildAutopilotPrimaryFailureRecovery(
     ? failure.details.message
     : '';
   const diagnostic = `${failure?.message || ''} ${detailsMessage}`;
+  if (/SGP_INVOICE_LOOKUP_FAILED/i.test(diagnostic)) {
+    return 'Não consegui confirmar os dados da fatura no SGP. Nenhum PIX foi gerado. Sua solicitação continua pendente.';
+  }
   if (/\[tool_policy:confirmation_required\]|confirmacao explicita/i.test(diagnostic)) {
     return 'A acao ainda nao foi executada. Para eu prosseguir com seguranca, responda "confirmo" autorizando a acao solicitada.';
   }
@@ -141,7 +149,9 @@ export function buildAutopilotPrimaryFailureRecovery(
   if (/TOOL_DEPENDENCY_FAILED/i.test(diagnostic)) {
     return 'Nao consegui executar a acao porque a consulta necessaria para identificar o roteador falhou. Nenhuma alteracao foi aplicada.';
   }
-  return undefined;
+  return diagnostic.trim()
+    ? 'Não consegui concluir esta etapa do atendimento. Sua solicitação continua pendente; não tenho um resultado confirmado para informar.'
+    : undefined;
 }
 
 function modelConfig(node: WorkflowNode) {
@@ -255,7 +265,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
     // Once V2 owns the turn, failures must be fail-closed. Returning handled=false
     // would let process-chat continue into the legacy runtime and could duplicate
     // a response or a tool side effect after a partial native attempt.
-    return { enabled: true, handled: true, started: false, status: 'failed', error: 'active_workflow_missing' };
+    return { enabled: true, handled: true, started: false, status: 'failed', error: 'active_workflow_missing', recoveryResponse: buildAutopilotPrimaryFailureRecovery({ message: 'active_workflow_missing' }) };
   }
 
   const persistence = new PostgresWorkflowPersistence(input.dependencies.database);
@@ -263,7 +273,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
     input.config.active_workflow_id,
     input.config.active_workflow_version,
   );
-  if (!workflow) return { enabled: true, handled: true, started: false, status: 'failed', error: 'workflow_definition_missing' };
+  if (!workflow) return { enabled: true, handled: true, started: false, status: 'failed', error: 'workflow_definition_missing', recoveryResponse: buildAutopilotPrimaryFailureRecovery({ message: 'workflow_definition_missing' }) };
   const validation = validateWorkflowDefinition(workflow);
   if (!validation.valid) {
     return {
@@ -272,6 +282,7 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       started: false,
       status: 'failed',
       error: validation.errors.map((issue) => issue.message).join(' '),
+      recoveryResponse: buildAutopilotPrimaryFailureRecovery({ message: 'workflow_definition_invalid' }),
     };
   }
 
@@ -297,6 +308,13 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
   let responseSentDuringRun = false;
   let handoffCompletedDuringRun = false;
   let conversationClosedDuringRun = false;
+  const currentTurnToolResults: AgentToolExecutionResult[] = [];
+  const preparationTime = new Date();
+  const prepareResponse = (draft: string) => prepareCustomerResponse({
+    draft, customerMessage: input.customerMessage, toolResults: currentTurnToolResults,
+    intent: input.dependencies.toolContext.intent,
+    timeZone: input.dependencies.responseTimeZone, now: preparationTime,
+  });
 
   const handlers = createDefaultNodeHandlerRegistry({
     resolveModelChain: async (context) => modelChainForNode({
@@ -327,7 +345,11 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
         toolNames: definitions.map((definition) => definition.name),
         definitions,
         knownFields,
-        reportToolStatus: input.dependencies.reportToolStatus,
+        responseTimeZone: input.dependencies.responseTimeZone,
+        reportToolStatus: async (event) => {
+          if (event.result) currentTurnToolResults.push(event.result);
+          await input.dependencies.reportToolStatus?.(event);
+        },
       });
     },
     loadMemory: async () => ({
@@ -347,11 +369,27 @@ export async function runAutopilotWorkflowRuntimeV2Primary(input: RunAutopilotPr
       });
       return retrieval.knowledgeBaseDocuments.map((document) => ({ ...document }));
     },
-    applyGuardrails: async (_phase, value) => assertGuardrailSafe(value),
+    applyGuardrails: async (phase, value) => {
+      if (phase !== 'output' || typeof value.response !== 'string') return assertGuardrailSafe(value);
+      const prepared = prepareResponse(value.response);
+      // Persist the prepared answer with the agent result. Resumed executions
+      // must not fall back to the discarded model draft after a delivery error.
+      return assertGuardrailSafe({ ...value, response: prepared.response,
+        ...(prepared.mode === 'verified_invoice' && ['invoice_ambiguous', 'invoice_not_found', 'sgp_lookup_unavailable'].includes(prepared.reason)
+          ? { completionStatus: 'partial' } : {}),
+        responsePreparation: { mode: prepared.mode, reason: prepared.reason } });
+    },
     sendResponse: async (message, nodeInput) => {
-      const result = await input.dependencies.sendResponse(message, nodeInput);
+      const prepared = prepareResponse(message);
+      const persistedPreparation = isRecord(nodeInput.input.responsePreparation) ? nodeInput.input.responsePreparation : {};
+      const preserveFormatting = prepared.mode === 'verified_invoice' || persistedPreparation.mode === 'verified_invoice';
+      const result = await input.dependencies.sendResponse(prepared.response, nodeInput,
+        preserveFormatting
+          ? { preserveFormatting: true, blocks: splitIntoMessageBlocks(prepared.response) }
+          : undefined);
       if (result.success === true) responseSentDuringRun = true;
-      return result;
+      return { ...result, preparation: prepared.mode === 'draft' && persistedPreparation.mode === 'verified_invoice'
+        ? persistedPreparation : { mode: prepared.mode, reason: prepared.reason } };
     },
     handoff: async (nodeInput) => {
       const result = await input.dependencies.handoff(nodeInput);

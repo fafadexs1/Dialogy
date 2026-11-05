@@ -40,6 +40,9 @@ import { NexusWorkflowExecutionsDialog } from './nexus-workflow-executions-dialo
 import { NexusWorkflowHistoryDialog } from './nexus-workflow-history-dialog';
 import { NexusAiFlowComposer } from './nexus-ai-flow-composer';
 
+// Temporarily hide the AI composer in the flow editor.
+const NEXUS_AI_FLOW_COMPOSER_ENABLED = false;
+
 function modelConfiguration(model: string): ModelConfiguration {
   return {
     provider: getAiModelRuntimeProvider(model),
@@ -317,7 +320,7 @@ export function StandaloneNexusFlowEditor() {
         }}
         onSave={() => void save()}
         onPublish={() => void publish()}
-        assistantComposer={(
+        assistantComposer={NEXUS_AI_FLOW_COMPOSER_ENABLED ? (
           <NexusAiFlowComposer
             disabled={saving || publishing}
             onGenerate={(conversation) => generateNexusWorkflowWithAi({
@@ -332,7 +335,7 @@ export function StandaloneNexusFlowEditor() {
               toast({ title: 'A IA alterou o rascunho', description: proposal.summary });
             }}
           />
-        )}
+        ) : undefined}
       />
       <LegacyNexusImportDialog
         disabled={saving || publishing}

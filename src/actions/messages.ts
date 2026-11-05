@@ -1,6 +1,9 @@
 
 'use server';
 
+import { lockWorkspaceAssignments } from '@/services/chat-distribution/transfer-operation';
+import { recordDirectAssignment, resolveAgentTeam } from '@/services/chat-distribution/direct-assignment';
+import { claimQueueChat } from '@/services/chat-distribution/claim-queue-chat';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import type { MessageMetadata, Message } from '@/lib/types';
@@ -20,6 +23,8 @@ import { sendTemplateMessage } from '@/services/whatsapp/send-template-message';
 import {
     assertValidTemplateComponents,
     InvalidTemplatePayloadError,
+    normalizeTemplateOrderDetailsAmounts as normalizeTemplateOrderDetailsContractAmounts,
+    parseCurrencyStringToCents as parseTemplateCurrencyToCents,
     ProviderAcceptanceNotConfirmedError,
     requireProviderMessageId,
 } from '@/services/whatsapp/template-send-contract';
@@ -40,7 +45,6 @@ import {
     enqueueAiCaseMemoryRefresh,
     enqueueAiTask,
     enqueueJob,
-    enqueueMarketingAutoClose,
     shouldEnqueueJob
 } from '@/lib/queue';
 import { touchUserPresenceActivity, touchUserPresenceFromChat } from '@/lib/presence-server';
@@ -70,6 +74,8 @@ import { archiveOutboundMediaSafely, isTemporaryMediaUrl } from '@/services/mess
 import { createSystemAgentMessageAttribution } from '@/services/messages/sender-attribution';
 import { normalizeStoredMediaUrl } from '@/lib/storage-url';
 import { resolveOutboundMessagePlatform } from '@/lib/chat-platform';
+import { getMarketingAutoCloseMs } from '@/services/chat/auto-close';
+import { scheduleMarketingAutoClose } from '@/services/chat/marketing-auto-close';
 
 // Helper to map DB message (snake_case) to Frontend Message (camelCase for some fields)
 function mapDbMessageToFrontend(row: any): Message {
@@ -181,135 +187,6 @@ type InteractiveButtonsPayload = {
 // Num arquivo "use server" todo export precisa ser uma função async, então
 // esta constante fica local. Se a UI precisar dela, mova para src/lib.
 const MAX_INTERACTIVE_REPLY_BUTTONS = 3;
-
-const DEFAULT_MARKETING_AUTO_CLOSE_MS = 5 * 60 * 1000;
-
-async function getMarketingAutoCloseMs(workspaceId: string): Promise<number> {
-    try {
-        const res = await db.query(
-            'SELECT marketing_auto_close_seconds FROM workspaces WHERE id = $1',
-            [workspaceId]
-        );
-        if ((res.rowCount ?? 0) === 0) return DEFAULT_MARKETING_AUTO_CLOSE_MS;
-        const raw = res.rows[0].marketing_auto_close_seconds;
-        if (raw === null || raw === undefined) return DEFAULT_MARKETING_AUTO_CLOSE_MS;
-        const seconds = Number(raw);
-        if (!Number.isFinite(seconds) || seconds <= 0) return 0; // 0 ou negativo desabilita
-        return seconds * 1000;
-    } catch (err) {
-        console.error('[MARKETING_AUTO_CLOSE] Falha ao buscar configuracao, usando padrao:', err);
-        return DEFAULT_MARKETING_AUTO_CLOSE_MS;
-    }
-}
-
-async function scheduleMarketingAutoClose(chatId: string, workspaceId: string, marketingSentAt: Date, autoCloseMs: number) {
-    if (!autoCloseMs || autoCloseMs <= 0) return;
-    const timer = setTimeout(async () => {
-        const client = await db.connect();
-        try {
-            await client.query('BEGIN');
-
-            const chatRes = await client.query(
-                `SELECT status, agent_id FROM chats WHERE id = $1 FOR UPDATE`,
-                [chatId]
-            );
-            if (chatRes.rowCount === 0) {
-                await client.query('ROLLBACK');
-                return;
-            }
-            const { status, agent_id } = chatRes.rows[0];
-
-            // Evita encerrar se já está encerrado ou com agente em atendimento
-            if (status === 'encerrados' || agent_id) {
-                await client.query('ROLLBACK');
-                return;
-            }
-
-            const hasReply = await client.query(
-                `SELECT 1 FROM messages WHERE chat_id = $1 AND from_me = FALSE AND created_at > $2 LIMIT 1`,
-                [chatId, marketingSentAt.toISOString()]
-            );
-
-            if ((hasReply.rowCount ?? 0) > 0) {
-                await client.query('ROLLBACK');
-                return;
-            }
-
-            const queueRes = await client.query(
-                `UPDATE chats 
-                 SET status = 'gerais',
-                     closed_at = NULL,
-                     assigned_system_agent_id = NULL,
-                     assigned_at = NULL,
-                     is_autopilot_active = FALSE,
-                     copilot_mode = 'off',
-                     updated_at = clock_timestamp()
-                 WHERE id = $1
-                   AND status <> 'encerrados'
-                   AND agent_id IS NULL
-                 RETURNING id`,
-                [chatId]
-            );
-
-            if ((queueRes.rowCount ?? 0) === 0) {
-                await client.query('ROLLBACK');
-                return;
-            }
-
-            const seconds = Math.max(1, Math.round(autoCloseMs / 1000));
-            const humanDelay = seconds >= 60 ? `${Math.round(seconds / 60)} minutos` : `${seconds} segundos`;
-
-            await client.query(
-                `INSERT INTO messages (
-                    workspace_id, chat_id, type, content, from_me, is_read, metadata
-                 ) VALUES ($1, $2, 'system', $3, true, true, $4)`,
-                [
-                    workspaceId,
-                    chatId,
-                    `Atendimento enviado automaticamente para a fila após ${humanDelay} sem resposta à mensagem de marketing.`,
-                    {
-                        event: 'marketing_auto_queue_handoff',
-                        queueAfterMs: autoCloseMs,
-                        marketingSentAt: marketingSentAt.toISOString(),
-                    }
-                ]
-            );
-
-            await client.query('COMMIT');
-            await broadcastHydratedChatUpdate(workspaceId, chatId);
-
-        } catch (err) {
-            await client.query('ROLLBACK');
-            console.error('[MARKETING_AUTO_CLOSE] Falha ao encerrar automaticamente:', err);
-        } finally {
-            client.release();
-        }
-    }, autoCloseMs);
-    (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
-}
-
-async function scheduleMarketingAutoCloseAsync(chatId: string, workspaceId: string, marketingSentAt: Date, autoCloseMs: number) {
-    if (!autoCloseMs || autoCloseMs <= 0) return;
-
-    if (!shouldEnqueueJob('marketing_auto_close')) {
-        await scheduleMarketingAutoClose(chatId, workspaceId, marketingSentAt, autoCloseMs);
-        return;
-    }
-
-    const anchor = Number.isFinite(marketingSentAt.getTime()) ? marketingSentAt : new Date();
-    await enqueueMarketingAutoClose(
-        {
-            chatId,
-            workspaceId,
-            marketingSentAt: anchor.toISOString(),
-            autoCloseMs,
-        },
-        {
-            runAt: new Date(anchor.getTime() + autoCloseMs),
-            maxAttempts: 1,
-        }
-    );
-}
 
 async function cleanupTempMedia(file: MediaFilePayload) {
     if (!file.deleteAfterSend || !file.storageBucket || !file.storagePath) return;
@@ -592,9 +469,14 @@ async function reopenClosedWhatsappChat(
         lastCustomerMessageAt: Date | null;
     }
 ): Promise<void> {
+    const snapshot=await client.query('SELECT team_id FROM chats WHERE id=$1 AND workspace_id=$2 FOR UPDATE',[input.chatId,input.workspaceId]);
+    const assignmentTeam=await resolveAgentTeam(client,input.workspaceId,input.senderId,snapshot.rows[0]?.team_id ?? null);
+    await recordDirectAssignment(client,{workspaceId:input.workspaceId,teamId:assignmentTeam,agentId:input.senderId,
+      chatId:input.chatId,source:'reopened_assignment',currentAgentId:null});
     const reopenRes = await client.query(
         `UPDATE chats
          SET status = 'atendimentos',
+             team_id = $4,
              closed_at = NULL,
              agent_id = $1,
              assigned_system_agent_id = NULL,
@@ -605,7 +487,7 @@ async function reopenClosedWhatsappChat(
          WHERE id = $2
            AND workspace_id = $3
          RETURNING id`,
-        [input.senderId, input.chatId, input.workspaceId]
+        [input.senderId, input.chatId, input.workspaceId, assignmentTeam]
     );
 
     if ((reopenRes.rowCount ?? 0) === 0) {
@@ -880,6 +762,8 @@ async function internalSendMessage(
         }
         chatId = (await resolveCanonicalWhatsappChatId(client, chatId)) || chatId;
 
+        const assignmentScope=await client.query('SELECT workspace_id FROM chats WHERE id=$1',[chatId]);
+        if (assignmentScope.rows[0] && !metadata?.sentBy) await lockWorkspaceAssignments(client,assignmentScope.rows[0].workspace_id);
         // Carrega info básica do chat para atribuição de agente (independente do canal)
         const chatInfoRes = await client.query(`
             SELECT 
@@ -932,7 +816,7 @@ async function internalSendMessage(
             FROM chats c
             JOIN contacts ct ON c.contact_id = ct.id
             LEFT JOIN meta_conversations mc ON mc.chat_id = c.id
-            WHERE c.id = $1
+            WHERE c.id = $1 FOR UPDATE OF c
         `, [chatId, instanceNameParam || null]);
 
         if (chatInfoRes.rowCount === 0) {
@@ -1024,9 +908,12 @@ async function internalSendMessage(
         const isCloseNotice = metadata?.event === 'close_notice';
 
         if (!currentAgentId && chatStatus !== 'encerrados' && isFromHumanAgent && !isCloseNotice) {
+            const teamScope=await client.query('SELECT team_id FROM chats WHERE id=$1 FOR UPDATE',[chatId]);
+            const assignmentTeam=await resolveAgentTeam(client,workspaceId,senderId,teamScope.rows[0]?.team_id ?? null);
+            await recordDirectAssignment(client,{workspaceId,teamId:assignmentTeam,agentId:senderId,chatId,source:'message_assignment',currentAgentId:null});
             await client.query(
                 `UPDATE chats
-                 SET agent_id = $1,
+                 SET team_id = $3, agent_id = $1,
                      assigned_system_agent_id = NULL,
                      is_autopilot_active = FALSE,
                      copilot_mode = 'off',
@@ -1034,7 +921,7 @@ async function internalSendMessage(
                      assigned_at = NOW(),
                      updated_at = clock_timestamp()
                  WHERE id = $2`,
-                [senderId, chatId]
+                [senderId, chatId, assignmentTeam]
             );
             assignmentWorkspaceId = workspaceId;
 
@@ -2177,7 +2064,6 @@ export async function sendAutomatedMessageAction(
     }
     const baseMetadata = isSystemAgent ? { sentBy: 'system_agent' as const } : { sentBy: 'autopilot' as const };
     const shouldAutoCloseMarketing = !!metadata?.isMarketing;
-    const marketingSentAt = shouldAutoCloseMarketing ? new Date() : null;
     let workspaceIdForAutoClose: string | null = null;
 
     // Meta first
@@ -2212,6 +2098,13 @@ export async function sendAutomatedMessageAction(
                     senderUserId: isSystemAgent ? null : agentId,
                     senderSystemAgentId: isSystemAgent ? agentId : null,
                 });
+                if (shouldAutoCloseMarketing) {
+                    try {
+                        await scheduleMarketingAutoClose(chatId, metaCtx.chat.workspace_id, new Date());
+                    } catch (error) {
+                        console.error('[SEND_AUTOMATED_MESSAGE][AUTO_CLOSE] Falha ao agendar auto-encerramento:', error);
+                    }
+                }
                 return { success: true, apiResponse, providerAccepted: true };
             } catch (metaErr) {
                 console.error('[SEND_AUTOMATED_MESSAGE][META]', metaErr);
@@ -2239,9 +2132,10 @@ export async function sendAutomatedMessageAction(
                 const wsRes = await db.query('SELECT workspace_id FROM chats WHERE id = $1', [chatId]);
                 workspaceIdForAutoClose = wsRes.rows[0]?.workspace_id ?? null;
             }
-            if (workspaceIdForAutoClose && marketingSentAt) {
+            if (workspaceIdForAutoClose) {
                 const autoCloseMs = await getMarketingAutoCloseMs(workspaceIdForAutoClose);
-                await scheduleMarketingAutoCloseAsync(chatId, workspaceIdForAutoClose, marketingSentAt, autoCloseMs);
+                const marketingSentAt = result.message?.createdAt ? new Date(result.message.createdAt) : new Date();
+                await scheduleMarketingAutoClose(chatId, workspaceIdForAutoClose, marketingSentAt, autoCloseMs, result.message?.id);
             }
         } catch (err) {
             console.error('[SEND_AUTOMATED_MESSAGE][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
@@ -2287,37 +2181,14 @@ export const sendMediaAction = withDebug(
                         if ((chatInfoRes.rowCount ?? 0) > 0) {
                             const { workspace_id: workspaceId, status, agent_id: currentAgentId, assigned_system_agent_id: currentSystemAgentId } = chatInfoRes.rows[0];
                             if (!currentAgentId && status !== 'encerrados') {
-                                await client.query(
-                                    `UPDATE chats
-                                     SET agent_id = $1,
-                                         assigned_system_agent_id = NULL,
-                                         is_autopilot_active = FALSE,
-                                         copilot_mode = 'off',
-                                         status = 'atendimentos',
-                                         assigned_at = NOW(),
-                                         updated_at = clock_timestamp()
-                                     WHERE id = $2`,
-                                    [user.id, chatId]
-                                );
-                                await broadcastHydratedChatUpdate(workspaceId, chatId);
-
-                                const agentRes = await client.query(
-                                    'SELECT full_name, email FROM users WHERE id = $1',
-                                    [user.id]
-                                );
-                                const agentName = agentRes.rows[0]?.full_name || agentRes.rows[0]?.email || 'Agente';
-
-                                await client.query(
-                                    `INSERT INTO messages (
-                                        workspace_id, chat_id, type, content, from_me,
-                                        sender_user_id, created_at, is_read
-                                    ) VALUES ($1, $2, 'system', $3, true, $4, NOW(), true)`,
-                                    [workspaceId, chatId, currentSystemAgentId ? `Atendimento reassumido por ${agentName}.` : `Atendimento iniciado por ${agentName}.`, user.id]
-                                );
+                                const agentName=user.user_metadata?.full_name || user.email || 'Agente';
+                                await claimQueueChat(workspaceId,chatId,user.id,agentName,true,client);
+                                await broadcastHydratedChatUpdate(workspaceId,chatId);
                             }
                         }
                     } catch (assignErr) {
                         console.error('[SEND_MEDIA][ASSIGN]', assignErr);
+                        throw assignErr;
                     }
 
                     const service = metaCtx.platform === 'instagram'
@@ -2457,115 +2328,11 @@ export async function sendAutomatedMediaAction(
 }
 
 function parseCurrencyStringToCents(value: unknown): number | null {
-    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
-        return value;
-    }
-
-    if (typeof value !== 'string') {
-        return null;
-    }
-
-    const raw = value.trim();
-    if (!raw || /^\{[^}]+\}$/.test(raw)) {
-        return null;
-    }
-
-    let normalized = raw
-        .replace(/[^\d,.-]/g, '')
-        .replace(/(?!^)-/g, '');
-
-    if (!normalized || normalized === '-' || normalized === ',' || normalized === '.') {
-        return null;
-    }
-
-    const commaIndex = normalized.lastIndexOf(',');
-    const dotIndex = normalized.lastIndexOf('.');
-    const decimalSeparator = commaIndex > dotIndex ? ',' : dotIndex >= 0 ? '.' : '';
-
-    if (decimalSeparator) {
-        const separatorIndex = normalized.lastIndexOf(decimalSeparator);
-        const integerPart = normalized.slice(0, separatorIndex).replace(/[,.]/g, '') || '0';
-        const decimalPart = normalized.slice(separatorIndex + 1).replace(/\D/g, '');
-
-        if (decimalPart.length === 0) {
-            normalized = integerPart;
-        } else if (decimalPart.length <= 2) {
-            normalized = `${integerPart}.${decimalPart.padEnd(2, '0')}`;
-        } else {
-            normalized = `${integerPart}${decimalPart}`;
-        }
-    }
-
-    const amount = Number(normalized);
-    if (!Number.isFinite(amount) || amount < 0) {
-        return null;
-    }
-
-    return Math.round(amount * 100);
+    return parseTemplateCurrencyToCents(value);
 }
 
 function normalizeTemplateOrderDetailsAmounts(components: any[]): any[] {
-    if (!Array.isArray(components)) {
-        return components;
-    }
-
-    const clonedComponents = structuredClone(components);
-    const bodyComponent = clonedComponents.find((component: any) => String(component?.type || '').toLowerCase() === 'body');
-    const bodyParameters = Array.isArray(bodyComponent?.parameters) ? bodyComponent.parameters : [];
-    const bodyValueCandidates = [
-        bodyParameters[3]?.text,
-        ...bodyParameters.map((parameter: any) => parameter?.text),
-    ];
-    const inferredCents = bodyValueCandidates
-        .map(parseCurrencyStringToCents)
-        .find((value): value is number => typeof value === 'number');
-
-    const normalizeAmountValue = (amount: any, options: { useInferredFallback?: boolean } = {}) => {
-        if (!amount || typeof amount !== 'object') {
-            return;
-        }
-
-        if (options.useInferredFallback && inferredCents !== undefined) {
-            amount.value = inferredCents;
-            return;
-        }
-
-        const parsedCents = parseCurrencyStringToCents(amount.value);
-        if (parsedCents !== null) {
-            amount.value = parsedCents;
-            return;
-        }
-    };
-
-    for (const component of clonedComponents) {
-        if (String(component?.type || '').toLowerCase() !== 'button') {
-            continue;
-        }
-
-        for (const parameter of component.parameters || []) {
-            const orderDetails = parameter?.action?.order_details;
-            if (!orderDetails || typeof orderDetails !== 'object') {
-                continue;
-            }
-
-            normalizeAmountValue(orderDetails.total_amount);
-            normalizeAmountValue(orderDetails.order?.subtotal);
-            normalizeAmountValue(orderDetails.order?.tax);
-            normalizeAmountValue(orderDetails.order?.shipping);
-            normalizeAmountValue(orderDetails.order?.discount);
-
-            if (Array.isArray(orderDetails.order?.items)) {
-                for (const item of orderDetails.order.items) {
-                    normalizeAmountValue(item?.amount, { useInferredFallback: true });
-                }
-            }
-
-            normalizeAmountValue(orderDetails.total_amount, { useInferredFallback: true });
-            normalizeAmountValue(orderDetails.order?.subtotal, { useInferredFallback: true });
-        }
-    }
-
-    return clonedComponents;
+    return normalizeTemplateOrderDetailsContractAmounts(components);
 }
 
 function renderApprovedTemplateContent(template: any, components: any[]): string | null {
@@ -2647,16 +2414,13 @@ export const sendAgentTemplateAction = withDebug(
         }
 
         let validationError: InvalidTemplatePayloadError | null = null;
+        let normalizedComponents = Array.isArray(components) ? components : [];
         try {
             assertValidTemplateComponents(components);
+            normalizedComponents = normalizeTemplateOrderDetailsAmounts(normalizedComponents);
         } catch (error) {
             if (!(error instanceof InvalidTemplatePayloadError)) throw error;
             validationError = error;
-        }
-
-        let normalizedComponents = Array.isArray(components) ? components : [];
-        if (!validationError) {
-            normalizedComponents = normalizeTemplateOrderDetailsAmounts(normalizedComponents);
         }
 
         const apiConfig = validationError ? null : await getEvolutionApiConfig(instanceName, { workspaceId });
@@ -2797,7 +2561,7 @@ export const sendAgentTemplateAction = withDebug(
             if (metadata?.isMarketing) {
                 try {
                     const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
-                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
                 } catch (err) {
                     console.error('[SEND_AGENT_TEMPLATE_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
                 }
@@ -3058,7 +2822,7 @@ export const sendAgentListAction = withDebug(
             if (metadata?.isMarketing && chatId) {
                 try {
                     const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
-                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
                 } catch (err) {
                     console.error('[SEND_AGENT_LIST_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
                 }
@@ -3208,7 +2972,7 @@ export const sendAgentButtonsAction = withDebug(
             if (metadata?.isMarketing && chatId) {
                 try {
                     const autoCloseMs = await getMarketingAutoCloseMs(workspaceId);
-                    await scheduleMarketingAutoCloseAsync(chatId, workspaceId, new Date(), autoCloseMs);
+                    await scheduleMarketingAutoClose(chatId, workspaceId, new Date(), autoCloseMs);
                 } catch (err) {
                     console.error('[SEND_AGENT_BUTTONS_ACTION][AUTO_CLOSE] Falha ao agendar auto-encerramento:', err);
                 }
@@ -3354,6 +3118,7 @@ export const startNewConversation = withDebug(
         const client = await db.connect();
         try {
             await client.query('BEGIN');
+            await lockWorkspaceAssignments(client,workspaceId);
 
             const instanceType = await getMessagingInstanceType(client, workspaceId, instanceName);
             const isCloudInstance = instanceType === 'wa_cloud';
@@ -3455,6 +3220,10 @@ export const startNewConversation = withDebug(
                         [newChatId, workspaceId, contactId, senderId, protocol]
                     );
                     chatId = newChatRes.rows[0].id;
+                    const assignmentTeam=await resolveAgentTeam(client,workspaceId,senderId,null);
+                    await client.query('UPDATE chats SET team_id=$1 WHERE id=$2',[assignmentTeam,chatId]);
+                    await recordDirectAssignment(client,{workspaceId,teamId:assignmentTeam,agentId:senderId,chatId:chatId!,
+                      source:'new_outbound_assignment',currentAgentId:null});
                 }
             }
 

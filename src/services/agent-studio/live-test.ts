@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
+import { transferSnapshot } from '@/services/chat-distribution/transfer-snapshot';
 import { db } from '@/lib/db';
 import type { AutopilotConfig, Contact } from '@/lib/types';
 import { broadcastHydratedChatUpdate } from '@/lib/realtime/chat-broadcast';
@@ -12,7 +13,7 @@ import { buildMediaAnalysisContext } from '@/services/autopilot/runtime/media-an
 
 export type LiveTestAttachment = { file: File };
 
-async function runLiveNative(scope: LiveTestScope, chatId: string, action: AgentToolAction, confirmed: boolean, outOfHoursMessage: string) {
+async function runLiveNative(scope: LiveTestScope, chatId: string, action: AgentToolAction, confirmed: boolean, outOfHoursMessage: string, sourceMessageId: string) {
   // Use normal authenticated actions: team availability, chat access, audit and event dispatch still apply.
   const { closeChatAction, transferChatAction } = await import('@/actions/chats');
   if (action.type === 'close_chat') {
@@ -24,7 +25,9 @@ async function runLiveNative(scope: LiveTestScope, chatId: string, action: Agent
   if (action.type !== 'transfer_chat') throw new Error('Ação nativa não suportada.');
   const team = await db.query('SELECT id, name FROM teams WHERE workspace_id=$1 AND (id::text=$2 OR name=$3) LIMIT 1', [scope.workspaceId, action.payload?.teamId || '', action.payload?.teamName || '']);
   if (!team.rows[0]) throw new Error('Equipe de destino indisponível neste workspace.');
-  const result = await transferChatAction({ chatId, teamId: team.rows[0].id });
+  const operationId=`studio:${scope.sessionId}:${sourceMessageId}`;
+  const preconditions=await transferSnapshot(scope.workspaceId,scope.userId,operationId,chatId);
+  const result = await transferChatAction({ chatId, teamId: team.rows[0].id,operationId,...preconditions });
   if (result.success) return { message: `Vou encaminhar seu atendimento para a equipe ${team.rows[0].name} continuar com você.` };
   if (!result.reasonCode) throw new Error(result.error || 'Não foi possível transferir o atendimento.');
   const queued = await db.query(`UPDATE chats SET agent_id=NULL, assigned_system_agent_id=NULL, team_id=$3,
@@ -132,7 +135,7 @@ export async function sendLiveTestMessage(scope: LiveTestScope, config: Autopilo
         },
         runNative: async (action, operation) => {
           await assertCurrent();
-          return runLiveNative(scope, row.chat_id, action, operation.confirmed, release.agentSnapshot.rules.outOfHoursMessage);
+          return runLiveNative(scope, row.chat_id, action, operation.confirmed, release.agentSnapshot.rules.outOfHoursMessage,messageId);
         },
       });
     // A checkpoint may have succeeded before the response delivery failed. A retry only redelivers.

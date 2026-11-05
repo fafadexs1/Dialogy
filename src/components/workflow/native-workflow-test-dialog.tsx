@@ -7,14 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
@@ -371,15 +364,15 @@ export function NativeWorkflowTestDialog({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}>
       <DialogContent
-        className="dark flex max-h-[92vh] w-[min(880px,95vw)] max-w-none flex-col gap-0 overflow-hidden border-slate-700 bg-[#0b121a] p-0 text-slate-100 shadow-2xl"
+        className="workflow-portal flex max-h-[92vh] w-[min(880px,95vw)] max-w-none flex-col gap-0 overflow-hidden border-[var(--wf-border)] bg-[var(--wf-panel)] p-0 text-[var(--wf-text)] shadow-2xl"
         aria-busy={busy}
       >
-        <DialogHeader className="border-b border-slate-700/80 bg-[#101b26] px-6 py-5 pr-12 text-left">
+        <DialogHeader className="border-b border-[var(--wf-border)] bg-[var(--wf-panel)] px-6 py-5 pr-12 text-left">
           <DialogTitle className="flex items-center gap-3 text-xl">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-400/15 text-cyan-300"><Beaker className="h-5 w-5" /></span>
             <span>{title}</span>
           </DialogTitle>
-          <DialogDescription className="pt-1 leading-6 text-slate-400">
+          <DialogDescription className="pt-1 leading-6 text-[var(--wf-muted)]">
             {description}{workflowName ? ` Workflow: ${workflowName}.` : ''}
           </DialogDescription>
         </DialogHeader>
@@ -389,7 +382,7 @@ export function NativeWorkflowTestDialog({
             <div className="space-y-6 p-6">
               {presets.length > 0 && (
                 <fieldset>
-                  <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Cenários rápidos</legend>
+                  <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--wf-muted)]">Cenários rápidos</legend>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {presets.map((preset) => (
                       <button
@@ -402,11 +395,11 @@ export function NativeWorkflowTestDialog({
                           'rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400',
                           selectedPreset?.id === preset.id
                             ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-100'
-                            : 'border-slate-700 bg-slate-900/50 text-slate-200 hover:border-slate-500',
+                            : 'border-[var(--wf-border)] bg-slate-900/50 text-[var(--wf-text)] hover:border-[var(--wf-border)]',
                         )}
                       >
                         <span className="block text-sm font-medium">{preset.label}</span>
-                        {preset.description && <span className="mt-1 block text-xs leading-5 text-slate-500">{preset.description}</span>}
+                        {preset.description && <span className="mt-1 block text-xs leading-5 text-[var(--wf-muted)]">{preset.description}</span>}
                       </button>
                     ))}
                   </div>
@@ -416,7 +409,7 @@ export function NativeWorkflowTestDialog({
               <section className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <Label htmlFor={messageId}>Mensagem do cliente</Label>
-                  <span className={cn('text-xs', draft.message.length > maxMessageLength ? 'text-red-300' : 'text-slate-500')}>
+                  <span className={cn('text-xs', draft.message.length > maxMessageLength ? 'text-red-300' : 'text-[var(--wf-muted)]')}>
                     {draft.message.length}/{maxMessageLength}
                   </span>
                 </div>
@@ -431,27 +424,27 @@ export function NativeWorkflowTestDialog({
                   aria-invalid={Boolean(fieldErrors.message)}
                   aria-describedby={fieldErrors.message ? `${messageId}-error` : undefined}
                   placeholder="Ex.: Olá, preciso da segunda via da minha fatura."
-                  className="min-h-28 resize-y border-slate-700 bg-[#121d28] text-slate-100 placeholder:text-slate-500"
+                  className="min-h-28 resize-y border-[var(--wf-border)] bg-[var(--wf-panel)] text-[var(--wf-text)] placeholder:text-[var(--wf-muted)]"
                 />
                 {fieldErrors.message && <p id={`${messageId}-error`} role="alert" className="text-xs text-red-300">{fieldErrors.message}</p>}
               </section>
 
               {lastEntry && (
-                <section className="flex flex-col gap-3 rounded-2xl border border-slate-700 bg-slate-900/45 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <section className="flex flex-col gap-3 rounded-2xl border border-[var(--wf-border)] bg-slate-900/45 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><History className="h-3.5 w-3.5" />Última entrada</p>
-                    <p className="mt-2 truncate text-sm text-slate-200">{lastEntry.message}</p>
-                    <p className="mt-1 text-xs text-slate-500">{new Date(lastEntry.submittedAt).toLocaleString('pt-BR')}</p>
+                    <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--wf-muted)]"><History className="h-3.5 w-3.5" />Última entrada</p>
+                    <p className="mt-2 truncate text-sm text-[var(--wf-text)]">{lastEntry.message}</p>
+                    <p className="mt-1 text-xs text-[var(--wf-muted)]">{new Date(lastEntry.submittedAt).toLocaleString('pt-BR')}</p>
                   </div>
-                  <Button type="button" size="sm" variant="outline" onClick={() => applyPayload(lastEntry)} disabled={busy} className="shrink-0 border-slate-600 bg-slate-800/60">
+                  <Button type="button" size="sm" variant="outline" onClick={() => applyPayload(lastEntry)} disabled={busy} className="shrink-0 border-[var(--wf-border)] bg-slate-800/60">
                     <RotateCcw className="mr-2 h-4 w-4" />Usar novamente
                   </Button>
                 </section>
               )}
 
               {fixtureMode !== 'hidden' && dependencies.length > 0 && (
-                <fieldset className="rounded-2xl border border-slate-700 bg-slate-900/30 p-4">
-                  <legend className="px-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Dependências simuladas</legend>
+                <fieldset className="rounded-2xl border border-[var(--wf-border)] bg-slate-900/30 p-4">
+                  <legend className="px-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--wf-muted)]">Dependências simuladas</legend>
                   {fixtureMode === 'optional' && (
                     <div className="flex items-start gap-3">
                       <Checkbox
@@ -462,7 +455,7 @@ export function NativeWorkflowTestDialog({
                       />
                       <div>
                         <Label htmlFor={`${generatedId}-fixtures-enabled`} className="cursor-pointer">Simular saídas anteriores</Label>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">Ative para testar este bloco isoladamente com dados controlados.</p>
+                        <p className="mt-1 text-xs leading-5 text-[var(--wf-muted)]">Ative para testar este bloco isoladamente com dados controlados.</p>
                       </div>
                     </div>
                   )}
@@ -477,11 +470,11 @@ export function NativeWorkflowTestDialog({
                         const outputError = fieldErrors[fixtureErrorKey(dependency.id, 'output')];
                         const statePatchError = fieldErrors[fixtureErrorKey(dependency.id, 'statePatch')];
                         return (
-                          <section key={dependency.id} className="rounded-xl border border-slate-700/80 bg-[#101821] p-4">
+                          <section key={dependency.id} className="rounded-xl border border-[var(--wf-border)] bg-[var(--wf-panel)] p-4">
                             <div className="flex flex-wrap items-start justify-between gap-2">
                               <div>
-                                <h3 className="text-sm font-medium text-slate-100">{dependency.label}</h3>
-                                {dependency.description && <p className="mt-1 text-xs leading-5 text-slate-500">{dependency.description}</p>}
+                                <h3 className="text-sm font-medium text-[var(--wf-text)]">{dependency.label}</h3>
+                                {dependency.description && <p className="mt-1 text-xs leading-5 text-[var(--wf-muted)]">{dependency.description}</p>}
                               </div>
                               {dependency.required && <Badge variant="outline" className="border-amber-400/30 text-amber-200">Obrigatória</Badge>}
                             </div>
@@ -497,12 +490,12 @@ export function NativeWorkflowTestDialog({
                                   aria-invalid={Boolean(outputError)}
                                   aria-describedby={outputError ? `${outputId}-error` : undefined}
                                   placeholder={'{\n  "campo": "valor"\n}'}
-                                  className="min-h-32 resize-y border-slate-700 bg-slate-950 font-mono text-xs text-slate-200"
+                                  className="min-h-32 resize-y border-[var(--wf-border)] bg-slate-950 font-mono text-xs text-[var(--wf-text)]"
                                 />
                                 {outputError && <p id={`${outputId}-error`} role="alert" className="text-xs text-red-300">{outputError}</p>}
                               </div>
                               <div className="space-y-2">
-                                <Label htmlFor={statePatchId}>Estado adicional JSON <span className="font-normal text-slate-500">(opcional)</span></Label>
+                                <Label htmlFor={statePatchId}>Estado adicional JSON <span className="font-normal text-[var(--wf-muted)]">(opcional)</span></Label>
                                 <Textarea
                                   id={statePatchId}
                                   value={draft.fixtures[dependency.id]?.statePatchJson || ''}
@@ -512,7 +505,7 @@ export function NativeWorkflowTestDialog({
                                   aria-invalid={Boolean(statePatchError)}
                                   aria-describedby={statePatchError ? `${statePatchId}-error` : undefined}
                                   placeholder={'{\n  "variavel": "valor"\n}'}
-                                  className="min-h-32 resize-y border-slate-700 bg-slate-950 font-mono text-xs text-slate-200"
+                                  className="min-h-32 resize-y border-[var(--wf-border)] bg-slate-950 font-mono text-xs text-[var(--wf-text)]"
                                 />
                                 {statePatchError && <p id={`${statePatchId}-error`} role="alert" className="text-xs text-red-300">{statePatchError}</p>}
                               </div>
@@ -536,11 +529,11 @@ export function NativeWorkflowTestDialog({
             </div>
           </ScrollArea>
 
-          <DialogFooter className="border-t border-slate-700/80 bg-[#101b26] px-6 py-4 sm:items-center sm:justify-between">
-            <p className="text-left text-xs text-slate-500">O teste usa o rascunho atual e não publica alterações.</p>
+          <DialogFooter className="border-t border-[var(--wf-border)] bg-[var(--wf-panel)] px-6 py-4 sm:items-center sm:justify-between">
+            <p className="text-left text-xs text-[var(--wf-muted)]">O teste usa o rascunho atual e não publica alterações.</p>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancelar</Button>
-              <Button type="submit" disabled={busy} className="bg-cyan-400 text-slate-950 hover:bg-cyan-300">
+              <Button type="submit" disabled={busy} className="bg-cyan-400 text-[var(--wf-text)] hover:bg-cyan-300">
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
                 {busy ? 'Executando…' : submitLabel}
               </Button>

@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useCallback, useTransition } from '
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Paperclip,
+    ShoppingBag,
     Send,
     Smile,
     Loader2,
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { cn } from '@/lib/utils';
+import { resolveChatPlatform } from '@/lib/chat-platform';
 import { type Chat, type Shortcut } from '@/lib/types';
 import { AudioRecorder } from './audio-recorder';
 import { ComposerAiMenu } from './composer-ai-menu';
@@ -32,13 +34,16 @@ const EmojiPicker = dynamic(() => import('emoji-picker-react'), {
 interface UseAutoResizeTextareaProps {
     minHeight: number;
     maxHeight?: number;
+    externalRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
 
 function useAutoResizeTextarea({
     minHeight,
     maxHeight,
+    externalRef,
 }: UseAutoResizeTextareaProps) {
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const localRef = useRef<HTMLTextAreaElement | null>(null);
+    const textareaRef = externalRef || localRef;
 
     const adjustHeight = useCallback(
         (reset?: boolean) => {
@@ -47,29 +52,28 @@ function useAutoResizeTextarea({
 
             if (reset) {
                 textarea.style.height = `${minHeight}px`;
+                textarea.style.overflowY = 'hidden';
                 return;
             }
 
-            textarea.style.height = `${minHeight}px`;
+            // Temporarily set height to 'auto' to allow scrollHeight to recalculate when deleting lines
+            textarea.style.height = 'auto';
+            const scrollHeight = textarea.scrollHeight;
+            const targetMaxHeight = maxHeight ?? 180;
             const newHeight = Math.max(
                 minHeight,
-                Math.min(
-                    textarea.scrollHeight,
-                    maxHeight ?? Number.POSITIVE_INFINITY
-                )
+                Math.min(scrollHeight, targetMaxHeight)
             );
 
             textarea.style.height = `${newHeight}px`;
+            textarea.style.overflowY = scrollHeight > targetMaxHeight ? 'auto' : 'hidden';
         },
-        [minHeight, maxHeight]
+        [minHeight, maxHeight, textareaRef]
     );
 
     useEffect(() => {
-        const textarea = textareaRef.current;
-        if (textarea) {
-            textarea.style.height = `${minHeight}px`;
-        }
-    }, [minHeight]);
+        adjustHeight();
+    }, [adjustHeight]);
 
     useEffect(() => {
         const handleResize = () => adjustHeight();
@@ -104,6 +108,93 @@ function TypingDots() {
     );
 }
 
+function normalizeText(text: string): string {
+    return (text || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function calculateShortcutScore(shortcut: Shortcut, rawQuery: string): number {
+    const query = normalizeText(rawQuery);
+    if (!query) return 100;
+
+    const name = normalizeText(shortcut.name);
+    const message = normalizeText(shortcut.message);
+
+    const cleanName = name.replace(/[-_]/g, ' ');
+    const cleanQuery = query.replace(/[-_]/g, ' ');
+
+    // 1. Exact match on shortcut name (e.g. "loss" === "loss" or "mudar-senha" === "mudar senha")
+    if (name === query || cleanName === cleanQuery) {
+        return 10000;
+    }
+
+    // 2. Name starts with query (e.g. "loss" starts with "l", "lo", "los")
+    // Shorter names get a bonus so "/loss" ranks above "/loss-externo" when typing "l" or "los"
+    if (name.startsWith(query) || cleanName.startsWith(cleanQuery)) {
+        return 5000 + Math.max(0, 500 - name.length * 10);
+    }
+
+    // 3. Word in name starts with query (e.g. "mudar-senha", typing "sen")
+    const nameWords = cleanName.split(/\s+/);
+    const nameWordIndex = nameWords.findIndex(w => w.startsWith(cleanQuery) || w.startsWith(query));
+    if (nameWordIndex >= 0) {
+        return 4000 - nameWordIndex * 50;
+    }
+
+    // 4. Initials / Acronym match on multi-word name (e.g. "mudar-senha", typing "ms")
+    if (nameWords.length > 1) {
+        const initials = nameWords.map(w => w[0] || '').join('');
+        if (initials.startsWith(query)) {
+            return 3500;
+        }
+    }
+
+    // 5. Name contains query anywhere as a substring
+    const nameIndex = name.indexOf(query);
+    if (nameIndex >= 0) {
+        return 2500 - nameIndex * 20;
+    }
+    const cleanNameIndex = cleanName.indexOf(cleanQuery);
+    if (cleanNameIndex >= 0) {
+        return 2500 - cleanNameIndex * 20;
+    }
+
+    // 6. Message matching:
+    // IMPORTANT: For 1-character queries (e.g. "/l"), NEVER match message body!
+    // Typing "/l" must strictly match shortcuts that have "l" in the title/name/command.
+    if (query.length === 1) {
+        return 0;
+    }
+
+    // For 2 characters: only match if a word in the message starts with the query, with low score
+    if (query.length === 2) {
+        const msgWords = message.split(/[\s.,;:!?()[\]{}"'/\\]+/);
+        if (msgWords.some(w => w.startsWith(query))) {
+            return 150;
+        }
+        return 0;
+    }
+
+    // For queries of 3+ characters:
+    if (message.startsWith(query)) {
+        return 800;
+    }
+
+    const msgWords = message.split(/[\s.,;:!?()[\]{}"'/\\]+/);
+    if (msgWords.some(w => w.startsWith(query))) {
+        return 500;
+    }
+
+    if (message.includes(query)) {
+        return 200;
+    }
+
+    return 0;
+}
+
 export interface AnimatedComposerProps {
     chat: Chat;
     value: string;
@@ -136,6 +227,7 @@ export interface AnimatedComposerProps {
     onLearnFromConversation: () => void;
     onOpenToolExecutions: () => void;
     onOpenAiTakeOver: () => void;
+    onOpenCatalog?: () => void;
     emojiPickerTheme: 'light' | 'dark' | 'auto';
     isSendBurstActive?: boolean;
     sendFeedbackKey?: number;
@@ -177,6 +269,7 @@ export function AnimatedComposer({
     onLearnFromConversation,
     onOpenToolExecutions,
     onOpenAiTakeOver,
+    onOpenCatalog,
     emojiPickerTheme,
     isSendBurstActive,
     sendFeedbackKey,
@@ -185,6 +278,9 @@ export function AnimatedComposer({
     processFiles,
     externalTextareaRef,
 }: AnimatedComposerProps) {
+    const catalogPlatform = resolveChatPlatform(chat);
+    const isWhatsappConversation = chat.instance_type !== 'telegram'
+        && ['whatsapp', 'baileys', 'wa_cloud'].includes(catalogPlatform);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isPending, startTransition] = useTransition();
     const [isFocused, setIsFocused] = useState(false);
@@ -193,37 +289,82 @@ export function AnimatedComposer({
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const [recentCommand, setRecentCommand] = useState<string | null>(null);
 
-    const { textareaRef: internalTextareaRef, adjustHeight } = useAutoResizeTextarea({
-        minHeight: 52,
+    const { textareaRef, adjustHeight } = useAutoResizeTextarea({
+        minHeight: 48,
         maxHeight: 180,
+        externalRef: externalTextareaRef,
     });
-
-    const textareaRef = externalTextareaRef || internalTextareaRef;
     const commandPaletteRef = useRef<HTMLDivElement>(null);
+    const commandListRef = useRef<HTMLDivElement>(null);
     const dragCounterRef = useRef(0);
 
-    // Filter shortcuts based on query after "/"
-    const filteredShortcuts = React.useMemo(() => {
-        if (!value.includes('/')) return shortcuts;
+    // Detect active command after slash (e.g. "Olá /l" -> "l")
+    const activeCommand = React.useMemo(() => {
+        if (!value.includes('/')) return null;
         const slashIndex = value.lastIndexOf('/');
-        const query = value.slice(slashIndex + 1).toLowerCase();
-        if (!query) return shortcuts;
-        return shortcuts.filter(s => 
-            s.name.toLowerCase().includes(query) || 
-            s.message.toLowerCase().includes(query)
-        );
-    }, [value, shortcuts]);
-
-    // Manage command palette visibility when typing "/"
-    useEffect(() => {
-        const hasSlash = value.includes('/');
-        if (hasSlash) {
-            setShowCommandPalette(true);
-            setActiveSuggestion(0);
-        } else if (!hasSlash && showCommandPalette && !commandPaletteRef.current?.contains(document.activeElement)) {
-            // Keep open only if manually opened via button
+        if (slashIndex > 0) {
+            const charBefore = value[slashIndex - 1];
+            // Only trigger if slash is at start of text or preceded by whitespace or punctuation
+            if (!/[\s.,;:!?()[\]{}"'/\\]/.test(charBefore)) {
+                return null;
+            }
         }
+        const textAfterSlash = value.slice(slashIndex + 1);
+        // If there's a newline after slash, don't treat it as an active command
+        if (textAfterSlash.includes('\n')) return null;
+        return textAfterSlash;
     }, [value]);
+
+    // High-precision shortcut filtering and relevance scoring
+    const filteredShortcuts = React.useMemo(() => {
+        if (activeCommand === null) {
+            return [...shortcuts].sort((a, b) => a.name.localeCompare(b.name));
+        }
+        const query = activeCommand.trim();
+        if (!query) {
+            return [...shortcuts].sort((a, b) => a.name.localeCompare(b.name));
+        }
+        const scored = shortcuts
+            .map((shortcut) => ({
+                shortcut,
+                score: calculateShortcutScore(shortcut, query),
+            }))
+            .filter((item) => item.score > 0);
+
+        scored.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            if (a.shortcut.name.length !== b.shortcut.name.length) {
+                return a.shortcut.name.length - b.shortcut.name.length;
+            }
+            return a.shortcut.name.localeCompare(b.shortcut.name);
+        });
+
+        return scored.map((item) => item.shortcut);
+    }, [activeCommand, shortcuts]);
+
+    // Automatically manage command palette visibility when typing "/"
+    useEffect(() => {
+        if (activeCommand !== null) {
+            setShowCommandPalette(true);
+        } else if (showCommandPalette && !commandPaletteRef.current?.contains(document.activeElement)) {
+            setShowCommandPalette(false);
+        }
+    }, [activeCommand]);
+
+    // Always reset selection to top-scored result when query or results change
+    useEffect(() => {
+        setActiveSuggestion(0);
+    }, [filteredShortcuts]);
+
+    // Scroll active item into view during arrow navigation
+    useEffect(() => {
+        if (showCommandPalette && commandListRef.current) {
+            const activeElement = commandListRef.current.children[activeSuggestion] as HTMLElement | undefined;
+            if (activeElement) {
+                activeElement.scrollIntoView({ block: 'nearest' });
+            }
+        }
+    }, [activeSuggestion, showCommandPalette]);
 
     // Handle outside click for command palette
     useEffect(() => {
@@ -322,7 +463,11 @@ export function AnimatedComposer({
             e.preventDefault();
             const files = Array.from(e.clipboardData.files) as File[];
             void processFiles(files);
+            return;
         }
+        requestAnimationFrame(() => {
+            adjustHeight();
+        });
     };
 
     const handleEmojiSelect = (emojiData: any) => {
@@ -537,7 +682,7 @@ export function AnimatedComposer({
                                 </span>
                             </div>
 
-                            <div className="max-h-64 overflow-y-auto p-1.5 space-y-0.5 scrollbar-thin">
+                            <div ref={commandListRef} className="max-h-64 overflow-y-auto p-1.5 space-y-0.5 scrollbar-thin">
                                 {filteredShortcuts.map((shortcut, index) => (
                                     <motion.div
                                         key={shortcut.id}
@@ -624,9 +769,9 @@ export function AnimatedComposer({
                             showAiTypingOverlay && "opacity-0"
                         )}
                         style={{
-                            minHeight: "52px",
+                            minHeight: "48px",
                             maxHeight: "180px",
-                            overflowY: "auto",
+                            overflowY: "hidden",
                         }}
                     />
                 </div>
@@ -657,6 +802,15 @@ export function AnimatedComposer({
                         </motion.button>
 
                         {/* Command Palette Button */}
+                        {onOpenCatalog && isWhatsappConversation && !isInternalNote && (
+                            <motion.button type="button" onClick={onOpenCatalog} whileTap={{ scale: 0.94 }}
+                                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-2 py-2 text-primary hover:bg-primary/10 transition-colors"
+                                title="Enviar catálogo de produtos" aria-label="Enviar catálogo de produtos">
+                                <ShoppingBag className="w-4 h-4" />
+                                <span className="text-xs font-medium">Catálogo</span>
+                            </motion.button>
+                        )}
+
                         <motion.button
                             type="button"
                             data-composer-cmd-button

@@ -1,4 +1,5 @@
 import type { AgentToolAction } from './types';
+import type { UniversalAutopilotIntent } from '@/services/autopilot/intent-types';
 
 export type ToolRouterTeam = {
   id: string;
@@ -10,6 +11,40 @@ export type ToolRouterTeam = {
     responseHint?: string | null;
   } | null;
 };
+
+/** Resolve only an unambiguous destination; never rely on array order. */
+export function resolveHandoffTeam(input: {
+  intent: UniversalAutopilotIntent;
+  availableTeams: ToolRouterTeam[];
+  customerMessage?: string;
+}): ToolRouterTeam | null {
+  const teams = input.availableTeams;
+  const message = normalizeSearchText(input.customerMessage || '');
+  const mentioned = teams.filter((team) => {
+    const name = normalizeSearchText(team.name);
+    return name.length >= 3 && message.includes(name);
+  });
+  if (mentioned.length === 1) return mentioned[0];
+  if (mentioned.length > 1) return null;
+  // An explicit sector that is not in the workspace must not silently become
+  // an unrelated default team.
+  if (/\b(?:setor|equipe)\s+(?:de\s+|do\s+|da\s+)?(?:financeiro|comercial|suporte|cobranca|vendas)\b/.test(message)
+    || /\b(?:para|pro|pra)\s+(?:o\s+|a\s+)?(?:financeiro|comercial|suporte|cobranca|vendas)\b/.test(message)) return null;
+  const hints: Partial<Record<UniversalAutopilotIntent, RegExp>> = {
+    billing_or_payment: /\b(financeiro|cobranca|billing)\b/,
+    support_request: /\b(suporte|sac|atendimento|help)\b/,
+    troubleshooting: /\b(suporte|tecnico|noc|atendimento)\b/,
+    order_or_request_status: /\b(suporte|atendimento|operacao|logistica)\b/,
+    human_handoff: /\b(atendimento|suporte|sac|help|humano)\b/,
+    complaint: /\b(sac|ouvidoria|qualidade|atendimento)\b/,
+  };
+  const hint = hints[input.intent];
+  const matches = hint ? teams.filter((team) => hint.test(normalizeSearchText(team.name))) : [];
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) return null;
+  const configured = teams.filter((team) => team.routingConfig?.enabled && team.routingConfig.autoTransfer !== false);
+  return configured.length === 1 ? configured[0] : null;
+}
 
 export type DeterministicToolRoutingInput = {
   customerMessage: string;
@@ -100,16 +135,18 @@ function findMentionedTeam(message: string, teams: ToolRouterTeam[]) {
   const normalizedMessage = normalizeSearchText(message);
   if (!normalizedMessage) return null;
 
-  return teams.find((team) => {
+  const matches = teams.filter((team) => {
     const normalizedName = normalizeSearchText(team.name);
     return normalizedName.length >= 3 && normalizedMessage.includes(normalizedName);
-  }) ?? null;
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function findConfiguredTeam(message: string, teams: ToolRouterTeam[]) {
   const normalizedMessage = normalizeSearchText(message);
   if (!normalizedMessage) return null;
 
+  const matches: Array<{ team: ToolRouterTeam; matchedKeyword: string }> = [];
   for (const team of teams) {
     const config = team.routingConfig;
     if (!config?.enabled || config.autoTransfer === false) continue;
@@ -120,17 +157,11 @@ function findConfiguredTeam(message: string, teams: ToolRouterTeam[]) {
 
     const matchedKeyword = keywords.find((keyword) => normalizedMessage.includes(keyword));
     if (matchedKeyword) {
-      return { team, matchedKeyword };
+      matches.push({ team, matchedKeyword });
     }
   }
 
-  return null;
-}
-
-function findHumanHandoffTeam(teams: ToolRouterTeam[]) {
-  return teams.find((candidate) => candidate.routingConfig?.enabled && candidate.routingConfig.autoTransfer !== false)
-    ?? teams[0]
-    ?? null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function shouldHandoffToHuman(message: string) {
@@ -177,7 +208,10 @@ export function routeDeterministicAgentTools(
 
   const candidates: ToolRoutingCandidate[] = [];
 
-  const configuredTeam = findConfiguredTeam(message, input.availableTeams);
+  const explicitlyMentioned = findMentionedTeam(message, input.availableTeams);
+  const configuredMatch = findConfiguredTeam(message, input.availableTeams);
+  const configuredTeam = explicitlyMentioned && hasExplicitTeamHandoff(message, explicitlyMentioned)
+    && configuredMatch?.team.id !== explicitlyMentioned.id ? null : configuredMatch;
   const configuredTeamIsExplicit = configuredTeam
     ? shouldHandoffToHuman(message) || hasExplicitTeamHandoff(message, configuredTeam.team)
     : false;
@@ -261,7 +295,7 @@ export function routeDeterministicAgentTools(
   }
 
   if (shouldHandoffToHuman(message)) {
-    const handoffTeam = findHumanHandoffTeam(input.availableTeams);
+    const handoffTeam = resolveHandoffTeam({ intent: 'human_handoff', availableTeams: input.availableTeams, customerMessage: message });
     if (handoffTeam) {
       const reason = `Cliente pediu atendimento humano sem indicar setor.`;
       return {
