@@ -79,6 +79,25 @@ describe('studio ledger entry', () => {
     expect(entryFor(resolved).metadata).toMatchObject({ chatClosed: null });
   });
 
+  it('does not call a resolved session a close when the explicit gate held it open', () => {
+    const resolved = base({ status: 'resolved', phase: 'done', reasoning: reasoning() });
+    const held = entryFor(resolved, { chatClosed: null, closeDecision: { mode: 'explicit', basis: null, blockedBy: ['no_customer_confirmation'] } });
+    expect(held.decisionType).toBe('answer');
+    expect(held.metadata).toMatchObject({ basis: 'resolved_awaiting_customer_confirmation', closeMode: 'explicit', closeBlockedBy: ['no_customer_confirmation'] });
+  });
+
+  it('records a gated close as a customer-confirmed close', () => {
+    const resolved = base({ status: 'resolved', phase: 'done', reasoning: reasoning() });
+    const closed = entryFor(resolved, { chatClosed: true, closeDecision: { mode: 'explicit', basis: 'cliente_confirmou', blockedBy: [] } });
+    expect(closed.decisionType).toBe('close');
+    expect(closed.metadata).toMatchObject({ basis: 'customer_confirmed_close', chatClosed: true, closeMode: 'explicit', closeBlockedBy: null });
+  });
+
+  it('keeps the legacy classification untouched when the gate is off', () => {
+    const resolved = base({ status: 'resolved', phase: 'done', reasoning: reasoning() });
+    expect(entryFor(resolved, { closeDecision: { mode: 'legacy' } })).toMatchObject({ decisionType: 'close', metadata: { basis: 'implicit_all_requests_resolved', closeMode: 'legacy' } });
+  });
+
   it('marks suggestion-only turns so they can serve as shadow-mode data', () => {
     expect(entryFor(base({ status: 'resolved', phase: 'done', reasoning: reasoning() }), { suggestionOnly: true }).metadata)
       .toMatchObject({ suggestionOnly: true, basis: 'implicit_all_requests_resolved' });

@@ -216,6 +216,7 @@ import {
 import { persistAutopilotContactFacts } from '@/services/autopilot/contact-facts';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
 import { buildStudioDecisionLedgerEntry } from '@/services/agent-studio/decision-record';
+import { evaluateStudioCloseGate, studioExplicitCloseEnabled } from '@/services/agent-studio/close-gate';
 import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
 import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
 import {
@@ -1385,7 +1386,40 @@ export async function processAutopilotForChat(
             // null = no close was attempted; true/false = the UPDATE below changed a row or not. The ledger records this
             // so "the session resolved" is never mistaken for "the chat was closed".
             let studioChatClosed: boolean | null = null;
-            if (result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime) {
+            let studioCloseDecision: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[] } | null = null;
+            const studioSessionResolved = result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime;
+            if (studioSessionResolved && studioExplicitCloseEnabled(autopilotConfig.id)) {
+                // Explicit close (docs/PLAN-ia-autonoma-transferir-encerrar.md, 3.1): resolving the requests is only a
+                // proposal. The chat closes when the gate agrees, through the same audited tool path as any close.
+                const gate = evaluateStudioCloseGate({ state: result.state, customerMessage: effectiveCustomerMessage || lastMessageContent || '' });
+                studioCloseDecision = { mode: 'explicit', basis: gate.basis ?? null, blockedBy: gate.blockedBy };
+                if (gate.close) {
+                    studioChatClosed = false;
+                    try {
+                        const closeAction = { type: 'close_chat' as const, reason: 'Cliente confirmou o encerramento.',
+                            payload: { sendCloseMessage: false, notes: 'Encerrado pelo Estúdio com confirmação do cliente.' } };
+                        const closeFingerprint = fingerprintToolAction(closeAction);
+                        const withClose = (names: string[]) => Array.from(new Set([...names, 'close_chat']));
+                        const closePolicy: AutopilotTurnPolicy = { ...studioPolicy, globallyEnabledToolNames: withClose(studioPolicy.globallyEnabledToolNames),
+                            attachedToolNames: withClose(studioPolicy.attachedToolNames), allowedToolNames: withClose(studioPolicy.allowedToolNames) };
+                        const closeResults = await runRequestedAgentToolsWithStatus({
+                            workspaceId, chat, contact: sanitizedContact, systemAgentId: assignedSystemAgentId,
+                            systemAgentName: assignedSystemAgentName, autopilotConfig: { ...autopilotConfig, enabled_tool_names: closePolicy.allowedToolNames },
+                            turnPolicy: closePolicy, customerMessage: effectiveCustomerMessage || lastMessageContent || '', sourceMessageId,
+                            orchestratorRunId: orchestratorRun.id, actions: [closeAction], confirmedActionFingerprint: closeFingerprint,
+                            closeAuthorization: { source: 'procedure_goal_completed', chatId: chat.id, orchestratorRunId: orchestratorRun.id,
+                                procedureExecutionId: `studio-close:${result.state.id}`, actionFingerprint: closeFingerprint },
+                        });
+                        const closeResult = closeResults.find((item) => item.toolName === 'close_chat');
+                        studioChatClosed = closeResult?.status === 'success';
+                        // The reply is already delivered: a failed close must not fail the run, only be visible.
+                        if (!studioChatClosed) console.error('[STUDIO_EXPLICIT_CLOSE] O encerramento não foi concluído:', closeResult?.error);
+                    } catch (closeError) {
+                        console.error('[STUDIO_EXPLICIT_CLOSE] Falha ao encerrar o atendimento:', closeError);
+                    }
+                }
+            } else if (studioSessionResolved) {
+                studioCloseDecision = { mode: 'legacy' };
                 studioChatClosed = false;
                 try {
                     const closedChat = await db.query(
@@ -1420,6 +1454,7 @@ export async function processAutopilotForChat(
                     decisionMode: pinnedRelease.agentSnapshot.resolveStage.conversationMode === 'adaptive'
                         && pinnedRelease.agentSnapshot.resolveStage.reasoning?.enabled ? 'model_reasoning' : 'published_journey',
                     suggestionOnly: isSuggestionOnlyRuntime, replay: result.replay, chatClosed: studioChatClosed,
+                    closeDecision: studioCloseDecision,
                 }));
             }
             await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,

@@ -77,6 +77,28 @@ Medido com `node scripts/baseline-ia-decisions.cjs --days=30`, somente leitura, 
 
 **Como verificar depois do deploy:** `node scripts/baseline-ia-decisions.cjs --days=7`: `handoff_failed_reasons` deve cair (restam só equipe sem membros e rotas com `onUnavailable: 'error'`) e `handoff_queued_events` deve aparecer.
 
+### 1.3 Encerramento explícito do Estúdio (05/11/2026, atrás de flag)
+
+**Problema.** No núcleo novo, o chat era encerrado como efeito colateral de "todos os pedidos resolvidos", sem confirmação do cliente. Neste banco, esse `UPDATE` ainda falha por usar uma coluna inexistente, então na prática a IA não encerrava; corrigir o `UPDATE` sozinho a faria encerrar cedo demais.
+
+**O que mudou** (`close-gate.ts` + `process-chat.ts`). Com `STUDIO_EXPLICIT_CLOSE_AGENT_IDS` contendo o agente (ou `*`), a sessão `resolved` passa por um portão em código, sem LLM. O chat só fecha se **todas** estas condições valem:
+- sessão `resolved` e `done`, sem operação em voo ou de resultado incerto, sem ação pendente, sem pedido aberto, sem campo pendente, sem confirmação pendente;
+- a mensagem do cliente que originou o turno é **só uma despedida** ("obrigado, era só isso", "pode fechar", "valeu"). Qualquer outra coisa mantém aberto: pergunta, "obrigado, mas ainda não funcionou", "obrigado, vou aguardar o técnico", mensagem longa.
+
+O fechamento usa o mesmo caminho auditado das ferramentas (`close_chat` com `closeAuthorization`), que confere que o chat ainda pertence a esta IA, grava o evento e a etiqueta. A resposta do turno já foi entregue, então uma falha ao fechar não derruba a execução: aparece no log e no ledger (`chatClosed:false`).
+
+**Ledger.** `closeMode` (`legacy` ou `explicit`), `closeBlockedBy` (todos os motivos que barraram) e a base `customer_confirmed_close` ou `resolved_awaiting_customer_confirmation`. Esta última é a que alimenta o monitor de conversas "resolvidas e esquecidas".
+
+**Sem a flag, nada muda** (continua o `UPDATE` antigo, com o mesmo defeito).
+
+**Limites que ficam para a próxima etapa.**
+- O detector de despedida é uma lista de frases, não um classificador. É conservador de propósito, e o prejuízo dele é o chat ficar aberto, não fechar errado.
+- Quem não responde depois de "posso ajudar em algo mais?" continua aberto: falta o vigilante de inatividade (seção 3.5).
+- Não valida o detector contra conversas reais ainda: isso é o replay no dataset ouro.
+- O caminho de produção do `process-chat` não tem teste automatizado de ponta a ponta; o gate e o ledger têm.
+
+**Como ligar com segurança:** um agente de baixo risco primeiro (`STUDIO_EXPLICIT_CLOSE_AGENT_IDS=<id>` no app e no worker de IA), acompanhar `ledger_studio_decisions` do baseline por 1 a 2 dias úteis e só então ampliar. Voltar atrás é esvaziar a variável.
+
 ## 2. Metas (SLOs de decisão), a calibrar na Fase 0
 
 **Transferência**

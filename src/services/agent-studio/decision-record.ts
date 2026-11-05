@@ -44,11 +44,20 @@ export function buildStudioDecisionLedgerEntry(input: {
   replay: boolean;
   /** null: no close attempted. true/false: whether the chat row was actually closed. */
   chatClosed?: boolean | null;
+  /** How the close was decided for a resolved session. `explicit` runs the close gate (STUDIO_EXPLICIT_CLOSE_AGENT_IDS). */
+  closeDecision?: { mode: 'legacy' | 'explicit'; basis?: string | null; blockedBy?: string[] } | null;
   /** Wall-clock for the whole turn, when the caller measured it. */
   latencyMs?: number | null;
 }): DecisionLedgerEntry {
   const { state } = input;
-  const { decisionType, basis } = classifyStudioTurnDecision(state);
+  const classified = classifyStudioTurnDecision(state);
+  // With the explicit gate, a resolved session that the gate refused to close is an answer, not a close.
+  const heldOpen = input.closeDecision?.mode === 'explicit' && !input.closeDecision.basis && classified.decisionType === 'close';
+  const { decisionType, basis } = heldOpen
+    ? { decisionType: 'answer' as const, basis: 'resolved_awaiting_customer_confirmation' }
+    : input.closeDecision?.mode === 'explicit' && classified.decisionType === 'close'
+      ? { decisionType: classified.decisionType, basis: 'customer_confirmed_close' }
+      : classified;
   const metrics = state.reasoning?.lastTurnMetrics;
   const lastEvent = state.events[state.events.length - 1];
   return {
@@ -75,6 +84,8 @@ export function buildStudioDecisionLedgerEntry(input: {
       suggestionOnly: input.suggestionOnly,
       replay: input.replay,
       chatClosed: input.chatClosed ?? null,
+      closeMode: input.closeDecision?.mode ?? null,
+      closeBlockedBy: input.closeDecision?.blockedBy?.length ? input.closeDecision.blockedBy : null,
       sessionStatus: state.status,
       sessionPhase: state.phase,
       turnCount: state.turnCount ?? null,
