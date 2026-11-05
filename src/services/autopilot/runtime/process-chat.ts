@@ -1,6 +1,10 @@
 import { db } from '@/lib/db';
+import { getWorkspaceTimezone } from '@/lib/workspace-config';
 import { selectStudioConversationRelease } from '@/services/agent-studio/release-selection';
 import { runStudioConversation } from '@/services/agent-studio/runtime';
+import { loadStudioRelease } from '@/services/agent-studio/repository';
+import { runStudioCopilot } from '@/services/agent-studio/copilot';
+import { loadStudioCopilotContext } from '@/services/agent-studio/copilot-context';
 import { sendAutomatedMediaAction } from '@/actions/messages';
 import { validateRemoteUrl } from '@/lib/security/safe-remote-url';
 import { randomUUID } from 'crypto';
@@ -82,6 +86,7 @@ import {
 import type { CloseIntentGateDecision, WorkflowSlotMappings } from '@/services/autopilot/workflow-engine';
 import {
     isConversationCloseRequest,
+    hasConversationCloseClaim,
     isPotentialConversationCloseRequest,
 } from '@/services/autopilot/close-intent';
 import { compactKnowledgeDocumentsForPrompt } from '@/services/autopilot/knowledge-prompt-budget';
@@ -210,6 +215,7 @@ import {
 } from '@/services/autopilot/collection-completion';
 import { persistAutopilotContactFacts } from '@/services/autopilot/contact-facts';
 import { recordAgentDecisionLedger } from '@/services/autopilot/decision-ledger';
+import { buildStudioDecisionLedgerEntry } from '@/services/agent-studio/decision-record';
 import { decideAgentNextAction } from '@/services/autopilot/agent-decision-engine';
 import { loadLatestActiveToolSelectionScoreWeights } from '@/services/autopilot/score-history';
 import {
@@ -884,7 +890,8 @@ export async function processAutopilotForChat(
     chat: Chat,
     lastMessageContent: string,
     instanceName: string,
-    sourceMessageId?: string | null
+    sourceMessageId?: string | null,
+    suggestionRequest?: { agentId: string }
 ) {
     const resolvedChatId = chat.status === 'encerrados'
         ? chat.id
@@ -920,7 +927,7 @@ export async function processAutopilotForChat(
     }
 
     try {
-    if (await hasCompletedAutopilotSourceMessage({
+    if (!suggestionRequest && await hasCompletedAutopilotSourceMessage({
         workspaceId,
         chatId: chat.id,
         sourceMessageId,
@@ -980,6 +987,9 @@ export async function processAutopilotForChat(
     //  - "copilot": a human still owns the chat and turned the AI on from the inbox. Same
     //    reasoning, knowledge and tools, but the reply is proposed to the operator instead
     //    of being delivered, so the human keeps the conversation.
+    if (suggestionRequest && (chatConfig?.copilot_mode !== 'suggest'
+        || assignedSystemAgentId || chatConfig?.autopilot_config_id !== suggestionRequest.agentId)) return;
+
     const isAttendantRuntime = Boolean(assignedSystemAgentId)
         && chatConfig?.assigned_system_agent_type === 'intelligent_attendant'
         && chatConfig?.assigned_system_agent_active !== false
@@ -1123,6 +1133,7 @@ export async function processAutopilotForChat(
         blocks?: string[] | null;
         stage?: CopilotSuggestionStage;
         insights?: Partial<CopilotSuggestionInsights>;
+        assertCurrent?: () => Promise<void>;
     }) => {
         const incoming = (input.blocks && input.blocks.length > 0 ? input.blocks : [input.response])
             .map((block) => (typeof block === 'string' ? block.trim() : ''))
@@ -1134,7 +1145,7 @@ export async function processAutopilotForChat(
         }
         if (turnSuggestionBlocks.length === 0) return;
 
-        const toolsUsed = await loadTurnToolTraces({
+        const toolsUsed = input.stage === 'studio_copilot' ? [] : await loadTurnToolTraces({
             chatId: chat.id,
             since: turnStartedAt,
         });
@@ -1147,6 +1158,7 @@ export async function processAutopilotForChat(
             sourceMessageId: sourceMessageId ?? null,
             orchestratorRunId: orchestratorRun.id,
             stage: input.stage || copilotTrace.stage,
+            assertCurrent: input.assertCurrent,
             suggestion: turnSuggestionBlocks.join('\n\n'),
             messageBlocks: turnSuggestionBlocks,
             insights: {
@@ -1257,6 +1269,29 @@ export async function processAutopilotForChat(
         effectiveCustomerMessage || lastMessageContent || '',
         mediaAnalysisContext && !effectiveCustomerMessage.includes(mediaAnalysisContext) ? mediaAnalysisContext : '',
     ].filter((part) => part.trim().length > 0).join('\n\n');
+    // Human assistance has its own reasoning path and never opens or advances an autonomous Studio session.
+    if (isSuggestionOnlyRuntime) {
+        try {
+            const release = await loadStudioRelease(workspaceId, autopilotConfig.id);
+            if (release) {
+                if (!sourceMessageId) throw new Error('O copiloto exige uma mensagem identificada.');
+                const context = await loadStudioCopilotContext({ workspaceId, agentId: autopilotConfig.id, chatId: chat.id, messageId: sourceMessageId });
+                const result = await runStudioCopilot({ release, workspaceId, agentId: autopilotConfig.id, chatId: chat.id,
+                    message: effectiveCustomerMessage || lastMessageContent, mediaAnalysisContext, ...context });
+                await context.assertCurrent();
+                await publishSuggestion({ response: result.response, blocks: result.messageBlocks, stage: 'studio_copilot',
+                    insights: { ...result.insights, contextMessageId: context.history.at(-1)?.messageId }, assertCurrent: context.assertCurrent });
+                await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,
+                    intent: result.insights.intent || 'agent_studio', metadata: { studioReleaseId: release.releaseId,
+                        studioVersion: release.version, studioDecisionMode: 'copilot_advisory', suggestionOnly: true } });
+                return;
+            }
+        } catch (error) {
+            await finishOrchestratorRun({ run: orchestratorRun, status: 'error', timings: orchestratorTimings,
+                intent: 'agent_studio', metadata: { studioDecisionMode: 'copilot_advisory', suggestionOnly: true } });
+            throw error;
+        }
+    }
     let focusedOperationalContext = [
         focusedContractContext,
         enrichedLastMessageContent,
@@ -1347,9 +1382,13 @@ export async function processAutopilotForChat(
                     { ...responseTrace, deliveryKey: `studio:${result.state.id}:${sourceMessageId}` }, { preserveFormatting: true });
                 if (!delivery.success) throw new Error('A resposta do Estúdio não pôde ser entregue.');
             }
+            // null = no close was attempted; true/false = the UPDATE below changed a row or not. The ledger records this
+            // so "the session resolved" is never mistaken for "the chat was closed".
+            let studioChatClosed: boolean | null = null;
             if (result.state.status === 'resolved' && result.state.phase === 'done' && !isSuggestionOnlyRuntime) {
+                studioChatClosed = false;
                 try {
-                    await db.query(
+                    const closedChat = await db.query(
                         `UPDATE chats
                          SET status = 'encerrados',
                              closed_at = clock_timestamp(),
@@ -1365,11 +1404,24 @@ export async function processAutopilotForChat(
                             workspaceId,
                         ],
                     );
+                    studioChatClosed = (closedChat.rowCount ?? 0) > 0;
                 } catch (closeError) {
                     console.error('[STUDIO_AUTO_CLOSE_CHAT] Falha ao atualizar status do chat para encerrados:', closeError);
                 }
             }
             studioExecutionStage = 'recording';
+            // Phase 0 (docs/PLAN-ia-autonoma-transferir-encerrar.md): one auditable decision per turn.
+            // Replays are skipped so a redelivered message never counts twice; the recorder never throws.
+            if (!result.replay) {
+                await recordAgentDecisionLedger(buildStudioDecisionLedgerEntry({
+                    workspaceId, chatId: chat.id, messageId: sourceMessageId, runId: orchestratorRun.id,
+                    systemAgentId: assignedSystemAgentId, autopilotConfigId: autopilotConfig.id,
+                    releaseId: pinnedRelease.releaseId, releaseVersion: pinnedRelease.version, state: result.state,
+                    decisionMode: pinnedRelease.agentSnapshot.resolveStage.conversationMode === 'adaptive'
+                        && pinnedRelease.agentSnapshot.resolveStage.reasoning?.enabled ? 'model_reasoning' : 'published_journey',
+                    suggestionOnly: isSuggestionOnlyRuntime, replay: result.replay, chatClosed: studioChatClosed,
+                }));
+            }
             await finishOrchestratorRun({ run: orchestratorRun, status: 'success', timings: orchestratorTimings,
                 intent: 'agent_studio',
                 metadata: { studioReleaseId: pinnedRelease.releaseId, studioVersion: pinnedRelease.version,
@@ -1427,6 +1479,10 @@ export async function processAutopilotForChat(
             currentSlotExtraction.invalidSlots,
         ),
     };
+    for (const [field, value] of Object.entries(structuredKnownFields)) {
+        if (canonicalWorkflowFieldName(field) === 'invoice_or_payment_id'
+            && !/^[a-z0-9-]*\d[a-z0-9-]*$/i.test(String(value))) delete structuredKnownFields[field];
+    }
     const focusedConversationFields: Record<string, string> = focusedContractId
         ? { contract_id: focusedContractId }
         : {};
@@ -2040,6 +2096,7 @@ export async function processAutopilotForChat(
                 maxAgeDays: verificationReceiptTtlDays,
             })
             : [];
+        const responseTimeZone = await getWorkspaceTimezone(workspaceId);
         let collectionCloseSucceeded = false;
         const nativeStage = await timeOrchestratorStage(
             orchestratorRun,
@@ -2052,6 +2109,7 @@ export async function processAutopilotForChat(
                 staticDocuments: staticKnowledgeDocuments,
                 dependencies: {
                     database: db,
+                    responseTimeZone,
                     toolContext: {
                         workspaceId,
                         chat,
@@ -2117,7 +2175,7 @@ export async function processAutopilotForChat(
                         },
                         policy: 'Use os campos conhecidos; nunca solicite novamente um campo ja preenchido. Revalide apenas resultados operacionais que possam ter mudado.',
                     },
-                    sendResponse: async (message, nodeInput) => {
+                    sendResponse: async (message, nodeInput, preparation) => {
                         await assertAutopilotSourceMessageCurrent({
                             chatId: chat.id,
                             sourceMessageId,
@@ -2241,15 +2299,18 @@ export async function processAutopilotForChat(
                                 }
                             }
                         }
-                        const formatted = formatCustomerFacingAiResponse(messageToSend);
+                        const preservedPreparation = messageToSend === message ? preparation : undefined;
+                        const formatted = preservedPreparation?.preserveFormatting
+                            ? messageToSend : formatCustomerFacingAiResponse(messageToSend);
                         const delivery = await sendMultiBlockResponse(
                             chat.id,
                             formatted,
                             assignedSystemAgentId,
                             true,
                             instanceName,
-                            null,
+                            preservedPreparation?.blocks || null,
                             { ...responseTrace, deliveryKey: `workflow:${nodeInput.node.id}` },
+                            { preserveFormatting: preservedPreparation?.preserveFormatting },
                         );
                         if (delivery.success && collectionRoute?.kind === 'needs_input') {
                             const checkpoint = buildCollectionCompletionCheckpoint({
@@ -2350,9 +2411,11 @@ export async function processAutopilotForChat(
                         const transferOutput = result.output && typeof result.output === 'object'
                             ? result.output as Record<string, unknown>
                             : {};
-                        let customerMessageSent = transferOutput.fallbackExecuted === true;
-                        if (!customerMessageSent && customerHandoffMessage) {
-                            const formattedCustomerMessage = formatCustomerFacingAiResponse(customerHandoffMessage);
+                        let customerMessageSent = transferOutput.fallbackExecuted === true && transferOutput.notificationDelivered === true;
+                        if (!customerMessageSent && (customerHandoffMessage || transferOutput.fallbackExecuted === true)) {
+                            const formattedCustomerMessage = formatCustomerFacingAiResponse(transferOutput.fallbackExecuted === true
+                                ? 'Seu atendimento foi colocado na fila para acompanhamento pela equipe.'
+                                : customerHandoffMessage);
                             const delivery = await sendMultiBlockResponse(
                                 chat.id,
                                 formattedCustomerMessage,
@@ -2380,7 +2443,8 @@ export async function processAutopilotForChat(
                             });
                         }
                         return {
-                            transferred: true,
+                            transferred: transferOutput.transferred === true,
+                            queued: transferOutput.fallbackExecuted === true,
                             customerMessage: customerHandoffMessage,
                             customerMessageSent,
                             output: result.output || null,
@@ -3898,6 +3962,10 @@ export async function processAutopilotForChat(
             return;
         }
 
+        if (responseValidator.actions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+            finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
+        }
+
         const sendStage = await timeOrchestratorStage(
             orchestratorRun,
             'message_send',
@@ -4108,6 +4176,10 @@ export async function processAutopilotForChat(
         const validatedWorkflowActions = responseValidator.actions.length > 0
             ? mergeAgentActions(responseValidator.actions, workflowPlan.actions)
             : workflowPlan.actions;
+
+        if (validatedWorkflowActions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+            finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
+        }
 
         if (workflowPrearmSignal) {
         await insertAgentToolStatusMessage({
@@ -4962,6 +5034,10 @@ export async function processAutopilotForChat(
             finalResponse = formatCustomerFacingAiResponse(responseValidator.response);
         }
 
+        if (responseValidator.actions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+            finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
+        }
+
         const sendStage = await timeOrchestratorStage(
             orchestratorRun,
             'message_send',
@@ -5013,7 +5089,7 @@ export async function processAutopilotForChat(
             });
         }
 
-        const workflowHadToolFailure = toolResults.some((result) => result.status !== 'success');
+        const workflowHadToolFailure = toolResults.some((result) => result.status !== 'success' || result.output?.disposition === 'queued');
 
         await logIntelligentAttendantResponse({
             configId: autopilotConfig.id,
@@ -6395,6 +6471,11 @@ export async function processAutopilotForChat(
                     ? mergeAgentActions(responseValidator.actions, postResponseActions)
                     : postResponseActions;
 
+                if (finalPostResponseActions.some((action) => action.type === 'close_chat') && hasConversationCloseClaim(finalResponse)) {
+                    finalResponse = 'Vou encerrar o atendimento conforme solicitado.';
+                    aiMessageBlocks = null;
+                }
+
                 console.log(`[AUTOPILOT_SERVICE] Enviando resposta: ${finalResponse}`);
                 const agentId = assignedSystemAgentId;
                 const sendStage = await timeOrchestratorStage(
@@ -6464,7 +6545,7 @@ export async function processAutopilotForChat(
                 });
                 await finishOrchestratorRun({
                     run: orchestratorRun,
-                    status: 'success',
+                    status: toolResults.some((toolResult) => toolResult.status !== 'success' || toolResult.output?.disposition === 'queued') ? 'fallback' : 'success',
                     timings: orchestratorTimings,
                     intent: deterministicRouting.matchedReason ? 'deterministic_tool_routing' : intentResolution.intent,
                     confidenceLevel: deterministicRouting.matchedReason ? 'deterministic' : 'plausible',

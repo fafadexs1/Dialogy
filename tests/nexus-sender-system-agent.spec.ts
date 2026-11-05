@@ -28,6 +28,10 @@ vi.mock('@/lib/security/trusted-server-context', () => ({
 vi.mock('@/lib/whatsapp/evolution-api-client', () => ({ fetchEvolutionAPI: vi.fn() }));
 vi.mock('@/lib/whatsapp/evolution-config', () => ({ getEvolutionApiConfig: vi.fn() }));
 vi.mock('@/services/autopilot/automation-rules', () => ({ resolveSafeAutopilotWebhookTarget: vi.fn() }));
+// Loaded on demand by queueHandoff: stub the heavy modules so the adapter can be exercised in isolation.
+vi.mock('@/services/agent-tools/runtime', () => ({ formatTeamBusinessHours: vi.fn(async () => 'Segunda a Sexta das 08:00 às 18:00') }));
+vi.mock('@/lib/realtime/chat-broadcast', () => ({ broadcastChatUpdate: vi.fn(async () => undefined) }));
+vi.mock('@/services/autopilot/procedure-store', () => ({ abortActiveProcedures: vi.fn(async () => 0) }));
 import { createNexusChatAdapters, resolveNexusSenderSystemAgent } from '@/modules/nexus/services/chat-adapters';
 import type { NodeRuntimeInput } from '@/services/workflow-runtime';
 import { linearWorkflow, workflowNode } from './workflow-runtime-fixtures';
@@ -71,6 +75,39 @@ describe('Nexus system-agent sender attribution', () => {
     expect(mocks.sendAutomatedMessageAction).not.toHaveBeenCalled();
   });
 
+  it('queues the chat for the team and tells the customer when nobody can take it', async () => {
+    mocks.dbQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('system_agents')) return { rows: [{ id: 'sender-1', name: 'Velpro' }] };
+      if (sql.includes("metadata->>'operationId'")) return { rows: [], rowCount: 0 };
+      if (sql.includes('FROM teams')) return { rows: [{ name: 'Financeiro', tag: 'Financeiro', color: '#fff' }], rowCount: 1 };
+      if (sql.includes('UPDATE chats')) return { rows: [{ chat_id: 'chat-1' }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+    const adapters = await createNexusChatAdapters({ workspaceId: 'workspace-1', chatId: 'chat-1' });
+    const input = runtimeInput('sender-1');
+    input.node = workflowNode('output.handoff', 'finance-handoff', { teamId: 'team-1' });
+    const result = await adapters.queueHandoff!(input, { reasonCode: 'all_offline', teamId: 'team-1', error: 'Nenhum agente online.' });
+    expect(result).toMatchObject({ queued: true, teamName: 'Financeiro', reasonCode: 'all_offline', teamId: 'team-1' });
+    expect(mocks.sendAutomatedMessageAction).toHaveBeenCalledWith('chat-1', expect.stringContaining('fila de espera'), 'sender-1', true, undefined);
+    const update = mocks.dbQuery.mock.calls.find(([sql]) => String(sql).includes('UPDATE chats'))!;
+    expect(JSON.parse(update[1][7])).toMatchObject({ event: 'transfer_queued', operationId: 'nexus:execution-1:finance-handoff' });
+  });
+
+  it('can queue silently when the flow sends its own message', async () => {
+    mocks.dbQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('system_agents')) return { rows: [{ id: 'sender-1', name: 'Velpro' }] };
+      if (sql.includes("metadata->>'operationId'")) return { rows: [], rowCount: 0 };
+      if (sql.includes('FROM teams')) return { rows: [{ name: 'Comercial', tag: 'Comercial', color: '#fff' }], rowCount: 1 };
+      return { rows: [{ chat_id: 'chat-1' }], rowCount: 1 };
+    });
+    const adapters = await createNexusChatAdapters({ workspaceId: 'workspace-1', chatId: 'chat-1' });
+    const input = runtimeInput('sender-1');
+    input.node = workflowNode('output.handoff', 'sales-handoff', { teamId: 'team-2', queueNotice: false });
+    const result = await adapters.queueHandoff!(input, { reasonCode: 'portfolio_full', teamId: 'team-2', error: 'Limite.' });
+    expect(result).toMatchObject({ queued: true, notificationDelivered: null });
+    expect(mocks.sendAutomatedMessageAction).not.toHaveBeenCalled();
+  });
+
   it('sends every response as the system agent stored in the workflow version', async () => {
     mocks.dbQuery.mockResolvedValue({ rows: [{ id: 'sender-1', name: 'Velpro' }] });
     const adapters = await createNexusChatAdapters({
@@ -100,6 +137,16 @@ describe('Nexus system-agent sender attribution', () => {
         nexusDeliveryId: 'execution-1:respond-1:',
       }),
     );
+  });
+
+  it('uses the approved official instance after an approval resumes without an adapter instance', async () => {
+    mocks.dbQuery.mockResolvedValue({ rows: [{ id:'sender-1', name:'Agente' }] });
+    const adapters=await createNexusChatAdapters({workspaceId:'workspace-1',chatId:'chat-1'});
+    const input=runtimeInput('sender-1');
+    input.node=workflowNode('tool.whatsapp_reply','approved-send');
+    input.execution.context.instanceName='official-channel';
+    await adapters.sendResponse!('Resposta aprovada',input);
+    expect(mocks.sendAutomatedMessageAction).toHaveBeenCalledWith('chat-1','Resposta aprovada','sender-1',true,'official-channel',expect.objectContaining({nexusNodeId:'approved-send'}));
   });
 
   it('delivers option blocks as one native list without also sending the text fallback', async () => {

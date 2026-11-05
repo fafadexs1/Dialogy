@@ -1,10 +1,7 @@
-import {
-  sendAgentButtonsAction,
-  sendAgentListAction,
-  sendAgentTemplateAction,
-  sendAutomatedMediaAction,
-  sendAutomatedMessageAction,
-} from '@/actions/messages';
+import { transferSnapshot } from '@/services/chat-distribution/transfer-snapshot';
+import { queueChatForUnavailableTeam } from '@/services/chat-distribution/queue-unavailable-team';
+import type { TeamAvailabilityReason } from '@/services/chat-distribution/team-availability';
+import { sendAgentButtonsAction, sendAgentListAction, sendAgentTemplateAction, sendAutomatedMediaAction, sendAutomatedMessageAction } from '@/actions/messages';
 import { closeChatAction, transferChatAction, transferChatToIntelligentAgentAction } from '@/actions/chats';
 import { db } from '@/lib/db';
 import { createTrustedActorContext } from '@/lib/security/trusted-server-context';
@@ -415,14 +412,14 @@ export async function createNexusChatAdapters(input: {
         message,
         sender.id,
         true,
-        input.instanceName,
+        runtimeInput.node.type === 'tool.whatsapp_reply' ? String(runtimeInput.execution.context.instanceName || '') : input.instanceName,
         metadata,
       );
     },
-    sendOptions: async ({ title, choices, invalid }, runtimeInput) => {
+    sendOptions: async ({ title, choices, invalid, invalidMessage }, runtimeInput) => {
       const sender = await senderFor(runtimeInput);
       const fallback = [
-        invalid ? 'Opcao invalida. Escolha uma das opcoes apresentadas.' : '',
+        invalid ? (invalidMessage || 'Opcao invalida. Escolha uma das opcoes apresentadas.') : '',
         title,
         choices.map((choice, index) => (
           `${index + 1}. ${choice.label}${choice.description ? ` — ${choice.description}` : ''}`
@@ -432,7 +429,7 @@ export async function createNexusChatAdapters(input: {
         const delivered = await sendNativeList(runtimeInput, {
           title,
           description: invalid
-            ? 'Opcao invalida. Escolha uma das opcoes abaixo.'
+            ? (invalidMessage || 'Opcao invalida. Escolha uma das opcoes abaixo.')
             : 'Selecione uma opcao abaixo.',
           options: choices.map((choice) => ({
             id: choice.id,
@@ -527,9 +524,12 @@ export async function createNexusChatAdapters(input: {
           context: runtimeInput.execution.context,
         }).slice(0, 2000)
         : undefined;
+      const operationId = `nexus:${runtimeInput.execution.executionId}:${runtimeInput.node.id}`;
+      const preconditions = await transferSnapshot(input.workspaceId,trustedActor.user.id,operationId,input.chatId);
       const result = await transferChatAction(
         {
           chatId: input.chatId,
+          operationId, ...preconditions,
           ...(teamId ? { teamId } : {}),
           ...(agentId ? { agentId } : {}),
           ...(handoffSummary ? { handoffSummary } : {}),
@@ -538,6 +538,35 @@ export async function createNexusChatAdapters(input: {
         trustedActor,
       );
       return { ...result, destinationType, teamId: teamId || null, agentId: agentId || null };
+    },
+    // Runs only after `handoff` failed because the team is unavailable (see output.handoff in node-handlers).
+    // Same queue and wording as the Autopilot tool path, so a flow and an AI agent behave alike.
+    queueHandoff: async (runtimeInput, failure) => {
+      const sender = await senderFor(runtimeInput);
+      const operationId = `nexus:${runtimeInput.execution.executionId}:${runtimeInput.node.id}`;
+      const notify = runtimeInput.node.config.queueNotice !== false;
+      const [{ formatTeamBusinessHours }, { broadcastChatUpdate }, { abortActiveProcedures }] = await Promise.all([
+        import('@/services/agent-tools/runtime'),
+        import('@/lib/realtime/chat-broadcast'),
+        import('@/services/autopilot/procedure-store'),
+      ]);
+      const result = await queueChatForUnavailableTeam({
+        workspaceId: input.workspaceId,
+        chatId: input.chatId,
+        teamId: failure.teamId,
+        reasonCode: failure.reasonCode as TeamAvailabilityReason,
+        operationId,
+        sendNotice: notify ? (text) => sendAutomatedMessageAction(input.chatId, text, sender.id, true, input.instanceName) : undefined,
+        describeBusinessHours: formatTeamBusinessHours,
+        afterQueued: async ({ teamId, tag, color }) => {
+          await broadcastChatUpdate(input.workspaceId, input.chatId, {
+            agent_id: null, assigned_system_agent_id: null, is_autopilot_active: false, copilot_mode: 'off',
+            status: 'gerais', team_id: teamId, tag, color, assigned_at: null,
+          });
+          await abortActiveProcedures(input.chatId);
+        },
+      });
+      return { ...result, destinationType: 'human', teamId: failure.teamId, reasonCode: failure.reasonCode };
     },
     closeConversation: async (runtimeInput) => {
       const trustedActor = await trustedActorFor(runtimeInput);

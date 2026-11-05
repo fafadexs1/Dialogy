@@ -61,9 +61,13 @@ function safeStringList(values: Array<string | null | undefined> | null | undefi
   ));
 }
 
+/**
+ * Only a missing table (the migration is not applied yet) is silent. Constraint violations
+ * also mention the table name in their message, and swallowing those hid real write failures.
+ */
 function shouldSuppressDbError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes('agent_decision_ledger');
+  return message.includes('agent_decision_ledger') && /does not exist/i.test(message);
 }
 
 export function inferAgentDecisionType(input: {

@@ -73,3 +73,6 @@ mobile/tmp
 # git
 .git
 .gitignore
+
+# Gold-dataset exports hold masked customer conversations; never commit them.
+/.gold-dataset/

@@ -1,6 +1,16 @@
+import { createStudioFlowNodeExecutor } from '@/services/agent-studio/flow-runtime';
+import { cancelStudioFlowInvocations } from '@/services/agent-studio/flow-store';
 import { z } from 'zod';
 
 import { db } from '@/lib/db';
+import { executeToolboxMedia } from './toolbox-media';
+import { workflowFileDownload } from './workflow-files';
+import { executeAutomationBatch } from './automation-batches';
+import { executeApprovalNode, requestAutomationApproval } from './automation-approvals';
+import { assertAutomationToolboxEnabled, usesAutomationToolbox } from './toolbox-policy';
+import { toolboxSource } from './runtime-source';
+import { executeConnectorStep } from './connectors';
+import { executeDurableEffect, nodeInvocationKey } from './durable-effects';
 import { stopPublishedStudioNode } from '@/services/agent-studio/workflow-adapter';
 import { getAiModelRuntimeProvider } from '@/lib/ai-models';
 import type { AutopilotConfig } from '@/lib/types';
@@ -23,7 +33,7 @@ import {
   type WorkflowResumeInput,
 } from '@/services/workflow-runtime';
 import { PostgresWorkflowPersistence } from '@/services/workflow-runtime/postgres-persistence';
-import { isRecord, readPath, renderTemplate, stableStringify, statePatchAtPath } from '@/services/workflow-runtime/utils';
+import { isRecord, materializeValue, readPath, renderTemplate, stableStringify, statePatchAtPath } from '@/services/workflow-runtime/utils';
 
 import { executeNexusHttpRequest } from './http-executor';
 import { executeNexusIntegration } from './integration-executors';
@@ -46,10 +56,10 @@ export type NexusRuntimeDelivery = {
 
 export type NexusRuntimeAdapters = Pick<
   WorkflowHandlerDependencies,
-  'executeLinkedAgent' | 'executePublishedAgent' | 'sendResponse' | 'sendMedia' | 'sendTyping' | 'handoff' | 'closeConversation' | 'loadState' | 'saveState' | 'executeSubflow'
+  'executeLinkedAgent' | 'executePublishedAgent' | 'sendResponse' | 'sendMedia' | 'sendTyping' | 'handoff' | 'queueHandoff' | 'closeConversation' | 'loadState' | 'saveState' | 'executeSubflow'
 > & {
   sendOptions?: (
-    options: { title: string; choices: NexusPlatformChoice[]; invalid?: boolean },
+    options: { title: string; choices: NexusPlatformChoice[]; invalid?: boolean; invalidMessage?: string },
     input: NodeRuntimeInput,
   ) => Promise<Record<string, unknown>>;
   sendTemplate?: (template: NexusTemplateDelivery, input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
@@ -198,6 +208,22 @@ async function createNexusRuntimeEnvironment(input: {
 
   const sendResponse = input.adapters?.sendResponse || defaultSendResponse;
   const dependencies: WorkflowHandlerDependencies = {
+    executeToolbox: async runtimeInput => {
+      assertAutomationToolboxEnabled(input.workspaceId);
+      if (['logic.map_subflow', 'logic.fork_subflows', 'logic.async_subflow'].includes(runtimeInput.node.type)) return executeAutomationBatch(runtimeInput);
+      const config = materializeValue(runtimeInput.node.config, toolboxSource(runtimeInput)) as Record<string, unknown>;
+      if (runtimeInput.node.type === 'logic.approval') return executeApprovalNode(runtimeInput, isRecord(config.arguments) ? config.arguments : { value: config.arguments }, String(config.title || 'Revisar operação'));
+      if (runtimeInput.node.type === 'output.webhook_response') return { status: 'success', selectedOutput: 'success', output: { response: config } };
+      if (runtimeInput.node.type === 'integration.connector') return executeConnectorStep(runtimeInput);
+      if (['audio.elevenlabs', 'audio.transcribe', 'media.analyze'].includes(runtimeInput.node.type)) return executeDurableEffect(input.workspaceId, nodeInvocationKey(runtimeInput), { config, type: runtimeInput.node.type }, () => executeToolboxMedia(runtimeInput)) as Promise<NodeExecutionResult>;
+      return executeToolboxMedia(runtimeInput);
+    },
+    executeStudioFlow: createStudioFlowNodeExecutor({ config: ai.config, sendResponse,
+      retrieveKnowledge: (runtimeInput, nodes) => retrieveNexusDialogyKnowledge({ workspaceId: input.workspaceId, execution: runtimeInput.execution, knowledgeNodes: nodes, library: knowledgeLibrary }),
+      loadMemory: (runtimeInput, node) => loadNexusDialogyMemory({ workspaceId: input.workspaceId, execution: runtimeInput.execution, memoryNode: node }),
+      executeSubflow: (runtimeInput) => executeNexusSubflow({ workspaceId: input.workspaceId, runtimeInput, adapters: input.adapters, database: input.database }),
+    }),
+    stopStudioFlow: async ({ workflow, execution }) => { if (workflow.workspaceId) await cancelStudioFlowInvocations(workflow.workspaceId, execution.executionId); },
     executeLinkedAgent: input.adapters?.executeLinkedAgent,
     executePublishedAgent: input.adapters?.executePublishedAgent,
     stopPublishedAgent: stopPublishedStudioNode,
@@ -265,9 +291,17 @@ async function createNexusRuntimeEnvironment(input: {
       };
     },
     sendResponse,
-    sendMedia: input.adapters?.sendMedia || defaultSendMedia,
+    sendMedia: async (media, runtimeInput) => {
+      if (media.file) {
+        const resolved = await workflowFileDownload(input.workspaceId, media.file);
+        const delivery = await (input.adapters?.sendMedia || defaultSendMedia)({ ...media, file: undefined, url: resolved.url, fileName: resolved.file.name, mimeType: resolved.file.mimeType }, runtimeInput);
+        return JSON.parse(JSON.stringify(delivery).split(resolved.url).join('[PRIVATE_FILE_URL]')) as Record<string, unknown>;
+      }
+      return (input.adapters?.sendMedia || defaultSendMedia)(media, runtimeInput);
+    },
     sendTyping: input.adapters?.sendTyping,
     handoff: input.adapters?.handoff,
+    queueHandoff: input.adapters?.queueHandoff,
     closeConversation: input.adapters?.closeConversation,
     loadState: input.adapters?.loadState,
     saveState: input.adapters?.saveState,
@@ -277,8 +311,10 @@ async function createNexusRuntimeEnvironment(input: {
       adapters: input.adapters,
       database: input.database,
     })),
-    executeHttp: executeNexusHttpRequest,
-    executeIntegration: executeNexusIntegration,
+    executeHttp: runtimeInput => runtimeInput.execution.context.automationManaged === true && !['GET', 'HEAD'].includes(String(runtimeInput.node.config.method || 'GET'))
+      ? executeDurableEffect(input.workspaceId, nodeInvocationKey(runtimeInput), { type: runtimeInput.node.type, config: runtimeInput.node.config, input: runtimeInput.input }, () => executeNexusHttpRequest(runtimeInput)) : executeNexusHttpRequest(runtimeInput),
+    executeIntegration: runtimeInput => runtimeInput.execution.context.automationManaged === true
+      ? executeDurableEffect(input.workspaceId, nodeInvocationKey(runtimeInput), { type: runtimeInput.node.type, config: runtimeInput.node.config, input: runtimeInput.input }, () => executeNexusIntegration(runtimeInput)) : executeNexusIntegration(runtimeInput),
     executePlatformAction: (runtimeInput) => executeNexusPlatformAction(runtimeInput, {
       sendResponse,
       sendOptions: input.adapters?.sendOptions,
@@ -286,6 +322,21 @@ async function createNexusRuntimeEnvironment(input: {
     }),
   };
   const handlers = createDefaultNodeHandlerRegistry(dependencies);
+  handlers.wrapExecutions(async (handler, runtimeInput) => {
+    const recovery = runtimeInput.execution.context.__automationRecovery;
+    if (isRecord(recovery) && recovery.nodeId === runtimeInput.node.id && isRecord(recovery.result)) return recovery.result as NodeExecutionResult;
+    if (handler.type === 'integration.http_request' && (runtimeInput.node.config.approvalPolicy === 'required' || (runtimeInput.execution.context.automationManaged === true && runtimeInput.node.config.requiresConfirmation === true))) {
+      assertAutomationToolboxEnabled(input.workspaceId);
+      const args = materializeValue(runtimeInput.node.config, toolboxSource(runtimeInput));
+      const approval = await requestAutomationApproval(runtimeInput, isRecord(args) ? args : {}, runtimeInput.node.name);
+      if (approval) return approval.status === 'waiting' ? approval : { status: 'error', error: { code: 'HTTP_APPROVAL_DENIED', message: 'A chamada foi recusada ou a aprovação expirou.', retryable: false }, output: approval.output };
+    }
+    const managed = runtimeInput.execution.context.automationManaged === true;
+    const effectful = /^(ai\.(?!model)|interaction\.|integration\.|whatsapp\.|dialogy\.)/.test(handler.type) || ['data.extract', 'logic.ai_router', 'output.respond', 'output.media', 'output.handoff', 'output.close_conversation'].includes(handler.type);
+    const readHttp = handler.type === 'integration.http_request' && ['GET', 'HEAD'].includes(String(runtimeInput.node.config.method || 'GET'));
+    if (!managed || !effectful || readHttp || handler.type === 'integration.connector') return handler.execute(runtimeInput);
+    return executeDurableEffect(input.workspaceId, `step_${nodeInvocationKey(runtimeInput)}`, { type: handler.type, config: runtimeInput.node.config, input: runtimeInput.input }, () => handler.execute(runtimeInput));
+  });
   const classifyInteractionOption: NonNullable<WorkflowExecutorOptions['classifyInteractionOption']> = async (request) => (
     classifyNexusInteractionOption({
       workspaceId: input.workspaceId,
@@ -435,12 +486,20 @@ async function executeNexusSubflow(input: {
   }
 
   const parent = input.runtimeInput.execution;
+  const remaining = isRecord(parent.context.studioBudgetRemaining) ? parent.context.studioBudgetRemaining : parent.context.automationManaged === true ? {
+    modelCalls: Math.max(0, input.runtimeInput.workflow.settings.maxModelCalls - parent.totalModelCalls),
+    toolCalls: Math.max(0, input.runtimeInput.workflow.settings.maxToolCalls - parent.totalToolCalls),
+    timeoutMs: Math.max(1, input.runtimeInput.workflow.settings.executionTimeoutMs - (Date.now() - Date.parse(parent.startedAt) - Number(parent.context.__automationPausedMs || 0))),
+  } : undefined;
   const result = await startPublishedNexusWorkflow({
     published,
+    signal: input.runtimeInput.signal,
+    ...(remaining ? { limits: { maxModelCalls: Number(remaining.modelCalls), maxToolCalls: Number(remaining.toolCalls), executionTimeoutMs: Number(remaining.timeoutMs) } } : {}),
     triggerType: 'trigger.manual',
     payload: materializeNexusSubflowInput(input.runtimeInput),
     context: {
       source: 'nexus_subflow',
+      ...(parent.context.automationManaged === true ? { automationManaged: true } : {}),
       parentExecutionId: parent.executionId,
       parentWorkflowId: input.runtimeInput.workflow.id,
       parentNodeId: input.runtimeInput.node.id,
@@ -455,6 +514,7 @@ async function executeNexusSubflow(input: {
       parentNodeId: input.runtimeInput.node.id,
       targetWorkflowId,
       parentStep: parent.totalSteps,
+      studioCallId: parent.context.studioSubflowCallId,
     })}`,
     workerId: `nexus_subflow_${targetWorkflowId}`,
     adapters: input.adapters,
@@ -471,11 +531,14 @@ async function executeNexusSubflow(input: {
     executionId: result.execution.executionId,
     status: result.execution.status,
     output: terminalNexusOutput(result.execution),
+    metrics: { modelCalls: result.execution.totalModelCalls, toolCalls: result.execution.totalToolCalls },
     deliveries: result.deliveries,
   };
 }
 
 export async function startPublishedNexusWorkflow(input: {
+  signal?: AbortSignal;
+  limits?: import('@/services/workflow-runtime/runtime-limits').WorkflowRuntimeCaps;
   published: PublishedNexusWorkflow;
   triggerType: string;
   triggerOutput?: string;
@@ -522,11 +585,12 @@ export async function startPublishedNexusWorkflow(input: {
       conversationId: input.conversationId || null,
       triggerOutput: input.triggerOutput || trigger.config.defaultOutput || null,
       ...(input.context || {}),
+      ...(usesAutomationToolbox(input.published.workflow) ? { automationManaged: true } : {}),
     },
     sessionId: input.sessionId,
     conversationId: input.conversationId,
     executionId: input.executionId,
-  }, { workerId: input.workerId || `nexus_${input.triggerType.replace(/[^a-z0-9]+/gi, '_')}` });
+  }, { workerId: input.workerId || `nexus_${input.triggerType.replace(/[^a-z0-9]+/gi, '_')}`, signal: input.signal, limits: input.limits });
   return { execution, deliveries };
 }
 
@@ -538,12 +602,13 @@ export async function resumePublishedNexusWorkflow(input: {
 }): Promise<{ execution: WorkflowExecution; deliveries: NexusRuntimeDelivery[] }> {
   const deliveries: NexusRuntimeDelivery[] = [];
   const database = input.database || db;
-  const environment = await createNexusRuntimeEnvironment({ workspaceId: input.workspaceId, adapters: input.adapters, deliveries, database });
   const persistence = new PostgresWorkflowPersistence(database as typeof db);
   const waiting = await persistence.getExecutionByResumeToken(input.resume.resumeToken);
   if (!waiting || waiting.workspaceId !== input.workspaceId || !waiting.workflowId.startsWith('nexus:')) {
     throw new Error('Execução Nexus aguardando resposta não encontrada neste workspace.');
   }
+  const adapters = input.adapters || (waiting.conversationId ? await (await import('./chat-adapters')).createNexusChatAdapters({ workspaceId: input.workspaceId, chatId: waiting.conversationId }) : undefined);
+  const environment = await createNexusRuntimeEnvironment({ workspaceId: input.workspaceId, adapters, deliveries, database });
   const execution = await new WorkflowExecutor(persistence, environment.handlers, environment.executorOptions).resume(input.resume);
   return { execution, deliveries };
 }
@@ -559,7 +624,7 @@ export async function cancelPublishedNexusWorkflowExecution(input: {
   if (!execution || execution.workspaceId !== input.workspaceId || !execution.workflowId.startsWith('nexus:')) {
     throw new Error('Execução Nexus ativa não encontrada neste workspace.');
   }
-  return new WorkflowExecutor(persistence, createDefaultNodeHandlerRegistry({ stopPublishedAgent: stopPublishedStudioNode })).cancel(input.executionId, input.reason);
+  return new WorkflowExecutor(persistence, createDefaultNodeHandlerRegistry({ stopPublishedAgent: stopPublishedStudioNode, stopStudioFlow: async ({ workflow, execution }) => { if (workflow.workspaceId) await cancelStudioFlowInvocations(workflow.workspaceId, execution.executionId); } })).cancel(input.executionId, input.reason);
 }
 
 export function terminalNexusOutput(execution: WorkflowExecution): Record<string, unknown> {
@@ -568,4 +633,28 @@ export function terminalNexusOutput(execution: WorkflowExecution): Record<string
   ));
   if (terminal && isRecord(terminal.output)) return terminal.output;
   return {};
+}
+
+/** Worker entry point: reuses the persisted immutable version and execution lock. */
+export async function runPersistedNexusExecution(input: {
+  workspaceId: string; executionId: string; workflowId?: string; version?: string; input?: Record<string, unknown>;
+  context?: Record<string, unknown>; sessionId?: string; conversationId?: string;
+  limits?: { maxModelCalls: number; maxToolCalls: number; executionTimeoutMs: number };
+}): Promise<WorkflowExecution> {
+  const persistence = new PostgresWorkflowPersistence(db);
+  const existing = await persistence.getExecution(input.executionId);
+  if (existing && (existing.workspaceId !== input.workspaceId || !existing.workflowId.startsWith('nexus:'))) throw new Error('Execução indisponível neste workspace.');
+  if (existing && ['completed', 'failed', 'cancelled'].includes(existing.status)) return existing;
+  const workflow = await persistence.getWorkflowDefinition(existing?.workflowId || input.workflowId || '', existing?.workflowVersion || input.version || '');
+  if (!workflow || workflow.workspaceId !== input.workspaceId) throw new Error('Versão publicada indisponível neste workspace.');
+  const active = await loadPublishedNexusWorkflow({ workspaceId: input.workspaceId, nexusWorkflowId: workflow.id.replace(/^nexus:/, '') });
+  if (!active) throw new Error('O fluxo foi despublicado ou desativado.');
+  const conversationId = existing?.conversationId || input.conversationId;
+  const adapters = conversationId ? await (await import('./chat-adapters')).createNexusChatAdapters({ workspaceId: input.workspaceId, chatId: conversationId }) : undefined;
+  const environment = await createNexusRuntimeEnvironment({ workspaceId: input.workspaceId, adapters });
+  const executor = new WorkflowExecutor(persistence, environment.handlers, environment.executorOptions);
+  if (existing) return executor.runExecution(existing.executionId);
+  const trigger = workflow.nodes.find(node => node.type === (input.context?.source === 'webhook' ? 'trigger.webhook' : 'trigger.manual'));
+  if (!trigger) throw new Error('O subfluxo não possui o gatilho esperado.');
+  return executor.start({ workflow, executionId: input.executionId, triggerNodeId: trigger.id, input: input.input || {}, variables: materializeNexusTriggerVariables(trigger.config, input.input || {}), context: { startedAt: new Date().toISOString(), sessionId: input.sessionId || null, conversationId: conversationId || null, ...input.context, automationManaged: true }, sessionId: input.sessionId, conversationId }, { limits: input.limits });
 }

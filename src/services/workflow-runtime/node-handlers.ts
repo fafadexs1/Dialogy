@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { DataOperationSchema, executeDataOperation } from './data-operations';
+import { toolboxManifests } from './toolbox-catalog';
 import { validateSchema } from 'genkit/schema';
 import { executeAgentNode } from './agent-loop';
 import type { ModelFallbackChain } from './model-adapter';
@@ -12,6 +14,7 @@ import type {
   WorkflowNode,
 } from './types';
 import { AgentNodeConfigSchema } from './schemas';
+import { isQueueableTeamReason } from '../chat-distribution/queueable-reasons';
 import { evaluateWorkflowGoalCompletion } from './goal-completion';
 import { executeSandboxedWorkflowCode } from './code-sandbox';
 import { executeJsonataTransform } from './jsonata-runtime';
@@ -39,6 +42,9 @@ type AgentDependencyContext = {
 };
 
 export type WorkflowHandlerDependencies = {
+  executeToolbox?: (input: NodeRuntimeInput) => Promise<NodeExecutionResult>;
+  executeStudioFlow?: (input: NodeRuntimeInput) => Promise<NodeExecutionResult>;
+  stopStudioFlow?: NonNullable<NodeHandler['stop']>;
   executePublishedAgent?: (input: NodeRuntimeInput) => Promise<NodeExecutionResult>;
   stopPublishedAgent?: NonNullable<NodeHandler['stop']>;
   executeLinkedAgent?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
@@ -57,7 +63,7 @@ export type WorkflowHandlerDependencies = {
     input: NodeRuntimeInput,
   ) => Promise<Record<string, unknown>>;
   sendMedia?: (
-    media: { type: string; url: string; caption?: string; fileName?: string; mimeType?: string },
+    media: { type: string; url: string; file?: unknown; caption?: string; fileName?: string; mimeType?: string },
     input: NodeRuntimeInput,
   ) => Promise<Record<string, unknown>>;
   sendTyping?: (
@@ -65,6 +71,15 @@ export type WorkflowHandlerDependencies = {
     input: NodeRuntimeInput,
   ) => Promise<Record<string, unknown>>;
   handoff?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
+  /**
+   * Called only after `handoff` failed because the destination team cannot take the chat right now
+   * (offline, full, paused, outside hours). Returns `{ queued: true }` once the customer has an owner
+   * (the team queue). Absent in sandboxes and previews: the failure is then reported as before.
+   */
+  queueHandoff?: (
+    input: NodeRuntimeInput,
+    failure: { reasonCode: string; teamId: string; error: string },
+  ) => Promise<Record<string, unknown>>;
   closeConversation?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   loadState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
   saveState?: (input: NodeRuntimeInput) => Promise<Record<string, unknown>>;
@@ -91,6 +106,9 @@ export class WorkflowNodeHandlerRegistry implements NodeHandlerRegistryContract 
 
   listTypes(): string[] {
     return [...this.handlers.keys()].sort();
+  }
+  wrapExecutions(wrapper: (handler: NodeHandler, input: NodeRuntimeInput) => Promise<NodeExecutionResult>): void {
+    for (const [type, handler] of this.handlers) this.handlers.set(type, { ...handler, execute: input => wrapper(handler, input) });
   }
 }
 
@@ -415,7 +433,9 @@ function extractHandler(dependencies: WorkflowHandlerDependencies): NodeHandler 
         };
       }
       const jsonSchema = isRecord(input.node.config.schema) ? input.node.config.schema : {};
-      const maxAttempts = Math.max(1, Math.min(5, Number(input.node.config.maxAttempts || 2)));
+      const remainingCalls = Math.max(0, input.workflow.settings.maxModelCalls - input.execution.totalModelCalls);
+      const maxAttempts = Math.min(remainingCalls, Math.max(1, Math.min(5, Number(input.node.config.maxAttempts || 2))));
+      if (maxAttempts === 0) return { status: 'error', error: { code: 'MAX_MODEL_CALLS_REACHED', message: 'O orçamento de extração foi esgotado.', retryable: false } };
       const modelChain = await dependencies.resolveModelChain(dependencyContext);
       let lastValidationErrors: unknown = [];
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -766,9 +786,11 @@ function waitHandler(dependencies: WorkflowHandlerDependencies): NodeHandler {
       resumeToken: createId(`resume_${input.execution.executionId}_${input.node.id}`),
       output: {
         waitingSince: waitingSince.toISOString(),
-        resumeEvent: input.node.config.resumeEvent,
+        resumeEvent: renderTemplate(String(input.node.config.resumeEvent || ''), sourceContext(input)),
+        pauseTimeoutWhileWaiting: input.node.config.pauseTimeoutWhileWaiting === true,
+        expireWait: input.node.config.expireEvents === true,
         ...(typing ? { typing } : {}),
-        ...(mode === 'time' ? {
+        ...(mode === 'time' || input.node.config.expireEvents === true ? {
           timeoutMs,
           expiresAt: new Date(waitingSince.getTime() + timeoutMs).toISOString(),
         } : {}),
@@ -1062,7 +1084,9 @@ function dependencyHandler(
           },
         };
       }
-      return success(await dependency(input));
+      const result = await dependency(input);
+      const metrics = isRecord(result.metrics) ? result.metrics : {};
+      return { ...success(result), ...(input.execution.context.automationManaged === true && type === 'logic.subflow' ? { metrics: { durationMs: 0, modelCalls: Number(metrics.modelCalls || 0), toolCalls: Number(metrics.toolCalls || 0) } } : {}) };
     },
   };
 }
@@ -1082,7 +1106,7 @@ function dependencyResultHandler(
       const statePatch = isRecord(result.statePatch) ? result.statePatch : undefined;
       const output = { ...result };
       delete output.statePatch;
-      return success(output, statePatch);
+      return { ...success(output, statePatch), ...(input.execution.context.automationManaged === true && /^(integration\.|whatsapp\.|dialogy\.)/.test(type) ? { metrics: { durationMs: 0, toolCalls: 1 } } : {}) };
     },
   };
 }
@@ -1100,6 +1124,18 @@ export function createDefaultNodeHandlerRegistry(
   ].forEach((type) => registry.register(triggerHandler(type)));
 
   registry
+    .register({ type: 'data.operation', configSchema: DataOperationSchema, execute: async (input) => {
+      const config = materializeValue(input.node.config, sourceContext(input));
+      if (input.node.config.operation === 'join' && typeof input.node.config.right === 'string' && (!isRecord(config) || !Array.isArray(config.right))) throw new Error('A variável da lista da direita não contém uma lista.');
+      let value: unknown;
+      if (isRecord(config) && config.operation === 'regex') {
+        const text = String(config.source ?? '');
+        if (text.length > 100000 || String(config.pattern || '').length > 500) throw new Error('Use texto de até 100 mil caracteres e expressão de até 500.');
+        value = executeSandboxedWorkflowCode({ source: 'const re = new RegExp(input.pattern, "g"); const result = []; for (const match of input.text.matchAll(re)) { result.push({ match: match[0], groups: Array.from(match).slice(1), named: match.groups || {} }); if (result.length >= 1000) break; } return { value: result };', current: { text, pattern: String(config.pattern || '') }, variables: {}, context: {}, timeoutMs: 100 }).value;
+      } else value = executeDataOperation(config, isRecord(config) ? config.source ?? input.input : input.input);
+      if (new TextEncoder().encode(JSON.stringify(value) ?? 'null').length > 1_000_000) throw new Error('O resultado excede 1 MB.');
+      return success({ result: value }, variableStatePatch(input.node.config.outputKey || 'result', value));
+    } })
     .register(interactionHandler('interaction.input', dependencies))
     .register(interactionHandler('interaction.options', dependencies))
     .register(interactionHandler('interaction.date', dependencies))
@@ -1131,7 +1167,7 @@ export function createDefaultNodeHandlerRegistry(
         const statePatch = isRecord(result.statePatch) ? result.statePatch : undefined;
         const output = { ...result };
         delete output.statePatch;
-        return success(output, statePatch);
+        return { ...success(output, statePatch), ...(input.execution.context.automationManaged === true ? { metrics: { durationMs: 0, toolCalls: 1 } } : {}) };
       },
     })
     .register(dependencyResultHandler('integration.email', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
@@ -1142,6 +1178,7 @@ export function createDefaultNodeHandlerRegistry(
     .register(dependencyResultHandler('dialogy.crm_update', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('whatsapp.send_text', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('whatsapp.send_media', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
+    .register(dependencyResultHandler('whatsapp.send_catalog', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register(dependencyResultHandler('whatsapp.group_create', dependencies.executeIntegration, 'INTEGRATION_RUNTIME_NOT_CONFIGURED'))
     .register({
       type: 'dialogy.team_availability',
@@ -1186,6 +1223,8 @@ export function createDefaultNodeHandlerRegistry(
       })),
     })
     .register(agentHandler(dependencies))
+    .register({ type: 'ai.studio_agent', stop: dependencies.stopStudioFlow, execute: dependencies.executeStudioFlow || (async () => ({ status: 'error', selectedOutput: 'error', error: { code: 'STUDIO_FLOW_ADAPTER_REQUIRED', message: 'Configure o runtime de composição do Studio.', retryable: false } })) })
+    .register({ type: 'integration.studio_procedure', stop: dependencies.stopStudioFlow, execute: dependencies.executeStudioFlow || (async () => ({ status: 'error', selectedOutput: 'error', error: { code: 'STUDIO_FLOW_ADAPTER_REQUIRED', message: 'Configure o runtime de composição do Studio.', retryable: false } })) })
     .register({
       type: 'ai.published_agent',
       stop: dependencies.stopPublishedAgent,
@@ -1264,10 +1303,37 @@ export function createDefaultNodeHandlerRegistry(
         }
         const result = await dependencies.handoff(input);
         if (result.success === false) {
+          const reasonCode = typeof result.reasonCode === 'string' ? result.reasonCode : '';
+          const teamId = typeof result.teamId === 'string' ? result.teamId : '';
+          const message = String(result.error || 'A transferência não foi concluída.');
+          // Waiting is not failing. When the team is merely unavailable, the chat goes to its queue so the
+          // customer is never left without an owner. An explicit error route keeps full control: the default
+          // ('auto') only queues when the route would otherwise dead-end the execution, which is exactly how
+          // the HANDOFF_FAILED executions ended. 'queue' always queues; 'error' never does.
+          const mode = String(input.node.config.onUnavailable || 'auto');
+          const hasErrorRoute = input.workflow.connections.some((connection) => (
+            connection.sourceNodeId === input.node.id && connection.connectionType === 'error'
+          ));
+          const mayQueue = Boolean(dependencies.queueHandoff && reasonCode && teamId && result.outcomeUncertain !== true
+            && (mode === 'queue' || (mode === 'auto' && !hasErrorRoute)) && isQueueableTeamReason(reasonCode));
+          if (mayQueue) {
+            try {
+              const queued = await dependencies.queueHandoff!(input, { reasonCode, teamId, error: message });
+              if (queued.queued === true) {
+                return success({ ...result, ...queued, success: true, handoffQueued: true, queuedReason: reasonCode }, undefined, 'completed');
+              }
+            } catch (error) {
+              // Fall through: the original failure is the honest result when even the queue is unavailable.
+              console.error('[HANDOFF_QUEUE] Falha ao enfileirar:', error);
+            }
+          }
           return {
             status: 'error',
             selectedOutput: 'error',
-            error: { code: 'HANDOFF_FAILED', message: String(result.error || 'A transferência não foi concluída.'), retryable: false },
+            error: {
+              code: 'HANDOFF_FAILED', message, retryable: false,
+              ...(reasonCode ? { details: { reasonCode, teamId: teamId || null } } : {}),
+            },
           };
         }
         return success(result, undefined, 'completed');
@@ -1286,11 +1352,12 @@ export function createDefaultNodeHandlerRegistry(
         const media = {
           type: String(input.node.config.mediaType || 'image'),
           url: renderTemplate(String(input.node.config.url || ''), source),
+          file: input.node.config.file ? materializeValue(input.node.config.file, source) : undefined,
           caption: renderTemplate(String(input.node.config.caption || ''), source),
           fileName: renderTemplate(String(input.node.config.fileName || ''), source),
           mimeType: renderTemplate(String(input.node.config.mimeType || ''), source),
         };
-        if (!media.url) {
+        if (!media.url && !media.file) {
           return { status: 'error', error: { code: 'MEDIA_URL_MISSING', message: 'A URL da mídia está vazia.', retryable: false } };
         }
         const delivery = await dependencies.sendMedia(media, input);
@@ -1368,5 +1435,9 @@ export function createDefaultNodeHandlerRegistry(
       },
     });
 
+  for (const manifest of toolboxManifests()) {
+    if (registry.get(manifest.type)) continue;
+    registry.register({ type: manifest.type, execute: dependencies.executeToolbox || (async () => ({ status: 'error', error: { code: 'TOOLBOX_RUNTIME_NOT_CONFIGURED', message: 'Esta operação exige o runtime Nexus atualizado.', retryable: false } })) });
+  }
   return registry;
 }
